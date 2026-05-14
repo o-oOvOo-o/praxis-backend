@@ -1,0 +1,10 @@
+load("//:defs.bzl", "praxis_rust_crate", "multiplatform_binaries")
+
+praxis_rust_crate(
+    name = "cli",
+    crate_name = "praxis_cli",
+)
+
+multiplatform_binaries(
+    name = "codex",
+)

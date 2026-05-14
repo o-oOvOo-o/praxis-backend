@@ -126,9 +126,9 @@ New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 $resolvedVersion = Resolve-Version
 Write-Step "Resolved version: $resolvedVersion"
-$packageAsset = "codex-npm-$npmTag-$resolvedVersion.tgz"
+$packageAsset = "praxis-npm-$npmTag-$resolvedVersion.tgz"
 
-$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("codex-install-" + [System.Guid]::NewGuid().ToString("N"))
+$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("praxis-install-" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
 
 try {
@@ -146,8 +146,8 @@ try {
     Write-Step "Installing to $installDir"
     $copyMap = @{
         "codex/codex.exe" = "codex.exe"
-        "codex/codex-command-runner.exe" = "codex-command-runner.exe"
-        "codex/codex-windows-sandbox-setup.exe" = "codex-windows-sandbox-setup.exe"
+        "codex/praxis-command-runner.exe" = "praxis-command-runner.exe"
+        "codex/praxis-windows-sandbox-setup.exe" = "praxis-windows-sandbox-setup.exe"
         "path/rg.exe" = "rg.exe"
     }
 

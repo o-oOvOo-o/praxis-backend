@@ -33,16 +33,16 @@ def python_runtime_root() -> Path:
 def schema_bundle_path() -> Path:
     return (
         repo_root()
-        / "codex-rs"
+        / "praxis-rs"
         / "app-server-protocol"
         / "schema"
         / "json"
-        / "codex_app_server_protocol.v2.schemas.json"
+        / "praxis_app_server_protocol.v2.schemas.json"
     )
 
 
 def schema_root_dir() -> Path:
-    return repo_root() / "codex-rs" / "app-server-protocol" / "schema" / "json"
+    return repo_root() / "praxis-rs" / "app-server-protocol" / "schema" / "json"
 
 
 def _is_windows() -> bool:
@@ -54,7 +54,7 @@ def runtime_binary_name() -> str:
 
 
 def staged_runtime_bin_path(root: Path) -> Path:
-    return root / "src" / "codex_cli_bin" / "bin" / runtime_binary_name()
+    return root / "src" / "praxis_cli_bin" / "bin" / runtime_binary_name()
 
 
 def run(cmd: list[str], cwd: Path) -> None:
@@ -118,8 +118,8 @@ def _rewrite_sdk_runtime_dependency(pyproject_text: str, runtime_version: str) -
         )
 
     raw_items = [item.strip() for item in match.group(1).split(",") if item.strip()]
-    raw_items = [item for item in raw_items if "codex-cli-bin" not in item]
-    raw_items.append(f'"codex-cli-bin=={runtime_version}"')
+    raw_items = [item for item in raw_items if "praxis-cli-bin" not in item]
+    raw_items.append(f'"praxis-cli-bin=={runtime_version}"')
     replacement = "dependencies = [\n  " + ",\n  ".join(raw_items) + ",\n]"
     return pyproject_text[: match.start()] + replacement + pyproject_text[match.end() :]
 
@@ -128,7 +128,7 @@ def stage_python_sdk_package(
     staging_dir: Path, sdk_version: str, runtime_version: str
 ) -> Path:
     _copy_package_tree(sdk_root(), staging_dir)
-    sdk_bin_dir = staging_dir / "src" / "codex_app_server" / "bin"
+    sdk_bin_dir = staging_dir / "src" / "praxis_app_server" / "bin"
     if sdk_bin_dir.exists():
         shutil.rmtree(sdk_bin_dir)
 
@@ -410,7 +410,7 @@ def _normalized_schema_bundle_text() -> str:
 
 
 def generate_v2_all() -> None:
-    out_path = sdk_root() / "src" / "codex_app_server" / "generated" / "v2_all.py"
+    out_path = sdk_root() / "src" / "praxis_app_server" / "generated" / "v2_all.py"
     out_dir = out_path.parent
     old_package_dir = out_dir / "v2_all"
     if old_package_dir.exists():
@@ -461,7 +461,7 @@ def _notification_specs() -> list[tuple[str, str]]:
     )
     one_of = server_notifications.get("oneOf", [])
     generated_source = (
-        sdk_root() / "src" / "codex_app_server" / "generated" / "v2_all.py"
+        sdk_root() / "src" / "praxis_app_server" / "generated" / "v2_all.py"
     ).read_text()
 
     specs: list[tuple[str, str]] = []
@@ -498,7 +498,7 @@ def generate_notification_registry() -> None:
     out = (
         sdk_root()
         / "src"
-        / "codex_app_server"
+        / "praxis_app_server"
         / "generated"
         / "notification_registry.py"
     )
@@ -650,7 +650,7 @@ def _replace_generated_block(source: str, block_name: str, body: str) -> str:
     return updated
 
 
-def _render_codex_block(
+def _render_praxis_block(
     thread_start_fields: list[PublicFieldSpec],
     thread_list_fields: list[PublicFieldSpec],
     resume_fields: list[PublicFieldSpec],
@@ -714,7 +714,7 @@ def _render_codex_block(
     return "\n".join(lines)
 
 
-def _render_async_codex_block(
+def _render_async_praxis_block(
     thread_start_fields: list[PublicFieldSpec],
     thread_list_fields: list[PublicFieldSpec],
     resume_fields: list[PublicFieldSpec],
@@ -835,7 +835,7 @@ def _render_async_thread_block(
 
 def generate_public_api_flat_methods() -> None:
     src_dir = sdk_root() / "src"
-    public_api_path = src_dir / "codex_app_server" / "api.py"
+    public_api_path = src_dir / "praxis_app_server" / "api.py"
     if not public_api_path.exists():
         # PR2 can run codegen before the ergonomic public API layer is added.
         return
@@ -844,25 +844,25 @@ def generate_public_api_flat_methods() -> None:
         sys.path.insert(0, src_dir_str)
 
     thread_start_fields = _load_public_fields(
-        "codex_app_server.generated.v2_all",
+        "praxis_app_server.generated.v2_all",
         "ThreadStartParams",
     )
     thread_list_fields = _load_public_fields(
-        "codex_app_server.generated.v2_all",
+        "praxis_app_server.generated.v2_all",
         "ThreadListParams",
     )
     thread_resume_fields = _load_public_fields(
-        "codex_app_server.generated.v2_all",
+        "praxis_app_server.generated.v2_all",
         "ThreadResumeParams",
         exclude={"thread_id"},
     )
     thread_fork_fields = _load_public_fields(
-        "codex_app_server.generated.v2_all",
+        "praxis_app_server.generated.v2_all",
         "ThreadForkParams",
         exclude={"thread_id"},
     )
     turn_start_fields = _load_public_fields(
-        "codex_app_server.generated.v2_all",
+        "praxis_app_server.generated.v2_all",
         "TurnStartParams",
         exclude={"thread_id", "input"},
     )
@@ -871,7 +871,7 @@ def generate_public_api_flat_methods() -> None:
     source = _replace_generated_block(
         source,
         "Codex.flat_methods",
-        _render_codex_block(
+        _render_praxis_block(
             thread_start_fields,
             thread_list_fields,
             thread_resume_fields,
@@ -881,7 +881,7 @@ def generate_public_api_flat_methods() -> None:
     source = _replace_generated_block(
         source,
         "AsyncCodex.flat_methods",
-        _render_async_codex_block(
+        _render_async_praxis_block(
             thread_start_fields,
             thread_list_fields,
             thread_resume_fields,
@@ -928,7 +928,7 @@ def build_parser() -> argparse.ArgumentParser:
     stage_sdk_parser.add_argument(
         "--runtime-version",
         required=True,
-        help="Pinned codex-cli-bin version for the staged SDK package",
+        help="Pinned praxis-cli-bin version for the staged SDK package",
     )
     stage_sdk_parser.add_argument(
         "--sdk-version",

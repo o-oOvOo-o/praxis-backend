@@ -7,7 +7,7 @@ The TypeScript SDK wraps the `codex` CLI from `@openai/codex`. It spawns the CLI
 ## Installation
 
 ```bash
-npm install @openai/codex-sdk
+npm install @openai/praxis-sdk
 ```
 
 Requires Node.js 18+.
@@ -15,7 +15,7 @@ Requires Node.js 18+.
 ## Quickstart
 
 ```typescript
-import { Codex } from "@openai/codex-sdk";
+import { Codex } from "@openai/praxis-sdk";
 
 const codex = new Codex();
 const thread = codex.startThread();

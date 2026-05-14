@@ -34,11 +34,11 @@ Codex can run a notification hook when the agent finishes a turn. See the config
 
 - https://developers.openai.com/codex/config-reference
 
-When Codex knows which client started the turn, the legacy notify JSON payload also includes a top-level `client` field. The TUI reports `codex-tui`, and the app server reports the `clientInfo.name` value from `initialize`.
+When Codex knows which client started the turn, the legacy notify JSON payload also includes a top-level `client` field. The TUI reports `praxis-tui`, and the app server reports the `clientInfo.name` value from `initialize`.
 
 ## JSON Schema
 
-The generated JSON Schema for `config.toml` lives at `codex-rs/core/config.schema.json`.
+The generated JSON Schema for `config.toml` lives at `praxis-rs/core/config.schema.json`.
 
 ## SQLite State DB
 
@@ -52,7 +52,7 @@ Codex can trust a custom root CA bundle for outbound HTTPS and secure websocket
 connections when enterprise proxies or gateways intercept TLS. This applies to
 login flows and to Codex's other external connections, including Codex
 components that build reqwest clients or secure websocket clients through the
-shared `codex-client` CA-loading path and remote MCP connections that use it.
+shared `praxis-client` CA-loading path and remote MCP connections that use it.
 
 Set `CODEX_CA_CERTIFICATE` to the path of a PEM file containing one or more
 certificate blocks to use a Codex-specific CA bundle. If

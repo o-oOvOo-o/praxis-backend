@@ -1,0 +1,173 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "praxis-core"
+version.workspace = true
+
+[lib]
+doctest = false
+name = "praxis_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "praxis-write-config-schema"
+path = "src/bin/config_schema.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+arc-swap = { workspace = true }
+async-channel = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+bm25 = { workspace = true }
+chardetng = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+clap = { workspace = true, features = ["derive"] }
+praxis-analytics = { workspace = true }
+praxis-api = { workspace = true }
+praxis-app-server-protocol = { workspace = true }
+praxis-apply-patch = { workspace = true }
+praxis-async-utils = { workspace = true }
+praxis-code-mode = { workspace = true }
+praxis-connectors = { workspace = true }
+praxis-config = { workspace = true }
+praxis-core-skills = { workspace = true }
+praxis-exec-server = { workspace = true }
+praxis-features = { workspace = true }
+praxis-login = { workspace = true }
+praxis-mcp = { workspace = true }
+praxis-shell-command = { workspace = true }
+praxis-execpolicy = { workspace = true }
+praxis-git-utils = { workspace = true }
+praxis-hooks = { workspace = true }
+praxis-instructions = { workspace = true }
+praxis-network-proxy = { workspace = true }
+praxis-otel = { workspace = true }
+praxis-plugin = { workspace = true }
+praxis-protocol = { workspace = true }
+praxis-rollout = { workspace = true }
+praxis-rmcp-client = { workspace = true }
+praxis-sandboxing = { workspace = true }
+praxis-state = { workspace = true }
+praxis-terminal-detection = { workspace = true }
+praxis-tools = { workspace = true }
+praxis-utils-absolute-path = { workspace = true }
+praxis-utils-cache = { workspace = true }
+praxis-utils-image = { workspace = true }
+praxis-utils-home-dir = { workspace = true }
+praxis-utils-output-truncation = { workspace = true }
+praxis-utils-path = { workspace = true }
+praxis-utils-plugins = { workspace = true }
+praxis-utils-pty = { workspace = true }
+praxis-utils-readiness = { workspace = true }
+praxis-secrets = { workspace = true }
+praxis-utils-string = { workspace = true }
+praxis-utils-stream-parser = { workspace = true }
+praxis-utils-template = { workspace = true }
+praxis-windows-sandbox = { package = "praxis-windows-sandbox", path = "../windows-sandbox-rs" }
+csv = { workspace = true }
+dirs = { workspace = true }
+dunce = { workspace = true }
+encoding_rs = { workspace = true }
+env-flags = { workspace = true }
+eventsource-stream = { workspace = true }
+futures = { workspace = true }
+http = { workspace = true }
+iana-time-zone = { workspace = true }
+image = { workspace = true, features = ["jpeg", "png", "webp"] }
+indexmap = { workspace = true }
+libc = { workspace = true }
+notify = { workspace = true }
+once_cell = { workspace = true }
+rand = { workspace = true }
+regex-lite = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream"] }
+rmcp = { workspace = true, default-features = false, features = [
+    "base64",
+    "macros",
+    "schemars",
+    "server",
+] }
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+shlex = { workspace = true }
+similar = { workspace = true }
+tempfile = { workspace = true }
+test-log = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+    "io-std",
+    "macros",
+    "process",
+    "rt-multi-thread",
+    "signal",
+] }
+tokio-util = { workspace = true, features = ["rt"] }
+tokio-tungstenite = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+url = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v4", "v5"] }
+which = { workspace = true }
+zip = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = { workspace = true }
+seccompiler = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.9"
+
+# Build OpenSSL from source for musl builds.
+[target.x86_64-unknown-linux-musl.dependencies]
+openssl-sys = { workspace = true, features = ["vendored"] }
+
+# Build OpenSSL from source for musl builds.
+[target.aarch64-unknown-linux-musl.dependencies]
+openssl-sys = { workspace = true, features = ["vendored"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
+
+[target.'cfg(unix)'.dependencies]
+praxis-shell-escalation = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+assert_matches = { workspace = true }
+praxis-arg0 = { workspace = true }
+praxis-otel = { workspace = true }
+praxis-utils-cargo-bin = { workspace = true }
+core_test_support = { workspace = true }
+ctor = { workspace = true }
+insta = { workspace = true }
+maplit = { workspace = true }
+opentelemetry = { workspace = true }
+predicates = { workspace = true }
+pretty_assertions = { workspace = true }
+test-case = "3.3.1"
+opentelemetry_sdk = { workspace = true, features = [
+    "experimental_metrics_custom_reader",
+    "metrics",
+] }
+serial_test = { workspace = true }
+tempfile = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-test = { workspace = true, features = ["no-env-filter"] }
+walkdir = { workspace = true }
+wiremock = { workspace = true }
+zstd = { workspace = true }
+
+[package.metadata.cargo-shear]
+ignored = ["openssl-sys"]

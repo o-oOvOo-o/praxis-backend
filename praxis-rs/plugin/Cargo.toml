@@ -1,0 +1,18 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "praxis-plugin"
+version.workspace = true
+
+[lib]
+doctest = false
+name = "praxis_plugin"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+praxis-utils-absolute-path = { workspace = true }
+praxis-utils-plugins = { workspace = true }
+thiserror = { workspace = true }

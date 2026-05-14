@@ -1,0 +1,15 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "praxis-utils-output-truncation"
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+praxis-protocol = { workspace = true }
+praxis-utils-string = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

@@ -4,9 +4,9 @@ import importlib.resources as resources
 import inspect
 from typing import Any
 
-from codex_app_server import AppServerConfig, RunResult
-from codex_app_server.models import InitializeResponse
-from codex_app_server.api import AsyncCodex, AsyncThread, Codex, Thread
+from praxis_app_server import AppServerConfig, RunResult
+from praxis_app_server.models import InitializeResponse
+from praxis_app_server.api import AsyncCodex, AsyncThread, Codex, Thread
 
 
 def _keyword_only_names(fn: object) -> list[str]:
@@ -36,7 +36,7 @@ def test_root_exports_run_result() -> None:
 
 
 def test_package_includes_py_typed_marker() -> None:
-    marker = resources.files("codex_app_server").joinpath("py.typed")
+    marker = resources.files("praxis_app_server").joinpath("py.typed")
     assert marker.is_file()
 
 
@@ -201,7 +201,7 @@ def test_generated_public_signatures_are_snake_case_and_typed() -> None:
         _assert_no_any_annotations(fn)
 
 
-def test_lifecycle_methods_are_codex_scoped() -> None:
+def test_lifecycle_methods_are_praxis_scoped() -> None:
     assert hasattr(Codex, "thread_resume")
     assert hasattr(Codex, "thread_fork")
     assert hasattr(Codex, "thread_archive")
@@ -232,12 +232,12 @@ def test_lifecycle_methods_are_codex_scoped() -> None:
 
 
 def test_initialize_metadata_parses_user_agent_shape() -> None:
-    payload = InitializeResponse.model_validate({"userAgent": "codex-cli/1.2.3"})
+    payload = InitializeResponse.model_validate({"userAgent": "praxis-cli/1.2.3"})
     parsed = Codex._validate_initialize(payload)
     assert parsed is payload
-    assert parsed.userAgent == "codex-cli/1.2.3"
+    assert parsed.userAgent == "praxis-cli/1.2.3"
     assert parsed.serverInfo is not None
-    assert parsed.serverInfo.name == "codex-cli"
+    assert parsed.serverInfo.name == "praxis-cli"
     assert parsed.serverInfo.version == "1.2.3"
 
 

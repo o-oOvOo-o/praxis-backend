@@ -8,7 +8,7 @@ class RuntimeBuildHook(BuildHookInterface):
         del version
         if self.target_name == "sdist":
             raise RuntimeError(
-                "codex-cli-bin is wheel-only; build and publish platform wheels only."
+                "praxis-cli-bin is wheel-only; build and publish platform wheels only."
             )
 
         build_data["pure_python"] = False

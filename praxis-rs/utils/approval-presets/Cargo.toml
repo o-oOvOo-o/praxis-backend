@@ -1,0 +1,11 @@
+[package]
+name = "praxis-utils-approval-presets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+praxis-protocol = { workspace = true }

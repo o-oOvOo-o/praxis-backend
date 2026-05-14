@@ -8,8 +8,8 @@ updates:
       interval: weekly
   - package-ecosystem: cargo
     directories:
-      - codex-rs
-      - codex-rs/*
+      - praxis-rs
+      - praxis-rs/*
     schedule:
       interval: weekly
   - package-ecosystem: devcontainers
@@ -17,7 +17,7 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: docker
-    directory: codex-cli
+    directory: praxis-cli
     schedule:
       interval: weekly
   - package-ecosystem: github-actions
@@ -25,6 +25,6 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: rust-toolchain
-    directory: codex-rs
+    directory: praxis-rs
     schedule:
       interval: weekly

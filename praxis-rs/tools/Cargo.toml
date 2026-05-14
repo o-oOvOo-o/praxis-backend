@@ -1,0 +1,28 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "praxis-tools"
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+praxis-app-server-protocol = { workspace = true }
+praxis-code-mode = { workspace = true }
+praxis-features = { workspace = true }
+praxis-protocol = { workspace = true }
+praxis-utils-absolute-path = { workspace = true }
+praxis-utils-pty = { workspace = true }
+rmcp = { workspace = true, default-features = false, features = [
+    "base64",
+    "macros",
+    "schemars",
+    "server",
+] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

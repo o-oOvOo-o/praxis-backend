@@ -1,4 +1,4 @@
-set working-directory := "codex-rs"
+set working-directory := "praxis-rs"
 set positional-arguments
 
 # Display help
@@ -14,19 +14,19 @@ codex *args:
 exec *args:
     cargo run --bin codex -- exec "$@"
 
-# Start codex-exec-server and run codex-tui.
+# Start praxis-exec-server and run praxis-tui.
 [no-cd]
 tui-with-exec-server *args:
     ./scripts/run_tui_with_exec_server.sh "$@"
 
 # Run the CLI version of the file-search crate.
 file-search *args:
-    cargo run --bin codex-file-search -- "$@"
+    cargo run --bin praxis-file-search -- "$@"
 
 # Build the CLI and run the app-server test client
 app-server-test-client *args:
-    cargo build -p codex-cli
-    cargo run -p codex-app-server-test-client -- --codex-bin ./target/debug/codex "$@"
+    cargo build -p praxis-cli
+    cargo run -p praxis-app-server-test-client -- --praxis-bin ./target/debug/codex "$@"
 
 # format code
 fmt:
@@ -56,7 +56,7 @@ test:
 # to ensure that Bazel runs the command in the current working directory.
 [no-cd]
 bazel-codex *args:
-    bazel run //codex-rs/cli:codex --run_under="cd $PWD &&" -- "$@"
+    bazel run //praxis-rs/cli:codex --run_under="cd $PWD &&" -- "$@"
 
 [no-cd]
 bazel-lock-update:
@@ -70,7 +70,7 @@ bazel-test:
     bazel test --test_tag_filters=-argument-comment-lint //... --keep_going
 
 bazel-clippy:
-    bazel build --config=clippy -- //codex-rs/... -//codex-rs/v8-poc:all
+    bazel build --config=clippy -- //praxis-rs/... -//praxis-rs/v8-poc:all
 
 [no-cd]
 bazel-argument-comment-lint:
@@ -80,25 +80,25 @@ bazel-remote-test:
     bazel test --test_tag_filters=-argument-comment-lint //... --config=remote --platforms=//:rbe --keep_going
 
 build-for-release:
-    bazel build //codex-rs/cli:release_binaries --config=remote
+    bazel build //praxis-rs/cli:release_binaries --config=remote
 
 # Run the MCP server
 mcp-server-run *args:
-    cargo run -p codex-mcp-server -- "$@"
+    cargo run -p praxis-mcp-server -- "$@"
 
 # Regenerate the json schema for config.toml from the current config types.
 write-config-schema:
-    cargo run -p codex-core --bin codex-write-config-schema
+    cargo run -p praxis-core --bin praxis-write-config-schema
 
 # Regenerate vendored app-server protocol schema artifacts.
 write-app-server-schema *args:
-    cargo run -p codex-app-server-protocol --bin write_schema_fixtures -- "$@"
+    cargo run -p praxis-app-server-protocol --bin write_schema_fixtures -- "$@"
 
 [no-cd]
 write-hooks-schema:
-    cargo run --manifest-path ./codex-rs/Cargo.toml -p codex-hooks --bin write_hooks_schema_fixtures
+    cargo run --manifest-path ./praxis-rs/Cargo.toml -p praxis-hooks --bin write_hooks_schema_fixtures
 
-# Run the argument-comment Dylint checks across codex-rs.
+# Run the argument-comment Dylint checks across praxis-rs.
 [no-cd]
 argument-comment-lint *args:
     if [ "$#" -eq 0 ]; then \
@@ -113,4 +113,4 @@ argument-comment-lint-from-source *args:
 
 # Tail logs from the state SQLite database
 log *args:
-    if [ "${1:-}" = "--" ]; then shift; fi; cargo run -p codex-state --bin logs_client -- "$@"
+    if [ "${1:-}" = "--" ]; then shift; fi; cargo run -p praxis-state --bin logs_client -- "$@"

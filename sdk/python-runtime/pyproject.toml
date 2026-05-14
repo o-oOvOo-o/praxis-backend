@@ -3,7 +3,7 @@ requires = ["hatchling>=1.24.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "codex-cli-bin"
+name = "praxis-cli-bin"
 version = "0.0.0-dev"
 description = "Pinned Codex CLI runtime for the Python SDK"
 readme = "README.md"
@@ -35,8 +35,8 @@ exclude = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/codex_cli_bin"]
-include = ["src/codex_cli_bin/bin/**"]
+packages = ["src/praxis_cli_bin"]
+include = ["src/praxis_cli_bin/bin/**"]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 

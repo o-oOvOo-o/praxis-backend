@@ -1,0 +1,6 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "cloud-tasks",
+    crate_name = "praxis_cloud_tasks",
+)

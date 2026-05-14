@@ -35,7 +35,7 @@ def ensure_local_sdk_src() -> Path:
     """Add sdk/python/src to sys.path so examples run without installing the package."""
     sdk_python_dir = _SDK_PYTHON_DIR
     src_dir = sdk_python_dir / "src"
-    package_dir = src_dir / "codex_app_server"
+    package_dir = src_dir / "praxis_app_server"
     if not package_dir.exists():
         raise RuntimeError(f"Could not locate local SDK package at {package_dir}")
 
@@ -49,7 +49,7 @@ def ensure_local_sdk_src() -> Path:
 
 def runtime_config():
     """Return an example-friendly AppServerConfig for repo-source SDK usage."""
-    from codex_app_server import AppServerConfig
+    from praxis_app_server import AppServerConfig
 
     ensure_runtime_package_installed(sys.executable, _SDK_PYTHON_DIR)
     return AppServerConfig()
@@ -98,7 +98,7 @@ def _generated_sample_png_bytes() -> bytes:
 
 @contextlib.contextmanager
 def temporary_sample_image_path() -> Iterator[Path]:
-    with tempfile.TemporaryDirectory(prefix="codex-python-example-image-") as temp_root:
+    with tempfile.TemporaryDirectory(prefix="praxis-python-example-image-") as temp_root:
         image_path = Path(temp_root) / "generated_sample.png"
         image_path.write_bytes(_generated_sample_png_bytes())
         yield image_path

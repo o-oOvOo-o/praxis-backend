@@ -1,0 +1,7 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "backend-client",
+    crate_name = "praxis_backend_client",
+    compile_data = glob(["tests/fixtures/**"]),
+)

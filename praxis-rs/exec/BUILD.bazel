@@ -1,0 +1,7 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "exec",
+    crate_name = "praxis_exec",
+    test_tags = ["no-sandbox"],
+)

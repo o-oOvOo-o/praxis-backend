@@ -31,7 +31,7 @@ jobs:
 
           client_version="99.99.99"
           terminal_info="github-actions"
-          user_agent="codex_cli_rs/99.99.99 (Linux $(uname -r); $(uname -m)) ${terminal_info}"
+          user_agent="praxis_cli_rs/99.99.99 (Linux $(uname -r); $(uname -m)) ${terminal_info}"
           base_url="${OPENAI_BASE_URL:-https://chatgpt.com/backend-api/codex}"
 
           headers=(
@@ -40,7 +40,7 @@ jobs:
           )
 
           url="${base_url%/}/models?client_version=${client_version}"
-          curl --http1.1 --fail --show-error --location "${headers[@]}" "${url}" | jq '.' > codex-rs/core/models.json
+          curl --http1.1 --fail --show-error --location "${headers[@]}" "${url}" | jq '.' > praxis-rs/core/models.json
 
       - name: Open pull request (if changed)
         uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8

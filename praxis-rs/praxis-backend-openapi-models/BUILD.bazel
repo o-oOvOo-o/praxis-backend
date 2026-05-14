@@ -1,0 +1,6 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "praxis-backend-openapi-models",
+    crate_name = "praxis_backend_openapi_models",
+)

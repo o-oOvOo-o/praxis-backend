@@ -7,12 +7,12 @@ We provide the following options to facilitate Codex development in a container.
 To build the Docker image locally for x64 and then run it with the repo mounted under `/workspace`:
 
 ```shell
-CODEX_DOCKER_IMAGE_NAME=codex-linux-dev
+CODEX_DOCKER_IMAGE_NAME=praxis-linux-dev
 docker build --platform=linux/amd64 -t "$CODEX_DOCKER_IMAGE_NAME" ./.devcontainer
-docker run --platform=linux/amd64 --rm -it -e CARGO_TARGET_DIR=/workspace/codex-rs/target-amd64 -v "$PWD":/workspace -w /workspace/codex-rs "$CODEX_DOCKER_IMAGE_NAME"
+docker run --platform=linux/amd64 --rm -it -e CARGO_TARGET_DIR=/workspace/praxis-rs/target-amd64 -v "$PWD":/workspace -w /workspace/praxis-rs "$CODEX_DOCKER_IMAGE_NAME"
 ```
 
-Note that `/workspace/target` will contain the binaries built for your host platform, so we include `-e CARGO_TARGET_DIR=/workspace/codex-rs/target-amd64` in the `docker run` command so that the binaries built inside your container are written to a separate directory.
+Note that `/workspace/target` will contain the binaries built for your host platform, so we include `-e CARGO_TARGET_DIR=/workspace/praxis-rs/target-amd64` in the `docker run` command so that the binaries built inside your container are written to a separate directory.
 
 For arm64, specify `--platform=linux/amd64` instead for both `docker build` and `docker run`.
 

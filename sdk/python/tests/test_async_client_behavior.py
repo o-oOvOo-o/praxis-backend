@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from codex_app_server.async_client import AsyncAppServerClient
+from praxis_app_server.async_client import AsyncAppServerClient
 
 
 def test_async_client_serializes_transport_calls() -> None:

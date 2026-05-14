@@ -1,0 +1,6 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "code-mode",
+    crate_name = "praxis_code_mode",
+)

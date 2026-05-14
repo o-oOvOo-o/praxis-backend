@@ -8,7 +8,7 @@ const originalCodexHome = process.env.CODEX_HOME;
 let currentCodexHome: string | undefined;
 
 beforeEach(async () => {
-  currentCodexHome = await fs.mkdtemp(path.join(os.tmpdir(), "codex-sdk-test-"));
+  currentCodexHome = await fs.mkdtemp(path.join(os.tmpdir(), "praxis-sdk-test-"));
   process.env.CODEX_HOME = currentCodexHome;
 });
 

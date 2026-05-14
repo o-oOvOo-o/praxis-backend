@@ -17,7 +17,7 @@ The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file fo
 ```bash
 # Clone the repository and navigate to the root of the Cargo workspace.
 git clone https://github.com/openai/codex.git
-cd codex/codex-rs
+cd codex/praxis-rs
 
 # Install the Rust toolchain, if necessary.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -35,12 +35,12 @@ cargo build
 # Launch the TUI with a sample prompt.
 cargo run --bin codex -- "explain this codebase to me"
 
-# After making changes, use the root justfile helpers (they default to codex-rs):
+# After making changes, use the root justfile helpers (they default to praxis-rs):
 just fmt
 just fix -p <crate-you-touched>
 
 # Run the relevant tests (project-specific is fastest), for example:
-cargo test -p codex-tui
+cargo test -p praxis-tui
 # If you have cargo-nextest installed, `just test` runs the test suite via nextest:
 just test
 # Avoid `--all-features` for routine local runs because it increases build
@@ -53,10 +53,10 @@ cargo test --all-features
 
 Codex is written in Rust, so it honors the `RUST_LOG` environment variable to configure its logging behavior.
 
-The TUI defaults to `RUST_LOG=codex_core=info,codex_tui=info,codex_rmcp_client=info` and log messages are written to `~/.codex/log/codex-tui.log` by default. For a single run, you can override the log directory with `-c log_dir=...` (for example, `-c log_dir=./.codex-log`).
+The TUI defaults to `RUST_LOG=praxis_core=info,praxis_tui=info,praxis_rmcp_client=info` and log messages are written to `~/.codex/log/praxis-tui.log` by default. For a single run, you can override the log directory with `-c log_dir=...` (for example, `-c log_dir=./.codex-log`).
 
 ```bash
-tail -F ~/.codex/log/codex-tui.log
+tail -F ~/.codex/log/praxis-tui.log
 ```
 
 By comparison, the non-interactive mode (`codex exec`) defaults to `RUST_LOG=error`, but messages are printed inline, so there is no need to monitor a separate file.

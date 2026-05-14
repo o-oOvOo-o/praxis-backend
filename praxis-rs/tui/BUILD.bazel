@@ -1,0 +1,23 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "tui",
+    crate_name = "praxis_tui",
+    compile_data = glob(
+        include = ["**"],
+        exclude = [
+            "**/* *",
+            "BUILD.bazel",
+            "Cargo.toml",
+        ],
+        allow_empty = True,
+    ) + [
+        "//praxis-rs/core:templates/collaboration_mode/default.md",
+        "//praxis-rs/core:templates/collaboration_mode/plan.md",
+    ],
+    test_data_extra = glob(["src/**/snapshots/**"]) + ["//praxis-rs/core:model_availability_nux_fixtures"],
+    integration_compile_data_extra = ["src/test_backend.rs"],
+    extra_binaries = [
+        "//praxis-rs/cli:codex",
+    ],
+)

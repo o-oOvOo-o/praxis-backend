@@ -1,0 +1,6 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "stdio-to-uds",
+    crate_name = "praxis_stdio_to_uds",
+)

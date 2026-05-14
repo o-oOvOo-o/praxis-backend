@@ -1,0 +1,6 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "async-utils",
+    crate_name = "praxis_async_utils",
+)

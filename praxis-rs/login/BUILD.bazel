@@ -1,0 +1,10 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "login",
+    crate_name = "praxis_login",
+    compile_data = [
+        "src/assets/error.html",
+        "src/assets/success.html",
+    ],
+)

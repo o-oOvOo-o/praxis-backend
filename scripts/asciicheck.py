@@ -34,14 +34,14 @@ substitutions: dict[int, str] = {
 }
 
 """
-Unicode codepoints that are allowed in addition to ASCII.
+Unicode praxisoints that are allowed in addition to ASCII.
 Be conservative with this list.
 
 Note that it is always an option to use the hex HTML representation
 instead of the character itself so the source code is ASCII-only.
 For example, U+2728 (sparkles) can be written as `&#x2728;`.
 """
-allowed_unicode_codepoints = {
+allowed_unicode_praxisoints = {
     0x2728,  # sparkles
 }
 
@@ -89,20 +89,20 @@ def lint_utf8_ascii(filename: Path, fix: bool) -> bool:
     errors = []
     for lineno, line in enumerate(text.splitlines(keepends=True), 1):
         for colno, char in enumerate(line, 1):
-            codepoint = ord(char)
+            praxisoint = ord(char)
             if char == "\n":
                 continue
             if (
-                not (0x20 <= codepoint <= 0x7E)
-                and codepoint not in allowed_unicode_codepoints
+                not (0x20 <= praxisoint <= 0x7E)
+                and praxisoint not in allowed_unicode_praxisoints
             ):
-                errors.append((lineno, colno, char, codepoint))
+                errors.append((lineno, colno, char, praxisoint))
 
     if errors:
-        for lineno, colno, char, codepoint in errors:
+        for lineno, colno, char, praxisoint in errors:
             safe_char = repr(char)[1:-1]  # nicely escape things like \u202f
             print(
-                f"Invalid character at line {lineno}, column {colno}: U+{codepoint:04X} ({safe_char})"
+                f"Invalid character at line {lineno}, column {colno}: U+{praxisoint:04X} ({safe_char})"
             )
 
     if errors and fix:
@@ -110,10 +110,10 @@ def lint_utf8_ascii(filename: Path, fix: bool) -> bool:
         num_replacements = 0
         new_contents = ""
         for char in text:
-            codepoint = ord(char)
-            if codepoint in substitutions:
+            praxisoint = ord(char)
+            if praxisoint in substitutions:
                 num_replacements += 1
-                new_contents += substitutions[codepoint]
+                new_contents += substitutions[praxisoint]
             else:
                 new_contents += char
         with open(filename, "w", encoding="utf-8") as f:

@@ -29,7 +29,7 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: codex-rs
+        working-directory: praxis-rs
     env:
       CARGO_PROFILE_RELEASE_LTO: ${{ inputs.release-lto }}
 
@@ -40,31 +40,31 @@ jobs:
           - runner: windows-x64
             target: x86_64-pc-windows-msvc
             bundle: primary
-            build_args: --bin codex --bin codex-responses-api-proxy
+            build_args: --bin codex --bin praxis-responses-api-proxy
             runs_on:
-              group: codex-runners
-              labels: codex-windows-x64
+              group: praxis-runners
+              labels: praxis-windows-x64
           - runner: windows-arm64
             target: aarch64-pc-windows-msvc
             bundle: primary
-            build_args: --bin codex --bin codex-responses-api-proxy
+            build_args: --bin codex --bin praxis-responses-api-proxy
             runs_on:
-              group: codex-runners
-              labels: codex-windows-arm64
+              group: praxis-runners
+              labels: praxis-windows-arm64
           - runner: windows-x64
             target: x86_64-pc-windows-msvc
             bundle: helpers
-            build_args: --bin codex-windows-sandbox-setup --bin codex-command-runner
+            build_args: --bin praxis-windows-sandbox-setup --bin praxis-command-runner
             runs_on:
-              group: codex-runners
-              labels: codex-windows-x64
+              group: praxis-runners
+              labels: praxis-windows-x64
           - runner: windows-arm64
             target: aarch64-pc-windows-msvc
             bundle: helpers
-            build_args: --bin codex-windows-sandbox-setup --bin codex-command-runner
+            build_args: --bin praxis-windows-sandbox-setup --bin praxis-command-runner
             runs_on:
-              group: codex-runners
-              labels: codex-windows-arm64
+              group: praxis-runners
+              labels: praxis-windows-arm64
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -95,7 +95,7 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
           name: cargo-timings-rust-release-windows-${{ matrix.target }}-${{ matrix.bundle }}
-          path: codex-rs/target/**/cargo-timings/cargo-timing.html
+          path: praxis-rs/target/**/cargo-timings/cargo-timing.html
           if-no-files-found: warn
 
       - name: Stage Windows binaries
@@ -105,10 +105,10 @@ jobs:
           mkdir -p "$output_dir"
           if [[ "${{ matrix.bundle }}" == "primary" ]]; then
             cp target/${{ matrix.target }}/release/codex.exe "$output_dir/codex.exe"
-            cp target/${{ matrix.target }}/release/codex-responses-api-proxy.exe "$output_dir/codex-responses-api-proxy.exe"
+            cp target/${{ matrix.target }}/release/praxis-responses-api-proxy.exe "$output_dir/praxis-responses-api-proxy.exe"
           else
-            cp target/${{ matrix.target }}/release/codex-windows-sandbox-setup.exe "$output_dir/codex-windows-sandbox-setup.exe"
-            cp target/${{ matrix.target }}/release/codex-command-runner.exe "$output_dir/codex-command-runner.exe"
+            cp target/${{ matrix.target }}/release/praxis-windows-sandbox-setup.exe "$output_dir/praxis-windows-sandbox-setup.exe"
+            cp target/${{ matrix.target }}/release/praxis-command-runner.exe "$output_dir/praxis-command-runner.exe"
           fi
 
       - name: Upload Windows binaries
@@ -116,7 +116,7 @@ jobs:
         with:
           name: windows-binaries-${{ matrix.target }}-${{ matrix.bundle }}
           path: |
-            codex-rs/target/${{ matrix.target }}/release/staged-${{ matrix.bundle }}/*
+            praxis-rs/target/${{ matrix.target }}/release/staged-${{ matrix.bundle }}/*
 
   build-windows:
     needs:
@@ -129,7 +129,7 @@ jobs:
       id-token: write
     defaults:
       run:
-        working-directory: codex-rs
+        working-directory: praxis-rs
 
     strategy:
       fail-fast: false
@@ -138,13 +138,13 @@ jobs:
           - runner: windows-x64
             target: x86_64-pc-windows-msvc
             runs_on:
-              group: codex-runners
-              labels: codex-windows-x64
+              group: praxis-runners
+              labels: praxis-windows-x64
           - runner: windows-arm64
             target: aarch64-pc-windows-msvc
             runs_on:
-              group: codex-runners
-              labels: codex-windows-arm64
+              group: praxis-runners
+              labels: praxis-windows-arm64
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -153,22 +153,22 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: windows-binaries-${{ matrix.target }}-primary
-          path: codex-rs/target/${{ matrix.target }}/release
+          path: praxis-rs/target/${{ matrix.target }}/release
 
       - name: Download prebuilt Windows helper binaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: windows-binaries-${{ matrix.target }}-helpers
-          path: codex-rs/target/${{ matrix.target }}/release
+          path: praxis-rs/target/${{ matrix.target }}/release
 
       - name: Verify binaries
         shell: bash
         run: |
           set -euo pipefail
           ls -lh target/${{ matrix.target }}/release/codex.exe
-          ls -lh target/${{ matrix.target }}/release/codex-responses-api-proxy.exe
-          ls -lh target/${{ matrix.target }}/release/codex-windows-sandbox-setup.exe
-          ls -lh target/${{ matrix.target }}/release/codex-command-runner.exe
+          ls -lh target/${{ matrix.target }}/release/praxis-responses-api-proxy.exe
+          ls -lh target/${{ matrix.target }}/release/praxis-windows-sandbox-setup.exe
+          ls -lh target/${{ matrix.target }}/release/praxis-command-runner.exe
 
       - name: Sign Windows binaries with Azure Trusted Signing
         uses: ./.github/actions/windows-code-sign
@@ -187,10 +187,10 @@ jobs:
           dest="dist/${{ matrix.target }}"
           mkdir -p "$dest"
 
-          cp target/${{ matrix.target }}/release/codex.exe "$dest/codex-${{ matrix.target }}.exe"
-          cp target/${{ matrix.target }}/release/codex-responses-api-proxy.exe "$dest/codex-responses-api-proxy-${{ matrix.target }}.exe"
-          cp target/${{ matrix.target }}/release/codex-windows-sandbox-setup.exe "$dest/codex-windows-sandbox-setup-${{ matrix.target }}.exe"
-          cp target/${{ matrix.target }}/release/codex-command-runner.exe "$dest/codex-command-runner-${{ matrix.target }}.exe"
+          cp target/${{ matrix.target }}/release/codex.exe "$dest/praxis-${{ matrix.target }}.exe"
+          cp target/${{ matrix.target }}/release/praxis-responses-api-proxy.exe "$dest/praxis-responses-api-proxy-${{ matrix.target }}.exe"
+          cp target/${{ matrix.target }}/release/praxis-windows-sandbox-setup.exe "$dest/praxis-windows-sandbox-setup-${{ matrix.target }}.exe"
+          cp target/${{ matrix.target }}/release/praxis-command-runner.exe "$dest/praxis-command-runner-${{ matrix.target }}.exe"
 
       - name: Install DotSlash
         uses: facebook/install-dotslash@1e4e7b3e07eaca387acb98f1d4720e0bee8dbb6a # v2
@@ -206,9 +206,9 @@ jobs:
           # For compatibility with environments that lack the `zstd` tool we
           # additionally create a `.tar.gz` and `.zip` for every Windows binary.
           # The end result is:
-          #   codex-<target>.zst
-          #   codex-<target>.tar.gz
-          #   codex-<target>.zip
+          #   praxis-<target>.zst
+          #   praxis-<target>.tar.gz
+          #   praxis-<target>.zip
           for f in "$dest"/*; do
             base="$(basename "$f")"
             # Skip files that are already archives (shouldn't happen, but be
@@ -228,18 +228,18 @@ jobs:
             # Create zip archive for Windows binaries.
             # Must run from inside the dest dir so 7z won't embed the
             # directory path inside the zip.
-            if [[ "$base" == "codex-${{ matrix.target }}.exe" ]]; then
+            if [[ "$base" == "praxis-${{ matrix.target }}.exe" ]]; then
               # Bundle the sandbox helper binaries into the main codex zip so
               # WinGet installs include the required helpers next to codex.exe.
               # Fall back to the single-binary zip if the helpers are missing
               # to avoid breaking releases.
               bundle_dir="$(mktemp -d)"
-              runner_src="$dest/codex-command-runner-${{ matrix.target }}.exe"
-              setup_src="$dest/codex-windows-sandbox-setup-${{ matrix.target }}.exe"
+              runner_src="$dest/praxis-command-runner-${{ matrix.target }}.exe"
+              setup_src="$dest/praxis-windows-sandbox-setup-${{ matrix.target }}.exe"
               if [[ -f "$runner_src" && -f "$setup_src" ]]; then
                 cp "$dest/$base" "$bundle_dir/$base"
-                cp "$runner_src" "$bundle_dir/codex-command-runner.exe"
-                cp "$setup_src" "$bundle_dir/codex-windows-sandbox-setup.exe"
+                cp "$runner_src" "$bundle_dir/praxis-command-runner.exe"
+                cp "$setup_src" "$bundle_dir/praxis-windows-sandbox-setup.exe"
                 # Use an absolute path so bundle zips land in the real dist
                 # dir even when 7z runs from a temp directory.
                 (cd "$bundle_dir" && 7z a "$repo_root/$dest/${base}.zip" .)
@@ -261,4 +261,4 @@ jobs:
         with:
           name: ${{ matrix.target }}
           path: |
-            codex-rs/dist/${{ matrix.target }}/*
+            praxis-rs/dist/${{ matrix.target }}/*

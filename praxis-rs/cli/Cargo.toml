@@ -1,0 +1,73 @@
+[package]
+name = "praxis-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "praxis"
+path = "src/main.rs"
+
+[lib]
+name = "praxis_cli"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+clap_complete = { workspace = true }
+praxis-app-server = { workspace = true }
+praxis-app-server-protocol = { workspace = true }
+praxis-app-server-test-client = { workspace = true }
+praxis-arg0 = { workspace = true }
+praxis-chatgpt = { workspace = true }
+praxis-cloud-tasks = { path = "../cloud-tasks" }
+praxis-utils-cli = { workspace = true }
+praxis-config = { workspace = true }
+praxis-core = { workspace = true }
+praxis-exec = { workspace = true }
+praxis-execpolicy = { workspace = true }
+praxis-features = { workspace = true }
+praxis-login = { workspace = true }
+praxis-mcp = { workspace = true }
+praxis-mcp-server = { workspace = true }
+praxis-protocol = { workspace = true }
+praxis-responses-api-proxy = { workspace = true }
+praxis-rmcp-client = { workspace = true }
+praxis-sandboxing = { workspace = true }
+praxis-state = { workspace = true }
+praxis-stdio-to-uds = { workspace = true }
+praxis-terminal-detection = { workspace = true }
+praxis-tui = { workspace = true }
+praxis-utils-path = { workspace = true }
+libc = { workspace = true }
+owo-colors = { workspace = true }
+regex-lite = { workspace = true }
+serde_json = { workspace = true }
+supports-color = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = [
+    "io-std",
+    "macros",
+    "process",
+    "rt-multi-thread",
+    "signal",
+] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+praxis_windows_sandbox = { package = "praxis-windows-sandbox", path = "../windows-sandbox-rs" }
+
+[dev-dependencies]
+assert_cmd = { workspace = true }
+assert_matches = { workspace = true }
+praxis-utils-cargo-bin = { workspace = true }
+predicates = { workspace = true }
+pretty_assertions = { workspace = true }
+sqlx = { workspace = true }

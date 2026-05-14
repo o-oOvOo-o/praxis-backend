@@ -71,7 +71,7 @@ jobs:
           bazel_targets=(
             //...
             # Keep standalone V8 library targets out of the ordinary Bazel CI
-            # path. V8 consumers under `//codex-rs/...` still participate
+            # path. V8 consumers under `//praxis-rs/...` still participate
             # transitively through `//...`.
             -//third_party/v8:all
           )
@@ -96,7 +96,7 @@ jobs:
         with:
           path: |
             ~/.cache/bazel-repo-cache
-          key: bazel-cache-${{ matrix.target }}-${{ hashFiles('MODULE.bazel', 'codex-rs/Cargo.lock', 'codex-rs/Cargo.toml') }}
+          key: bazel-cache-${{ matrix.target }}-${{ hashFiles('MODULE.bazel', 'praxis-rs/Cargo.lock', 'praxis-rs/Cargo.toml') }}
 
   clippy:
     timeout-minutes: 30
@@ -126,12 +126,12 @@ jobs:
         with:
           target: ${{ matrix.target }}
 
-      - name: bazel build --config=clippy //codex-rs/...
+      - name: bazel build --config=clippy //praxis-rs/...
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         shell: bash
         run: |
-          # Keep the initial Bazel clippy scope on codex-rs and out of the
+          # Keep the initial Bazel clippy scope on praxis-rs and out of the
           # V8 proof-of-concept target for now.
           ./.github/scripts/run-bazel-ci.sh \
             -- \
@@ -140,8 +140,8 @@ jobs:
             --build_metadata=COMMIT_SHA=${GITHUB_SHA} \
             --build_metadata=TAG_job=clippy \
             -- \
-            //codex-rs/... \
-            -//codex-rs/v8-poc:all
+            //praxis-rs/... \
+            -//praxis-rs/v8-poc:all
 
       # Save bazel repository cache explicitly; make non-fatal so cache uploading
       # never fails the overall job. Only save when key wasn't hit.
@@ -152,4 +152,4 @@ jobs:
         with:
           path: |
             ~/.cache/bazel-repo-cache
-          key: bazel-cache-${{ matrix.target }}-${{ hashFiles('MODULE.bazel', 'codex-rs/Cargo.lock', 'codex-rs/Cargo.toml') }}
+          key: bazel-cache-${{ matrix.target }}-${{ hashFiles('MODULE.bazel', 'praxis-rs/Cargo.lock', 'praxis-rs/Cargo.toml') }}

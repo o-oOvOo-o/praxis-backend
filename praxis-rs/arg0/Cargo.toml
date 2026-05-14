@@ -1,0 +1,23 @@
+[package]
+name = "praxis-arg0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "praxis_arg0"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+praxis-apply-patch = { workspace = true }
+praxis-linux-sandbox = { workspace = true }
+praxis-sandboxing = { workspace = true }
+praxis-shell-escalation = { workspace = true }
+praxis-utils-home-dir = { workspace = true }
+dotenvy = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }

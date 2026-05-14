@@ -1,0 +1,25 @@
+[package]
+name = "praxis-chatgpt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+praxis-connectors = { workspace = true }
+praxis-core = { workspace = true }
+praxis-login = { workspace = true }
+praxis-utils-cli = { workspace = true }
+praxis-utils-cargo-bin = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+praxis-git-utils = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

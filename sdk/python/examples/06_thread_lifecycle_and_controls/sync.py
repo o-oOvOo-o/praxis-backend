@@ -9,7 +9,7 @@ from _bootstrap import ensure_local_sdk_src, runtime_config
 
 ensure_local_sdk_src()
 
-from codex_app_server import Codex, TextInput
+from praxis_app_server import Codex, TextInput
 
 
 with Codex(config=runtime_config()) as codex:

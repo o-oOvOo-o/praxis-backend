@@ -44,4 +44,4 @@ crate hardcodes a `v<crate_version>` tag layout, while our musl artifacts are
 published under `rusty-v8-v<crate_version>`.
 
 Do not mix artifacts across crate versions. The archive and binding must match
-the exact resolved `v8` crate version in `codex-rs/Cargo.lock`.
+the exact resolved `v8` crate version in `praxis-rs/Cargo.lock`.

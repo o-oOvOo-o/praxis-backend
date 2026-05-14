@@ -23,7 +23,7 @@ When enabled, direct model tool calls are restricted to `js_repl` and `js_repl_r
 
 ## Node runtime
 
-`js_repl` requires a Node version that meets or exceeds `codex-rs/node-version.txt`.
+`js_repl` requires a Node version that meets or exceeds `praxis-rs/node-version.txt`.
 
 Runtime resolution order:
 
@@ -58,7 +58,7 @@ imported local file. They are not resolved relative to the imported file's locat
 
 - `js_repl` is a freeform tool: send raw JavaScript source text.
 - Optional first-line pragma:
-  - `// codex-js-repl: timeout_ms=15000`
+  - `// praxis-js-repl: timeout_ms=15000`
 - Top-level bindings persist across calls.
 - If a cell throws, prior bindings remain available, lexical bindings whose initialization completed before the throw stay available in later calls, and hoisted `var` / `function` bindings persist only when execution clearly reached their declaration or a supported write site.
 - Supported hoisted-`var` failed-cell cases are direct top-level identifier writes and updates before the declaration (for example `x = 1`, `x += 1`, `x++`, `x &&= 1`) and non-empty top-level `for...in` / `for...of` loops.
@@ -81,7 +81,7 @@ imported local file. They are not resolved relative to the imported file's locat
 - `codex.emitImage(imageLike)`: explicitly adds one image to the outer `js_repl` function output each time you call it.
 - `codex.tool(...)` and `codex.emitImage(...)` keep stable helper identities across cells. Saved references and persisted objects can reuse them in later cells, but async callbacks that fire after a cell finishes still fail because no exec is active.
 - Imported local files run in the same VM context, so they can also access `codex.*`, the captured `console`, and Node-like `import.meta` helpers.
-- Each `codex.tool(...)` call emits a bounded summary at `info` level from the `codex_core::tools::js_repl` logger. At `trace` level, the same path also logs the exact raw response object or error string seen by JavaScript.
+- Each `codex.tool(...)` call emits a bounded summary at `info` level from the `praxis_core::tools::js_repl` logger. At `trace` level, the same path also logs the exact raw response object or error string seen by JavaScript.
 - Nested `codex.tool(...)` outputs stay inside JavaScript unless you emit them explicitly.
 - `codex.emitImage(...)` accepts a data URL, a single `input_image` item, an object like `{ bytes, mimeType }`, or a raw tool response object that contains exactly one image and no text. Call it multiple times if you want to emit multiple images.
 - `codex.emitImage(...)` rejects mixed text-and-image content.
@@ -104,26 +104,26 @@ For `codex app-server`, these logs are written to the server process `stderr`.
 Examples:
 
 ```sh
-RUST_LOG=codex_core::tools::js_repl=info \
+RUST_LOG=praxis_core::tools::js_repl=info \
 LOG_FORMAT=json \
 codex app-server \
-2> /tmp/codex-app-server.log
+2> /tmp/praxis-app-server.log
 ```
 
 ```sh
-RUST_LOG=codex_core::tools::js_repl=trace \
+RUST_LOG=praxis_core::tools::js_repl=trace \
 LOG_FORMAT=json \
 codex app-server \
-2> /tmp/codex-app-server.log
+2> /tmp/praxis-app-server.log
 ```
 
-In both cases, inspect `/tmp/codex-app-server.log` or whatever sink captures the process `stderr`.
+In both cases, inspect `/tmp/praxis-app-server.log` or whatever sink captures the process `stderr`.
 
 ## Vendored parser asset (`meriyah.umd.min.js`)
 
 The kernel embeds a vendored Meriyah bundle at:
 
-- `codex-rs/core/src/tools/js_repl/meriyah.umd.min.js`
+- `praxis-rs/core/src/tools/js_repl/meriyah.umd.min.js`
 
 Current source is `meriyah@7.0.0` from npm (`dist/meriyah.umd.min.js`).
 Licensing is tracked in:
@@ -140,14 +140,14 @@ tmp="$(mktemp -d)"
 cd "$tmp"
 npm pack meriyah@7.0.0
 tar -xzf meriyah-7.0.0.tgz
-cp package/dist/meriyah.umd.min.js /path/to/repo/codex-rs/core/src/tools/js_repl/meriyah.umd.min.js
+cp package/dist/meriyah.umd.min.js /path/to/repo/praxis-rs/core/src/tools/js_repl/meriyah.umd.min.js
 cp package/LICENSE.md /path/to/repo/third_party/meriyah/LICENSE
 ```
 
 ### How to update to a newer version
 
 1. Replace `7.0.0` in the commands above with the target version.
-2. Copy the new `dist/meriyah.umd.min.js` into `codex-rs/core/src/tools/js_repl/meriyah.umd.min.js`.
+2. Copy the new `dist/meriyah.umd.min.js` into `praxis-rs/core/src/tools/js_repl/meriyah.umd.min.js`.
 3. Copy the package license into `third_party/meriyah/LICENSE`.
 4. Update the version string in the header comment at the top of `meriyah.umd.min.js`.
 5. Update `NOTICE` if the upstream copyright notice changed.

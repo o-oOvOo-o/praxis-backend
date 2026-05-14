@@ -11,15 +11,15 @@ cd sdk/python
 python -m pip install -e .
 ```
 
-Published SDK builds pin an exact `codex-cli-bin` runtime dependency. For local
-repo development, either pass `AppServerConfig(codex_bin=...)` to point at a
+Published SDK builds pin an exact `praxis-cli-bin` runtime dependency. For local
+repo development, either pass `AppServerConfig(praxis_bin=...)` to point at a
 local build explicitly, or use the repo examples/notebook bootstrap which
 installs the pinned runtime package automatically.
 
 ## Quickstart
 
 ```python
-from codex_app_server import Codex
+from praxis_app_server import Codex
 
 with Codex() as codex:
     thread = codex.thread_start(model="gpt-5")
@@ -53,13 +53,13 @@ python examples/01_quickstart_constructor/async.py
 
 The repo no longer checks `codex` binaries into `sdk/python`.
 
-Published SDK builds are pinned to an exact `codex-cli-bin` package version,
+Published SDK builds are pinned to an exact `praxis-cli-bin` package version,
 and that runtime package carries the platform-specific binary for the target
 wheel.
 
 For local repo development, the checked-in `sdk/python-runtime` package is only
 a template for staged release artifacts. Editable installs should use an
-explicit `codex_bin` override for manual SDK usage; the repo examples and
+explicit `praxis_bin` override for manual SDK usage; the repo examples and
 notebook bootstrap the pinned runtime package automatically.
 
 ## Maintainer workflow
@@ -69,11 +69,11 @@ cd sdk/python
 python scripts/update_sdk_artifacts.py generate-types
 python scripts/update_sdk_artifacts.py \
   stage-sdk \
-  /tmp/codex-python-release/codex-app-server-sdk \
+  /tmp/praxis-python-release/praxis-app-server-sdk \
   --runtime-version 1.2.3
 python scripts/update_sdk_artifacts.py \
   stage-runtime \
-  /tmp/codex-python-release/codex-cli-bin \
+  /tmp/praxis-python-release/praxis-cli-bin \
   /path/to/codex \
   --runtime-version 1.2.3
 ```
@@ -81,14 +81,14 @@ python scripts/update_sdk_artifacts.py \
 This supports the CI release flow:
 
 - run `generate-types` before packaging
-- stage `codex-app-server-sdk` once with an exact `codex-cli-bin==...` dependency
-- stage `codex-cli-bin` on each supported platform runner with the same pinned runtime version
-- build and publish `codex-cli-bin` as platform wheels only; do not publish an sdist
+- stage `praxis-app-server-sdk` once with an exact `praxis-cli-bin==...` dependency
+- stage `praxis-cli-bin` on each supported platform runner with the same pinned runtime version
+- build and publish `praxis-cli-bin` as platform wheels only; do not publish an sdist
 
 ## Compatibility and versioning
 
-- Package: `codex-app-server-sdk`
-- Runtime package: `codex-cli-bin`
+- Package: `praxis-app-server-sdk`
+- Runtime package: `praxis-cli-bin`
 - Current SDK version in this repo: `0.2.0`
 - Python: `>=3.10`
 - Target protocol: Codex `app-server` JSON-RPC v2
@@ -100,4 +100,4 @@ This supports the CI release flow:
 - Use context managers (`with Codex() as codex:`) to ensure shutdown.
 - Prefer `thread.run("...")` for the common case. Use `thread.turn(...)` when
   you need streaming, steering, or interrupt control.
-- For transient overload, use `codex_app_server.retry.retry_on_overload`.
+- For transient overload, use `praxis_app_server.retry.retry_on_overload`.

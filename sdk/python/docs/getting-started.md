@@ -16,13 +16,13 @@ python -m pip install -e .
 Requirements:
 
 - Python `>=3.10`
-- installed `codex-cli-bin` runtime package, or an explicit `codex_bin` override
+- installed `praxis-cli-bin` runtime package, or an explicit `praxis_bin` override
 - local Codex auth/session configured
 
 ## 2) Run your first turn (sync)
 
 ```python
-from codex_app_server import Codex
+from praxis_app_server import Codex
 
 with Codex() as codex:
     server = codex.metadata.serverInfo
@@ -48,7 +48,7 @@ What happened:
 ## 3) Continue the same thread (multi-turn)
 
 ```python
-from codex_app_server import Codex
+from praxis_app_server import Codex
 
 with Codex() as codex:
     thread = codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})
@@ -67,7 +67,7 @@ initializes lazily, and context entry makes startup/shutdown explicit.
 
 ```python
 import asyncio
-from codex_app_server import AsyncCodex
+from praxis_app_server import AsyncCodex
 
 
 async def main() -> None:
@@ -83,7 +83,7 @@ asyncio.run(main())
 ## 5) Resume an existing thread
 
 ```python
-from codex_app_server import Codex
+from praxis_app_server import Codex
 
 THREAD_ID = "thr_123"  # replace with a real id
 
@@ -98,7 +98,7 @@ with Codex() as codex:
 The convenience wrappers live at the package root, but the canonical app-server models live under:
 
 ```python
-from codex_app_server.generated.v2_all import Turn, TurnStatus, ThreadReadResponse
+from praxis_app_server.generated.v2_all import Turn, TurnStatus, ThreadReadResponse
 ```
 
 ## 7) Next stops

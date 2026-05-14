@@ -1,0 +1,27 @@
+---
+source: tui/src/history_cell.rs
+expression: rendered
+---
+╭─── Praxis CLI vtest ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                     │ Tips for getting started                                                                           │
+│            Welcome back!            │                                                                                                    │
+│                                     │ Run /init to create an AGENTS.md file with instructions for Praxis.                            │
+│               ▗▟███▙▖               │ Use /resume to jump back into an earlier thread.                                                   │
+│              ▐███████▌              │ Use /model to change model and reasoning effort.                                                   │
+│              ▐██● ●██▌              │                                                                                                    │
+│              ▜██▿██▛ │              │ ────────────────────────────────────────────────────────────────────────────────────────────────── │
+│                ▘▘ ▝▝                │                                                                                                    │
+│                                     │ What's new                                                                                         │
+│  gpt-5.4 xhigh · API Usage Billing  │                                                                                                    │
+│            C:\work\puppy            │ Workspace-aware resume keeps Praxis threads attached to this project.                          │
+│                                     │                                                                                                    │
+│                                     │ ────────────────────────────────────────────────────────────────────────────────────────────────── │
+│                                     │                                                                                                    │
+│                                     │ Recent activity                                                                                    │
+│                                     │                                                                                                    │
+│                                     │ Refine startup header spacing                                                                      │
+│                                     │ Tune thread title generation                                                                       │
+│                                     │ Fork keeps renamed project chat title                                                              │
+│                                     │                                                                                                    │
+│                                     │ /resume for more                                                                                   │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

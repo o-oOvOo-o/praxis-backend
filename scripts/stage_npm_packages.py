@@ -14,12 +14,12 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BUILD_SCRIPT = REPO_ROOT / "codex-cli" / "scripts" / "build_npm_package.py"
-INSTALL_NATIVE_DEPS = REPO_ROOT / "codex-cli" / "scripts" / "install_native_deps.py"
+BUILD_SCRIPT = REPO_ROOT / "praxis-cli" / "scripts" / "build_npm_package.py"
+INSTALL_NATIVE_DEPS = REPO_ROOT / "praxis-cli" / "scripts" / "install_native_deps.py"
 WORKFLOW_NAME = ".github/workflows/rust-release.yml"
 GITHUB_REPO = "openai/codex"
 
-_SPEC = importlib.util.spec_from_file_location("codex_build_npm_package", BUILD_SCRIPT)
+_SPEC = importlib.util.spec_from_file_location("praxis_build_npm_package", BUILD_SCRIPT)
 if _SPEC is None or _SPEC.loader is None:
     raise RuntimeError(f"Unable to load module from {BUILD_SCRIPT}")
 _BUILD_MODULE = importlib.util.module_from_spec(_SPEC)
@@ -132,8 +132,8 @@ def run_command(cmd: list[str]) -> None:
 
 def tarball_name_for_package(package: str, version: str) -> str:
     if package in CODEX_PLATFORM_PACKAGES:
-        platform = package.removeprefix("codex-")
-        return f"codex-npm-{platform}-{version}.tgz"
+        platform = package.removeprefix("praxis-")
+        return f"praxis-npm-{platform}-{version}.tgz"
     return f"{package}-npm-{version}.tgz"
 
 

@@ -1,13 +1,13 @@
 # Codex App Server SDK — API Reference
 
-Public surface of `codex_app_server` for app-server v2.
+Public surface of `praxis_app_server` for app-server v2.
 
 This SDK surface is experimental. The current implementation intentionally allows only one active turn consumer (`Thread.run()`, `TurnHandle.stream()`, or `TurnHandle.run()`) per client instance at a time.
 
 ## Package Entry
 
 ```python
-from codex_app_server import (
+from praxis_app_server import (
     Codex,
     AsyncCodex,
     RunResult,
@@ -25,12 +25,12 @@ from codex_app_server import (
     MentionInput,
     TurnStatus,
 )
-from codex_app_server.generated.v2_all import ThreadItem, ThreadTokenUsage
+from praxis_app_server.generated.v2_all import ThreadItem, ThreadTokenUsage
 ```
 
-- Version: `codex_app_server.__version__`
+- Version: `praxis_app_server.__version__`
 - Requires Python >= 3.10
-- Canonical generated app-server models live in `codex_app_server.generated.v2_all`
+- Canonical generated app-server models live in `praxis_app_server.generated.v2_all`
 
 ## Codex (sync)
 
@@ -133,7 +133,7 @@ Use `turn(...)` when you need low-level turn control (`stream()`, `steer()`,
 - `steer(input: Input) -> TurnSteerResponse`
 - `interrupt() -> TurnInterruptResponse`
 - `stream() -> Iterator[Notification]`
-- `run() -> codex_app_server.generated.v2_all.Turn`
+- `run() -> praxis_app_server.generated.v2_all.Turn`
 
 Behavior notes:
 
@@ -145,7 +145,7 @@ Behavior notes:
 - `steer(input: Input) -> Awaitable[TurnSteerResponse]`
 - `interrupt() -> Awaitable[TurnInterruptResponse]`
 - `stream() -> AsyncIterator[Notification]`
-- `run() -> Awaitable[codex_app_server.generated.v2_all.Turn]`
+- `run() -> Awaitable[praxis_app_server.generated.v2_all.Turn]`
 
 Behavior notes:
 
@@ -170,7 +170,7 @@ Input = list[InputItem] | InputItem
 The SDK wrappers return and accept canonical generated app-server models wherever possible:
 
 ```python
-from codex_app_server.generated.v2_all import (
+from praxis_app_server.generated.v2_all import (
     AskForApproval,
     ThreadReadResponse,
     Turn,
@@ -182,7 +182,7 @@ from codex_app_server.generated.v2_all import (
 ## Retry + errors
 
 ```python
-from codex_app_server import (
+from praxis_app_server import (
     retry_on_overload,
     JsonRpcError,
     MethodNotFoundError,
@@ -198,7 +198,7 @@ from codex_app_server import (
 ## Example
 
 ```python
-from codex_app_server import Codex
+from praxis_app_server import Codex
 
 with Codex() as codex:
     thread = codex.thread_start(model="gpt-5.4", config={"model_reasoning_effort": "high"})

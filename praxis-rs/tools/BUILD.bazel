@@ -1,0 +1,9 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "tools",
+    crate_name = "praxis_tools",
+    compile_data = [
+        "src/tool_apply_patch.lark",
+    ],
+)

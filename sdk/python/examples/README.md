@@ -5,7 +5,7 @@ Each example folder contains runnable versions:
 - `sync.py` (public sync surface: `Codex`)
 - `async.py` (public async surface: `AsyncCodex`)
 
-All examples intentionally use only public SDK exports from `codex_app_server`.
+All examples intentionally use only public SDK exports from `praxis_app_server`.
 
 ## Prerequisites
 
@@ -23,11 +23,11 @@ python -m pip install -e .
 
 When running examples from this repo checkout, the SDK source uses the local
 tree and does not bundle a runtime binary. The helper in `examples/_bootstrap.py`
-uses the installed `codex-cli-bin` runtime package.
+uses the installed `praxis-cli-bin` runtime package.
 
-If the pinned `codex-cli-bin` runtime is not already installed, the bootstrap
+If the pinned `praxis-cli-bin` runtime is not already installed, the bootstrap
 will download the matching GitHub release artifact, stage a temporary local
-`codex-cli-bin` package, install it into your active interpreter, and clean up
+`praxis-cli-bin` package, install it into your active interpreter, and clean up
 the temporary files afterward.
 
 Current pinned runtime version: `0.116.0-alpha.1`
@@ -43,7 +43,7 @@ python examples/<example-folder>/async.py
 
 The examples bootstrap local imports from `sdk/python/src` automatically, so no
 SDK wheel install is required. You only need the Python dependencies for your
-active interpreter and an installed `codex-cli-bin` runtime package (either
+active interpreter and an installed `praxis-cli-bin` runtime package (either
 already present or automatically provisioned by the bootstrap).
 
 ## Recommended first run

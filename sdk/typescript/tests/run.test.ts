@@ -562,7 +562,7 @@ describe("Codex", () => {
       const text = payload!.json.text;
       expect(text).toBeDefined();
       expect(text?.format).toEqual({
-        name: "codex_output_schema",
+        name: "praxis_output_schema",
         type: "json_schema",
         strict: true,
         schema,
@@ -626,7 +626,7 @@ describe("Codex", () => {
     });
 
     const { args: spawnArgs, restore } = codexExecSpy();
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-images-"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "praxis-images-"));
     const imagesDirectoryEntries: [string, string] = [
       path.join(tempDir, "first.png"),
       path.join(tempDir, "second.jpg"),
@@ -673,7 +673,7 @@ describe("Codex", () => {
     });
 
     const { args: spawnArgs, restore } = codexExecSpy();
-    const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-working-dir-"));
+    const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "praxis-working-dir-"));
     const { client, cleanup } = createTestClient({
       baseUrl: url,
       apiKey: "test",
@@ -707,7 +707,7 @@ describe("Codex", () => {
         ),
       ],
     });
-    const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "codex-working-dir-"));
+    const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "praxis-working-dir-"));
     const { client, cleanup } = createTestClient({
       baseUrl: url,
       apiKey: "test",
@@ -741,9 +741,9 @@ describe("Codex", () => {
       expect(requests.length).toBeGreaterThan(0);
       const originatorHeader = requests[0]!.headers["originator"];
       if (Array.isArray(originatorHeader)) {
-        expect(originatorHeader).toContain("codex_sdk_ts");
+        expect(originatorHeader).toContain("praxis_sdk_ts");
       } else {
-        expect(originatorHeader).toBe("codex_sdk_ts");
+        expect(originatorHeader).toBe("praxis_sdk_ts");
       }
     } finally {
       cleanup();

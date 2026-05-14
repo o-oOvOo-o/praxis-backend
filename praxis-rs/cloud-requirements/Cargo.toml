@@ -1,0 +1,31 @@
+[package]
+name = "praxis-cloud-requirements"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+praxis-backend-client = { workspace = true }
+praxis-core = { workspace = true }
+praxis-login = { workspace = true }
+praxis-otel = { workspace = true }
+praxis-protocol = { workspace = true }
+hmac = "0.12.1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "sync", "time"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "test-util", "time"] }

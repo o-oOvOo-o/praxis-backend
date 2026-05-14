@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
-# Remote-env setup script for codex-rs integration tests.
+# Remote-env setup script for praxis-rs integration tests.
 #
 # Usage (source-only):
 #   source scripts/test-remote-env.sh
-#   cd codex-rs
-#   cargo test -p codex-core --test all remote_env_connects_creates_temp_dir_and_runs_sample_script
-#   codex_remote_env_cleanup
+#   cd praxis-rs
+#   cargo test -p praxis-core --test all remote_env_connects_creates_temp_dir_and_runs_sample_script
+#   praxis_remote_env_cleanup
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -17,10 +17,10 @@ is_sourced() {
 
 setup_remote_env() {
   local container_name
-  local codex_exec_server_binary_path
+  local praxis_exec_server_binary_path
 
-  container_name="${CODEX_TEST_REMOTE_ENV_CONTAINER_NAME:-codex-remote-test-env-local-$(date +%s)-${RANDOM}}"
-  codex_exec_server_binary_path="${REPO_ROOT}/codex-rs/target/debug/codex-exec-server"
+  container_name="${CODEX_TEST_REMOTE_ENV_CONTAINER_NAME:-praxis-remote-test-env-local-$(date +%s)-${RANDOM}}"
+  praxis_exec_server_binary_path="${REPO_ROOT}/praxis-rs/target/debug/praxis-exec-server"
 
   if ! command -v docker >/dev/null 2>&1; then
     echo "docker is required (Colima or Docker Desktop)" >&2
@@ -33,17 +33,17 @@ setup_remote_env() {
   fi
 
   if ! command -v cargo >/dev/null 2>&1; then
-    echo "cargo is required to build codex-exec-server" >&2
+    echo "cargo is required to build praxis-exec-server" >&2
     return 1
   fi
 
   (
-    cd "${REPO_ROOT}/codex-rs"
-    cargo build -p codex-exec-server --bin codex-exec-server
+    cd "${REPO_ROOT}/praxis-rs"
+    cargo build -p praxis-exec-server --bin praxis-exec-server
   )
 
-  if [[ ! -f "${codex_exec_server_binary_path}" ]]; then
-    echo "codex-exec-server binary not found at ${codex_exec_server_binary_path}" >&2
+  if [[ ! -f "${praxis_exec_server_binary_path}" ]]; then
+    echo "praxis-exec-server binary not found at ${praxis_exec_server_binary_path}" >&2
     return 1
   fi
 
@@ -53,7 +53,7 @@ setup_remote_env() {
   export CODEX_TEST_REMOTE_ENV="${container_name}"
 }
 
-codex_remote_env_cleanup() {
+praxis_remote_env_cleanup() {
   if [[ -n "${CODEX_TEST_REMOTE_ENV:-}" ]]; then
     docker rm -f "${CODEX_TEST_REMOTE_ENV}" >/dev/null 2>&1 || true
     unset CODEX_TEST_REMOTE_ENV
@@ -70,7 +70,7 @@ set -euo pipefail
 if setup_remote_env; then
   status=0
   echo "CODEX_TEST_REMOTE_ENV=${CODEX_TEST_REMOTE_ENV}"
-  echo "Remote env ready. Run your command, then call: codex_remote_env_cleanup"
+  echo "Remote env ready. Run your command, then call: praxis_remote_env_cleanup"
 else
   status=$?
 fi

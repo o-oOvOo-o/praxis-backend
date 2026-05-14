@@ -1,0 +1,6 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "terminal-detection",
+    crate_name = "praxis_terminal_detection",
+)

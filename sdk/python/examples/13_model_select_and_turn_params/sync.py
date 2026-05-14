@@ -9,7 +9,7 @@ from _bootstrap import assistant_text_from_turn, ensure_local_sdk_src, find_turn
 
 ensure_local_sdk_src()
 
-from codex_app_server import (
+from praxis_app_server import (
     AskForApproval,
     Codex,
     Personality,

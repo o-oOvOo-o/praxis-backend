@@ -10,17 +10,17 @@ jobs:
   gather-labels:
     name: Generate label suggestions
     # Prevent runs on forks (requires OpenAI API key, wastes Actions minutes)
-    if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'codex-label'))
+    if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'praxis-label'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
-      codex_output: ${{ steps.codex.outputs.final-message }}
+      praxis_output: ${{ steps.codex.outputs.final-message }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - id: codex
-        uses: openai/codex-action@0b91f4a2703c23df3102c3f0967d3c6db34eedef # v1
+        uses: openai/praxis-action@0b91f4a2703c23df3102c3f0967d3c6db34eedef # v1
         with:
           openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
           allow-users: "*"
@@ -39,7 +39,7 @@ jobs:
             1. CLI — the Codex command line interface.
             2. extension — VS Code (or other IDE) extension-specific issues.
             3. app - Issues related to the Codex desktop application.
-            4. codex-web — Issues targeting the Codex web UI/Cloud experience.
+            4. praxis-web — Issues targeting the Codex web UI/Cloud experience.
             5. github-action — Issues with the Codex GitHub action.
             6. iOS — Issues with the Codex iOS app.
 
@@ -52,7 +52,7 @@ jobs:
             6. code-review — Issues related to the code review feature or functionality.
             7. safety-check - Issues related to cyber risk detection or trusted access verification.
             8. auth - Problems related to authentication, login, or access tokens.
-            9. codex-exec - Problems related to the "codex exec" command or functionality.
+            9. praxis-exec - Problems related to the "codex exec" command or functionality.
             10. context-management - Problems related to compaction, context windows, or available context reporting.
             11. custom-model - Problems that involve using custom model providers, local models, or OSS models.
             12. rate-limits - Problems related to token limits, rate limits, or token usage reporting.
@@ -98,7 +98,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
-      CODEX_OUTPUT: ${{ needs.gather-labels.outputs.codex_output }}
+      CODEX_OUTPUT: ${{ needs.gather-labels.outputs.praxis_output }}
     steps:
       - name: Apply labels
         run: |
@@ -126,8 +126,8 @@ jobs:
 
           "${cmd[@]}" || true
 
-      - name: Remove codex-label trigger
-        if: ${{ always() && github.event.action == 'labeled' && github.event.label.name == 'codex-label' }}
+      - name: Remove praxis-label trigger
+        if: ${{ always() && github.event.action == 'labeled' && github.event.label.name == 'praxis-label' }}
         run: |
-          gh issue edit "$ISSUE_NUMBER" --remove-label codex-label || true
-          echo "Attempted to remove label: codex-label"
+          gh issue edit "$ISSUE_NUMBER" --remove-label praxis-label || true
+          echo "Attempted to remove label: praxis-label"

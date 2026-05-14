@@ -8,8 +8,8 @@ on:
 jobs:
   sdks:
     runs-on:
-      group: codex-runners
-      labels: codex-linux-x64
+      group: praxis-runners
+      labels: praxis-linux-x64
     timeout-minutes: 10
     steps:
       - name: Checkout repository
@@ -56,7 +56,7 @@ jobs:
             --build_metadata=COMMIT_SHA=${GITHUB_SHA} \
             --build_metadata=TAG_job=sdk \
             -- \
-            //codex-rs/cli:codex
+            //praxis-rs/cli:codex
 
           # Resolve the exact output file using the same wrapper/config path as
           # the build instead of guessing which Bazel convenience symlink is
@@ -67,21 +67,21 @@ jobs:
               cquery \
               --output=files \
               -- \
-              //codex-rs/cli:codex \
+              //praxis-rs/cli:codex \
               | grep -E '^(/|bazel-out/)' \
               | tail -n 1
           )"
           if [[ "${cquery_output}" = /* ]]; then
-            codex_bazel_output_path="${cquery_output}"
+            praxis_bazel_output_path="${cquery_output}"
           else
-            codex_bazel_output_path="${GITHUB_WORKSPACE}/${cquery_output}"
+            praxis_bazel_output_path="${GITHUB_WORKSPACE}/${cquery_output}"
           fi
-          if [[ -z "${codex_bazel_output_path}" ]]; then
-            echo "Bazel did not report an output path for //codex-rs/cli:codex." >&2
+          if [[ -z "${praxis_bazel_output_path}" ]]; then
+            echo "Bazel did not report an output path for //praxis-rs/cli:codex." >&2
             exit 1
           fi
-          if [[ ! -e "${codex_bazel_output_path}" ]]; then
-            echo "Unable to locate the Bazel-built codex binary at ${codex_bazel_output_path}." >&2
+          if [[ ! -e "${praxis_bazel_output_path}" ]]; then
+            echo "Unable to locate the Bazel-built codex binary at ${praxis_bazel_output_path}." >&2
             exit 1
           fi
 
@@ -91,7 +91,7 @@ jobs:
           # test process.
           install_dir="${GITHUB_WORKSPACE}/.tmp/sdk-ci"
           mkdir -p "${install_dir}"
-          install -m 755 "${codex_bazel_output_path}" "${install_dir}/codex"
+          install -m 755 "${praxis_bazel_output_path}" "${install_dir}/codex"
           echo "CODEX_EXEC_PATH=${install_dir}/codex" >> "$GITHUB_ENV"
 
       - name: Warm up Bazel-built codex
@@ -119,4 +119,4 @@ jobs:
         with:
           path: |
             ~/.cache/bazel-repo-cache
-          key: bazel-cache-x86_64-unknown-linux-gnu-${{ hashFiles('MODULE.bazel', 'codex-rs/Cargo.lock', 'codex-rs/Cargo.toml') }}
+          key: bazel-cache-x86_64-unknown-linux-gnu-${{ hashFiles('MODULE.bazel', 'praxis-rs/Cargo.lock', 'praxis-rs/Cargo.toml') }}

@@ -31,7 +31,7 @@ jobs:
             mapfile -t files < <(git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA")
           else
             # On manual runs, default to the full fast-PR bundle.
-            files=("codex-rs/force" "tools/argument-comment-lint/force" ".github/force")
+            files=("praxis-rs/force" "tools/argument-comment-lint/force" ".github/force")
           fi
 
           codex=false
@@ -39,8 +39,8 @@ jobs:
           argument_comment_lint_package=false
           workflows=false
           for f in "${files[@]}"; do
-            [[ $f == codex-rs/* ]] && codex=true
-            [[ $f == codex-rs/* || $f == tools/argument-comment-lint/* || $f == justfile ]] && argument_comment_lint=true
+            [[ $f == praxis-rs/* ]] && codex=true
+            [[ $f == praxis-rs/* || $f == tools/argument-comment-lint/* || $f == justfile ]] && argument_comment_lint=true
             [[ $f == tools/argument-comment-lint/* || $f == .github/workflows/rust-ci.yml || $f == .github/workflows/rust-ci-full.yml ]] && argument_comment_lint_package=true
             [[ $f == .github/* ]] && workflows=true
           done
@@ -58,7 +58,7 @@ jobs:
     if: ${{ needs.changed.outputs.codex == 'true' || needs.changed.outputs.workflows == 'true' }}
     defaults:
       run:
-        working-directory: codex-rs
+        working-directory: praxis-rs
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
@@ -74,7 +74,7 @@ jobs:
     if: ${{ needs.changed.outputs.codex == 'true' || needs.changed.outputs.workflows == 'true' }}
     defaults:
       run:
-        working-directory: codex-rs
+        working-directory: praxis-rs
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
@@ -145,8 +145,8 @@ jobs:
             runner: windows-x64
             timeout_minutes: 30
             runs_on:
-              group: codex-runners
-              labels: codex-windows-x64
+              group: praxis-runners
+              labels: praxis-windows-x64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/setup-bazel-ci
@@ -159,7 +159,7 @@ jobs:
         run: |
           sudo DEBIAN_FRONTEND=noninteractive apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libcap-dev
-      - name: Run argument comment lint on codex-rs via Bazel
+      - name: Run argument comment lint on praxis-rs via Bazel
         if: ${{ runner.os != 'Windows' }}
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
@@ -174,7 +174,7 @@ jobs:
             --build_metadata=COMMIT_SHA=${GITHUB_SHA} \
             -- \
             ${bazel_targets}
-      - name: Run argument comment lint on codex-rs via Bazel
+      - name: Run argument comment lint on praxis-rs via Bazel
         if: ${{ runner.os == 'Windows' }}
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}

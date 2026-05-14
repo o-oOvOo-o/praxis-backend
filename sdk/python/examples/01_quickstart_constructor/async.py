@@ -15,7 +15,7 @@ ensure_local_sdk_src()
 
 import asyncio
 
-from codex_app_server import AsyncCodex
+from praxis_app_server import AsyncCodex
 
 
 async def main() -> None:

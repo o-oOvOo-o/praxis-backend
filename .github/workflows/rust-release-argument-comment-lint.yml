@@ -49,8 +49,8 @@ jobs:
             runner_binary: argument-comment-lint.exe
             cargo_dylint_binary: cargo-dylint.exe
             runs_on:
-              group: codex-runners
-              labels: codex-windows-x64
+              group: praxis-runners
+              labels: praxis-windows-x64
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6

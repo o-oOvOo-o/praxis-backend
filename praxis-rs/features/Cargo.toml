@@ -1,0 +1,25 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "praxis-features"
+version.workspace = true
+
+[lib]
+doctest = false
+name = "praxis_features"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+praxis-login = { workspace = true }
+praxis-otel = { workspace = true }
+praxis-protocol = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+toml = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

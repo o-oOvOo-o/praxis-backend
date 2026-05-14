@@ -10,7 +10,7 @@ jobs:
   gather-duplicates-all:
     name: Identify potential duplicates (all issues)
     # Prevent runs on forks (requires OpenAI API key, wastes Actions minutes)
-    if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'codex-deduplicate'))
+    if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'praxis-deduplicate'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,8 +29,8 @@ jobs:
         run: |
           set -eo pipefail
 
-          CURRENT_ISSUE_FILE=codex-current-issue.json
-          EXISTING_ALL_FILE=codex-existing-issues-all.json
+          CURRENT_ISSUE_FILE=praxis-current-issue.json
+          EXISTING_ALL_FILE=praxis-existing-issues-all.json
 
           gh issue list --repo "$REPO" \
             --json number,title,body,createdAt,updatedAt,state,labels \
@@ -59,9 +59,9 @@ jobs:
 
       # Prompt instructions are intentionally inline in this workflow. The old
       # .github/prompts/issue-deduplicator.txt file is obsolete and removed.
-      - id: codex-all
+      - id: praxis-all
         name: Find duplicates (pass 1, all issues)
-        uses: openai/codex-action@0b91f4a2703c23df3102c3f0967d3c6db34eedef # v1
+        uses: openai/praxis-action@0b91f4a2703c23df3102c3f0967d3c6db34eedef # v1
         with:
           openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
           allow-users: "*"
@@ -69,8 +69,8 @@ jobs:
             You are an assistant that triages new GitHub issues by identifying potential duplicates.
 
             You will receive the following JSON files located in the current working directory:
-            - `codex-current-issue.json`: JSON object describing the newly created issue (fields: number, title, body).
-            - `codex-existing-issues-all.json`: JSON array of recent issues with states, timestamps, and labels.
+            - `praxis-current-issue.json`: JSON object describing the newly created issue (fields: number, title, body).
+            - `praxis-existing-issues-all.json`: JSON array of recent issues with states, timestamps, and labels.
 
             Instructions:
             - Compare the current issue against the existing issues to find up to five that appear to describe the same underlying problem or request.
@@ -165,8 +165,8 @@ jobs:
         run: |
           set -eo pipefail
 
-          CURRENT_ISSUE_FILE=codex-current-issue.json
-          EXISTING_OPEN_FILE=codex-existing-issues-open.json
+          CURRENT_ISSUE_FILE=praxis-current-issue.json
+          EXISTING_OPEN_FILE=praxis-existing-issues-open.json
 
           gh issue list --repo "$REPO" \
             --json number,title,body,createdAt,updatedAt,state,labels \
@@ -193,9 +193,9 @@ jobs:
           echo "Prepared fallback duplicate detection input files."
           echo "open_issue_count=$(jq 'length' "$EXISTING_OPEN_FILE")"
 
-      - id: codex-open
+      - id: praxis-open
         name: Find duplicates (pass 2, open issues)
-        uses: openai/codex-action@0b91f4a2703c23df3102c3f0967d3c6db34eedef # v1
+        uses: openai/praxis-action@0b91f4a2703c23df3102c3f0967d3c6db34eedef # v1
         with:
           openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
           allow-users: "*"
@@ -205,8 +205,8 @@ jobs:
             This is a fallback pass because a broad search did not find convincing matches.
 
             You will receive the following JSON files located in the current working directory:
-            - `codex-current-issue.json`: JSON object describing the newly created issue (fields: number, title, body).
-            - `codex-existing-issues-open.json`: JSON array of open issues only.
+            - `praxis-current-issue.json`: JSON object describing the newly created issue (fields: number, title, body).
+            - `praxis-existing-issues-open.json`: JSON array of open issues only.
 
             Instructions:
             - Search only these active unresolved issues for duplicates of the current issue.
@@ -286,7 +286,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      codex_output: ${{ steps.select-final.outputs.codex_output }}
+      praxis_output: ${{ steps.select-final.outputs.praxis_output }}
     steps:
       - id: select-final
         name: Select final duplicate set
@@ -327,7 +327,7 @@ jobs:
           echo "Final reason: $(jq -r '.reason' <<< "$final_json")"
 
           {
-            echo "codex_output<<EOF"
+            echo "praxis_output<<EOF"
             echo "$final_json"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -344,7 +344,7 @@ jobs:
       - name: Comment on issue
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          CODEX_OUTPUT: ${{ needs.select-final.outputs.codex_output }}
+          CODEX_OUTPUT: ${{ needs.select-final.outputs.praxis_output }}
         with:
           github-token: ${{ github.token }}
           script: |
@@ -382,7 +382,7 @@ jobs:
               '',
               ...filteredIssues.map((value) => `- #${String(value)}`),
               '',
-              '*Powered by [Codex Action](https://github.com/openai/codex-action)*'];
+              '*Powered by [Codex Action](https://github.com/openai/praxis-action)*'];
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -391,12 +391,12 @@ jobs:
               body: lines.join("\n"),
             });
 
-      - name: Remove codex-deduplicate label
-        if: ${{ always() && github.event.action == 'labeled' && github.event.label.name == 'codex-deduplicate' }}
+      - name: Remove praxis-deduplicate label
+        if: ${{ always() && github.event.action == 'labeled' && github.event.label.name == 'praxis-deduplicate' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
-          gh issue edit "$ISSUE_NUMBER" --remove-label codex-deduplicate || true
-          echo "Attempted to remove label: codex-deduplicate"
+          gh issue edit "$ISSUE_NUMBER" --remove-label praxis-deduplicate || true
+          echo "Attempted to remove label: praxis-deduplicate"

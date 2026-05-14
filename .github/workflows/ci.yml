@@ -14,7 +14,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Verify codex-rs Cargo manifests inherit workspace settings
+      - name: Verify praxis-rs Cargo manifests inherit workspace settings
         run: python3 .github/scripts/verify_cargo_workspace_manifests.py
 
       - name: Verify Bazel clippy flags match Cargo workspace lints
@@ -49,13 +49,13 @@ jobs:
             --release-version "$CODEX_VERSION" \
             --package codex \
             --output-dir "$OUTPUT_DIR"
-          PACK_OUTPUT="${OUTPUT_DIR}/codex-npm-${CODEX_VERSION}.tgz"
+          PACK_OUTPUT="${OUTPUT_DIR}/praxis-npm-${CODEX_VERSION}.tgz"
           echo "pack_output=$PACK_OUTPUT" >> "$GITHUB_OUTPUT"
 
       - name: Upload staged npm package artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
         with:
-          name: codex-npm-staging
+          name: praxis-npm-staging
           path: ${{ steps.stage_npm_package.outputs.pack_output }}
 
       - name: Ensure root README.md contains only ASCII and certain Unicode code points
@@ -63,10 +63,10 @@ jobs:
       - name: Check root README ToC
         run: python3 scripts/readme_toc.py README.md
 
-      - name: Ensure codex-cli/README.md contains only ASCII and certain Unicode code points
-        run: ./scripts/asciicheck.py codex-cli/README.md
-      - name: Check codex-cli/README ToC
-        run: python3 scripts/readme_toc.py codex-cli/README.md
+      - name: Ensure praxis-cli/README.md contains only ASCII and certain Unicode code points
+        run: ./scripts/asciicheck.py praxis-cli/README.md
+      - name: Check praxis-cli/README ToC
+        run: python3 scripts/readme_toc.py praxis-cli/README.md
 
       - name: Prettier (run `pnpm run format:fix` to fix)
         run: pnpm run format

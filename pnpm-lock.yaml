@@ -17,9 +17,9 @@ importers:
         specifier: ^3.5.3
         version: 3.5.3
 
-  codex-cli: {}
+  praxis-cli: {}
 
-  codex-rs/responses-api-proxy/npm: {}
+  praxis-rs/responses-api-proxy/npm: {}
 
   sdk/typescript:
     devDependencies:

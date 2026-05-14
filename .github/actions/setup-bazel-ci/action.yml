@@ -20,7 +20,7 @@ runs:
       if: inputs.install-test-prereqs == 'true'
       uses: actions/setup-node@v6
       with:
-        node-version-file: codex-rs/node-version.txt
+        node-version-file: praxis-rs/node-version.txt
 
     # Some integration tests rely on DotSlash being installed.
     # See https://github.com/openai/codex/pull/7617.
@@ -49,7 +49,7 @@ runs:
       with:
         path: |
           ~/.cache/bazel-repo-cache
-        key: bazel-cache-${{ inputs.target }}-${{ hashFiles('MODULE.bazel', 'codex-rs/Cargo.lock', 'codex-rs/Cargo.toml') }}
+        key: bazel-cache-${{ inputs.target }}-${{ hashFiles('MODULE.bazel', 'praxis-rs/Cargo.lock', 'praxis-rs/Cargo.toml') }}
         restore-keys: |
           bazel-cache-${{ inputs.target }}
 

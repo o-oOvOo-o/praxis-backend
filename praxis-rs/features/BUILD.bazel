@@ -1,0 +1,16 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "features",
+    crate_name = "praxis_features",
+    compile_data = glob(
+        include = ["**"],
+        exclude = [
+            "BUILD.bazel",
+            "Cargo.toml",
+        ],
+        allow_empty = True,
+    ) + [
+        "//praxis-rs:node-version.txt",
+    ],
+)

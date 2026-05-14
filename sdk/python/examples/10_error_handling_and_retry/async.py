@@ -19,7 +19,7 @@ import random
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from codex_app_server import (
+from praxis_app_server import (
     AsyncCodex,
     JsonRpcError,
     ServerBusyError,

@@ -1,0 +1,10 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "windows-sandbox-rs",
+    crate_name = "praxis_windows_sandbox",
+    build_script_data = [
+        "Cargo.toml",
+        "praxis-windows-sandbox-setup.manifest",
+    ],
+)
