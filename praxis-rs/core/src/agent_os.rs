@@ -1,7 +1,7 @@
+use async_trait::async_trait;
 use chrono::DateTime;
 use chrono::Duration;
 use chrono::Utc;
-use async_trait::async_trait;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
@@ -16,6 +16,8 @@ use std::hash::Hasher;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -27,6 +29,7 @@ const COORDINATOR_RANK: u8 = 0;
 const MAX_COORDINATORS: usize = 3;
 const DEFAULT_TICKET_TTL_SECONDS: i64 = 30 * 60;
 const DEFAULT_LEASE_TTL_SECONDS: i64 = 30 * 60;
+const LEASE_JANITOR_INTERVAL_SECONDS: u64 = 30;
 
 #[async_trait]
 pub(crate) trait AgentOsProcessCleaner: Send + Sync {
@@ -454,6 +457,7 @@ pub(crate) struct AgentOsRuntime {
     state: RwLock<AgentOsState>,
     state_db: RwLock<Option<StateDbHandle>>,
     process_cleaner: RwLock<Option<Arc<dyn AgentOsProcessCleaner>>>,
+    lease_janitor_started: AtomicBool,
 }
 
 impl AgentOsRuntime {
@@ -467,12 +471,36 @@ impl AgentOsRuntime {
         }
     }
 
-    pub(crate) async fn attach_process_cleaner<T>(&self, process_cleaner: Arc<T>)
+    pub(crate) async fn attach_process_cleaner<T>(self: &Arc<Self>, process_cleaner: Arc<T>)
     where
         T: AgentOsProcessCleaner + 'static,
     {
         let process_cleaner: Arc<dyn AgentOsProcessCleaner> = process_cleaner;
         *self.process_cleaner.write().await = Some(process_cleaner);
+        self.start_lease_janitor();
+    }
+
+    fn start_lease_janitor(self: &Arc<Self>) {
+        if self
+            .lease_janitor_started
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let runtime = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+                LEASE_JANITOR_INTERVAL_SECONDS,
+            ));
+            loop {
+                interval.tick().await;
+                let Some(runtime) = runtime.upgrade() else {
+                    break;
+                };
+                runtime.expire_leases().await;
+            }
+        });
     }
 
     pub(crate) async fn register_thread(
