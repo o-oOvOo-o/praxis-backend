@@ -747,6 +747,14 @@ fn spawn_tool_spec_marks_role_locked_reasoning_effort_only() {
 
 #[test]
 fn built_in_config_file_contents_resolves_explorer_only() {
+    assert!(
+        built_in::config_file_contents(Path::new("explorer.toml"))
+            .is_some_and(|contents| contents.contains("You are an explorer."))
+    );
+    assert_eq!(
+        built_in::config_file_contents(Path::new("awaiter.toml")),
+        None
+    );
     assert_eq!(
         built_in::config_file_contents(Path::new("missing.toml")),
         None
