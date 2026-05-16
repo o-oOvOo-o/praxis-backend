@@ -3,8 +3,8 @@
 mod common;
 
 use common::exec_server::exec_server;
-use praxis_app_server_protocol::JSONRPCMessage;
-use praxis_app_server_protocol::JSONRPCResponse;
+use praxis_app_gateway_protocol::JSONRPCMessage;
+use praxis_app_gateway_protocol::JSONRPCResponse;
 use praxis_exec_server::InitializeParams;
 use praxis_exec_server::InitializeResponse;
 use pretty_assertions::assert_eq;

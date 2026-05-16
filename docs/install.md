@@ -10,7 +10,7 @@
 
 ### DotSlash
 
-The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file for the Codex CLI named `codex`. Using a DotSlash file makes it possible to make a lightweight commit to source control to ensure all contributors use the same version of an executable, regardless of what platform they use for development.
+The GitHub Release also contains a [DotSlash](https://dotslash-cli.com/) file for the Praxis CLI named `codex`. Using a DotSlash file makes it possible to make a lightweight commit to source control to ensure all contributors use the same version of an executable, regardless of what platform they use for development.
 
 ### Build from source
 
@@ -59,6 +59,6 @@ The TUI defaults to `RUST_LOG=praxis_core=info,praxis_tui=info,praxis_rmcp_clien
 tail -F ~/.codex/log/praxis-tui.log
 ```
 
-By comparison, the non-interactive mode (`codex exec`) defaults to `RUST_LOG=error`, but messages are printed inline, so there is no need to monitor a separate file.
+By comparison, the non-interactive mode (`praxis exec`) defaults to `RUST_LOG=error`, but messages are printed inline, so there is no need to monitor a separate file.
 
 See the Rust documentation on [`RUST_LOG`](https://docs.rs/env_logger/latest/env_logger/#enabling-logging) for more information on the configuration options.

@@ -62,7 +62,7 @@ use core_test_support::tracing::install_test_tracing;
 use core_test_support::wait_for_event;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
-use praxis_app_server_protocol::AppInfo;
+use praxis_app_gateway_protocol::AppInfo;
 use praxis_execpolicy::Decision;
 use praxis_execpolicy::NetworkRuleProtocol;
 use praxis_execpolicy::Policy;
@@ -1822,7 +1822,7 @@ async fn set_rate_limits_retains_previous_credits() {
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
         metrics_service_name: None,
-        app_server_client_name: None,
+        app_gateway_client_name: None,
         session_source: SessionSource::Exec,
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
@@ -1920,7 +1920,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
         metrics_service_name: None,
-        app_server_client_name: None,
+        app_gateway_client_name: None,
         session_source: SessionSource::Exec,
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
@@ -2262,7 +2262,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
         metrics_service_name: None,
-        app_server_client_name: None,
+        app_gateway_client_name: None,
         session_source: SessionSource::Exec,
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
@@ -2524,7 +2524,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
         metrics_service_name: None,
-        app_server_client_name: None,
+        app_gateway_client_name: None,
         session_source: SessionSource::Exec,
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
@@ -2558,6 +2558,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         mcp_manager,
         Arc::new(SkillsWatcher::noop()),
         AgentControl::default(),
+        crate::agent_os::AgentOsRuntime::new(),
     )
     .await;
 
@@ -2621,7 +2622,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
         metrics_service_name: None,
-        app_server_client_name: None,
+        app_gateway_client_name: None,
         session_source: SessionSource::Exec,
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
@@ -2660,9 +2661,9 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             &config.permissions.approval_policy,
         ))),
         mcp_startup_cancellation_token: Mutex::new(CancellationToken::new()),
-        unified_exec_manager: UnifiedExecProcessManager::new(
+        unified_exec_manager: Arc::new(UnifiedExecProcessManager::new(
             config.background_terminal_max_timeout,
-        ),
+        )),
         shell_zsh_path: None,
         main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
         analytics_events_client: AnalyticsEventsClient::new(
@@ -2688,6 +2689,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_manager,
         skills_watcher,
         agent_control,
+        agent_os: crate::agent_os::AgentOsRuntime::new(),
         network_proxy: None,
         network_approval: Arc::clone(&network_approval),
         state_db: None,
@@ -2929,7 +2931,7 @@ async fn submit_with_id_captures_current_span_trace_context() {
         traceparent: Some("00-00000000000000000000000000000011-0000000000000022-01".into()),
         tracestate: Some("vendor=value".into()),
     };
-    let request_span = info_span!("app_server.request");
+    let request_span = info_span!("app_gateway.request");
     assert!(set_parent_from_w3c_trace_context(
         &request_span,
         &request_parent
@@ -2965,7 +2967,7 @@ async fn new_default_turn_captures_current_span_trace_id() {
         traceparent: Some("00-00000000000000000000000000000011-0000000000000022-01".into()),
         tracestate: Some("vendor=value".into()),
     };
-    let request_span = info_span!("app_server.request");
+    let request_span = info_span!("app_gateway.request");
     assert!(set_parent_from_w3c_trace_context(
         &request_span,
         &request_parent
@@ -3152,7 +3154,7 @@ async fn spawn_task_turn_span_inherits_dispatch_trace_context() {
         traceparent: Some("00-00000000000000000000000000000011-0000000000000022-01".into()),
         tracestate: Some("vendor=value".into()),
     };
-    let request_span = tracing::info_span!("app_server.request");
+    let request_span = tracing::info_span!("app_gateway.request");
     assert!(set_parent_from_w3c_trace_context(
         &request_span,
         &request_parent
@@ -3461,7 +3463,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         thread_name: None,
         original_config_do_not_use: Arc::clone(&config),
         metrics_service_name: None,
-        app_server_client_name: None,
+        app_gateway_client_name: None,
         session_source: SessionSource::Exec,
         dynamic_tools,
         persist_extended_history: false,
@@ -3500,9 +3502,9 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
             &config.permissions.approval_policy,
         ))),
         mcp_startup_cancellation_token: Mutex::new(CancellationToken::new()),
-        unified_exec_manager: UnifiedExecProcessManager::new(
+        unified_exec_manager: Arc::new(UnifiedExecProcessManager::new(
             config.background_terminal_max_timeout,
-        ),
+        )),
         shell_zsh_path: None,
         main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
         analytics_events_client: AnalyticsEventsClient::new(
@@ -3528,6 +3530,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         mcp_manager,
         skills_watcher,
         agent_control,
+        agent_os: crate::agent_os::AgentOsRuntime::new(),
         network_proxy: None,
         network_approval: Arc::clone(&network_approval),
         state_db: None,

@@ -2,7 +2,7 @@
 //!
 //! This is the single path that turns a static `ModelProviderInfo` plus the
 //! current auth store into an executable request setup. Product surfaces such
-//! as Harness Tool should not decide API keys, auth realms, provider headers,
+//! as native app hosts should not decide API keys, auth realms, provider headers,
 //! endpoint defaults, or telemetry snapshots on their own.
 
 use std::sync::Arc;

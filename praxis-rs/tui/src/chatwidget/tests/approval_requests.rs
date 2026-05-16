@@ -52,10 +52,10 @@ async fn exec_approval_emits_proposed_command_and_decision_history() {
 }
 
 #[test]
-fn app_server_exec_approval_request_splits_shell_wrapped_command() {
+fn app_gateway_exec_approval_request_splits_shell_wrapped_command() {
     let script = r#"python3 -c 'print("Hello, world!")'"#;
     let request =
-        exec_approval_request_from_params(AppServerCommandExecutionRequestApprovalParams {
+        exec_approval_request_from_params(AppGatewayCommandExecutionRequestApprovalParams {
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "item-1".to_string(),
@@ -85,30 +85,30 @@ fn app_server_exec_approval_request_splits_shell_wrapped_command() {
 }
 
 #[test]
-fn app_server_exec_approval_request_preserves_permissions_context() {
+fn app_gateway_exec_approval_request_preserves_permissions_context() {
     let read_path = AbsolutePathBuf::try_from(PathBuf::from(test_path_display("/tmp/read-only")))
         .expect("absolute read path");
     let write_path = AbsolutePathBuf::try_from(PathBuf::from(test_path_display("/tmp/write")))
         .expect("absolute write path");
     let request =
-        exec_approval_request_from_params(AppServerCommandExecutionRequestApprovalParams {
+        exec_approval_request_from_params(AppGatewayCommandExecutionRequestApprovalParams {
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "item-1".to_string(),
             approval_id: Some("approval-1".to_string()),
             reason: None,
-            network_approval_context: Some(praxis_app_server_protocol::NetworkApprovalContext {
+            network_approval_context: Some(praxis_app_gateway_protocol::NetworkApprovalContext {
                 host: "example.com".to_string(),
-                protocol: praxis_app_server_protocol::NetworkApprovalProtocol::Socks5Tcp,
+                protocol: praxis_app_gateway_protocol::NetworkApprovalProtocol::Socks5Tcp,
             }),
             command: Some("ls".to_string()),
             cwd: Some(PathBuf::from("/tmp")),
             command_actions: None,
-            additional_permissions: Some(AppServerAdditionalPermissionProfile {
-                network: Some(AppServerAdditionalNetworkPermissions {
+            additional_permissions: Some(AppGatewayAdditionalPermissionProfile {
+                network: Some(AppGatewayAdditionalNetworkPermissions {
                     enabled: Some(true),
                 }),
-                file_system: Some(AppServerAdditionalFileSystemPermissions {
+                file_system: Some(AppGatewayAdditionalFileSystemPermissions {
                     read: Some(vec![read_path.clone()]),
                     write: Some(vec![write_path.clone()]),
                 }),
@@ -140,22 +140,22 @@ fn app_server_exec_approval_request_preserves_permissions_context() {
 }
 
 #[test]
-fn app_server_request_permissions_preserves_file_system_permissions() {
+fn app_gateway_request_permissions_preserves_file_system_permissions() {
     let read_path = AbsolutePathBuf::try_from(PathBuf::from(test_path_display("/tmp/read-only")))
         .expect("absolute read path");
     let write_path = AbsolutePathBuf::try_from(PathBuf::from(test_path_display("/tmp/write")))
         .expect("absolute write path");
 
-    let request = request_permissions_from_params(AppServerPermissionsRequestApprovalParams {
+    let request = request_permissions_from_params(AppGatewayPermissionsRequestApprovalParams {
         thread_id: "thread-1".to_string(),
         turn_id: "turn-1".to_string(),
         item_id: "item-1".to_string(),
         reason: Some("Select a workspace root".to_string()),
-        permissions: praxis_app_server_protocol::RequestPermissionProfile {
-            network: Some(AppServerAdditionalNetworkPermissions {
+        permissions: praxis_app_gateway_protocol::RequestPermissionProfile {
+            network: Some(AppGatewayAdditionalNetworkPermissions {
                 enabled: Some(true),
             }),
-            file_system: Some(AppServerAdditionalFileSystemPermissions {
+            file_system: Some(AppGatewayAdditionalFileSystemPermissions {
                 read: Some(vec![read_path.clone()]),
                 write: Some(vec![write_path.clone()]),
             }),

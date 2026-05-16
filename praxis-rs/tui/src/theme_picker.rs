@@ -349,8 +349,8 @@ fn theme_picker_subtitle(praxis_home: Option<&Path>, terminal_width: Option<u16>
 /// Lists all bundled themes plus custom `.tmTheme` files, with live preview
 /// on cursor movement and cancel-restore.
 ///
-/// `current_name` should be the value of `Config::tui_theme` (the persisted
-/// preference).  When it names a theme that is currently available the picker
+/// `current_name` should be the persisted TUI theme preference.
+/// When it names a theme that is currently available the picker
 /// preselects it; otherwise the picker falls back to the configured name (or
 /// adaptive default) so opening the picker without a persisted preference still
 /// highlights the most likely intended entry.

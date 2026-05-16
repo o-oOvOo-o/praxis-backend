@@ -178,7 +178,7 @@ impl ToolHandler for UnifiedExecHandler {
             }
         };
 
-        let manager: &UnifiedExecProcessManager = &session.services.unified_exec_manager;
+        let manager: &UnifiedExecProcessManager = session.services.unified_exec_manager.as_ref();
         let context = UnifiedExecContext::new(session.clone(), turn.clone(), call_id.clone());
 
         let response = match tool_name.as_str() {
@@ -276,7 +276,38 @@ impl ToolHandler for UnifiedExecHandler {
                     }
                 };
 
-                if let Some(output) = intercept_apply_patch(
+                let ticket = match session
+                    .services
+                    .agent_os
+                    .request_command_ticket(session.conversation_id, &command, &cwd)
+                    .await
+                {
+                    Ok(ticket) => ticket,
+                    Err(err) => {
+                        manager.release_process_id(process_id).await;
+                        return Err(FunctionCallError::RespondToModel(err.to_string()));
+                    }
+                };
+                let command_record_id = match session
+                    .services
+                    .agent_os
+                    .begin_managed_command(
+                        &ticket,
+                        command_for_display.clone(),
+                        &command,
+                        cwd.clone(),
+                        Some(process_id),
+                    )
+                    .await
+                {
+                    Ok(command_id) => command_id,
+                    Err(err) => {
+                        manager.release_process_id(process_id).await;
+                        return Err(FunctionCallError::RespondToModel(err.to_string()));
+                    }
+                };
+
+                let intercept_result = intercept_apply_patch(
                     &command,
                     &cwd,
                     Some(yield_time_ms),
@@ -286,24 +317,53 @@ impl ToolHandler for UnifiedExecHandler {
                     &context.call_id,
                     tool_name.as_str(),
                 )
-                .await?
-                {
-                    manager.release_process_id(process_id).await;
-                    return Ok(ExecCommandToolOutput {
-                        event_call_id: String::new(),
-                        chunk_id: String::new(),
-                        wall_time: std::time::Duration::ZERO,
-                        raw_output: output.into_text().into_bytes(),
-                        max_output_tokens: None,
-                        process_id: None,
-                        exit_code: None,
-                        original_token_count: None,
-                        session_command: None,
-                    });
+                .await;
+                match intercept_result {
+                    Ok(Some(output)) => {
+                        manager.release_process_id(process_id).await;
+                        let text = output.log_preview();
+                        let _ = session
+                            .services
+                            .agent_os
+                            .finish_managed_command(
+                                command_record_id.as_str(),
+                                Some(0),
+                                text.as_bytes(),
+                                /*release_leases*/ true,
+                            )
+                            .await;
+                        return Ok(ExecCommandToolOutput {
+                            event_call_id: String::new(),
+                            chunk_id: String::new(),
+                            wall_time: std::time::Duration::ZERO,
+                            raw_output: output.into_text().into_bytes(),
+                            max_output_tokens: None,
+                            process_id: None,
+                            exit_code: None,
+                            original_token_count: None,
+                            session_command: None,
+                        });
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        manager.release_process_id(process_id).await;
+                        let error_text = err.to_string();
+                        let _ = session
+                            .services
+                            .agent_os
+                            .finish_managed_command(
+                                command_record_id.as_str(),
+                                Some(-1),
+                                error_text.as_bytes(),
+                                /*release_leases*/ true,
+                            )
+                            .await;
+                        return Err(err);
+                    }
                 }
 
                 emit_unified_exec_tty_metric(&turn.session_telemetry, tty);
-                manager
+                let exec_result = manager
                     .exec_command(
                         ExecCommandRequest {
                             command,
@@ -323,12 +383,49 @@ impl ToolHandler for UnifiedExecHandler {
                         },
                         &context,
                     )
-                    .await
-                    .map_err(|err| {
-                        FunctionCallError::RespondToModel(format!(
+                    .await;
+                match exec_result {
+                    Ok(response) => {
+                        if response.process_id.is_some() {
+                            let _ = session
+                                .services
+                                .agent_os
+                                .checkpoint_managed_command(
+                                    command_record_id.as_str(),
+                                    response.raw_output.as_slice(),
+                                )
+                                .await;
+                        } else {
+                            let _ = session
+                                .services
+                                .agent_os
+                                .finish_managed_command(
+                                    command_record_id.as_str(),
+                                    response.exit_code,
+                                    response.raw_output.as_slice(),
+                                    /*release_leases*/ true,
+                                )
+                                .await;
+                        }
+                        response
+                    }
+                    Err(err) => {
+                        let error_text = format!("{err:?}");
+                        let _ = session
+                            .services
+                            .agent_os
+                            .finish_managed_command(
+                                command_record_id.as_str(),
+                                Some(-1),
+                                error_text.as_bytes(),
+                                /*release_leases*/ true,
+                            )
+                            .await;
+                        return Err(FunctionCallError::RespondToModel(format!(
                             "exec_command failed for `{command_for_display}`: {err:?}"
-                        ))
-                    })?
+                        )));
+                    }
+                }
             }
             "write_stdin" => {
                 let args: WriteStdinArgs = parse_arguments(&arguments)?;
@@ -352,6 +449,24 @@ impl ToolHandler for UnifiedExecHandler {
                 session
                     .send_event(turn.as_ref(), EventMsg::TerminalInteraction(interaction))
                     .await;
+
+                if response.process_id.is_some() {
+                    let _ = session
+                        .services
+                        .agent_os
+                        .checkpoint_managed_process(args.session_id, response.raw_output.as_slice())
+                        .await;
+                } else {
+                    let _ = session
+                        .services
+                        .agent_os
+                        .finish_managed_process(
+                            args.session_id,
+                            response.exit_code,
+                            response.raw_output.as_slice(),
+                        )
+                        .await;
+                }
 
                 response
             }

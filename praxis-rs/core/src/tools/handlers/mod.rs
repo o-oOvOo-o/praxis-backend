@@ -7,7 +7,6 @@ mod mcp;
 mod mcp_resource;
 pub(crate) mod multi_agents;
 pub(crate) mod multi_agents_common;
-pub(crate) mod multi_agents_v2;
 mod plan;
 mod request_permissions;
 mod request_user_input;

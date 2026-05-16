@@ -16,6 +16,8 @@ const LIGHT_INTERACTIVE_SURFACE_BG_RGB: (u8, u8, u8) = (232, 236, 244);
 const DARK_INTERACTIVE_SURFACE_BG_RGB: (u8, u8, u8) = (44, 50, 62);
 const LIGHT_SEARCH_HIGHLIGHT_BG_RGB: (u8, u8, u8) = (255, 236, 179);
 const DARK_SEARCH_HIGHLIGHT_BG_RGB: (u8, u8, u8) = (120, 90, 36);
+const LIGHT_USER_MESSAGE_BG_ALPHA: f32 = 0.08;
+const DARK_USER_MESSAGE_BG_ALPHA: f32 = 0.18;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SemanticTheme {
@@ -45,6 +47,16 @@ pub(crate) fn semantic_theme_for(appearance: TerminalAppearance) -> SemanticThem
 
 pub fn user_message_style() -> Style {
     user_message_style_for(default_bg())
+}
+
+pub(crate) fn user_message_rule_style() -> Style {
+    user_message_rule_style_for(default_bg())
+}
+
+fn user_message_rule_style_for(terminal_bg: Option<(u8, u8, u8)>) -> Style {
+    user_message_style_for(terminal_bg)
+        .fg(Color::DarkGray)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn proposed_plan_style() -> Style {
@@ -116,9 +128,9 @@ pub fn proposed_plan_bg(terminal_bg: (u8, u8, u8)) -> Color {
 
 fn user_message_bg_rgb(terminal_bg: (u8, u8, u8)) -> (u8, u8, u8) {
     let (top, alpha) = if is_light(terminal_bg) {
-        ((0, 0, 0), 0.04)
+        ((0, 0, 0), LIGHT_USER_MESSAGE_BG_ALPHA)
     } else {
-        ((255, 255, 255), 0.12)
+        ((255, 255, 255), DARK_USER_MESSAGE_BG_ALPHA)
     };
     blend(top, terminal_bg, alpha)
 }
@@ -238,5 +250,26 @@ mod tests {
             dark.interactive_surface_bg_rgb,
             Some(DARK_INTERACTIVE_SURFACE_BG_RGB)
         );
+    }
+
+    #[test]
+    fn user_message_background_has_visible_contrast() {
+        assert_eq!(
+            user_message_bg_rgb((240, 240, 240)),
+            blend((0, 0, 0), (240, 240, 240), LIGHT_USER_MESSAGE_BG_ALPHA)
+        );
+        assert_eq!(
+            user_message_bg_rgb((20, 20, 20)),
+            blend((255, 255, 255), (20, 20, 20), DARK_USER_MESSAGE_BG_ALPHA)
+        );
+    }
+
+    #[test]
+    fn user_message_rule_keeps_panel_background() {
+        let rule = user_message_rule_style_for(Some((20, 20, 20)));
+
+        assert_eq!(rule.fg, Some(Color::DarkGray));
+        assert!(rule.bg.is_some());
+        assert!(rule.add_modifier.contains(Modifier::BOLD));
     }
 }

@@ -1,0 +1,16 @@
+[package]
+name = "praxis-host-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "praxis_host_sdk"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+praxis-app-gateway-protocol = { workspace = true }
+serde_json = { workspace = true }

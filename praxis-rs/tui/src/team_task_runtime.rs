@@ -4,14 +4,14 @@ use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use praxis_app_server_protocol::Team;
-use praxis_app_server_protocol::TeamDeletedNotification;
-use praxis_app_server_protocol::TeamTask;
-use praxis_app_server_protocol::TeamTaskStatus;
-use praxis_app_server_protocol::TeamTaskUpdatedNotification;
-use praxis_app_server_protocol::TeamTeammate;
-use praxis_app_server_protocol::TeamTeammateUpdatedNotification;
-use praxis_app_server_protocol::TeamUpdatedNotification;
+use praxis_app_gateway_protocol::Team;
+use praxis_app_gateway_protocol::TeamDeletedNotification;
+use praxis_app_gateway_protocol::TeamTask;
+use praxis_app_gateway_protocol::TeamTaskStatus;
+use praxis_app_gateway_protocol::TeamTaskUpdatedNotification;
+use praxis_app_gateway_protocol::TeamTeammate;
+use praxis_app_gateway_protocol::TeamTeammateUpdatedNotification;
+use praxis_app_gateway_protocol::TeamUpdatedNotification;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ThreadTeamTaskSummary {
@@ -100,8 +100,8 @@ impl TeamTaskRuntime {
                     lead_thread_id: String::new(),
                     name: notification.team_id.clone(),
                     objective: None,
-                    execution_mode: praxis_app_server_protocol::TeamExecutionMode::ProcessFirst,
-                    resume_mode: praxis_app_server_protocol::TeamResumeMode::StrongResume,
+                    execution_mode: praxis_app_gateway_protocol::TeamExecutionMode::ProcessFirst,
+                    resume_mode: praxis_app_gateway_protocol::TeamResumeMode::StrongResume,
                     created_at: notification.teammate.created_at,
                     updated_at: notification.teammate.updated_at,
                 },
@@ -137,8 +137,8 @@ impl TeamTaskRuntime {
                     lead_thread_id: String::new(),
                     name: notification.team_id.clone(),
                     objective: None,
-                    execution_mode: praxis_app_server_protocol::TeamExecutionMode::ProcessFirst,
-                    resume_mode: praxis_app_server_protocol::TeamResumeMode::StrongResume,
+                    execution_mode: praxis_app_gateway_protocol::TeamExecutionMode::ProcessFirst,
+                    resume_mode: praxis_app_gateway_protocol::TeamResumeMode::StrongResume,
                     created_at: notification.task.created_at,
                     updated_at: notification.task.updated_at,
                 },
@@ -287,9 +287,9 @@ fn task_to_item(team: &TeamRuntime, task: &TeamTask) -> ThreadTeamTaskItem {
 mod tests {
     use super::*;
 
-    use praxis_app_server_protocol::TeamExecutionMode;
-    use praxis_app_server_protocol::TeamResumeMode;
-    use praxis_app_server_protocol::TeamTeammateStatus;
+    use praxis_app_gateway_protocol::TeamExecutionMode;
+    use praxis_app_gateway_protocol::TeamResumeMode;
+    use praxis_app_gateway_protocol::TeamTeammateStatus;
     use pretty_assertions::assert_eq;
 
     fn team(team_id: &str, lead_thread_id: &str) -> Team {

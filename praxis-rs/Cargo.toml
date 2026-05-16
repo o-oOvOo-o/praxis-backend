@@ -4,10 +4,13 @@ members = [
     "backend-client",
     "ansi-escape",
     "async-utils",
-    "app-server",
-    "app-server-client",
-    "app-server-protocol",
-    "app-server-test-client",
+    "app-gateway-client",
+    "app-gateway-core",
+    "app-gateway-native",
+    "app-gateway-protocol",
+    "app-gateway-service",
+    "app-gateway-runtime",
+    "app-gateway-test-client",
     "debug-client",
     "apply-patch",
     "arg0",
@@ -28,6 +31,7 @@ members = [
     "core",
     "core-skills",
     "hooks",
+    "host-sdk",
     "instructions",
     "secrets",
     "exec",
@@ -41,6 +45,7 @@ members = [
     "login",
     "praxis-mcp",
     "mcp-server",
+    "metra-gateway",
     "network-proxy",
     "ollama",
     "process-hardening",
@@ -97,14 +102,17 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 # Internal
-app_test_support = { path = "app-server/tests/common" }
+app_test_support = { path = "app-gateway-runtime/tests/common" }
 praxis-analytics = { path = "analytics" }
 praxis-ansi-escape = { path = "ansi-escape" }
 praxis-api = { path = "praxis-api" }
-praxis-app-server = { path = "app-server" }
-praxis-app-server-client = { path = "app-server-client" }
-praxis-app-server-protocol = { path = "app-server-protocol" }
-praxis-app-server-test-client = { path = "app-server-test-client" }
+praxis-app-gateway-client = { path = "app-gateway-client" }
+praxis-app-gateway-core = { path = "app-gateway-core" }
+praxis-app-gateway-native = { path = "app-gateway-native" }
+praxis-app-gateway-protocol = { path = "app-gateway-protocol" }
+praxis-app-gateway-service = { path = "app-gateway-service" }
+praxis-app-gateway-runtime = { path = "app-gateway-runtime" }
+praxis-app-gateway-test-client = { path = "app-gateway-test-client" }
 praxis-apply-patch = { path = "apply-patch" }
 praxis-arg0 = { path = "arg0" }
 praxis-async-utils = { path = "async-utils" }
@@ -129,6 +137,7 @@ praxis-feedback = { path = "feedback" }
 praxis-file-search = { path = "file-search" }
 praxis-git-utils = { path = "git-utils" }
 praxis-hooks = { path = "hooks" }
+praxis-host-sdk = { path = "host-sdk" }
 praxis-instructions = { path = "instructions" }
 praxis-keyring-store = { path = "keyring-store" }
 praxis-linux-sandbox = { path = "linux-sandbox" }
@@ -136,6 +145,7 @@ praxis-lmstudio = { path = "lmstudio" }
 praxis-login = { path = "login" }
 praxis-mcp = { path = "praxis-mcp" }
 praxis-mcp-server = { path = "mcp-server" }
+praxis-metra-gateway = { path = "metra-gateway" }
 praxis-network-proxy = { path = "network-proxy" }
 praxis-ollama = { path = "ollama" }
 praxis-otel = { path = "otel" }

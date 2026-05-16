@@ -19,7 +19,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_exec_server::EnvironmentManager;
 use praxis_execpolicy::Decision;
 use praxis_execpolicy::Evaluation;
@@ -450,6 +450,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
             GUARDIAN_REVIEWER_NAME.to_string(),
         )),
         agent_control: AgentControl::default(),
+        agent_os: crate::agent_os::AgentOsRuntime::new(),
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
         metrics_service_name: None,

@@ -178,10 +178,11 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
         "web_search",
         "view_image",
         "spawn_agent",
-        "send_input",
-        "resume_agent",
+        "send_message",
+        "assign_task",
         "wait_agent",
         "close_agent",
+        "list_agents",
     ]);
     let body0 = req1.single_request().body_json();
 

@@ -1,4 +1,4 @@
-use praxis_app_server_protocol::ConfigLayerMetadata;
+use praxis_app_gateway_protocol::ConfigLayerMetadata;
 use serde_json::Value as JsonValue;
 use sha2::Digest;
 use sha2::Sha256;

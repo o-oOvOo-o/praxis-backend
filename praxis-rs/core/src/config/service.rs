@@ -16,18 +16,18 @@ use crate::path_utils;
 use crate::path_utils::SymlinkWritePaths;
 use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
-use praxis_app_server_protocol::Config as ApiConfig;
-use praxis_app_server_protocol::ConfigBatchWriteParams;
-use praxis_app_server_protocol::ConfigLayerMetadata;
-use praxis_app_server_protocol::ConfigLayerSource;
-use praxis_app_server_protocol::ConfigReadParams;
-use praxis_app_server_protocol::ConfigReadResponse;
-use praxis_app_server_protocol::ConfigValueWriteParams;
-use praxis_app_server_protocol::ConfigWriteErrorCode;
-use praxis_app_server_protocol::ConfigWriteResponse;
-use praxis_app_server_protocol::MergeStrategy;
-use praxis_app_server_protocol::OverriddenMetadata;
-use praxis_app_server_protocol::WriteStatus;
+use praxis_app_gateway_protocol::Config as ApiConfig;
+use praxis_app_gateway_protocol::ConfigBatchWriteParams;
+use praxis_app_gateway_protocol::ConfigLayerMetadata;
+use praxis_app_gateway_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigReadParams;
+use praxis_app_gateway_protocol::ConfigReadResponse;
+use praxis_app_gateway_protocol::ConfigValueWriteParams;
+use praxis_app_gateway_protocol::ConfigWriteErrorCode;
+use praxis_app_gateway_protocol::ConfigWriteResponse;
+use praxis_app_gateway_protocol::MergeStrategy;
+use praxis_app_gateway_protocol::OverriddenMetadata;
+use praxis_app_gateway_protocol::WriteStatus;
 use praxis_config::CONFIG_TOML_FILE;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value as JsonValue;
@@ -235,7 +235,7 @@ impl ConfigService {
 
     pub async fn load_user_saved_config(
         &self,
-    ) -> Result<praxis_app_server_protocol::UserSavedConfig, ConfigServiceError> {
+    ) -> Result<praxis_app_gateway_protocol::UserSavedConfig, ConfigServiceError> {
         let layers = self
             .load_thread_agnostic_config()
             .await

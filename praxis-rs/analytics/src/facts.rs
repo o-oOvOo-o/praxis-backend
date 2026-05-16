@@ -1,10 +1,10 @@
-use crate::events::AppServerRpcTransport;
+use crate::events::AppGatewayRpcTransport;
 use crate::events::PraxisRuntimeMetadata;
-use praxis_app_server_protocol::ClientRequest;
-use praxis_app_server_protocol::ClientResponse;
-use praxis_app_server_protocol::InitializeParams;
-use praxis_app_server_protocol::RequestId;
-use praxis_app_server_protocol::ServerNotification;
+use praxis_app_gateway_protocol::ClientRequest;
+use praxis_app_gateway_protocol::ClientResponse;
+use praxis_app_gateway_protocol::InitializeParams;
+use praxis_app_gateway_protocol::RequestId;
+use praxis_app_gateway_protocol::ServerNotification;
 use praxis_plugin::PluginTelemetryMetadata;
 use praxis_protocol::protocol::SkillScope;
 use serde::Serialize;
@@ -57,7 +57,7 @@ pub(crate) enum AnalyticsFact {
         params: InitializeParams,
         product_client_id: String,
         runtime: PraxisRuntimeMetadata,
-        rpc_transport: AppServerRpcTransport,
+        rpc_transport: AppGatewayRpcTransport,
     },
     Request {
         connection_id: u64,
@@ -69,7 +69,7 @@ pub(crate) enum AnalyticsFact {
         response: Box<ClientResponse>,
     },
     Notification(Box<ServerNotification>),
-    // Facts that do not naturally exist on the app-server protocol surface, or
+    // Facts that do not naturally exist on the app-gateway protocol surface, or
     // would require non-trivial protocol reshaping on this branch.
     Custom(CustomAnalyticsFact),
 }

@@ -5,13 +5,12 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
+use praxis_core::ModelProviderCompatInfo;
+use praxis_core::ModelProviderInfo;
+use praxis_core::ModelProviderMaxTokensField;
+use praxis_core::ModelProviderThinkingFormat;
+use praxis_core::WireApi;
 use praxis_core::config::Config;
-use praxis_core::model_provider_info::ModelProviderCompatInfo;
-use praxis_core::model_provider_info::ModelProviderInfo;
-use praxis_core::model_provider_info::ModelProviderMaxTokensField;
-use praxis_core::model_provider_info::ModelProviderReasoningEffortMap;
-use praxis_core::model_provider_info::ModelProviderThinkingFormat;
-use praxis_core::model_provider_info::WireApi;
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::openai_models::ReasoningEffortPreset;
@@ -28,7 +27,6 @@ const DEFAULT_LMSTUDIO_BASE_URL: &str = "http://localhost:1234/v1";
 #[derive(Debug, Clone)]
 pub(crate) struct ModelCatalogSelectionMetadata {
     pub(crate) provider_id: String,
-    pub(crate) provider_name: String,
     pub(crate) provider: ModelProviderInfo,
 }
 
@@ -45,7 +43,6 @@ struct DiscoveredModel {
     provider: ModelProviderInfo,
     model: String,
     display_name: String,
-    note: Option<String>,
     description: String,
     is_default: bool,
 }
@@ -115,7 +112,6 @@ pub(crate) fn build_model_catalog(
             preset.id.clone(),
             ModelCatalogSelectionMetadata {
                 provider_id,
-                provider_name,
                 provider: config.model_provider.clone(),
             },
         );
@@ -134,7 +130,6 @@ pub(crate) fn build_model_catalog(
             preset_id,
             ModelCatalogSelectionMetadata {
                 provider_id: discovered.provider_id,
-                provider_name: discovered.provider_name,
                 provider: discovered.provider,
             },
         );
@@ -260,7 +255,6 @@ fn build_praxis_config_models(
                 provider: provider.clone(),
                 model: model.clone(),
                 display_name: model.clone(),
-                note: None,
                 description: format!("{provider_name} imported from {subtitle}."),
                 is_default: defaults.contains(model),
             });
@@ -710,7 +704,7 @@ fn zed_provider(
             "Zed OpenRouter".to_owned(),
             create_provider(
                 "Zed OpenRouter",
-                normalize_common_base_url(&api_url?),
+                normalize_common_base_url(api_url.as_deref()?),
                 Some("OPENROUTER_API_KEY".to_owned()),
                 WireApi::Common,
                 infer_common_provider_compat("open_router", None, api_url.as_deref()?),
@@ -721,7 +715,7 @@ fn zed_provider(
             "Zed DeepSeek".to_owned(),
             create_provider(
                 "Zed DeepSeek",
-                normalize_common_base_url(&api_url?),
+                normalize_common_base_url(api_url.as_deref()?),
                 Some("DEEPSEEK_API_KEY".to_owned()),
                 WireApi::Common,
                 infer_common_provider_compat("deepseek", None, api_url.as_deref()?),
@@ -732,7 +726,7 @@ fn zed_provider(
             "Zed Mistral".to_owned(),
             create_provider(
                 "Zed Mistral",
-                normalize_common_base_url(&api_url?),
+                normalize_common_base_url(api_url.as_deref()?),
                 Some("MISTRAL_API_KEY".to_owned()),
                 WireApi::Common,
                 infer_common_provider_compat("mistral", None, api_url.as_deref()?),
@@ -743,7 +737,7 @@ fn zed_provider(
             "Zed xAI".to_owned(),
             create_provider(
                 "Zed xAI",
-                normalize_common_base_url(&api_url?),
+                normalize_common_base_url(api_url.as_deref()?),
                 Some("XAI_API_KEY".to_owned()),
                 WireApi::Common,
                 infer_common_provider_compat("x_ai", None, api_url.as_deref()?),
@@ -754,7 +748,7 @@ fn zed_provider(
             "Zed Vercel".to_owned(),
             create_provider(
                 "Zed Vercel",
-                normalize_common_base_url(&api_url?),
+                normalize_common_base_url(api_url.as_deref()?),
                 Some("VERCEL_API_KEY".to_owned()),
                 WireApi::Common,
                 infer_common_provider_compat("vercel", None, api_url.as_deref()?),
@@ -765,7 +759,7 @@ fn zed_provider(
             "Zed Vercel AI Gateway".to_owned(),
             create_provider(
                 "Zed Vercel AI Gateway",
-                normalize_common_base_url(&api_url?),
+                normalize_common_base_url(api_url.as_deref()?),
                 Some("VERCEL_AI_GATEWAY_API_KEY".to_owned()),
                 WireApi::Common,
                 infer_common_provider_compat("vercel_ai_gateway", None, api_url.as_deref()?),
@@ -773,7 +767,7 @@ fn zed_provider(
         )),
         "openai_compatible" => {
             let custom_key = custom_key?;
-            let base_url = normalize_common_base_url(&api_url?);
+            let base_url = normalize_common_base_url(api_url.as_deref()?);
             Some((
                 sanitize_provider_id(&format!("imported_zed_{custom_key}")),
                 format!("Zed {custom_key}"),
@@ -967,7 +961,6 @@ fn push_discovered_model(
         provider: provider.clone(),
         model,
         display_name,
-        note,
         description,
         is_default,
     });
@@ -1282,7 +1275,7 @@ mod tests {
         assert_eq!(models.len(), 2);
         assert_eq!(models[0].model, "glm-5.1");
         assert_eq!(models[0].display_name, "claude-sonnet-4-5");
-        assert_eq!(models[0].note.as_deref(), Some("glm-5.1"));
+        assert!(models[0].description.contains("model: glm-5.1"));
         assert_eq!(models[1].model, "glm-4.7");
     }
 }

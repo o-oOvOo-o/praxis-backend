@@ -301,7 +301,7 @@ impl ChatWidget {
     }
 
     pub(super) fn configured_status_line_items(&self) -> Vec<String> {
-        self.config.tui_status_line.clone().unwrap_or_else(|| {
+        self.tui_config.status_line.clone().unwrap_or_else(|| {
             DEFAULT_STATUS_LINE_ITEMS
                 .iter()
                 .map(ToString::to_string)
@@ -318,7 +318,7 @@ impl ChatWidget {
 
     /// Returns the configured terminal-title ids, or the default ordering when unset.
     pub(super) fn configured_terminal_title_items(&self) -> Vec<String> {
-        self.config.tui_terminal_title.clone().unwrap_or_else(|| {
+        self.tui_config.terminal_title.clone().unwrap_or_else(|| {
             DEFAULT_TERMINAL_TITLE_ITEMS
                 .iter()
                 .map(ToString::to_string)
@@ -587,7 +587,7 @@ impl ChatWidget {
     }
 
     pub(super) fn terminal_title_spinner_text_at(&self, now: Instant) -> Option<String> {
-        if !self.config.animations {
+        if !self.tui_config.animations {
             return None;
         }
 
@@ -606,8 +606,8 @@ impl ChatWidget {
     }
 
     fn terminal_title_uses_spinner(&self) -> bool {
-        self.config
-            .tui_terminal_title
+        self.tui_config
+            .terminal_title
             .as_ref()
             .is_none_or(|items| items.iter().any(|item| item == "spinner"))
     }
@@ -619,7 +619,7 @@ impl ChatWidget {
     }
 
     pub(super) fn should_animate_terminal_title_spinner(&self) -> bool {
-        self.config.animations
+        self.tui_config.animations
             && self.terminal_title_uses_spinner()
             && self.terminal_title_has_active_progress()
     }
@@ -628,7 +628,7 @@ impl ChatWidget {
         &self,
         selections: &StatusSurfaceSelections,
     ) -> bool {
-        self.config.animations
+        self.tui_config.animations
             && selections
                 .terminal_title_items
                 .contains(&TerminalTitleItem::Spinner)

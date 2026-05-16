@@ -51,10 +51,10 @@ async fn exec_approval_emits_proposed_command_and_decision_history() {
 }
 
 #[test]
-fn app_server_exec_approval_request_splits_shell_wrapped_command() {
+fn app_gateway_exec_approval_request_splits_shell_wrapped_command() {
     let script = r#"python3 -c 'print("Hello, world!")'"#;
     let request =
-        exec_approval_request_from_params(AppServerCommandExecutionRequestApprovalParams {
+        exec_approval_request_from_params(AppGatewayCommandExecutionRequestApprovalParams {
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "item-1".to_string(),
@@ -983,7 +983,7 @@ async fn user_shell_command_renders_output_not_exploring() {
 }
 
 #[tokio::test]
-async fn bang_shell_command_submits_run_user_shell_command_in_app_server_tui() {
+async fn bang_shell_command_submits_run_user_shell_command_in_app_gateway_tui() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     let conversation_id = ThreadId::new();
     let rollout_file = NamedTempFile::new().unwrap();

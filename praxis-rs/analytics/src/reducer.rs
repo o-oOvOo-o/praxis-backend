@@ -1,6 +1,6 @@
-use crate::events::AppServerRpcTransport;
+use crate::events::AppGatewayRpcTransport;
 use crate::events::PraxisAppMentionedEventRequest;
-use crate::events::PraxisAppServerClientMetadata;
+use crate::events::PraxisAppGatewayClientMetadata;
 use crate::events::PraxisAppUsedEventRequest;
 use crate::events::PraxisPluginEventRequest;
 use crate::events::PraxisPluginUsedEventRequest;
@@ -24,8 +24,8 @@ use crate::facts::PluginState;
 use crate::facts::PluginStateChangedInput;
 use crate::facts::PluginUsedInput;
 use crate::facts::SkillInvokedInput;
-use praxis_app_server_protocol::ClientResponse;
-use praxis_app_server_protocol::InitializeParams;
+use praxis_app_gateway_protocol::ClientResponse;
+use praxis_app_gateway_protocol::InitializeParams;
 use praxis_git_utils::collect_git_info;
 use praxis_git_utils::get_git_repo_root;
 use praxis_login::default_client::originator;
@@ -41,7 +41,7 @@ pub(crate) struct AnalyticsReducer {
 }
 
 struct ConnectionState {
-    app_server_client: PraxisAppServerClientMetadata,
+    app_gateway_client: PraxisAppGatewayClientMetadata,
     runtime: PraxisRuntimeMetadata,
 }
 
@@ -101,12 +101,12 @@ impl AnalyticsReducer {
         params: InitializeParams,
         product_client_id: String,
         runtime: PraxisRuntimeMetadata,
-        rpc_transport: AppServerRpcTransport,
+        rpc_transport: AppGatewayRpcTransport,
     ) {
         self.connections.insert(
             connection_id,
             ConnectionState {
-                app_server_client: PraxisAppServerClientMetadata {
+                app_gateway_client: PraxisAppGatewayClientMetadata {
                     product_client_id,
                     client_name: Some(params.client_info.name),
                     client_version: Some(params.client_info.version),
@@ -249,7 +249,7 @@ impl AnalyticsReducer {
                 event_type: "praxis_thread_initialized",
                 event_params: ThreadInitializedEventParams {
                     thread_id: thread.id,
-                    app_server_client: connection_state.app_server_client.clone(),
+                    app_gateway_client: connection_state.app_gateway_client.clone(),
                     runtime: connection_state.runtime.clone(),
                     model,
                     ephemeral: thread.ephemeral,

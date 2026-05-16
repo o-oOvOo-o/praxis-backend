@@ -21,7 +21,7 @@ use tracing::warn;
 
 use crate::token_data::TokenData;
 use once_cell::sync::Lazy;
-use praxis_app_server_protocol::AuthMode;
+use praxis_app_gateway_protocol::AuthMode;
 use praxis_keyring_store::DefaultKeyringStore;
 use praxis_keyring_store::KeyringStore;
 use praxis_utils_home_dir::praxis_shared_praxis_home;

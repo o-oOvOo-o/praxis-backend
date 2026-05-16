@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use praxis_app_server_protocol::ClientRequest;
-use praxis_app_server_protocol::LoginAccountParams;
-use praxis_app_server_protocol::LoginAccountResponse;
+use praxis_app_gateway_protocol::ClientRequest;
+use praxis_app_gateway_protocol::LoginAccountParams;
+use praxis_app_gateway_protocol::LoginAccountResponse;
 use praxis_login::CLIENT_ID;
 use praxis_login::ServerOptions;
 use praxis_login::complete_device_code_login;
@@ -44,7 +44,7 @@ pub(super) fn start_headless_chatgpt_login(widget: &mut AuthModeWidget) {
     let sign_in_state = widget.sign_in_state.clone();
     let request_frame = widget.request_frame.clone();
     let error = widget.error.clone();
-    let request_handle = widget.app_server_request_handle.clone();
+    let request_handle = widget.app_gateway_request_handle.clone();
     let praxis_home = widget.praxis_home.clone();
     let cli_auth_credentials_store_mode = widget.cli_auth_credentials_store_mode;
     let forced_chatgpt_workspace_id = widget.forced_chatgpt_workspace_id.clone();
@@ -268,7 +268,7 @@ fn set_device_code_error_for_active_attempt(
 }
 
 async fn fallback_to_browser_login(
-    request_handle: praxis_app_server_client::AppServerRequestHandle,
+    request_handle: praxis_app_gateway_client::AppGatewayRequestHandle,
     sign_in_state: Arc<RwLock<SignInState>>,
     request_frame: FrameRequester,
     error: Arc<RwLock<Option<String>>>,
@@ -324,7 +324,7 @@ async fn fallback_to_browser_login(
 }
 
 async fn handle_chatgpt_auth_tokens_login_result_for_active_attempt(
-    request_handle: praxis_app_server_client::AppServerRequestHandle,
+    request_handle: praxis_app_gateway_client::AppGatewayRequestHandle,
     sign_in_state: Arc<RwLock<SignInState>>,
     request_frame: FrameRequester,
     error: Arc<RwLock<Option<String>>>,

@@ -100,12 +100,12 @@ impl PraxisThread {
         self.praxis.steer_input(input, expected_turn_id).await
     }
 
-    pub async fn set_app_server_client_name(
+    pub async fn set_app_gateway_client_name(
         &self,
-        app_server_client_name: Option<String>,
+        app_gateway_client_name: Option<String>,
     ) -> ConstraintResult<()> {
         self.praxis
-            .set_app_server_client_name(app_server_client_name)
+            .set_app_gateway_client_name(app_gateway_client_name)
             .await
     }
 

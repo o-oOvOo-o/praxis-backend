@@ -2,10 +2,10 @@
 # Do not increase, fix your test instead
 slow-timeout = { period = "15s", terminate-after = 2 }
 
-[test-groups.app_server_protocol_codegen]
+[test-groups.app_gateway_protocol_codegen]
 max-threads = 1
 
-[test-groups.app_server_integration]
+[test-groups.app_gateway_integration]
 max-threads = 1
 
 
@@ -19,11 +19,11 @@ filter = 'test(approval_matrix_covers_all_modes)'
 slow-timeout = { period = "30s", terminate-after = 2 }
 
 [[profile.default.overrides]]
-filter = 'package(praxis-app-server-protocol) & (test(typescript_schema_fixtures_match_generated) | test(json_schema_fixtures_match_generated) | test(generate_ts_with_experimental_api_retains_experimental_entries) | test(generated_ts_optional_nullable_fields_only_in_params) | test(generate_json_filters_experimental_fields_and_methods))'
-test-group = 'app_server_protocol_codegen'
+filter = 'package(praxis-app-gateway-protocol) & (test(typescript_schema_fixtures_match_generated) | test(json_schema_fixtures_match_generated) | test(generate_ts_with_experimental_api_retains_experimental_entries) | test(generated_ts_optional_nullable_fields_only_in_params) | test(generate_json_filters_experimental_fields_and_methods))'
+test-group = 'app_gateway_protocol_codegen'
 
 [[profile.default.overrides]]
-# These integration tests spawn a fresh app-server subprocess per case.
+# These integration tests spawn a fresh app-gateway subprocess per case.
 # Keep the library unit tests parallel.
-filter = 'package(praxis-app-server) & kind(test)'
-test-group = 'app_server_integration'
+filter = 'package(praxis-app-gateway-runtime) & kind(test)'
+test-group = 'app_gateway_integration'

@@ -9,7 +9,7 @@ use crate::config_loader::ConfigRequirementsToml;
 use crate::config_loader::LoaderOverrides;
 use crate::config_loader::RequirementSource;
 use crate::config_loader::Sourced;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::RequirementsExecPolicy;
 use praxis_protocol::permissions::FileSystemAccessMode;
 use praxis_protocol::permissions::FileSystemPath;

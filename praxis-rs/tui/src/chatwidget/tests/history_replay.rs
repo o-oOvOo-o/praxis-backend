@@ -396,11 +396,14 @@ async fn forked_thread_history_line_includes_name_and_id_snapshot() {
 
     let forked_from_id =
         ThreadId::from_string("e9f18a88-8081-4e51-9d4e-8af5cde2d8dd").expect("forked id");
-    let session_index_entry = format!(
-        "{{\"id\":\"{forked_from_id}\",\"thread_name\":\"named-thread\",\"updated_at\":\"2024-01-02T00:00:00Z\"}}\n"
-    );
-    std::fs::write(temp.path().join("session_index.jsonl"), session_index_entry)
-        .expect("write session index");
+    let state_runtime =
+        praxis_state::StateRuntime::init(temp.path().to_path_buf(), "test-provider".to_string())
+            .await
+            .expect("state runtime");
+    state_runtime
+        .set_thread_name(forked_from_id, "named-thread")
+        .await
+        .expect("write thread name");
 
     chat.emit_forked_thread_event(forked_from_id);
 
@@ -525,16 +528,16 @@ async fn live_legacy_agent_message_after_item_completed_does_not_duplicate_assis
 }
 
 #[tokio::test]
-async fn replayed_retryable_app_server_error_keeps_turn_running() {
+async fn replayed_retryable_app_gateway_error_keeps_turn_running() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.handle_server_notification(
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
-            turn: AppServerTurn {
+            turn: AppGatewayTurn {
                 id: "turn-1".to_string(),
                 items: Vec::new(),
-                status: AppServerTurnStatus::InProgress,
+                status: AppGatewayTurnStatus::InProgress,
                 error: None,
             },
         }),
@@ -544,7 +547,7 @@ async fn replayed_retryable_app_server_error_keeps_turn_running() {
 
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
-            error: AppServerTurnError {
+            error: AppGatewayTurnError {
                 message: "Reconnecting... 1/5".to_string(),
                 praxis_error_info: None,
                 additional_details: Some("Idle timeout waiting for SSE".to_string()),
@@ -608,7 +611,7 @@ async fn replayed_reasoning_item_hides_raw_reasoning_when_disabled() {
     let _ = drain_insert_history(&mut rx);
 
     chat.replay_thread_item(
-        AppServerThreadItem::Reasoning {
+        AppGatewayThreadItem::Reasoning {
             id: "reasoning-1".to_string(),
             summary: vec!["Summary only".to_string()],
             content: vec!["Raw reasoning".to_string()],
@@ -655,7 +658,7 @@ async fn replayed_reasoning_item_shows_raw_reasoning_when_enabled() {
     let _ = drain_insert_history(&mut rx);
 
     chat.replay_thread_item(
-        AppServerThreadItem::Reasoning {
+        AppGatewayThreadItem::Reasoning {
             id: "reasoning-1".to_string(),
             summary: vec!["Summary only".to_string()],
             content: vec!["Raw reasoning".to_string()],
@@ -681,10 +684,10 @@ async fn live_reasoning_summary_is_not_rendered_twice_when_item_completes() {
     chat.handle_server_notification(
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
-            turn: AppServerTurn {
+            turn: AppGatewayTurn {
                 id: "turn-1".to_string(),
                 items: Vec::new(),
-                status: AppServerTurnStatus::InProgress,
+                status: AppGatewayTurnStatus::InProgress,
                 error: None,
             },
         }),
@@ -707,7 +710,7 @@ async fn live_reasoning_summary_is_not_rendered_twice_when_item_completes() {
         ServerNotification::ItemCompleted(ItemCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
-            item: AppServerThreadItem::Reasoning {
+            item: AppGatewayThreadItem::Reasoning {
                 id: "reasoning-1".to_string(),
                 summary: vec!["Summary only".to_string()],
                 content: Vec::new(),
@@ -766,10 +769,10 @@ async fn replayed_in_progress_turn_marks_task_running() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.replay_thread_turns(
-        vec![AppServerTurn {
+        vec![AppGatewayTurn {
             id: "turn-1".to_string(),
             items: Vec::new(),
-            status: AppServerTurnStatus::InProgress,
+            status: AppGatewayTurnStatus::InProgress,
             error: None,
         }],
         ReplayKind::ResumeInitialMessages,

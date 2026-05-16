@@ -4,6 +4,7 @@ use praxis_config::types::McpServerToolConfig;
 use praxis_config::types::McpServerTransportConfig;
 use praxis_protocol::openai_models::ReasoningEffort;
 use pretty_assertions::assert_eq;
+use std::collections::HashMap;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 use tempfile::tempdir;
@@ -48,25 +49,6 @@ fn builder_with_edits_applies_custom_paths() {
     let contents =
         std::fs::read_to_string(praxis_home.join(CONFIG_TOML_FILE)).expect("read config");
     assert_eq!(contents, "enabled = true\n");
-}
-
-#[test]
-fn set_model_availability_nux_count_writes_shown_count() {
-    let tmp = tempdir().expect("tmpdir");
-    let praxis_home = tmp.path();
-    let shown_count = HashMap::from([("gpt-foo".to_string(), 4)]);
-
-    ConfigEditsBuilder::new(praxis_home)
-        .set_model_availability_nux_count(&shown_count)
-        .apply_blocking()
-        .expect("persist");
-
-    let contents =
-        std::fs::read_to_string(praxis_home.join(CONFIG_TOML_FILE)).expect("read config");
-    let expected = r#"[tui.model_availability_nux]
-gpt-foo = 4
-"#;
-    assert_eq!(contents, expected);
 }
 
 #[test]

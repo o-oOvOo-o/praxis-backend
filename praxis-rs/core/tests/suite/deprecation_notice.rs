@@ -7,7 +7,7 @@ use core_test_support::test_absolute_path;
 use core_test_support::test_codex::TestCodex;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event_match;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_core::config_loader::ConfigLayerEntry;
 use praxis_core::config_loader::ConfigLayerStack;
 use praxis_core::config_loader::ConfigRequirements;

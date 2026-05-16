@@ -14,7 +14,7 @@ use crate::exec_policy::load_exec_policy;
 use anyhow::Context;
 use anyhow::Result;
 use async_trait::async_trait;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::CONFIG_TOML_FILE;
 use praxis_network_proxy::ConfigReloader;
 use praxis_network_proxy::ConfigState;

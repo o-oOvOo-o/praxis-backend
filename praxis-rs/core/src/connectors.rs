@@ -11,9 +11,9 @@ use std::time::Instant;
 
 use anyhow::Context;
 use async_channel::unbounded;
-pub use praxis_app_server_protocol::AppBranding;
-pub use praxis_app_server_protocol::AppInfo;
-pub use praxis_app_server_protocol::AppMetadata;
+pub use praxis_app_gateway_protocol::AppBranding;
+pub use praxis_app_gateway_protocol::AppInfo;
+pub use praxis_app_gateway_protocol::AppMetadata;
 use praxis_connectors::AllConnectorsCacheKey;
 use praxis_connectors::DirectoryListResponse;
 use praxis_login::token_data::TokenData;

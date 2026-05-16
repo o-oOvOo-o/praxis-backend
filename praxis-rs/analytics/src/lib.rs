@@ -4,7 +4,7 @@ mod facts;
 mod reducer;
 
 pub use client::AnalyticsEventsClient;
-pub use events::AppServerRpcTransport;
+pub use events::AppGatewayRpcTransport;
 pub use facts::AppInvocation;
 pub use facts::InvocationType;
 pub use facts::SkillInvocation;

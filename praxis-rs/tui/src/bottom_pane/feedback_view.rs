@@ -42,7 +42,7 @@ pub(crate) enum FeedbackAudience {
 }
 
 /// Minimal input overlay to collect an optional feedback note, then submit it
-/// through the app-server-managed feedback flow.
+/// through the app-gateway-managed feedback flow.
 pub(crate) struct FeedbackNoteView {
     category: FeedbackCategory,
     app_event_tx: AppEventSender,

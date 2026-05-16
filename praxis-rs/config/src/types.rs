@@ -516,7 +516,7 @@ const fn default_true() -> bool {
     true
 }
 
-/// Settings for notices we display to users via the tui and app-server clients
+/// Settings for notices we display to users via the tui and app-gateway clients
 /// (primarily the Praxis IDE extension). NOTE: these are different from
 /// notifications - notices are warnings, NUX screens, acknowledgements, etc.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
@@ -561,7 +561,7 @@ pub struct SandboxWorkspaceWrite {
     pub exclude_slash_tmp: bool,
 }
 
-impl From<SandboxWorkspaceWrite> for praxis_app_server_protocol::SandboxSettings {
+impl From<SandboxWorkspaceWrite> for praxis_app_gateway_protocol::SandboxSettings {
     fn from(sandbox_workspace_write: SandboxWorkspaceWrite) -> Self {
         Self {
             writable_roots: sandbox_workspace_write.writable_roots,

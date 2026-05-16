@@ -1,34 +1,34 @@
 use std::path::PathBuf;
 
-use praxis_app_server_protocol::CollabAgentState as ApiCollabAgentState;
-use praxis_app_server_protocol::CollabAgentStatus as ApiCollabAgentStatus;
-use praxis_app_server_protocol::CollabAgentTool;
-use praxis_app_server_protocol::CollabAgentToolCallStatus as ApiCollabAgentToolCallStatus;
-use praxis_app_server_protocol::CommandAction;
-use praxis_app_server_protocol::CommandExecutionSource;
-use praxis_app_server_protocol::CommandExecutionStatus as ApiCommandExecutionStatus;
-use praxis_app_server_protocol::ErrorNotification;
-use praxis_app_server_protocol::FileUpdateChange as ApiFileUpdateChange;
-use praxis_app_server_protocol::ItemCompletedNotification;
-use praxis_app_server_protocol::ItemStartedNotification;
-use praxis_app_server_protocol::McpToolCallError;
-use praxis_app_server_protocol::McpToolCallResult;
-use praxis_app_server_protocol::McpToolCallStatus as ApiMcpToolCallStatus;
-use praxis_app_server_protocol::PatchApplyStatus as ApiPatchApplyStatus;
-use praxis_app_server_protocol::PatchChangeKind as ApiPatchChangeKind;
-use praxis_app_server_protocol::ServerNotification;
-use praxis_app_server_protocol::ThreadItem;
-use praxis_app_server_protocol::ThreadTokenUsage;
-use praxis_app_server_protocol::TokenUsageBreakdown;
-use praxis_app_server_protocol::Turn;
-use praxis_app_server_protocol::TurnCompletedNotification;
-use praxis_app_server_protocol::TurnError;
-use praxis_app_server_protocol::TurnPlanStep;
-use praxis_app_server_protocol::TurnPlanStepStatus;
-use praxis_app_server_protocol::TurnPlanUpdatedNotification;
-use praxis_app_server_protocol::TurnStartedNotification;
-use praxis_app_server_protocol::TurnStatus;
-use praxis_app_server_protocol::WebSearchAction as ApiWebSearchAction;
+use praxis_app_gateway_protocol::CollabAgentState as ApiCollabAgentState;
+use praxis_app_gateway_protocol::CollabAgentStatus as ApiCollabAgentStatus;
+use praxis_app_gateway_protocol::CollabAgentTool;
+use praxis_app_gateway_protocol::CollabAgentToolCallStatus as ApiCollabAgentToolCallStatus;
+use praxis_app_gateway_protocol::CommandAction;
+use praxis_app_gateway_protocol::CommandExecutionSource;
+use praxis_app_gateway_protocol::CommandExecutionStatus as ApiCommandExecutionStatus;
+use praxis_app_gateway_protocol::ErrorNotification;
+use praxis_app_gateway_protocol::FileUpdateChange as ApiFileUpdateChange;
+use praxis_app_gateway_protocol::ItemCompletedNotification;
+use praxis_app_gateway_protocol::ItemStartedNotification;
+use praxis_app_gateway_protocol::McpToolCallError;
+use praxis_app_gateway_protocol::McpToolCallResult;
+use praxis_app_gateway_protocol::McpToolCallStatus as ApiMcpToolCallStatus;
+use praxis_app_gateway_protocol::PatchApplyStatus as ApiPatchApplyStatus;
+use praxis_app_gateway_protocol::PatchChangeKind as ApiPatchChangeKind;
+use praxis_app_gateway_protocol::ServerNotification;
+use praxis_app_gateway_protocol::ThreadItem;
+use praxis_app_gateway_protocol::ThreadTokenUsage;
+use praxis_app_gateway_protocol::TokenUsageBreakdown;
+use praxis_app_gateway_protocol::Turn;
+use praxis_app_gateway_protocol::TurnCompletedNotification;
+use praxis_app_gateway_protocol::TurnError;
+use praxis_app_gateway_protocol::TurnPlanStep;
+use praxis_app_gateway_protocol::TurnPlanStepStatus;
+use praxis_app_gateway_protocol::TurnPlanUpdatedNotification;
+use praxis_app_gateway_protocol::TurnStartedNotification;
+use praxis_app_gateway_protocol::TurnStatus;
+use praxis_app_gateway_protocol::WebSearchAction as ApiWebSearchAction;
 use praxis_protocol::ThreadId;
 use praxis_protocol::models::WebSearchAction;
 use praxis_protocol::protocol::AskForApproval;
@@ -1163,7 +1163,7 @@ fn token_usage_update_is_emitted_on_turn_completion() {
 
     let usage_update =
         processor.collect_thread_events(ServerNotification::ThreadTokenUsageUpdated(
-            praxis_app_server_protocol::ThreadTokenUsageUpdatedNotification {
+            praxis_app_gateway_protocol::ThreadTokenUsageUpdatedNotification {
                 thread_id: "thread-1".to_string(),
                 turn_id: "turn-1".to_string(),
                 token_usage: ThreadTokenUsage {
@@ -1547,12 +1547,12 @@ fn model_reroute_surfaces_as_error_item() {
     let mut processor = EventProcessorWithJsonOutput::new(/*last_message_path*/ None);
 
     let collected = processor.collect_thread_events(ServerNotification::ModelRerouted(
-        praxis_app_server_protocol::ModelReroutedNotification {
+        praxis_app_gateway_protocol::ModelReroutedNotification {
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             from_model: "gpt-5".to_string(),
             to_model: "gpt-5-mini".to_string(),
-            reason: praxis_app_server_protocol::ModelRerouteReason::HighRiskCyberActivity,
+            reason: praxis_app_gateway_protocol::ModelRerouteReason::HighRiskCyberActivity,
         },
     ));
 

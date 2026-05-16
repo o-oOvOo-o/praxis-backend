@@ -1,0 +1,22 @@
+[package]
+name = "praxis-app-gateway-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "praxis_app_gateway_native"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+praxis-app-gateway-runtime = { workspace = true }
+praxis-app-gateway-core = { workspace = true }
+praxis-app-gateway-protocol = { workspace = true }
+praxis-arg0 = { workspace = true }
+praxis-core = { workspace = true }
+praxis-feedback = { workspace = true }
+praxis-protocol = { workspace = true }
+toml = { workspace = true }

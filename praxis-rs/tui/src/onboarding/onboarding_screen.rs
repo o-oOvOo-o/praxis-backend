@@ -1,9 +1,9 @@
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
-use praxis_app_server_client::AppServerEvent;
-use praxis_app_server_client::AppServerRequestHandle;
-use praxis_app_server_protocol::ServerNotification;
+use praxis_app_gateway_client::AppGatewayEvent;
+use praxis_app_gateway_client::AppGatewayRequestHandle;
+use praxis_app_gateway_protocol::ServerNotification;
 use praxis_core::config::Config;
 #[cfg(target_os = "windows")]
 use praxis_core::windows_sandbox::WindowsSandboxLevelExt;
@@ -19,7 +19,7 @@ use ratatui::widgets::WidgetRef;
 use praxis_protocol::config_types::ForcedLoginMethod;
 
 use crate::LoginStatus;
-use crate::app_server_session::AppServerSession;
+use crate::app_gateway_session::AppGatewaySession;
 use crate::onboarding::auth::AuthModeWidget;
 use crate::onboarding::auth::SignInOption;
 use crate::onboarding::auth::SignInState;
@@ -29,6 +29,7 @@ use crate::onboarding::welcome::WelcomeWidget;
 use crate::tui::FrameRequester;
 use crate::tui::Tui;
 use crate::tui::TuiEvent;
+use crate::tui_config::TuiRuntimeConfig;
 use color_eyre::eyre::Result;
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -67,8 +68,9 @@ pub(crate) struct OnboardingScreenArgs {
     pub show_trust_screen: bool,
     pub show_login_screen: bool,
     pub login_status: LoginStatus,
-    pub app_server_request_handle: Option<AppServerRequestHandle>,
+    pub app_gateway_request_handle: Option<AppGatewayRequestHandle>,
     pub config: Config,
+    pub tui_config: TuiRuntimeConfig,
 }
 
 pub(crate) struct OnboardingResult {
@@ -82,8 +84,9 @@ impl OnboardingScreen {
             show_trust_screen,
             show_login_screen,
             login_status,
-            app_server_request_handle,
+            app_gateway_request_handle,
             config,
+            tui_config,
         } = args;
         let cwd = config.cwd.to_path_buf();
         let forced_chatgpt_workspace_id = config.forced_chatgpt_workspace_id.clone();
@@ -94,14 +97,14 @@ impl OnboardingScreen {
         steps.push(Step::Welcome(WelcomeWidget::new(
             !matches!(login_status, LoginStatus::NotAuthenticated),
             tui.frame_requester(),
-            config.animations,
+            tui_config.animations,
         )));
         if show_login_screen {
             let highlighted_mode = match forced_login_method {
                 Some(ForcedLoginMethod::Api) => SignInOption::ApiKey,
                 _ => SignInOption::ChatGpt,
             };
-            if let Some(app_server_request_handle) = app_server_request_handle {
+            if let Some(app_gateway_request_handle) = app_gateway_request_handle {
                 steps.push(Step::Auth(AuthModeWidget {
                     request_frame: tui.frame_requester(),
                     highlighted_mode,
@@ -110,13 +113,13 @@ impl OnboardingScreen {
                     praxis_home: praxis_home.clone(),
                     cli_auth_credentials_store_mode,
                     login_status,
-                    app_server_request_handle,
+                    app_gateway_request_handle,
                     forced_chatgpt_workspace_id,
                     forced_login_method,
-                    animations_enabled: config.animations,
+                    animations_enabled: tui_config.animations,
                 }));
             } else {
-                tracing::warn!("skipping onboarding login step without app-server request handle");
+                tracing::warn!("skipping onboarding login step without app-gateway request handle");
             }
         }
         #[cfg(target_os = "windows")]
@@ -221,7 +224,7 @@ impl OnboardingScreen {
         })
     }
 
-    fn handle_app_server_notification(&mut self, notification: ServerNotification) {
+    fn handle_app_gateway_notification(&mut self, notification: ServerNotification) {
         match notification {
             ServerNotification::AccountLoginCompleted(notification) => {
                 if let Some(widget) = self.auth_widget_mut() {
@@ -433,7 +436,7 @@ impl WidgetRef for Step {
 
 pub(crate) async fn run_onboarding_app(
     args: OnboardingScreenArgs,
-    mut app_server: Option<AppServerSession>,
+    mut app_gateway: Option<AppGatewaySession>,
     tui: &mut Tui,
 ) -> Result<OnboardingResult> {
     use tokio_stream::StreamExt;
@@ -500,28 +503,28 @@ pub(crate) async fn run_onboarding_app(
                 }
             }
             event = async {
-                match app_server.as_mut() {
-                    Some(app_server) => app_server.next_event().await,
+                match app_gateway.as_mut() {
+                    Some(app_gateway) => app_gateway.next_event().await,
                     None => None,
                 }
-            }, if app_server.is_some() => {
+            }, if app_gateway.is_some() => {
                 if let Some(event) = event {
                     match event {
-                        AppServerEvent::ServerNotification(notification) => {
-                            onboarding_screen.handle_app_server_notification(notification);
+                        AppGatewayEvent::ServerNotification(notification) => {
+                            onboarding_screen.handle_app_gateway_notification(notification);
                         }
-                        AppServerEvent::Disconnected { message } => {
+                        AppGatewayEvent::Disconnected { message } => {
                             return Err(color_eyre::eyre::eyre!(message));
                         }
-                        AppServerEvent::Lagged { .. }
-                        | AppServerEvent::ServerRequest(_) => {}
+                        AppGatewayEvent::Lagged { .. }
+                        | AppGatewayEvent::ServerRequest(_) => {}
                     }
                 }
             }
         }
     }
-    if let Some(app_server) = app_server {
-        app_server.shutdown().await.ok();
+    if let Some(app_gateway) = app_gateway {
+        app_gateway.shutdown().await.ok();
     }
     Ok(OnboardingResult {
         directory_trust_decision: onboarding_screen.directory_trust_decision(),

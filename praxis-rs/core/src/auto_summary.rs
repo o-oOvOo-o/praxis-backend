@@ -4,7 +4,8 @@ use std::sync::atomic::Ordering;
 use praxis_login::AuthManager;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
-use tracing::{debug, warn};
+use tracing::debug;
+use tracing::warn;
 
 use crate::praxis::Session;
 

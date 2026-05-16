@@ -15,40 +15,40 @@ pub use cli::Command;
 pub use cli::ReviewArgs;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
 use event_processor_with_jsonl_output::EventProcessorWithJsonOutput;
-use praxis_app_server_client::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
-use praxis_app_server_client::InProcessAppServerClient;
-use praxis_app_server_client::InProcessClientStartArgs;
-use praxis_app_server_client::InProcessServerEvent;
-use praxis_app_server_protocol::ClientRequest;
-use praxis_app_server_protocol::ConfigWarningNotification;
-use praxis_app_server_protocol::JSONRPCErrorError;
-use praxis_app_server_protocol::McpServerElicitationAction;
-use praxis_app_server_protocol::McpServerElicitationRequestResponse;
-use praxis_app_server_protocol::RequestId;
-use praxis_app_server_protocol::ReviewStartParams;
-use praxis_app_server_protocol::ReviewStartResponse;
-use praxis_app_server_protocol::ReviewTarget as ApiReviewTarget;
-use praxis_app_server_protocol::ServerNotification;
-use praxis_app_server_protocol::ServerRequest;
-use praxis_app_server_protocol::Thread as AppServerThread;
-use praxis_app_server_protocol::ThreadItem as AppServerThreadItem;
-use praxis_app_server_protocol::ThreadListParams;
-use praxis_app_server_protocol::ThreadListResponse;
-use praxis_app_server_protocol::ThreadReadParams;
-use praxis_app_server_protocol::ThreadReadResponse;
-use praxis_app_server_protocol::ThreadResumeParams;
-use praxis_app_server_protocol::ThreadResumeResponse;
-use praxis_app_server_protocol::ThreadSortKey;
-use praxis_app_server_protocol::ThreadSourceKind;
-use praxis_app_server_protocol::ThreadStartParams;
-use praxis_app_server_protocol::ThreadStartResponse;
-use praxis_app_server_protocol::ThreadUnsubscribeParams;
-use praxis_app_server_protocol::ThreadUnsubscribeResponse;
-use praxis_app_server_protocol::TurnInterruptParams;
-use praxis_app_server_protocol::TurnInterruptResponse;
-use praxis_app_server_protocol::TurnStartParams;
-use praxis_app_server_protocol::TurnStartResponse;
-use praxis_app_server_protocol::TurnStartedNotification;
+use praxis_app_gateway_client::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
+use praxis_app_gateway_client::NativeAppGatewayClient;
+use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
+use praxis_app_gateway_client::NativeGatewayEvent;
+use praxis_app_gateway_protocol::ClientRequest;
+use praxis_app_gateway_protocol::ConfigWarningNotification;
+use praxis_app_gateway_protocol::JSONRPCErrorError;
+use praxis_app_gateway_protocol::McpServerElicitationAction;
+use praxis_app_gateway_protocol::McpServerElicitationRequestResponse;
+use praxis_app_gateway_protocol::RequestId;
+use praxis_app_gateway_protocol::ReviewStartParams;
+use praxis_app_gateway_protocol::ReviewStartResponse;
+use praxis_app_gateway_protocol::ReviewTarget as ApiReviewTarget;
+use praxis_app_gateway_protocol::ServerNotification;
+use praxis_app_gateway_protocol::ServerRequest;
+use praxis_app_gateway_protocol::Thread as AppGatewayThread;
+use praxis_app_gateway_protocol::ThreadItem as AppGatewayThreadItem;
+use praxis_app_gateway_protocol::ThreadListParams;
+use praxis_app_gateway_protocol::ThreadListResponse;
+use praxis_app_gateway_protocol::ThreadReadParams;
+use praxis_app_gateway_protocol::ThreadReadResponse;
+use praxis_app_gateway_protocol::ThreadResumeParams;
+use praxis_app_gateway_protocol::ThreadResumeResponse;
+use praxis_app_gateway_protocol::ThreadSortKey;
+use praxis_app_gateway_protocol::ThreadSourceKind;
+use praxis_app_gateway_protocol::ThreadStartParams;
+use praxis_app_gateway_protocol::ThreadStartResponse;
+use praxis_app_gateway_protocol::ThreadUnsubscribeParams;
+use praxis_app_gateway_protocol::ThreadUnsubscribeResponse;
+use praxis_app_gateway_protocol::TurnInterruptParams;
+use praxis_app_gateway_protocol::TurnInterruptResponse;
+use praxis_app_gateway_protocol::TurnStartParams;
+use praxis_app_gateway_protocol::TurnStartResponse;
+use praxis_app_gateway_protocol::TurnStartedNotification;
 use praxis_arg0::Arg0DispatchPaths;
 use praxis_cloud_requirements::cloud_requirements_loader_for_storage;
 use praxis_core::LMSTUDIO_OSS_PROVIDER_ID;
@@ -122,9 +122,9 @@ enum InitialOperation {
 
 enum StdinPromptBehavior {
     /// Read stdin only when there is no positional prompt, which is the legacy
-    /// `codex exec` behavior for `codex exec` with piped input.
+    /// `praxis exec` behavior for `praxis exec` with piped input.
     RequiredIfPiped,
-    /// Always treat stdin as the prompt, used for the explicit `codex exec -`
+    /// Always treat stdin as the prompt, used for the explicit `praxis exec -`
     /// sentinel and similar forced-stdin call sites.
     Forced,
     /// If stdin is piped alongside a positional prompt, treat stdin as
@@ -149,7 +149,7 @@ impl RequestIdSequencer {
 }
 
 struct ExecRunArgs {
-    in_process_start_args: InProcessClientStartArgs,
+    in_process_start_args: NativeAppGatewayClientStartArgs,
     command: Option<ExecCommand>,
     config: Config,
     dangerously_bypass_approvals_and_sandbox: bool,
@@ -176,7 +176,7 @@ fn exec_root_span() -> tracing::Span {
 
 pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     if let Err(err) = set_default_originator("praxis_exec".to_string()) {
-        tracing::warn!(?err, "Failed to set codex exec originator override {err:?}");
+        tracing::warn!(?err, "Failed to set praxis exec originator override {err:?}");
     }
 
     let Cli {
@@ -430,7 +430,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
             range: None,
         })
         .collect();
-    let in_process_start_args = InProcessClientStartArgs {
+    let in_process_start_args = NativeAppGatewayClientStartArgs {
         arg0_paths,
         config: std::sync::Arc::new(config.clone()),
         cli_overrides: run_cli_overrides,
@@ -444,7 +444,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
-        channel_capacity: DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+        channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
     };
     run_exec_session(ExecRunArgs {
         in_process_start_args,
@@ -525,10 +525,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     }
 
     let mut request_ids = RequestIdSequencer::new();
-    let mut client = InProcessAppServerClient::start(in_process_start_args)
+    let mut client = NativeAppGatewayClient::start(in_process_start_args)
         .await
         .map_err(|err| {
-            anyhow::anyhow!("failed to initialize in-process app-server client: {err}")
+            anyhow::anyhow!("failed to initialize in-process app-gateway client: {err}")
         })?;
 
     // Handle resume subcommand through existing `thread/list` + `thread/resume`
@@ -765,10 +765,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         };
 
         match server_event {
-            InProcessServerEvent::ServerRequest(request) => {
+            NativeGatewayEvent::ServerRequest(request) => {
                 handle_server_request(&client, request, &mut error_seen).await;
             }
-            InProcessServerEvent::ServerNotification(mut notification) => {
+            NativeGatewayEvent::Notification(mut notification) => {
                 if let ServerNotification::Error(payload) = &notification {
                     if payload.thread_id == primary_thread_id_for_requests
                         && payload.turn_id == task_id
@@ -781,8 +781,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     && payload.turn.id == task_id
                     && matches!(
                         payload.turn.status,
-                        praxis_app_server_protocol::TurnStatus::Failed
-                            | praxis_app_server_protocol::TurnStatus::Interrupted
+                        praxis_app_gateway_protocol::TurnStatus::Failed
+                            | praxis_app_gateway_protocol::TurnStatus::Interrupted
                     )
                 {
                     error_seen = true;
@@ -813,7 +813,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     }
                 }
             }
-            InProcessServerEvent::Lagged { skipped } => {
+            NativeGatewayEvent::Lagged { skipped } => {
                 let message = lagged_event_warning_message(skipped);
                 warn!("{message}");
                 event_processor.process_warning(message);
@@ -822,7 +822,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     }
 
     if let Err(err) = client.shutdown().await {
-        warn!("in-process app-server shutdown failed: {err}");
+        warn!("in-process app-gateway shutdown failed: {err}");
     }
     event_processor.print_final_output();
     if error_seen {
@@ -834,16 +834,16 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
 
 fn sandbox_mode_from_policy(
     sandbox_policy: &praxis_protocol::protocol::SandboxPolicy,
-) -> Option<praxis_app_server_protocol::SandboxMode> {
+) -> Option<praxis_app_gateway_protocol::SandboxMode> {
     match sandbox_policy {
         praxis_protocol::protocol::SandboxPolicy::DangerFullAccess => {
-            Some(praxis_app_server_protocol::SandboxMode::DangerFullAccess)
+            Some(praxis_app_gateway_protocol::SandboxMode::DangerFullAccess)
         }
         praxis_protocol::protocol::SandboxPolicy::ReadOnly { .. } => {
-            Some(praxis_app_server_protocol::SandboxMode::ReadOnly)
+            Some(praxis_app_gateway_protocol::SandboxMode::ReadOnly)
         }
         praxis_protocol::protocol::SandboxPolicy::WorkspaceWrite { .. } => {
-            Some(praxis_app_server_protocol::SandboxMode::WorkspaceWrite)
+            Some(praxis_app_gateway_protocol::SandboxMode::WorkspaceWrite)
         }
         praxis_protocol::protocol::SandboxPolicy::ExternalSandbox { .. } => None,
     }
@@ -886,12 +886,12 @@ fn config_request_overrides_from_config(config: &Config) -> Option<HashMap<Strin
 
 fn approvals_reviewer_override_from_config(
     config: &Config,
-) -> Option<praxis_app_server_protocol::ApprovalsReviewer> {
+) -> Option<praxis_app_gateway_protocol::ApprovalsReviewer> {
     Some(config.approvals_reviewer.into())
 }
 
 async fn send_request_with_response<T>(
-    client: &InProcessAppServerClient,
+    client: &NativeAppGatewayClient,
     request: ClientRequest,
     method: &str,
 ) -> Result<T, String>
@@ -993,7 +993,7 @@ fn session_configured_from_thread_response(
 }
 
 fn lagged_event_warning_message(skipped: usize) -> String {
-    format!("in-process app-server event stream lagged; dropped {skipped} events")
+    format!("in-process app-gateway event stream lagged; dropped {skipped} events")
 }
 
 fn should_process_notification(
@@ -1049,12 +1049,12 @@ fn should_process_notification(
 }
 
 async fn maybe_backfill_turn_completed_items(
-    client: &InProcessAppServerClient,
+    client: &NativeAppGatewayClient,
     request_ids: &mut RequestIdSequencer,
     notification: &mut ServerNotification,
 ) {
     // In-process delivery may drop non-terminal item notifications under backpressure while still
-    // guaranteeing `turn/completed`. Because app-server currently emits that completion with an
+    // guaranteeing `turn/completed`. Because app-gateway currently emits that completion with an
     // empty `turn.items`, exec does one last `thread/read` here so human/json output can recover
     // the final message and reconcile any still-running items before shutdown.
     let ServerNotification::TurnCompleted(payload) = notification else {
@@ -1090,9 +1090,9 @@ async fn maybe_backfill_turn_completed_items(
 }
 
 fn turn_items_for_thread(
-    thread: &AppServerThread,
+    thread: &AppGatewayThread,
     turn_id: &str,
-) -> Option<Vec<AppServerThreadItem>> {
+) -> Option<Vec<AppGatewayThreadItem>> {
     thread
         .turns
         .iter()
@@ -1105,7 +1105,7 @@ fn all_thread_source_kinds() -> Vec<ThreadSourceKind> {
         ThreadSourceKind::Cli,
         ThreadSourceKind::VsCode,
         ThreadSourceKind::Exec,
-        ThreadSourceKind::AppServer,
+        ThreadSourceKind::AppGateway,
         ThreadSourceKind::SubAgent,
         ThreadSourceKind::SubAgentReview,
         ThreadSourceKind::SubAgentCompact,
@@ -1115,7 +1115,7 @@ fn all_thread_source_kinds() -> Vec<ThreadSourceKind> {
     ]
 }
 
-async fn latest_thread_cwd(thread: &AppServerThread) -> PathBuf {
+async fn latest_thread_cwd(thread: &AppGatewayThread) -> PathBuf {
     if let Some(path) = thread.path.as_deref()
         && let Some(cwd) = parse_latest_turn_context_cwd(path).await
     {
@@ -1152,7 +1152,7 @@ fn cwds_match(current_cwd: &Path, session_cwd: &Path) -> bool {
 }
 
 async fn resolve_resume_thread_id(
-    client: &InProcessAppServerClient,
+    client: &NativeAppGatewayClient,
     config: &Config,
     args: &crate::cli::ResumeArgs,
 ) -> anyhow::Result<Option<String>> {
@@ -1259,7 +1259,7 @@ fn canceled_mcp_server_elicitation_response() -> Result<Value, String> {
 }
 
 async fn request_shutdown(
-    client: &InProcessAppServerClient,
+    client: &NativeAppGatewayClient,
     request_ids: &mut RequestIdSequencer,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -1275,7 +1275,7 @@ async fn request_shutdown(
 }
 
 async fn resolve_server_request(
-    client: &InProcessAppServerClient,
+    client: &NativeAppGatewayClient,
     request_id: RequestId,
     value: serde_json::Value,
     method: &str,
@@ -1287,7 +1287,7 @@ async fn resolve_server_request(
 }
 
 async fn reject_server_request(
-    client: &InProcessAppServerClient,
+    client: &NativeAppGatewayClient,
     request_id: RequestId,
     method: &str,
     reason: String,
@@ -1318,7 +1318,7 @@ fn server_request_method_name(request: &ServerRequest) -> String {
 }
 
 async fn handle_server_request(
-    client: &InProcessAppServerClient,
+    client: &NativeAppGatewayClient,
     request: ServerRequest,
     error_seen: &mut bool,
 ) {
@@ -1861,7 +1861,7 @@ mod tests {
     fn lagged_event_warning_message_is_explicit() {
         assert_eq!(
             lagged_event_warning_message(/*skipped*/ 7),
-            "in-process app-server event stream lagged; dropped 7 events".to_string()
+            "in-process app-gateway event stream lagged; dropped 7 events".to_string()
         );
     }
 
@@ -1901,7 +1901,7 @@ mod tests {
 
     #[test]
     fn turn_items_for_thread_returns_matching_turn_items() {
-        let thread = AppServerThread {
+        let thread = AppGatewayThread {
             id: "thread-1".to_string(),
             preview: String::new(),
             summary: None,
@@ -1909,11 +1909,11 @@ mod tests {
             model_provider: "openai".to_string(),
             created_at: 0,
             updated_at: 0,
-            status: praxis_app_server_protocol::ThreadStatus::Idle,
+            status: praxis_app_gateway_protocol::ThreadStatus::Idle,
             path: None,
             cwd: PathBuf::from("/tmp/project"),
             cli_version: "0.0.0-test".to_string(),
-            source: praxis_app_server_protocol::SessionSource::Exec,
+            source: praxis_app_gateway_protocol::SessionSource::Exec,
             agent_nickname: None,
             agent_role: None,
             git_info: None,
@@ -1921,24 +1921,24 @@ mod tests {
             total_cost_usd: None,
             last_cost_usd: None,
             turns: vec![
-                praxis_app_server_protocol::Turn {
+                praxis_app_gateway_protocol::Turn {
                     id: "turn-1".to_string(),
-                    items: vec![AppServerThreadItem::AgentMessage {
+                    items: vec![AppGatewayThreadItem::AgentMessage {
                         id: "msg-1".to_string(),
                         text: "hello".to_string(),
                         phase: None,
                         memory_citation: None,
                     }],
-                    status: praxis_app_server_protocol::TurnStatus::Completed,
+                    status: praxis_app_gateway_protocol::TurnStatus::Completed,
                     error: None,
                 },
-                praxis_app_server_protocol::Turn {
+                praxis_app_gateway_protocol::Turn {
                     id: "turn-2".to_string(),
-                    items: vec![AppServerThreadItem::Plan {
+                    items: vec![AppGatewayThreadItem::Plan {
                         id: "plan-1".to_string(),
                         text: "ship it".to_string(),
                     }],
-                    status: praxis_app_server_protocol::TurnStatus::Completed,
+                    status: praxis_app_gateway_protocol::TurnStatus::Completed,
                     error: None,
                 },
             ],
@@ -1946,7 +1946,7 @@ mod tests {
 
         assert_eq!(
             turn_items_for_thread(&thread, "turn-1"),
-            Some(vec![AppServerThreadItem::AgentMessage {
+            Some(vec![AppGatewayThreadItem::AgentMessage {
                 id: "msg-1".to_string(),
                 text: "hello".to_string(),
                 phase: None,
@@ -1992,7 +1992,7 @@ mod tests {
 
         assert_eq!(
             params.approvals_reviewer,
-            Some(praxis_app_server_protocol::ApprovalsReviewer::User)
+            Some(praxis_app_gateway_protocol::ApprovalsReviewer::User)
         );
     }
 
@@ -2015,14 +2015,14 @@ mod tests {
 
         assert_eq!(
             params.approvals_reviewer,
-            Some(praxis_app_server_protocol::ApprovalsReviewer::GuardianSubagent)
+            Some(praxis_app_gateway_protocol::ApprovalsReviewer::GuardianSubagent)
         );
     }
 
     #[test]
     fn session_configured_from_thread_response_uses_review_policy_from_response() {
         let response = ThreadStartResponse {
-            thread: praxis_app_server_protocol::Thread {
+            thread: praxis_app_gateway_protocol::Thread {
                 id: "67e55044-10b1-426f-9247-bb680e5fe0c8".to_string(),
                 preview: String::new(),
                 summary: None,
@@ -2030,11 +2030,11 @@ mod tests {
                 model_provider: "openai".to_string(),
                 created_at: 0,
                 updated_at: 0,
-                status: praxis_app_server_protocol::ThreadStatus::Idle,
+                status: praxis_app_gateway_protocol::ThreadStatus::Idle,
                 path: Some(PathBuf::from("/tmp/rollout.jsonl")),
                 cwd: PathBuf::from("/tmp"),
                 cli_version: "0.0.0".to_string(),
-                source: praxis_app_server_protocol::SessionSource::Cli,
+                source: praxis_app_gateway_protocol::SessionSource::Cli,
                 agent_nickname: None,
                 agent_role: None,
                 git_info: None,
@@ -2047,11 +2047,11 @@ mod tests {
             model_provider: "openai".to_string(),
             service_tier: None,
             cwd: PathBuf::from("/tmp"),
-            approval_policy: praxis_app_server_protocol::AskForApproval::OnRequest,
-            approvals_reviewer: praxis_app_server_protocol::ApprovalsReviewer::GuardianSubagent,
-            sandbox: praxis_app_server_protocol::SandboxPolicy::WorkspaceWrite {
+            approval_policy: praxis_app_gateway_protocol::AskForApproval::OnRequest,
+            approvals_reviewer: praxis_app_gateway_protocol::ApprovalsReviewer::GuardianSubagent,
+            sandbox: praxis_app_gateway_protocol::SandboxPolicy::WorkspaceWrite {
                 writable_roots: vec![],
-                read_only_access: praxis_app_server_protocol::ReadOnlyAccess::FullAccess,
+                read_only_access: praxis_app_gateway_protocol::ReadOnlyAccess::FullAccess,
                 network_access: false,
                 exclude_tmpdir_env_var: false,
                 exclude_slash_tmp: false,

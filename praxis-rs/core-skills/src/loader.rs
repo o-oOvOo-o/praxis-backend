@@ -8,7 +8,7 @@ use crate::model::SkillToolDependency;
 use crate::system::system_cache_root_dir;
 use dirs::home_dir;
 use dunce::canonicalize as canonicalize_path;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::ConfigLayerStack;
 use praxis_config::ConfigLayerStackOrdering;
 use praxis_config::default_project_root_markers;

@@ -13,7 +13,7 @@ use crate::ToolRegistryPlanAppTool;
 use crate::ToolsConfigParams;
 use crate::WaitAgentTimeoutOptions;
 use crate::mcp_call_tool_result_output_schema;
-use praxis_app_server_protocol::AppInfo;
+use praxis_app_gateway_protocol::AppInfo;
 use praxis_features::Feature;
 use praxis_features::Features;
 use praxis_protocol::config_types::WebSearchConfig;
@@ -96,26 +96,15 @@ fn test_full_toolset_specs_for_gpt5_praxis_unified_exec_web_search() {
     ] {
         expected.insert(spec.name().to_string(), spec);
     }
-    let collab_specs = if config.multi_agent_v2 {
-        vec![
-            create_spawn_agent_tool_v2(spawn_agent_tool_options(&config)),
-            create_send_message_tool(),
-            create_wait_agent_tool_v2(wait_agent_timeout_options()),
-            create_close_agent_tool_v2(),
-        ]
-    } else {
-        vec![
-            create_spawn_agent_tool_v1(spawn_agent_tool_options(&config)),
-            create_send_input_tool_v1(),
-            create_wait_agent_tool_v1(wait_agent_timeout_options()),
-            create_close_agent_tool_v1(),
-        ]
-    };
+    let collab_specs = vec![
+        create_spawn_agent_tool(spawn_agent_tool_options(&config)),
+        create_send_message_tool(),
+        create_assign_task_tool(),
+        create_wait_agent_tool(wait_agent_timeout_options()),
+        create_close_agent_tool(),
+        create_list_agents_tool(),
+    ];
     for spec in collab_specs {
-        expected.insert(spec.name().to_string(), spec);
-    }
-    if !config.multi_agent_v2 {
-        let spec = create_resume_agent_tool();
         expected.insert(spec.name().to_string(), spec);
     }
 
@@ -163,10 +152,16 @@ fn test_build_specs_collab_tools_enabled() {
 
     assert_contains_tool_names(
         &tools,
-        &["spawn_agent", "send_input", "wait_agent", "close_agent"],
+        &[
+            "spawn_agent",
+            "send_message",
+            "assign_task",
+            "wait_agent",
+            "close_agent",
+            "list_agents",
+        ],
     );
     assert_lacks_tool_name(&tools, "spawn_agents_on_csv");
-    assert_lacks_tool_name(&tools, "list_agents");
 
     let spawn_agent = find_tool(&tools, "spawn_agent");
     let ToolSpec::Function(ResponsesApiTool { parameters, .. }) = &spawn_agent.spec else {
@@ -175,16 +170,15 @@ fn test_build_specs_collab_tools_enabled() {
     let JsonSchema::Object { properties, .. } = parameters else {
         panic!("spawn_agent should use object params");
     };
-    assert!(properties.contains_key("fork_context"));
-    assert!(!properties.contains_key("fork_turns"));
+    assert!(properties.contains_key("fork_turns"));
+    assert!(!properties.contains_key("fork_context"));
 }
 
 #[test]
-fn test_build_specs_multi_agent_v2_uses_task_names_and_hides_resume() {
+fn test_build_specs_multi_agent_uses_task_names_and_hides_resume() {
     let model_info = model_info();
     let mut features = Features::with_defaults();
     features.enable(Feature::Collab);
-    features.enable(Feature::MultiAgentV2);
     let available_models = Vec::new();
     let tools_config = ToolsConfig::new(&ToolsConfigParams {
         model_info: &model_info,
@@ -282,11 +276,25 @@ fn test_build_specs_multi_agent_v2_uses_task_names_and_hides_resume() {
         panic!("assign_task should use object params");
     };
     assert!(properties.contains_key("target"));
+    assert!(properties.contains_key("objective"));
     assert!(properties.contains_key("message"));
+    assert!(properties.contains_key("scope"));
+    assert!(properties.contains_key("constraints"));
+    assert!(properties.contains_key("acceptance_criteria"));
+    assert!(properties.contains_key("artifact_refs"));
+    assert!(properties.contains_key("required_capabilities"));
+    assert!(properties.contains_key("required_resources"));
+    assert!(properties.contains_key("token_budget"));
+    assert!(properties.contains_key("priority"));
+    assert!(properties.contains_key("exploratory"));
     assert!(!properties.contains_key("items"));
     assert_eq!(
         required.as_ref(),
-        Some(&vec!["target".to_string(), "message".to_string()])
+        Some(&vec![
+            "target".to_string(),
+            "objective".to_string(),
+            "scope".to_string()
+        ])
     );
 
     let wait_agent = find_tool(&tools, "wait_agent");
@@ -343,8 +351,6 @@ fn test_build_specs_multi_agent_v2_uses_task_names_and_hides_resume() {
         output_schema["properties"]["agents"]["items"]["required"],
         json!(["agent_name", "agent_status", "last_task_message"])
     );
-    assert_lacks_tool_name(&tools, "send_input");
-    assert_lacks_tool_name(&tools, "resume_agent");
 }
 
 #[test]
@@ -374,9 +380,11 @@ fn test_build_specs_enable_fanout_enables_agent_jobs_and_collab_tools() {
         &tools,
         &[
             "spawn_agent",
-            "send_input",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
             "spawn_agents_on_csv",
         ],
     );
@@ -483,10 +491,11 @@ fn test_build_specs_agent_job_worker_tools_enabled() {
         &tools,
         &[
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
             "spawn_agents_on_csv",
             "report_agent_job_result",
         ],

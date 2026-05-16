@@ -460,8 +460,33 @@ impl ShellHandler {
             )));
         }
 
+        let command_for_display =
+            praxis_shell_command::parse_command::shlex_join(&exec_params.command);
+        let ticket = session
+            .services
+            .agent_os
+            .request_command_ticket(
+                session.conversation_id,
+                &exec_params.command,
+                &exec_params.cwd,
+            )
+            .await
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+        let command_record_id = session
+            .services
+            .agent_os
+            .begin_managed_command(
+                &ticket,
+                command_for_display,
+                &exec_params.command,
+                exec_params.cwd.clone(),
+                None,
+            )
+            .await
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+
         // Intercept apply_patch if present.
-        if let Some(output) = intercept_apply_patch(
+        let intercept_result = intercept_apply_patch(
             &exec_params.command,
             &exec_params.cwd,
             exec_params.expiration.timeout_ms(),
@@ -471,9 +496,37 @@ impl ShellHandler {
             &call_id,
             tool_name.as_str(),
         )
-        .await?
-        {
-            return Ok(output);
+        .await;
+        match intercept_result {
+            Ok(Some(output)) => {
+                let text = output.log_preview();
+                let _ = session
+                    .services
+                    .agent_os
+                    .finish_managed_command(
+                        command_record_id.as_str(),
+                        Some(0),
+                        text.as_bytes(),
+                        /*release_leases*/ true,
+                    )
+                    .await;
+                return Ok(output);
+            }
+            Ok(None) => {}
+            Err(err) => {
+                let error_text = err.to_string();
+                let _ = session
+                    .services
+                    .agent_os
+                    .finish_managed_command(
+                        command_record_id.as_str(),
+                        Some(-1),
+                        error_text.as_bytes(),
+                        /*release_leases*/ true,
+                    )
+                    .await;
+                return Err(err);
+            }
         }
 
         let source = ExecCommandSource::Agent;
@@ -560,7 +613,35 @@ impl ShellHandler {
             .ok()
             .map(|output| crate::tools::format_exec_output_str(output, turn.truncation_policy))
             .map(JsonValue::String);
-        let content = emitter.finish(event_ctx, out).await?;
+        let finish_result = emitter.finish(event_ctx, out).await;
+        match &finish_result {
+            Ok(content) => {
+                let _ = session
+                    .services
+                    .agent_os
+                    .finish_managed_command(
+                        command_record_id.as_str(),
+                        Some(0),
+                        content.as_bytes(),
+                        /*release_leases*/ true,
+                    )
+                    .await;
+            }
+            Err(err) => {
+                let error_text = err.to_string();
+                let _ = session
+                    .services
+                    .agent_os
+                    .finish_managed_command(
+                        command_record_id.as_str(),
+                        Some(-1),
+                        error_text.as_bytes(),
+                        /*release_leases*/ true,
+                    )
+                    .await;
+            }
+        }
+        let content = finish_result?;
         Ok(FunctionToolOutput {
             body: vec![
                 praxis_protocol::models::FunctionCallOutputContentItem::InputText { text: content },

@@ -13,6 +13,30 @@ use crate::render::RectExt as _;
 pub trait Renderable {
     fn render(&self, area: Rect, buf: &mut Buffer);
     fn desired_height(&self, width: u16) -> u16;
+    fn render_window(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) {
+        if scroll_offset == 0 {
+            self.render(area, buf);
+            return;
+        }
+
+        let height = self.desired_height(area.width);
+        let buffer_height = height.min(area.height.saturating_add(scroll_offset));
+        if area.width == 0 || buffer_height <= scroll_offset {
+            return;
+        }
+
+        let mut tall_buf = Buffer::empty(Rect::new(0, 0, area.width, buffer_height));
+        self.render(*tall_buf.area(), &mut tall_buf);
+        let copy_height = area
+            .height
+            .min(tall_buf.area().height.saturating_sub(scroll_offset));
+        for y in 0..copy_height {
+            let src_y = y + scroll_offset;
+            for x in 0..area.width {
+                buf[(area.x + x, area.y + y)] = tall_buf[(x, src_y)].clone();
+            }
+        }
+    }
     fn cursor_pos(&self, _area: Rect) -> Option<(u16, u16)> {
         None
     }
@@ -28,6 +52,13 @@ impl<'a> Renderable for RenderableItem<'a> {
         match self {
             RenderableItem::Owned(child) => child.render(area, buf),
             RenderableItem::Borrowed(child) => child.render(area, buf),
+        }
+    }
+
+    fn render_window(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) {
+        match self {
+            RenderableItem::Owned(child) => child.render_window(area, buf, scroll_offset),
+            RenderableItem::Borrowed(child) => child.render_window(area, buf, scroll_offset),
         }
     }
 
@@ -120,6 +151,12 @@ impl<R: Renderable> Renderable for Option<R> {
         }
     }
 
+    fn render_window(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) {
+        if let Some(renderable) = self {
+            renderable.render_window(area, buf, scroll_offset);
+        }
+    }
+
     fn desired_height(&self, width: u16) -> u16 {
         if let Some(renderable) = self {
             renderable.desired_height(width)
@@ -132,6 +169,9 @@ impl<R: Renderable> Renderable for Option<R> {
 impl<R: Renderable> Renderable for Arc<R> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         self.as_ref().render(area, buf);
+    }
+    fn render_window(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) {
+        self.as_ref().render_window(area, buf, scroll_offset);
     }
     fn desired_height(&self, width: u16) -> u16 {
         self.as_ref().desired_height(width)
@@ -393,6 +433,34 @@ pub struct InsetRenderable<'a> {
 impl<'a> Renderable for InsetRenderable<'a> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         self.child.render(area.inset(self.insets), buf);
+    }
+    fn render_window(&self, area: Rect, buf: &mut Buffer, scroll_offset: u16) {
+        let inner_width = area
+            .width
+            .saturating_sub(self.insets.left.saturating_add(self.insets.right));
+        let child_height = self.child.desired_height(inner_width);
+        let child_top = self.insets.top;
+        if scroll_offset >= child_top.saturating_add(child_height) {
+            return;
+        }
+
+        let visible_top_inset = child_top.saturating_sub(scroll_offset);
+        let child_scroll = scroll_offset.saturating_sub(child_top);
+        let child_area_height = area.height.saturating_sub(visible_top_inset);
+        let visible_child_height = child_height
+            .saturating_sub(child_scroll)
+            .min(child_area_height);
+        if inner_width == 0 || visible_child_height == 0 {
+            return;
+        }
+
+        let child_area = Rect::new(
+            area.x.saturating_add(self.insets.left),
+            area.y.saturating_add(visible_top_inset),
+            inner_width,
+            visible_child_height,
+        );
+        self.child.render_window(child_area, buf, child_scroll);
     }
     fn desired_height(&self, width: u16) -> u16 {
         self.child

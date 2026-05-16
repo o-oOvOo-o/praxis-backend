@@ -13,12 +13,12 @@ It currently provides:
 - a Rust client: `ExecServerClient`
 - a small protocol module with shared request/response types
 
-This crate is intentionally narrow. It is not wired into the main Codex CLI or
+This crate is intentionally narrow. It is not wired into the main Praxis CLI or
 unified-exec in this PR; it is only the standalone transport layer.
 
 ## Transport
 
-The server speaks the shared `praxis-app-server-protocol` message envelope on
+The server speaks the shared `praxis-app-gateway-protocol` message envelope on
 the wire.
 
 The standalone binary supports:

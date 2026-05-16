@@ -34,7 +34,7 @@ Codex can run a notification hook when the agent finishes a turn. See the config
 
 - https://developers.openai.com/codex/config-reference
 
-When Codex knows which client started the turn, the legacy notify JSON payload also includes a top-level `client` field. The TUI reports `praxis-tui`, and the app server reports the `clientInfo.name` value from `initialize`.
+When Praxis knows which client started the turn, the legacy notify JSON payload also includes a top-level `client` field. The TUI reports `praxis-tui`, and the app gateway reports the `clientInfo.name` value from `initialize`.
 
 ## JSON Schema
 

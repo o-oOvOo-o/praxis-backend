@@ -13,14 +13,14 @@ use crate::render::renderable::ColumnRenderable;
 use crate::render::renderable::Renderable;
 use crate::shimmer::shimmer_spans;
 use crate::tui::FrameRequester;
-use praxis_app_server_protocol::PluginDetail;
-use praxis_app_server_protocol::PluginInstallPolicy;
-use praxis_app_server_protocol::PluginInstallResponse;
-use praxis_app_server_protocol::PluginListResponse;
-use praxis_app_server_protocol::PluginMarketplaceEntry;
-use praxis_app_server_protocol::PluginReadResponse;
-use praxis_app_server_protocol::PluginSummary;
-use praxis_app_server_protocol::PluginUninstallResponse;
+use praxis_app_gateway_protocol::PluginDetail;
+use praxis_app_gateway_protocol::PluginInstallPolicy;
+use praxis_app_gateway_protocol::PluginInstallResponse;
+use praxis_app_gateway_protocol::PluginListResponse;
+use praxis_app_gateway_protocol::PluginMarketplaceEntry;
+use praxis_app_gateway_protocol::PluginReadResponse;
+use praxis_app_gateway_protocol::PluginSummary;
+use praxis_app_gateway_protocol::PluginUninstallResponse;
 use praxis_features::Feature;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use ratatui::buffer::Buffer;
@@ -563,7 +563,7 @@ impl ChatWidget {
             view_id: Some(PLUGINS_SELECTION_VIEW_ID),
             header: Box::new(DelayedLoadingHeader::new(
                 self.frame_requester.clone(),
-                self.config.animations,
+                self.tui_config.animations,
                 "Loading available plugins...".to_string(),
                 Some("This first pass shows the ChatGPT marketplace only.".to_string()),
             )),
@@ -582,7 +582,7 @@ impl ChatWidget {
             view_id: Some(PLUGINS_SELECTION_VIEW_ID),
             header: Box::new(DelayedLoadingHeader::new(
                 self.frame_requester.clone(),
-                self.config.animations,
+                self.tui_config.animations,
                 format!("Loading details for {plugin_display_name}..."),
                 /*note*/ None,
             )),
@@ -786,7 +786,7 @@ impl ChatWidget {
                     });
                     tx.send(AppEvent::FetchPluginDetail {
                         cwd: cwd.clone(),
-                        params: praxis_app_server_protocol::PluginReadParams {
+                        params: praxis_app_gateway_protocol::PluginReadParams {
                             marketplace_path: marketplace_path.clone(),
                             plugin_name: plugin_name.clone(),
                         },

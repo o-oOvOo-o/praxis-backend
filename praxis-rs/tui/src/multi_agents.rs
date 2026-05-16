@@ -211,14 +211,19 @@ pub(crate) fn interaction_end(ev: CollabAgentInteractionEndEvent) -> PlainHistor
         call_id: _,
         sender_thread_id: _,
         receiver_thread_id,
+        kind,
         receiver_agent_nickname,
         receiver_agent_role,
         prompt,
         status: _,
     } = ev;
 
+    let title_prefix = match kind {
+        praxis_protocol::protocol::CollabAgentInteractionKind::SendMessage => "Sent message to",
+        praxis_protocol::protocol::CollabAgentInteractionKind::AssignTask => "Assigned task to",
+    };
     let title = title_with_agent(
-        "Sent input to",
+        title_prefix,
         AgentLabel {
             thread_id: Some(receiver_thread_id),
             nickname: receiver_agent_nickname.as_deref(),
@@ -623,6 +628,7 @@ mod tests {
             call_id: "call-send".to_string(),
             sender_thread_id,
             receiver_thread_id: robie_id,
+            kind: praxis_protocol::protocol::CollabAgentInteractionKind::SendMessage,
             receiver_agent_nickname: Some("Robie".to_string()),
             receiver_agent_role: Some("explorer".to_string()),
             prompt: "Please continue and return the answer only.".to_string(),

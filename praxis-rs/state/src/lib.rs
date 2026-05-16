@@ -59,6 +59,7 @@ pub use model::TeamTeammateCreateParams;
 pub use model::TeamTeammateStatus;
 pub use model::ThreadMetadata;
 pub use model::ThreadMetadataBuilder;
+pub use model::ThreadSourceKind;
 pub use model::ThreadsPage;
 pub use runtime::logs_db_filename;
 pub use runtime::logs_db_path;

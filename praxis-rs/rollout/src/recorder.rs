@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::Error as IoError;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use chrono::SecondsFormat;
 use chrono::Utc;
@@ -20,6 +21,7 @@ use time::macros::format_description;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
+use tokio::io::BufWriter;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
@@ -172,17 +174,22 @@ impl RolloutRecorder {
         allowed_sources: &[SessionSource],
         model_providers: Option<&[String]>,
         default_provider: &str,
+        cwd: Option<&Path>,
         search_term: Option<&str>,
     ) -> std::io::Result<ThreadsPage> {
-        Self::list_threads_with_db_fallback(
+        let state_db_ctx = state_db::get_state_db(config).await;
+        Self::list_threads_with_db_context(
             config,
+            state_db_ctx.as_deref(),
             page_size,
             cursor,
             sort_key,
             allowed_sources,
+            /*source_kinds*/ None,
             model_providers,
             default_provider,
             /*archived*/ false,
+            cwd,
             search_term,
         )
         .await
@@ -198,78 +205,107 @@ impl RolloutRecorder {
         allowed_sources: &[SessionSource],
         model_providers: Option<&[String]>,
         default_provider: &str,
+        cwd: Option<&Path>,
         search_term: Option<&str>,
     ) -> std::io::Result<ThreadsPage> {
-        Self::list_threads_with_db_fallback(
+        let state_db_ctx = state_db::get_state_db(config).await;
+        Self::list_threads_with_db_context(
             config,
+            state_db_ctx.as_deref(),
             page_size,
             cursor,
             sort_key,
             allowed_sources,
+            /*source_kinds*/ None,
             model_providers,
             default_provider,
             /*archived*/ true,
+            cwd,
             search_term,
         )
         .await
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn list_threads_with_db_fallback(
+    pub(crate) async fn list_threads_with_db_context(
         config: &impl RolloutConfigView,
+        state_db_ctx: Option<&StateRuntime>,
         page_size: usize,
         cursor: Option<&Cursor>,
         sort_key: ThreadSortKey,
         allowed_sources: &[SessionSource],
+        source_kinds: Option<&[praxis_state::ThreadSourceKind]>,
         model_providers: Option<&[String]>,
         default_provider: &str,
         archived: bool,
+        cwd: Option<&Path>,
         search_term: Option<&str>,
     ) -> std::io::Result<ThreadsPage> {
         let praxis_home = config.praxis_home();
-        let state_db_ctx = state_db::get_state_db(config).await;
-        if let Some(db_page) = state_db::list_threads_db(
-            state_db_ctx.as_deref(),
-            praxis_home,
-            page_size,
-            cursor,
-            sort_key,
-            allowed_sources,
-            model_providers,
-            archived,
-            search_term,
-        )
-        .await
-        {
-            // The hot path should be SQLite-only. The old implementation always scanned
-            // rollout files first, which made the resume picker O(number_of_session_files)
-            // even when the indexed state DB was available.
-            //
-            // If SQLite returns a full page, trust it and avoid the filesystem entirely.
-            // When it under-fills and we are not doing a DB-only search, fall back to a
-            // small filesystem page so missing/stale rollout paths can still self-repair.
-            if search_term.is_some() || db_page.items.len() >= page_size {
-                return Ok(db_page.into());
-            }
-
-            tracing::warn!(
-                db_items = db_page.items.len(),
+        if let Some(ctx) = state_db_ctx {
+            let backfill_complete =
+                state_db::is_backfill_complete(Some(ctx), "list_threads_with_db_fallback")
+                    .await
+                    .unwrap_or(false);
+            if let Some(db_page) = state_db::list_threads_db(
+                Some(ctx),
+                praxis_home,
                 page_size,
-                "state db returned an underfilled page; checking rollout files for repair"
-            );
+                cursor,
+                sort_key,
+                allowed_sources,
+                source_kinds,
+                model_providers,
+                archived,
+                cwd,
+                search_term,
+            )
+            .await
+            {
+                let can_return_db_page = backfill_complete
+                    || cursor.is_some()
+                    || search_term.is_some()
+                    || db_page.items.len() >= page_size
+                    || db_page.next_anchor.is_some();
+                if !can_return_db_page {
+                    tracing::warn!(
+                        "state db returned a partial first page before backfill completed; falling back to filesystem list once"
+                    );
+                } else {
+                    // Hot resume/list paths are DB-only. Backfill may still be running, but
+                    // foreground listing must remain O(page_size), not O(session_files).
+                    return Ok(db_page.into());
+                }
+            } else if backfill_complete {
+                tracing::warn!(
+                    "state db list failed after backfill completed; returning an empty partial page"
+                );
+                return Ok(ThreadsPage::default());
+            } else if search_term.is_some() {
+                tracing::warn!(
+                    "state db search failed before backfill completed; returning an empty partial page"
+                );
+                return Ok(ThreadsPage::default());
+            } else {
+                tracing::warn!(
+                    "state db list failed before backfill completed; falling back to filesystem list once"
+                );
+            }
         }
 
-        // Legacy and repair path. Keep the overfetch only here, not on every DB-backed list.
-        let fs_page_size = if state_db_ctx.is_some() {
-            page_size.saturating_mul(2).max(page_size)
-        } else {
-            page_size
-        };
+        if search_term.is_some() {
+            tracing::warn!(
+                "state db unavailable for indexed thread search; returning an empty page"
+            );
+            return Ok(ThreadsPage::default());
+        }
+
+        // Legacy path for environments where SQLite cannot be opened.
         let fs_page = if archived {
             let root = praxis_home.join(ARCHIVED_SESSIONS_SUBDIR);
             get_threads_in_root(
                 root,
-                fs_page_size,
+                page_size,
                 cursor,
                 sort_key,
                 ThreadListConfig {
@@ -283,7 +319,7 @@ impl RolloutRecorder {
         } else {
             get_threads(
                 praxis_home,
-                fs_page_size,
+                page_size,
                 cursor,
                 sort_key,
                 allowed_sources,
@@ -293,23 +329,7 @@ impl RolloutRecorder {
             .await?
         };
 
-        if state_db_ctx.is_some() {
-            for item in &fs_page.items {
-                state_db::read_repair_rollout_path(
-                    state_db_ctx.as_deref(),
-                    item.thread_id,
-                    Some(archived),
-                    item.path.as_path(),
-                )
-                .await;
-            }
-        }
-
-        if state_db_ctx.is_some() {
-            tracing::warn!(
-                "state db discrepancy during list_threads_with_db_fallback: falling_back"
-            );
-        }
+        let fs_page = filter_fs_page_by_cwd(fs_page, cwd, default_provider).await;
         Ok(truncate_fs_page(fs_page, page_size, sort_key))
     }
 
@@ -327,18 +347,24 @@ impl RolloutRecorder {
     ) -> std::io::Result<Option<PathBuf>> {
         let praxis_home = config.praxis_home();
         let state_db_ctx = state_db::get_state_db(config).await;
-        if state_db_ctx.is_some() {
+        if let Some(ctx) = state_db_ctx.as_deref() {
+            let backfill_complete =
+                state_db::is_backfill_complete(Some(ctx), "find_latest_thread_path")
+                    .await
+                    .unwrap_or(false);
             let mut db_cursor = cursor.cloned();
             loop {
                 let Some(db_page) = state_db::list_threads_db(
-                    state_db_ctx.as_deref(),
+                    Some(ctx),
                     praxis_home,
                     page_size,
                     db_cursor.as_ref(),
                     sort_key,
                     allowed_sources,
+                    /*source_kinds*/ None,
                     model_providers,
                     /*archived*/ false,
+                    filter_cwd,
                     /*search_term*/ None,
                 )
                 .await
@@ -355,6 +381,12 @@ impl RolloutRecorder {
                     break;
                 }
             }
+            if backfill_complete {
+                return Ok(None);
+            }
+            tracing::warn!(
+                "state db did not resolve latest thread before backfill completed; falling back to filesystem lookup once"
+            );
         }
 
         let mut cursor = cursor.cloned();
@@ -666,6 +698,32 @@ fn truncate_fs_page(
     page
 }
 
+async fn filter_fs_page_by_cwd(
+    mut page: ThreadsPage,
+    cwd: Option<&Path>,
+    default_provider: &str,
+) -> ThreadsPage {
+    let Some(cwd) = cwd else {
+        return page;
+    };
+
+    let mut filtered = Vec::with_capacity(page.items.len());
+    for item in page.items {
+        if resume_candidate_matches_cwd(
+            item.path.as_path(),
+            item.cwd.as_deref(),
+            cwd,
+            default_provider,
+        )
+        .await
+        {
+            filtered.push(item);
+        }
+    }
+    page.items = filtered;
+    page
+}
+
 struct LogFileInfo {
     /// Full path to the rollout file.
     path: PathBuf,
@@ -736,8 +794,10 @@ async fn rollout_writer(
     default_provider: String,
     generate_memories: bool,
 ) -> std::io::Result<()> {
-    let mut writer = file.map(|file| JsonlWriter { file });
+    let mut writer = file.map(JsonlWriter::new);
     let mut buffered_items = Vec::<RolloutItem>::new();
+    let mut flush_interval = tokio::time::interval(Duration::from_millis(100));
+    flush_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     if let Some(builder) = state_builder.as_mut() {
         builder.rollout_path = rollout_path.clone();
     }
@@ -761,9 +821,14 @@ async fn rollout_writer(
     }
 
     // Process rollout commands
-    while let Some(cmd) = rx.recv().await {
-        match cmd {
-            RolloutCmd::AddItems(items) => {
+    loop {
+        tokio::select! {
+            cmd = rx.recv() => {
+                let Some(cmd) = cmd else {
+                    break;
+                };
+                match cmd {
+                    RolloutCmd::AddItems(items) => {
                 if items.is_empty() {
                     continue;
                 }
@@ -782,8 +847,8 @@ async fn rollout_writer(
                     default_provider.as_str(),
                 )
                 .await?;
-            }
-            RolloutCmd::Persist { ack } => {
+                    }
+                    RolloutCmd::Persist { ack } => {
                 if writer.is_none() {
                     let result = async {
                         let Some(log_file_info) = deferred_log_file_info.take() else {
@@ -792,9 +857,7 @@ async fn rollout_writer(
                             ));
                         };
                         let file = open_log_file(log_file_info.path.as_path())?;
-                        writer = Some(JsonlWriter {
-                            file: tokio::fs::File::from_std(file),
-                        });
+                        writer = Some(JsonlWriter::new(tokio::fs::File::from_std(file)));
 
                         if let Some(session_meta) = meta.take() {
                             write_session_meta(
@@ -822,6 +885,9 @@ async fn rollout_writer(
                             .await?;
                             buffered_items.clear();
                         }
+                        if let Some(writer) = writer.as_mut() {
+                            writer.flush().await?;
+                        }
 
                         Ok(())
                     }
@@ -832,24 +898,49 @@ async fn rollout_writer(
                         return Err(err);
                     }
                 }
-                let _ = ack.send(());
-            }
-            RolloutCmd::Flush { ack } => {
-                // Deferred fresh threads may not have an initialized file yet.
                 if let Some(writer) = writer.as_mut()
-                    && let Err(e) = writer.file.flush().await
+                    && let Err(e) = writer.flush().await
                 {
                     let _ = ack.send(());
                     return Err(e);
                 }
                 let _ = ack.send(());
-            }
-            RolloutCmd::Shutdown { ack } => {
+                    }
+                    RolloutCmd::Flush { ack } => {
+                // Deferred fresh threads may not have an initialized file yet.
+                if let Some(writer) = writer.as_mut()
+                    && let Err(e) = writer.flush().await
+                {
+                    let _ = ack.send(());
+                    return Err(e);
+                }
                 let _ = ack.send(());
+                    }
+                    RolloutCmd::Shutdown { ack } => {
+                if let Some(writer) = writer.as_mut()
+                    && let Err(e) = writer.flush().await
+                {
+                    let _ = ack.send(());
+                    return Err(e);
+                }
+                let _ = ack.send(());
+                        break;
+                    }
+                }
+            }
+            _ = flush_interval.tick(), if writer.is_some() => {
+                if let Some(writer) = writer.as_mut()
+                    && let Err(err) = writer.flush().await
+                {
+                    return Err(err);
+                }
             }
         }
     }
 
+    if let Some(writer) = writer.as_mut() {
+        writer.flush().await?;
+    }
     Ok(())
 }
 
@@ -880,6 +971,7 @@ async fn write_session_meta(
     let rollout_item = RolloutItem::SessionMeta(session_meta_line);
     if let Some(writer) = writer.as_mut() {
         writer.write_rollout_item(&rollout_item).await?;
+        writer.flush().await?;
     }
     sync_thread_state_after_write(
         state_db_ctx,
@@ -968,7 +1060,8 @@ async fn sync_thread_state_after_write(
 }
 
 struct JsonlWriter {
-    file: tokio::fs::File,
+    file: BufWriter<tokio::fs::File>,
+    needs_flush: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -979,6 +1072,13 @@ struct RolloutLineRef<'a> {
 }
 
 impl JsonlWriter {
+    fn new(file: tokio::fs::File) -> Self {
+        Self {
+            file: BufWriter::new(file),
+            needs_flush: false,
+        }
+    }
+
     async fn write_rollout_item(&mut self, rollout_item: &RolloutItem) -> std::io::Result<()> {
         let timestamp_format: &[FormatItem] = format_description!(
             "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
@@ -997,7 +1097,15 @@ impl JsonlWriter {
         let mut json = serde_json::to_string(item)?;
         json.push('\n');
         self.file.write_all(json.as_bytes()).await?;
-        self.file.flush().await?;
+        self.needs_flush = true;
+        Ok(())
+    }
+
+    async fn flush(&mut self) -> std::io::Result<()> {
+        if self.needs_flush {
+            self.file.flush().await?;
+            self.needs_flush = false;
+        }
         Ok(())
     }
 }
@@ -1119,9 +1227,9 @@ fn cwd_matches(session_cwd: &Path, cwd: &Path) -> bool {
         path_utils::normalize_for_path_comparison(session_cwd),
         path_utils::normalize_for_path_comparison(cwd),
     ) {
-        return ca == cb;
+        return ca == cb || ca.starts_with(&cb);
     }
-    session_cwd == cwd
+    session_cwd == cwd || session_cwd.starts_with(cwd)
 }
 
 #[cfg(test)]

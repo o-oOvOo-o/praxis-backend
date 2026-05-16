@@ -5,9 +5,9 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use std::time::Instant;
 
-use praxis_app_server_protocol::AppBranding;
-use praxis_app_server_protocol::AppInfo;
-use praxis_app_server_protocol::AppMetadata;
+use praxis_app_gateway_protocol::AppBranding;
+use praxis_app_gateway_protocol::AppInfo;
+use praxis_app_gateway_protocol::AppMetadata;
 use serde::Deserialize;
 
 pub const CONNECTORS_CACHE_TTL: Duration = Duration::from_secs(3600);

@@ -47,8 +47,8 @@ use url::Url;
 use self::realtime::PendingSteerCompareKey;
 use crate::app_command::AppCommand;
 use crate::app_event::RealtimeAudioDeviceKind;
-use crate::app_server_approval_conversions::network_approval_context_to_core;
-use crate::app_server_session::ThreadSessionState;
+use crate::app_gateway_approval_conversions::network_approval_context_to_core;
+use crate::app_gateway_session::ThreadSessionState;
 #[cfg(not(target_os = "linux"))]
 use crate::audio_device::list_realtime_audio_device_names;
 use crate::bottom_pane::StatusLineItem;
@@ -71,35 +71,36 @@ use crate::terminal_title::SetTerminalTitleResult;
 use crate::terminal_title::clear_terminal_title;
 use crate::terminal_title::set_terminal_title;
 use crate::text_formatting::proper_join;
+use crate::tui_config::TuiRuntimeConfig;
 use crate::version::PRAXIS_CLI_VERSION;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use praxis_app_server_protocol::AppSummary;
-use praxis_app_server_protocol::CodexErrorInfo as AppServerCodexErrorInfo;
-use praxis_app_server_protocol::CollabAgentState as AppServerCollabAgentState;
-use praxis_app_server_protocol::CollabAgentStatus as AppServerCollabAgentStatus;
-use praxis_app_server_protocol::CollabAgentTool;
-use praxis_app_server_protocol::CollabAgentToolCallStatus;
-use praxis_app_server_protocol::CommandExecutionRequestApprovalParams;
-use praxis_app_server_protocol::ConfigLayerSource;
-use praxis_app_server_protocol::ErrorNotification;
-use praxis_app_server_protocol::FileChangeRequestApprovalParams;
-use praxis_app_server_protocol::GuardianApprovalReviewAction;
-use praxis_app_server_protocol::ItemCompletedNotification;
-use praxis_app_server_protocol::ItemStartedNotification;
-use praxis_app_server_protocol::McpServerStartupState;
-use praxis_app_server_protocol::McpServerStatusUpdatedNotification;
-use praxis_app_server_protocol::ServerNotification;
-use praxis_app_server_protocol::ServerRequest;
-use praxis_app_server_protocol::ThreadItem;
-use praxis_app_server_protocol::ThreadTokenUsage;
-use praxis_app_server_protocol::ToolRequestUserInputParams;
-use praxis_app_server_protocol::Turn;
-use praxis_app_server_protocol::TurnCompletedNotification;
-use praxis_app_server_protocol::TurnPlanStepStatus;
-use praxis_app_server_protocol::TurnStatus;
+use praxis_app_gateway_protocol::AppSummary;
+use praxis_app_gateway_protocol::CodexErrorInfo as AppGatewayCodexErrorInfo;
+use praxis_app_gateway_protocol::CollabAgentState as AppGatewayCollabAgentState;
+use praxis_app_gateway_protocol::CollabAgentStatus as AppGatewayCollabAgentStatus;
+use praxis_app_gateway_protocol::CollabAgentTool;
+use praxis_app_gateway_protocol::CollabAgentToolCallStatus;
+use praxis_app_gateway_protocol::CommandExecutionRequestApprovalParams;
+use praxis_app_gateway_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ErrorNotification;
+use praxis_app_gateway_protocol::FileChangeRequestApprovalParams;
+use praxis_app_gateway_protocol::GuardianApprovalReviewAction;
+use praxis_app_gateway_protocol::ItemCompletedNotification;
+use praxis_app_gateway_protocol::ItemStartedNotification;
+use praxis_app_gateway_protocol::McpServerStartupState;
+use praxis_app_gateway_protocol::McpServerStatusUpdatedNotification;
+use praxis_app_gateway_protocol::ServerNotification;
+use praxis_app_gateway_protocol::ServerRequest;
+use praxis_app_gateway_protocol::ThreadItem;
+use praxis_app_gateway_protocol::ThreadTokenUsage;
+use praxis_app_gateway_protocol::ToolRequestUserInputParams;
+use praxis_app_gateway_protocol::Turn;
+use praxis_app_gateway_protocol::TurnCompletedNotification;
+use praxis_app_gateway_protocol::TurnPlanStepStatus;
+use praxis_app_gateway_protocol::TurnStatus;
 use praxis_chatgpt::connectors;
 use praxis_config::types::ApprovalsReviewer;
 use praxis_config::types::Notifications;
@@ -108,7 +109,6 @@ use praxis_core::config::Config;
 use praxis_core::config::Constrained;
 use praxis_core::config::ConstraintResult;
 use praxis_core::config_loader::ConfigLayerStackOrdering;
-use praxis_core::find_thread_name_by_id;
 use praxis_core::plugins::PluginsManager;
 use praxis_core::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use praxis_core::skills::model::SkillMetadata;
@@ -357,8 +357,6 @@ use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 #[cfg(test)]
 use crate::markdown::append_markdown;
-use crate::render::Insets;
-use crate::render::RectExt as _;
 use crate::render::renderable::ColumnRenderable;
 use crate::render::renderable::Renderable;
 use crate::slash_command::SlashCommand;
@@ -391,9 +389,18 @@ mod realtime;
 use self::realtime::RealtimeConversationUiState;
 use self::realtime::RenderedUserMessageEvent;
 mod status_surfaces;
+mod surface_layout;
 mod team_tasks;
 use self::status_surfaces::CachedProjectRootName;
 use self::status_surfaces::TerminalTitleStatusKind;
+use self::surface_layout::CHAT_SECTION_GAP_ROWS;
+use self::surface_layout::ChatSurfaceLayoutInput;
+use self::surface_layout::ChatWidgetLayout;
+use self::surface_layout::IN_APP_TOAST_ROW_HEIGHT;
+use self::surface_layout::chat_surface_split_for_width;
+use self::surface_layout::layout_chat_surface;
+mod work_panel;
+use self::work_panel::WorkPanelState;
 use crate::streaming::chunking::AdaptiveChunkingPolicy;
 use crate::streaming::commit_tick::CommitTickScope;
 use crate::streaming::commit_tick::run_commit_tick;
@@ -577,6 +584,7 @@ pub(crate) fn get_limits_duration(windows_minutes: i64) -> String {
 /// Common initialization parameters shared by all `ChatWidget` constructors.
 pub(crate) struct ChatWidgetInit {
     pub(crate) config: Config,
+    pub(crate) tui_config: TuiRuntimeConfig,
     pub(crate) frame_requester: FrameRequester,
     pub(crate) app_event_tx: AppEventSender,
     pub(crate) initial_user_message: Option<UserMessage>,
@@ -644,11 +652,13 @@ fn core_rate_limit_error_kind(info: &CoreCodexErrorInfo) -> Option<RateLimitErro
     }
 }
 
-fn app_server_rate_limit_error_kind(info: &AppServerCodexErrorInfo) -> Option<RateLimitErrorKind> {
+fn app_gateway_rate_limit_error_kind(
+    info: &AppGatewayCodexErrorInfo,
+) -> Option<RateLimitErrorKind> {
     match info {
-        AppServerCodexErrorInfo::ServerOverloaded => Some(RateLimitErrorKind::ServerOverloaded),
-        AppServerCodexErrorInfo::UsageLimitExceeded => Some(RateLimitErrorKind::UsageLimit),
-        AppServerCodexErrorInfo::ResponseTooManyFailedAttempts {
+        AppGatewayCodexErrorInfo::ServerOverloaded => Some(RateLimitErrorKind::ServerOverloaded),
+        AppGatewayCodexErrorInfo::UsageLimitExceeded => Some(RateLimitErrorKind::UsageLimit),
+        AppGatewayCodexErrorInfo::ResponseTooManyFailedAttempts {
             http_status_code: Some(429),
         } => Some(RateLimitErrorKind::Generic),
         _ => None,
@@ -785,7 +795,9 @@ pub(crate) struct ChatWidget {
     /// owns committed transcript cells. The app layer passes committed cells into the helpers below
     /// so query state, result counters, and next/prev navigation can still live with the chat UI.
     transcript_search: TranscriptSearchState,
+    transcript_search_document_cache: Option<TranscriptSearchDocumentCache>,
     config: Config,
+    tui_config: TuiRuntimeConfig,
     /// The unmasked collaboration mode settings (always Default mode).
     ///
     /// Masks are applied on top of this base mode to derive the effective mode.
@@ -812,7 +824,7 @@ pub(crate) struct ChatWidget {
     plan_stream_controller: Option<PlanStreamController>,
     // Latest completed user-visible Praxis output that `/copy` should place on the clipboard.
     last_copyable_output: Option<String>,
-    // Final-answer agent message observed during the active turn. App-server turn completion
+    // Final-answer agent message observed during the active turn. App-gateway turn completion
     // notifications do not repeat this payload, so we promote it when the turn completes.
     pending_turn_copyable_output: Option<String>,
     running_commands: HashMap<String, RunningCommand>,
@@ -946,6 +958,8 @@ pub(crate) struct ChatWidget {
     saw_plan_item_this_turn: bool,
     // Latest `update_plan` checklist task counts for terminal-title rendering.
     last_plan_progress: Option<(usize, usize)>,
+    // TUI-only work sidebar projection; runtime ownership stays in core/protocol state.
+    work_panel: WorkPanelState,
     // Incremental buffer for streamed plan content.
     plan_delta_buffer: String,
     // True while a plan item is streaming.
@@ -985,7 +999,7 @@ pub(crate) struct ChatWidget {
     //
     // The outer `Option` tracks whether a setup session is active (`Some`)
     // or not (`None`). The inner `Option<Vec<String>>` mirrors the shape
-    // of `config.tui_terminal_title` (which is `None` when using defaults).
+    // of `tui_config.terminal_title` (which is `None` when using defaults).
     // On cancel or persist-failure the inner value is restored to config;
     // on confirm the outer is set to `None` to end the session.
     terminal_title_setup_original_items: Option<Option<Vec<String>>>,
@@ -1021,15 +1035,6 @@ struct ActiveCellRenderCache {
     lines: Vec<Line<'static>>,
     desired_height: u16,
     mouse_targets: Vec<history_cell::HistoryCellMouseTarget>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct ChatWidgetLayout {
-    active_outer_area: Option<Rect>,
-    active_content_area: Option<Rect>,
-    toast_area: Option<Rect>,
-    bottom_outer_area: Rect,
-    bottom_content_area: Rect,
 }
 
 /// Cached nickname and role for a collab agent thread, used to attach human-readable labels to
@@ -1076,12 +1081,29 @@ pub(crate) struct ActiveCellTranscriptKey {
     pub(crate) presentation_revision: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TranscriptSearchDocumentKey {
+    width: u16,
+    committed_len: usize,
+    committed_first_ptr: usize,
+    committed_last_ptr: usize,
+    presentation_revision: u64,
+    active_revision: Option<u64>,
+    active_presentation_revision: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TranscriptSearchDocumentCache {
+    key: TranscriptSearchDocumentKey,
+    documents: Vec<TranscriptSearchDocument>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct UserMessage {
     text: String,
     local_images: Vec<LocalImageAttachment>,
     /// Remote image attachments represented as URLs (for example data URLs)
-    /// provided by app-server clients.
+    /// provided by app-gateway clients.
     ///
     /// Unlike `local_images`, these are not created by TUI image attach/paste
     /// flows. The TUI can restore and remove them while editing/backtracking.
@@ -1391,7 +1413,7 @@ fn thread_session_state_to_legacy_event(
 }
 
 fn hook_output_entry_from_notification(
-    entry: praxis_app_server_protocol::HookOutputEntry,
+    entry: praxis_app_gateway_protocol::HookOutputEntry,
 ) -> praxis_protocol::protocol::HookOutputEntry {
     praxis_protocol::protocol::HookOutputEntry {
         kind: entry.kind.to_core(),
@@ -1400,7 +1422,7 @@ fn hook_output_entry_from_notification(
 }
 
 fn hook_run_summary_from_notification(
-    run: praxis_app_server_protocol::HookRunSummary,
+    run: praxis_app_gateway_protocol::HookRunSummary,
 ) -> praxis_protocol::protocol::HookRunSummary {
     praxis_protocol::protocol::HookRunSummary {
         id: run.id,
@@ -1424,7 +1446,7 @@ fn hook_run_summary_from_notification(
 }
 
 fn hook_started_event_from_notification(
-    notification: praxis_app_server_protocol::HookStartedNotification,
+    notification: praxis_app_gateway_protocol::HookStartedNotification,
 ) -> praxis_protocol::protocol::HookStartedEvent {
     praxis_protocol::protocol::HookStartedEvent {
         turn_id: notification.turn_id,
@@ -1433,7 +1455,7 @@ fn hook_started_event_from_notification(
 }
 
 fn hook_completed_event_from_notification(
-    notification: praxis_app_server_protocol::HookCompletedNotification,
+    notification: praxis_app_gateway_protocol::HookCompletedNotification,
 ) -> praxis_protocol::protocol::HookCompletedEvent {
     praxis_protocol::protocol::HookCompletedEvent {
         turn_id: notification.turn_id,
@@ -1441,14 +1463,14 @@ fn hook_completed_event_from_notification(
     }
 }
 
-fn app_server_request_id_to_mcp_request_id(
-    request_id: &praxis_app_server_protocol::RequestId,
+fn app_gateway_request_id_to_mcp_request_id(
+    request_id: &praxis_app_gateway_protocol::RequestId,
 ) -> praxis_protocol::mcp::RequestId {
     match request_id {
-        praxis_app_server_protocol::RequestId::String(value) => {
+        praxis_app_gateway_protocol::RequestId::String(value) => {
             praxis_protocol::mcp::RequestId::String(value.clone())
         }
-        praxis_app_server_protocol::RequestId::Integer(value) => {
+        praxis_app_gateway_protocol::RequestId::Integer(value) => {
             praxis_protocol::mcp::RequestId::Integer(*value)
         }
     }
@@ -1474,12 +1496,12 @@ fn exec_approval_request_from_params(
         approval_id: params.approval_id,
         proposed_execpolicy_amendment: params
             .proposed_execpolicy_amendment
-            .map(praxis_app_server_protocol::ExecPolicyAmendment::into_core),
+            .map(praxis_app_gateway_protocol::ExecPolicyAmendment::into_core),
         proposed_network_policy_amendments: params.proposed_network_policy_amendments.map(
             |amendments| {
                 amendments
                     .into_iter()
-                    .map(praxis_app_server_protocol::NetworkPolicyAmendment::into_core)
+                    .map(praxis_app_gateway_protocol::NetworkPolicyAmendment::into_core)
                     .collect()
             },
         ),
@@ -1487,26 +1509,26 @@ fn exec_approval_request_from_params(
             decisions
                 .into_iter()
                 .map(|decision| match decision {
-                    praxis_app_server_protocol::CommandExecutionApprovalDecision::Accept => {
+                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::Accept => {
                         praxis_protocol::protocol::ReviewDecision::Approved
                     }
-                    praxis_app_server_protocol::CommandExecutionApprovalDecision::AcceptForSession => {
+                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::AcceptForSession => {
                         praxis_protocol::protocol::ReviewDecision::ApprovedForSession
                     }
-                    praxis_app_server_protocol::CommandExecutionApprovalDecision::AcceptWithExecpolicyAmendment {
+                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::AcceptWithExecpolicyAmendment {
                         execpolicy_amendment,
                     } => praxis_protocol::protocol::ReviewDecision::ApprovedExecpolicyAmendment {
                         proposed_execpolicy_amendment: execpolicy_amendment.into_core(),
                     },
-                    praxis_app_server_protocol::CommandExecutionApprovalDecision::ApplyNetworkPolicyAmendment {
+                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::ApplyNetworkPolicyAmendment {
                         network_policy_amendment,
                     } => praxis_protocol::protocol::ReviewDecision::NetworkPolicyAmendment {
                         network_policy_amendment: network_policy_amendment.into_core(),
                     },
-                    praxis_app_server_protocol::CommandExecutionApprovalDecision::Decline => {
+                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::Decline => {
                         praxis_protocol::protocol::ReviewDecision::Denied
                     }
-                    praxis_app_server_protocol::CommandExecutionApprovalDecision::Cancel => {
+                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::Cancel => {
                         praxis_protocol::protocol::ReviewDecision::Abort
                     }
                 })
@@ -1516,7 +1538,7 @@ fn exec_approval_request_from_params(
             .command_actions
             .unwrap_or_default()
             .into_iter()
-            .map(praxis_app_server_protocol::CommandAction::into_core)
+            .map(praxis_app_gateway_protocol::CommandAction::into_core)
             .collect(),
     }
 }
@@ -1533,25 +1555,25 @@ fn patch_approval_request_from_params(
     }
 }
 
-fn app_server_patch_changes_to_core(
-    changes: Vec<praxis_app_server_protocol::FileUpdateChange>,
+fn app_gateway_patch_changes_to_core(
+    changes: Vec<praxis_app_gateway_protocol::FileUpdateChange>,
 ) -> HashMap<PathBuf, praxis_protocol::protocol::FileChange> {
     changes
         .into_iter()
         .map(|change| {
             let path = PathBuf::from(change.path);
             let file_change = match change.kind {
-                praxis_app_server_protocol::PatchChangeKind::Add => {
+                praxis_app_gateway_protocol::PatchChangeKind::Add => {
                     praxis_protocol::protocol::FileChange::Add {
                         content: change.diff,
                     }
                 }
-                praxis_app_server_protocol::PatchChangeKind::Delete => {
+                praxis_app_gateway_protocol::PatchChangeKind::Delete => {
                     praxis_protocol::protocol::FileChange::Delete {
                         content: change.diff,
                     }
                 }
-                praxis_app_server_protocol::PatchChangeKind::Update { move_path } => {
+                praxis_app_gateway_protocol::PatchChangeKind::Update { move_path } => {
                     praxis_protocol::protocol::FileChange::Update {
                         unified_diff: change.diff,
                         move_path,
@@ -1563,7 +1585,7 @@ fn app_server_patch_changes_to_core(
         .collect()
 }
 
-fn app_server_collab_thread_id_to_core(thread_id: &str) -> Option<ThreadId> {
+fn app_gateway_collab_thread_id_to_core(thread_id: &str) -> Option<ThreadId> {
     match ThreadId::from_string(thread_id) {
         Ok(thread_id) => Some(thread_id),
         Err(err) => {
@@ -1573,41 +1595,41 @@ fn app_server_collab_thread_id_to_core(thread_id: &str) -> Option<ThreadId> {
     }
 }
 
-fn app_server_collab_state_to_core(state: &AppServerCollabAgentState) -> AgentStatus {
+fn app_gateway_collab_state_to_core(state: &AppGatewayCollabAgentState) -> AgentStatus {
     match state.status {
-        AppServerCollabAgentStatus::PendingInit => AgentStatus::PendingInit,
-        AppServerCollabAgentStatus::Running => AgentStatus::Running,
-        AppServerCollabAgentStatus::Interrupted => AgentStatus::Interrupted,
-        AppServerCollabAgentStatus::Completed => AgentStatus::Completed(state.message.clone()),
-        AppServerCollabAgentStatus::Errored => AgentStatus::Errored(
+        AppGatewayCollabAgentStatus::PendingInit => AgentStatus::PendingInit,
+        AppGatewayCollabAgentStatus::Running => AgentStatus::Running,
+        AppGatewayCollabAgentStatus::Interrupted => AgentStatus::Interrupted,
+        AppGatewayCollabAgentStatus::Completed => AgentStatus::Completed(state.message.clone()),
+        AppGatewayCollabAgentStatus::Errored => AgentStatus::Errored(
             state
                 .message
                 .clone()
                 .unwrap_or_else(|| "Agent errored".into()),
         ),
-        AppServerCollabAgentStatus::Shutdown => AgentStatus::Shutdown,
-        AppServerCollabAgentStatus::NotFound => AgentStatus::NotFound,
+        AppGatewayCollabAgentStatus::Shutdown => AgentStatus::Shutdown,
+        AppGatewayCollabAgentStatus::NotFound => AgentStatus::NotFound,
     }
 }
 
-/// Converts app-server collab agent states into the core protocol representation, enriching each
+/// Converts app-gateway collab agent states into the core protocol representation, enriching each
 /// entry with cached nickname and role metadata so rendered items show human-readable names.
-fn app_server_collab_agent_statuses_to_core(
+fn app_gateway_collab_agent_statuses_to_core(
     receiver_thread_ids: &[String],
-    agents_states: &HashMap<String, AppServerCollabAgentState>,
+    agents_states: &HashMap<String, AppGatewayCollabAgentState>,
     collab_agent_metadata: &HashMap<ThreadId, CollabAgentMetadata>,
 ) -> (Vec<CollabAgentStatusEntry>, HashMap<ThreadId, AgentStatus>) {
     let mut agent_statuses = Vec::new();
     let mut statuses = HashMap::new();
 
     for receiver_thread_id in receiver_thread_ids {
-        let Some(thread_id) = app_server_collab_thread_id_to_core(receiver_thread_id) else {
+        let Some(thread_id) = app_gateway_collab_thread_id_to_core(receiver_thread_id) else {
             continue;
         };
         let Some(agent_state) = agents_states.get(receiver_thread_id) else {
             continue;
         };
-        let status = app_server_collab_state_to_core(agent_state);
+        let status = app_gateway_collab_state_to_core(agent_state);
         let metadata = collab_agent_metadata
             .get(&thread_id)
             .cloned()
@@ -1628,14 +1650,14 @@ fn app_server_collab_agent_statuses_to_core(
 ///
 /// Used when converting collab `Wait` tool-call items so the rendered waiting list shows agent
 /// names instead of bare thread ids.
-fn app_server_collab_receiver_agent_refs(
+fn app_gateway_collab_receiver_agent_refs(
     receiver_thread_ids: &[String],
     collab_agent_metadata: &HashMap<ThreadId, CollabAgentMetadata>,
 ) -> Vec<CollabAgentRef> {
     receiver_thread_ids
         .iter()
         .filter_map(|thread_id| {
-            let thread_id = app_server_collab_thread_id_to_core(thread_id)?;
+            let thread_id = app_gateway_collab_thread_id_to_core(thread_id)?;
             let metadata = collab_agent_metadata
                 .get(&thread_id)
                 .cloned()
@@ -1650,7 +1672,7 @@ fn app_server_collab_receiver_agent_refs(
 }
 
 fn request_permissions_from_params(
-    params: praxis_app_server_protocol::PermissionsRequestApprovalParams,
+    params: praxis_app_gateway_protocol::PermissionsRequestApprovalParams,
 ) -> RequestPermissionsEvent {
     RequestPermissionsEvent {
         turn_id: params.turn_id,
@@ -1689,7 +1711,7 @@ fn request_user_input_from_params(params: ToolRequestUserInputParams) -> Request
     }
 }
 
-fn token_usage_info_from_app_server(token_usage: ThreadTokenUsage) -> TokenUsageInfo {
+fn token_usage_info_from_app_gateway(token_usage: ThreadTokenUsage) -> TokenUsageInfo {
     TokenUsageInfo {
         total_token_usage: TokenUsage {
             total_tokens: token_usage.total.total_tokens,
@@ -1710,19 +1732,19 @@ fn token_usage_info_from_app_server(token_usage: ThreadTokenUsage) -> TokenUsage
 }
 
 fn web_search_action_to_core(
-    action: praxis_app_server_protocol::WebSearchAction,
+    action: praxis_app_gateway_protocol::WebSearchAction,
 ) -> praxis_protocol::models::WebSearchAction {
     match action {
-        praxis_app_server_protocol::WebSearchAction::Search { query, queries } => {
+        praxis_app_gateway_protocol::WebSearchAction::Search { query, queries } => {
             praxis_protocol::models::WebSearchAction::Search { query, queries }
         }
-        praxis_app_server_protocol::WebSearchAction::OpenPage { url } => {
+        praxis_app_gateway_protocol::WebSearchAction::OpenPage { url } => {
             praxis_protocol::models::WebSearchAction::OpenPage { url }
         }
-        praxis_app_server_protocol::WebSearchAction::FindInPage { url, pattern } => {
+        praxis_app_gateway_protocol::WebSearchAction::FindInPage { url, pattern } => {
             praxis_protocol::models::WebSearchAction::FindInPage { url, pattern }
         }
-        praxis_app_server_protocol::WebSearchAction::Other => {
+        praxis_app_gateway_protocol::WebSearchAction::Other => {
             praxis_protocol::models::WebSearchAction::Other
         }
     }
@@ -1961,18 +1983,18 @@ impl ChatWidget {
     pub(crate) fn setup_status_line(&mut self, items: Vec<StatusLineItem>) {
         tracing::info!("status line setup confirmed with items: {items:#?}");
         let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
-        self.config.tui_status_line = Some(ids);
+        self.tui_config.status_line = Some(ids);
         self.refresh_status_line();
     }
 
     /// Applies a temporary terminal-title selection while the setup UI is open.
     pub(crate) fn preview_terminal_title(&mut self, items: Vec<TerminalTitleItem>) {
         if self.terminal_title_setup_original_items.is_none() {
-            self.terminal_title_setup_original_items = Some(self.config.tui_terminal_title.clone());
+            self.terminal_title_setup_original_items = Some(self.tui_config.terminal_title.clone());
         }
 
         let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
-        self.config.tui_terminal_title = Some(ids);
+        self.tui_config.terminal_title = Some(ids);
         self.refresh_terminal_title();
     }
 
@@ -1983,7 +2005,7 @@ impl ChatWidget {
             return;
         };
 
-        self.config.tui_terminal_title = original_items;
+        self.tui_config.terminal_title = original_items;
         self.refresh_terminal_title();
     }
 
@@ -2001,7 +2023,7 @@ impl ChatWidget {
         tracing::info!("terminal title setup confirmed with items: {items:#?}");
         let ids = items.iter().map(ToString::to_string).collect::<Vec<_>>();
         self.terminal_title_setup_original_items = None;
-        self.config.tui_terminal_title = Some(ids);
+        self.tui_config.terminal_title = Some(ids);
         self.refresh_terminal_title();
     }
 
@@ -2054,6 +2076,12 @@ impl ChatWidget {
 
     // --- Small event handlers ---
     fn on_session_configured(&mut self, event: praxis_protocol::protocol::SessionConfiguredEvent) {
+        if self
+            .thread_id
+            .is_some_and(|thread_id| thread_id != event.session_id)
+        {
+            self.work_panel.clear_plan();
+        }
         self.bottom_pane
             .set_history_metadata(event.history_log_id, event.history_entry_count);
         self.set_skills(/*skills*/ None);
@@ -2118,6 +2146,7 @@ impl ChatWidget {
         let initial_messages = event.initial_messages.clone();
         let session_info_cell = history_cell::new_session_info(
             &self.config,
+            &self.tui_config,
             &model_for_header,
             event,
             self.show_welcome_banner,
@@ -2170,6 +2199,7 @@ impl ChatWidget {
             self.selfwork_turn_in_flight = false;
         }
         self.selfwork_plan_path = session.selfwork_plan_path.clone();
+        self.sync_work_panel_selfwork();
         self.on_session_configured(thread_session_state_to_legacy_event(session));
     }
 
@@ -2208,15 +2238,15 @@ impl ChatWidget {
                 )));
             };
 
-            match find_thread_name_by_id(&praxis_home, &forked_from_id).await {
-                Ok(Some(name)) if !name.trim().is_empty() => {
+            let state_db = praxis_rollout::state_db::open_if_present(&praxis_home, "").await;
+            match praxis_rollout::ThreadNameResolver::new(state_db.as_deref())
+                .resolve_name(forked_from_id)
+                .await
+            {
+                Some(name) if !name.trim().is_empty() => {
                     send_name_and_id(name);
                 }
-                Ok(_) => send_id_only(),
-                Err(err) => {
-                    tracing::warn!("Failed to read forked thread name: {err}");
-                    send_id_only();
-                }
+                _ => send_id_only(),
             }
         });
     }
@@ -2436,6 +2466,7 @@ impl ChatWidget {
     fn on_task_complete(&mut self, last_agent_message: Option<String>, from_replay: bool) {
         let completed_selfwork_turn = self.selfwork_turn_in_flight;
         self.selfwork_turn_in_flight = false;
+        self.sync_work_panel_selfwork();
         self.submit_pending_steers_after_interrupt = false;
         let copyable_turn_output = last_agent_message
             .filter(|message| !message.trim().is_empty())
@@ -2631,13 +2662,13 @@ impl ChatWidget {
         ) && self.enqueue_rejected_steer()
     }
 
-    fn handle_app_server_steer_rejected_error(
+    fn handle_app_gateway_steer_rejected_error(
         &mut self,
-        praxis_error_info: &AppServerCodexErrorInfo,
+        praxis_error_info: &AppGatewayCodexErrorInfo,
     ) -> bool {
         matches!(
             praxis_error_info,
-            AppServerCodexErrorInfo::ActiveTurnNotSteerable { .. }
+            AppGatewayCodexErrorInfo::ActiveTurnNotSteerable { .. }
         ) && self.enqueue_rejected_steer()
     }
 
@@ -2944,15 +2975,15 @@ impl ChatWidget {
     fn handle_non_retry_error(
         &mut self,
         message: String,
-        praxis_error_info: Option<AppServerCodexErrorInfo>,
+        praxis_error_info: Option<AppGatewayCodexErrorInfo>,
     ) {
         if praxis_error_info
             .as_ref()
-            .is_some_and(|info| self.handle_app_server_steer_rejected_error(info))
+            .is_some_and(|info| self.handle_app_gateway_steer_rejected_error(info))
         {
         } else if let Some(info) = praxis_error_info
             .as_ref()
-            .and_then(app_server_rate_limit_error_kind)
+            .and_then(app_gateway_rate_limit_error_kind)
         {
             match info {
                 RateLimitErrorKind::ServerOverloaded => self.on_server_overloaded_error(message),
@@ -2973,7 +3004,7 @@ impl ChatWidget {
     /// Record one MCP startup update, promoting it into either the active startup
     /// round or a buffered "next" round.
     ///
-    /// This path has to deal with lossy app-server delivery. After
+    /// This path has to deal with lossy app-gateway delivery. After
     /// `finish_mcp_startup()` or `finish_mcp_startup_after_lag()`, we briefly
     /// ignore incoming updates so stale events from the just-finished round do not
     /// reopen startup. While that guard is active we buffer updates for a possible
@@ -3046,7 +3077,7 @@ impl ChatWidget {
         self.mcp_startup_status = Some(startup_status);
         self.update_task_running_state();
 
-        // App-server-backed startup completes when every expected server has
+        // App-gateway-backed startup completes when every expected server has
         // reported a non-Starting status. Lag handling can force an earlier
         // settle via `finish_mcp_startup_after_lag()`.
         if complete_when_settled
@@ -3348,6 +3379,7 @@ impl ChatWidget {
             self.selfwork_last_plan_digest = input_state.selfwork_last_plan_digest;
             self.selfwork_stall_count = input_state.selfwork_stall_count;
             self.selfwork_turn_in_flight = input_state.selfwork_turn_in_flight;
+            self.sync_work_panel_selfwork();
             self.agent_turn_running = input_state.agent_turn_running;
             self.update_collaboration_mode_indicator();
             self.refresh_model_dependent_surfaces();
@@ -3394,9 +3426,11 @@ impl ChatWidget {
             self.agent_turn_running = false;
             self.pending_steers.clear();
             self.rejected_steers_queue.clear();
+            self.selfwork_plan_path = None;
             self.selfwork_last_plan_digest = None;
             self.selfwork_stall_count = 0;
             self.selfwork_turn_in_flight = false;
+            self.sync_work_panel_selfwork();
             self.set_remote_image_urls(Vec::new());
             self.bottom_pane.set_composer_text_with_mention_bindings(
                 String::new(),
@@ -3434,6 +3468,7 @@ impl ChatWidget {
             })
             .count();
         self.last_plan_progress = (total > 0).then_some((completed, total));
+        self.work_panel.update_plan(&update);
         self.refresh_terminal_title();
         self.add_to_history(history_cell::new_plan_update(update));
     }
@@ -3881,7 +3916,7 @@ impl ChatWidget {
         self.active_cell = Some(Box::new(history_cell::new_active_web_search_call(
             ev.call_id,
             String::new(),
-            self.config.animations,
+            self.tui_config.animations,
         )));
         self.bump_active_cell_revision();
         self.request_redraw();
@@ -3935,12 +3970,12 @@ impl ChatWidget {
         else {
             return;
         };
-        let sender_thread_id = app_server_collab_thread_id_to_core(&sender_thread_id)
+        let sender_thread_id = app_gateway_collab_thread_id_to_core(&sender_thread_id)
             .or(self.thread_id)
             .unwrap_or_default();
         let first_receiver = receiver_thread_ids
             .first()
-            .and_then(|thread_id| app_server_collab_thread_id_to_core(thread_id));
+            .and_then(|thread_id| app_gateway_collab_thread_id_to_core(thread_id));
         let first_receiver_metadata =
             first_receiver.map(|thread_id| self.collab_agent_metadata(thread_id));
 
@@ -3985,7 +4020,7 @@ impl ChatWidget {
                             status: first_receiver
                                 .as_ref()
                                 .and_then(|thread_id| agents_states.get(&thread_id.to_string()))
-                                .map(app_server_collab_state_to_core)
+                                .map(app_gateway_collab_state_to_core)
                                 .unwrap_or_else(|| {
                                     AgentStatus::Errored("Agent spawn failed".into())
                                 }),
@@ -3994,15 +4029,25 @@ impl ChatWidget {
                     ));
                 }
             }
-            CollabAgentTool::SendInput => {
+            tool @ (CollabAgentTool::SendMessage | CollabAgentTool::AssignTask) => {
                 if let Some(receiver_thread_id) = first_receiver
                     && !matches!(status, CollabAgentToolCallStatus::InProgress)
                 {
+                    let kind = match tool {
+                        CollabAgentTool::SendMessage => {
+                            praxis_protocol::protocol::CollabAgentInteractionKind::SendMessage
+                        }
+                        CollabAgentTool::AssignTask => {
+                            praxis_protocol::protocol::CollabAgentInteractionKind::AssignTask
+                        }
+                        _ => unreachable!(),
+                    };
                     self.on_collab_event(multi_agents::interaction_end(
                         praxis_protocol::protocol::CollabAgentInteractionEndEvent {
                             call_id: id,
                             sender_thread_id,
                             receiver_thread_id,
+                            kind,
                             receiver_agent_nickname: first_receiver_metadata
                                 .as_ref()
                                 .and_then(|metadata| metadata.agent_nickname.clone()),
@@ -4013,7 +4058,7 @@ impl ChatWidget {
                             status: receiver_thread_ids
                                 .iter()
                                 .find_map(|thread_id| agents_states.get(thread_id))
-                                .map(app_server_collab_state_to_core)
+                                .map(app_gateway_collab_state_to_core)
                                 .unwrap_or_else(|| {
                                     AgentStatus::Errored("Agent interaction failed".into())
                                 }),
@@ -4021,7 +4066,7 @@ impl ChatWidget {
                     ));
                 }
             }
-            CollabAgentTool::ResumeAgent => {
+            CollabAgentTool::ResumeThread => {
                 if let Some(receiver_thread_id) = first_receiver {
                     if matches!(status, CollabAgentToolCallStatus::InProgress) {
                         self.on_collab_event(multi_agents::resume_begin(
@@ -4052,7 +4097,7 @@ impl ChatWidget {
                                 status: receiver_thread_ids
                                     .iter()
                                     .find_map(|thread_id| agents_states.get(thread_id))
-                                    .map(app_server_collab_state_to_core)
+                                    .map(app_gateway_collab_state_to_core)
                                     .unwrap_or_else(|| {
                                         AgentStatus::Errored("Agent resume failed".into())
                                     }),
@@ -4069,10 +4114,10 @@ impl ChatWidget {
                             receiver_thread_ids: receiver_thread_ids
                                 .iter()
                                 .filter_map(|thread_id| {
-                                    app_server_collab_thread_id_to_core(thread_id)
+                                    app_gateway_collab_thread_id_to_core(thread_id)
                                 })
                                 .collect(),
-                            receiver_agents: app_server_collab_receiver_agent_refs(
+                            receiver_agents: app_gateway_collab_receiver_agent_refs(
                                 &receiver_thread_ids,
                                 &self.collab_agent_metadata,
                             ),
@@ -4080,7 +4125,7 @@ impl ChatWidget {
                         },
                     ));
                 } else {
-                    let (agent_statuses, statuses) = app_server_collab_agent_statuses_to_core(
+                    let (agent_statuses, statuses) = app_gateway_collab_agent_statuses_to_core(
                         &receiver_thread_ids,
                         &agents_states,
                         &self.collab_agent_metadata,
@@ -4113,7 +4158,7 @@ impl ChatWidget {
                             status: receiver_thread_ids
                                 .iter()
                                 .find_map(|thread_id| agents_states.get(thread_id))
-                                .map(app_server_collab_state_to_core)
+                                .map(app_gateway_collab_state_to_core)
                                 .unwrap_or_else(|| {
                                     AgentStatus::Errored("Agent close failed".into())
                                 }),
@@ -4501,7 +4546,7 @@ impl ChatWidget {
                     parsed,
                     source,
                     ev.interaction_input.clone(),
-                    self.config.animations,
+                    self.tui_config.animations,
                 );
                 let completed = orphan.complete_call(&ev.call_id, output, ev.duration);
                 debug_assert!(
@@ -4522,7 +4567,7 @@ impl ChatWidget {
                     parsed,
                     source,
                     ev.interaction_input.clone(),
-                    self.config.animations,
+                    self.tui_config.animations,
                 );
                 let completed = cell.complete_call(&ev.call_id, output, ev.duration);
                 debug_assert!(completed, "new exec cell should contain {}", ev.call_id);
@@ -4725,7 +4770,7 @@ impl ChatWidget {
                 ev.parsed_cmd,
                 ev.source,
                 interaction_input,
-                self.config.animations,
+                self.tui_config.animations,
             )));
             self.bump_active_cell_revision();
         }
@@ -4744,7 +4789,7 @@ impl ChatWidget {
         self.active_cell = Some(Box::new(history_cell::new_active_mcp_tool_call(
             ev.call_id,
             ev.invocation,
-            self.config.animations,
+            self.tui_config.animations,
         )));
         self.bump_active_cell_revision();
         self.request_redraw();
@@ -4770,7 +4815,7 @@ impl ChatWidget {
                 let mut cell = history_cell::new_active_mcp_tool_call(
                     call_id,
                     invocation,
-                    self.config.animations,
+                    self.tui_config.animations,
                 );
                 let extra_cell = cell.complete(duration, result);
                 self.active_cell = Some(Box::new(cell));
@@ -4801,6 +4846,7 @@ impl ChatWidget {
     fn new_with_op_target(common: ChatWidgetInit, praxis_op_target: PraxisOpTarget) -> Self {
         let ChatWidgetInit {
             config,
+            tui_config,
             frame_requester,
             app_event_tx,
             initial_user_message,
@@ -4844,7 +4890,7 @@ impl ChatWidget {
             settings: fallback_default,
         };
 
-        let active_cell = Some(Self::placeholder_session_header_cell(&config));
+        let active_cell = Some(Self::placeholder_session_header_cell(&config, &tui_config));
 
         let current_cwd = Some(config.cwd.to_path_buf());
         let queued_message_edit_binding = queued_message_edit_binding_for_terminal(terminal_info());
@@ -4859,13 +4905,15 @@ impl ChatWidget {
                 enhanced_keys_supported,
                 placeholder_text: placeholder,
                 disable_paste_burst: config.disable_paste_burst,
-                animations_enabled: config.animations,
+                animations_enabled: tui_config.animations,
                 skills: None,
             }),
             active_cell,
             active_cell_revision: 0,
             transcript_search: TranscriptSearchState::default(),
+            transcript_search_document_cache: None,
             config,
+            tui_config,
             skills_all: Vec::new(),
             skills_initial_state: None,
             current_collaboration_mode,
@@ -4947,6 +4995,7 @@ impl ChatWidget {
             saw_plan_update_this_turn: false,
             saw_plan_item_this_turn: false,
             last_plan_progress: None,
+            work_panel: WorkPanelState::default(),
             plan_delta_buffer: String::new(),
             plan_item_active: false,
             last_separator_elapsed_secs: None,
@@ -5242,6 +5291,15 @@ impl ChatWidget {
             && self.bottom_pane.no_modal_or_popup_active()
             && self.bottom_pane.composer_is_empty()
             && self.initial_user_message.is_none()
+    }
+
+    fn sync_work_panel_selfwork(&mut self) {
+        self.work_panel.set_selfwork(
+            self.selfwork_plan_path.clone(),
+            self.selfwork_turn_in_flight,
+            self.selfwork_stall_count,
+            SELFWORK_STALL_LIMIT,
+        );
     }
 
     fn persist_selfwork_plan_path(&self, plan_path: Option<PathBuf>) {
@@ -5658,6 +5716,7 @@ impl ChatWidget {
         self.selfwork_last_plan_digest = None;
         self.selfwork_stall_count = 0;
         self.selfwork_turn_in_flight = false;
+        self.sync_work_panel_selfwork();
         if persist {
             self.persist_selfwork_plan_path(None);
         }
@@ -5698,6 +5757,7 @@ impl ChatWidget {
         self.selfwork_last_plan_digest = Some(inspection.digest);
         self.selfwork_stall_count = 0;
         self.selfwork_turn_in_flight = false;
+        self.sync_work_panel_selfwork();
         self.persist_selfwork_plan_path(Some(inspection.path.clone()));
 
         let waiting_reason = if self.selfwork_can_start_now() {
@@ -5794,6 +5854,7 @@ impl ChatWidget {
 
         self.selfwork_last_plan_digest = Some(inspection.digest);
         self.selfwork_turn_in_flight = true;
+        self.sync_work_panel_selfwork();
         self.submit_user_message(Self::selfwork_prompt(&inspection.path).into());
         true
     }
@@ -5837,6 +5898,7 @@ impl ChatWidget {
                 self.selfwork_stall_count = 0;
             }
             self.selfwork_last_plan_digest = Some(inspection.digest);
+            self.sync_work_panel_selfwork();
 
             if self.selfwork_stall_count >= SELFWORK_STALL_LIMIT {
                 self.clear_selfwork_state(
@@ -6171,10 +6233,10 @@ impl ChatWidget {
                 self.clean_background_terminals();
             }
             SlashCommand::MemoryDrop => {
-                self.add_app_server_stub_message("Memory maintenance");
+                self.add_app_gateway_stub_message("Memory maintenance");
             }
             SlashCommand::MemoryUpdate => {
-                self.add_app_server_stub_message("Memory maintenance");
+                self.add_app_gateway_stub_message("Memory maintenance");
             }
             SlashCommand::Selfwork => {
                 self.handle_selfwork_default_invocation();
@@ -6869,7 +6931,7 @@ impl ChatWidget {
                     id,
                     content: content
                         .into_iter()
-                        .map(praxis_app_server_protocol::UserInput::into_core)
+                        .map(praxis_app_gateway_protocol::UserInput::into_core)
                         .collect(),
                 };
                 let praxis_protocol::protocol::EventMsg::UserMessage(event) =
@@ -6973,7 +7035,7 @@ impl ChatWidget {
             } => {
                 if matches!(
                     status,
-                    praxis_app_server_protocol::CommandExecutionStatus::InProgress
+                    praxis_app_gateway_protocol::CommandExecutionStatus::InProgress
                 ) {
                     self.on_exec_command_begin(ExecCommandBeginEvent {
                         call_id: id,
@@ -6983,7 +7045,7 @@ impl ChatWidget {
                         cwd,
                         parsed_cmd: command_actions
                             .into_iter()
-                            .map(praxis_app_server_protocol::CommandAction::into_core)
+                            .map(praxis_app_gateway_protocol::CommandAction::into_core)
                             .collect(),
                         source: source.to_core(),
                         interaction_input: None,
@@ -6998,7 +7060,7 @@ impl ChatWidget {
                         cwd,
                         parsed_cmd: command_actions
                             .into_iter()
-                            .map(praxis_app_server_protocol::CommandAction::into_core)
+                            .map(praxis_app_gateway_protocol::CommandAction::into_core)
                             .collect(),
                         source: source.to_core(),
                         interaction_input: None,
@@ -7011,16 +7073,16 @@ impl ChatWidget {
                         ),
                         formatted_output: aggregated_output,
                         status: match status {
-                            praxis_app_server_protocol::CommandExecutionStatus::Completed => {
+                            praxis_app_gateway_protocol::CommandExecutionStatus::Completed => {
                                 praxis_protocol::protocol::ExecCommandStatus::Completed
                             }
-                            praxis_app_server_protocol::CommandExecutionStatus::Failed => {
+                            praxis_app_gateway_protocol::CommandExecutionStatus::Failed => {
                                 praxis_protocol::protocol::ExecCommandStatus::Failed
                             }
-                            praxis_app_server_protocol::CommandExecutionStatus::Declined => {
+                            praxis_app_gateway_protocol::CommandExecutionStatus::Declined => {
                                 praxis_protocol::protocol::ExecCommandStatus::Declined
                             }
-                            praxis_app_server_protocol::CommandExecutionStatus::InProgress => {
+                            praxis_app_gateway_protocol::CommandExecutionStatus::InProgress => {
                                 praxis_protocol::protocol::ExecCommandStatus::Failed
                             }
                         },
@@ -7034,7 +7096,7 @@ impl ChatWidget {
             } => {
                 if !matches!(
                     status,
-                    praxis_app_server_protocol::PatchApplyStatus::InProgress
+                    praxis_app_gateway_protocol::PatchApplyStatus::InProgress
                 ) {
                     self.on_patch_apply_end(praxis_protocol::protocol::PatchApplyEndEvent {
                         call_id: id,
@@ -7043,20 +7105,20 @@ impl ChatWidget {
                         stderr: String::new(),
                         success: !matches!(
                             status,
-                            praxis_app_server_protocol::PatchApplyStatus::Failed
+                            praxis_app_gateway_protocol::PatchApplyStatus::Failed
                         ),
-                        changes: app_server_patch_changes_to_core(changes),
+                        changes: app_gateway_patch_changes_to_core(changes),
                         status: match status {
-                            praxis_app_server_protocol::PatchApplyStatus::Completed => {
+                            praxis_app_gateway_protocol::PatchApplyStatus::Completed => {
                                 praxis_protocol::protocol::PatchApplyStatus::Completed
                             }
-                            praxis_app_server_protocol::PatchApplyStatus::Failed => {
+                            praxis_app_gateway_protocol::PatchApplyStatus::Failed => {
                                 praxis_protocol::protocol::PatchApplyStatus::Failed
                             }
-                            praxis_app_server_protocol::PatchApplyStatus::Declined => {
+                            praxis_app_gateway_protocol::PatchApplyStatus::Declined => {
                                 praxis_protocol::protocol::PatchApplyStatus::Declined
                             }
-                            praxis_app_server_protocol::PatchApplyStatus::InProgress => {
+                            praxis_app_gateway_protocol::PatchApplyStatus::InProgress => {
                                 praxis_protocol::protocol::PatchApplyStatus::Failed
                             }
                         },
@@ -7185,7 +7247,7 @@ impl ChatWidget {
             }
             ServerRequest::McpServerElicitationRequest { request_id, params } => {
                 self.on_mcp_server_elicitation_request(
-                    app_server_request_id_to_mcp_request_id(&request_id),
+                    app_gateway_request_id_to_mcp_request_id(&request_id),
                     params,
                 );
             }
@@ -7226,7 +7288,7 @@ impl ChatWidget {
         }
         match notification {
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
-                self.set_token_info(Some(token_usage_info_from_app_server(
+                self.set_token_info(Some(token_usage_info_from_app_gateway(
                     notification.token_usage,
                 )));
             }
@@ -7242,7 +7304,7 @@ impl ChatWidget {
                         tracing::warn!(
                             thread_id = notification.thread_id,
                             error = %err,
-                            "ignoring app-server ThreadNameUpdated with invalid thread_id"
+                            "ignoring app-gateway ThreadNameUpdated with invalid thread_id"
                         );
                     }
                 }
@@ -7458,7 +7520,6 @@ impl ChatWidget {
             | ServerNotification::McpServerOauthLoginCompleted(_)
             | ServerNotification::AppListUpdated(_)
             | ServerNotification::FsChanged(_)
-            | ServerNotification::ContextCompacted(_)
             | ServerNotification::FuzzyFileSearchSessionUpdated(_)
             | ServerNotification::FuzzyFileSearchSessionCompleted(_)
             | ServerNotification::ThreadRealtimeTranscriptUpdated(_)
@@ -7481,14 +7542,14 @@ impl ChatWidget {
     fn on_mcp_server_elicitation_request(
         &mut self,
         request_id: praxis_protocol::mcp::RequestId,
-        params: praxis_app_server_protocol::McpServerElicitationRequestParams,
+        params: praxis_app_gateway_protocol::McpServerElicitationRequestParams,
     ) {
         let request = praxis_protocol::approvals::ElicitationRequestEvent {
             turn_id: params.turn_id,
             server_name: params.server_name,
             id: request_id,
             request: match params.request {
-                praxis_app_server_protocol::McpServerElicitationRequest::Form {
+                praxis_app_gateway_protocol::McpServerElicitationRequest::Form {
                     meta,
                     message,
                     requested_schema,
@@ -7498,7 +7559,7 @@ impl ChatWidget {
                     requested_schema: serde_json::to_value(requested_schema)
                         .unwrap_or(serde_json::Value::Null),
                 },
-                praxis_app_server_protocol::McpServerElicitationRequest::Url {
+                praxis_app_gateway_protocol::McpServerElicitationRequest::Url {
                     meta,
                     message,
                     url,
@@ -7571,7 +7632,7 @@ impl ChatWidget {
                     cwd,
                     parsed_cmd: command_actions
                         .into_iter()
-                        .map(praxis_app_server_protocol::CommandAction::into_core)
+                        .map(praxis_app_gateway_protocol::CommandAction::into_core)
                         .collect(),
                     source: source.to_core(),
                     interaction_input: None,
@@ -7582,7 +7643,7 @@ impl ChatWidget {
                     call_id: id,
                     turn_id: notification.turn_id,
                     auto_approved: false,
-                    changes: app_server_patch_changes_to_core(changes),
+                    changes: app_gateway_patch_changes_to_core(changes),
                 });
             }
             ThreadItem::McpToolCall {
@@ -7655,35 +7716,35 @@ impl ChatWidget {
         &mut self,
         id: String,
         turn_id: String,
-        review: praxis_app_server_protocol::GuardianApprovalReview,
+        review: praxis_app_gateway_protocol::GuardianApprovalReview,
         action: GuardianApprovalReviewAction,
     ) {
         self.on_guardian_assessment(GuardianAssessmentEvent {
             id,
             turn_id,
             status: match review.status {
-                praxis_app_server_protocol::GuardianApprovalReviewStatus::InProgress => {
+                praxis_app_gateway_protocol::GuardianApprovalReviewStatus::InProgress => {
                     GuardianAssessmentStatus::InProgress
                 }
-                praxis_app_server_protocol::GuardianApprovalReviewStatus::Approved => {
+                praxis_app_gateway_protocol::GuardianApprovalReviewStatus::Approved => {
                     GuardianAssessmentStatus::Approved
                 }
-                praxis_app_server_protocol::GuardianApprovalReviewStatus::Denied => {
+                praxis_app_gateway_protocol::GuardianApprovalReviewStatus::Denied => {
                     GuardianAssessmentStatus::Denied
                 }
-                praxis_app_server_protocol::GuardianApprovalReviewStatus::Aborted => {
+                praxis_app_gateway_protocol::GuardianApprovalReviewStatus::Aborted => {
                     GuardianAssessmentStatus::Aborted
                 }
             },
             risk_score: review.risk_score,
             risk_level: review.risk_level.map(|risk_level| match risk_level {
-                praxis_app_server_protocol::GuardianRiskLevel::Low => {
+                praxis_app_gateway_protocol::GuardianRiskLevel::Low => {
                     praxis_protocol::protocol::GuardianRiskLevel::Low
                 }
-                praxis_app_server_protocol::GuardianRiskLevel::Medium => {
+                praxis_app_gateway_protocol::GuardianRiskLevel::Medium => {
                     praxis_protocol::protocol::GuardianRiskLevel::Medium
                 }
-                praxis_app_server_protocol::GuardianRiskLevel::High => {
+                praxis_app_gateway_protocol::GuardianRiskLevel::High => {
                     praxis_protocol::protocol::GuardianRiskLevel::High
                 }
             }),
@@ -8162,7 +8223,7 @@ impl ChatWidget {
                 duration,
             ));
         }
-        if notification.allowed_for(&self.config.tui_notifications) {
+        if notification.allowed_for(&self.tui_config.notifications) {
             if let Some(existing) = self.pending_notification.as_ref()
                 && existing.priority() > notification.priority()
             {
@@ -8367,7 +8428,7 @@ impl ChatWidget {
 
     fn open_terminal_title_setup(&mut self) {
         let configured_terminal_title_items = self.configured_terminal_title_items();
-        self.terminal_title_setup_original_items = Some(self.config.tui_terminal_title.clone());
+        self.terminal_title_setup_original_items = Some(self.tui_config.terminal_title.clone());
         let view = TerminalTitleSetupView::new(
             Some(configured_terminal_title_items.as_slice()),
             self.app_event_tx.clone(),
@@ -8382,7 +8443,7 @@ impl ChatWidget {
             .get()
             .and_then(|width| u16::try_from(width).ok());
         let params = crate::theme_picker::build_theme_picker_params(
-            self.config.tui_theme.as_deref(),
+            self.tui_config.theme.as_deref(),
             praxis_home.as_deref(),
             terminal_width,
         );
@@ -8595,6 +8656,7 @@ impl ChatWidget {
     fn open_rate_limit_switch_prompt(&mut self, preset: ModelPreset) {
         let switch_model = preset.model;
         let switch_model_for_events = switch_model.clone();
+        let switch_provider_id_for_events = self.current_model_provider_id().to_string();
         let default_effort: ReasoningEffortConfig = preset.default_reasoning_effort;
 
         let switch_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
@@ -8605,6 +8667,7 @@ impl ChatWidget {
                     /*approvals_reviewer*/ None,
                     /*sandbox_policy*/ None,
                     /*windows_sandbox_level*/ None,
+                    Some(switch_provider_id_for_events.clone()),
                     Some(switch_model_for_events.clone()),
                     Some(Some(default_effort)),
                     /*summary*/ None,
@@ -8614,7 +8677,10 @@ impl ChatWidget {
                 )
                 .into_core(),
             ));
-            tx.send(AppEvent::UpdateModel(switch_model_for_events.clone()));
+            tx.send(AppEvent::UpdateModelSelection {
+                model: switch_model_for_events.clone(),
+                provider_id: switch_provider_id_for_events.clone(),
+            });
             tx.send(AppEvent::UpdateReasoningEffort(Some(default_effort)));
         })];
 
@@ -8730,6 +8796,7 @@ impl ChatWidget {
                             /*approvals_reviewer*/ None,
                             /*sandbox_policy*/ None,
                             /*windows_sandbox_level*/ None,
+                            /*model_provider*/ None,
                             /*model*/ None,
                             /*effort*/ None,
                             /*summary*/ None,
@@ -8966,7 +9033,6 @@ impl ChatWidget {
             .cloned()
             .unwrap_or_else(|| ModelCatalogSelectionMetadata {
                 provider_id: self.current_model_provider_id().to_owned(),
-                provider_name: self.config.model_provider.name.clone(),
                 provider: self.config.model_provider.clone(),
             })
     }
@@ -8991,7 +9057,6 @@ impl ChatWidget {
             .filter(|preset| preset.show_in_picker)
             .collect();
 
-        let current_model = self.current_model();
         let current_label = presets
             .iter()
             .find(|preset| self.is_current_model_selection(preset))
@@ -9183,7 +9248,7 @@ impl ChatWidget {
     fn model_selection_actions(
         model_for_action: String,
         provider_id_for_action: String,
-        provider_for_action: Option<praxis_core::model_provider_info::ModelProviderInfo>,
+        provider_for_action: Option<praxis_core::ModelProviderInfo>,
         effort_for_action: Option<ReasoningEffortConfig>,
         should_prompt_plan_mode_scope: bool,
     ) -> Vec<SelectionAction> {
@@ -9238,7 +9303,7 @@ impl ChatWidget {
         &mut self,
         model: String,
         provider_id: String,
-        provider: Option<praxis_core::model_provider_info::ModelProviderInfo>,
+        provider: Option<praxis_core::ModelProviderInfo>,
         effort: Option<ReasoningEffortConfig>,
     ) {
         let reasoning_phrase = match effort {
@@ -9336,7 +9401,7 @@ impl ChatWidget {
         &mut self,
         preset: ModelPreset,
         provider_id: String,
-        provider: Option<praxis_core::model_provider_info::ModelProviderInfo>,
+        provider: Option<praxis_core::ModelProviderInfo>,
     ) {
         let default_effort: ReasoningEffortConfig = preset.default_reasoning_effort;
         let supported = preset.supported_reasoning_efforts;
@@ -9541,22 +9606,6 @@ impl ChatWidget {
             ReasoningEffortConfig::High => "High",
             ReasoningEffortConfig::XHigh => "Extra high",
         }
-    }
-
-    fn apply_model_and_effort_without_persist(
-        &self,
-        model: String,
-        effort: Option<ReasoningEffortConfig>,
-    ) {
-        self.app_event_tx.send(AppEvent::UpdateModel(model));
-        self.app_event_tx
-            .send(AppEvent::UpdateReasoningEffort(effort));
-    }
-
-    fn apply_model_and_effort(&self, model: String, effort: Option<ReasoningEffortConfig>) {
-        self.apply_model_and_effort_without_persist(model.clone(), effort);
-        self.app_event_tx
-            .send(AppEvent::PersistModelSelection { model, effort });
     }
 
     /// Open the permissions popup (alias for /permissions).
@@ -9803,6 +9852,7 @@ impl ChatWidget {
                     Some(approvals_reviewer),
                     Some(sandbox_clone.clone()),
                     /*windows_sandbox_level*/ None,
+                    /*model_provider*/ None,
                     /*model*/ None,
                     /*effort*/ None,
                     /*summary*/ None,
@@ -10585,7 +10635,7 @@ impl ChatWidget {
 
     /// Set the syntax theme override in the widget's config copy.
     pub(crate) fn set_tui_theme(&mut self, theme: Option<String>) {
-        self.config.tui_theme = theme;
+        self.tui_config.theme = theme;
     }
 
     /// Set the model in the widget's config copy and stored collaboration mode.
@@ -10617,6 +10667,7 @@ impl ChatWidget {
                 /*approvals_reviewer*/ None,
                 /*sandbox_policy*/ None,
                 /*windows_sandbox_level*/ None,
+                /*model_provider*/ None,
                 /*model*/ None,
                 /*effort*/ None,
                 /*summary*/ None,
@@ -10941,9 +10992,12 @@ impl ChatWidget {
     }
 
     /// Build a placeholder header cell while the session is configuring.
-    fn placeholder_session_header_cell(config: &Config) -> Box<dyn HistoryCell> {
+    fn placeholder_session_header_cell(
+        config: &Config,
+        tui_config: &TuiRuntimeConfig,
+    ) -> Box<dyn HistoryCell> {
         let placeholder_style = Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC);
-        if config.animations {
+        if tui_config.animations {
             Box::new(
                 history_cell::SessionHeaderHistoryCell::new_with_style_animated(
                     DEFAULT_MODEL_DISPLAY_NAME.to_string(),
@@ -11016,7 +11070,7 @@ impl ChatWidget {
         self.request_redraw();
     }
 
-    fn add_app_server_stub_message(&mut self, feature: &str) {
+    fn add_app_gateway_stub_message(&mut self, feature: &str) {
         warn!(feature, "stubbed unsupported TUI feature");
         self.add_error_message(format!("{feature}: {TUI_STUB_MESSAGE}"));
     }
@@ -11036,7 +11090,7 @@ impl ChatWidget {
     }
 
     /// Begin the asynchronous MCP inventory flow: show a loading spinner and
-    /// request the app-server fetch via `AppEvent::FetchMcpInventory`.
+    /// request the app-gateway fetch via `AppEvent::FetchMcpInventory`.
     ///
     /// The spinner lives in `active_cell` and is cleared by
     /// [`clear_mcp_inventory_loading`] once the result arrives.
@@ -11044,7 +11098,7 @@ impl ChatWidget {
         self.flush_answer_stream_with_separator();
         self.flush_active_cell();
         self.active_cell = Some(Box::new(history_cell::new_mcp_inventory_loading(
-            self.config.animations,
+            self.tui_config.animations,
         )));
         self.bump_active_cell_revision();
         self.request_redraw();
@@ -11867,6 +11921,7 @@ impl ChatWidget {
         self.transcript_search.query()
     }
 
+    #[cfg(test)]
     pub(crate) fn transcript_search_status(&self) -> Option<TranscriptSearchStatus> {
         self.transcript_search.status()
     }
@@ -11877,7 +11932,18 @@ impl ChatWidget {
         width: u16,
         transcript_cells: &[Arc<dyn HistoryCell>],
     ) -> Option<TranscriptSearchOverlayState> {
-        let documents = self.transcript_search_documents(width, transcript_cells);
+        let query = query.into();
+        if query.is_empty() {
+            self.transcript_search_document_cache = None;
+            return self.transcript_search.set_query(query, &[]);
+        }
+
+        self.ensure_transcript_search_document_cache(width, transcript_cells);
+        let documents = self
+            .transcript_search_document_cache
+            .as_ref()
+            .map(|cache| cache.documents.as_slice())
+            .unwrap_or(&[]);
         self.transcript_search.set_query(query, &documents)
     }
 
@@ -11886,8 +11952,7 @@ impl ChatWidget {
         width: u16,
         transcript_cells: &[Arc<dyn HistoryCell>],
     ) -> Option<TranscriptSearchOverlayState> {
-        let documents = self.transcript_search_documents(width, transcript_cells);
-        self.transcript_search.refresh(&documents)
+        self.refresh_transcript_search_if_stale(width, transcript_cells)
     }
 
     pub(crate) fn transcript_search_next(
@@ -11895,8 +11960,8 @@ impl ChatWidget {
         width: u16,
         transcript_cells: &[Arc<dyn HistoryCell>],
     ) -> Option<TranscriptSearchOverlayState> {
-        let documents = self.transcript_search_documents(width, transcript_cells);
-        self.transcript_search.next(&documents)
+        let _ = self.refresh_transcript_search_if_stale(width, transcript_cells);
+        self.transcript_search.next_indexed()
     }
 
     pub(crate) fn transcript_search_prev(
@@ -11904,8 +11969,8 @@ impl ChatWidget {
         width: u16,
         transcript_cells: &[Arc<dyn HistoryCell>],
     ) -> Option<TranscriptSearchOverlayState> {
-        let documents = self.transcript_search_documents(width, transcript_cells);
-        self.transcript_search.prev(&documents)
+        let _ = self.refresh_transcript_search_if_stale(width, transcript_cells);
+        self.transcript_search.prev_indexed()
     }
 
     pub(crate) fn transcript_search_overlay_state(
@@ -11914,6 +11979,36 @@ impl ChatWidget {
         transcript_cells: &[Arc<dyn HistoryCell>],
     ) -> Option<TranscriptSearchOverlayState> {
         self.refresh_transcript_search(width, transcript_cells)
+    }
+
+    fn refresh_transcript_search_if_stale(
+        &mut self,
+        width: u16,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+    ) -> Option<TranscriptSearchOverlayState> {
+        if !self.transcript_search.is_open() {
+            return None;
+        }
+        if self.transcript_search.query().is_empty() {
+            return self.transcript_search.overlay_state();
+        }
+
+        let key = self.compute_transcript_search_document_key(width, transcript_cells);
+        if self
+            .transcript_search_document_cache
+            .as_ref()
+            .is_some_and(|cache| cache.key == key)
+        {
+            return self.transcript_search.overlay_state();
+        }
+
+        self.ensure_transcript_search_document_cache_for_key(key, width, transcript_cells);
+        let documents = self
+            .transcript_search_document_cache
+            .as_ref()
+            .map(|cache| cache.documents.as_slice())
+            .unwrap_or(&[]);
+        self.transcript_search.refresh(&documents)
     }
 
     /// Returns a cache key describing the current in-flight active cell for the transcript overlay.
@@ -11974,6 +12069,58 @@ impl ChatWidget {
         documents
     }
 
+    fn ensure_transcript_search_document_cache(
+        &mut self,
+        width: u16,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+    ) {
+        let key = self.compute_transcript_search_document_key(width, transcript_cells);
+        self.ensure_transcript_search_document_cache_for_key(key, width, transcript_cells);
+    }
+
+    fn ensure_transcript_search_document_cache_for_key(
+        &mut self,
+        key: TranscriptSearchDocumentKey,
+        width: u16,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+    ) {
+        if self
+            .transcript_search_document_cache
+            .as_ref()
+            .is_some_and(|cache| cache.key == key)
+        {
+            return;
+        }
+
+        self.transcript_search_document_cache = Some(TranscriptSearchDocumentCache {
+            key,
+            documents: self.transcript_search_documents(width, transcript_cells),
+        });
+    }
+
+    fn compute_transcript_search_document_key(
+        &self,
+        width: u16,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+    ) -> TranscriptSearchDocumentKey {
+        let active_key = self.active_cell_transcript_key();
+        TranscriptSearchDocumentKey {
+            width,
+            committed_len: transcript_cells.len(),
+            committed_first_ptr: transcript_cells
+                .first()
+                .map(Self::history_cell_ptr_id)
+                .unwrap_or_default(),
+            committed_last_ptr: transcript_cells
+                .last()
+                .map(Self::history_cell_ptr_id)
+                .unwrap_or_default(),
+            presentation_revision: history_cell::history_presentation_revision(),
+            active_revision: active_key.map(|key| key.revision),
+            active_presentation_revision: active_key.map(|key| key.presentation_revision),
+        }
+    }
+
     fn transcript_search_lines_to_strings(lines: Vec<Line<'static>>) -> Vec<String> {
         lines
             .into_iter()
@@ -11984,6 +12131,10 @@ impl ChatWidget {
                     .collect::<String>()
             })
             .collect()
+    }
+
+    fn history_cell_ptr_id(cell: &Arc<dyn HistoryCell>) -> usize {
+        Arc::as_ptr(cell) as *const () as usize
     }
 
     pub(crate) fn active_cell_mouse_action(
@@ -12023,6 +12174,18 @@ impl ChatWidget {
     }
 
     #[cfg(test)]
+    pub(crate) fn tui_config_ref(&self) -> &TuiRuntimeConfig {
+        &self.tui_config
+    }
+
+    pub(crate) fn set_tui_config(&mut self, tui_config: TuiRuntimeConfig) {
+        self.tui_config = tui_config;
+        self.bottom_pane
+            .set_animations_enabled(self.tui_config.animations);
+        self.refresh_status_surfaces();
+    }
+
+    #[cfg(test)]
     pub(crate) fn status_line_text(&self) -> Option<String> {
         self.bottom_pane.status_line_text()
     }
@@ -12059,9 +12222,6 @@ fn has_websocket_timing_metrics(summary: RuntimeMetricsSummary) -> bool {
         || summary.responses_api_engine_service_tbt_ms > 0
 }
 
-const CHAT_SECTION_GAP_ROWS: u16 = 1;
-const IN_APP_TOAST_ROW_HEIGHT: u16 = 1;
-
 impl Drop for ChatWidget {
     fn drop(&mut self) {
         self.reset_realtime_conversation_state();
@@ -12073,6 +12233,7 @@ impl Renderable for ChatWidget {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let layout = self.layout_for_area(area);
         self.render_active_cell(layout, buf);
+        self.render_work_panel(layout, buf);
         self.render_bottom_pane(layout, buf);
         self.render_in_app_toast_overlay(layout, buf);
         self.last_rendered_width.set(Some(area.width as usize));
@@ -12162,82 +12323,37 @@ impl ChatWidget {
     }
 
     fn desired_total_height(&self, width: u16) -> u16 {
+        let split = chat_surface_split_for_width(width, self.work_panel.has_content());
+        let work_panel_height = split
+            .work_panel_width
+            .map(|panel_width| self.work_panel.desired_height(panel_width))
+            .unwrap_or(0);
         let toast_height = u16::try_from(self.in_app_toasts.visible_entries().len())
             .unwrap_or(u16::MAX)
             .saturating_mul(IN_APP_TOAST_ROW_HEIGHT);
-        self.active_cell_total_height(width)
+        self.active_cell_total_height(split.agent_width)
+            .max(work_panel_height)
             .saturating_add(toast_height)
             .saturating_add(self.bottom_pane_total_height(width))
     }
 
     fn layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
-        if area.is_empty() {
-            return ChatWidgetLayout::default();
-        }
-
-        let bottom_outer_height = self.bottom_pane_total_height(area.width).min(area.height);
+        let split = chat_surface_split_for_width(area.width, self.work_panel.has_content());
+        let work_panel_outer_height = split
+            .work_panel_width
+            .map(|panel_width| self.work_panel.desired_height(panel_width))
+            .unwrap_or(0);
         let visible_toasts = u16::try_from(self.in_app_toasts.visible_entries().len())
             .unwrap_or(u16::MAX)
             .saturating_mul(IN_APP_TOAST_ROW_HEIGHT);
-        let toast_height = visible_toasts.min(area.height.saturating_sub(bottom_outer_height));
-        let available_for_active = area
-            .height
-            .saturating_sub(bottom_outer_height)
-            .saturating_sub(toast_height);
-        let active_outer_height = self
-            .active_cell_total_height(area.width)
-            .min(available_for_active);
-
-        let active_outer_area = if active_outer_height > 0 {
-            Some(Rect::new(area.x, area.y, area.width, active_outer_height))
-        } else {
-            None
-        };
-        let active_content_area = active_outer_area.map(|outer| {
-            outer.inset(Insets::tlbr(
-                /*top*/ CHAT_SECTION_GAP_ROWS,
-                /*left*/ 0,
-                /*bottom*/ 0,
-                /*right*/ 0,
-            ))
-        });
-
-        let toast_area = if toast_height > 0 {
-            Some(Rect::new(
-                area.x,
-                area.y.saturating_add(active_outer_height),
-                area.width,
-                toast_height,
-            ))
-        } else {
-            None
-        };
-
-        let bottom_outer_y = area
-            .y
-            .saturating_add(active_outer_height)
-            .saturating_add(toast_height);
-        let bottom_outer_available = area.bottom().saturating_sub(bottom_outer_y);
-        let bottom_outer_area = Rect::new(
-            area.x,
-            bottom_outer_y,
-            area.width,
-            bottom_outer_height.min(bottom_outer_available),
-        );
-        let bottom_content_area = bottom_outer_area.inset(Insets::tlbr(
-            /*top*/ CHAT_SECTION_GAP_ROWS,
-            /*left*/ 0,
-            /*bottom*/ 0,
-            /*right*/ 0,
-        ));
-
-        ChatWidgetLayout {
-            active_outer_area,
-            active_content_area,
-            toast_area,
-            bottom_outer_area,
-            bottom_content_area,
-        }
+        layout_chat_surface(ChatSurfaceLayoutInput {
+            area,
+            agent_outer_height: self.active_cell_total_height(split.agent_width),
+            bottom_outer_height: self.bottom_pane_total_height(area.width),
+            toast_height: visible_toasts,
+            work_panel_outer_height,
+            show_work_panel: self.work_panel.has_content(),
+        })
     }
 
     fn render_active_cell(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
@@ -12256,6 +12372,13 @@ impl ChatWidget {
             .wrap(Wrap { trim: false })
             .scroll((scroll_offset, 0))
             .render(content_area, buf);
+    }
+
+    fn render_work_panel(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
+        let Some(area) = layout.work_panel_area else {
+            return;
+        };
+        self.work_panel.render(area, buf);
     }
 
     fn render_bottom_pane(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {

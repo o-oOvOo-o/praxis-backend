@@ -8,7 +8,7 @@ use std::path::PathBuf;
 pub enum SessionLookupSource {
     #[default]
     Praxis,
-    Praxis,
+    Codex,
 }
 
 #[derive(Parser, Debug)]

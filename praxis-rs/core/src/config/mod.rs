@@ -28,8 +28,8 @@ use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 use crate::windows_sandbox::WindowsSandboxLevelExt;
 use crate::windows_sandbox::resolve_windows_sandbox_mode;
 use crate::windows_sandbox::resolve_windows_sandbox_private_desktop;
-use praxis_app_server_protocol::Tools;
-use praxis_app_server_protocol::UserSavedConfig;
+use praxis_app_gateway_protocol::Tools;
+use praxis_app_gateway_protocol::UserSavedConfig;
 use praxis_config::types::ApprovalsReviewer;
 use praxis_config::types::AppsConfigToml;
 use praxis_config::types::DEFAULT_OTEL_ENVIRONMENT;
@@ -39,10 +39,7 @@ use praxis_config::types::McpServerDisabledReason;
 use praxis_config::types::McpServerTransportConfig;
 use praxis_config::types::MemoriesConfig;
 use praxis_config::types::MemoriesToml;
-use praxis_config::types::ModelAvailabilityNuxConfig;
 use praxis_config::types::Notice;
-use praxis_config::types::NotificationMethod;
-use praxis_config::types::Notifications;
 use praxis_config::types::OtelConfig;
 use praxis_config::types::OtelConfigToml;
 use praxis_config::types::OtelExporterKind;
@@ -53,7 +50,6 @@ use praxis_config::types::ShellEnvironmentPolicyToml;
 use praxis_config::types::SkillsConfig;
 use praxis_config::types::ToolSuggestConfig;
 use praxis_config::types::ToolSuggestDiscoverable;
-use praxis_config::types::Tui;
 use praxis_config::types::UriBasedFileOpener;
 use praxis_config::types::WindowsSandboxModeToml;
 use praxis_config::types::WindowsToml;
@@ -65,7 +61,6 @@ use praxis_features::FeaturesToml;
 use praxis_git_utils::resolve_root_git_project_for_trust;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_mcp::mcp::McpConfig;
-use praxis_protocol::config_types::AltScreenMode;
 use praxis_protocol::config_types::ForcedLoginMethod;
 use praxis_protocol::config_types::Personality;
 use praxis_protocol::config_types::ReasoningSummary;
@@ -312,46 +307,6 @@ pub struct Config {
     ///
     /// If unset the feature is disabled.
     pub notify: Option<Vec<String>>,
-
-    /// TUI notifications preference. When set, the TUI will send terminal notifications on
-    /// approvals and turn completions when not focused.
-    pub tui_notifications: Notifications,
-
-    /// Notification method for terminal notifications (osc9 or bel).
-    pub tui_notification_method: NotificationMethod,
-
-    /// Enable ASCII animations and shimmer effects in the TUI.
-    pub animations: bool,
-
-    /// Show startup tooltips in the TUI welcome screen.
-    pub show_tooltips: bool,
-
-    /// Persisted startup availability NUX state for model tooltips.
-    pub model_availability_nux: ModelAvailabilityNuxConfig,
-
-    /// Start the TUI in the specified collaboration mode (plan/default).
-
-    /// Controls whether the TUI uses the terminal's alternate screen buffer.
-    ///
-    /// This is the same `tui.alternate_screen` value from `config.toml` (see [`Tui`]).
-    /// - `auto` (default): Disable alternate screen in Zellij, enable elsewhere.
-    /// - `always`: Always use alternate screen (original behavior).
-    /// - `never`: Never use alternate screen (inline mode, preserves scrollback).
-    pub tui_alternate_screen: AltScreenMode,
-
-    /// Ordered list of status line item identifiers for the TUI.
-    ///
-    /// When unset, the TUI defaults to: `model-with-reasoning`, `context-remaining`, and
-    /// `current-dir`.
-    pub tui_status_line: Option<Vec<String>>,
-
-    /// Ordered list of terminal title item identifiers for the TUI.
-    ///
-    /// When unset, the TUI defaults to: `project`, `thread`, and `spinner`.
-    pub tui_terminal_title: Option<Vec<String>>,
-
-    /// Syntax highlighting theme override (kebab-case name).
-    pub tui_theme: Option<String>,
 
     /// The absolute directory that should be treated as the current working
     /// directory for the session. All relative paths inside the business-logic
@@ -752,7 +707,7 @@ impl Config {
 
     /// This is a secondary way of creating [Config], which is appropriate when
     /// the harness is meant to be used with a specific configuration that
-    /// ignores user settings. For example, the `codex exec` subcommand is
+    /// ignores user settings. For example, the `praxis exec` subcommand is
     /// designed to use [AskForApproval::Never] exclusively.
     ///
     /// Further, [ConfigOverrides] contains some options that are not supported
@@ -1267,16 +1222,13 @@ pub struct ConfigToml {
     /// Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`.
     pub sqlite_home: Option<AbsolutePathBuf>,
 
-    /// Directory where Praxis writes log files, for example `praxis-tui.log`.
+    /// Directory where Praxis writes client/runtime log files.
     /// Defaults to `$CODEX_HOME/log`.
     pub log_dir: Option<AbsolutePathBuf>,
 
     /// Optional URI-based file opener. If set, citations to files in the model
     /// output will be hyperlinked using the specified URI scheme.
     pub file_opener: Option<UriBasedFileOpener>,
-
-    /// Collection of settings that are specific to the TUI.
-    pub tui: Option<Tui>,
 
     /// When set to `true`, `AgentReasoning` events will be hidden from the
     /// UI/output. Defaults to `false`.
@@ -1437,8 +1389,8 @@ impl From<ConfigToml> for UserSavedConfig {
             .collect();
 
         Self {
-            approval_policy: config_toml.approval_policy,
-            sandbox_mode: config_toml.sandbox_mode,
+            approval_policy: config_toml.approval_policy.map(Into::into),
+            sandbox_mode: config_toml.sandbox_mode.map(Into::into),
             sandbox_settings: config_toml.sandbox_workspace_write.map(From::from),
             forced_chatgpt_workspace_id: config_toml.forced_chatgpt_workspace_id,
             forced_login_method: config_toml.forced_login_method,
@@ -1626,7 +1578,7 @@ pub struct AgentRoleToml {
 impl From<ToolsToml> for Tools {
     fn from(tools_toml: ToolsToml) -> Self {
         Self {
-            web_search: tools_toml.web_search.is_some().then_some(true),
+            web_search: tools_toml.web_search,
             view_image: tools_toml.view_image,
         }
     }
@@ -2726,31 +2678,6 @@ impl Config {
                 .and_then(|feedback| feedback.enabled)
                 .unwrap_or(true),
             tool_suggest,
-            tui_notifications: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.notifications.clone())
-                .unwrap_or_default(),
-            tui_notification_method: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.notification_method)
-                .unwrap_or_default(),
-            animations: cfg.tui.as_ref().map(|t| t.animations).unwrap_or(true),
-            show_tooltips: cfg.tui.as_ref().map(|t| t.show_tooltips).unwrap_or(true),
-            model_availability_nux: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.model_availability_nux.clone())
-                .unwrap_or_default(),
-            tui_alternate_screen: cfg
-                .tui
-                .as_ref()
-                .map(|t| t.alternate_screen)
-                .unwrap_or_default(),
-            tui_status_line: cfg.tui.as_ref().and_then(|t| t.status_line.clone()),
-            tui_terminal_title: cfg.tui.as_ref().and_then(|t| t.terminal_title.clone()),
-            tui_theme: cfg.tui.as_ref().and_then(|t| t.theme.clone()),
             otel: {
                 let t: OtelConfigToml = cfg.otel.unwrap_or_default();
                 let log_user_prompt = t.log_user_prompt.unwrap_or(false);

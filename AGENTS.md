@@ -161,22 +161,28 @@ If you don’t have the tool:
   // assert using request.function_call_output(call_id) or request.json_body() or other helpers.
   ```
 
-## App-server API Development Best Practices
+## App Gateway API Development Best Practices
 
-These guidelines apply to app-server protocol work in `praxis-rs`, especially:
+These guidelines apply to App Gateway protocol work in `praxis-rs`, especially:
 
-- `app-server-protocol/src/protocol/common.rs`
-- `app-server-protocol/src/protocol/v2.rs`
-- `app-server/README.md`
+- `app-gateway-protocol/src/lib.rs`
+- `app-gateway-core/src/lib.rs`
+- `app-gateway-native/src/lib.rs`
+- `app-gateway-service/src/lib.rs`
+- `app-gateway-client/src/lib.rs`
+- `host-sdk/src/lib.rs`
+- `metra-gateway/src/lib.rs`
 
 ### Core Rules
 
-- All active API development should happen in app-server v2. Do not add new API surface area to v1.
+- All active API development should happen in App Gateway. Do not add new API surface area outside App Gateway.
+- Native mode and service mode must call the same core dispatcher instead of growing separate request handlers.
+- Public Praxis crates must describe host extensions generically. Product-specific adapters belong outside the public Praxis backend.
 - Follow payload naming consistently:
   `*Params` for request payloads, `*Response` for responses, and `*Notification` for notifications.
 - Expose RPC methods as `<resource>/<method>` and keep `<resource>` singular (for example, `thread/read`, `app/list`).
 - Always expose fields as camelCase on the wire with `#[serde(rename_all = "camelCase")]` unless a tagged union or explicit compatibility requirement needs a targeted rename.
-- Exception: config RPC payloads are expected to use snake_case to mirror config.toml keys (see the config read/write/list APIs in `app-server-protocol/src/protocol/v2.rs`).
+- Exception: config RPC payloads are expected to use snake_case to mirror config.toml keys (see the config read/write/list APIs in `app-gateway-protocol/src/protocol/v2.rs`).
 - Always set `#[ts(export_to = "v2/")]` on v2 request/response/notification types so generated TypeScript lands in the correct namespace.
 - Never use `#[serde(skip_serializing_if = "Option::is_none")]` for v2 API payload fields.
   Exception: client->server requests that intentionally have no params may use:
@@ -200,10 +206,10 @@ These guidelines apply to app-server protocol work in `praxis-rs`, especially:
 
 ### Development Workflow
 
-- Update docs/examples when API behavior changes (at minimum `app-server/README.md`).
-- Regenerate schema fixtures when API shapes change:
-  `just write-app-server-schema`
-  (and `just write-app-server-schema --experimental` when experimental API fixtures are affected).
-- Validate with `cargo test -p praxis-app-server-protocol`.
+- Update docs/examples when API behavior changes.
+- Regenerate schema fixtures when App Gateway API shapes change:
+  `just write-app-gateway-schema`
+  (and `just write-app-gateway-schema --experimental` when experimental API fixtures are affected).
+- Validate App Gateway protocol changes with the narrow crate test once tests are permitted.
 - Avoid boilerplate tests that only assert experimental field markers for individual
   request fields in `common.rs`; rely on schema generation/tests and behavioral coverage instead.

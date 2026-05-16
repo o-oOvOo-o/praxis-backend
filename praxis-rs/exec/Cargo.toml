@@ -24,8 +24,8 @@ workspace = true
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 praxis-arg0 = { workspace = true }
-praxis-app-server-client = { workspace = true }
-praxis-app-server-protocol = { workspace = true }
+praxis-app-gateway-client = { workspace = true }
+praxis-app-gateway-protocol = { workspace = true }
 praxis-cloud-requirements = { workspace = true }
 praxis-core = { workspace = true }
 praxis-feedback = { workspace = true }

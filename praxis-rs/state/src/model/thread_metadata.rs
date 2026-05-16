@@ -41,6 +41,21 @@ pub struct ThreadsPage {
     pub num_scanned_rows: usize,
 }
 
+/// Standardized source kind stored for indexed thread filtering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThreadSourceKind {
+    Cli,
+    VsCode,
+    Exec,
+    AppGateway,
+    SubAgent,
+    SubAgentReview,
+    SubAgentCompact,
+    SubAgentThreadSpawn,
+    SubAgentOther,
+    Unknown,
+}
+
 /// The outcome of extracting metadata from a rollout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractionOutcome {

@@ -422,9 +422,6 @@
             "multi_agent": {
               "type": "boolean"
             },
-            "multi_agent_v2": {
-              "type": "boolean"
-            },
             "personality": {
               "type": "boolean"
             },
@@ -491,7 +488,7 @@
             "tool_suggest": {
               "type": "boolean"
             },
-            "tui_app_server": {
+            "tui_app_gateway": {
               "type": "boolean"
             },
             "undo": {
@@ -1035,7 +1032,7 @@
       "type": "object"
     },
     "Notice": {
-      "description": "Settings for notices we display to users via the tui and app-server clients (primarily the Codex IDE extension). NOTE: these are different from notifications - notices are warnings, NUX screens, acknowledgements, etc.",
+      "description": "Settings for notices we display to users via the tui and app-gateway clients (primarily the Codex IDE extension). NOTE: these are different from notifications - notices are warnings, NUX screens, acknowledgements, etc.",
       "properties": {
         "hide_full_access_warning": {
           "description": "Tracks whether the user has acknowledged the full access warning prompt.",
@@ -2120,9 +2117,6 @@
         "multi_agent": {
           "type": "boolean"
         },
-        "multi_agent_v2": {
-          "type": "boolean"
-        },
         "personality": {
           "type": "boolean"
         },
@@ -2189,7 +2183,7 @@
         "tool_suggest": {
           "type": "boolean"
         },
-        "tui_app_server": {
+        "tui_app_gateway": {
           "type": "boolean"
         },
         "undo": {

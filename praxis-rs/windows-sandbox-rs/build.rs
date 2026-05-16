@@ -1,5 +1,4 @@
 fn main() {
-    let mut res = winres::WindowsResource::new();
-    res.set_manifest_file("praxis-windows-sandbox-setup.manifest");
-    let _ = res.compile();
+    // This crate is linked by host apps, so package-wide manifests collide with host manifests.
+    println!("cargo:rerun-if-changed=build.rs");
 }

@@ -1,0 +1,17 @@
+[package]
+name = "praxis-metra-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "praxis_metra_gateway"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+praxis-app-gateway-protocol = { workspace = true }
+praxis-host-sdk = { workspace = true }
+serde_json = { workspace = true }

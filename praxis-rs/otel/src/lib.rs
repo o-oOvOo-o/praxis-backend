@@ -43,12 +43,12 @@ pub enum TelemetryAuthMode {
     Chatgpt,
 }
 
-impl From<praxis_app_server_protocol::AuthMode> for TelemetryAuthMode {
-    fn from(mode: praxis_app_server_protocol::AuthMode) -> Self {
+impl From<praxis_app_gateway_protocol::AuthMode> for TelemetryAuthMode {
+    fn from(mode: praxis_app_gateway_protocol::AuthMode) -> Self {
         match mode {
-            praxis_app_server_protocol::AuthMode::ApiKey => Self::ApiKey,
-            praxis_app_server_protocol::AuthMode::Chatgpt
-            | praxis_app_server_protocol::AuthMode::ChatgptAuthTokens => Self::Chatgpt,
+            praxis_app_gateway_protocol::AuthMode::ApiKey => Self::ApiKey,
+            praxis_app_gateway_protocol::AuthMode::Chatgpt
+            | praxis_app_gateway_protocol::AuthMode::ChatgptAuthTokens => Self::Chatgpt,
         }
     }
 }

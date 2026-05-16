@@ -1,6 +1,6 @@
 # praxis-protocol
 
-This crate defines the "types" for the protocol used by Codex CLI, which includes both "internal types" for communication between `praxis-core` and `praxis-tui`, as well as "external types" used with `codex app-server`.
+This crate defines the "types" for the protocol used by Praxis CLI, which includes both "internal types" for communication between `praxis-core` and `praxis-tui`, as well as "external types" used with `praxis app-gateway`.
 
 This crate should have minimal dependencies.
 

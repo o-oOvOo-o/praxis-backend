@@ -70,14 +70,6 @@ impl ToastQueue {
         }
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    pub(crate) fn len(&self) -> usize {
-        self.entries.len()
-    }
-
     pub(crate) fn expire(&mut self, now: Instant) -> bool {
         let original_len = self.entries.len();
         self.entries.retain(|entry| !entry.is_expired_at(now));

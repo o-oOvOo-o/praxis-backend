@@ -12,9 +12,9 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::ArgAction;
 use clap::Parser;
-use praxis_app_server_protocol::AskForApproval;
+use praxis_app_gateway_protocol::AskForApproval;
 
-use crate::client::AppServerClient;
+use crate::client::AppGatewayClient;
 use crate::client::build_thread_resume_params;
 use crate::client::build_thread_start_params;
 use crate::commands::InputAction;
@@ -24,7 +24,7 @@ use crate::output::Output;
 use crate::state::ReaderEvent;
 
 #[derive(Parser)]
-#[command(author = "Praxis", version, about = "Minimal app-server client")]
+#[command(author = "Praxis", version, about = "Minimal app-gateway client")]
 struct Cli {
     /// Path to the `codex` CLI binary.
     #[arg(long, default_value = "codex")]
@@ -68,7 +68,7 @@ fn main() -> Result<()> {
     let output = Output::new();
     let approval_policy = parse_approval_policy(&cli.approval_policy)?;
 
-    let mut client = AppServerClient::spawn(
+    let mut client = AppGatewayClient::spawn(
         &cli.praxis_bin,
         &cli.config_overrides,
         output.clone(),
@@ -150,7 +150,7 @@ fn main() -> Result<()> {
 
 fn handle_command(
     command: UserCommand,
-    client: &AppServerClient,
+    client: &AppGatewayClient,
     output: &Output,
     approval_policy: AskForApproval,
     cli: &Cli,

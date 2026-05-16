@@ -1,7 +1,7 @@
 use crate::client::AnalyticsEventsQueue;
-use crate::events::AppServerRpcTransport;
+use crate::events::AppGatewayRpcTransport;
 use crate::events::PraxisAppMentionedEventRequest;
-use crate::events::PraxisAppServerClientMetadata;
+use crate::events::PraxisAppGatewayClientMetadata;
 use crate::events::PraxisAppUsedEventRequest;
 use crate::events::PraxisPluginEventRequest;
 use crate::events::PraxisPluginUsedEventRequest;
@@ -28,19 +28,19 @@ use crate::facts::TrackEventsContext;
 use crate::reducer::AnalyticsReducer;
 use crate::reducer::normalize_path_for_skill_id;
 use crate::reducer::skill_id_for_local_skill;
-use praxis_app_server_protocol::ApprovalsReviewer as AppServerApprovalsReviewer;
-use praxis_app_server_protocol::AskForApproval as AppServerAskForApproval;
-use praxis_app_server_protocol::ClientInfo;
-use praxis_app_server_protocol::ClientResponse;
-use praxis_app_server_protocol::InitializeCapabilities;
-use praxis_app_server_protocol::InitializeParams;
-use praxis_app_server_protocol::RequestId;
-use praxis_app_server_protocol::SandboxPolicy as AppServerSandboxPolicy;
-use praxis_app_server_protocol::SessionSource as AppServerSessionSource;
-use praxis_app_server_protocol::Thread;
-use praxis_app_server_protocol::ThreadResumeResponse;
-use praxis_app_server_protocol::ThreadStartResponse;
-use praxis_app_server_protocol::ThreadStatus as AppServerThreadStatus;
+use praxis_app_gateway_protocol::ApprovalsReviewer as AppGatewayApprovalsReviewer;
+use praxis_app_gateway_protocol::AskForApproval as AppGatewayAskForApproval;
+use praxis_app_gateway_protocol::ClientInfo;
+use praxis_app_gateway_protocol::ClientResponse;
+use praxis_app_gateway_protocol::InitializeCapabilities;
+use praxis_app_gateway_protocol::InitializeParams;
+use praxis_app_gateway_protocol::RequestId;
+use praxis_app_gateway_protocol::SandboxPolicy as AppGatewaySandboxPolicy;
+use praxis_app_gateway_protocol::SessionSource as AppGatewaySessionSource;
+use praxis_app_gateway_protocol::Thread;
+use praxis_app_gateway_protocol::ThreadResumeResponse;
+use praxis_app_gateway_protocol::ThreadStartResponse;
+use praxis_app_gateway_protocol::ThreadStatus as AppGatewayThreadStatus;
 use praxis_login::default_client::DEFAULT_ORIGINATOR;
 use praxis_login::default_client::originator;
 use praxis_plugin::AppConnectorId;
@@ -64,11 +64,11 @@ fn sample_thread(thread_id: &str, ephemeral: bool) -> Thread {
         model_provider: "openai".to_string(),
         created_at: 1,
         updated_at: 2,
-        status: AppServerThreadStatus::Idle,
+        status: AppGatewayThreadStatus::Idle,
         path: None,
         cwd: PathBuf::from("/tmp"),
         cli_version: "0.0.0".to_string(),
-        source: AppServerSessionSource::Exec,
+        source: AppGatewaySessionSource::Exec,
         agent_nickname: None,
         agent_role: None,
         git_info: None,
@@ -88,9 +88,9 @@ fn sample_thread_start_response(thread_id: &str, ephemeral: bool, model: &str) -
             model_provider: "openai".to_string(),
             service_tier: None,
             cwd: PathBuf::from("/tmp"),
-            approval_policy: AppServerAskForApproval::OnFailure,
-            approvals_reviewer: AppServerApprovalsReviewer::User,
-            sandbox: AppServerSandboxPolicy::DangerFullAccess,
+            approval_policy: AppGatewayAskForApproval::OnFailure,
+            approvals_reviewer: AppGatewayApprovalsReviewer::User,
+            sandbox: AppGatewaySandboxPolicy::DangerFullAccess,
             reasoning_effort: None,
         },
     }
@@ -105,9 +105,9 @@ fn sample_thread_resume_response(thread_id: &str, ephemeral: bool, model: &str) 
             model_provider: "openai".to_string(),
             service_tier: None,
             cwd: PathBuf::from("/tmp"),
-            approval_policy: AppServerAskForApproval::OnFailure,
-            approvals_reviewer: AppServerApprovalsReviewer::User,
-            sandbox: AppServerSandboxPolicy::DangerFullAccess,
+            approval_policy: AppGatewayAskForApproval::OnFailure,
+            approvals_reviewer: AppGatewayApprovalsReviewer::User,
+            sandbox: AppGatewaySandboxPolicy::DangerFullAccess,
             reasoning_effort: None,
         },
     }
@@ -289,11 +289,11 @@ fn thread_initialized_event_serializes_expected_shape() {
         event_type: "praxis_thread_initialized",
         event_params: ThreadInitializedEventParams {
             thread_id: "thread-0".to_string(),
-            app_server_client: PraxisAppServerClientMetadata {
+            app_gateway_client: PraxisAppGatewayClientMetadata {
                 product_client_id: DEFAULT_ORIGINATOR.to_string(),
                 client_name: Some("praxis-tui".to_string()),
                 client_version: Some("1.0.0".to_string()),
-                rpc_transport: AppServerRpcTransport::Stdio,
+                rpc_transport: AppGatewayRpcTransport::Stdio,
                 experimental_api_enabled: Some(true),
             },
             runtime: PraxisRuntimeMetadata {
@@ -320,7 +320,7 @@ fn thread_initialized_event_serializes_expected_shape() {
             "event_type": "praxis_thread_initialized",
             "event_params": {
                 "thread_id": "thread-0",
-                "app_server_client": {
+                "app_gateway_client": {
                     "product_client_id": DEFAULT_ORIGINATOR,
                     "client_name": "praxis-tui",
                     "client_version": "1.0.0",
@@ -387,7 +387,7 @@ async fn initialize_caches_client_and_thread_lifecycle_publishes_once_initialize
                     runtime_os_version: "24.04".to_string(),
                     runtime_arch: "x86_64".to_string(),
                 },
-                rpc_transport: AppServerRpcTransport::Websocket,
+                rpc_transport: AppGatewayRpcTransport::Websocket,
             },
             &mut events,
         )
@@ -410,23 +410,23 @@ async fn initialize_caches_client_and_thread_lifecycle_publishes_once_initialize
     assert_eq!(payload.as_array().expect("events array").len(), 1);
     assert_eq!(payload[0]["event_type"], "praxis_thread_initialized");
     assert_eq!(
-        payload[0]["event_params"]["app_server_client"]["product_client_id"],
+        payload[0]["event_params"]["app_gateway_client"]["product_client_id"],
         DEFAULT_ORIGINATOR
     );
     assert_eq!(
-        payload[0]["event_params"]["app_server_client"]["client_name"],
+        payload[0]["event_params"]["app_gateway_client"]["client_name"],
         "praxis-tui"
     );
     assert_eq!(
-        payload[0]["event_params"]["app_server_client"]["client_version"],
+        payload[0]["event_params"]["app_gateway_client"]["client_version"],
         "1.0.0"
     );
     assert_eq!(
-        payload[0]["event_params"]["app_server_client"]["rpc_transport"],
+        payload[0]["event_params"]["app_gateway_client"]["rpc_transport"],
         "websocket"
     );
     assert_eq!(
-        payload[0]["event_params"]["app_server_client"]["experimental_api_enabled"],
+        payload[0]["event_params"]["app_gateway_client"]["experimental_api_enabled"],
         false
     );
     assert_eq!(

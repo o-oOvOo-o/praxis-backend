@@ -2374,6 +2374,9 @@ pub enum SessionSource {
     #[default]
     VSCode,
     Exec,
+    #[serde(rename = "app_gateway", alias = "app-gateway", alias = "appGateway")]
+    #[ts(rename = "app_gateway")]
+    AppGateway,
     Mcp,
     Custom(String),
     SubAgent(SubAgentSource),
@@ -2407,6 +2410,7 @@ impl fmt::Display for SessionSource {
             SessionSource::Cli => f.write_str("cli"),
             SessionSource::VSCode => f.write_str("vscode"),
             SessionSource::Exec => f.write_str("exec"),
+            SessionSource::AppGateway => f.write_str("app_gateway"),
             SessionSource::Mcp => f.write_str("mcp"),
             SessionSource::Custom(source) => f.write_str(source),
             SessionSource::SubAgent(sub_source) => write!(f, "subagent_{sub_source}"),
@@ -2427,7 +2431,8 @@ impl SessionSource {
             "cli" => SessionSource::Cli,
             "vscode" => SessionSource::VSCode,
             "exec" => SessionSource::Exec,
-            "mcp" | "appserver" | "app-server" | "app_server" => SessionSource::Mcp,
+            "app-gateway" | "app_gateway" | "appgateway" => SessionSource::AppGateway,
+            "mcp" => SessionSource::Mcp,
             "unknown" => SessionSource::Unknown,
             _ => SessionSource::Custom(normalized),
         })
@@ -2472,6 +2477,7 @@ impl SessionSource {
             SessionSource::Cli
             | SessionSource::VSCode
             | SessionSource::Exec
+            | SessionSource::AppGateway
             | SessionSource::Mcp
             | SessionSource::Unknown => Some(Product::Praxis),
             SessionSource::SubAgent(_) => None,
@@ -3454,6 +3460,14 @@ pub struct CollabAgentSpawnEndEvent {
     pub status: AgentStatus,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum CollabAgentInteractionKind {
+    SendMessage,
+    AssignTask,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 pub struct CollabAgentInteractionBeginEvent {
     /// Identifier for the collab tool call.
@@ -3462,6 +3476,8 @@ pub struct CollabAgentInteractionBeginEvent {
     pub sender_thread_id: ThreadId,
     /// Thread ID of the receiver.
     pub receiver_thread_id: ThreadId,
+    /// The message interaction surface used by the sender.
+    pub kind: CollabAgentInteractionKind,
     /// Prompt sent from the sender to the receiver. Can be empty to prevent CoT
     /// leaking at the beginning.
     pub prompt: String,
@@ -3475,6 +3491,8 @@ pub struct CollabAgentInteractionEndEvent {
     pub sender_thread_id: ThreadId,
     /// Thread ID of the receiver.
     pub receiver_thread_id: ThreadId,
+    /// The message interaction surface used by the sender.
+    pub kind: CollabAgentInteractionKind,
     /// Optional nickname assigned to the receiver agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receiver_agent_nickname: Option<String>,
@@ -3648,8 +3666,8 @@ mod tests {
             SessionSource::VSCode
         );
         assert_eq!(
-            SessionSource::from_startup_arg("app-server").unwrap(),
-            SessionSource::Mcp
+            SessionSource::from_startup_arg("app-gateway").unwrap(),
+            SessionSource::AppGateway
         );
     }
 
@@ -3666,7 +3684,7 @@ mod tests {
     }
 
     #[test]
-    fn session_source_restriction_product_defaults_non_subagent_sources_to_codex() {
+    fn session_source_restriction_product_defaults_non_subagent_sources_to_praxis() {
         assert_eq!(
             SessionSource::Cli.restriction_product(),
             Some(Product::Praxis)
@@ -3677,6 +3695,10 @@ mod tests {
         );
         assert_eq!(
             SessionSource::Exec.restriction_product(),
+            Some(Product::Praxis)
+        );
+        assert_eq!(
+            SessionSource::AppGateway.restriction_product(),
             Some(Product::Praxis)
         );
         assert_eq!(

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use praxis_app_server_protocol::AppInfo;
+use praxis_app_gateway_protocol::AppInfo;
 use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
 use praxis_rmcp_client::ElicitationAction;
 use praxis_tools::DiscoverableTool;
@@ -67,7 +67,7 @@ impl ToolHandler for ToolSuggestHandler {
             ));
         }
         if args.tool_type == DiscoverableToolType::Plugin
-            && turn.app_server_client_name.as_deref() == Some("praxis-tui")
+            && turn.app_gateway_client_name.as_deref() == Some("praxis-tui")
         {
             return Err(FunctionCallError::RespondToModel(
                 "plugin tool suggestions are not available in praxis-tui yet".to_string(),
@@ -91,7 +91,7 @@ impl ToolHandler for ToolSuggestHandler {
         .map(|discoverable_tools| {
             filter_tool_suggest_discoverable_tools_for_client(
                 discoverable_tools,
-                turn.app_server_client_name.as_deref(),
+                turn.app_gateway_client_name.as_deref(),
             )
         })
         .map_err(|err| {

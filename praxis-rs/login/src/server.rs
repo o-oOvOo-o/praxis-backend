@@ -34,7 +34,7 @@ use crate::token_data::TokenData;
 use crate::token_data::parse_chatgpt_jwt_claims;
 use base64::Engine;
 use chrono::Utc;
-use praxis_app_server_protocol::AuthMode;
+use praxis_app_gateway_protocol::AuthMode;
 use praxis_client::build_reqwest_client_with_custom_ca;
 use praxis_utils_template::Template;
 use rand::RngCore;

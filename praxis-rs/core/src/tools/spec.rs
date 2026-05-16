@@ -55,17 +55,12 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::ToolSuggestHandler;
     use crate::tools::handlers::UnifiedExecHandler;
     use crate::tools::handlers::ViewImageHandler;
+    use crate::tools::handlers::multi_agents::AssignTaskHandler;
     use crate::tools::handlers::multi_agents::CloseAgentHandler;
-    use crate::tools::handlers::multi_agents::ResumeAgentHandler;
-    use crate::tools::handlers::multi_agents::SendInputHandler;
+    use crate::tools::handlers::multi_agents::ListAgentsHandler;
+    use crate::tools::handlers::multi_agents::SendMessageHandler;
     use crate::tools::handlers::multi_agents::SpawnAgentHandler;
     use crate::tools::handlers::multi_agents::WaitAgentHandler;
-    use crate::tools::handlers::multi_agents_v2::AssignTaskHandler as AssignTaskHandlerV2;
-    use crate::tools::handlers::multi_agents_v2::CloseAgentHandler as CloseAgentHandlerV2;
-    use crate::tools::handlers::multi_agents_v2::ListAgentsHandler as ListAgentsHandlerV2;
-    use crate::tools::handlers::multi_agents_v2::SendMessageHandler as SendMessageHandlerV2;
-    use crate::tools::handlers::multi_agents_v2::SpawnAgentHandler as SpawnAgentHandlerV2;
-    use crate::tools::handlers::multi_agents_v2::WaitAgentHandler as WaitAgentHandlerV2;
     use crate::tools::handlers::team::TeamReadHandler;
     use crate::tools::handlers::team::TeamSendMessageHandler;
     use crate::tools::handlers::team::TeamTaskCreateHandler;
@@ -141,14 +136,11 @@ pub(crate) fn build_specs_with_discoverable_tools(
             ToolHandlerKind::ApplyPatch => {
                 builder.register_handler(handler.name, apply_patch_handler.clone());
             }
-            ToolHandlerKind::AssignTaskV2 => {
-                builder.register_handler(handler.name, Arc::new(AssignTaskHandlerV2));
+            ToolHandlerKind::AssignTask => {
+                builder.register_handler(handler.name, Arc::new(AssignTaskHandler));
             }
-            ToolHandlerKind::CloseAgentV1 => {
+            ToolHandlerKind::CloseAgent => {
                 builder.register_handler(handler.name, Arc::new(CloseAgentHandler));
-            }
-            ToolHandlerKind::CloseAgentV2 => {
-                builder.register_handler(handler.name, Arc::new(CloseAgentHandlerV2));
             }
             ToolHandlerKind::CodeModeExecute => {
                 builder.register_handler(handler.name, code_mode_handler.clone());
@@ -165,8 +157,8 @@ pub(crate) fn build_specs_with_discoverable_tools(
             ToolHandlerKind::JsReplReset => {
                 builder.register_handler(handler.name, js_repl_reset_handler.clone());
             }
-            ToolHandlerKind::ListAgentsV2 => {
-                builder.register_handler(handler.name, Arc::new(ListAgentsHandlerV2));
+            ToolHandlerKind::ListAgents => {
+                builder.register_handler(handler.name, Arc::new(ListAgentsHandler));
             }
             ToolHandlerKind::ListDir => {
                 builder.register_handler(handler.name, Arc::new(ListDirHandler));
@@ -186,14 +178,8 @@ pub(crate) fn build_specs_with_discoverable_tools(
             ToolHandlerKind::RequestUserInput => {
                 builder.register_handler(handler.name, request_user_input_handler.clone());
             }
-            ToolHandlerKind::ResumeAgentV1 => {
-                builder.register_handler(handler.name, Arc::new(ResumeAgentHandler));
-            }
-            ToolHandlerKind::SendInputV1 => {
-                builder.register_handler(handler.name, Arc::new(SendInputHandler));
-            }
-            ToolHandlerKind::SendMessageV2 => {
-                builder.register_handler(handler.name, Arc::new(SendMessageHandlerV2));
+            ToolHandlerKind::SendMessage => {
+                builder.register_handler(handler.name, Arc::new(SendMessageHandler));
             }
             ToolHandlerKind::Shell => {
                 builder.register_handler(handler.name, shell_handler.clone());
@@ -201,11 +187,8 @@ pub(crate) fn build_specs_with_discoverable_tools(
             ToolHandlerKind::ShellCommand => {
                 builder.register_handler(handler.name, shell_command_handler.clone());
             }
-            ToolHandlerKind::SpawnAgentV1 => {
+            ToolHandlerKind::SpawnAgent => {
                 builder.register_handler(handler.name, Arc::new(SpawnAgentHandler));
-            }
-            ToolHandlerKind::SpawnAgentV2 => {
-                builder.register_handler(handler.name, Arc::new(SpawnAgentHandlerV2));
             }
             ToolHandlerKind::TeamRead => {
                 builder.register_handler(handler.name, Arc::new(TeamReadHandler));
@@ -244,11 +227,8 @@ pub(crate) fn build_specs_with_discoverable_tools(
             ToolHandlerKind::ViewImage => {
                 builder.register_handler(handler.name, view_image_handler.clone());
             }
-            ToolHandlerKind::WaitAgentV1 => {
+            ToolHandlerKind::WaitAgent => {
                 builder.register_handler(handler.name, Arc::new(WaitAgentHandler));
-            }
-            ToolHandlerKind::WaitAgentV2 => {
-                builder.register_handler(handler.name, Arc::new(WaitAgentHandlerV2));
             }
         }
     }

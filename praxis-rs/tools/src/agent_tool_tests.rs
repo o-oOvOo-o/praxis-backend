@@ -27,8 +27,8 @@ fn model_preset(id: &str, show_in_picker: bool) -> ModelPreset {
 }
 
 #[test]
-fn spawn_agent_tool_v2_requires_task_name_and_lists_visible_models() {
-    let tool = create_spawn_agent_tool_v2(SpawnAgentToolOptions {
+fn spawn_agent_tool_requires_task_name_and_lists_visible_models() {
+    let tool = create_spawn_agent_tool(SpawnAgentToolOptions {
         available_models: &[
             model_preset("visible", /*show_in_picker*/ true),
             model_preset("hidden", /*show_in_picker*/ false),
@@ -77,24 +77,6 @@ fn spawn_agent_tool_v2_requires_task_name_and_lists_visible_models() {
 }
 
 #[test]
-fn spawn_agent_tool_v1_keeps_legacy_fork_context_field() {
-    let tool = create_spawn_agent_tool_v1(SpawnAgentToolOptions {
-        available_models: &[],
-        agent_type_description: "role help".to_string(),
-    });
-
-    let ToolSpec::Function(ResponsesApiTool { parameters, .. }) = tool else {
-        panic!("spawn_agent should be a function tool");
-    };
-    let JsonSchema::Object { properties, .. } = parameters else {
-        panic!("spawn_agent should use object params");
-    };
-
-    assert!(properties.contains_key("fork_context"));
-    assert!(!properties.contains_key("fork_turns"));
-}
-
-#[test]
 fn send_message_tool_requires_message_and_uses_submission_output() {
     let ToolSpec::Function(ResponsesApiTool {
         parameters,
@@ -127,7 +109,7 @@ fn send_message_tool_requires_message_and_uses_submission_output() {
 }
 
 #[test]
-fn assign_task_tool_requires_message_and_uses_submission_output() {
+fn assign_task_tool_requires_structured_task_and_uses_submission_output() {
     let ToolSpec::Function(ResponsesApiTool {
         parameters,
         output_schema,
@@ -145,12 +127,26 @@ fn assign_task_tool_requires_message_and_uses_submission_output() {
         panic!("assign_task should use object params");
     };
     assert!(properties.contains_key("target"));
+    assert!(properties.contains_key("objective"));
     assert!(properties.contains_key("message"));
+    assert!(properties.contains_key("scope"));
+    assert!(properties.contains_key("constraints"));
+    assert!(properties.contains_key("acceptance_criteria"));
+    assert!(properties.contains_key("artifact_refs"));
+    assert!(properties.contains_key("required_capabilities"));
+    assert!(properties.contains_key("required_resources"));
+    assert!(properties.contains_key("token_budget"));
+    assert!(properties.contains_key("priority"));
+    assert!(properties.contains_key("exploratory"));
     assert!(properties.contains_key("interrupt"));
     assert!(!properties.contains_key("items"));
     assert_eq!(
         required,
-        Some(vec!["target".to_string(), "message".to_string()])
+        Some(vec![
+            "target".to_string(),
+            "objective".to_string(),
+            "scope".to_string()
+        ])
     );
     assert_eq!(
         output_schema.expect("assign_task output schema")["required"],
@@ -159,12 +155,12 @@ fn assign_task_tool_requires_message_and_uses_submission_output() {
 }
 
 #[test]
-fn wait_agent_tool_v2_uses_timeout_only_summary_output() {
+fn wait_agent_tool_uses_timeout_only_summary_output() {
     let ToolSpec::Function(ResponsesApiTool {
         parameters,
         output_schema,
         ..
-    }) = create_wait_agent_tool_v2(WaitAgentTimeoutOptions {
+    }) = create_wait_agent_tool(WaitAgentTimeoutOptions {
         default_timeout_ms: 30_000,
         min_timeout_ms: 10_000,
         max_timeout_ms: 3_600_000,

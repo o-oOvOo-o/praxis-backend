@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::SessionLookupSource;
-use crate::app_server_session::AppServerSession;
+use crate::app_gateway_session::AppGatewaySession;
 use crate::diff_render::display_path_for;
 use crate::key_hint;
 use crate::text_formatting::truncate_text;
@@ -18,20 +18,22 @@ use color_eyre::eyre::Result;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
-use praxis_app_server_protocol::Thread;
-use praxis_app_server_protocol::ThreadListParams;
-use praxis_app_server_protocol::ThreadSortKey as AppServerThreadSortKey;
-use praxis_app_server_protocol::ThreadSourceKind;
+use praxis_app_gateway_protocol::Thread;
+use praxis_app_gateway_protocol::ThreadListParams;
+use praxis_app_gateway_protocol::ThreadSortKey as AppGatewayThreadSortKey;
+use praxis_app_gateway_protocol::ThreadSourceKind;
 use praxis_core::Cursor;
-use praxis_core::INTERACTIVE_SESSION_SOURCES;
-use praxis_core::RolloutRecorder;
+use praxis_core::ListThreadsQuery;
+use praxis_core::ThreadDirectory;
 use praxis_core::ThreadItem;
 use praxis_core::ThreadSortKey;
+use praxis_core::ThreadSummary;
+use praxis_core::ThreadSummaryPage;
 use praxis_core::ThreadsPage;
 use praxis_core::config::Config;
-use praxis_core::find_thread_names_by_ids;
 use praxis_core::path_utils;
 use praxis_protocol::ThreadId;
+use praxis_rollout::StateDbHandle;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
@@ -115,14 +117,9 @@ struct PageLoadRequest {
     cursor: Option<PageCursor>,
     request_token: usize,
     search_token: Option<usize>,
-    provider_filter: ProviderFilter,
+    search_term: Option<String>,
+    filter_cwd: Option<PathBuf>,
     sort_key: ThreadSortKey,
-}
-
-#[derive(Clone)]
-enum ProviderFilter {
-    Any,
-    MatchDefault(String),
 }
 
 type PageLoader = Arc<dyn Fn(PageLoadRequest) + Send + Sync>;
@@ -147,22 +144,22 @@ impl SourceSwitcher {
         alternate: PickerSourceConfig,
     ) -> Self {
         match (primary_source, alternate_source) {
-            (SessionLookupSource::Praxis, SessionLookupSource::Praxis) => Self {
+            (SessionLookupSource::Praxis, SessionLookupSource::Codex) => Self {
                 praxis: primary,
                 codex: alternate,
             },
-            (SessionLookupSource::Praxis, SessionLookupSource::Praxis) => Self {
+            (SessionLookupSource::Codex, SessionLookupSource::Praxis) => Self {
                 praxis: alternate,
                 codex: primary,
             },
-            _ => unreachable!("source switcher requires Praxis and Praxis sources"),
+            _ => unreachable!("source switcher requires Praxis and Codex sources"),
         }
     }
 
     fn config(&self, source: SessionLookupSource) -> &PickerSourceConfig {
         match source {
             SessionLookupSource::Praxis => &self.praxis,
-            SessionLookupSource::Praxis => &self.codex,
+            SessionLookupSource::Codex => &self.codex,
         }
     }
 }
@@ -170,7 +167,7 @@ impl SourceSwitcher {
 pub(crate) struct AlternatePickerSource {
     pub(crate) source: SessionLookupSource,
     pub(crate) config: Config,
-    pub(crate) app_server: AppServerSession,
+    pub(crate) app_gateway: AppGatewaySession,
 }
 
 enum BackgroundEvent {
@@ -185,7 +182,7 @@ enum BackgroundEvent {
 enum PageCursor {
     #[allow(dead_code)]
     Rollout(Cursor),
-    AppServer(String),
+    AppGateway(String),
 }
 
 struct PickerPage {
@@ -203,7 +200,7 @@ struct PickerPage {
 /// between sorting by creation time and last-updated time using the Tab key.
 ///
 /// Sessions are loaded on-demand via cursor-based pagination. The backend
-/// `RolloutRecorder::list_threads` returns pages ordered by the selected sort key,
+/// `ThreadDirectory::list_threads` returns pages ordered by the selected sort key,
 /// and the picker deduplicates across pages to handle overlapping windows when
 /// new sessions appear during pagination.
 ///
@@ -220,22 +217,22 @@ pub async fn run_resume_picker(
     run_session_picker(tui, config, show_all, SessionPickerAction::Resume).await
 }
 
-pub async fn run_resume_picker_with_app_server(
+pub async fn run_resume_picker_with_app_gateway(
     tui: &mut Tui,
     config: &Config,
     show_all: bool,
     include_non_interactive: bool,
     active_source: SessionLookupSource,
-    app_server: AppServerSession,
+    app_gateway: AppGatewaySession,
     alternate_source: Option<AlternatePickerSource>,
 ) -> Result<SessionSelection> {
     let (bg_tx, bg_rx) = mpsc::unbounded_channel();
-    let is_remote = app_server.is_remote();
+    let is_remote = app_gateway.is_remote();
     let primary_loader =
-        spawn_app_server_page_loader(app_server, include_non_interactive, bg_tx.clone());
+        spawn_app_gateway_page_loader(app_gateway, include_non_interactive, bg_tx.clone());
     let source_switcher = alternate_source.map(|alternate| {
         let alternate_loader =
-            spawn_app_server_page_loader(alternate.app_server, include_non_interactive, bg_tx);
+            spawn_app_gateway_page_loader(alternate.app_gateway, include_non_interactive, bg_tx);
         SourceSwitcher::from_sources(
             active_source,
             picker_source_config(config, primary_loader.clone()),
@@ -253,28 +250,29 @@ pub async fn run_resume_picker_with_app_server(
         bg_rx,
         active_source,
         source_switcher,
+        /*lookup_missing_thread_names*/ false,
     )
     .await
 }
 
-pub async fn run_fork_picker_with_app_server(
+pub async fn run_fork_picker_with_app_gateway(
     tui: &mut Tui,
     config: &Config,
     show_all: bool,
     active_source: SessionLookupSource,
-    app_server: AppServerSession,
+    app_gateway: AppGatewaySession,
     alternate_source: Option<AlternatePickerSource>,
 ) -> Result<SessionSelection> {
     let (bg_tx, bg_rx) = mpsc::unbounded_channel();
-    let is_remote = app_server.is_remote();
-    let primary_loader = spawn_app_server_page_loader(
-        app_server,
+    let is_remote = app_gateway.is_remote();
+    let primary_loader = spawn_app_gateway_page_loader(
+        app_gateway,
         /*include_non_interactive*/ false,
         bg_tx.clone(),
     );
     let source_switcher = alternate_source.map(|alternate| {
-        let alternate_loader = spawn_app_server_page_loader(
-            alternate.app_server,
+        let alternate_loader = spawn_app_gateway_page_loader(
+            alternate.app_gateway,
             /*include_non_interactive*/ false,
             bg_tx,
         );
@@ -295,6 +293,7 @@ pub async fn run_fork_picker_with_app_server(
         bg_rx,
         active_source,
         source_switcher,
+        /*lookup_missing_thread_names*/ false,
     )
     .await
 }
@@ -317,6 +316,7 @@ async fn run_session_picker(
         bg_rx,
         SessionLookupSource::Praxis,
         None,
+        /*lookup_missing_thread_names*/ true,
     )
     .await
 }
@@ -331,9 +331,9 @@ async fn run_session_picker_with_loader(
     bg_rx: mpsc::UnboundedReceiver<BackgroundEvent>,
     active_source: SessionLookupSource,
     source_switcher: Option<SourceSwitcher>,
+    lookup_missing_thread_names: bool,
 ) -> Result<SessionSelection> {
     let alt = AltScreenGuard::enter(tui);
-    let provider_filter = ProviderFilter::Any;
     let praxis_home = config.praxis_home.as_path();
     let filter_cwd = if show_all || is_remote {
         // Remote sessions live in the server's filesystem namespace, so the client
@@ -348,11 +348,14 @@ async fn run_session_picker_with_loader(
         praxis_home.to_path_buf(),
         alt.tui.frame_requester(),
         page_loader,
-        provider_filter,
         show_all,
         filter_cwd,
         action,
     );
+    state.set_lookup_missing_thread_names(lookup_missing_thread_names);
+    if lookup_missing_thread_names {
+        state.set_thread_name_state_db(praxis_rollout::state_db::get_state_db(config).await);
+    }
     state.set_active_source(active_source);
     if let Some(source_switcher) = source_switcher {
         state.configure_source_switcher(active_source, source_switcher);
@@ -409,57 +412,65 @@ fn spawn_rollout_page_loader(
         let tx = loader_tx.clone();
         let config = config.clone();
         tokio::spawn(async move {
-            let default_provider = match request.provider_filter {
-                ProviderFilter::Any => None,
-                ProviderFilter::MatchDefault(default_provider) => Some(default_provider),
-            };
-            let cursor = match request.cursor.as_ref() {
+            let PageLoadRequest {
+                cursor,
+                request_token,
+                search_token,
+                search_term,
+                filter_cwd,
+                sort_key,
+            } = request;
+            let cursor = match cursor.as_ref() {
                 Some(PageCursor::Rollout(cursor)) => Some(cursor),
-                Some(PageCursor::AppServer(_)) => None,
+                Some(PageCursor::AppGateway(_)) => None,
                 None => None,
             };
-            let page = RolloutRecorder::list_threads(
-                &config,
-                PAGE_SIZE,
-                cursor,
-                request.sort_key,
-                INTERACTIVE_SESSION_SOURCES.as_slice(),
-                default_provider.as_ref().map(std::slice::from_ref),
-                default_provider.as_deref().unwrap_or_default(),
-                /*search_term*/ None,
-            )
-            .await
-            .map(picker_page_from_rollout_page);
+            let directory = ThreadDirectory::open(&config).await;
+            let page = directory
+                .list_threads(ListThreadsQuery {
+                    page_size: PAGE_SIZE,
+                    cursor: cursor.cloned(),
+                    sort_key,
+                    model_providers: None,
+                    source_kinds: None,
+                    archived: false,
+                    cwd: filter_cwd,
+                    search_term,
+                    fallback_provider: String::new(),
+                })
+                .await
+                .map(picker_page_from_thread_summary_page);
             let _ = tx.send(BackgroundEvent::PageLoaded {
-                request_token: request.request_token,
-                search_token: request.search_token,
+                request_token,
+                search_token,
                 page,
             });
         });
     })
 }
 
-fn spawn_app_server_page_loader(
-    app_server: AppServerSession,
+fn spawn_app_gateway_page_loader(
+    app_gateway: AppGatewaySession,
     include_non_interactive: bool,
     bg_tx: mpsc::UnboundedSender<BackgroundEvent>,
 ) -> PageLoader {
     let (request_tx, mut request_rx) = mpsc::unbounded_channel::<PageLoadRequest>();
 
     tokio::spawn(async move {
-        let mut app_server = app_server;
+        let mut app_gateway = app_gateway;
         while let Some(request) = request_rx.recv().await {
             let cursor = match request.cursor {
-                Some(PageCursor::AppServer(cursor)) => Some(cursor),
+                Some(PageCursor::AppGateway(cursor)) => Some(cursor),
                 Some(PageCursor::Rollout(_)) => None,
                 None => None,
             };
-            let page = load_app_server_page(
-                &mut app_server,
+            let page = load_app_gateway_page(
+                &mut app_gateway,
                 cursor,
-                request.provider_filter,
                 request.sort_key,
                 include_non_interactive,
+                request.search_term,
+                request.filter_cwd,
             )
             .await;
             let _ = bg_tx.send(BackgroundEvent::PageLoaded {
@@ -468,8 +479,8 @@ fn spawn_app_server_page_loader(
                 page,
             });
         }
-        if let Err(err) = app_server.shutdown().await {
-            warn!(%err, "Failed to shut down app-server picker session");
+        if let Err(err) = app_gateway.shutdown().await {
+            warn!(%err, "Failed to shut down app-gateway picker session");
         }
     });
 
@@ -526,7 +537,6 @@ struct PickerState {
     next_search_token: usize,
     page_loader: PageLoader,
     view_rows: Option<usize>,
-    provider_filter: ProviderFilter,
     show_all: bool,
     filter_cwd: Option<PathBuf>,
     action: SessionPickerAction,
@@ -534,6 +544,8 @@ struct PickerState {
     source_switcher: Option<SourceSwitcher>,
     sort_key: ThreadSortKey,
     thread_name_cache: HashMap<ThreadId, Option<String>>,
+    lookup_missing_thread_names: bool,
+    thread_name_state_db: Option<StateDbHandle>,
     inline_error: Option<String>,
 }
 
@@ -573,19 +585,21 @@ impl LoadingState {
     }
 }
 
-async fn load_app_server_page(
-    app_server: &mut AppServerSession,
+async fn load_app_gateway_page(
+    app_gateway: &mut AppGatewaySession,
     cursor: Option<String>,
-    provider_filter: ProviderFilter,
     sort_key: ThreadSortKey,
     include_non_interactive: bool,
+    search_term: Option<String>,
+    filter_cwd: Option<PathBuf>,
 ) -> std::io::Result<PickerPage> {
-    let response = app_server
+    let response = app_gateway
         .thread_list(thread_list_params(
             cursor,
-            provider_filter,
             sort_key,
             include_non_interactive,
+            search_term,
+            filter_cwd,
         ))
         .await
         .map_err(std::io::Error::other)?;
@@ -595,9 +609,9 @@ async fn load_app_server_page(
         rows: response
             .data
             .into_iter()
-            .filter_map(row_from_app_server_thread)
+            .filter_map(row_from_app_gateway_thread)
             .collect(),
-        next_cursor: response.next_cursor.map(PageCursor::AppServer),
+        next_cursor: response.next_cursor.map(PageCursor::AppGateway),
         num_scanned_files,
         reached_scan_cap: false,
     })
@@ -645,18 +659,6 @@ impl Row {
     fn display_preview(&self) -> &str {
         self.thread_name.as_deref().unwrap_or(&self.preview)
     }
-
-    fn matches_query(&self, query: &str) -> bool {
-        if self.preview.to_lowercase().contains(query) {
-            return true;
-        }
-        if let Some(thread_name) = self.thread_name.as_ref()
-            && thread_name.to_lowercase().contains(query)
-        {
-            return true;
-        }
-        false
-    }
 }
 
 impl PickerState {
@@ -664,7 +666,6 @@ impl PickerState {
         praxis_home: PathBuf,
         requester: FrameRequester,
         page_loader: PageLoader,
-        provider_filter: ProviderFilter,
         show_all: bool,
         filter_cwd: Option<PathBuf>,
         action: SessionPickerAction,
@@ -689,7 +690,6 @@ impl PickerState {
             next_search_token: 0,
             page_loader,
             view_rows: None,
-            provider_filter,
             show_all,
             filter_cwd,
             action,
@@ -697,6 +697,8 @@ impl PickerState {
             source_switcher: None,
             sort_key: ThreadSortKey::UpdatedAt,
             thread_name_cache: HashMap::new(),
+            lookup_missing_thread_names: true,
+            thread_name_state_db: None,
             inline_error: None,
         }
     }
@@ -707,6 +709,14 @@ impl PickerState {
 
     fn set_active_source(&mut self, source: SessionLookupSource) {
         self.active_source = source;
+    }
+
+    fn set_lookup_missing_thread_names(&mut self, enabled: bool) {
+        self.lookup_missing_thread_names = enabled;
+    }
+
+    fn set_thread_name_state_db(&mut self, state_db: Option<StateDbHandle>) {
+        self.thread_name_state_db = state_db;
     }
 
     fn configure_source_switcher(
@@ -723,12 +733,12 @@ impl PickerState {
     }
 
     fn shows_source_section(&self) -> bool {
-        self.has_source_switcher() || matches!(self.active_source, SessionLookupSource::Praxis)
+        self.has_source_switcher() || matches!(self.active_source, SessionLookupSource::Codex)
     }
 
     fn effective_action(&self) -> SessionPickerAction {
         if matches!(self.action, SessionPickerAction::Resume)
-            && matches!(self.active_source, SessionLookupSource::Praxis)
+            && matches!(self.active_source, SessionLookupSource::Codex)
         {
             SessionPickerAction::Fork
         } else {
@@ -847,7 +857,7 @@ impl PickerState {
                 self.request_frame();
             }
             KeyCode::Right => {
-                self.switch_source(SessionLookupSource::Praxis);
+                self.switch_source(SessionLookupSource::Codex);
                 self.request_frame();
             }
             KeyCode::Tab => {
@@ -883,7 +893,8 @@ impl PickerState {
         self.seen_rows.clear();
         self.selected = 0;
 
-        let search_token = if self.query.is_empty() {
+        let search_term = self.search_term();
+        let search_token = if search_term.is_none() {
             self.search_state = SearchState::Idle;
             None
         } else {
@@ -903,7 +914,8 @@ impl PickerState {
             cursor: None,
             request_token,
             search_token,
-            provider_filter: self.provider_filter.clone(),
+            search_term,
+            filter_cwd: self.filter_cwd.clone(),
             sort_key: self.sort_key,
         });
     }
@@ -925,7 +937,9 @@ impl PickerState {
                 self.pagination.loading = LoadingState::Idle;
                 let page = page.map_err(color_eyre::Report::from)?;
                 self.ingest_page(page);
-                self.update_thread_names().await;
+                if self.lookup_missing_thread_names {
+                    self.update_thread_names().await;
+                }
                 let completed_token = pending.search_token.or(search_token);
                 self.continue_search_if_token_matches(completed_token);
             }
@@ -986,9 +1000,9 @@ impl PickerState {
             return;
         }
 
-        let names = find_thread_names_by_ids(&self.praxis_home, &missing_ids)
-            .await
-            .unwrap_or_default();
+        let names = praxis_rollout::ThreadNameResolver::new(self.thread_name_state_db.as_deref())
+            .resolve_names(&missing_ids)
+            .await;
         for thread_id in missing_ids {
             let thread_name = names.get(&thread_id).cloned();
             self.thread_name_cache.insert(thread_id, thread_name);
@@ -1017,12 +1031,7 @@ impl PickerState {
             .all_rows
             .iter()
             .filter(|row| self.row_matches_filter(row));
-        if self.query.is_empty() {
-            self.filtered_rows = base_iter.cloned().collect();
-        } else {
-            let q = self.query.to_lowercase();
-            self.filtered_rows = base_iter.filter(|r| r.matches_query(&q)).cloned().collect();
-        }
+        self.filtered_rows = base_iter.cloned().collect();
         if self.selected >= self.filtered_rows.len() {
             self.selected = self.filtered_rows.len().saturating_sub(1);
         }
@@ -1052,22 +1061,7 @@ impl PickerState {
         }
         self.query = new_query;
         self.selected = 0;
-        self.apply_filter();
-        if self.query.is_empty() {
-            self.search_state = SearchState::Idle;
-            return;
-        }
-        if !self.filtered_rows.is_empty() {
-            self.search_state = SearchState::Idle;
-            return;
-        }
-        if self.pagination.reached_scan_cap || self.pagination.next_cursor.is_none() {
-            self.search_state = SearchState::Idle;
-            return;
-        }
-        let token = self.allocate_search_token();
-        self.search_state = SearchState::Active { token };
-        self.load_more_if_needed(LoadTrigger::Search { token });
+        self.start_initial_load();
     }
 
     fn continue_search_if_needed(&mut self) {
@@ -1179,9 +1173,15 @@ impl PickerState {
             cursor: Some(cursor),
             request_token,
             search_token,
-            provider_filter: self.provider_filter.clone(),
+            search_term: self.search_term(),
+            filter_cwd: self.filter_cwd.clone(),
             sort_key: self.sort_key,
         });
+    }
+
+    fn search_term(&self) -> Option<String> {
+        let query = self.query.trim();
+        (!query.is_empty()).then(|| query.to_string())
     }
 
     fn allocate_request_token(&mut self) -> usize {
@@ -1220,6 +1220,44 @@ fn picker_page_from_rollout_page(page: ThreadsPage) -> PickerPage {
     }
 }
 
+fn picker_page_from_thread_summary_page(page: ThreadSummaryPage) -> PickerPage {
+    PickerPage {
+        rows: rows_from_thread_summaries(page.items),
+        next_cursor: page.next_cursor.map(PageCursor::Rollout),
+        num_scanned_files: page.num_scanned_files,
+        reached_scan_cap: page.reached_scan_cap,
+    }
+}
+
+fn rows_from_thread_summaries(items: Vec<ThreadSummary>) -> Vec<Row> {
+    items.into_iter().map(row_from_thread_summary).collect()
+}
+
+fn row_from_thread_summary(summary: ThreadSummary) -> Row {
+    let created_at = summary.timestamp.as_deref().and_then(parse_timestamp_str);
+    let updated_at = summary
+        .updated_at
+        .as_deref()
+        .and_then(parse_timestamp_str)
+        .or(created_at);
+
+    let preview = summary.preview.trim();
+    Row {
+        path: Some(summary.path),
+        preview: if preview.is_empty() {
+            String::from("(no message yet)")
+        } else {
+            preview.to_string()
+        },
+        thread_id: Some(summary.conversation_id),
+        thread_name: summary.thread_name,
+        created_at,
+        updated_at,
+        cwd: Some(summary.cwd),
+        git_branch: summary.git_info.and_then(|git_info| git_info.branch),
+    }
+}
+
 #[cfg_attr(not(test), allow(dead_code))]
 fn rows_from_items(items: Vec<ThreadItem>) -> Vec<Row> {
     items.into_iter().map(|item| head_to_row(&item)).collect()
@@ -1254,11 +1292,11 @@ fn head_to_row(item: &ThreadItem) -> Row {
     }
 }
 
-fn row_from_app_server_thread(thread: Thread) -> Option<Row> {
+fn row_from_app_gateway_thread(thread: Thread) -> Option<Row> {
     let thread_id = match ThreadId::from_string(&thread.id) {
         Ok(thread_id) => thread_id,
         Err(err) => {
-            warn!(thread_id = thread.id, %err, "Skipping app-server picker row with invalid id");
+            warn!(thread_id = thread.id, %err, "Skipping app-gateway picker row with invalid id");
             return None;
         }
     };
@@ -1283,26 +1321,24 @@ fn row_from_app_server_thread(thread: Thread) -> Option<Row> {
 
 fn thread_list_params(
     cursor: Option<String>,
-    provider_filter: ProviderFilter,
     sort_key: ThreadSortKey,
     include_non_interactive: bool,
+    search_term: Option<String>,
+    filter_cwd: Option<PathBuf>,
 ) -> ThreadListParams {
     ThreadListParams {
         cursor,
         limit: Some(PAGE_SIZE as u32),
         sort_key: Some(match sort_key {
-            ThreadSortKey::CreatedAt => AppServerThreadSortKey::CreatedAt,
-            ThreadSortKey::UpdatedAt => AppServerThreadSortKey::UpdatedAt,
+            ThreadSortKey::CreatedAt => AppGatewayThreadSortKey::CreatedAt,
+            ThreadSortKey::UpdatedAt => AppGatewayThreadSortKey::UpdatedAt,
         }),
-        model_providers: match provider_filter {
-            ProviderFilter::Any => None,
-            ProviderFilter::MatchDefault(default_provider) => Some(vec![default_provider]),
-        },
+        model_providers: None,
         source_kinds: (!include_non_interactive)
             .then_some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode]),
         archived: Some(false),
-        cwd: None,
-        search_term: None,
+        cwd: filter_cwd.map(|path| path.display().to_string()),
+        search_term,
     }
 }
 
@@ -1348,7 +1384,13 @@ fn draw_picker(tui: &mut Tui, state: &PickerState) -> std::io::Result<()> {
         // Search line
         frame.render_widget_ref(search_line(state), search);
 
-        let metrics = calculate_column_metrics(&state.filtered_rows, state.show_all);
+        let (start, end) = visible_row_range(
+            state.filtered_rows.len(),
+            state.scroll_top,
+            list.height as usize,
+        );
+        let metrics =
+            calculate_column_metrics_for_range(&state.filtered_rows, start, end, state.show_all);
 
         // Column headers and list
         render_column_headers(frame, columns, &metrics, state.sort_key);
@@ -1373,7 +1415,7 @@ fn picker_header_line(state: &PickerState) -> Line<'static> {
         ));
         spans.push(" ".into());
         spans.push(source_tab_span(
-            SessionLookupSource::Praxis,
+            SessionLookupSource::Codex,
             state.active_source,
         ));
     }
@@ -1388,7 +1430,7 @@ fn picker_header_line(state: &PickerState) -> Line<'static> {
 fn picker_hint_line(state: &PickerState) -> Line<'static> {
     let action_label = if matches!(
         (state.action, state.active_source),
-        (SessionPickerAction::Resume, SessionLookupSource::Praxis)
+        (SessionPickerAction::Resume, SessionLookupSource::Codex)
     ) {
         "fork into Praxis"
     } else {
@@ -1440,7 +1482,7 @@ fn source_tab_span(
 fn source_display_name(source: SessionLookupSource) -> &'static str {
     match source {
         SessionLookupSource::Praxis => "Praxis",
-        SessionLookupSource::Praxis => "Praxis",
+        SessionLookupSource::Codex => "Codex",
     }
 }
 
@@ -1452,6 +1494,15 @@ fn search_line(state: &PickerState) -> Line<'_> {
         return Line::from("Type to search".dim());
     }
     Line::from(format!("Search: {}", state.query))
+}
+
+fn visible_row_range(len: usize, scroll_top: usize, capacity: usize) -> (usize, usize) {
+    if len == 0 || capacity == 0 {
+        return (0, 0);
+    }
+    let start = scroll_top.min(len.saturating_sub(1));
+    let end = len.min(start.saturating_add(capacity));
+    (start, end)
 }
 
 fn render_list(
@@ -1471,10 +1522,10 @@ fn render_list(
         return;
     }
 
-    let capacity = area.height as usize;
-    let start = state.scroll_top.min(rows.len().saturating_sub(1));
-    let end = rows.len().min(start + capacity);
+    let (start, end) = visible_row_range(rows.len(), state.scroll_top, area.height as usize);
     let labels = &metrics.labels;
+    let label_start = start.saturating_sub(metrics.first_row);
+    let label_end = label_start + (end - start);
     let mut y = area.y;
 
     let visibility = column_visibility(area.width, metrics, state.sort_key);
@@ -1485,7 +1536,7 @@ fn render_list(
 
     for (idx, (row, (created_label, updated_label, branch_label, cwd_label))) in rows[start..end]
         .iter()
-        .zip(labels[start..end].iter())
+        .zip(labels[label_start..label_end].iter())
         .enumerate()
     {
         let is_sel = start + idx == state.selected;
@@ -1730,6 +1781,7 @@ fn render_column_headers(
 /// Widths are measured in Unicode display width (not byte length) so columns
 /// align correctly when labels contain non-ASCII characters.
 struct ColumnMetrics {
+    first_row: usize,
     max_created_width: usize,
     max_updated_width: usize,
     max_branch_width: usize,
@@ -1751,7 +1803,17 @@ struct ColumnVisibility {
     show_cwd: bool,
 }
 
+#[cfg(test)]
 fn calculate_column_metrics(rows: &[Row], include_cwd: bool) -> ColumnMetrics {
+    calculate_column_metrics_for_range(rows, 0, rows.len(), include_cwd)
+}
+
+fn calculate_column_metrics_for_range(
+    rows: &[Row],
+    first_row: usize,
+    last_row: usize,
+    include_cwd: bool,
+) -> ColumnMetrics {
     fn right_elide(s: &str, max: usize) -> String {
         if s.chars().count() <= max {
             return s.to_string();
@@ -1771,7 +1833,8 @@ fn calculate_column_metrics(rows: &[Row], include_cwd: bool) -> ColumnMetrics {
         format!("…{tail}")
     }
 
-    let mut labels: Vec<(String, String, String, String)> = Vec::with_capacity(rows.len());
+    let mut labels: Vec<(String, String, String, String)> =
+        Vec::with_capacity(last_row.saturating_sub(first_row));
     let mut max_created_width = UnicodeWidthStr::width("Created at");
     let mut max_updated_width = UnicodeWidthStr::width("Updated at");
     let mut max_branch_width = UnicodeWidthStr::width("Branch");
@@ -1781,7 +1844,7 @@ fn calculate_column_metrics(rows: &[Row], include_cwd: bool) -> ColumnMetrics {
         0
     };
 
-    for row in rows {
+    for row in rows.get(first_row..last_row).unwrap_or(&[]) {
         let created = format_created_label(row);
         let updated = format_updated_label(row);
         let branch_raw = row.git_branch.clone().unwrap_or_default();
@@ -1804,6 +1867,7 @@ fn calculate_column_metrics(rows: &[Row], include_cwd: bool) -> ColumnMetrics {
     }
 
     ColumnMetrics {
+        first_row,
         max_created_width,
         max_updated_width,
         max_branch_width,
@@ -1875,7 +1939,6 @@ mod tests {
     use crossterm::event::KeyModifiers;
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
-    use serde_json::json;
     use std::fs::FileTimes;
     use std::fs::OpenOptions;
     use std::path::Path;
@@ -2094,12 +2157,13 @@ mod tests {
     }
 
     #[test]
-    fn remote_thread_list_params_omit_provider_filter() {
+    fn remote_thread_list_params_omit_model_providers() {
         let params = thread_list_params(
             Some(String::from("cursor-1")),
-            ProviderFilter::Any,
             ThreadSortKey::UpdatedAt,
             /*include_non_interactive*/ false,
+            /*search_term*/ None,
+            /*filter_cwd*/ None,
         );
 
         assert_eq!(params.cursor, Some(String::from("cursor-1")));
@@ -2114,14 +2178,42 @@ mod tests {
     fn remote_thread_list_params_can_include_non_interactive_sources() {
         let params = thread_list_params(
             Some(String::from("cursor-1")),
-            ProviderFilter::Any,
             ThreadSortKey::UpdatedAt,
             /*include_non_interactive*/ true,
+            /*search_term*/ None,
+            /*filter_cwd*/ None,
         );
 
         assert_eq!(params.cursor, Some(String::from("cursor-1")));
         assert_eq!(params.model_providers, None);
         assert_eq!(params.source_kinds, None);
+    }
+
+    #[test]
+    fn remote_thread_list_params_forwards_search_term() {
+        let params = thread_list_params(
+            None,
+            ThreadSortKey::UpdatedAt,
+            /*include_non_interactive*/ false,
+            Some(String::from("legacy codex")),
+            /*filter_cwd*/ None,
+        );
+
+        assert_eq!(params.search_term.as_deref(), Some("legacy codex"));
+    }
+
+    #[test]
+    fn remote_thread_list_params_forwards_cwd_filter() {
+        let cwd = PathBuf::from("project");
+        let params = thread_list_params(
+            None,
+            ThreadSortKey::UpdatedAt,
+            /*include_non_interactive*/ false,
+            /*search_term*/ None,
+            Some(cwd.clone()),
+        );
+
+        assert_eq!(params.cwd, Some(cwd.display().to_string()));
     }
 
     #[test]
@@ -2131,7 +2223,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::Any,
             /*show_all*/ false,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2162,7 +2253,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2240,7 +2330,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2446,41 +2535,34 @@ mod tests {
         use ratatui::layout::Layout;
 
         let tempdir = tempfile::tempdir().expect("tempdir");
-        let session_index_path = tempdir.path().join("session_index.jsonl");
 
         let id1 =
             ThreadId::from_string("11111111-1111-1111-1111-111111111111").expect("thread id 1");
         let id2 =
             ThreadId::from_string("22222222-2222-2222-2222-222222222222").expect("thread id 2");
-        let entries = vec![
-            json!({
-                "id": id1,
-                "thread_name": "Keep this for now",
-                "updated_at": "2025-01-01T00:00:00Z",
-            }),
-            json!({
-                "id": id2,
-                "thread_name": "Named thread",
-                "updated_at": "2025-01-01T00:00:00Z",
-            }),
-        ];
-        let mut out = String::new();
-        for entry in entries {
-            out.push_str(&serde_json::to_string(&entry).expect("session index entry"));
-            out.push('\n');
-        }
-        std::fs::write(&session_index_path, out).expect("write session index");
+        let state_db =
+            praxis_state::StateRuntime::init(tempdir.path().to_path_buf(), "openai".to_string())
+                .await
+                .expect("state db");
+        state_db
+            .set_thread_name(id1, "Keep this for now")
+            .await
+            .expect("thread name 1");
+        state_db
+            .set_thread_name(id2, "Named thread")
+            .await
+            .expect("thread name 2");
 
         let loader: PageLoader = Arc::new(|_| {});
         let mut state = PickerState::new(
             tempdir.path().to_path_buf(),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
         );
+        state.set_thread_name_state_db(Some(state_db));
 
         let now = Utc::now();
         let rows = vec![
@@ -2543,7 +2625,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2612,7 +2693,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2640,6 +2720,7 @@ mod tests {
     #[test]
     fn column_visibility_hides_extra_date_column_when_narrow() {
         let metrics = ColumnMetrics {
+            first_row: 0,
             max_created_width: 8,
             max_updated_width: 12,
             max_branch_width: 0,
@@ -2693,7 +2774,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2719,12 +2799,11 @@ mod tests {
     #[test]
     fn picker_header_and_hint_show_source_switcher() {
         let praxis_loader: PageLoader = Arc::new(|_| {});
-        let praxis_loader: PageLoader = Arc::new(|_| {});
+        let codex_loader: PageLoader = Arc::new(|_| {});
         let mut state = PickerState::new(
             PathBuf::from("/tmp/praxis"),
             FrameRequester::test_dummy(),
             praxis_loader.clone(),
-            ProviderFilter::Any,
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2737,10 +2816,10 @@ mod tests {
                     praxis_home: PathBuf::from("/tmp/praxis"),
                     page_loader: praxis_loader,
                 },
-                SessionLookupSource::Praxis,
+                SessionLookupSource::Codex,
                 PickerSourceConfig {
                     praxis_home: PathBuf::from("/tmp/codex"),
-                    page_loader: praxis_loader,
+                    page_loader: codex_loader,
                 },
             ),
         );
@@ -2748,30 +2827,29 @@ mod tests {
         let header = line_text(picker_header_line(&state));
         assert!(header.contains("Source:"));
         assert!(header.contains("[Praxis]"));
-        assert!(header.contains("Praxis"));
+        assert!(header.contains("Codex"));
 
         let hint = line_text(picker_hint_line(&state));
         assert!(hint.contains("switch source"));
     }
 
     #[tokio::test]
-    async fn switching_source_reloads_other_loader_and_praxis_resume_forks() {
+    async fn switching_source_reloads_other_loader_and_codex_resume_forks() {
         let praxis_requests: Arc<Mutex<Vec<PageLoadRequest>>> = Arc::new(Mutex::new(Vec::new()));
-        let praxis_requests: Arc<Mutex<Vec<PageLoadRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let codex_requests: Arc<Mutex<Vec<PageLoadRequest>>> = Arc::new(Mutex::new(Vec::new()));
         let praxis_sink = praxis_requests.clone();
-        let praxis_sink = praxis_requests.clone();
+        let codex_sink = codex_requests.clone();
         let praxis_loader: PageLoader = Arc::new(move |req: PageLoadRequest| {
             praxis_sink.lock().unwrap().push(req);
         });
-        let praxis_loader: PageLoader = Arc::new(move |req: PageLoadRequest| {
-            praxis_sink.lock().unwrap().push(req);
+        let codex_loader: PageLoader = Arc::new(move |req: PageLoadRequest| {
+            codex_sink.lock().unwrap().push(req);
         });
 
         let mut state = PickerState::new(
             PathBuf::from("/tmp/praxis"),
             FrameRequester::test_dummy(),
             praxis_loader.clone(),
-            ProviderFilter::Any,
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2784,29 +2862,29 @@ mod tests {
                     praxis_home: PathBuf::from("/tmp/praxis"),
                     page_loader: praxis_loader,
                 },
-                SessionLookupSource::Praxis,
+                SessionLookupSource::Codex,
                 PickerSourceConfig {
                     praxis_home: PathBuf::from("/tmp/codex"),
-                    page_loader: praxis_loader,
+                    page_loader: codex_loader,
                 },
             ),
         );
 
         state.start_initial_load();
         assert_eq!(praxis_requests.lock().unwrap().len(), 1);
-        assert!(praxis_requests.lock().unwrap().is_empty());
+        assert!(codex_requests.lock().unwrap().is_empty());
 
         state
             .handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE))
             .await
             .unwrap();
 
-        assert_eq!(state.active_source, SessionLookupSource::Praxis);
-        assert_eq!(praxis_requests.lock().unwrap().len(), 1);
+        assert_eq!(state.active_source, SessionLookupSource::Codex);
+        assert_eq!(codex_requests.lock().unwrap().len(), 1);
 
         let thread_id = ThreadId::new();
         let row = Row {
-            path: Some(PathBuf::from("/tmp/praxis-thread.jsonl")),
+            path: Some(PathBuf::from("/tmp/codex-thread.jsonl")),
             preview: String::from("imported codex thread"),
             thread_id: Some(thread_id),
             thread_name: Some(String::from("Imported")),
@@ -2844,7 +2922,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2892,7 +2969,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2932,7 +3008,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -2967,7 +3042,7 @@ mod tests {
     }
 
     #[test]
-    fn app_server_row_keeps_pathless_threads() {
+    fn app_gateway_row_keeps_pathless_threads() {
         let thread_id = ThreadId::new();
         let thread = Thread {
             id: thread_id.to_string(),
@@ -2977,11 +3052,11 @@ mod tests {
             model_provider: String::from("openai"),
             created_at: 1,
             updated_at: 2,
-            status: praxis_app_server_protocol::ThreadStatus::Idle,
+            status: praxis_app_gateway_protocol::ThreadStatus::Idle,
             path: None,
             cwd: PathBuf::from("/tmp"),
             cli_version: String::from("0.0.0"),
-            source: praxis_app_server_protocol::SessionSource::Cli,
+            source: praxis_app_gateway_protocol::SessionSource::Cli,
             agent_nickname: None,
             agent_role: None,
             git_info: None,
@@ -2992,7 +3067,7 @@ mod tests {
             turns: Vec::new(),
         };
 
-        let row = row_from_app_server_thread(thread).expect("row should be preserved");
+        let row = row_from_app_gateway_thread(thread).expect("row should be preserved");
 
         assert_eq!(row.path, None);
         assert_eq!(row.thread_id, Some(thread_id));
@@ -3006,7 +3081,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -3043,7 +3117,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_query_loads_until_match_and_respects_scan_cap() {
+    async fn set_query_restarts_backend_search_and_ignores_stale_pages() {
         let recorded_requests: Arc<Mutex<Vec<PageLoadRequest>>> = Arc::new(Mutex::new(Vec::new()));
         let request_sink = recorded_requests.clone();
         let loader: PageLoader = Arc::new(move |req: PageLoadRequest| {
@@ -3054,7 +3128,6 @@ mod tests {
             PathBuf::from("/tmp"),
             FrameRequester::test_dummy(),
             loader,
-            ProviderFilter::MatchDefault(String::from("openai")),
             /*show_all*/ true,
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
@@ -3080,44 +3153,50 @@ mod tests {
             assert_eq!(guard.len(), 1);
             guard[0].clone()
         };
+        assert!(first_request.cursor.is_none());
+        assert_eq!(first_request.search_term.as_deref(), Some("target"));
+        assert!(first_request.search_token.is_some());
+
+        state.set_query("other".to_string());
+        let active_request = {
+            let guard = recorded_requests.lock().unwrap();
+            assert_eq!(guard.len(), 2);
+            guard[1].clone()
+        };
+        assert!(active_request.cursor.is_none());
+        assert_eq!(active_request.search_term.as_deref(), Some("other"));
+        assert!(active_request.search_token.is_some());
 
         state
             .handle_background_event(BackgroundEvent::PageLoaded {
                 request_token: first_request.request_token,
                 search_token: first_request.search_token,
                 page: Ok(page(
-                    vec![make_item("/tmp/beta.jsonl", "2025-01-02T00:00:00Z", "beta")],
-                    Some(cursor_from_str(
-                        "2025-01-03T00-00-00|00000000-0000-0000-0000-000000000001",
-                    )),
+                    vec![make_item(
+                        "/tmp/stale.jsonl",
+                        "2025-01-02T00:00:00Z",
+                        "target stale",
+                    )],
+                    /*next_cursor*/ None,
                     /*num_scanned_files*/ 5,
                     /*reached_scan_cap*/ false,
                 )),
             })
             .await
             .unwrap();
-
-        let second_request = {
-            let guard = recorded_requests.lock().unwrap();
-            assert_eq!(guard.len(), 2);
-            guard[1].clone()
-        };
-        assert!(state.search_state.is_active());
         assert!(state.filtered_rows.is_empty());
 
         state
             .handle_background_event(BackgroundEvent::PageLoaded {
-                request_token: second_request.request_token,
-                search_token: second_request.search_token,
+                request_token: active_request.request_token,
+                search_token: active_request.search_token,
                 page: Ok(page(
                     vec![make_item(
-                        "/tmp/match.jsonl",
+                        "/tmp/backend-result.jsonl",
                         "2025-01-03T00:00:00Z",
-                        "target log",
+                        "backend ranked result",
                     )],
-                    Some(cursor_from_str(
-                        "2025-01-04T00-00-00|00000000-0000-0000-0000-000000000002",
-                    )),
+                    /*next_cursor*/ None,
                     /*num_scanned_files*/ 7,
                     /*reached_scan_cap*/ false,
                 )),
@@ -3129,8 +3208,33 @@ mod tests {
         assert!(!state.search_state.is_active());
 
         recorded_requests.lock().unwrap().clear();
-        state.set_query("missing".to_string());
-        let active_request = {
+        state.set_query(String::new());
+        let clear_request = {
+            let guard = recorded_requests.lock().unwrap();
+            assert_eq!(guard.len(), 1);
+            guard[0].clone()
+        };
+        assert_eq!(clear_request.search_term, None);
+    }
+
+    #[tokio::test]
+    async fn backend_search_continues_empty_pages_until_cursor_exhausted() {
+        let recorded_requests: Arc<Mutex<Vec<PageLoadRequest>>> = Arc::new(Mutex::new(Vec::new()));
+        let request_sink = recorded_requests.clone();
+        let loader: PageLoader = Arc::new(move |req: PageLoadRequest| {
+            request_sink.lock().unwrap().push(req);
+        });
+
+        let mut state = PickerState::new(
+            PathBuf::from("/tmp"),
+            FrameRequester::test_dummy(),
+            loader,
+            /*show_all*/ true,
+            /*filter_cwd*/ None,
+            SessionPickerAction::Resume,
+        );
+        state.set_query("target".to_string());
+        let first_request = {
             let guard = recorded_requests.lock().unwrap();
             assert_eq!(guard.len(), 1);
             guard[0].clone()
@@ -3138,23 +3242,31 @@ mod tests {
 
         state
             .handle_background_event(BackgroundEvent::PageLoaded {
-                request_token: second_request.request_token,
-                search_token: second_request.search_token,
+                request_token: first_request.request_token,
+                search_token: first_request.search_token,
                 page: Ok(page(
                     Vec::new(),
-                    /*next_cursor*/ None,
+                    Some(cursor_from_str(
+                        "2025-01-03T00-00-00|00000000-0000-0000-0000-000000000001",
+                    )),
                     /*num_scanned_files*/ 0,
                     /*reached_scan_cap*/ false,
                 )),
             })
             .await
             .unwrap();
-        assert_eq!(recorded_requests.lock().unwrap().len(), 1);
+        let second_request = {
+            let guard = recorded_requests.lock().unwrap();
+            assert_eq!(guard.len(), 2);
+            guard[1].clone()
+        };
+        assert_eq!(second_request.search_term.as_deref(), Some("target"));
+        assert!(second_request.cursor.is_some());
 
         state
             .handle_background_event(BackgroundEvent::PageLoaded {
-                request_token: active_request.request_token,
-                search_token: active_request.search_token,
+                request_token: second_request.request_token,
+                search_token: second_request.search_token,
                 page: Ok(page(
                     Vec::new(),
                     /*next_cursor*/ None,

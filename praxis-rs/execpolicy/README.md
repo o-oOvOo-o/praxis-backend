@@ -46,16 +46,16 @@ host_executable(
 
 ## CLI
 
-- From the Codex CLI, run `codex execpolicy check` subcommand with one or more policy files (for example `src/default.rules`) to check a command:
+- From the Praxis CLI, run `praxis execpolicy check` subcommand with one or more policy files (for example `src/default.rules`) to check a command:
 
 ```bash
-codex execpolicy check --rules path/to/policy.rules git status
+praxis execpolicy check --rules path/to/policy.rules git status
 ```
 
 - To opt into basename fallback for absolute program paths, pass `--resolve-host-executables`:
 
 ```bash
-codex execpolicy check \
+praxis execpolicy check \
   --rules path/to/policy.rules \
   --resolve-host-executables \
   /usr/bin/git status

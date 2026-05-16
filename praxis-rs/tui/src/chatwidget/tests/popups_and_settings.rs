@@ -62,6 +62,7 @@ async fn experimental_mode_plan_is_ignored_on_startup() {
     let session_telemetry = test_session_telemetry(&cfg, resolved_model.as_str());
     let init = ChatWidgetInit {
         config: cfg.clone(),
+        tui_config: TuiRuntimeConfig::default(),
         frame_requester: FrameRequester::test_dummy(),
         app_event_tx: AppEventSender::new(unbounded_channel::<AppEvent>().0),
         initial_user_message: None,
@@ -1632,7 +1633,7 @@ async fn server_overloaded_error_does_not_switch_models() {
     });
 
     while let Ok(event) = rx.try_recv() {
-        if let AppEvent::UpdateModel(model) = event {
+        if let AppEvent::UpdateModelSelection { model, .. } = event {
             assert_eq!(
                 model, "gpt-5.2-codex",
                 "did not expect model switch on server-overloaded error"
@@ -1658,7 +1659,7 @@ async fn model_reasoning_selection_popup_snapshot() {
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
     let preset = get_available_model(&chat, "gpt-5.1-codex-max");
-    chat.open_reasoning_popup(preset);
+    chat.open_reasoning_popup(preset, "openai".to_string(), None);
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
     assert_chatwidget_snapshot!("model_reasoning_selection_popup", popup);
@@ -1672,7 +1673,7 @@ async fn model_reasoning_selection_popup_extra_high_warning_snapshot() {
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::XHigh));
 
     let preset = get_available_model(&chat, "gpt-5.1-codex-max");
-    chat.open_reasoning_popup(preset);
+    chat.open_reasoning_popup(preset, "openai".to_string(), None);
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
     assert_chatwidget_snapshot!("model_reasoning_selection_popup_extra_high_warning", popup);
@@ -1685,7 +1686,7 @@ async fn reasoning_popup_shows_extra_high_with_space() {
     set_chatgpt_auth(&mut chat);
 
     let preset = get_available_model(&chat, "gpt-5.1-codex-max");
-    chat.open_reasoning_popup(preset);
+    chat.open_reasoning_popup(preset, "openai".to_string(), None);
 
     let popup = render_bottom_popup(&chat, /*width*/ 120);
     assert!(
@@ -1721,7 +1722,7 @@ async fn single_reasoning_option_skips_selection() {
         supported_in_api: true,
         input_modalities: default_input_modalities(),
     };
-    chat.open_reasoning_popup(preset);
+    chat.open_reasoning_popup(preset, "openai".to_string(), None);
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
     assert!(
@@ -1800,7 +1801,7 @@ async fn reasoning_popup_escape_returns_to_model_popup() {
     chat.open_model_popup();
 
     let preset = get_available_model(&chat, "gpt-5.1-codex-max");
-    chat.open_reasoning_popup(preset);
+    chat.open_reasoning_popup(preset, "openai".to_string(), None);
 
     let before_escape = render_bottom_popup(&chat, /*width*/ 80);
     assert!(before_escape.contains("Select Reasoning Level"));

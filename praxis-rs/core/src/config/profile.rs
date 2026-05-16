@@ -65,16 +65,21 @@ pub struct ConfigProfile {
     pub oss_provider: Option<String>,
 }
 
-impl From<ConfigProfile> for praxis_app_server_protocol::Profile {
+impl From<ConfigProfile> for praxis_app_gateway_protocol::Profile {
     fn from(config_profile: ConfigProfile) -> Self {
         Self {
             model: config_profile.model,
             model_provider: config_profile.model_provider,
-            approval_policy: config_profile.approval_policy,
+            approval_policy: config_profile.approval_policy.map(Into::into),
+            approvals_reviewer: config_profile.approvals_reviewer.map(Into::into),
+            service_tier: config_profile.service_tier,
             model_reasoning_effort: config_profile.model_reasoning_effort,
             model_reasoning_summary: config_profile.model_reasoning_summary,
             model_verbosity: config_profile.model_verbosity,
+            web_search: config_profile.web_search,
+            tools: config_profile.tools.map(From::from),
             chatgpt_base_url: config_profile.chatgpt_base_url,
+            additional: Default::default(),
         }
     }
 }

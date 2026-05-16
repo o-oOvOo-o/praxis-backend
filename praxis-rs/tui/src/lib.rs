@@ -7,23 +7,23 @@ use additional_dirs::add_dir_warning_message;
 use app::App;
 pub use app::AppExitInfo;
 pub use app::ExitReason;
-use app_server_session::AppServerSession;
+use app_gateway_session::AppGatewaySession;
 use color_eyre::eyre::WrapErr;
 use cwd_prompt::CwdPromptAction;
 use cwd_prompt::CwdPromptOutcome;
 use cwd_prompt::CwdSelection;
-use praxis_app_server_client::AppServerClient;
-use praxis_app_server_client::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
-use praxis_app_server_client::InProcessAppServerClient;
-use praxis_app_server_client::InProcessClientStartArgs;
-use praxis_app_server_client::RemoteAppServerClient;
-use praxis_app_server_client::RemoteAppServerConnectArgs;
-use praxis_app_server_protocol::AuthMode as AppServerAuthMode;
-use praxis_app_server_protocol::ConfigWarningNotification;
-use praxis_app_server_protocol::Thread as AppServerThread;
-use praxis_app_server_protocol::ThreadListParams;
-use praxis_app_server_protocol::ThreadSortKey as AppServerThreadSortKey;
-use praxis_app_server_protocol::ThreadSourceKind;
+use praxis_app_gateway_client::AppGatewayClient;
+use praxis_app_gateway_client::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
+use praxis_app_gateway_client::NativeAppGatewayClient;
+use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
+use praxis_app_gateway_client::RemoteAppGatewayClient;
+use praxis_app_gateway_client::RemoteAppGatewayConnectArgs;
+use praxis_app_gateway_protocol::AuthMode as AppGatewayAuthMode;
+use praxis_app_gateway_protocol::ConfigWarningNotification;
+use praxis_app_gateway_protocol::Thread as AppGatewayThread;
+use praxis_app_gateway_protocol::ThreadListParams;
+use praxis_app_gateway_protocol::ThreadSortKey as AppGatewayThreadSortKey;
+use praxis_app_gateway_protocol::ThreadSourceKind;
 use praxis_cloud_requirements::cloud_requirements_loader_for_storage;
 use praxis_core::check_execpolicy_for_warnings;
 use praxis_core::config::Config;
@@ -71,6 +71,7 @@ use tracing::warn;
 use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
+use tui_config::TuiRuntimeConfig;
 use url::Url;
 use uuid::Uuid;
 
@@ -80,8 +81,8 @@ mod app_backtrack;
 mod app_command;
 mod app_event;
 mod app_event_sender;
-mod app_server_approval_conversions;
-mod app_server_session;
+mod app_gateway_approval_conversions;
+mod app_gateway_session;
 mod ascii_animation;
 #[cfg(not(target_os = "linux"))]
 mod audio_device;
@@ -118,7 +119,6 @@ mod frames;
 mod get_git_diff;
 mod history_cell;
 mod history_presentation;
-mod history_render_cache;
 pub mod insert_history;
 mod key_hint;
 mod line_truncation;
@@ -155,9 +155,9 @@ mod terminal_title;
 mod text_formatting;
 mod theme_picker;
 mod toast_queue;
-mod tooltips;
 mod transcript_search;
 mod tui;
+mod tui_config;
 mod turn_runtime;
 mod ui_consts;
 pub mod update_action;
@@ -239,28 +239,28 @@ pub use public_widgets::composer_input::ComposerAction;
 pub use public_widgets::composer_input::ComposerInput;
 // (tests access modules directly within the crate)
 
-async fn start_embedded_app_server(
+async fn start_embedded_app_gateway(
     arg0_paths: Arg0DispatchPaths,
     config: Config,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
     cloud_requirements: CloudRequirementsLoader,
     feedback: praxis_feedback::CodexFeedback,
-) -> color_eyre::Result<InProcessAppServerClient> {
-    start_embedded_app_server_with(
+) -> color_eyre::Result<NativeAppGatewayClient> {
+    start_embedded_app_gateway_with(
         arg0_paths,
         config,
         cli_kv_overrides,
         loader_overrides,
         cloud_requirements,
         feedback,
-        InProcessAppServerClient::start,
+        NativeAppGatewayClient::start,
     )
     .await
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum AppServerTarget {
+pub(crate) enum AppGatewayTarget {
     Embedded,
     Remote {
         websocket_url: String,
@@ -342,35 +342,35 @@ fn validate_remote_auth_token_transport(websocket_url: &str) -> color_eyre::Resu
     )
 }
 
-async fn connect_remote_app_server(
+async fn connect_remote_app_gateway(
     websocket_url: String,
     auth_token: Option<String>,
-) -> color_eyre::Result<AppServerClient> {
-    let app_server = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+) -> color_eyre::Result<AppGatewayClient> {
+    let app_gateway = RemoteAppGatewayClient::connect(RemoteAppGatewayConnectArgs {
         websocket_url,
         auth_token,
         client_name: "praxis-tui".to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
-        channel_capacity: DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+        channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
     })
     .await
-    .wrap_err("failed to connect to remote app server")?;
-    Ok(AppServerClient::Remote(app_server))
+    .wrap_err("failed to connect to remote app gateway")?;
+    Ok(AppGatewayClient::Remote(app_gateway))
 }
 
-async fn start_app_server(
-    target: &AppServerTarget,
+async fn start_app_gateway(
+    target: &AppGatewayTarget,
     arg0_paths: Arg0DispatchPaths,
     config: Config,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
     cloud_requirements: CloudRequirementsLoader,
     feedback: praxis_feedback::CodexFeedback,
-) -> color_eyre::Result<AppServerClient> {
+) -> color_eyre::Result<AppGatewayClient> {
     match target {
-        AppServerTarget::Embedded => start_embedded_app_server(
+        AppGatewayTarget::Embedded => start_embedded_app_gateway(
             arg0_paths,
             config,
             cli_kv_overrides,
@@ -379,19 +379,19 @@ async fn start_app_server(
             feedback,
         )
         .await
-        .map(AppServerClient::InProcess),
-        AppServerTarget::Remote {
+        .map(AppGatewayClient::Native),
+        AppGatewayTarget::Remote {
             websocket_url,
             auth_token,
-        } => connect_remote_app_server(websocket_url.clone(), auth_token.clone()).await,
+        } => connect_remote_app_gateway(websocket_url.clone(), auth_token.clone()).await,
     }
 }
 
-pub(crate) async fn start_app_server_for_picker(
+pub(crate) async fn start_app_gateway_for_picker(
     config: &Config,
-    target: &AppServerTarget,
-) -> color_eyre::Result<AppServerSession> {
-    let app_server = start_app_server(
+    target: &AppGatewayTarget,
+) -> color_eyre::Result<AppGatewaySession> {
+    let app_gateway = start_app_gateway(
         target,
         Arg0DispatchPaths::default(),
         config.clone(),
@@ -401,17 +401,17 @@ pub(crate) async fn start_app_server_for_picker(
         praxis_feedback::CodexFeedback::new(),
     )
     .await?;
-    Ok(AppServerSession::new(app_server))
+    Ok(AppGatewaySession::new(app_gateway))
 }
 
 #[cfg(test)]
-pub(crate) async fn start_embedded_app_server_for_picker(
+pub(crate) async fn start_embedded_app_gateway_for_picker(
     config: &Config,
-) -> color_eyre::Result<AppServerSession> {
-    start_app_server_for_picker(config, &AppServerTarget::Embedded).await
+) -> color_eyre::Result<AppGatewaySession> {
+    start_app_gateway_for_picker(config, &AppGatewayTarget::Embedded).await
 }
 
-async fn start_embedded_app_server_with<F, Fut>(
+async fn start_embedded_app_gateway_with<F, Fut>(
     arg0_paths: Arg0DispatchPaths,
     config: Config,
     cli_kv_overrides: Vec<(String, toml::Value)>,
@@ -419,10 +419,10 @@ async fn start_embedded_app_server_with<F, Fut>(
     cloud_requirements: CloudRequirementsLoader,
     feedback: praxis_feedback::CodexFeedback,
     start_client: F,
-) -> color_eyre::Result<InProcessAppServerClient>
+) -> color_eyre::Result<NativeAppGatewayClient>
 where
-    F: FnOnce(InProcessClientStartArgs) -> Fut,
-    Fut: Future<Output = std::io::Result<InProcessAppServerClient>>,
+    F: FnOnce(NativeAppGatewayClientStartArgs) -> Fut,
+    Fut: Future<Output = std::io::Result<NativeAppGatewayClient>>,
 {
     let config_warnings = config
         .startup_warnings
@@ -434,7 +434,7 @@ where
             range: None,
         })
         .collect();
-    let client = start_client(InProcessClientStartArgs {
+    let client = start_client(NativeAppGatewayClientStartArgs {
         arg0_paths,
         config: Arc::new(config),
         cli_overrides: cli_kv_overrides,
@@ -448,23 +448,23 @@ where
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
-        channel_capacity: DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+        channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
     })
     .await
-    .wrap_err("failed to start embedded app server")?;
+    .wrap_err("failed to start embedded app gateway")?;
     Ok(client)
 }
 
-async fn shutdown_app_server_if_present(app_server: Option<AppServerSession>) {
-    if let Some(app_server) = app_server
-        && let Err(err) = app_server.shutdown().await
+async fn shutdown_app_gateway_if_present(app_gateway: Option<AppGatewaySession>) {
+    if let Some(app_gateway) = app_gateway
+        && let Err(err) = app_gateway.shutdown().await
     {
-        warn!(%err, "Failed to shut down temporary embedded app server");
+        warn!(%err, "Failed to shut down temporary embedded app gateway");
     }
 }
 
-fn session_target_from_app_server_thread(
-    thread: AppServerThread,
+fn session_target_from_app_gateway_thread(
+    thread: AppGatewayThread,
 ) -> Option<resume_picker::SessionTarget> {
     match ThreadId::from_string(&thread.id) {
         Ok(thread_id) => Some(resume_picker::SessionTarget {
@@ -476,24 +476,24 @@ fn session_target_from_app_server_thread(
             warn!(
                 thread_id = thread.id,
                 %err,
-                "Ignoring app-server thread with invalid thread id during TUI session lookup"
+                "Ignoring app-gateway thread with invalid thread id during TUI session lookup"
             );
             None
         }
     }
 }
 
-async fn lookup_session_target_by_name_with_app_server(
-    app_server: &mut AppServerSession,
+async fn lookup_session_target_by_name_with_app_gateway(
+    app_gateway: &mut AppGatewaySession,
     name: &str,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
     let mut cursor = None;
     loop {
-        let response = app_server
+        let response = app_gateway
             .thread_list(ThreadListParams {
                 cursor: cursor.clone(),
                 limit: Some(100),
-                sort_key: Some(AppServerThreadSortKey::UpdatedAt),
+                sort_key: Some(AppGatewayThreadSortKey::UpdatedAt),
                 model_providers: None,
                 source_kinds: Some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode]),
                 archived: Some(false),
@@ -509,7 +509,7 @@ async fn lookup_session_target_by_name_with_app_server(
             .into_iter()
             .find(|thread| thread.name.as_deref() == Some(name))
         {
-            return Ok(session_target_from_app_server_thread(thread));
+            return Ok(session_target_from_app_gateway_thread(thread));
         }
         if response.next_cursor.is_none() {
             return Ok(None);
@@ -518,8 +518,8 @@ async fn lookup_session_target_by_name_with_app_server(
     }
 }
 
-async fn lookup_session_target_with_app_server(
-    app_server: &mut AppServerSession,
+async fn lookup_session_target_with_app_gateway(
+    app_gateway: &mut AppGatewaySession,
     id_or_name: &str,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
     if Uuid::parse_str(id_or_name).is_ok() {
@@ -534,11 +534,11 @@ async fn lookup_session_target_with_app_server(
                 return Ok(None);
             }
         };
-        return match app_server
+        return match app_gateway
             .thread_read(thread_id, /*include_turns*/ false)
             .await
         {
-            Ok(thread) => Ok(session_target_from_app_server_thread(thread)),
+            Ok(thread) => Ok(session_target_from_app_gateway_thread(thread)),
             Err(err) => {
                 warn!(
                     session = id_or_name,
@@ -550,18 +550,18 @@ async fn lookup_session_target_with_app_server(
         };
     }
 
-    lookup_session_target_by_name_with_app_server(app_server, id_or_name).await
+    lookup_session_target_by_name_with_app_gateway(app_gateway, id_or_name).await
 }
 
-async fn lookup_latest_session_target_with_app_server(
-    app_server: &mut AppServerSession,
+async fn lookup_latest_session_target_with_app_gateway(
+    app_gateway: &mut AppGatewaySession,
     cwd_filter: Option<&Path>,
     include_non_interactive: bool,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
     let project_filter = cwd_filter.map(project_scope_root);
     let mut cursor = None;
     loop {
-        let response = app_server
+        let response = app_gateway
             .thread_list(latest_session_lookup_params(
                 cursor.clone(),
                 include_non_interactive,
@@ -576,7 +576,7 @@ async fn lookup_latest_session_target_with_app_server(
                     None => true,
                 })
         {
-            return Ok(session_target_from_app_server_thread(thread));
+            return Ok(session_target_from_app_gateway_thread(thread));
         }
         if response.next_cursor.is_none() {
             return Ok(None);
@@ -592,7 +592,7 @@ fn latest_session_lookup_params(
     ThreadListParams {
         cursor,
         limit: Some(100),
-        sort_key: Some(AppServerThreadSortKey::UpdatedAt),
+        sort_key: Some(AppGatewayThreadSortKey::UpdatedAt),
         model_providers: None,
         source_kinds: (!include_non_interactive)
             .then_some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode]),
@@ -609,20 +609,20 @@ fn project_scope_root(path: &Path) -> PathBuf {
 fn session_lookup_command_hint(action: &str, source: SessionLookupSource) -> String {
     match source {
         SessionLookupSource::Praxis => format!("praxis {action}"),
-        SessionLookupSource::Praxis => format!("praxis {action} codex"),
+        SessionLookupSource::Codex => format!("praxis {action} codex"),
     }
 }
 
 struct SessionLookupContext {
     source: SessionLookupSource,
     config: Config,
-    app_server: AppServerSession,
+    app_gateway: AppGatewaySession,
 }
 
 pub(crate) async fn build_praxis_bridge_lookup_config(
     primary_config: &Config,
 ) -> std::io::Result<Config> {
-    let praxis_home = default_praxis_home_for_namespace(PraxisHomeNamespace::Praxis)?;
+    let praxis_home = default_praxis_home_for_namespace(PraxisHomeNamespace::Codex)?;
     ConfigBuilder::default()
         .praxis_home(praxis_home)
         .fallback_cwd(Some(primary_config.cwd.to_path_buf()))
@@ -630,27 +630,27 @@ pub(crate) async fn build_praxis_bridge_lookup_config(
         .await
 }
 
-pub(crate) fn picker_source_switch_enabled(app_server_target: &AppServerTarget) -> bool {
+pub(crate) fn picker_source_switch_enabled(app_gateway_target: &AppGatewayTarget) -> bool {
     matches!(current_praxis_home_namespace(), PraxisHomeNamespace::Praxis)
-        && matches!(app_server_target, AppServerTarget::Embedded)
+        && matches!(app_gateway_target, AppGatewayTarget::Embedded)
 }
 
 async fn start_session_lookup_context(
     source: SessionLookupSource,
     primary_config: &Config,
-    app_server_target: &AppServerTarget,
+    app_gateway_target: &AppGatewayTarget,
     arg0_paths: Arg0DispatchPaths,
     loader_overrides: LoaderOverrides,
     feedback: praxis_feedback::CodexFeedback,
 ) -> color_eyre::Result<SessionLookupContext> {
     let lookup_config = match source {
         SessionLookupSource::Praxis => primary_config.clone(),
-        SessionLookupSource::Praxis => build_praxis_bridge_lookup_config(primary_config)
+        SessionLookupSource::Codex => build_praxis_bridge_lookup_config(primary_config)
             .await
             .map_err(color_eyre::Report::new)?,
     };
-    let app_server = start_app_server(
-        app_server_target,
+    let app_gateway = start_app_gateway(
+        app_gateway_target,
         arg0_paths,
         lookup_config.clone(),
         Vec::new(),
@@ -662,7 +662,7 @@ async fn start_session_lookup_context(
     Ok(SessionLookupContext {
         source,
         config: lookup_config,
-        app_server: AppServerSession::new(app_server),
+        app_gateway: AppGatewaySession::new(app_gateway),
     })
 }
 
@@ -677,13 +677,13 @@ pub async fn run_main(
     if let (Some(websocket_url), Some(_)) = (remote_url.as_deref(), remote_auth_token.as_ref()) {
         validate_remote_auth_token_transport(websocket_url).map_err(std::io::Error::other)?;
     }
-    let app_server_target = remote_url
+    let app_gateway_target = remote_url
         .clone()
-        .map(|websocket_url| AppServerTarget::Remote {
+        .map(|websocket_url| AppGatewayTarget::Remote {
             websocket_url,
             auth_token: remote_auth_token.clone(),
         })
-        .unwrap_or(AppServerTarget::Embedded);
+        .unwrap_or(AppGatewayTarget::Embedded);
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
@@ -836,12 +836,13 @@ pub async fn run_main(
         ..Default::default()
     };
 
-    let config = load_config_or_exit(
+    let loaded_config = load_config_or_exit(
         cli_kv_overrides.clone(),
         overrides.clone(),
         cloud_requirements.clone(),
     )
     .await;
+    let LoadedTuiConfig { config, tui_config } = loaded_config;
 
     #[allow(clippy::print_stderr)]
     match check_execpolicy_for_warnings(&config.config_layer_stack).await {
@@ -867,7 +868,7 @@ pub async fn run_main(
         }
     }
 
-    if matches!(app_server_target, AppServerTarget::Embedded) {
+    if matches!(app_gateway_target, AppGatewayTarget::Embedded) {
         #[allow(clippy::print_stderr)]
         if let Err(err) = enforce_login_restrictions(&AuthConfig {
             praxis_home: config.praxis_home.clone(),
@@ -986,8 +987,9 @@ pub async fn run_main(
         cli,
         arg0_paths,
         loader_overrides,
-        app_server_target,
+        app_gateway_target,
         config,
+        tui_config,
         overrides,
         cli_kv_overrides,
         cloud_requirements,
@@ -1004,8 +1006,9 @@ async fn run_ratatui_app(
     cli: Cli,
     arg0_paths: Arg0DispatchPaths,
     loader_overrides: LoaderOverrides,
-    app_server_target: AppServerTarget,
+    app_gateway_target: AppGatewayTarget,
     initial_config: Config,
+    initial_tui_config: TuiRuntimeConfig,
     overrides: ConfigOverrides,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     mut cloud_requirements: CloudRequirementsLoader,
@@ -1013,10 +1016,8 @@ async fn run_ratatui_app(
     remote_url: Option<String>,
     remote_auth_token: Option<String>,
 ) -> color_eyre::Result<AppExitInfo> {
-    let remote_mode = matches!(&app_server_target, AppServerTarget::Remote { .. });
+    let remote_mode = matches!(&app_gateway_target, AppGatewayTarget::Remote { .. });
     color_eyre::install()?;
-
-    tooltips::announcement::prewarm();
 
     // Forward panic reports through tracing so they appear in the UI status
     // line, but do not swallow the default/color-eyre panic handler.
@@ -1060,12 +1061,12 @@ async fn run_ratatui_app(
 
     let should_show_trust_screen_flag = !remote_mode && should_show_trust_screen(&initial_config);
     let mut trust_decision_was_made = false;
-    let needs_onboarding_app_server =
+    let needs_onboarding_app_gateway =
         should_show_trust_screen_flag || initial_config.model_provider.requires_openai_auth;
-    let mut onboarding_app_server = if needs_onboarding_app_server {
-        Some(AppServerSession::new(
-            start_app_server(
-                &app_server_target,
+    let mut onboarding_app_gateway = if needs_onboarding_app_gateway {
+        Some(AppGatewaySession::new(
+            start_app_gateway(
+                &app_gateway_target,
                 arg0_paths.clone(),
                 initial_config.clone(),
                 cli_kv_overrides.clone(),
@@ -1079,30 +1080,31 @@ async fn run_ratatui_app(
         None
     };
     let login_status = if initial_config.model_provider.requires_openai_auth {
-        let Some(app_server) = onboarding_app_server.as_mut() else {
-            unreachable!("onboarding app server should exist when auth is required");
+        let Some(app_gateway) = onboarding_app_gateway.as_mut() else {
+            unreachable!("onboarding app gateway should exist when auth is required");
         };
-        get_login_status(app_server, &initial_config).await?
+        get_login_status(app_gateway, &initial_config).await?
     } else {
         LoginStatus::NotAuthenticated
     };
     let should_show_onboarding =
         should_show_onboarding(login_status, &initial_config, should_show_trust_screen_flag);
 
-    let config = if should_show_onboarding {
+    let (mut config, mut tui_config) = if should_show_onboarding {
         let show_login_screen = should_show_login_screen(login_status, &initial_config);
         let onboarding_result = run_onboarding_app(
             OnboardingScreenArgs {
                 show_login_screen,
                 show_trust_screen: should_show_trust_screen_flag,
                 login_status,
-                app_server_request_handle: onboarding_app_server
+                app_gateway_request_handle: onboarding_app_gateway
                     .as_ref()
-                    .map(AppServerSession::request_handle),
+                    .map(AppGatewaySession::request_handle),
                 config: initial_config.clone(),
+                tui_config: initial_tui_config.clone(),
             },
             if show_login_screen {
-                onboarding_app_server.take()
+                onboarding_app_gateway.take()
             } else {
                 None
             },
@@ -1139,20 +1141,21 @@ async fn run_ratatui_app(
         if onboarding_result.directory_trust_decision.is_some()
             || (show_login_screen && !remote_mode)
         {
-            load_config_or_exit(
+            let loaded = load_config_or_exit(
                 cli_kv_overrides.clone(),
                 overrides.clone(),
                 cloud_requirements.clone(),
             )
-            .await
+            .await;
+            (loaded.config, loaded.tui_config)
         } else {
-            initial_config
+            (initial_config, initial_tui_config)
         }
     } else {
-        shutdown_app_server_if_present(onboarding_app_server.take()).await;
-        initial_config
+        shutdown_app_gateway_if_present(onboarding_app_gateway.take()).await;
+        (initial_config, initial_tui_config)
     };
-    shutdown_app_server_if_present(onboarding_app_server.take()).await;
+    shutdown_app_gateway_if_present(onboarding_app_gateway.take()).await;
 
     let mut missing_session_exit = |id_str: &str, action: &str, source: SessionLookupSource| {
         error!("Error finding conversation path: {id_str}");
@@ -1171,7 +1174,7 @@ async fn run_ratatui_app(
         })
     };
 
-    let needs_app_server_session_lookup = cli.resume_last
+    let needs_app_gateway_session_lookup = cli.resume_last
         || cli.fork_last
         || cli.resume_session_id.is_some()
         || cli.fork_session_id.is_some()
@@ -1183,12 +1186,12 @@ async fn run_ratatui_app(
     } else {
         cli.resume_source
     };
-    let mut session_lookup_context = if needs_app_server_session_lookup {
+    let mut session_lookup_context = if needs_app_gateway_session_lookup {
         Some(
             start_session_lookup_context(
                 session_lookup_source,
                 &config,
-                &app_server_target,
+                &app_gateway_target,
                 arg0_paths.clone(),
                 loader_overrides.clone(),
                 feedback.clone(),
@@ -1205,15 +1208,15 @@ async fn run_ratatui_app(
             let lookup_source = session_lookup_context
                 .as_ref()
                 .map(|ctx| ctx.source)
-                .expect("session lookup app server should be initialized for --fork <id>");
+                .expect("session lookup app gateway should be initialized for --fork <id>");
             let Some(lookup) = session_lookup_context.as_mut() else {
-                unreachable!("session lookup app server should be initialized for --fork <id>");
+                unreachable!("session lookup app gateway should be initialized for --fork <id>");
             };
-            match lookup_session_target_with_app_server(&mut lookup.app_server, id_str).await? {
+            match lookup_session_target_with_app_gateway(&mut lookup.app_gateway, id_str).await? {
                 Some(target_session) => resume_picker::SessionSelection::Fork(target_session),
                 None => {
-                    shutdown_app_server_if_present(
-                        session_lookup_context.take().map(|ctx| ctx.app_server),
+                    shutdown_app_gateway_if_present(
+                        session_lookup_context.take().map(|ctx| ctx.app_gateway),
                     )
                     .await;
                     return missing_session_exit(id_str, "fork", lookup_source);
@@ -1221,10 +1224,10 @@ async fn run_ratatui_app(
             }
         } else if cli.fork_last {
             let Some(lookup) = session_lookup_context.as_mut() else {
-                unreachable!("session lookup app server should be initialized for --fork --last");
+                unreachable!("session lookup app gateway should be initialized for --fork --last");
             };
-            match lookup_latest_session_target_with_app_server(
-                &mut lookup.app_server,
+            match lookup_latest_session_target_with_app_gateway(
+                &mut lookup.app_gateway,
                 /*cwd_filter*/ None,
                 /*include_non_interactive*/ false,
             )
@@ -1235,21 +1238,21 @@ async fn run_ratatui_app(
             }
         } else if cli.fork_picker {
             let Some(lookup) = session_lookup_context.take() else {
-                unreachable!("session lookup app server should be initialized for --fork picker");
+                unreachable!("session lookup app gateway should be initialized for --fork picker");
             };
             let SessionLookupContext {
                 source,
                 config: lookup_config,
-                app_server,
+                app_gateway,
             } = lookup;
-            let alternate_source = if picker_source_switch_enabled(&app_server_target) {
+            let alternate_source = if picker_source_switch_enabled(&app_gateway_target) {
                 let alternate_lookup = start_session_lookup_context(
                     match source {
-                        SessionLookupSource::Praxis => SessionLookupSource::Praxis,
-                        SessionLookupSource::Praxis => SessionLookupSource::Praxis,
+                        SessionLookupSource::Praxis => SessionLookupSource::Codex,
+                        SessionLookupSource::Codex => SessionLookupSource::Praxis,
                     },
                     &config,
-                    &app_server_target,
+                    &app_gateway_target,
                     arg0_paths.clone(),
                     loader_overrides.clone(),
                     feedback.clone(),
@@ -1258,17 +1261,17 @@ async fn run_ratatui_app(
                 Some(resume_picker::AlternatePickerSource {
                     source: alternate_lookup.source,
                     config: alternate_lookup.config,
-                    app_server: alternate_lookup.app_server,
+                    app_gateway: alternate_lookup.app_gateway,
                 })
             } else {
                 None
             };
-            match resume_picker::run_fork_picker_with_app_server(
+            match resume_picker::run_fork_picker_with_app_gateway(
                 &mut tui,
                 &lookup_config,
                 cli.fork_show_all,
                 source,
-                app_server,
+                app_gateway,
                 alternate_source,
             )
             .await?
@@ -1293,22 +1296,20 @@ async fn run_ratatui_app(
         let lookup_source = session_lookup_context
             .as_ref()
             .map(|ctx| ctx.source)
-            .expect("session lookup app server should be initialized for --resume <id>");
+            .expect("session lookup app gateway should be initialized for --resume <id>");
         let Some(lookup) = session_lookup_context.as_mut() else {
-            unreachable!("session lookup app server should be initialized for --resume <id>");
+            unreachable!("session lookup app gateway should be initialized for --resume <id>");
         };
-        match lookup_session_target_with_app_server(&mut lookup.app_server, id_str).await? {
+        match lookup_session_target_with_app_gateway(&mut lookup.app_gateway, id_str).await? {
             Some(target_session) => match lookup.source {
                 SessionLookupSource::Praxis => {
                     resume_picker::SessionSelection::Resume(target_session)
                 }
-                SessionLookupSource::Praxis => {
-                    resume_picker::SessionSelection::Fork(target_session)
-                }
+                SessionLookupSource::Codex => resume_picker::SessionSelection::Fork(target_session),
             },
             None => {
-                shutdown_app_server_if_present(
-                    session_lookup_context.take().map(|ctx| ctx.app_server),
+                shutdown_app_gateway_if_present(
+                    session_lookup_context.take().map(|ctx| ctx.app_gateway),
                 )
                 .await;
                 return missing_session_exit(id_str, "resume", lookup_source);
@@ -1321,10 +1322,10 @@ async fn run_ratatui_app(
             Some(config.cwd.as_path())
         };
         let Some(lookup) = session_lookup_context.as_mut() else {
-            unreachable!("session lookup app server should be initialized for --resume --last");
+            unreachable!("session lookup app gateway should be initialized for --resume --last");
         };
-        match lookup_latest_session_target_with_app_server(
-            &mut lookup.app_server,
+        match lookup_latest_session_target_with_app_gateway(
+            &mut lookup.app_gateway,
             filter_cwd,
             cli.resume_include_non_interactive,
         )
@@ -1334,29 +1335,27 @@ async fn run_ratatui_app(
                 SessionLookupSource::Praxis => {
                     resume_picker::SessionSelection::Resume(target_session)
                 }
-                SessionLookupSource::Praxis => {
-                    resume_picker::SessionSelection::Fork(target_session)
-                }
+                SessionLookupSource::Codex => resume_picker::SessionSelection::Fork(target_session),
             },
             None => resume_picker::SessionSelection::StartFresh,
         }
     } else if cli.resume_picker {
         let Some(lookup) = session_lookup_context.take() else {
-            unreachable!("session lookup app server should be initialized for --resume picker");
+            unreachable!("session lookup app gateway should be initialized for --resume picker");
         };
         let SessionLookupContext {
             source,
             config: lookup_config,
-            app_server,
+            app_gateway,
         } = lookup;
-        let alternate_source = if picker_source_switch_enabled(&app_server_target) {
+        let alternate_source = if picker_source_switch_enabled(&app_gateway_target) {
             let alternate_lookup = start_session_lookup_context(
                 match source {
-                    SessionLookupSource::Praxis => SessionLookupSource::Praxis,
-                    SessionLookupSource::Praxis => SessionLookupSource::Praxis,
+                    SessionLookupSource::Praxis => SessionLookupSource::Codex,
+                    SessionLookupSource::Codex => SessionLookupSource::Praxis,
                 },
                 &config,
-                &app_server_target,
+                &app_gateway_target,
                 arg0_paths.clone(),
                 loader_overrides.clone(),
                 feedback.clone(),
@@ -1365,24 +1364,24 @@ async fn run_ratatui_app(
             Some(resume_picker::AlternatePickerSource {
                 source: alternate_lookup.source,
                 config: alternate_lookup.config,
-                app_server: alternate_lookup.app_server,
+                app_gateway: alternate_lookup.app_gateway,
             })
         } else {
             None
         };
-        match resume_picker::run_resume_picker_with_app_server(
+        match resume_picker::run_resume_picker_with_app_gateway(
             &mut tui,
             &lookup_config,
             cli.resume_show_all,
             cli.resume_include_non_interactive,
             source,
-            app_server,
+            app_gateway,
             alternate_source,
         )
         .await?
         {
             resume_picker::SessionSelection::Resume(target_session)
-                if matches!(source, SessionLookupSource::Praxis) =>
+                if matches!(source, SessionLookupSource::Codex) =>
             {
                 resume_picker::SessionSelection::Fork(target_session)
             }
@@ -1402,7 +1401,7 @@ async fn run_ratatui_app(
     } else {
         resume_picker::SessionSelection::StartFresh
     };
-    shutdown_app_server_if_present(session_lookup_context.take().map(|ctx| ctx.app_server)).await;
+    shutdown_app_gateway_if_present(session_lookup_context.take().map(|ctx| ctx.app_gateway)).await;
 
     let current_cwd = config.cwd.clone();
     let allow_prompt = !remote_mode && cli.cwd.is_none();
@@ -1449,24 +1448,30 @@ async fn run_ratatui_app(
         None => None,
     };
 
-    let mut config = match &session_selection {
+    let reload_for_resume = match &session_selection {
         resume_picker::SessionSelection::Resume(_) | resume_picker::SessionSelection::Fork(_) => {
-            load_config_or_exit_with_fallback_cwd(
-                cli_kv_overrides.clone(),
-                overrides.clone(),
-                cloud_requirements.clone(),
-                fallback_cwd,
+            Some(
+                load_config_or_exit_with_fallback_cwd(
+                    cli_kv_overrides.clone(),
+                    overrides.clone(),
+                    cloud_requirements.clone(),
+                    fallback_cwd,
+                )
+                .await,
             )
-            .await
         }
-        _ => config,
+        _ => None,
     };
+    if let Some(loaded) = reload_for_resume {
+        config = loaded.config;
+        tui_config = loaded.tui_config;
+    }
 
     // Configure syntax highlighting theme from the final config — onboarding
-    // and resume/fork can both reload config with a different tui_theme, so
+    // and resume/fork can both reload config with a different TUI theme, so
     // this must happen after the last possible reload.
     if let Some(w) = crate::render::highlight::set_theme_override(
-        config.tui_theme.clone(),
+        tui_config.theme.clone(),
         find_praxis_home().ok(),
     ) {
         config.startup_warnings.push(w);
@@ -1486,10 +1491,10 @@ async fn run_ratatui_app(
         ..
     } = cli;
 
-    let use_alt_screen = determine_alt_screen_mode(no_alt_screen, config.tui_alternate_screen);
+    let use_alt_screen = determine_alt_screen_mode(no_alt_screen, tui_config.alternate_screen);
     tui.set_alt_screen_enabled(use_alt_screen);
-    let app_server = match start_app_server(
-        &app_server_target,
+    let app_gateway = match start_app_gateway(
+        &app_gateway_target,
         arg0_paths,
         config.clone(),
         cli_kv_overrides.clone(),
@@ -1499,7 +1504,7 @@ async fn run_ratatui_app(
     )
     .await
     {
-        Ok(app_server) => app_server,
+        Ok(app_gateway) => app_gateway,
         Err(err) => {
             terminal_restore_guard.restore_silently();
             session_log::log_session_end();
@@ -1509,8 +1514,9 @@ async fn run_ratatui_app(
 
     let app_result = App::run(
         &mut tui,
-        AppServerSession::new(app_server),
+        AppGatewaySession::new(app_gateway),
         config,
+        tui_config,
         cli_kv_overrides.clone(),
         overrides.clone(),
         active_profile,
@@ -1732,19 +1738,24 @@ fn determine_alt_screen_mode(no_alt_screen: bool, tui_alternate_screen: AltScree
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginStatus {
-    AuthMode(AppServerAuthMode),
+    AuthMode(AppGatewayAuthMode),
     NotAuthenticated,
 }
 
+struct LoadedTuiConfig {
+    config: Config,
+    tui_config: TuiRuntimeConfig,
+}
+
 async fn get_login_status(
-    app_server: &mut AppServerSession,
+    app_gateway: &mut AppGatewaySession,
     config: &Config,
 ) -> color_eyre::Result<LoginStatus> {
     if !config.model_provider.requires_openai_auth {
         return Ok(LoginStatus::NotAuthenticated);
     }
 
-    let bootstrap = app_server.bootstrap(config).await?;
+    let bootstrap = app_gateway.bootstrap(config).await?;
     Ok(match bootstrap.account_auth_mode {
         Some(auth_mode) => LoginStatus::AuthMode(auth_mode),
         None => LoginStatus::NotAuthenticated,
@@ -1755,7 +1766,7 @@ async fn load_config_or_exit(
     cli_kv_overrides: Vec<(String, toml::Value)>,
     overrides: ConfigOverrides,
     cloud_requirements: CloudRequirementsLoader,
-) -> Config {
+) -> LoadedTuiConfig {
     load_config_or_exit_with_fallback_cwd(
         cli_kv_overrides,
         overrides,
@@ -1770,7 +1781,7 @@ async fn load_config_or_exit_with_fallback_cwd(
     overrides: ConfigOverrides,
     cloud_requirements: CloudRequirementsLoader,
     fallback_cwd: Option<PathBuf>,
-) -> Config {
+) -> LoadedTuiConfig {
     #[allow(clippy::print_stderr)]
     match ConfigBuilder::default()
         .cli_overrides(cli_kv_overrides)
@@ -1780,7 +1791,16 @@ async fn load_config_or_exit_with_fallback_cwd(
         .build()
         .await
     {
-        Ok(config) => config,
+        Ok(config) => {
+            let tui_config = match TuiRuntimeConfig::from_core_config(&config) {
+                Ok(tui_config) => tui_config,
+                Err(err) => {
+                    eprintln!("Error loading TUI configuration: {err}");
+                    std::process::exit(1);
+                }
+            };
+            LoadedTuiConfig { config, tui_config }
+        }
         Err(err) => {
             eprintln!("Error loading configuration: {err}");
             std::process::exit(1);
@@ -1818,10 +1838,10 @@ fn should_show_login_screen(login_status: LoginStatus, config: &Config) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use praxis_app_server_protocol::ClientRequest;
-    use praxis_app_server_protocol::RequestId;
-    use praxis_app_server_protocol::ThreadStartParams;
-    use praxis_app_server_protocol::ThreadStartResponse;
+    use praxis_app_gateway_protocol::ClientRequest;
+    use praxis_app_gateway_protocol::RequestId;
+    use praxis_app_gateway_protocol::ThreadStartParams;
+    use praxis_app_gateway_protocol::ThreadStartResponse;
     use praxis_core::config::ConfigBuilder;
     use praxis_core::config::ConfigOverrides;
     use praxis_core::config::ProjectConfig;
@@ -1843,10 +1863,10 @@ mod tests {
             .await
     }
 
-    async fn start_test_embedded_app_server(
+    async fn start_test_embedded_app_gateway(
         config: Config,
-    ) -> color_eyre::Result<InProcessAppServerClient> {
-        start_embedded_app_server(
+    ) -> color_eyre::Result<NativeAppGatewayClient> {
+        start_embedded_app_gateway(
             Arg0DispatchPaths::default(),
             config,
             Vec::new(),
@@ -2002,11 +2022,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn embedded_app_server_supports_thread_start_rpc() -> color_eyre::Result<()> {
+    async fn embedded_app_gateway_supports_thread_start_rpc() -> color_eyre::Result<()> {
         let temp_dir = TempDir::new()?;
         let config = build_config(&temp_dir).await?;
-        let app_server = start_test_embedded_app_server(config).await?;
-        let response: ThreadStartResponse = app_server
+        let app_gateway = start_test_embedded_app_gateway(config).await?;
+        let response: ThreadStartResponse = app_gateway
             .request_typed(ClientRequest::ThreadStart {
                 request_id: RequestId::Integer(1),
                 params: ThreadStartParams {
@@ -2018,7 +2038,7 @@ mod tests {
             .expect("thread/start should succeed");
         assert!(!response.thread.id.is_empty());
 
-        app_server.shutdown().await?;
+        app_gateway.shutdown().await?;
         Ok(())
     }
 
@@ -2067,27 +2087,30 @@ mod tests {
             .await
             .map_err(std::io::Error::other)?;
 
-        praxis_core::append_thread_name(&config.praxis_home, thread_id, "saved-session").await?;
+        praxis_rollout::ThreadNameWriter::new(Some(state_runtime.as_ref()))
+            .write_name(thread_id, "saved-session")
+            .await?;
 
-        let mut app_server =
-            AppServerSession::new(praxis_app_server_client::AppServerClient::InProcess(
-                start_test_embedded_app_server(config).await?,
+        let mut app_gateway =
+            AppGatewaySession::new(praxis_app_gateway_client::AppGatewayClient::Native(
+                start_test_embedded_app_gateway(config).await?,
             ));
         let target =
-            lookup_session_target_by_name_with_app_server(&mut app_server, "saved-session").await?;
+            lookup_session_target_by_name_with_app_gateway(&mut app_gateway, "saved-session")
+                .await?;
         let target = target.expect("name lookup should find the saved thread");
         assert_eq!(target.path, Some(rollout_path));
         assert_eq!(target.thread_id, thread_id);
 
-        app_server.shutdown().await?;
+        app_gateway.shutdown().await?;
         Ok(())
     }
 
     #[tokio::test]
-    async fn embedded_app_server_start_failure_is_returned() -> color_eyre::Result<()> {
+    async fn embedded_app_gateway_start_failure_is_returned() -> color_eyre::Result<()> {
         let temp_dir = TempDir::new()?;
         let config = build_config(&temp_dir).await?;
-        let result = start_embedded_app_server_with(
+        let result = start_embedded_app_gateway_with(
             Arg0DispatchPaths::default(),
             config,
             Vec::new(),
@@ -2104,8 +2127,8 @@ mod tests {
 
         assert!(
             err.to_string()
-                .contains("failed to start embedded app server"),
-            "error should preserve the embedded app server startup context"
+                .contains("failed to start embedded app gateway"),
+            "error should preserve the embedded app gateway startup context"
         );
         Ok(())
     }
@@ -2310,7 +2333,7 @@ trust_level = "untrusted"
     ///
     /// `run_ratatui_app` can reload config during onboarding and again
     /// during session resume/fork.  The syntax theme override (stored in
-    /// a `OnceLock`) must use the final config's `tui_theme`, not the
+    /// a `OnceLock`) must use the final TUI config's theme, not the
     /// initial one — otherwise users resuming a thread in a project with
     /// a different theme get the wrong highlighting.
     ///
@@ -2326,15 +2349,17 @@ trust_level = "untrusted"
 
         // initial_config has a valid theme — no warning.
         let initial_config = build_config(&temp_dir).await?;
-        assert!(initial_config.tui_theme.is_none());
+        let initial_tui_config = TuiRuntimeConfig::from_core_config(&initial_config)?;
+        assert!(initial_tui_config.theme.is_none());
 
         // Simulate resume/fork reload: the final config has an invalid theme.
         let mut config = build_config(&temp_dir).await?;
-        config.tui_theme = Some("bogus-theme".into());
+        let mut tui_config = TuiRuntimeConfig::from_core_config(&config)?;
+        tui_config.theme = Some("bogus-theme".into());
 
         // Theme override must use the final config (not initial_config).
         // This mirrors the real call site in run_ratatui_app.
-        if let Some(w) = validate_theme_name(config.tui_theme.as_deref(), Some(temp_dir.path())) {
+        if let Some(w) = validate_theme_name(tui_config.theme.as_deref(), Some(temp_dir.path())) {
             config.startup_warnings.push(w);
         }
 

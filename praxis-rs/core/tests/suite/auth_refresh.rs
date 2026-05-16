@@ -4,7 +4,7 @@ use base64::Engine;
 use chrono::Duration;
 use chrono::Utc;
 use core_test_support::skip_if_no_network;
-use praxis_app_server_protocol::AuthMode;
+use praxis_app_gateway_protocol::AuthMode;
 use praxis_core::error::RefreshTokenFailedReason;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_login::AuthDotJson;

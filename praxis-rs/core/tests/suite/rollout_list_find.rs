@@ -4,15 +4,9 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use chrono::Utc;
-use praxis_core::EventPersistenceMode;
-use praxis_core::RolloutRecorder;
-use praxis_core::RolloutRecorderParams;
-use praxis_core::config::ConfigBuilder;
 use praxis_core::find_archived_thread_path_by_id_str;
 use praxis_core::find_thread_path_by_id_str;
-use praxis_core::find_thread_path_by_name_str;
 use praxis_protocol::ThreadId;
-use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::protocol::SessionSource;
 use praxis_state::StateRuntime;
 use praxis_state::ThreadMetadataBuilder;
@@ -155,56 +149,6 @@ async fn find_ignores_granular_gitignore_rules() {
         .unwrap();
 
     assert_eq!(found, Some(expected));
-}
-
-#[tokio::test]
-async fn find_locates_rollout_file_written_by_recorder() -> std::io::Result<()> {
-    // Ensures the name-based finder locates a rollout produced by the real recorder.
-    let home = TempDir::new().unwrap();
-    let config = ConfigBuilder::default()
-        .praxis_home(home.path().to_path_buf())
-        .build()
-        .await?;
-    let thread_id = ThreadId::new();
-    let thread_name = "named thread";
-    let recorder = RolloutRecorder::new(
-        &config,
-        RolloutRecorderParams::new(
-            thread_id,
-            /*forked_from_id*/ None,
-            SessionSource::Exec,
-            BaseInstructions::default(),
-            Vec::new(),
-            EventPersistenceMode::Limited,
-        ),
-        /*state_db_ctx*/ None,
-        /*state_builder*/ None,
-    )
-    .await?;
-    recorder.persist().await?;
-    recorder.flush().await?;
-
-    let index_path = home.path().join("session_index.jsonl");
-    std::fs::write(
-        &index_path,
-        format!(
-            "{}\n",
-            serde_json::json!({
-                "id": thread_id,
-                "thread_name": thread_name,
-                "updated_at": "2024-01-01T00:00:00Z"
-            })
-        ),
-    )?;
-
-    let found = find_thread_path_by_name_str(home.path(), thread_name).await?;
-
-    let path = found.expect("expected rollout path to be found");
-    assert!(path.exists());
-    let contents = std::fs::read_to_string(&path)?;
-    assert!(contents.contains(&thread_id.to_string()));
-    recorder.shutdown().await?;
-    Ok(())
 }
 
 #[tokio::test]

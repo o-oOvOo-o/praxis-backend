@@ -74,73 +74,8 @@ pub(crate) struct StatusIndicatorSnapshot {
     pub(crate) details: Option<String>,
     pub(crate) details_capitalization: RuntimeTextCapitalization,
     pub(crate) details_max_lines: usize,
-    pub(crate) inline_message: Option<String>,
     pub(crate) activity_message: Option<String>,
     pub(crate) extra_lines: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct CurrentTaskSnapshot {
-    pub(crate) team_id: String,
-    pub(crate) task_id: String,
-    pub(crate) title: String,
-    pub(crate) description: Option<String>,
-    pub(crate) active_form: Option<String>,
-}
-
-impl CurrentTaskSnapshot {
-    pub(crate) fn display_message(&self) -> Option<String> {
-        self.active_form
-            .clone()
-            .or_else(|| (!self.title.trim().is_empty()).then(|| self.title.clone()))
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct NextTaskSnapshot {
-    pub(crate) team_id: String,
-    pub(crate) task_id: String,
-    pub(crate) title: String,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct TurnStatusSnapshot {
-    pub(crate) override_header: Option<String>,
-    pub(crate) current_task: Option<CurrentTaskSnapshot>,
-    pub(crate) next_task: Option<NextTaskSnapshot>,
-    pub(crate) footer_note: Option<String>,
-}
-
-impl TurnStatusSnapshot {
-    pub(crate) fn effective_header(&self, fallback_header: &str) -> String {
-        if fallback_header != TurnRuntimeState::WORKING_HEADER {
-            return fallback_header.to_string();
-        }
-
-        self.override_header
-            .clone()
-            .or_else(|| {
-                self.current_task
-                    .as_ref()
-                    .and_then(CurrentTaskSnapshot::display_message)
-            })
-            .unwrap_or_else(|| fallback_header.to_string())
-    }
-
-    pub(crate) fn effective_details(&self, fallback_details: Option<String>) -> Option<String> {
-        fallback_details.or_else(|| {
-            self.current_task
-                .as_ref()
-                .and_then(|task| task.description.clone())
-        })
-    }
-
-    pub(crate) fn effective_footer(&self) -> Option<String> {
-        self.next_task
-            .as_ref()
-            .and_then(|task| format_next_task_message(&task.title))
-            .or_else(|| self.footer_note.as_deref().and_then(compact_footer_note))
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -206,9 +141,6 @@ pub(crate) struct TurnRuntimeState {
     details: Option<String>,
     details_capitalization: RuntimeTextCapitalization,
     details_max_lines: usize,
-    override_message: Option<String>,
-    item_message: Option<String>,
-    inline_message: Option<String>,
     tip_message: Option<String>,
     budget_message: Option<String>,
     summary_message: Option<String>,
@@ -233,9 +165,6 @@ impl TurnRuntimeState {
             details: None,
             details_capitalization: RuntimeTextCapitalization::CapitalizeFirst,
             details_max_lines: 3,
-            override_message: None,
-            item_message: None,
-            inline_message: None,
             tip_message: None,
             budget_message: None,
             summary_message: None,
@@ -263,24 +192,6 @@ impl TurnRuntimeState {
             .filter(|details| !details.is_empty());
         self.details_capitalization = details_capitalization;
         self.details_max_lines = details_max_lines.max(1);
-    }
-
-    pub(crate) fn set_override_message(&mut self, message: Option<String>) {
-        self.override_message = message
-            .map(|message| message.trim().to_string())
-            .filter(|message| !message.is_empty());
-    }
-
-    pub(crate) fn set_item_message(&mut self, message: Option<String>) {
-        self.item_message = message
-            .map(|message| message.trim().to_string())
-            .filter(|message| !message.is_empty());
-    }
-
-    pub(crate) fn set_inline_message(&mut self, message: Option<String>) {
-        self.inline_message = message
-            .map(|message| message.trim().to_string())
-            .filter(|message| !message.is_empty());
     }
 
     pub(crate) fn set_tip_message(&mut self, message: Option<String>) {
@@ -328,23 +239,14 @@ impl TurnRuntimeState {
         self.activity_trail.push(summary);
     }
 
-    pub(crate) fn base_header(&self) -> &str {
-        &self.base_header
-    }
-
     fn resolved_header(&self) -> String {
         if self.base_header != Self::WORKING_HEADER {
             return self.base_header.clone();
         }
 
-        self.override_message
-            .clone()
-            .or_else(|| {
-                self.active_task
-                    .as_ref()
-                    .and_then(RuntimeTaskSnapshot::display_message)
-            })
-            .or_else(|| self.item_message.clone())
+        self.active_task
+            .as_ref()
+            .and_then(RuntimeTaskSnapshot::display_message)
             .unwrap_or_else(|| Self::WORKING_HEADER.to_string())
     }
 
@@ -387,24 +289,9 @@ impl TurnRuntimeState {
             details: self.details.clone(),
             details_capitalization: self.details_capitalization,
             details_max_lines: self.details_max_lines,
-            inline_message: self.inline_message.clone(),
             activity_message: self.activity_trail.summary(),
             extra_lines: self.extra_lines(),
         }
-    }
-
-    pub(crate) fn effective_header(&self, fallback_header: &str) -> String {
-        let header = self.status_snapshot().header;
-        if header.trim().is_empty() {
-            fallback_header.to_string()
-        } else {
-            header
-        }
-    }
-
-    pub(crate) fn effective_footer(&self) -> Option<String> {
-        let extra_lines = self.status_snapshot().extra_lines;
-        (!extra_lines.is_empty()).then(|| extra_lines.join("\n"))
     }
 }
 

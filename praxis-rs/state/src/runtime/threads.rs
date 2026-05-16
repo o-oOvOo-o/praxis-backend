@@ -1,7 +1,160 @@
 use super::*;
 use praxis_protocol::protocol::SessionSource;
+use praxis_protocol::protocol::SubAgentSource;
+
+#[derive(Debug, Clone)]
+struct ThreadSourceColumns {
+    source_kind: &'static str,
+    subagent_kind: Option<&'static str>,
+    subagent_parent_thread_id: Option<String>,
+    subagent_depth: Option<i64>,
+    subagent_agent_nickname: Option<String>,
+}
 
 impl StateRuntime {
+    pub(crate) async fn backfill_thread_source_columns(&self) -> anyhow::Result<()> {
+        let rows = sqlx::query(
+            r#"
+SELECT id, source, agent_nickname
+FROM threads
+WHERE source_kind IS NULL OR source_kind = ''
+            "#,
+        )
+        .fetch_all(self.pool.as_ref())
+        .await?;
+
+        for row in rows {
+            let id: String = row.try_get("id")?;
+            let source: String = row.try_get("source")?;
+            let agent_nickname: Option<String> = row.try_get("agent_nickname")?;
+            let columns = thread_source_columns_from_source_str(&source, agent_nickname.as_deref());
+            sqlx::query(
+                r#"
+UPDATE threads
+SET
+    source_kind = ?,
+    subagent_kind = ?,
+    subagent_parent_thread_id = ?,
+    subagent_depth = ?,
+    subagent_agent_nickname = ?
+WHERE id = ?
+                "#,
+            )
+            .bind(columns.source_kind)
+            .bind(columns.subagent_kind)
+            .bind(columns.subagent_parent_thread_id.as_deref())
+            .bind(columns.subagent_depth)
+            .bind(columns.subagent_agent_nickname.as_deref())
+            .bind(id)
+            .execute(self.pool.as_ref())
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn set_thread_name(&self, id: ThreadId, name: &str) -> anyhow::Result<()> {
+        sqlx::query(
+            r#"
+INSERT INTO thread_names (thread_id, name, updated_at)
+VALUES (?, ?, ?)
+ON CONFLICT(thread_id) DO UPDATE SET
+    name = excluded.name,
+    updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(id.to_string())
+        .bind(name)
+        .bind(Utc::now().timestamp())
+        .execute(self.pool.as_ref())
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_thread_names(
+        &self,
+        ids: &std::collections::HashSet<ThreadId>,
+    ) -> anyhow::Result<std::collections::HashMap<ThreadId, String>> {
+        if ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            "SELECT thread_id, name FROM thread_names WHERE thread_id IN (",
+        );
+        let mut separated = builder.separated(", ");
+        for id in ids {
+            separated.push_bind(id.to_string());
+        }
+        separated.push_unseparated(")");
+
+        let rows = builder.build().fetch_all(self.pool.as_ref()).await?;
+        let mut names = std::collections::HashMap::with_capacity(rows.len());
+        for row in rows {
+            let id: String = row.try_get("thread_id")?;
+            let Ok(thread_id) = ThreadId::from_string(&id) else {
+                continue;
+            };
+            names.insert(thread_id, row.try_get("name")?);
+        }
+        Ok(names)
+    }
+
+    pub async fn get_threads(
+        &self,
+        ids: &std::collections::HashSet<ThreadId>,
+    ) -> anyhow::Result<std::collections::HashMap<ThreadId, crate::ThreadMetadata>> {
+        if ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let mut builder = QueryBuilder::<Sqlite>::new(
+            r#"
+SELECT
+    id,
+    rollout_path,
+    created_at,
+    updated_at,
+    source,
+    agent_nickname,
+    agent_role,
+    agent_path,
+    model_provider,
+    model,
+    reasoning_effort,
+    cwd,
+    cli_version,
+    title,
+    sandbox_policy,
+    approval_mode,
+    tokens_used,
+    session_summary,
+    total_cost_micros,
+    last_cost_micros,
+    selfwork_plan_path,
+    first_user_message,
+    archived_at,
+    git_sha,
+    git_branch,
+    git_origin_url
+FROM threads WHERE id IN ("#,
+        );
+        let mut separated = builder.separated(", ");
+        for id in ids {
+            separated.push_bind(id.to_string());
+        }
+        separated.push_unseparated(")");
+
+        let rows = builder.build().fetch_all(self.pool.as_ref()).await?;
+        let mut threads = std::collections::HashMap::with_capacity(rows.len());
+        for row in rows {
+            let thread_row = ThreadRow::try_from_row(&row)?;
+            let metadata = crate::ThreadMetadata::try_from(thread_row)?;
+            threads.insert(metadata.id, metadata);
+        }
+        Ok(threads)
+    }
+
     pub async fn get_thread(&self, id: ThreadId) -> anyhow::Result<Option<crate::ThreadMetadata>> {
         let row = sqlx::query(
             r#"
@@ -338,8 +491,10 @@ ON CONFLICT(child_thread_id) DO NOTHING
         anchor: Option<&crate::Anchor>,
         sort_key: crate::SortKey,
         allowed_sources: &[String],
+        source_kinds: Option<&[crate::ThreadSourceKind]>,
         model_providers: Option<&[String]>,
         archived_only: bool,
+        cwd: Option<&str>,
         search_term: Option<&str>,
     ) -> anyhow::Result<crate::ThreadsPage> {
         let limit = page_size.saturating_add(1);
@@ -380,9 +535,11 @@ FROM threads
             &mut builder,
             archived_only,
             allowed_sources,
+            source_kinds,
             model_providers,
             anchor,
             sort_key,
+            cwd,
             search_term,
         );
         push_thread_order_and_limit(&mut builder, sort_key, limit);
@@ -423,9 +580,11 @@ FROM threads
             &mut builder,
             archived_only,
             allowed_sources,
+            /*source_kinds*/ None,
             model_providers,
             anchor,
             sort_key,
+            /*cwd*/ None,
             /*search_term*/ None,
         );
         push_thread_order_and_limit(&mut builder, sort_key, limit);
@@ -449,6 +608,10 @@ FROM threads
         &self,
         metadata: &crate::ThreadMetadata,
     ) -> anyhow::Result<bool> {
+        let source_columns = thread_source_columns_from_source_str(
+            &metadata.source,
+            metadata.agent_nickname.as_deref(),
+        );
         let result = sqlx::query(
             r#"
 INSERT INTO threads (
@@ -457,6 +620,11 @@ INSERT INTO threads (
     created_at,
     updated_at,
     source,
+    source_kind,
+    subagent_kind,
+    subagent_parent_thread_id,
+    subagent_depth,
+    subagent_agent_nickname,
     agent_nickname,
     agent_role,
     agent_path,
@@ -480,7 +648,7 @@ INSERT INTO threads (
     git_origin_url,
     memory_mode,
     selfwork_plan_path
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -489,6 +657,11 @@ ON CONFLICT(id) DO NOTHING
         .bind(datetime_to_epoch_seconds(metadata.created_at))
         .bind(datetime_to_epoch_seconds(metadata.updated_at))
         .bind(metadata.source.as_str())
+        .bind(source_columns.source_kind)
+        .bind(source_columns.subagent_kind)
+        .bind(source_columns.subagent_parent_thread_id.as_deref())
+        .bind(source_columns.subagent_depth)
+        .bind(source_columns.subagent_agent_nickname.as_deref())
         .bind(metadata.agent_nickname.as_deref())
         .bind(metadata.agent_role.as_deref())
         .bind(metadata.agent_path.as_deref())
@@ -602,6 +775,10 @@ WHERE id = ?
         metadata: &crate::ThreadMetadata,
         creation_memory_mode: Option<&str>,
     ) -> anyhow::Result<()> {
+        let source_columns = thread_source_columns_from_source_str(
+            &metadata.source,
+            metadata.agent_nickname.as_deref(),
+        );
         sqlx::query(
             r#"
 INSERT INTO threads (
@@ -610,6 +787,11 @@ INSERT INTO threads (
     created_at,
     updated_at,
     source,
+    source_kind,
+    subagent_kind,
+    subagent_parent_thread_id,
+    subagent_depth,
+    subagent_agent_nickname,
     agent_nickname,
     agent_role,
     agent_path,
@@ -633,12 +815,17 @@ INSERT INTO threads (
     git_origin_url,
     memory_mode,
     selfwork_plan_path
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     rollout_path = excluded.rollout_path,
     created_at = excluded.created_at,
     updated_at = excluded.updated_at,
     source = excluded.source,
+    source_kind = excluded.source_kind,
+    subagent_kind = excluded.subagent_kind,
+    subagent_parent_thread_id = excluded.subagent_parent_thread_id,
+    subagent_depth = excluded.subagent_depth,
+    subagent_agent_nickname = excluded.subagent_agent_nickname,
     agent_nickname = excluded.agent_nickname,
     agent_role = excluded.agent_role,
     agent_path = excluded.agent_path,
@@ -668,6 +855,11 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(datetime_to_epoch_seconds(metadata.created_at))
         .bind(datetime_to_epoch_seconds(metadata.updated_at))
         .bind(metadata.source.as_str())
+        .bind(source_columns.source_kind)
+        .bind(source_columns.subagent_kind)
+        .bind(source_columns.subagent_parent_thread_id.as_deref())
+        .bind(source_columns.subagent_depth)
+        .bind(source_columns.subagent_agent_nickname.as_deref())
         .bind(metadata.agent_nickname.as_deref())
         .bind(metadata.agent_role.as_deref())
         .bind(metadata.agent_path.as_deref())
@@ -907,6 +1099,32 @@ pub(super) fn extract_memory_mode(items: &[RolloutItem]) -> Option<String> {
     })
 }
 
+fn thread_search_fts_query(search_term: &str) -> Option<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in search_term.chars() {
+        if ch.is_alphanumeric() {
+            current.extend(ch.to_lowercase());
+        } else if !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    if tokens.is_empty() {
+        return None;
+    }
+
+    Some(
+        tokens
+            .into_iter()
+            .map(|token| format!("{}*", token.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(" AND "),
+    )
+}
+
 fn thread_spawn_parent_thread_id_from_source_str(source: &str) -> Option<ThreadId> {
     let parsed_source = serde_json::from_str(source)
         .or_else(|_| serde_json::from_value::<SessionSource>(Value::String(source.to_string())));
@@ -919,13 +1137,163 @@ fn thread_spawn_parent_thread_id_from_source_str(source: &str) -> Option<ThreadI
     }
 }
 
+fn thread_source_columns_from_source_str(
+    source: &str,
+    fallback_agent_nickname: Option<&str>,
+) -> ThreadSourceColumns {
+    let parsed_source = serde_json::from_str(source)
+        .or_else(|_| serde_json::from_value::<SessionSource>(Value::String(source.to_string())))
+        .unwrap_or(SessionSource::Unknown);
+    thread_source_columns_from_source(parsed_source, fallback_agent_nickname)
+}
+
+fn thread_source_columns_from_source(
+    source: SessionSource,
+    fallback_agent_nickname: Option<&str>,
+) -> ThreadSourceColumns {
+    match source {
+        SessionSource::Cli => ThreadSourceColumns {
+            source_kind: "cli",
+            subagent_kind: None,
+            subagent_parent_thread_id: None,
+            subagent_depth: None,
+            subagent_agent_nickname: None,
+        },
+        SessionSource::VSCode => ThreadSourceColumns {
+            source_kind: "vscode",
+            subagent_kind: None,
+            subagent_parent_thread_id: None,
+            subagent_depth: None,
+            subagent_agent_nickname: None,
+        },
+        SessionSource::Exec => ThreadSourceColumns {
+            source_kind: "exec",
+            subagent_kind: None,
+            subagent_parent_thread_id: None,
+            subagent_depth: None,
+            subagent_agent_nickname: None,
+        },
+        SessionSource::AppGateway => ThreadSourceColumns {
+            source_kind: "app_gateway",
+            subagent_kind: None,
+            subagent_parent_thread_id: None,
+            subagent_depth: None,
+            subagent_agent_nickname: None,
+        },
+        SessionSource::Mcp => ThreadSourceColumns {
+            source_kind: "mcp",
+            subagent_kind: None,
+            subagent_parent_thread_id: None,
+            subagent_depth: None,
+            subagent_agent_nickname: None,
+        },
+        SessionSource::Custom(_) => ThreadSourceColumns {
+            source_kind: "custom",
+            subagent_kind: None,
+            subagent_parent_thread_id: None,
+            subagent_depth: None,
+            subagent_agent_nickname: None,
+        },
+        SessionSource::Unknown => ThreadSourceColumns {
+            source_kind: "unknown",
+            subagent_kind: None,
+            subagent_parent_thread_id: None,
+            subagent_depth: None,
+            subagent_agent_nickname: None,
+        },
+        SessionSource::SubAgent(subagent) => match subagent {
+            SubAgentSource::Review => ThreadSourceColumns {
+                source_kind: "subagent",
+                subagent_kind: Some("review"),
+                subagent_parent_thread_id: None,
+                subagent_depth: None,
+                subagent_agent_nickname: fallback_agent_nickname.map(str::to_string),
+            },
+            SubAgentSource::Compact => ThreadSourceColumns {
+                source_kind: "subagent",
+                subagent_kind: Some("compact"),
+                subagent_parent_thread_id: None,
+                subagent_depth: None,
+                subagent_agent_nickname: fallback_agent_nickname.map(str::to_string),
+            },
+            SubAgentSource::ThreadSpawn {
+                parent_thread_id,
+                depth,
+                agent_nickname,
+                ..
+            } => ThreadSourceColumns {
+                source_kind: "subagent",
+                subagent_kind: Some("thread_spawn"),
+                subagent_parent_thread_id: Some(parent_thread_id.to_string()),
+                subagent_depth: Some(depth as i64),
+                subagent_agent_nickname: agent_nickname
+                    .or_else(|| fallback_agent_nickname.map(str::to_string)),
+            },
+            SubAgentSource::MemoryConsolidation => ThreadSourceColumns {
+                source_kind: "subagent",
+                subagent_kind: Some("memory_consolidation"),
+                subagent_parent_thread_id: None,
+                subagent_depth: None,
+                subagent_agent_nickname: fallback_agent_nickname
+                    .map(str::to_string)
+                    .or_else(|| Some("Morpheus".to_string())),
+            },
+            SubAgentSource::Other(_) => ThreadSourceColumns {
+                source_kind: "subagent",
+                subagent_kind: Some("other"),
+                subagent_parent_thread_id: None,
+                subagent_depth: None,
+                subagent_agent_nickname: fallback_agent_nickname.map(str::to_string),
+            },
+        },
+    }
+}
+
+fn source_kind_db_value(kind: crate::ThreadSourceKind) -> (&'static str, Option<&'static str>) {
+    match kind {
+        crate::ThreadSourceKind::Cli => ("cli", None),
+        crate::ThreadSourceKind::VsCode => ("vscode", None),
+        crate::ThreadSourceKind::Exec => ("exec", None),
+        crate::ThreadSourceKind::AppGateway => ("app_gateway", None),
+        crate::ThreadSourceKind::SubAgent => ("subagent", None),
+        crate::ThreadSourceKind::SubAgentReview => ("subagent", Some("review")),
+        crate::ThreadSourceKind::SubAgentCompact => ("subagent", Some("compact")),
+        crate::ThreadSourceKind::SubAgentThreadSpawn => ("subagent", Some("thread_spawn")),
+        crate::ThreadSourceKind::SubAgentOther => ("subagent", Some("other")),
+        crate::ThreadSourceKind::Unknown => ("unknown", None),
+    }
+}
+
+fn push_thread_source_kind_filter(
+    builder: &mut QueryBuilder<'_, Sqlite>,
+    source_kinds: &[crate::ThreadSourceKind],
+) {
+    builder.push(" AND (");
+    for (idx, kind) in source_kinds.iter().enumerate() {
+        if idx > 0 {
+            builder.push(" OR ");
+        }
+        let (source_kind, subagent_kind) = source_kind_db_value(*kind);
+        builder.push("(source_kind = ");
+        builder.push_bind(source_kind);
+        if let Some(subagent_kind) = subagent_kind {
+            builder.push(" AND subagent_kind = ");
+            builder.push_bind(subagent_kind);
+        }
+        builder.push(")");
+    }
+    builder.push(")");
+}
+
 pub(super) fn push_thread_filters<'a>(
     builder: &mut QueryBuilder<'a, Sqlite>,
     archived_only: bool,
     allowed_sources: &'a [String],
+    source_kinds: Option<&'a [crate::ThreadSourceKind]>,
     model_providers: Option<&'a [String]>,
     anchor: Option<&crate::Anchor>,
     sort_key: SortKey,
+    cwd: Option<&'a str>,
     search_term: Option<&'a str>,
 ) {
     builder.push(" WHERE 1 = 1");
@@ -935,7 +1303,11 @@ pub(super) fn push_thread_filters<'a>(
         builder.push(" AND archived = 0");
     }
     builder.push(" AND first_user_message <> ''");
-    if !allowed_sources.is_empty() {
+    if let Some(source_kinds) = source_kinds
+        && !source_kinds.is_empty()
+    {
+        push_thread_source_kind_filter(builder, source_kinds);
+    } else if !allowed_sources.is_empty() {
         builder.push(" AND source IN (");
         let mut separated = builder.separated(", ");
         for source in allowed_sources {
@@ -953,12 +1325,31 @@ pub(super) fn push_thread_filters<'a>(
         }
         separated.push_unseparated(")");
     }
+    if let Some(cwd) = cwd {
+        builder.push(" AND (cwd = ");
+        builder.push_bind(cwd);
+        let cwd_root = cwd.trim_end_matches(|ch| ch == '/' || ch == '\\');
+        if !cwd_root.is_empty() {
+            let escaped = sqlite_like_escape(cwd_root);
+            builder.push(" OR cwd LIKE ");
+            builder.push_bind(format!("{escaped}/%"));
+            builder.push(" ESCAPE '\\' OR cwd LIKE ");
+            builder.push_bind(format!("{escaped}\\\\%"));
+            builder.push(" ESCAPE '\\'");
+        }
+        builder.push(")");
+    }
     if let Some(search_term) = search_term {
-        builder.push(" AND (instr(title, ");
-        builder.push_bind(search_term);
-        builder.push(") > 0 OR instr(COALESCE(session_summary, ''), ");
-        builder.push_bind(search_term);
-        builder.push(") > 0)");
+        let Some(search_query) = thread_search_fts_query(search_term) else {
+            builder.push(" AND 0 = 1");
+            return;
+        };
+        builder
+            .push(" AND (threads.rowid IN (SELECT rowid FROM threads_fts WHERE threads_fts MATCH ");
+        builder.push_bind(search_query.clone());
+        builder.push(") OR threads.id IN (SELECT thread_id FROM thread_names WHERE rowid IN (SELECT rowid FROM thread_names_fts WHERE thread_names_fts MATCH ");
+        builder.push_bind(search_query);
+        builder.push(")))");
     }
     if let Some(anchor) = anchor {
         let anchor_ts = datetime_to_epoch_seconds(anchor.ts);
@@ -978,6 +1369,17 @@ pub(super) fn push_thread_filters<'a>(
         builder.push_bind(anchor.id.to_string());
         builder.push("))");
     }
+}
+
+fn sqlite_like_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if matches!(ch, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
 }
 
 pub(super) fn push_thread_order_and_limit(
@@ -1007,8 +1409,146 @@ mod tests {
     use praxis_protocol::protocol::SessionMeta;
     use praxis_protocol::protocol::SessionMetaLine;
     use praxis_protocol::protocol::SessionSource;
+    use praxis_protocol::protocol::SubAgentSource;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
+
+    #[test]
+    fn sqlite_like_escape_escapes_wildcards_and_escape_char() {
+        assert_eq!(sqlite_like_escape(r"C:\a%b_c"), r"C:\\a\%b\_c");
+    }
+
+    #[test]
+    fn thread_search_fts_query_uses_prefix_tokens() {
+        assert_eq!(
+            thread_search_fts_query("Legacy Codex").as_deref(),
+            Some("legacy* AND codex*")
+        );
+        assert_eq!(thread_search_fts_query("///"), None);
+    }
+
+    #[tokio::test]
+    async fn list_threads_cwd_filter_matches_descendant_paths() {
+        let praxis_home = unique_temp_dir();
+        let runtime = StateRuntime::init(praxis_home.clone(), "test-provider".to_string())
+            .await
+            .expect("state db should initialize");
+        let root_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000201").expect("root id");
+        let child_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000202").expect("child id");
+        let sibling_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000203").expect("sibling id");
+        let project_root = praxis_home.join("project");
+
+        runtime
+            .upsert_thread(&test_thread_metadata(
+                &praxis_home,
+                root_id,
+                project_root.clone(),
+            ))
+            .await
+            .expect("root thread");
+        runtime
+            .upsert_thread(&test_thread_metadata(
+                &praxis_home,
+                child_id,
+                project_root.join("src"),
+            ))
+            .await
+            .expect("child thread");
+        runtime
+            .upsert_thread(&test_thread_metadata(
+                &praxis_home,
+                sibling_id,
+                praxis_home.join("project-sibling"),
+            ))
+            .await
+            .expect("sibling thread");
+
+        let cwd = project_root.display().to_string();
+        let allowed_sources = vec!["cli".to_string()];
+        let page = runtime
+            .list_threads(
+                10,
+                /*anchor*/ None,
+                SortKey::UpdatedAt,
+                allowed_sources.as_slice(),
+                /*source_kinds*/ None,
+                /*model_providers*/ None,
+                /*archived_only*/ false,
+                Some(cwd.as_str()),
+                /*search_term*/ None,
+            )
+            .await
+            .expect("list threads");
+
+        assert_eq!(page.items.len(), 2);
+        assert!(page.items.iter().any(|item| item.id == root_id));
+        assert!(page.items.iter().any(|item| item.id == child_id));
+        assert!(!page.items.iter().any(|item| item.id == sibling_id));
+    }
+
+    #[tokio::test]
+    async fn list_threads_filters_mixed_source_kinds() {
+        let praxis_home = unique_temp_dir();
+        let runtime = StateRuntime::init(praxis_home.clone(), "test-provider".to_string())
+            .await
+            .expect("state db should initialize");
+        let cli_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000921").expect("valid thread id");
+        let spawn_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000922").expect("valid thread id");
+        let exec_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000923").expect("valid thread id");
+
+        runtime
+            .upsert_thread(&test_thread_metadata(
+                &praxis_home,
+                cli_id,
+                praxis_home.clone(),
+            ))
+            .await
+            .expect("cli thread");
+
+        let mut spawn = test_thread_metadata(&praxis_home, spawn_id, praxis_home.clone());
+        spawn.source =
+            crate::extract::enum_to_string(&SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id: cli_id,
+                depth: 1,
+                agent_path: None,
+                agent_nickname: Some("builder".to_string()),
+                agent_role: None,
+            }));
+        runtime.upsert_thread(&spawn).await.expect("spawn thread");
+
+        let mut exec = test_thread_metadata(&praxis_home, exec_id, praxis_home.clone());
+        exec.source = crate::extract::enum_to_string(&SessionSource::Exec);
+        runtime.upsert_thread(&exec).await.expect("exec thread");
+
+        let source_kinds = [
+            crate::ThreadSourceKind::Cli,
+            crate::ThreadSourceKind::SubAgentThreadSpawn,
+        ];
+        let page = runtime
+            .list_threads(
+                10,
+                /*anchor*/ None,
+                SortKey::UpdatedAt,
+                &[],
+                Some(source_kinds.as_slice()),
+                /*model_providers*/ None,
+                /*archived_only*/ false,
+                /*cwd*/ None,
+                /*search_term*/ None,
+            )
+            .await
+            .expect("list threads");
+
+        assert!(page.items.iter().any(|item| item.id == cli_id));
+        assert!(page.items.iter().any(|item| item.id == spawn_id));
+        assert!(!page.items.iter().any(|item| item.id == exec_id));
+    }
 
     #[tokio::test]
     async fn upsert_thread_keeps_creation_memory_mode_for_existing_rows() {

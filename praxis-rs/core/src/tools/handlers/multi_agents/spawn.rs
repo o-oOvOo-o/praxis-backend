@@ -2,11 +2,12 @@ use super::*;
 use crate::agent::control::SpawnAgentForkMode;
 use crate::agent::control::SpawnAgentOptions;
 use crate::agent::control::render_input_preview;
+use crate::agent::next_thread_spawn_depth;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
-
-use crate::agent::exceeds_thread_spawn_depth_limit;
-use crate::agent::next_thread_spawn_depth;
+use praxis_protocol::AgentPath;
+use praxis_protocol::protocol::InterAgentCommunication;
+use praxis_protocol::protocol::Op;
 
 pub(crate) struct Handler;
 
@@ -32,13 +33,16 @@ impl ToolHandler for Handler {
         } = invocation;
         let arguments = function_arguments(payload)?;
         let args: SpawnAgentArgs = parse_arguments(&arguments)?;
+        let fork_mode = args.fork_mode()?;
         let role_name = args
             .agent_type
             .as_deref()
             .map(str::trim)
             .filter(|role| !role.is_empty());
-        let input_items = parse_collab_input(args.message, args.items)?;
-        let prompt = render_input_preview(&input_items);
+
+        let initial_operation = parse_collab_input(Some(args.message), /*items*/ None)?;
+        let prompt = render_input_preview(&initial_operation);
+
         let session_source = turn.session_source.clone();
         let child_depth = next_thread_spawn_depth(&session_source);
         let max_depth = turn.config.agent_max_depth;
@@ -76,22 +80,42 @@ impl ToolHandler for Handler {
         apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
         apply_spawn_agent_overrides(&mut config, child_depth);
 
+        let spawn_source = thread_spawn_source(
+            session.conversation_id,
+            &turn.session_source,
+            child_depth,
+            role_name,
+            Some(args.task_name.clone()),
+        )?;
         let result = session
             .services
             .agent_control
             .spawn_agent_with_metadata(
                 config,
-                input_items,
-                Some(thread_spawn_source(
-                    session.conversation_id,
-                    &turn.session_source,
-                    child_depth,
-                    role_name,
-                    /*task_name*/ None,
-                )?),
+                match (spawn_source.get_agent_path(), initial_operation) {
+                    (Some(recipient), Op::UserInput { items, .. })
+                        if items
+                            .iter()
+                            .all(|item| matches!(item, UserInput::Text { .. })) =>
+                    {
+                        Op::InterAgentCommunication {
+                            communication: InterAgentCommunication::new(
+                                turn.session_source
+                                    .get_agent_path()
+                                    .unwrap_or_else(AgentPath::root),
+                                recipient,
+                                Vec::new(),
+                                prompt.clone(),
+                                /*trigger_turn*/ true,
+                            ),
+                        }
+                    }
+                    (_, initial_operation) => initial_operation,
+                },
+                Some(spawn_source),
                 SpawnAgentOptions {
-                    fork_parent_spawn_call_id: args.fork_context.then(|| call_id.clone()),
-                    fork_mode: args.fork_context.then_some(SpawnAgentForkMode::FullHistory),
+                    fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.clone()),
+                    fork_mode,
                 },
             )
             .await
@@ -114,7 +138,7 @@ impl ToolHandler for Handler {
             }
             None => None,
         };
-        let (_new_agent_path, new_agent_nickname, new_agent_role) =
+        let (new_agent_path, new_agent_nickname, new_agent_role) =
             match (&agent_snapshot, new_agent_metadata) {
                 (Some(snapshot), _) => (
                     snapshot.session_source.get_agent_path().map(String::from),
@@ -154,35 +178,75 @@ impl ToolHandler for Handler {
                 .into(),
             )
             .await;
-        let new_thread_id = result?.thread_id;
+        let _ = result?;
         let role_tag = role_name.unwrap_or(DEFAULT_ROLE_NAME);
         turn.session_telemetry.counter(
             "codex.multi_agent.spawn",
             /*inc*/ 1,
             &[("role", role_tag)],
         );
+        let task_name = new_agent_path.ok_or_else(|| {
+            FunctionCallError::RespondToModel(
+                "spawned agent is missing a canonical task name".to_string(),
+            )
+        })?;
 
         Ok(SpawnAgentResult {
-            agent_id: new_thread_id.to_string(),
+            agent_id: None,
+            task_name,
             nickname,
         })
     }
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SpawnAgentArgs {
-    message: Option<String>,
-    items: Option<Vec<UserInput>>,
+    message: String,
+    task_name: String,
     agent_type: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
-    #[serde(default)]
-    fork_context: bool,
+    fork_turns: Option<String>,
+}
+
+impl SpawnAgentArgs {
+    fn fork_mode(&self) -> Result<Option<SpawnAgentForkMode>, FunctionCallError> {
+        let Some(fork_turns) = self
+            .fork_turns
+            .as_deref()
+            .map(str::trim)
+            .filter(|fork_turns| !fork_turns.is_empty())
+        else {
+            return Ok(None);
+        };
+
+        if fork_turns.eq_ignore_ascii_case("none") {
+            return Ok(None);
+        }
+        if fork_turns.eq_ignore_ascii_case("all") {
+            return Ok(Some(SpawnAgentForkMode::FullHistory));
+        }
+
+        let last_n_turns = fork_turns.parse::<usize>().map_err(|_| {
+            FunctionCallError::RespondToModel(
+                "fork_turns must be `none`, `all`, or a positive integer string".to_string(),
+            )
+        })?;
+        if last_n_turns == 0 {
+            return Err(FunctionCallError::RespondToModel(
+                "fork_turns must be `none`, `all`, or a positive integer string".to_string(),
+            ));
+        }
+
+        Ok(Some(SpawnAgentForkMode::LastNTurns(last_n_turns)))
+    }
 }
 
 #[derive(Debug, Serialize)]
 pub(crate) struct SpawnAgentResult {
-    agent_id: String,
+    agent_id: Option<String>,
+    task_name: String,
     nickname: Option<String>,
 }
 

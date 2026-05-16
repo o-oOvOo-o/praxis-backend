@@ -5,7 +5,7 @@ use crate::ResponsesApiTool;
 use crate::ToolSearchOutputTool;
 use crate::ToolSpec;
 use crate::mcp_tool_to_deferred_responses_api_tool;
-use praxis_app_server_protocol::AppInfo;
+use praxis_app_gateway_protocol::AppInfo;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -110,9 +110,9 @@ impl From<DiscoverablePluginInfo> for DiscoverableTool {
 
 pub fn filter_tool_suggest_discoverable_tools_for_client(
     discoverable_tools: Vec<DiscoverableTool>,
-    app_server_client_name: Option<&str>,
+    app_gateway_client_name: Option<&str>,
 ) -> Vec<DiscoverableTool> {
-    if app_server_client_name != Some(TUI_CLIENT_NAME) {
+    if app_gateway_client_name != Some(TUI_CLIENT_NAME) {
         return discoverable_tools;
     }
 

@@ -131,9 +131,9 @@ def praxis_rust_crate(
 
     Args:
         name: Bazel target name for the library, should be the directory name.
-            Example: `app-server`.
+            Example: `app-gateway`.
         crate_name: Cargo crate name from Cargo.toml
-            Example: `praxis_app_server`.
+            Example: `praxis_app_gateway`.
         crate_features: Cargo features to enable for this crate.
             Crates are only compiled in a single configuration across the workspace, i.e.
             with all features in this list enabled. So use sparingly, and prefer to refactor

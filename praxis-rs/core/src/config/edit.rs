@@ -1,3 +1,4 @@
+use crate::ModelProviderInfo;
 use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
 use anyhow::Context;
@@ -9,10 +10,10 @@ use praxis_protocol::config_types::ServiceTier;
 use praxis_protocol::config_types::TrustLevel;
 use praxis_protocol::openai_models::ReasoningEffort;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::task;
+use toml::Value as TomlValue;
 use toml_edit::ArrayOfTables;
 use toml_edit::DocumentMut;
 use toml_edit::Item as TomlItem;
@@ -28,6 +29,13 @@ pub enum ConfigEdit {
     SetModel {
         model: Option<String>,
         effort: Option<ReasoningEffort>,
+    },
+    /// Update the active (or default) model provider selection.
+    SetModelProvider { provider_id: Option<String> },
+    /// Add or replace a user-defined model provider.
+    UpsertModelProvider {
+        provider_id: String,
+        provider: ModelProviderInfo,
     },
     /// Update the service tier preference for future turns.
     SetServiceTier { service_tier: Option<ServiceTier> },
@@ -67,61 +75,6 @@ pub enum ConfigEdit {
 enum SkillConfigSelector {
     Name(String),
     Path(PathBuf),
-}
-
-/// Produces a config edit that sets `[tui].theme = "<name>"`.
-pub fn syntax_theme_edit(name: &str) -> ConfigEdit {
-    ConfigEdit::SetPath {
-        segments: vec!["tui".to_string(), "theme".to_string()],
-        value: value(name.to_string()),
-    }
-}
-
-/// Produces a config edit that sets `[tui].status_line` to an explicit ordered list.
-///
-/// The array is written even when it is empty so "hide the status line" stays
-/// distinct from "unset, so use defaults".
-pub fn status_line_items_edit(items: &[String]) -> ConfigEdit {
-    let array = items.iter().cloned().collect::<toml_edit::Array>();
-
-    ConfigEdit::SetPath {
-        segments: vec!["tui".to_string(), "status_line".to_string()],
-        value: TomlItem::Value(array.into()),
-    }
-}
-
-/// Produces a config edit that sets `[tui].terminal_title` to an explicit ordered list.
-///
-/// The array is written even when it is empty so "disabled title updates" stays
-/// distinct from "unset, so use defaults".
-pub fn terminal_title_items_edit(items: &[String]) -> ConfigEdit {
-    let array = items.iter().cloned().collect::<toml_edit::Array>();
-
-    ConfigEdit::SetPath {
-        segments: vec!["tui".to_string(), "terminal_title".to_string()],
-        value: TomlItem::Value(array.into()),
-    }
-}
-
-pub fn model_availability_nux_count_edits(shown_count: &HashMap<String, u32>) -> Vec<ConfigEdit> {
-    let mut shown_count_entries: Vec<_> = shown_count.iter().collect();
-    shown_count_entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-
-    let mut edits = vec![ConfigEdit::ClearPath {
-        segments: vec!["tui".to_string(), "model_availability_nux".to_string()],
-    }];
-    for (model_slug, count) in shown_count_entries {
-        edits.push(ConfigEdit::SetPath {
-            segments: vec![
-                "tui".to_string(),
-                "model_availability_nux".to_string(),
-                model_slug.clone(),
-            ],
-            value: value(i64::from(*count)),
-        });
-    }
-
-    edits
 }
 
 // TODO(jif) move to a dedicated file
@@ -378,6 +331,26 @@ impl ConfigDocument {
                 );
                 mutated
             }),
+            ConfigEdit::SetModelProvider { provider_id } => Ok(self.write_profile_value(
+                &["model_provider"],
+                provider_id
+                    .as_ref()
+                    .map(|provider_id| value(provider_id.clone())),
+            )),
+            ConfigEdit::UpsertModelProvider {
+                provider_id,
+                provider,
+            } => {
+                let provider_value =
+                    TomlValue::try_from(provider).context("failed to serialize model provider")?;
+                let provider_item = toml_value_to_item(&provider_value)
+                    .context("failed to convert model provider to toml_edit item")?;
+                Ok(self.write_value(
+                    Scope::Global,
+                    &["model_providers", provider_id.as_str()],
+                    provider_item,
+                ))
+            }
             ConfigEdit::SetServiceTier { service_tier } => Ok(self.write_profile_value(
                 &["service_tier"],
                 service_tier.map(|service_tier| value(service_tier.to_string())),
@@ -732,6 +705,44 @@ impl ConfigDocument {
     }
 }
 
+fn toml_value_to_item(value: &TomlValue) -> anyhow::Result<TomlItem> {
+    match value {
+        TomlValue::Table(table) => {
+            let mut table_item = TomlTable::new();
+            table_item.set_implicit(false);
+            for (key, val) in table {
+                table_item.insert(key, toml_value_to_item(val)?);
+            }
+            Ok(TomlItem::Table(table_item))
+        }
+        other => Ok(TomlItem::Value(toml_value_to_value(other)?)),
+    }
+}
+
+fn toml_value_to_value(value: &TomlValue) -> anyhow::Result<toml_edit::Value> {
+    match value {
+        TomlValue::String(val) => Ok(toml_edit::Value::from(val.clone())),
+        TomlValue::Integer(val) => Ok(toml_edit::Value::from(*val)),
+        TomlValue::Float(val) => Ok(toml_edit::Value::from(*val)),
+        TomlValue::Boolean(val) => Ok(toml_edit::Value::from(*val)),
+        TomlValue::Datetime(val) => Ok(toml_edit::Value::from(*val)),
+        TomlValue::Array(items) => {
+            let mut array = toml_edit::Array::new();
+            for item in items {
+                array.push(toml_value_to_value(item)?);
+            }
+            Ok(toml_edit::Value::Array(array))
+        }
+        TomlValue::Table(table) => {
+            let mut inline = toml_edit::InlineTable::new();
+            for (key, val) in table {
+                inline.insert(key, toml_value_to_value(val)?);
+            }
+            Ok(toml_edit::Value::InlineTable(inline))
+        }
+    }
+}
+
 fn normalize_skill_config_path(path: &Path) -> String {
     dunce::canonicalize(path)
         .unwrap_or_else(|_| path.to_path_buf())
@@ -868,6 +879,25 @@ impl ConfigEditsBuilder {
         self
     }
 
+    pub fn set_model_provider(mut self, provider_id: Option<&str>) -> Self {
+        self.edits.push(ConfigEdit::SetModelProvider {
+            provider_id: provider_id.map(ToOwned::to_owned),
+        });
+        self
+    }
+
+    pub fn upsert_model_provider(
+        mut self,
+        provider_id: &str,
+        provider: &ModelProviderInfo,
+    ) -> Self {
+        self.edits.push(ConfigEdit::UpsertModelProvider {
+            provider_id: provider_id.to_string(),
+            provider: provider.clone(),
+        });
+        self
+    }
+
     pub fn set_service_tier(mut self, service_tier: Option<ServiceTier>) -> Self {
         self.edits.push(ConfigEdit::SetServiceTier { service_tier });
         self
@@ -917,12 +947,6 @@ impl ConfigEditsBuilder {
     pub fn set_windows_wsl_setup_acknowledged(mut self, acknowledged: bool) -> Self {
         self.edits
             .push(ConfigEdit::SetWindowsWslSetupAcknowledged(acknowledged));
-        self
-    }
-
-    pub fn set_model_availability_nux_count(mut self, shown_count: &HashMap<String, u32>) -> Self {
-        self.edits
-            .extend(model_availability_nux_count_edits(shown_count));
         self
     }
 

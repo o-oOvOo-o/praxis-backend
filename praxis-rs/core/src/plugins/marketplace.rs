@@ -1,8 +1,8 @@
 use super::PluginManifestInterface;
 use super::load_plugin_manifest;
 use dirs::home_dir;
-use praxis_app_server_protocol::PluginAuthPolicy;
-use praxis_app_server_protocol::PluginInstallPolicy;
+use praxis_app_gateway_protocol::PluginAuthPolicy;
+use praxis_app_gateway_protocol::PluginInstallPolicy;
 use praxis_git_utils::get_git_repo_root;
 use praxis_plugin::PluginId;
 use praxis_plugin::PluginIdError;

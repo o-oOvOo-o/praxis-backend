@@ -2,7 +2,7 @@ use super::*;
 use crate::SkillMetadata;
 use crate::config_rules::resolve_disabled_skill_paths;
 use crate::config_rules::skill_config_rules_from_stack;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::CONFIG_TOML_FILE;
 use praxis_config::ConfigLayerEntry;
 use praxis_config::ConfigLayerStack;

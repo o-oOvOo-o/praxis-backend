@@ -36,7 +36,6 @@ use crate::realtime_conversation::handle_close as handle_realtime_conversation_c
 use crate::realtime_conversation::handle_start as handle_realtime_conversation_start;
 use crate::realtime_conversation::handle_text as handle_realtime_conversation_text;
 use crate::render_skills_section;
-use crate::rollout::session_index;
 use crate::session_prefix::format_subagent_notification_message;
 use crate::skills_load_input_from_config;
 use crate::stream_events_utils::HandleOutputCtx;
@@ -59,8 +58,8 @@ use praxis_analytics::AnalyticsEventsClient;
 use praxis_analytics::AppInvocation;
 use praxis_analytics::InvocationType;
 use praxis_analytics::build_track_events_context;
-use praxis_app_server_protocol::McpServerElicitationRequest;
-use praxis_app_server_protocol::McpServerElicitationRequestParams;
+use praxis_app_gateway_protocol::McpServerElicitationRequest;
+use praxis_app_gateway_protocol::McpServerElicitationRequestParams;
 use praxis_exec_server::Environment;
 use praxis_exec_server::EnvironmentManager;
 use praxis_features::FEATURES;
@@ -133,7 +132,6 @@ use praxis_rmcp_client::ElicitationResponse;
 use praxis_rmcp_client::OAuthCredentialsStoreMode;
 use praxis_rollout::state_db;
 use praxis_shell_command::parse_command::parse_command;
-use praxis_terminal_detection::user_agent;
 use praxis_tools::filter_tool_suggest_discoverable_tools_for_client;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_stream_parser::AssistantTextChunk;
@@ -255,6 +253,11 @@ use crate::SkillInjections;
 use crate::SkillLoadOutcome;
 use crate::SkillMetadata;
 use crate::SkillsManager;
+use crate::agent_os::AgentOsRuntime;
+use crate::agent_os::ThreadRegistration;
+use crate::agent_os::coordination_scope_for_session_source;
+use crate::agent_os::profile_for_rank;
+use crate::agent_os::rank_for_session_source;
 use crate::build_skill_injections;
 use crate::collect_env_var_dependencies;
 use crate::collect_explicit_skill_mentions;
@@ -405,8 +408,6 @@ pub(crate) type SessionLoopTermination = Shared<BoxFuture<'static, ()>>;
 pub struct PraxisSpawnOk {
     pub praxis: Praxis,
     pub thread_id: ThreadId,
-    #[deprecated(note = "use thread_id")]
-    pub conversation_id: ThreadId,
 }
 
 pub(crate) struct PraxisSpawnArgs {
@@ -421,6 +422,7 @@ pub(crate) struct PraxisSpawnArgs {
     pub(crate) conversation_history: InitialHistory,
     pub(crate) session_source: SessionSource,
     pub(crate) agent_control: AgentControl,
+    pub(crate) agent_os: Arc<AgentOsRuntime>,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) persist_extended_history: bool,
     pub(crate) metrics_service_name: Option<String>,
@@ -475,6 +477,7 @@ impl Praxis {
             conversation_history,
             session_source,
             agent_control,
+            agent_os,
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,
@@ -639,7 +642,7 @@ impl Praxis {
             thread_name: None,
             original_config_do_not_use: Arc::clone(&config),
             metrics_service_name,
-            app_server_client_name: None,
+            app_gateway_client_name: None,
             session_source,
             dynamic_tools,
             persist_extended_history,
@@ -667,6 +670,7 @@ impl Praxis {
             mcp_manager.clone(),
             skills_watcher,
             agent_control,
+            agent_os,
         )
         .await
         .map_err(|e| {
@@ -690,12 +694,7 @@ impl Praxis {
             session_loop_termination: session_loop_termination_from_handle(session_loop_handle),
         };
 
-        #[allow(deprecated)]
-        Ok(PraxisSpawnOk {
-            praxis,
-            thread_id,
-            conversation_id: thread_id,
-        })
+        Ok(PraxisSpawnOk { praxis, thread_id })
     }
 
     /// Submit the `op` wrapped in a `Submission` with a unique ID.
@@ -759,13 +758,13 @@ impl Praxis {
         self.session.steer_input(input, expected_turn_id).await
     }
 
-    pub(crate) async fn set_app_server_client_name(
+    pub(crate) async fn set_app_gateway_client_name(
         &self,
-        app_server_client_name: Option<String>,
+        app_gateway_client_name: Option<String>,
     ) -> ConstraintResult<()> {
         self.session
             .update_settings(SessionSettingsUpdate {
-                app_server_client_name,
+                app_gateway_client_name,
                 ..Default::default()
             })
             .await
@@ -868,7 +867,7 @@ pub(crate) struct TurnContext {
     pub(crate) cwd: AbsolutePathBuf,
     pub(crate) current_date: Option<String>,
     pub(crate) timezone: Option<String>,
-    pub(crate) app_server_client_name: Option<String>,
+    pub(crate) app_gateway_client_name: Option<String>,
     pub(crate) developer_instructions: Option<String>,
     pub(crate) compact_prompt: Option<String>,
     pub(crate) user_instructions: Option<String>,
@@ -978,7 +977,7 @@ impl TurnContext {
             cwd: self.cwd.clone(),
             current_date: self.current_date.clone(),
             timezone: self.timezone.clone(),
-            app_server_client_name: self.app_server_client_name.clone(),
+            app_gateway_client_name: self.app_gateway_client_name.clone(),
             developer_instructions: self.developer_instructions.clone(),
             compact_prompt: self.compact_prompt.clone(),
             user_instructions: self.user_instructions.clone(),
@@ -1121,7 +1120,7 @@ pub(crate) struct SessionConfiguration {
     original_config_do_not_use: Arc<Config>,
     /// Optional service name tag for session metrics.
     metrics_service_name: Option<String>,
-    app_server_client_name: Option<String>,
+    app_gateway_client_name: Option<String>,
     /// Source of the session (cli, vscode, exec, mcp, ...)
     session_source: SessionSource,
     dynamic_tools: Vec<DynamicToolSpec>,
@@ -1244,8 +1243,8 @@ impl SessionConfiguration {
                     &next_configuration.cwd,
                 );
         }
-        if let Some(app_server_client_name) = updates.app_server_client_name.clone() {
-            next_configuration.app_server_client_name = Some(app_server_client_name);
+        if let Some(app_gateway_client_name) = updates.app_gateway_client_name.clone() {
+            next_configuration.app_gateway_client_name = Some(app_gateway_client_name);
         }
         Ok(next_configuration)
     }
@@ -1264,7 +1263,7 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) service_tier: Option<Option<ServiceTier>>,
     pub(crate) final_output_json_schema: Option<Option<Value>>,
     pub(crate) personality: Option<Personality>,
-    pub(crate) app_server_client_name: Option<String>,
+    pub(crate) app_gateway_client_name: Option<String>,
 }
 
 impl Session {
@@ -1481,7 +1480,7 @@ impl Session {
             cwd,
             current_date: Some(current_date),
             timezone: Some(timezone),
-            app_server_client_name: session_configuration.app_server_client_name.clone(),
+            app_gateway_client_name: session_configuration.app_gateway_client_name.clone(),
             developer_instructions: session_configuration.developer_instructions.clone(),
             compact_prompt: session_configuration.compact_prompt.clone(),
             user_instructions: session_configuration.user_instructions.clone(),
@@ -1528,6 +1527,7 @@ impl Session {
         mcp_manager: Arc<McpManager>,
         skills_watcher: Arc<SkillsWatcher>,
         agent_control: AgentControl,
+        agent_os: Arc<AgentOsRuntime>,
     ) -> anyhow::Result<Arc<Self>> {
         debug!(
             "Configuring session: model={}; provider={:?}",
@@ -1711,7 +1711,10 @@ impl Session {
         let account_id = auth.and_then(CodexAuth::get_account_id);
         let account_email = auth.and_then(CodexAuth::get_account_email);
         let originator = originator().value;
-        let terminal_type = user_agent();
+        let terminal_type = session_configuration
+            .app_gateway_client_name
+            .clone()
+            .unwrap_or_else(|| session_configuration.session_source.to_string());
         let session_model = session_configuration.collaboration_mode.model().to_string();
         let telemetry_auth_manager = ProviderDecisionCenter::provider_auth_manager(
             Some(Arc::clone(&auth_manager)),
@@ -1816,45 +1819,26 @@ impl Session {
             tx
         };
         let mut inherited_thread_name_from_fork = false;
-        let mut thread_name =
-            match session_index::find_thread_name_by_id(&config.praxis_home, &conversation_id)
-                .instrument(info_span!(
-                    "session_init.thread_name_lookup",
-                    otel.name = "session_init.thread_name_lookup",
-                ))
-                .await
-            {
-                Ok(name) => name,
-                Err(err) => {
-                    warn!("Failed to read session index for thread name: {err}");
-                    None
-                }
-            };
+        let thread_name_resolver = praxis_rollout::ThreadNameResolver::new(state_db_ctx.as_deref());
+        let thread_name_writer = praxis_rollout::ThreadNameWriter::new(state_db_ctx.as_deref());
+        let mut thread_name = thread_name_resolver
+            .resolve_name(conversation_id)
+            .instrument(info_span!(
+                "session_init.thread_name_lookup",
+                otel.name = "session_init.thread_name_lookup",
+            ))
+            .await;
         if thread_name.is_none()
             && matches!(&initial_history, InitialHistory::Forked(_))
             && let Some(source_thread_id) = forked_from_id
         {
-            thread_name =
-                match session_index::find_thread_name_by_id(&config.praxis_home, &source_thread_id)
-                    .await
-                {
-                    Ok(name) => {
-                        inherited_thread_name_from_fork = name.is_some();
-                        name
-                    }
-                    Err(err) => {
-                        warn!(
-                            "Failed to read source thread name for fork {source_thread_id}: {err}"
-                        );
-                        None
-                    }
-                };
+            thread_name = thread_name_resolver.resolve_name(source_thread_id).await;
+            inherited_thread_name_from_fork = thread_name.is_some();
         }
         if inherited_thread_name_from_fork
             && !config.ephemeral
             && let Some(name) = thread_name.as_deref()
-            && let Err(err) =
-                session_index::append_thread_name(&config.praxis_home, conversation_id, name).await
+            && let Err(err) = thread_name_writer.write_name(conversation_id, name).await
         {
             warn!("Failed to persist inherited thread name for fork {conversation_id}: {err}");
         }
@@ -1934,6 +1918,45 @@ impl Session {
             });
         }
 
+        agent_os.attach_state_db(state_db_ctx.clone()).await;
+        let agent_rank = rank_for_session_source(&session_configuration.session_source);
+        if let Err(err) = agent_os
+            .register_thread(ThreadRegistration {
+                thread_id: conversation_id,
+                coordination_scope: coordination_scope_for_session_source(
+                    &session_configuration.session_source,
+                    conversation_id,
+                ),
+                rank: agent_rank,
+                profile_id: profile_for_rank(agent_rank).to_string(),
+                cwd: session_configuration.cwd.to_path_buf(),
+                repo_id: None,
+                branch: None,
+                worktree: None,
+                priority: if agent_rank == 0 { 100 } else { 0 },
+            })
+            .await
+        {
+            warn!("failed to register AgentOS thread {conversation_id}: {err}");
+        }
+        if let Err(err) = agent_os
+            .ensure_bootstrap_task(
+                conversation_id,
+                "Session bootstrap task",
+                vec![session_configuration.cwd.display().to_string()],
+            )
+            .await
+        {
+            warn!("failed to create AgentOS bootstrap task for {conversation_id}: {err}");
+        }
+
+        let unified_exec_manager = Arc::new(UnifiedExecProcessManager::new(
+            config.background_terminal_max_timeout,
+        ));
+        agent_os
+            .attach_process_cleaner(Arc::clone(&unified_exec_manager))
+            .await;
+
         let services = SessionServices {
             // Initialize the MCP connection manager with an uninitialized
             // instance. It will be replaced with one created via
@@ -1946,9 +1969,7 @@ impl Session {
                 &config.permissions.approval_policy,
             ))),
             mcp_startup_cancellation_token: Mutex::new(CancellationToken::new()),
-            unified_exec_manager: UnifiedExecProcessManager::new(
-                config.background_terminal_max_timeout,
-            ),
+            unified_exec_manager,
             shell_zsh_path: config.zsh_path.clone(),
             main_execve_wrapper_exe: config.main_execve_wrapper_exe.clone(),
             analytics_events_client: AnalyticsEventsClient::new(
@@ -1971,6 +1992,7 @@ impl Session {
             mcp_manager: Arc::clone(&mcp_manager),
             skills_watcher,
             agent_control,
+            agent_os,
             network_proxy,
             network_approval: Arc::clone(&network_approval),
             state_db: state_db_ctx.clone(),
@@ -2772,16 +2794,12 @@ impl Session {
         }
     }
 
-    /// Forwards terminal turn events from spawned MultiAgentV2 children to their direct parent.
+    /// Forwards terminal turn events from spawned children to their direct parent.
     async fn maybe_notify_parent_of_terminal_turn(
         &self,
         turn_context: &TurnContext,
         msg: &EventMsg,
     ) {
-        if !self.enabled(Feature::MultiAgentV2) {
-            return;
-        }
-
         if !matches!(msg, EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_)) {
             return;
         }
@@ -2806,7 +2824,7 @@ impl Session {
             .await;
     }
 
-    /// Sends the standard completion envelope from a spawned MultiAgentV2 child to its parent.
+    /// Sends the standard completion envelope from a spawned child to its parent.
     async fn forward_child_completion_to_parent(
         &self,
         parent_thread_id: ThreadId,
@@ -4731,7 +4749,6 @@ mod handlers {
 
     use crate::review_prompts::resolve_review_request;
     use crate::rollout::RolloutRecorder;
-    use crate::rollout::session_index;
     use crate::tasks::CompactTask;
     use crate::tasks::UndoTask;
     use crate::tasks::UserShellCommandMode;
@@ -4838,7 +4855,7 @@ mod handlers {
                         service_tier,
                         final_output_json_schema: Some(final_output_json_schema),
                         personality,
-                        app_server_client_name: None,
+                        app_gateway_client_name: None,
                     },
                 )
             }
@@ -4899,6 +4916,24 @@ mod handlers {
         communication: InterAgentCommunication,
     ) {
         let trigger_turn = communication.trigger_turn;
+        match sess
+            .services
+            .agent_os
+            .ack_pending_runtime_commands(sess.conversation_id)
+            .await
+        {
+            Ok(acked_commands) => {
+                if !acked_commands.is_empty() {
+                    tracing::debug!(
+                        count = acked_commands.len(),
+                        "AgentOS runtime commands acknowledged by receiver"
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::debug!("failed to acknowledge AgentOS runtime commands: {err}");
+            }
+        }
         sess.enqueue_mailbox_communication(communication);
         if trigger_turn {
             sess.maybe_start_turn_for_pending_work_with_sub_id(sub_id)
@@ -5401,13 +5436,7 @@ mod handlers {
         .await;
     }
 
-    /// Persists the thread name in the session index, updates in-memory state, and emits
-    /// a `ThreadNameUpdated` event on success.
-    ///
-    /// This appends the name to `CODEX_HOME/sessions_index.jsonl` via `session_index::append_thread_name` for the
-    /// current `thread_id`, then updates `SessionConfiguration::thread_name`.
-    ///
-    /// Returns an error event if the name is empty or session persistence is disabled.
+    /// Persists the thread name, updates in-memory state, and emits `ThreadNameUpdated` on success.
     pub async fn set_thread_name(sess: &Arc<Session>, sub_id: String, name: String) {
         let Some(name) = crate::util::normalize_thread_name(&name) else {
             let event = Event {
@@ -5437,9 +5466,9 @@ mod handlers {
             return;
         };
 
-        let praxis_home = sess.praxis_home().await;
-        if let Err(e) =
-            session_index::append_thread_name(&praxis_home, sess.conversation_id, &name).await
+        if let Err(e) = praxis_rollout::ThreadNameWriter::new(sess.services.state_db.as_deref())
+            .write_name(sess.conversation_id, &name)
+            .await
         {
             let event = Event {
                 id: sub_id,
@@ -5657,7 +5686,7 @@ async fn spawn_review_thread(
         ghost_snapshot: parent_turn_context.ghost_snapshot.clone(),
         current_date: parent_turn_context.current_date.clone(),
         timezone: parent_turn_context.timezone.clone(),
-        app_server_client_name: parent_turn_context.app_server_client_name.clone(),
+        app_gateway_client_name: parent_turn_context.app_gateway_client_name.clone(),
         developer_instructions: None,
         user_instructions: None,
         compact_prompt: parent_turn_context.compact_prompt.clone(),
@@ -6182,7 +6211,7 @@ pub(crate) async fn run_turn(
                         .dispatch(HookPayload {
                             session_id: sess.conversation_id,
                             cwd: turn_context.cwd.to_path_buf(),
-                            client: turn_context.app_server_client_name.clone(),
+                            client: turn_context.app_gateway_client_name.clone(),
                             triggered_at: chrono::Utc::now(),
                             hook_event: HookEvent::AfterAgent {
                                 event: HookEventAfterAgent {
@@ -6751,7 +6780,7 @@ pub(crate) async fn built_tools(
             .map(|discoverable_tools| {
                 filter_tool_suggest_discoverable_tools_for_client(
                     discoverable_tools,
-                    turn_context.app_server_client_name.as_deref(),
+                    turn_context.app_gateway_client_name.as_deref(),
                 )
             }) {
                 Ok(discoverable_tools) if discoverable_tools.is_empty() => None,

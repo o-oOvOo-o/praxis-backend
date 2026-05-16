@@ -9,20 +9,20 @@ use std::thread;
 use std::thread::JoinHandle;
 
 use anyhow::Context;
-use praxis_app_server_protocol::CommandExecutionApprovalDecision;
-use praxis_app_server_protocol::CommandExecutionRequestApprovalResponse;
-use praxis_app_server_protocol::FileChangeApprovalDecision;
-use praxis_app_server_protocol::FileChangeRequestApprovalResponse;
-use praxis_app_server_protocol::JSONRPCMessage;
-use praxis_app_server_protocol::JSONRPCNotification;
-use praxis_app_server_protocol::JSONRPCRequest;
-use praxis_app_server_protocol::JSONRPCResponse;
-use praxis_app_server_protocol::ServerNotification;
-use praxis_app_server_protocol::ServerRequest;
-use praxis_app_server_protocol::ThreadItem;
-use praxis_app_server_protocol::ThreadListResponse;
-use praxis_app_server_protocol::ThreadResumeResponse;
-use praxis_app_server_protocol::ThreadStartResponse;
+use praxis_app_gateway_protocol::CommandExecutionApprovalDecision;
+use praxis_app_gateway_protocol::CommandExecutionRequestApprovalResponse;
+use praxis_app_gateway_protocol::FileChangeApprovalDecision;
+use praxis_app_gateway_protocol::FileChangeRequestApprovalResponse;
+use praxis_app_gateway_protocol::JSONRPCMessage;
+use praxis_app_gateway_protocol::JSONRPCNotification;
+use praxis_app_gateway_protocol::JSONRPCRequest;
+use praxis_app_gateway_protocol::JSONRPCResponse;
+use praxis_app_gateway_protocol::ServerNotification;
+use praxis_app_gateway_protocol::ServerRequest;
+use praxis_app_gateway_protocol::ThreadItem;
+use praxis_app_gateway_protocol::ThreadListResponse;
+use praxis_app_gateway_protocol::ThreadResumeResponse;
+use praxis_app_gateway_protocol::ThreadStartResponse;
 use serde::Serialize;
 use std::io::Write;
 
@@ -316,7 +316,7 @@ fn write_multiline(
 
 fn send_response<T: Serialize>(
     stdin: &Arc<Mutex<Option<std::process::ChildStdin>>>,
-    request_id: praxis_app_server_protocol::RequestId,
+    request_id: praxis_app_gateway_protocol::RequestId,
     response: T,
 ) -> anyhow::Result<()> {
     let result = serde_json::to_value(response).context("serialize response")?;

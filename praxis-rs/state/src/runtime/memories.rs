@@ -204,9 +204,11 @@ LEFT JOIN jobs
             &mut builder,
             /*archived_only*/ false,
             allowed_sources,
+            /*source_kinds*/ None,
             /*model_providers*/ None,
             /*anchor*/ None,
             SortKey::UpdatedAt,
+            /*cwd*/ None,
             /*search_term*/ None,
         );
         builder.push(" AND threads.memory_mode = 'enabled'");

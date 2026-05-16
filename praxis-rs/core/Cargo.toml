@@ -28,7 +28,7 @@ chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 praxis-analytics = { workspace = true }
 praxis-api = { workspace = true }
-praxis-app-server-protocol = { workspace = true }
+praxis-app-gateway-protocol = { workspace = true }
 praxis-apply-patch = { workspace = true }
 praxis-async-utils = { workspace = true }
 praxis-code-mode = { workspace = true }
@@ -52,7 +52,6 @@ praxis-rollout = { workspace = true }
 praxis-rmcp-client = { workspace = true }
 praxis-sandboxing = { workspace = true }
 praxis-state = { workspace = true }
-praxis-terminal-detection = { workspace = true }
 praxis-tools = { workspace = true }
 praxis-utils-absolute-path = { workspace = true }
 praxis-utils-cache = { workspace = true }

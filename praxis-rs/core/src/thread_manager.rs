@@ -1,6 +1,7 @@
 use crate::ModelProviderInfo;
 use crate::SkillsManager;
 use crate::agent::AgentControl;
+use crate::agent_os::AgentOsRuntime;
 use crate::config::Config;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
@@ -22,8 +23,8 @@ use crate::skills_watcher::SkillsWatcherEvent;
 use crate::tasks::interrupted_turn_history_marker;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use praxis_app_server_protocol::ThreadHistoryBuilder;
-use praxis_app_server_protocol::TurnStatus;
+use praxis_app_gateway_protocol::ThreadHistoryBuilder;
+use praxis_app_gateway_protocol::TurnStatus;
 use praxis_exec_server::EnvironmentManager;
 use praxis_login::AuthManager;
 use praxis_login::CodexAuth;
@@ -205,6 +206,7 @@ pub(crate) struct ThreadManagerState {
     plugins_manager: Arc<PluginsManager>,
     mcp_manager: Arc<McpManager>,
     skills_watcher: Arc<SkillsWatcher>,
+    pub(crate) agent_os: Arc<AgentOsRuntime>,
     session_source: SessionSource,
     // Captures submitted ops for testing purpose when test mode is enabled.
     ops_log: Option<SharedCapturedOps>,
@@ -248,6 +250,7 @@ impl ThreadManager {
                 plugins_manager,
                 mcp_manager,
                 skills_watcher,
+                agent_os: AgentOsRuntime::new(),
                 auth_manager,
                 session_source,
                 ops_log: should_use_test_thread_manager_behavior()
@@ -317,6 +320,7 @@ impl ThreadManager {
                 plugins_manager,
                 mcp_manager,
                 skills_watcher,
+                agent_os: AgentOsRuntime::new(),
                 auth_manager,
                 session_source: SessionSource::Exec,
                 ops_log: should_use_test_thread_manager_behavior()
@@ -945,6 +949,7 @@ impl ThreadManagerState {
             conversation_history: initial_history,
             session_source,
             agent_control,
+            agent_os: Arc::clone(&self.agent_os),
             dynamic_tools,
             persist_extended_history,
             metrics_service_name,

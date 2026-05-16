@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use praxis_app_server_protocol::AuthMode;
+use praxis_app_gateway_protocol::AuthMode;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_login::load_auth_dot_json;
 
@@ -57,7 +57,7 @@ mod tests {
 
     use base64::Engine;
     use chrono::Utc;
-    use praxis_app_server_protocol::AuthMode;
+    use praxis_app_gateway_protocol::AuthMode;
     use praxis_login::AuthDotJson;
     use praxis_login::auth::login_with_chatgpt_auth_tokens;
     use praxis_login::save_auth;

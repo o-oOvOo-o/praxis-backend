@@ -3,13 +3,13 @@ use std::path::PathBuf;
 
 use owo_colors::OwoColorize;
 use owo_colors::Style;
-use praxis_app_server_protocol::CommandExecutionStatus;
-use praxis_app_server_protocol::McpToolCallStatus;
-use praxis_app_server_protocol::PatchApplyStatus;
-use praxis_app_server_protocol::ServerNotification;
-use praxis_app_server_protocol::ThreadItem;
-use praxis_app_server_protocol::ThreadTokenUsage;
-use praxis_app_server_protocol::TurnStatus;
+use praxis_app_gateway_protocol::CommandExecutionStatus;
+use praxis_app_gateway_protocol::McpToolCallStatus;
+use praxis_app_gateway_protocol::PatchApplyStatus;
+use praxis_app_gateway_protocol::ServerNotification;
+use praxis_app_gateway_protocol::ThreadItem;
+use praxis_app_gateway_protocol::ThreadTokenUsage;
+use praxis_app_gateway_protocol::TurnStatus;
 use praxis_core::WireApi;
 use praxis_core::config::Config;
 use praxis_protocol::num_format::format_with_separators;
@@ -342,13 +342,13 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 }
                 for step in notification.plan {
                     match step.status {
-                        praxis_app_server_protocol::TurnPlanStepStatus::Completed => {
+                        praxis_app_gateway_protocol::TurnPlanStepStatus::Completed => {
                             eprintln!("  {} {}", "✓".style(self.green), step.step);
                         }
-                        praxis_app_server_protocol::TurnPlanStepStatus::InProgress => {
+                        praxis_app_gateway_protocol::TurnPlanStepStatus::InProgress => {
                             eprintln!("  {} {}", "→".style(self.cyan), step.step);
                         }
-                        praxis_app_server_protocol::TurnPlanStepStatus::Pending => {
+                        praxis_app_gateway_protocol::TurnPlanStepStatus::Pending => {
                             eprintln!(
                                 "  {} {}",
                                 "•".style(self.dimmed),
@@ -566,9 +566,9 @@ fn should_print_final_message_to_tty(
 #[cfg(test)]
 mod tests {
     use owo_colors::Style;
-    use praxis_app_server_protocol::ThreadItem;
-    use praxis_app_server_protocol::Turn;
-    use praxis_app_server_protocol::TurnStatus;
+    use praxis_app_gateway_protocol::ThreadItem;
+    use praxis_app_gateway_protocol::Turn;
+    use praxis_app_gateway_protocol::TurnStatus;
 
     use super::EventProcessorWithHumanOutput;
     use super::final_message_from_turn_items;
@@ -576,7 +576,7 @@ mod tests {
     use super::should_print_final_message_to_stdout;
     use super::should_print_final_message_to_tty;
     use crate::event_processor::EventProcessor;
-    use praxis_app_server_protocol::ServerNotification;
+    use praxis_app_gateway_protocol::ServerNotification;
 
     #[test]
     fn suppresses_final_stdout_message_when_both_streams_are_terminals() {
@@ -721,7 +721,7 @@ mod tests {
         };
 
         let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            praxis_app_server_protocol::TurnCompletedNotification {
+            praxis_app_gateway_protocol::TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: Turn {
                     id: "turn-1".to_string(),
@@ -765,7 +765,7 @@ mod tests {
         };
 
         let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            praxis_app_server_protocol::TurnCompletedNotification {
+            praxis_app_gateway_protocol::TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: Turn {
                     id: "turn-1".to_string(),
@@ -810,7 +810,7 @@ mod tests {
         };
 
         let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            praxis_app_server_protocol::TurnCompletedNotification {
+            praxis_app_gateway_protocol::TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: Turn {
                     id: "turn-1".to_string(),
@@ -850,7 +850,7 @@ mod tests {
         };
 
         let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            praxis_app_server_protocol::TurnCompletedNotification {
+            praxis_app_gateway_protocol::TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: Turn {
                     id: "turn-1".to_string(),
@@ -891,7 +891,7 @@ mod tests {
         };
 
         let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            praxis_app_server_protocol::TurnCompletedNotification {
+            praxis_app_gateway_protocol::TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: Turn {
                     id: "turn-1".to_string(),

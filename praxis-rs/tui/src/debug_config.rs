@@ -1,5 +1,5 @@
 use crate::history_cell::PlainHistoryCell;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_core::config::Config;
 use praxis_core::config_loader::ConfigLayerEntry;
 use praxis_core::config_loader::ConfigLayerStack;
@@ -421,7 +421,7 @@ fn format_network_unix_socket_permission(
 mod tests {
     use super::render_debug_config_lines;
     use super::session_all_proxy_url;
-    use praxis_app_server_protocol::ConfigLayerSource;
+    use praxis_app_gateway_protocol::ConfigLayerSource;
     use praxis_core::config::Constrained;
     use praxis_core::config_loader::ConfigLayerEntry;
     use praxis_core::config_loader::ConfigLayerStack;

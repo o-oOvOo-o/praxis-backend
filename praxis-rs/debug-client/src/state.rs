@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use praxis_app_server_protocol::RequestId;
+use praxis_app_gateway_protocol::RequestId;
 
 #[derive(Debug, Default)]
 pub struct State {

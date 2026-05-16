@@ -1,6 +1,6 @@
 //! Shared model metadata types exchanged between Praxis services and clients.
 //!
-//! These types are serialized across core, TUI, app-server, and SDK boundaries, so field defaults
+//! These types are serialized across core, TUI, app-gateway, and SDK boundaries, so field defaults
 //! are used to preserve compatibility when older payloads omit newly introduced attributes.
 
 use std::collections::HashMap;

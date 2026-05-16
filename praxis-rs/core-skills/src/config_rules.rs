@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::ConfigLayerStack;
 use praxis_config::ConfigLayerStackOrdering;
 use praxis_config::SkillConfig;

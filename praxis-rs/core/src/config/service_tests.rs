@@ -1,9 +1,9 @@
 use super::*;
 use anyhow::Result;
-use praxis_app_server_protocol::AppConfig;
-use praxis_app_server_protocol::AppToolApproval;
-use praxis_app_server_protocol::AppsConfig;
-use praxis_app_server_protocol::AskForApproval;
+use praxis_app_gateway_protocol::AppConfig;
+use praxis_app_gateway_protocol::AppToolApproval;
+use praxis_app_gateway_protocol::AppsConfig;
+use praxis_app_gateway_protocol::AskForApproval;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;

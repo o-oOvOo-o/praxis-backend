@@ -10,6 +10,7 @@ use crate::tools::context::ApplyPatchToolOutput;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolInvocation;
+use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use crate::tools::events::ToolEmitter;
 use crate::tools::events::ToolEventCtx;
@@ -171,14 +172,83 @@ impl ToolHandler for ApplyPatchHandler {
         let command = vec!["apply_patch".to_string(), patch_input.clone()];
         match praxis_apply_patch::maybe_parse_apply_patch_verified(&command, &cwd) {
             praxis_apply_patch::MaybeApplyPatchVerified::Body(changes) => {
+                let ticket = session
+                    .services
+                    .agent_os
+                    .request_command_ticket(session.conversation_id, &command, &cwd)
+                    .await
+                    .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+                let command_record_id = session
+                    .services
+                    .agent_os
+                    .begin_managed_command(
+                        &ticket,
+                        "apply_patch".to_string(),
+                        &command,
+                        cwd.to_path_buf(),
+                        None,
+                    )
+                    .await
+                    .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
                 let (file_paths, effective_additional_permissions, file_system_sandbox_policy) =
                     effective_patch_permissions(session.as_ref(), turn.as_ref(), &changes).await;
+                let dirty_files = file_paths
+                    .iter()
+                    .map(|path| path.clone().into_path_buf())
+                    .collect();
+                if let Err(err) = session
+                    .services
+                    .agent_os
+                    .record_command_dirty_files(command_record_id.as_str(), dirty_files)
+                    .await
+                {
+                    let error_text = err.to_string();
+                    let _ = session
+                        .services
+                        .agent_os
+                        .finish_managed_command(
+                            command_record_id.as_str(),
+                            Some(-1),
+                            error_text.as_bytes(),
+                            /*release_leases*/ true,
+                        )
+                        .await;
+                    return Err(FunctionCallError::RespondToModel(error_text));
+                }
                 match apply_patch::apply_patch(turn.as_ref(), &file_system_sandbox_policy, changes)
                     .await
                 {
                     InternalApplyPatchInvocation::Output(item) => {
-                        let content = item?;
-                        Ok(ApplyPatchToolOutput::from_text(content))
+                        let content = match item {
+                            Ok(content) => content,
+                            Err(err) => {
+                                let error_text = err.to_string();
+                                let _ = session
+                                    .services
+                                    .agent_os
+                                    .finish_managed_command(
+                                        command_record_id.as_str(),
+                                        Some(-1),
+                                        error_text.as_bytes(),
+                                        /*release_leases*/ true,
+                                    )
+                                    .await;
+                                return Err(err);
+                            }
+                        };
+                        let output = ApplyPatchToolOutput::from_text(content);
+                        let output_preview = output.log_preview();
+                        let _ = session
+                            .services
+                            .agent_os
+                            .finish_managed_command(
+                                command_record_id.as_str(),
+                                Some(0),
+                                output_preview.as_bytes(),
+                                /*release_leases*/ true,
+                            )
+                            .await;
+                        Ok(output)
                     }
                     InternalApplyPatchInvocation::DelegateToExec(apply) => {
                         let changes = convert_apply_patch_to_protocol(&apply.action);
@@ -228,7 +298,35 @@ impl ToolHandler for ApplyPatchHandler {
                             &call_id,
                             Some(&tracker),
                         );
-                        let content = emitter.finish(event_ctx, out).await?;
+                        let finish_result = emitter.finish(event_ctx, out).await;
+                        match &finish_result {
+                            Ok(content) => {
+                                let _ = session
+                                    .services
+                                    .agent_os
+                                    .finish_managed_command(
+                                        command_record_id.as_str(),
+                                        Some(0),
+                                        content.as_bytes(),
+                                        /*release_leases*/ true,
+                                    )
+                                    .await;
+                            }
+                            Err(err) => {
+                                let error_text = err.to_string();
+                                let _ = session
+                                    .services
+                                    .agent_os
+                                    .finish_managed_command(
+                                        command_record_id.as_str(),
+                                        Some(-1),
+                                        error_text.as_bytes(),
+                                        /*release_leases*/ true,
+                                    )
+                                    .await;
+                            }
+                        }
+                        let content = finish_result?;
                         Ok(ApplyPatchToolOutput::from_text(content))
                     }
                 }

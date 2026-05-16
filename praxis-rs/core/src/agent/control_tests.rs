@@ -210,10 +210,10 @@ async fn wait_for_live_thread_spawn_children(
 }
 
 #[tokio::test]
-async fn send_input_errors_when_manager_dropped() {
+async fn submit_turn_operation_errors_when_manager_dropped() {
     let control = AgentControl::default();
     let err = control
-        .send_input(
+        .submit_turn_operation(
             ThreadId::new(),
             vec![UserInput::Text {
                 text: "hello".to_string(),
@@ -222,7 +222,7 @@ async fn send_input_errors_when_manager_dropped() {
             .into(),
         )
         .await
-        .expect_err("send_input should fail without a manager");
+        .expect_err("submit_turn_operation should fail without a manager");
     assert_eq!(
         err.to_string(),
         "unsupported operation: thread manager dropped"
@@ -299,13 +299,13 @@ async fn spawn_agent_errors_when_manager_dropped() {
 }
 
 #[tokio::test]
-async fn resume_agent_errors_when_manager_dropped() {
+async fn resume_thread_errors_when_manager_dropped() {
     let control = AgentControl::default();
     let (_home, config) = test_config().await;
     let err = control
-        .resume_agent_from_rollout(config, ThreadId::new(), SessionSource::Exec)
+        .resume_thread_from_rollout(config, ThreadId::new(), SessionSource::Exec)
         .await
-        .expect_err("resume_agent should fail without a manager");
+        .expect_err("resume_thread should fail without a manager");
     assert_eq!(
         err.to_string(),
         "unsupported operation: thread manager dropped"
@@ -313,12 +313,12 @@ async fn resume_agent_errors_when_manager_dropped() {
 }
 
 #[tokio::test]
-async fn send_input_errors_when_thread_missing() {
+async fn submit_turn_operation_errors_when_thread_missing() {
     let harness = AgentControlHarness::new().await;
     let thread_id = ThreadId::new();
     let err = harness
         .control
-        .send_input(
+        .submit_turn_operation(
             thread_id,
             vec![UserInput::Text {
                 text: "hello".to_string(),
@@ -327,7 +327,7 @@ async fn send_input_errors_when_thread_missing() {
             .into(),
         )
         .await
-        .expect_err("send_input should fail for missing thread");
+        .expect_err("submit_turn_operation should fail for missing thread");
     assert_matches!(err, PraxisErr::ThreadNotFound(id) if id == thread_id);
 }
 
@@ -379,13 +379,13 @@ async fn subscribe_status_updates_on_shutdown() {
 }
 
 #[tokio::test]
-async fn send_input_submits_user_message() {
+async fn submit_turn_operation_submits_user_message() {
     let harness = AgentControlHarness::new().await;
     let (thread_id, _thread) = harness.start_thread().await;
 
     let submission_id = harness
         .control
-        .send_input(
+        .submit_turn_operation(
             thread_id,
             vec![UserInput::Text {
                 text: "hello from tests".to_string(),
@@ -394,7 +394,7 @@ async fn send_input_submits_user_message() {
             .into(),
         )
         .await
-        .expect("send_input should succeed");
+        .expect("submit_turn_operation should succeed");
     assert!(!submission_id.is_empty());
     let expected = (
         thread_id,
@@ -1077,7 +1077,7 @@ async fn spawn_agent_limit_shared_across_clones() {
 }
 
 #[tokio::test]
-async fn resume_agent_respects_max_threads_limit() {
+async fn resume_thread_respects_max_threads_limit() {
     let max_threads = 1usize;
     let (_home, config) = test_config_with_cli_overrides(vec![(
         "agents.max_threads".to_string(),
@@ -1117,7 +1117,7 @@ async fn resume_agent_respects_max_threads_limit() {
         .expect("spawn_agent should succeed for active slot");
 
     let err = control
-        .resume_agent_from_rollout(config, resumable_id, SessionSource::Exec)
+        .resume_thread_from_rollout(config, resumable_id, SessionSource::Exec)
         .await
         .expect_err("resume should respect max threads");
     let PraxisErr::AgentLimitReached {
@@ -1135,7 +1135,7 @@ async fn resume_agent_respects_max_threads_limit() {
 }
 
 #[tokio::test]
-async fn resume_agent_releases_slot_after_resume_failure() {
+async fn resume_thread_releases_slot_after_resume_failure() {
     let max_threads = 1usize;
     let (_home, config) = test_config_with_cli_overrides(vec![(
         "agents.max_threads".to_string(),
@@ -1153,7 +1153,7 @@ async fn resume_agent_releases_slot_after_resume_failure() {
     let control = manager.agent_control();
 
     let _ = control
-        .resume_agent_from_rollout(config.clone(), ThreadId::new(), SessionSource::Exec)
+        .resume_thread_from_rollout(config.clone(), ThreadId::new(), SessionSource::Exec)
         .await
         .expect_err("resume should fail for missing rollout path");
 
@@ -1202,11 +1202,11 @@ async fn spawn_child_completion_notifies_parent_history() {
 }
 
 #[tokio::test]
-async fn multi_agent_v2_completion_ignores_dead_direct_parent() {
+async fn multi_agent_completion_ignores_dead_direct_parent() {
     let harness = AgentControlHarness::new().await;
     let (root_thread_id, root_thread) = harness.start_thread().await;
     let mut config = harness.config.clone();
-    let _ = config.features.enable(Feature::MultiAgentV2);
+    let _ = config.features.enable(Feature::Collab);
     let worker_path = AgentPath::root().join("worker_a").expect("worker path");
     let worker_thread_id = harness
         .control
@@ -1303,12 +1303,12 @@ async fn multi_agent_v2_completion_ignores_dead_direct_parent() {
 }
 
 #[tokio::test]
-async fn multi_agent_v2_completion_queues_message_for_direct_parent() {
+async fn multi_agent_completion_queues_message_for_direct_parent() {
     let harness = AgentControlHarness::new().await;
     let (_root_thread_id, root_thread) = harness.start_thread().await;
     let (worker_thread_id, _worker_thread) = harness.start_thread().await;
     let mut tester_config = harness.config.clone();
-    let _ = tester_config.features.enable(Feature::MultiAgentV2);
+    let _ = tester_config.features.enable(Feature::Collab);
     let tester_thread_id = harness
         .manager
         .start_thread(tester_config)
@@ -1625,7 +1625,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
 
     let resumed_thread_id = harness
         .control
-        .resume_agent_from_rollout(
+        .resume_thread_from_rollout(
             harness.config.clone(),
             child_thread_id,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
@@ -1672,7 +1672,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
 }
 
 #[tokio::test]
-async fn resume_agent_from_rollout_reads_archived_rollout_path() {
+async fn resume_thread_from_rollout_reads_archived_rollout_path() {
     let harness = AgentControlHarness::new().await;
     let child_thread_id = harness
         .control
@@ -1725,7 +1725,7 @@ async fn resume_agent_from_rollout_reads_archived_rollout_path() {
 
     let resumed_thread_id = harness
         .control
-        .resume_agent_from_rollout(harness.config.clone(), child_thread_id, SessionSource::Exec)
+        .resume_thread_from_rollout(harness.config.clone(), child_thread_id, SessionSource::Exec)
         .await
         .expect("resume should find archived rollout");
     assert_eq!(resumed_thread_id, child_thread_id);
@@ -1914,7 +1914,7 @@ async fn shutdown_agent_tree_closes_descendants_when_started_at_child() {
 }
 
 #[tokio::test]
-async fn resume_agent_from_rollout_does_not_reopen_closed_descendants() {
+async fn resume_thread_from_rollout_does_not_reopen_closed_descendants() {
     let harness = AgentControlHarness::new().await;
     let (parent_thread_id, parent_thread) = harness.start_thread().await;
 
@@ -1980,7 +1980,7 @@ async fn resume_agent_from_rollout_does_not_reopen_closed_descendants() {
 
     let resumed_parent_thread_id = harness
         .control
-        .resume_agent_from_rollout(
+        .resume_thread_from_rollout(
             harness.config.clone(),
             parent_thread_id,
             SessionSource::Exec,
@@ -2070,7 +2070,7 @@ async fn resume_closed_child_reopens_open_descendants() {
 
     let resumed_child_thread_id = harness
         .control
-        .resume_agent_from_rollout(
+        .resume_thread_from_rollout(
             harness.config.clone(),
             child_thread_id,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
@@ -2106,7 +2106,7 @@ async fn resume_closed_child_reopens_open_descendants() {
 }
 
 #[tokio::test]
-async fn resume_agent_from_rollout_reopens_open_descendants_after_manager_shutdown() {
+async fn resume_thread_from_rollout_reopens_open_descendants_after_manager_shutdown() {
     let harness = AgentControlHarness::new().await;
     let (parent_thread_id, parent_thread) = harness.start_thread().await;
 
@@ -2168,7 +2168,7 @@ async fn resume_agent_from_rollout_reopens_open_descendants_after_manager_shutdo
 
     let resumed_parent_thread_id = harness
         .control
-        .resume_agent_from_rollout(
+        .resume_thread_from_rollout(
             harness.config.clone(),
             parent_thread_id,
             SessionSource::Exec,
@@ -2197,7 +2197,7 @@ async fn resume_agent_from_rollout_reopens_open_descendants_after_manager_shutdo
 }
 
 #[tokio::test]
-async fn resume_agent_from_rollout_uses_edge_data_when_descendant_metadata_source_is_stale() {
+async fn resume_thread_from_rollout_uses_edge_data_when_descendant_metadata_source_is_stale() {
     let harness = AgentControlHarness::new().await;
     let (parent_thread_id, parent_thread) = harness.start_thread().await;
 
@@ -2281,7 +2281,7 @@ async fn resume_agent_from_rollout_uses_edge_data_when_descendant_metadata_sourc
 
     let resumed_parent_thread_id = harness
         .control
-        .resume_agent_from_rollout(
+        .resume_thread_from_rollout(
             harness.config.clone(),
             parent_thread_id,
             SessionSource::Exec,
@@ -2328,7 +2328,7 @@ async fn resume_agent_from_rollout_uses_edge_data_when_descendant_metadata_sourc
 }
 
 #[tokio::test]
-async fn resume_agent_from_rollout_skips_descendants_when_parent_resume_fails() {
+async fn resume_thread_from_rollout_skips_descendants_when_parent_resume_fails() {
     let harness = AgentControlHarness::new().await;
     let (parent_thread_id, parent_thread) = harness.start_thread().await;
 
@@ -2396,7 +2396,7 @@ async fn resume_agent_from_rollout_skips_descendants_when_parent_resume_fails() 
 
     let resumed_parent_thread_id = harness
         .control
-        .resume_agent_from_rollout(
+        .resume_thread_from_rollout(
             harness.config.clone(),
             parent_thread_id,
             SessionSource::Exec,

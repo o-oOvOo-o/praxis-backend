@@ -6,7 +6,7 @@ use crate::shell::ShellType;
 use crate::tools::ToolRouter;
 use crate::tools::registry::tool_handler_key;
 use crate::tools::router::ToolRouterParams;
-use praxis_app_server_protocol::AppInfo;
+use praxis_app_gateway_protocol::AppInfo;
 use praxis_features::Feature;
 use praxis_features::Features;
 use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
@@ -309,10 +309,11 @@ fn test_build_specs_gpt5_praxis_default() {
             "web_search",
             "view_image",
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
         ],
     );
 }
@@ -332,10 +333,11 @@ fn test_build_specs_gpt51_praxis_default() {
             "web_search",
             "view_image",
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
         ],
     );
 }
@@ -357,10 +359,11 @@ fn test_build_specs_gpt5_praxis_unified_exec_web_search() {
             "web_search",
             "view_image",
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
         ],
     );
 }
@@ -382,10 +385,11 @@ fn test_build_specs_gpt51_praxis_unified_exec_web_search() {
             "web_search",
             "view_image",
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
         ],
     );
 }
@@ -405,10 +409,11 @@ fn test_gpt_5_1_praxis_max_defaults() {
             "web_search",
             "view_image",
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
         ],
     );
 }
@@ -428,10 +433,11 @@ fn test_praxis_5_1_mini_defaults() {
             "web_search",
             "view_image",
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
         ],
     );
 }
@@ -450,10 +456,11 @@ fn test_gpt_5_defaults() {
             "web_search",
             "view_image",
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
         ],
     );
 }
@@ -473,10 +480,11 @@ fn test_gpt_5_1_defaults() {
             "web_search",
             "view_image",
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
         ],
     );
 }
@@ -498,10 +506,11 @@ fn test_gpt_5_1_praxis_max_unified_exec_web_search() {
             "web_search",
             "view_image",
             "spawn_agent",
-            "send_input",
-            "resume_agent",
+            "send_message",
+            "assign_task",
             "wait_agent",
             "close_agent",
+            "list_agents",
         ],
     );
 }

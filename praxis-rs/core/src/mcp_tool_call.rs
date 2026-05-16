@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
-use praxis_app_server_protocol::ConfigLayerSource;
-use praxis_app_server_protocol::McpElicitationObjectType;
-use praxis_app_server_protocol::McpElicitationSchema;
-use praxis_app_server_protocol::McpServerElicitationRequest;
-use praxis_app_server_protocol::McpServerElicitationRequestParams;
+use praxis_app_gateway_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::McpElicitationObjectType;
+use praxis_app_gateway_protocol::McpElicitationSchema;
+use praxis_app_gateway_protocol::McpServerElicitationRequest;
+use praxis_app_gateway_protocol::McpServerElicitationRequestParams;
 use tracing::error;
 
 use crate::arc_monitor::ArcMonitorOutcome;

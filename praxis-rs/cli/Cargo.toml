@@ -19,9 +19,9 @@ workspace = true
 anyhow = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 clap_complete = { workspace = true }
-praxis-app-server = { workspace = true }
-praxis-app-server-protocol = { workspace = true }
-praxis-app-server-test-client = { workspace = true }
+praxis-app-gateway-protocol = { workspace = true }
+praxis-app-gateway-service = { workspace = true }
+praxis-app-gateway-test-client = { workspace = true }
 praxis-arg0 = { workspace = true }
 praxis-chatgpt = { workspace = true }
 praxis-cloud-tasks = { path = "../cloud-tasks" }

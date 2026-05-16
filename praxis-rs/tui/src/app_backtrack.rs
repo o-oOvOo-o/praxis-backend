@@ -24,10 +24,14 @@
 //! both committed history and in-flight activity without changing flush or coalescing behavior.
 
 use std::any::TypeId;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::app::App;
+use crate::app::TRANSCRIPT_SCROLLBACK_BACKFILL_CELL_BUDGET;
+use crate::app::TRANSCRIPT_SCROLLBACK_BACKFILL_LINE_BUDGET;
+use crate::app::TranscriptScrollbackBackfill;
 use crate::app_command::AppCommand;
 use crate::app_event::AppEvent;
 use crate::history_cell::SessionInfoCell;
@@ -391,14 +395,71 @@ impl App {
         }
     }
 
-    /// Re-render the full transcript into the terminal scrollback in one call.
-    /// Useful when switching sessions to ensure prior history remains visible.
-    pub(crate) fn render_transcript_once(&mut self, tui: &mut tui::Tui) {
-        if !self.transcript_cells.is_empty() {
-            let width = tui.terminal.last_known_screen_size.width;
-            for cell in &self.transcript_cells {
-                tui.insert_history_lines(cell.display_lines(width));
+    pub(crate) fn has_pending_transcript_scrollback_work(&self) -> bool {
+        self.backtrack_render_pending || self.transcript_scrollback_backfill.is_some()
+    }
+
+    /// Start a transcript scrollback refresh; chunks are drained during subsequent draws.
+    pub(crate) fn start_transcript_scrollback_backfill(&mut self, tui: &tui::Tui) {
+        self.backtrack_render_pending = false;
+        self.transcript_scrollback_backfill =
+            (!self.transcript_cells.is_empty()).then_some(TranscriptScrollbackBackfill {
+                next_cell: 0,
+                width: tui.terminal.last_known_screen_size.width.max(1),
+                pending_lines: VecDeque::new(),
+            });
+    }
+
+    /// Drain one bounded transcript scrollback refresh chunk. Returns true if more chunks remain.
+    pub(crate) fn drain_transcript_scrollback_backfill_chunk(
+        &mut self,
+        tui: &mut tui::Tui,
+    ) -> bool {
+        let Some(mut backfill) = self.transcript_scrollback_backfill.take() else {
+            return false;
+        };
+
+        let mut cells_processed = 0usize;
+        let mut lines_processed = 0usize;
+        while lines_processed < TRANSCRIPT_SCROLLBACK_BACKFILL_LINE_BUDGET {
+            if !backfill.pending_lines.is_empty() {
+                let remaining =
+                    TRANSCRIPT_SCROLLBACK_BACKFILL_LINE_BUDGET.saturating_sub(lines_processed);
+                let take = remaining.min(backfill.pending_lines.len());
+                let mut lines = Vec::with_capacity(take);
+                for _ in 0..take {
+                    if let Some(line) = backfill.pending_lines.pop_front() {
+                        lines.push(line);
+                    }
+                }
+                lines_processed = lines_processed.saturating_add(lines.len());
+                if !lines.is_empty() {
+                    tui.insert_history_lines(lines);
+                }
+                continue;
             }
+
+            if backfill.next_cell >= self.transcript_cells.len()
+                || cells_processed >= TRANSCRIPT_SCROLLBACK_BACKFILL_CELL_BUDGET
+            {
+                break;
+            }
+
+            backfill.pending_lines = self.transcript_cells[backfill.next_cell]
+                .committed_display_lines(backfill.width)
+                .into();
+            backfill.next_cell = backfill.next_cell.saturating_add(1);
+            cells_processed = cells_processed.saturating_add(1);
+            if backfill.pending_lines.is_empty() {
+                lines_processed = lines_processed.saturating_add(1);
+            }
+        }
+
+        if backfill.next_cell < self.transcript_cells.len() || !backfill.pending_lines.is_empty() {
+            self.transcript_scrollback_backfill = Some(backfill);
+            true
+        } else {
+            false
         }
     }
 

@@ -272,13 +272,49 @@ async fn metadata_irrelevant_events_fall_back_to_upsert_when_thread_missing() ->
 }
 
 #[tokio::test]
-async fn list_threads_db_disabled_does_not_skip_paginated_items() -> std::io::Result<()> {
+async fn list_threads_db_paginates_without_filesystem_fallback() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
 
-    let newest = write_session_file(home.path(), "2025-01-03T12-00-00", Uuid::from_u128(9001))?;
-    let middle = write_session_file(home.path(), "2025-01-02T12-00-00", Uuid::from_u128(9002))?;
+    let newest_uuid = Uuid::from_u128(9001);
+    let middle_uuid = Uuid::from_u128(9002);
+    let newest = write_session_file(home.path(), "2025-01-03T12-00-00", newest_uuid)?;
+    let middle = write_session_file(home.path(), "2025-01-02T12-00-00", middle_uuid)?;
     let _oldest = write_session_file(home.path(), "2025-01-01T12-00-00", Uuid::from_u128(9003))?;
+
+    let runtime = praxis_state::StateRuntime::init(
+        home.path().to_path_buf(),
+        config.model_provider_id.clone(),
+    )
+    .await
+    .expect("state db should initialize");
+    runtime
+        .mark_backfill_complete(/*last_watermark*/ None)
+        .await
+        .expect("backfill should be complete");
+    for (uuid, path, day) in [
+        (newest_uuid, newest.clone(), 3),
+        (middle_uuid, middle.clone(), 2),
+    ] {
+        let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");
+        let created_at = chrono::Utc
+            .with_ymd_and_hms(2025, 1, day, 12, 0, 0)
+            .single()
+            .expect("valid datetime");
+        let mut builder = praxis_state::ThreadMetadataBuilder::new(
+            thread_id,
+            path,
+            created_at,
+            SessionSource::Cli,
+        );
+        builder.model_provider = Some(config.model_provider_id.clone());
+        builder.cwd = home.path().to_path_buf();
+        let metadata = builder.build(config.model_provider_id.as_str());
+        runtime
+            .upsert_thread(&metadata)
+            .await
+            .expect("state db upsert should succeed");
+    }
 
     let default_provider = config.model_provider_id.clone();
     let page1 = RolloutRecorder::list_threads(
@@ -289,6 +325,7 @@ async fn list_threads_db_disabled_does_not_skip_paginated_items() -> std::io::Re
         &[],
         /*model_providers*/ None,
         default_provider.as_str(),
+        /*cwd*/ None,
         /*search_term*/ None,
     )
     .await?;
@@ -304,6 +341,7 @@ async fn list_threads_db_disabled_does_not_skip_paginated_items() -> std::io::Re
         &[],
         /*model_providers*/ None,
         default_provider.as_str(),
+        /*cwd*/ None,
         /*search_term*/ None,
     )
     .await?;
@@ -361,6 +399,7 @@ async fn list_threads_db_enabled_drops_missing_rollout_paths() -> std::io::Resul
         &[],
         /*model_providers*/ None,
         default_provider.as_str(),
+        /*cwd*/ None,
         /*search_term*/ None,
     )
     .await?;
@@ -374,13 +413,13 @@ async fn list_threads_db_enabled_drops_missing_rollout_paths() -> std::io::Resul
 }
 
 #[tokio::test]
-async fn list_threads_db_enabled_repairs_stale_rollout_paths() -> std::io::Result<()> {
+async fn list_threads_db_enabled_does_not_repair_stale_paths_on_hot_list() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
 
     let uuid = Uuid::from_u128(9011);
     let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");
-    let real_path = write_session_file(home.path(), "2025-01-03T13-00-00", uuid)?;
+    let _real_path = write_session_file(home.path(), "2025-01-03T13-00-00", uuid)?;
     let stale_path = home.path().join(format!(
         "sessions/2099/01/01/rollout-2099-01-01T00-00-00-{uuid}.jsonl"
     ));
@@ -423,17 +462,17 @@ async fn list_threads_db_enabled_repairs_stale_rollout_paths() -> std::io::Resul
         &[],
         /*model_providers*/ None,
         default_provider.as_str(),
+        /*cwd*/ None,
         /*search_term*/ None,
     )
     .await?;
-    assert_eq!(page.items.len(), 1);
-    assert_eq!(page.items[0].path, real_path);
+    assert_eq!(page.items.len(), 0);
 
-    let repaired_path = runtime
+    let stored_path = runtime
         .find_rollout_path_by_id(thread_id, Some(false))
         .await
         .expect("state db lookup should succeed");
-    assert_eq!(repaired_path, Some(real_path));
+    assert_eq!(stored_path, None);
     Ok(())
 }
 
@@ -482,4 +521,15 @@ async fn resume_candidate_matches_cwd_reads_latest_turn_context() -> std::io::Re
         .await
     );
     Ok(())
+}
+
+#[test]
+fn cwd_matches_accepts_descendant_paths_after_normalization() {
+    let root = Path::new("work").join("praxis");
+    let child = root.join("crates").join("praxis-backend");
+    let sibling = Path::new("work").join("praxis-old");
+
+    assert!(cwd_matches(root.as_path(), root.as_path()));
+    assert!(cwd_matches(child.as_path(), root.as_path()));
+    assert!(!cwd_matches(sibling.as_path(), root.as_path()));
 }

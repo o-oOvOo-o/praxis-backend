@@ -30,7 +30,7 @@ pub(crate) struct TranscriptSearchDocument {
     chunk_index: usize,
     cell_index: Option<usize>,
     is_live_tail: bool,
-    lines: Vec<String>,
+    normalized_lines: Vec<String>,
 }
 
 impl TranscriptSearchDocument {
@@ -39,7 +39,7 @@ impl TranscriptSearchDocument {
             chunk_index: cell_index,
             cell_index: Some(cell_index),
             is_live_tail: false,
-            lines,
+            normalized_lines: normalize_lines(lines),
         }
     }
 
@@ -48,7 +48,7 @@ impl TranscriptSearchDocument {
             chunk_index,
             cell_index: None,
             is_live_tail: true,
-            lines,
+            normalized_lines: normalize_lines(lines),
         }
     }
 }
@@ -187,8 +187,7 @@ impl TranscriptSearchState {
         documents: &[TranscriptSearchDocument],
     ) -> Option<TranscriptSearchOverlayState> {
         self.reindex(documents);
-        self.step(NavigationDirection::Next);
-        self.overlay_state()
+        self.next_indexed()
     }
 
     pub(crate) fn prev(
@@ -196,6 +195,15 @@ impl TranscriptSearchState {
         documents: &[TranscriptSearchDocument],
     ) -> Option<TranscriptSearchOverlayState> {
         self.reindex(documents);
+        self.prev_indexed()
+    }
+
+    pub(crate) fn next_indexed(&mut self) -> Option<TranscriptSearchOverlayState> {
+        self.step(NavigationDirection::Next);
+        self.overlay_state()
+    }
+
+    pub(crate) fn prev_indexed(&mut self) -> Option<TranscriptSearchOverlayState> {
         self.step(NavigationDirection::Prev);
         self.overlay_state()
     }
@@ -276,8 +284,8 @@ fn build_matches(
 
     let mut out = Vec::new();
     for document in documents {
-        for (line_index, line) in document.lines.iter().enumerate() {
-            for match_index_in_line in line_match_ordinals(line, &normalized_query) {
+        for (line_index, normalized_line) in document.normalized_lines.iter().enumerate() {
+            for match_index_in_line in line_match_ordinals(normalized_line, &normalized_query) {
                 out.push(TranscriptSearchMatch {
                     target: TranscriptSearchTarget {
                         chunk_index: document.chunk_index,
@@ -293,8 +301,11 @@ fn build_matches(
     out
 }
 
-fn line_match_ordinals(line: &str, normalized_query: &str) -> Vec<usize> {
-    let normalized_line = line.to_lowercase();
+fn normalize_lines(lines: Vec<String>) -> Vec<String> {
+    lines.into_iter().map(|line| line.to_lowercase()).collect()
+}
+
+fn line_match_ordinals(normalized_line: &str, normalized_query: &str) -> Vec<usize> {
     let mut ordinals = Vec::new();
     let mut offset = 0usize;
     let mut ordinal = 0usize;

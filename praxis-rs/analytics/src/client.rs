@@ -1,4 +1,4 @@
-use crate::events::AppServerRpcTransport;
+use crate::events::AppGatewayRpcTransport;
 use crate::events::TrackEventRequest;
 use crate::events::TrackEventsRequest;
 use crate::events::current_runtime_metadata;
@@ -13,8 +13,8 @@ use crate::facts::SkillInvocation;
 use crate::facts::SkillInvokedInput;
 use crate::facts::TrackEventsContext;
 use crate::reducer::AnalyticsReducer;
-use praxis_app_server_protocol::ClientResponse;
-use praxis_app_server_protocol::InitializeParams;
+use praxis_app_gateway_protocol::ClientResponse;
+use praxis_app_gateway_protocol::InitializeParams;
 use praxis_login::AuthManager;
 use praxis_login::default_client::create_client;
 use praxis_plugin::PluginTelemetryMetadata;
@@ -133,7 +133,7 @@ impl AnalyticsEventsClient {
         connection_id: u64,
         params: InitializeParams,
         product_client_id: String,
-        rpc_transport: AppServerRpcTransport,
+        rpc_transport: AppGatewayRpcTransport,
     ) {
         self.record_fact(AnalyticsFact::Initialize {
             connection_id,

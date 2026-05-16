@@ -5,14 +5,14 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-fn test_team(team_id: &str, lead_thread_id: &str) -> praxis_app_server_protocol::Team {
-    praxis_app_server_protocol::Team {
+fn test_team(team_id: &str, lead_thread_id: &str) -> praxis_app_gateway_protocol::Team {
+    praxis_app_gateway_protocol::Team {
         id: team_id.to_string(),
         lead_thread_id: lead_thread_id.to_string(),
         name: "Test Team".to_string(),
         objective: None,
-        execution_mode: praxis_app_server_protocol::TeamExecutionMode::ProcessFirst,
-        resume_mode: praxis_app_server_protocol::TeamResumeMode::StrongResume,
+        execution_mode: praxis_app_gateway_protocol::TeamExecutionMode::ProcessFirst,
+        resume_mode: praxis_app_gateway_protocol::TeamResumeMode::StrongResume,
         created_at: 1,
         updated_at: 1,
     }
@@ -23,11 +23,11 @@ fn test_team_task(
     task_id: &str,
     title: &str,
     description: Option<&str>,
-    status: praxis_app_server_protocol::TeamTaskStatus,
+    status: praxis_app_gateway_protocol::TeamTaskStatus,
     created_at: i64,
     updated_at: i64,
-) -> praxis_app_server_protocol::TeamTask {
-    praxis_app_server_protocol::TeamTask {
+) -> praxis_app_gateway_protocol::TeamTask {
+    praxis_app_gateway_protocol::TeamTask {
         team_id: team_id.to_string(),
         task_id: task_id.to_string(),
         title: title.to_string(),
@@ -45,13 +45,13 @@ fn test_teammate(
     teammate_id: &str,
     name: &str,
     thread_id: &str,
-) -> praxis_app_server_protocol::TeamTeammate {
-    praxis_app_server_protocol::TeamTeammate {
+) -> praxis_app_gateway_protocol::TeamTeammate {
+    praxis_app_gateway_protocol::TeamTeammate {
         team_id: team_id.to_string(),
         teammate_id: teammate_id.to_string(),
         name: name.to_string(),
         role: None,
-        status: praxis_app_server_protocol::TeamTeammateStatus::Active,
+        status: praxis_app_gateway_protocol::TeamTeammateStatus::Active,
         thread_id: Some(thread_id.to_string()),
         last_error: None,
         created_at: 1,
@@ -219,32 +219,32 @@ async fn context_budget_footer_stacks_above_team_task_footer() {
     let thread_id_text = thread_id.to_string();
     chat.thread_id = Some(thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", &thread_id_text),
     });
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-1",
                 "Audit diff",
                 Some("Inspect the rendered patch"),
-                praxis_app_server_protocol::TeamTaskStatus::InProgress,
+                praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
                 1,
                 2,
             ),
         },
     );
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-2",
                 "Apply patch",
                 None,
-                praxis_app_server_protocol::TeamTaskStatus::Pending,
+                praxis_app_gateway_protocol::TeamTaskStatus::Pending,
                 2,
                 2,
             ),
@@ -289,18 +289,18 @@ async fn clearing_token_info_restores_team_task_footer_copy() {
     let thread_id_text = thread_id.to_string();
     chat.thread_id = Some(thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", &thread_id_text),
     });
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-1",
                 "Audit diff",
                 Some("Inspect the rendered patch"),
-                praxis_app_server_protocol::TeamTaskStatus::InProgress,
+                praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
                 1,
                 2,
             ),
@@ -353,6 +353,7 @@ async fn helpers_are_available_and_do_not_panic() {
     let session_telemetry = test_session_telemetry(&cfg, resolved_model.as_str());
     let init = ChatWidgetInit {
         config: cfg.clone(),
+        tui_config: TuiRuntimeConfig::default(),
         frame_requester: FrameRequester::test_dummy(),
         app_event_tx: tx,
         initial_user_message: None,
@@ -454,18 +455,18 @@ async fn team_task_status_shows_status_tip_when_only_current_task_exists() {
     let thread_id_text = thread_id.to_string();
     chat.thread_id = Some(thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", &thread_id_text),
     });
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-1",
                 "Audit diff",
                 Some("Inspect the rendered patch"),
-                praxis_app_server_protocol::TeamTaskStatus::InProgress,
+                praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
                 1,
                 2,
             ),
@@ -501,32 +502,32 @@ async fn team_task_status_prefers_up_next_footer_over_tip() {
     let thread_id_text = thread_id.to_string();
     chat.thread_id = Some(thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", &thread_id_text),
     });
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-1",
                 "Audit diff",
                 Some("Inspect the rendered patch"),
-                praxis_app_server_protocol::TeamTaskStatus::InProgress,
+                praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
                 1,
                 2,
             ),
         },
     );
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-2",
                 "Apply patch",
                 None,
-                praxis_app_server_protocol::TeamTaskStatus::Pending,
+                praxis_app_gateway_protocol::TeamTaskStatus::Pending,
                 2,
                 2,
             ),
@@ -559,18 +560,18 @@ async fn team_task_keeps_status_visible_after_agent_turn_completes() {
     let thread_id_text = thread_id.to_string();
     chat.thread_id = Some(thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", &thread_id_text),
     });
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-1",
                 "Audit diff",
                 Some("Inspect the rendered patch"),
-                praxis_app_server_protocol::TeamTaskStatus::InProgress,
+                praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
                 1,
                 2,
             ),
@@ -601,18 +602,18 @@ async fn completed_team_task_hides_status_when_no_other_work_is_running() {
     let thread_id_text = thread_id.to_string();
     chat.thread_id = Some(thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", &thread_id_text),
     });
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-1",
                 "Audit diff",
                 Some("Inspect the rendered patch"),
-                praxis_app_server_protocol::TeamTaskStatus::InProgress,
+                praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
                 1,
                 2,
             ),
@@ -622,14 +623,14 @@ async fn completed_team_task_hides_status_when_no_other_work_is_running() {
     assert!(chat.bottom_pane.status_indicator_visible());
 
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-1",
                 "Audit diff",
                 Some("Inspect the rendered patch"),
-                praxis_app_server_protocol::TeamTaskStatus::Completed,
+                praxis_app_gateway_protocol::TeamTaskStatus::Completed,
                 1,
                 3,
             ),
@@ -656,11 +657,11 @@ async fn lead_thread_team_task_prefixes_assignee_in_header_and_footer() {
     let lead_thread_id_text = lead_thread_id.to_string();
     chat.thread_id = Some(lead_thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", &lead_thread_id_text),
     });
     chat.on_team_teammate_updated_notification(
-        praxis_app_server_protocol::TeamTeammateUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTeammateUpdatedNotification {
             team_id: "team-1".to_string(),
             teammate: test_teammate("team-1", "teammate-1", "alice", "worker-thread"),
             thread: None,
@@ -672,13 +673,13 @@ async fn lead_thread_team_task_prefixes_assignee_in_header_and_footer() {
         "task-1",
         "Audit diff",
         Some("Inspect the rendered patch"),
-        praxis_app_server_protocol::TeamTaskStatus::InProgress,
+        praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
         1,
         2,
     );
     current_task.assignee_teammate_id = Some("teammate-1".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: current_task,
         },
@@ -689,13 +690,13 @@ async fn lead_thread_team_task_prefixes_assignee_in_header_and_footer() {
         "task-2",
         "Apply patch",
         None,
-        praxis_app_server_protocol::TeamTaskStatus::Pending,
+        praxis_app_gateway_protocol::TeamTaskStatus::Pending,
         2,
         2,
     );
     next_task.assignee_teammate_id = Some("teammate-1".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: next_task,
         },
@@ -733,11 +734,11 @@ async fn teammate_thread_omits_self_assignee_prefix_in_header_and_footer() {
     let worker_thread_id_text = worker_thread_id.to_string();
     chat.thread_id = Some(worker_thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", "lead-thread"),
     });
     chat.on_team_teammate_updated_notification(
-        praxis_app_server_protocol::TeamTeammateUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTeammateUpdatedNotification {
             team_id: "team-1".to_string(),
             teammate: test_teammate("team-1", "teammate-1", "alice", &worker_thread_id_text),
             thread: None,
@@ -749,13 +750,13 @@ async fn teammate_thread_omits_self_assignee_prefix_in_header_and_footer() {
         "task-1",
         "Audit diff",
         Some("Inspect the rendered patch"),
-        praxis_app_server_protocol::TeamTaskStatus::InProgress,
+        praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
         1,
         2,
     );
     current_task.assignee_teammate_id = Some("teammate-1".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: current_task,
         },
@@ -766,13 +767,13 @@ async fn teammate_thread_omits_self_assignee_prefix_in_header_and_footer() {
         "task-2",
         "Apply patch",
         None,
-        praxis_app_server_protocol::TeamTaskStatus::Pending,
+        praxis_app_gateway_protocol::TeamTaskStatus::Pending,
         2,
         2,
     );
     next_task.assignee_teammate_id = Some("teammate-1".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: next_task,
         },
@@ -804,11 +805,11 @@ async fn lead_thread_team_task_summary_includes_extra_queue_counts() {
     let lead_thread_id_text = lead_thread_id.to_string();
     chat.thread_id = Some(lead_thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", &lead_thread_id_text),
     });
     chat.on_team_teammate_updated_notification(
-        praxis_app_server_protocol::TeamTeammateUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTeammateUpdatedNotification {
             team_id: "team-1".to_string(),
             teammate: test_teammate("team-1", "teammate-1", "alice", "worker-thread"),
             thread: None,
@@ -820,13 +821,13 @@ async fn lead_thread_team_task_summary_includes_extra_queue_counts() {
         "task-1",
         "Audit diff",
         Some("Inspect the rendered patch"),
-        praxis_app_server_protocol::TeamTaskStatus::InProgress,
+        praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
         1,
         2,
     );
     current_task.assignee_teammate_id = Some("teammate-1".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: current_task,
         },
@@ -837,20 +838,20 @@ async fn lead_thread_team_task_summary_includes_extra_queue_counts() {
         "task-2",
         "Apply patch",
         None,
-        praxis_app_server_protocol::TeamTaskStatus::Pending,
+        praxis_app_gateway_protocol::TeamTaskStatus::Pending,
         2,
         2,
     );
     next_task.assignee_teammate_id = Some("teammate-1".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: next_task,
         },
     );
 
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: {
                 let mut queued_task = test_team_task(
@@ -858,7 +859,7 @@ async fn lead_thread_team_task_summary_includes_extra_queue_counts() {
                     "task-3",
                     "Write regression test",
                     None,
-                    praxis_app_server_protocol::TeamTaskStatus::Pending,
+                    praxis_app_gateway_protocol::TeamTaskStatus::Pending,
                     3,
                     3,
                 );
@@ -869,14 +870,14 @@ async fn lead_thread_team_task_summary_includes_extra_queue_counts() {
     );
 
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: test_team_task(
                 "team-1",
                 "task-4",
                 "Wait on approval",
                 None,
-                praxis_app_server_protocol::TeamTaskStatus::Blocked,
+                praxis_app_gateway_protocol::TeamTaskStatus::Blocked,
                 4,
                 4,
             ),
@@ -915,18 +916,18 @@ async fn lead_thread_queue_preview_includes_assignee_and_overflow_count() {
     let lead_thread_id_text = lead_thread_id.to_string();
     chat.thread_id = Some(lead_thread_id);
 
-    chat.on_team_updated_notification(praxis_app_server_protocol::TeamUpdatedNotification {
+    chat.on_team_updated_notification(praxis_app_gateway_protocol::TeamUpdatedNotification {
         team: test_team("team-1", &lead_thread_id_text),
     });
     chat.on_team_teammate_updated_notification(
-        praxis_app_server_protocol::TeamTeammateUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTeammateUpdatedNotification {
             team_id: "team-1".to_string(),
             teammate: test_teammate("team-1", "teammate-1", "alice", "worker-thread-a"),
             thread: None,
         },
     );
     chat.on_team_teammate_updated_notification(
-        praxis_app_server_protocol::TeamTeammateUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTeammateUpdatedNotification {
             team_id: "team-1".to_string(),
             teammate: test_teammate("team-1", "teammate-2", "bob", "worker-thread-b"),
             thread: None,
@@ -938,13 +939,13 @@ async fn lead_thread_queue_preview_includes_assignee_and_overflow_count() {
         "task-1",
         "Audit diff",
         Some("Inspect the rendered patch"),
-        praxis_app_server_protocol::TeamTaskStatus::InProgress,
+        praxis_app_gateway_protocol::TeamTaskStatus::InProgress,
         1,
         2,
     );
     current_task.assignee_teammate_id = Some("teammate-1".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: current_task,
         },
@@ -955,13 +956,13 @@ async fn lead_thread_queue_preview_includes_assignee_and_overflow_count() {
         "task-2",
         "Apply patch",
         None,
-        praxis_app_server_protocol::TeamTaskStatus::Pending,
+        praxis_app_gateway_protocol::TeamTaskStatus::Pending,
         2,
         2,
     );
     next_task.assignee_teammate_id = Some("teammate-1".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: next_task,
         },
@@ -972,13 +973,13 @@ async fn lead_thread_queue_preview_includes_assignee_and_overflow_count() {
         "task-3",
         "Review logs",
         None,
-        praxis_app_server_protocol::TeamTaskStatus::Pending,
+        praxis_app_gateway_protocol::TeamTaskStatus::Pending,
         3,
         3,
     );
     queued_bob.assignee_teammate_id = Some("teammate-2".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: queued_bob,
         },
@@ -989,13 +990,13 @@ async fn lead_thread_queue_preview_includes_assignee_and_overflow_count() {
         "task-4",
         "Update docs",
         None,
-        praxis_app_server_protocol::TeamTaskStatus::Pending,
+        praxis_app_gateway_protocol::TeamTaskStatus::Pending,
         4,
         4,
     );
     queued_docs.assignee_teammate_id = Some("teammate-2".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: queued_docs,
         },
@@ -1006,13 +1007,13 @@ async fn lead_thread_queue_preview_includes_assignee_and_overflow_count() {
         "task-5",
         "Run snapshots",
         None,
-        praxis_app_server_protocol::TeamTaskStatus::Pending,
+        praxis_app_gateway_protocol::TeamTaskStatus::Pending,
         5,
         5,
     );
     overflow.assignee_teammate_id = Some("teammate-2".to_string());
     chat.on_team_task_updated_notification(
-        praxis_app_server_protocol::TeamTaskUpdatedNotification {
+        praxis_app_gateway_protocol::TeamTaskUpdatedNotification {
             team_id: "team-1".to_string(),
             task: overflow,
         },
@@ -1757,7 +1758,7 @@ async fn warning_event_adds_warning_history_cell() {
 #[tokio::test]
 async fn status_line_invalid_items_warn_once() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.config.tui_status_line = Some(vec![
+    chat.tui_config.status_line = Some(vec![
         "model_name".to_string(),
         "bogus_item".to_string(),
         "lines_changed".to_string(),
@@ -1788,7 +1789,7 @@ async fn status_line_branch_state_resets_when_git_branch_disabled() {
     chat.status_line_branch = Some("main".to_string());
     chat.status_line_branch_pending = true;
     chat.status_line_branch_lookup_complete = true;
-    chat.config.tui_status_line = Some(vec!["model_name".to_string()]);
+    chat.tui_config.status_line = Some(vec!["model_name".to_string()]);
 
     chat.refresh_status_line();
 
@@ -1800,7 +1801,7 @@ async fn status_line_branch_state_resets_when_git_branch_disabled() {
 #[tokio::test]
 async fn status_line_branch_refreshes_after_turn_complete() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.config.tui_status_line = Some(vec!["git-branch".to_string()]);
+    chat.tui_config.status_line = Some(vec!["git-branch".to_string()]);
     chat.status_line_branch_lookup_complete = true;
     chat.status_line_branch_pending = false;
 
@@ -1818,7 +1819,7 @@ async fn status_line_branch_refreshes_after_turn_complete() {
 #[tokio::test]
 async fn status_line_branch_refreshes_after_interrupt() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.config.tui_status_line = Some(vec!["git-branch".to_string()]);
+    chat.tui_config.status_line = Some(vec!["git-branch".to_string()]);
     chat.status_line_branch_lookup_complete = true;
     chat.status_line_branch_pending = false;
 
@@ -1836,7 +1837,7 @@ async fn status_line_branch_refreshes_after_interrupt() {
 #[tokio::test]
 async fn status_line_fast_mode_renders_on_and_off() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.config.tui_status_line = Some(vec!["fast-mode".to_string()]);
+    chat.tui_config.status_line = Some(vec!["fast-mode".to_string()]);
 
     chat.refresh_status_line();
     assert_eq!(status_line_text(&chat), Some("Fast off".to_string()));
@@ -1850,7 +1851,7 @@ async fn status_line_fast_mode_renders_on_and_off() {
 async fn status_line_renders_above_footer_instead_of_replacing_it() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     chat.config.cwd = test_project_path().abs();
-    chat.config.tui_status_line = Some(vec!["model-with-reasoning".to_string()]);
+    chat.tui_config.status_line = Some(vec!["model-with-reasoning".to_string()]);
     chat.refresh_status_line();
 
     let status_line = status_line_text(&chat).expect("status line should be populated");
@@ -1878,7 +1879,7 @@ async fn status_line_fast_mode_footer_snapshot() {
 
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.show_welcome_banner = false;
-    chat.config.tui_status_line = Some(vec!["fast-mode".to_string()]);
+    chat.tui_config.status_line = Some(vec!["fast-mode".to_string()]);
     chat.set_service_tier(Some(ServiceTier::Fast));
     chat.refresh_status_line();
 
@@ -1898,7 +1899,7 @@ async fn status_line_fast_mode_footer_snapshot() {
 async fn status_line_model_with_reasoning_includes_fast_for_gpt54_only() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     chat.config.cwd = test_project_path().abs();
-    chat.config.tui_status_line = Some(vec![
+    chat.tui_config.status_line = Some(vec![
         "model-with-reasoning".to_string(),
         "context-remaining".to_string(),
         "current-dir".to_string(),
@@ -1926,7 +1927,7 @@ async fn status_line_model_with_reasoning_includes_fast_for_gpt54_only() {
 #[tokio::test]
 async fn terminal_title_model_updates_on_model_change_without_manual_refresh() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
-    chat.config.tui_terminal_title = Some(vec!["model".to_string()]);
+    chat.tui_config.terminal_title = Some(vec!["model".to_string()]);
     chat.refresh_terminal_title();
 
     assert_eq!(chat.last_terminal_title, Some("gpt-5.4".to_string()));
@@ -1939,7 +1940,7 @@ async fn terminal_title_model_updates_on_model_change_without_manual_refresh() {
 #[tokio::test]
 async fn terminal_title_defaults_to_project_and_thread_name() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.config.tui_terminal_title = None;
+    chat.tui_config.terminal_title = None;
     chat.config.cwd = test_project_path().abs();
     chat.thread_name = Some("Investigate flaky test".to_string());
 
@@ -1954,7 +1955,7 @@ async fn terminal_title_defaults_to_project_and_thread_name() {
 #[tokio::test]
 async fn terminal_title_default_omits_thread_separator_until_name_exists() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.config.tui_terminal_title = None;
+    chat.tui_config.terminal_title = None;
     chat.config.cwd = test_project_path().abs();
     chat.thread_name = None;
 
@@ -1966,7 +1967,7 @@ async fn terminal_title_default_omits_thread_separator_until_name_exists() {
 #[tokio::test]
 async fn terminal_title_default_prefers_current_directory_name() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.config.tui_terminal_title = None;
+    chat.tui_config.terminal_title = None;
     chat.config.cwd = PathBuf::from(test_path_display("/tmp/project/subdir")).abs();
     chat.thread_name = Some("Investigate flaky test".to_string());
 
@@ -1982,7 +1983,7 @@ async fn terminal_title_default_prefers_current_directory_name() {
 async fn status_line_model_with_reasoning_updates_on_mode_switch_without_manual_refresh() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.3-codex")).await;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
-    chat.config.tui_status_line = Some(vec!["model-with-reasoning".to_string()]);
+    chat.tui_config.status_line = Some(vec!["model-with-reasoning".to_string()]);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
     assert_eq!(
@@ -2017,7 +2018,7 @@ async fn status_line_model_with_reasoning_plan_mode_footer_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.3-codex")).await;
     chat.show_welcome_banner = false;
     chat.set_feature_enabled(Feature::CollaborationModes, /*enabled*/ true);
-    chat.config.tui_status_line = Some(vec!["model-with-reasoning".to_string()]);
+    chat.tui_config.status_line = Some(vec!["model-with-reasoning".to_string()]);
     chat.set_reasoning_effort(Some(ReasoningEffortConfig::High));
 
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
@@ -2044,7 +2045,7 @@ async fn status_line_model_with_reasoning_fast_footer_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.4")).await;
     chat.show_welcome_banner = false;
     chat.config.cwd = test_project_path().abs();
-    chat.config.tui_status_line = Some(vec![
+    chat.tui_config.status_line = Some(vec![
         "model-with-reasoning".to_string(),
         "context-remaining".to_string(),
         "current-dir".to_string(),
@@ -2259,22 +2260,22 @@ async fn deltas_then_same_final_message_are_rendered_snapshot() {
 }
 
 #[tokio::test]
-async fn user_prompt_submit_app_server_hook_notifications_render_snapshot() {
+async fn user_prompt_submit_app_gateway_hook_notifications_render_snapshot() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.handle_server_notification(
-        ServerNotification::HookStarted(AppServerHookStartedNotification {
+        ServerNotification::HookStarted(AppGatewayHookStartedNotification {
             thread_id: ThreadId::new().to_string(),
             turn_id: Some("turn-1".to_string()),
-            run: AppServerHookRunSummary {
+            run: AppGatewayHookRunSummary {
                 id: "user-prompt-submit:0:/tmp/hooks.json".to_string(),
-                event_name: AppServerHookEventName::UserPromptSubmit,
-                handler_type: AppServerHookHandlerType::Command,
-                execution_mode: AppServerHookExecutionMode::Sync,
-                scope: AppServerHookScope::Turn,
+                event_name: AppGatewayHookEventName::UserPromptSubmit,
+                handler_type: AppGatewayHookHandlerType::Command,
+                execution_mode: AppGatewayHookExecutionMode::Sync,
+                scope: AppGatewayHookScope::Turn,
                 source_path: PathBuf::from("/tmp/hooks.json"),
                 display_order: 0,
-                status: AppServerHookRunStatus::Running,
+                status: AppGatewayHookRunStatus::Running,
                 status_message: Some("checking go-workflow input policy".to_string()),
                 started_at: 1,
                 completed_at: None,
@@ -2285,29 +2286,29 @@ async fn user_prompt_submit_app_server_hook_notifications_render_snapshot() {
         /*replay_kind*/ None,
     );
     chat.handle_server_notification(
-        ServerNotification::HookCompleted(AppServerHookCompletedNotification {
+        ServerNotification::HookCompleted(AppGatewayHookCompletedNotification {
             thread_id: ThreadId::new().to_string(),
             turn_id: Some("turn-1".to_string()),
-            run: AppServerHookRunSummary {
+            run: AppGatewayHookRunSummary {
                 id: "user-prompt-submit:0:/tmp/hooks.json".to_string(),
-                event_name: AppServerHookEventName::UserPromptSubmit,
-                handler_type: AppServerHookHandlerType::Command,
-                execution_mode: AppServerHookExecutionMode::Sync,
-                scope: AppServerHookScope::Turn,
+                event_name: AppGatewayHookEventName::UserPromptSubmit,
+                handler_type: AppGatewayHookHandlerType::Command,
+                execution_mode: AppGatewayHookExecutionMode::Sync,
+                scope: AppGatewayHookScope::Turn,
                 source_path: PathBuf::from("/tmp/hooks.json"),
                 display_order: 0,
-                status: AppServerHookRunStatus::Stopped,
+                status: AppGatewayHookRunStatus::Stopped,
                 status_message: Some("checking go-workflow input policy".to_string()),
                 started_at: 1,
                 completed_at: Some(11),
                 duration_ms: Some(10),
                 entries: vec![
-                    AppServerHookOutputEntry {
-                        kind: AppServerHookOutputEntryKind::Warning,
+                    AppGatewayHookOutputEntry {
+                        kind: AppGatewayHookOutputEntryKind::Warning,
                         text: "go-workflow must start from PlanMode".to_string(),
                     },
-                    AppServerHookOutputEntry {
-                        kind: AppServerHookOutputEntryKind::Stop,
+                    AppGatewayHookOutputEntry {
+                        kind: AppGatewayHookOutputEntryKind::Stop,
                         text: "prompt blocked".to_string(),
                     },
                 ],
@@ -2322,7 +2323,7 @@ async fn user_prompt_submit_app_server_hook_notifications_render_snapshot() {
         .map(|lines| lines_to_single_string(lines))
         .collect::<String>();
     assert_chatwidget_snapshot!(
-        "user_prompt_submit_app_server_hook_notifications_render_snapshot",
+        "user_prompt_submit_app_gateway_hook_notifications_render_snapshot",
         combined
     );
 }

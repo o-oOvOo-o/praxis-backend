@@ -12,7 +12,7 @@ use crate::plugins::test_support::TEST_CURATED_PLUGIN_SHA;
 use crate::plugins::test_support::write_curated_plugin_sha_with as write_curated_plugin_sha;
 use crate::plugins::test_support::write_file;
 use crate::plugins::test_support::write_openai_curated_marketplace;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::types::McpServerTransportConfig;
 use praxis_login::CodexAuth;
 use praxis_protocol::protocol::Product;

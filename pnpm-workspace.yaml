@@ -1,10 +1,6 @@
 packages:
   - praxis-cli
   - praxis-rs/responses-api-proxy/npm
-  - sdk/typescript
-
-ignoredBuiltDependencies:
-  - esbuild
 
 minimumReleaseAge: 10080
 

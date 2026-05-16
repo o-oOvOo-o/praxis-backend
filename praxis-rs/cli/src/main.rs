@@ -4,6 +4,7 @@ use clap::Parser;
 use clap_complete::Shell;
 use clap_complete::generate;
 use owo_colors::OwoColorize;
+use praxis_app_gateway_service as praxis_app_gateway;
 use praxis_arg0::Arg0DispatchPaths;
 use praxis_arg0::arg0_dispatch_or_else;
 use praxis_chatgpt::apply_command::ApplyCommand;
@@ -109,8 +110,8 @@ enum Subcommand {
     /// Start Praxis as an MCP server (stdio).
     McpServer,
 
-    /// [experimental] Run the app server or related tooling.
-    AppServer(AppServerCommand),
+    /// [experimental] Run the app gateway or related tooling.
+    AppGateway(AppGatewayCommand),
 
     /// Launch the Praxis desktop app (downloads the macOS installer if missing).
     #[cfg(target_os = "macos")]
@@ -170,8 +171,8 @@ struct DebugCommand {
 
 #[derive(Debug, clap::Subcommand)]
 enum DebugSubcommand {
-    /// Tooling: helps debug the app server.
-    AppServer(DebugAppServerCommand),
+    /// Tooling: helps debug the app gateway.
+    AppGateway(DebugAppGatewayCommand),
 
     /// Internal: reset local memory state for a fresh start.
     #[clap(hide = true)]
@@ -179,19 +180,19 @@ enum DebugSubcommand {
 }
 
 #[derive(Debug, Parser)]
-struct DebugAppServerCommand {
+struct DebugAppGatewayCommand {
     #[command(subcommand)]
-    subcommand: DebugAppServerSubcommand,
+    subcommand: DebugAppGatewaySubcommand,
 }
 
 #[derive(Debug, clap::Subcommand)]
-enum DebugAppServerSubcommand {
-    // Send message to app server V2.
-    SendMessageV2(DebugAppServerSendMessageV2Command),
+enum DebugAppGatewaySubcommand {
+    // Send a message through the app-gateway canonical API.
+    SendMessageApi(DebugAppGatewaySendMessageApiCommand),
 }
 
 #[derive(Debug, Parser)]
-struct DebugAppServerSendMessageV2Command {
+struct DebugAppGatewaySendMessageApiCommand {
     #[arg(value_name = "USER_MESSAGE", required = true)]
     user_message: String,
 }
@@ -325,23 +326,23 @@ struct LogoutCommand {
 }
 
 #[derive(Debug, Parser)]
-struct AppServerCommand {
-    /// Omit to run the app server; specify a subcommand for tooling.
+struct AppGatewayCommand {
+    /// Omit to run the app gateway; specify a subcommand for tooling.
     #[command(subcommand)]
-    subcommand: Option<AppServerSubcommand>,
+    subcommand: Option<AppGatewaySubcommand>,
 
     /// Transport endpoint URL. Supported values: `stdio://` (default),
     /// `ws://IP:PORT`.
     #[arg(
         long = "listen",
         value_name = "URL",
-        default_value = praxis_app_server::AppServerTransport::DEFAULT_LISTEN_URL
+        default_value = praxis_app_gateway::AppGatewayTransport::DEFAULT_LISTEN_URL
     )]
-    listen: praxis_app_server::AppServerTransport,
+    listen: praxis_app_gateway::AppGatewayTransport,
 
     /// Controls whether analytics are enabled by default.
     ///
-    /// Analytics are disabled by default for app-server. Users have to explicitly opt in
+    /// Analytics are disabled by default for app-gateway. Users have to explicitly opt in
     /// via the `analytics` section in the config.toml file.
     ///
     /// However, for first-party use cases like the VSCode IDE extension, we default analytics
@@ -358,16 +359,16 @@ struct AppServerCommand {
     analytics_default_enabled: bool,
 
     #[command(flatten)]
-    auth: praxis_app_server::AppServerWebsocketAuthArgs,
+    auth: praxis_app_gateway::AppGatewayWebsocketAuthArgs,
 }
 
 #[derive(Debug, clap::Subcommand)]
 #[allow(clippy::enum_variant_names)]
-enum AppServerSubcommand {
-    /// [experimental] Generate TypeScript bindings for the app server protocol.
+enum AppGatewaySubcommand {
+    /// [experimental] Generate TypeScript bindings for the app gateway protocol.
     GenerateTs(GenerateTsCommand),
 
-    /// [experimental] Generate JSON Schema for the app server protocol.
+    /// [experimental] Generate JSON Schema for the app gateway protocol.
     GenerateJsonSchema(GenerateJsonSchemaCommand),
 
     /// [internal] Generate internal JSON Schema artifacts for Praxis tooling.
@@ -505,11 +506,11 @@ fn run_execpolicycheck(cmd: ExecPolicyCheckCommand) -> anyhow::Result<()> {
     cmd.run()
 }
 
-async fn run_debug_app_server_command(cmd: DebugAppServerCommand) -> anyhow::Result<()> {
+async fn run_debug_app_gateway_command(cmd: DebugAppGatewayCommand) -> anyhow::Result<()> {
     match cmd.subcommand {
-        DebugAppServerSubcommand::SendMessageV2(cmd) => {
+        DebugAppGatewaySubcommand::SendMessageApi(cmd) => {
             let praxis_bin = std::env::current_exe()?;
-            praxis_app_server_test_client::send_message_v2(
+            praxis_app_gateway_test_client::send_message_api(
                 &praxis_bin,
                 &[],
                 cmd.user_message,
@@ -533,14 +534,14 @@ struct FeatureToggles {
 
 #[derive(Debug, Default, Parser, Clone)]
 struct InteractiveRemoteOptions {
-    /// Connect the TUI to a remote app server websocket endpoint.
+    /// Connect the TUI to a remote app gateway websocket endpoint.
     ///
     /// Accepted forms: `ws://host:port` or `wss://host:port`.
     #[arg(long = "remote", value_name = "ADDR")]
     remote: Option<String>,
 
     /// Name of the environment variable containing the bearer token to send to
-    /// a remote app server websocket.
+    /// a remote app gateway websocket.
     #[arg(long = "remote-auth-token-env", value_name = "ENV_VAR")]
     remote_auth_token_env: Option<String>,
 }
@@ -593,14 +594,14 @@ struct FeatureSetArgs {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SessionTargetSource {
     Praxis,
-    Praxis,
+    Codex,
 }
 
 impl SessionTargetSource {
     fn from_keyword(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "praxis" => Some(Self::Praxis),
-            "codex" => Some(Self::Praxis),
+            "codex" => Some(Self::Codex),
             _ => None,
         }
     }
@@ -608,7 +609,7 @@ impl SessionTargetSource {
     fn lookup_source(self) -> SessionLookupSource {
         match self {
             Self::Praxis => SessionLookupSource::Praxis,
-            Self::Praxis => SessionLookupSource::Praxis,
+            Self::Codex => SessionLookupSource::Codex,
         }
     }
 }
@@ -760,14 +761,14 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             prepend_config_flags(&mut mcp_cli.config_overrides, root_config_overrides.clone());
             mcp_cli.run().await?;
         }
-        Some(Subcommand::AppServer(app_server_cli)) => {
-            let AppServerCommand {
+        Some(Subcommand::AppGateway(app_gateway_cli)) => {
+            let AppGatewayCommand {
                 subcommand,
                 listen,
                 analytics_default_enabled,
                 auth,
-            } = app_server_cli;
-            reject_remote_mode_for_app_server_subcommand(
+            } = app_gateway_cli;
+            reject_remote_mode_for_app_gateway_subcommand(
                 root_remote.as_deref(),
                 root_remote_auth_token_env.as_deref(),
                 subcommand.as_ref(),
@@ -776,36 +777,39 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 None => {
                     let transport = listen;
                     let auth = auth.try_into_settings()?;
-                    praxis_app_server::run_main_with_transport(
-                        arg0_paths.clone(),
-                        root_config_overrides,
-                        praxis_core::config_loader::LoaderOverrides::default(),
-                        analytics_default_enabled,
-                        transport,
-                        praxis_protocol::protocol::SessionSource::VSCode,
-                        auth,
+                    praxis_app_gateway::run_service_gateway(
+                        praxis_app_gateway::ServiceGatewayStartArgs {
+                            arg0_paths: arg0_paths.clone(),
+                            cli_config_overrides: root_config_overrides,
+                            loader_overrides: praxis_core::config_loader::LoaderOverrides::default(
+                            ),
+                            default_analytics_enabled: analytics_default_enabled,
+                            listen: transport,
+                            session_source: praxis_protocol::protocol::SessionSource::AppGateway,
+                            auth,
+                        },
                     )
                     .await?;
                 }
-                Some(AppServerSubcommand::GenerateTs(gen_cli)) => {
-                    let options = praxis_app_server_protocol::GenerateTsOptions {
+                Some(AppGatewaySubcommand::GenerateTs(gen_cli)) => {
+                    let options = praxis_app_gateway_protocol::GenerateTsOptions {
                         experimental_api: gen_cli.experimental,
                         ..Default::default()
                     };
-                    praxis_app_server_protocol::generate_ts_with_options(
+                    praxis_app_gateway_protocol::generate_ts_with_options(
                         &gen_cli.out_dir,
                         gen_cli.prettier.as_deref(),
                         options,
                     )?;
                 }
-                Some(AppServerSubcommand::GenerateJsonSchema(gen_cli)) => {
-                    praxis_app_server_protocol::generate_json_with_experimental(
+                Some(AppGatewaySubcommand::GenerateJsonSchema(gen_cli)) => {
+                    praxis_app_gateway_protocol::generate_json_with_experimental(
                         &gen_cli.out_dir,
                         gen_cli.experimental,
                     )?;
                 }
-                Some(AppServerSubcommand::GenerateInternalJsonSchema(gen_cli)) => {
-                    praxis_app_server_protocol::generate_internal_json_schema(&gen_cli.out_dir)?;
+                Some(AppGatewaySubcommand::GenerateInternalJsonSchema(gen_cli)) => {
+                    praxis_app_gateway_protocol::generate_internal_json_schema(&gen_cli.out_dir)?;
                 }
             }
         }
@@ -998,13 +1002,13 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             }
         },
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
-            DebugSubcommand::AppServer(cmd) => {
+            DebugSubcommand::AppGateway(cmd) => {
                 reject_remote_mode_for_subcommand(
                     root_remote.as_deref(),
                     root_remote_auth_token_env.as_deref(),
-                    "debug app-server",
+                    "debug app-gateway",
                 )?;
-                run_debug_app_server_command(cmd).await?;
+                run_debug_app_gateway_command(cmd).await?;
             }
             DebugSubcommand::ClearMemories => {
                 reject_remote_mode_for_subcommand(
@@ -1254,17 +1258,17 @@ fn reject_remote_mode_for_subcommand(
     Ok(())
 }
 
-fn reject_remote_mode_for_app_server_subcommand(
+fn reject_remote_mode_for_app_gateway_subcommand(
     remote: Option<&str>,
     remote_auth_token_env: Option<&str>,
-    subcommand: Option<&AppServerSubcommand>,
+    subcommand: Option<&AppGatewaySubcommand>,
 ) -> anyhow::Result<()> {
     let subcommand_name = match subcommand {
-        None => "app-server",
-        Some(AppServerSubcommand::GenerateTs(_)) => "app-server generate-ts",
-        Some(AppServerSubcommand::GenerateJsonSchema(_)) => "app-server generate-json-schema",
-        Some(AppServerSubcommand::GenerateInternalJsonSchema(_)) => {
-            "app-server generate-internal-json-schema"
+        None => "app-gateway",
+        Some(AppGatewaySubcommand::GenerateTs(_)) => "app-gateway generate-ts",
+        Some(AppGatewaySubcommand::GenerateJsonSchema(_)) => "app-gateway generate-json-schema",
+        Some(AppGatewaySubcommand::GenerateInternalJsonSchema(_)) => {
+            "app-gateway generate-internal-json-schema"
         }
     };
     reject_remote_mode_for_subcommand(remote, remote_auth_token_env, subcommand_name)
@@ -1589,12 +1593,13 @@ mod tests {
         assert_eq!(args.prompt.as_deref(), Some("re-review"));
     }
 
-    fn app_server_from_args(args: &[&str]) -> AppServerCommand {
+    fn app_gateway_from_args(args: &[&str]) -> AppGatewayCommand {
         let cli = MultitoolCli::try_parse_from(args).expect("parse");
-        let Subcommand::AppServer(app_server) = cli.subcommand.expect("app-server present") else {
+        let Subcommand::AppGateway(app_gateway) = cli.subcommand.expect("app-gateway present")
+        else {
             unreachable!()
         };
-        app_server
+        app_gateway
     }
 
     fn sample_exit_info(conversation_id: Option<&str>, thread_name: Option<&str>) -> AppExitInfo {
@@ -1714,23 +1719,23 @@ mod tests {
     }
 
     #[test]
-    fn resume_praxis_without_session_id_opens_praxis_picker() {
+    fn resume_codex_without_session_id_opens_codex_picker() {
         let interactive = finalize_resume_from_args(["codex", "resume", "codex"].as_ref());
         assert!(interactive.resume_picker);
-        assert_eq!(interactive.resume_source, SessionLookupSource::Praxis);
+        assert_eq!(interactive.resume_source, SessionLookupSource::Codex);
         assert_eq!(interactive.resume_session_id, None);
     }
 
     #[test]
-    fn resume_praxis_with_session_id_targets_praxis_lookup() {
+    fn resume_codex_with_session_id_targets_codex_lookup() {
         let interactive = finalize_resume_from_args(["codex", "resume", "codex", "1234"].as_ref());
         assert!(!interactive.resume_picker);
-        assert_eq!(interactive.resume_source, SessionLookupSource::Praxis);
+        assert_eq!(interactive.resume_source, SessionLookupSource::Codex);
         assert_eq!(interactive.resume_session_id.as_deref(), Some("1234"));
     }
 
     #[test]
-    fn resume_praxis_last_keeps_praxis_lookup_source() {
+    fn resume_codex_last_keeps_codex_lookup_source() {
         let cli =
             MultitoolCli::try_parse_from(["codex", "resume", "codex", "--last"]).expect("parse");
         let Subcommand::Resume(ResumeCommand { targets, last, .. }) =
@@ -1743,7 +1748,7 @@ mod tests {
         assert!(last);
         assert_eq!(
             parsed_target.source.lookup_source(),
-            SessionLookupSource::Praxis
+            SessionLookupSource::Codex
         );
         assert_eq!(parsed_target.session_id, None);
     }
@@ -1872,10 +1877,10 @@ mod tests {
     }
 
     #[test]
-    fn fork_praxis_without_session_id_opens_praxis_picker() {
+    fn fork_codex_without_session_id_opens_codex_picker() {
         let interactive = finalize_fork_from_args(["codex", "fork", "codex"].as_ref());
         assert!(interactive.fork_picker);
-        assert_eq!(interactive.fork_source, SessionLookupSource::Praxis);
+        assert_eq!(interactive.fork_source, SessionLookupSource::Codex);
         assert_eq!(interactive.fork_session_id, None);
     }
 
@@ -1900,20 +1905,20 @@ mod tests {
     }
 
     #[test]
-    fn app_server_analytics_default_disabled_without_flag() {
-        let app_server = app_server_from_args(["codex", "app-server"].as_ref());
-        assert!(!app_server.analytics_default_enabled);
+    fn app_gateway_analytics_default_disabled_without_flag() {
+        let app_gateway = app_gateway_from_args(["codex", "app-gateway"].as_ref());
+        assert!(!app_gateway.analytics_default_enabled);
         assert_eq!(
-            app_server.listen,
-            praxis_app_server::AppServerTransport::Stdio
+            app_gateway.listen,
+            praxis_app_gateway::AppGatewayTransport::Stdio
         );
     }
 
     #[test]
-    fn app_server_analytics_default_enabled_with_flag() {
-        let app_server =
-            app_server_from_args(["codex", "app-server", "--analytics-default-enabled"].as_ref());
-        assert!(app_server.analytics_default_enabled);
+    fn app_gateway_analytics_default_enabled_with_flag() {
+        let app_gateway =
+            app_gateway_from_args(["codex", "app-gateway", "--analytics-default-enabled"].as_ref());
+        assert!(app_gateway.analytics_default_enabled);
     }
 
     #[test]
@@ -1981,17 +1986,19 @@ mod tests {
     }
 
     #[test]
-    fn reject_remote_auth_token_env_for_app_server_generate_internal_json_schema() {
+    fn reject_remote_auth_token_env_for_app_gateway_generate_internal_json_schema() {
         let subcommand =
-            AppServerSubcommand::GenerateInternalJsonSchema(GenerateInternalJsonSchemaCommand {
+            AppGatewaySubcommand::GenerateInternalJsonSchema(GenerateInternalJsonSchemaCommand {
                 out_dir: PathBuf::from("/tmp/out"),
             });
-        let err = reject_remote_mode_for_app_server_subcommand(
+        let err = reject_remote_mode_for_app_gateway_subcommand(
             /*remote*/ None,
             Some("CODEX_REMOTE_AUTH_TOKEN"),
             Some(&subcommand),
         )
-        .expect_err("non-interactive app-server subcommands should reject --remote-auth-token-env");
+        .expect_err(
+            "non-interactive app-gateway subcommands should reject --remote-auth-token-env",
+        );
         assert!(err.to_string().contains("generate-internal-json-schema"));
     }
 
@@ -2024,41 +2031,41 @@ mod tests {
     }
 
     #[test]
-    fn app_server_listen_websocket_url_parses() {
-        let app_server = app_server_from_args(
-            ["codex", "app-server", "--listen", "ws://127.0.0.1:4500"].as_ref(),
+    fn app_gateway_listen_websocket_url_parses() {
+        let app_gateway = app_gateway_from_args(
+            ["codex", "app-gateway", "--listen", "ws://127.0.0.1:4500"].as_ref(),
         );
         assert_eq!(
-            app_server.listen,
-            praxis_app_server::AppServerTransport::WebSocket {
+            app_gateway.listen,
+            praxis_app_gateway::AppGatewayTransport::WebSocket {
                 bind_address: "127.0.0.1:4500".parse().expect("valid socket address"),
             }
         );
     }
 
     #[test]
-    fn app_server_listen_stdio_url_parses() {
-        let app_server =
-            app_server_from_args(["codex", "app-server", "--listen", "stdio://"].as_ref());
+    fn app_gateway_listen_stdio_url_parses() {
+        let app_gateway =
+            app_gateway_from_args(["codex", "app-gateway", "--listen", "stdio://"].as_ref());
         assert_eq!(
-            app_server.listen,
-            praxis_app_server::AppServerTransport::Stdio
+            app_gateway.listen,
+            praxis_app_gateway::AppGatewayTransport::Stdio
         );
     }
 
     #[test]
-    fn app_server_listen_invalid_url_fails_to_parse() {
+    fn app_gateway_listen_invalid_url_fails_to_parse() {
         let parse_result =
-            MultitoolCli::try_parse_from(["codex", "app-server", "--listen", "http://foo"]);
+            MultitoolCli::try_parse_from(["codex", "app-gateway", "--listen", "http://foo"]);
         assert!(parse_result.is_err());
     }
 
     #[test]
-    fn app_server_capability_token_flags_parse() {
-        let app_server = app_server_from_args(
+    fn app_gateway_capability_token_flags_parse() {
+        let app_gateway = app_gateway_from_args(
             [
                 "codex",
-                "app-server",
+                "app-gateway",
                 "--ws-auth",
                 "capability-token",
                 "--ws-token-file",
@@ -2067,21 +2074,21 @@ mod tests {
             .as_ref(),
         );
         assert_eq!(
-            app_server.auth.ws_auth,
-            Some(praxis_app_server::WebsocketAuthCliMode::CapabilityToken)
+            app_gateway.auth.ws_auth,
+            Some(praxis_app_gateway::WebsocketAuthCliMode::CapabilityToken)
         );
         assert_eq!(
-            app_server.auth.ws_token_file,
+            app_gateway.auth.ws_token_file,
             Some(PathBuf::from("/tmp/praxis-token"))
         );
     }
 
     #[test]
-    fn app_server_signed_bearer_flags_parse() {
-        let app_server = app_server_from_args(
+    fn app_gateway_signed_bearer_flags_parse() {
+        let app_gateway = app_gateway_from_args(
             [
                 "codex",
-                "app-server",
+                "app-gateway",
                 "--ws-auth",
                 "signed-bearer-token",
                 "--ws-shared-secret-file",
@@ -2096,23 +2103,23 @@ mod tests {
             .as_ref(),
         );
         assert_eq!(
-            app_server.auth.ws_auth,
-            Some(praxis_app_server::WebsocketAuthCliMode::SignedBearerToken)
+            app_gateway.auth.ws_auth,
+            Some(praxis_app_gateway::WebsocketAuthCliMode::SignedBearerToken)
         );
         assert_eq!(
-            app_server.auth.ws_shared_secret_file,
+            app_gateway.auth.ws_shared_secret_file,
             Some(PathBuf::from("/tmp/praxis-secret"))
         );
-        assert_eq!(app_server.auth.ws_issuer.as_deref(), Some("issuer"));
-        assert_eq!(app_server.auth.ws_audience.as_deref(), Some("audience"));
-        assert_eq!(app_server.auth.ws_max_clock_skew_seconds, Some(9));
+        assert_eq!(app_gateway.auth.ws_issuer.as_deref(), Some("issuer"));
+        assert_eq!(app_gateway.auth.ws_audience.as_deref(), Some("audience"));
+        assert_eq!(app_gateway.auth.ws_max_clock_skew_seconds, Some(9));
     }
 
     #[test]
-    fn app_server_rejects_removed_insecure_non_loopback_flag() {
+    fn app_gateway_rejects_removed_insecure_non_loopback_flag() {
         let parse_result = MultitoolCli::try_parse_from([
             "codex",
-            "app-server",
+            "app-gateway",
             "--allow-unauthenticated-non-loopback-ws",
         ]);
         assert!(parse_result.is_err());

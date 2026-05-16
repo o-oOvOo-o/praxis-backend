@@ -75,13 +75,6 @@ pub struct ThreadItem {
     pub updated_at: Option<String>,
 }
 
-#[allow(dead_code)]
-#[deprecated(note = "use ThreadItem")]
-pub type ConversationItem = ThreadItem;
-#[allow(dead_code)]
-#[deprecated(note = "use ThreadsPage")]
-pub type ConversationsPage = ThreadsPage;
-
 #[derive(Default)]
 struct HeadTailSummary {
     saw_session_meta: bool,
@@ -1169,10 +1162,11 @@ fn truncate_to_seconds(dt: OffsetDateTime) -> Option<OffsetDateTime> {
     dt.replace_nanosecond(0).ok()
 }
 
-async fn find_thread_path_by_id_str_in_subdir(
+async fn find_thread_path_by_id_str_in_subdir_with_db_context(
     praxis_home: &Path,
     subdir: &str,
     id_str: &str,
+    state_db_ctx: Option<&praxis_state::StateRuntime>,
 ) -> io::Result<Option<PathBuf>> {
     // Validate UUID format early.
     if Uuid::parse_str(id_str).is_err() {
@@ -1187,8 +1181,7 @@ async fn find_thread_path_by_id_str_in_subdir(
         _ => None,
     };
     let thread_id = ThreadId::from_string(id_str).ok();
-    let state_db_ctx = state_db::open_if_present(praxis_home, "").await;
-    if let Some(state_db_ctx) = state_db_ctx.as_deref()
+    if let Some(state_db_ctx) = state_db_ctx
         && let Some(thread_id) = thread_id
         && let Some(db_path) = state_db::find_rollout_path_by_id(
             Some(state_db_ctx),
@@ -1235,7 +1228,7 @@ async fn find_thread_path_by_id_str_in_subdir(
             "state db discrepancy during find_thread_path_by_id_str_in_subdir: falling_back"
         );
         state_db::read_repair_rollout_path(
-            state_db_ctx.as_deref(),
+            state_db_ctx,
             thread_id,
             archived_only,
             found_path.as_path(),
@@ -1244,6 +1237,68 @@ async fn find_thread_path_by_id_str_in_subdir(
     }
 
     Ok(found)
+}
+
+async fn find_thread_path_by_id_str_in_subdir(
+    praxis_home: &Path,
+    subdir: &str,
+    id_str: &str,
+) -> io::Result<Option<PathBuf>> {
+    let state_db_ctx = state_db::open_if_present(praxis_home, "").await;
+    find_thread_path_by_id_str_in_subdir_with_db_context(
+        praxis_home,
+        subdir,
+        id_str,
+        state_db_ctx.as_deref(),
+    )
+    .await
+}
+
+pub(crate) async fn find_thread_path_by_id_str_with_db_context(
+    praxis_home: &Path,
+    id_str: &str,
+    archived_only: Option<bool>,
+    state_db_ctx: Option<&praxis_state::StateRuntime>,
+) -> io::Result<Option<PathBuf>> {
+    match archived_only {
+        Some(true) => {
+            find_thread_path_by_id_str_in_subdir_with_db_context(
+                praxis_home,
+                ARCHIVED_SESSIONS_SUBDIR,
+                id_str,
+                state_db_ctx,
+            )
+            .await
+        }
+        Some(false) => {
+            find_thread_path_by_id_str_in_subdir_with_db_context(
+                praxis_home,
+                SESSIONS_SUBDIR,
+                id_str,
+                state_db_ctx,
+            )
+            .await
+        }
+        None => {
+            if let Some(path) = find_thread_path_by_id_str_in_subdir_with_db_context(
+                praxis_home,
+                SESSIONS_SUBDIR,
+                id_str,
+                state_db_ctx,
+            )
+            .await?
+            {
+                return Ok(Some(path));
+            }
+            find_thread_path_by_id_str_in_subdir_with_db_context(
+                praxis_home,
+                ARCHIVED_SESSIONS_SUBDIR,
+                id_str,
+                state_db_ctx,
+            )
+            .await
+        }
+    }
 }
 
 /// Locate a recorded thread rollout file by its UUID string using the existing

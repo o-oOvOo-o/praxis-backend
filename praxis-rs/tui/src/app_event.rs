@@ -10,14 +10,14 @@
 
 use std::path::PathBuf;
 
-use praxis_app_server_protocol::McpServerStatus;
-use praxis_app_server_protocol::PluginInstallResponse;
-use praxis_app_server_protocol::PluginListResponse;
-use praxis_app_server_protocol::PluginReadParams;
-use praxis_app_server_protocol::PluginReadResponse;
-use praxis_app_server_protocol::PluginUninstallResponse;
+use praxis_app_gateway_protocol::McpServerStatus;
+use praxis_app_gateway_protocol::PluginInstallResponse;
+use praxis_app_gateway_protocol::PluginListResponse;
+use praxis_app_gateway_protocol::PluginReadParams;
+use praxis_app_gateway_protocol::PluginReadResponse;
+use praxis_app_gateway_protocol::PluginUninstallResponse;
 use praxis_chatgpt::connectors::AppInfo;
-use praxis_core::model_provider_info::ModelProviderInfo;
+use praxis_core::ModelProviderInfo;
 use praxis_file_search::FileMatch;
 use praxis_protocol::ThreadId;
 use praxis_protocol::openai_models::ModelPreset;
@@ -257,10 +257,10 @@ pub(crate) enum AppEvent {
     /// Abandon the post-install plugin app-auth flow.
     PluginInstallAuthAbandon,
 
-    /// Fetch MCP inventory via app-server RPCs and render it into history.
+    /// Fetch MCP inventory via app-gateway RPCs and render it into history.
     FetchMcpInventory,
 
-    /// Result of fetching MCP inventory via app-server RPCs.
+    /// Result of fetching MCP inventory via app-gateway RPCs.
     McpInventoryLoaded {
         result: Result<Vec<McpServerStatus>, String>,
     },
@@ -551,7 +551,7 @@ pub(crate) enum AppEvent {
         category: FeedbackCategory,
     },
 
-    /// Submit feedback for the current thread via the app-server feedback RPC.
+    /// Submit feedback for the current thread via the app-gateway feedback RPC.
     SubmitFeedback {
         category: FeedbackCategory,
         reason: Option<String>,

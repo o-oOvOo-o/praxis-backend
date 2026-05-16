@@ -92,7 +92,7 @@ fn init_login_file_logging(config: &Config) -> Option<WorkerGuard> {
 
     // Direct `praxis login` otherwise relies on ephemeral stderr and browser output.
     // Persist the same login targets to a file so support can inspect auth failures
-    // without reproducing them through TUI or app-server.
+    // without reproducing them through TUI or app-gateway.
     if let Err(err) = tracing_subscriber::registry().with(file_layer).try_init() {
         eprintln!(
             "Warning: failed to initialize login log file {}: {err}",

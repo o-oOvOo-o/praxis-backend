@@ -32,7 +32,7 @@ const CURATED_PLUGINS_GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const CURATED_PLUGINS_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 // Keep this comfortably above a normal sync attempt so we do not race another Praxis process.
 const CURATED_PLUGINS_STALE_TEMP_DIR_MAX_AGE: Duration = Duration::from_secs(10 * 60);
-const STARTUP_REMOTE_PLUGIN_SYNC_MARKER_FILE: &str = ".tmp/app-server-remote-plugin-sync-v1";
+const STARTUP_REMOTE_PLUGIN_SYNC_MARKER_FILE: &str = ".tmp/app-gateway-remote-plugin-sync-v1";
 const STARTUP_REMOTE_PLUGIN_SYNC_PREREQUISITE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Deserialize)]
@@ -205,7 +205,7 @@ pub(super) fn start_startup_remote_plugin_sync_once(
             Err(err) => {
                 warn!(
                     error = %err,
-                    "startup remote plugin sync failed; will retry on next app-server start"
+                    "startup remote plugin sync failed; will retry on next app-gateway start"
                 );
             }
         }

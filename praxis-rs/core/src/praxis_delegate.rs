@@ -87,6 +87,7 @@ pub(crate) async fn run_praxis_thread_interactive(
         conversation_history: initial_history.unwrap_or(InitialHistory::New),
         session_source: SessionSource::SubAgent(subagent_source),
         agent_control: parent_session.services.agent_control.clone(),
+        agent_os: Arc::clone(&parent_session.services.agent_os),
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
         metrics_service_name: None,

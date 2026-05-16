@@ -15,24 +15,24 @@ use std::sync::mpsc::Sender;
 
 use anyhow::Context;
 use anyhow::Result;
-use praxis_app_server_protocol::AskForApproval;
-use praxis_app_server_protocol::ClientInfo;
-use praxis_app_server_protocol::ClientNotification;
-use praxis_app_server_protocol::ClientRequest;
-use praxis_app_server_protocol::CommandExecutionApprovalDecision;
-use praxis_app_server_protocol::FileChangeApprovalDecision;
-use praxis_app_server_protocol::InitializeCapabilities;
-use praxis_app_server_protocol::JSONRPCMessage;
-use praxis_app_server_protocol::JSONRPCRequest;
-use praxis_app_server_protocol::JSONRPCResponse;
-use praxis_app_server_protocol::RequestId;
-use praxis_app_server_protocol::ThreadListParams;
-use praxis_app_server_protocol::ThreadResumeParams;
-use praxis_app_server_protocol::ThreadResumeResponse;
-use praxis_app_server_protocol::ThreadStartParams;
-use praxis_app_server_protocol::ThreadStartResponse;
-use praxis_app_server_protocol::TurnStartParams;
-use praxis_app_server_protocol::UserInput;
+use praxis_app_gateway_protocol::AskForApproval;
+use praxis_app_gateway_protocol::ClientInfo;
+use praxis_app_gateway_protocol::ClientNotification;
+use praxis_app_gateway_protocol::ClientRequest;
+use praxis_app_gateway_protocol::CommandExecutionApprovalDecision;
+use praxis_app_gateway_protocol::FileChangeApprovalDecision;
+use praxis_app_gateway_protocol::InitializeCapabilities;
+use praxis_app_gateway_protocol::JSONRPCMessage;
+use praxis_app_gateway_protocol::JSONRPCRequest;
+use praxis_app_gateway_protocol::JSONRPCResponse;
+use praxis_app_gateway_protocol::RequestId;
+use praxis_app_gateway_protocol::ThreadListParams;
+use praxis_app_gateway_protocol::ThreadResumeParams;
+use praxis_app_gateway_protocol::ThreadResumeResponse;
+use praxis_app_gateway_protocol::ThreadStartParams;
+use praxis_app_gateway_protocol::ThreadStartResponse;
+use praxis_app_gateway_protocol::TurnStartParams;
+use praxis_app_gateway_protocol::UserInput;
 use serde::Serialize;
 
 use crate::output::Output;
@@ -41,7 +41,7 @@ use crate::state::PendingRequest;
 use crate::state::ReaderEvent;
 use crate::state::State;
 
-pub struct AppServerClient {
+pub struct AppGatewayClient {
     child: Child,
     stdin: Arc<Mutex<Option<ChildStdin>>>,
     stdout: Option<BufReader<ChildStdout>>,
@@ -51,7 +51,7 @@ pub struct AppServerClient {
     filtered_output: bool,
 }
 
-impl AppServerClient {
+impl AppGatewayClient {
     pub fn spawn(
         praxis_bin: &str,
         config_overrides: &[String],
@@ -64,21 +64,21 @@ impl AppServerClient {
         }
 
         let mut child = cmd
-            .arg("app-server")
+            .arg("app-gateway")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()
-            .with_context(|| format!("failed to start `{praxis_bin}` app-server"))?;
+            .with_context(|| format!("failed to start `{praxis_bin}` app-gateway"))?;
 
         let stdin = child
             .stdin
             .take()
-            .context("praxis app-server stdin unavailable")?;
+            .context("praxis app-gateway stdin unavailable")?;
         let stdout = child
             .stdout
             .take()
-            .context("praxis app-server stdout unavailable")?;
+            .context("praxis app-gateway stdout unavailable")?;
 
         Ok(Self {
             child,
@@ -95,7 +95,7 @@ impl AppServerClient {
         let request_id = self.next_request_id();
         let request = ClientRequest::Initialize {
             request_id: request_id.clone(),
-            params: praxis_app_server_protocol::InitializeParams {
+            params: praxis_app_gateway_protocol::InitializeParams {
                 client_info: ClientInfo {
                     name: "debug-client".to_string(),
                     title: Some("Debug Client".to_string()),
@@ -110,7 +110,7 @@ impl AppServerClient {
 
         self.send(&request)?;
         let response = self.read_until_response(&request_id)?;
-        let _parsed: praxis_app_server_protocol::InitializeResponse =
+        let _parsed: praxis_app_gateway_protocol::InitializeResponse =
             serde_json::from_value(response.result).context("decode initialize response")?;
         let initialized = ClientNotification::Initialized;
         self.send(&initialized)?;
@@ -327,24 +327,24 @@ fn handle_server_request(
     request: JSONRPCRequest,
     stdin: &Arc<Mutex<Option<ChildStdin>>>,
 ) -> Result<()> {
-    let Ok(server_request) = praxis_app_server_protocol::ServerRequest::try_from(request) else {
+    let Ok(server_request) = praxis_app_gateway_protocol::ServerRequest::try_from(request) else {
         return Ok(());
     };
 
     match server_request {
-        praxis_app_server_protocol::ServerRequest::CommandExecutionRequestApproval {
+        praxis_app_gateway_protocol::ServerRequest::CommandExecutionRequestApproval {
             request_id,
             ..
         } => {
-            let response = praxis_app_server_protocol::CommandExecutionRequestApprovalResponse {
+            let response = praxis_app_gateway_protocol::CommandExecutionRequestApprovalResponse {
                 decision: CommandExecutionApprovalDecision::Decline,
             };
             send_jsonrpc_response(stdin, request_id, response)
         }
-        praxis_app_server_protocol::ServerRequest::FileChangeRequestApproval {
+        praxis_app_gateway_protocol::ServerRequest::FileChangeRequestApproval {
             request_id, ..
         } => {
-            let response = praxis_app_server_protocol::FileChangeRequestApprovalResponse {
+            let response = praxis_app_gateway_protocol::FileChangeRequestApprovalResponse {
                 decision: FileChangeApprovalDecision::Decline,
             };
             send_jsonrpc_response(stdin, request_id, response)

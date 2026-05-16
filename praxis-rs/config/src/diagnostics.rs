@@ -4,7 +4,7 @@
 use crate::ConfigLayerEntry;
 use crate::ConfigLayerStack;
 use crate::ConfigLayerStackOrdering;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_utils_absolute_path::AbsolutePathBufGuard;
 use serde::de::DeserializeOwned;
 use serde_path_to_error::Path as SerdePath;

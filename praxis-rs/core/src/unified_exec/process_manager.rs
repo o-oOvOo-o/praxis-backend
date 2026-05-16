@@ -12,6 +12,7 @@ use tokio::time::Duration;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use crate::agent_os::AgentOsProcessCleaner;
 use crate::exec_env::create_env;
 use crate::exec_policy::ExecApprovalRequest;
 use crate::sandboxing::ExecRequest;
@@ -142,6 +143,22 @@ impl UnifiedExecProcessManager {
         };
         if let Some(entry) = removed {
             Self::unregister_network_approval_for_entry(&entry).await;
+        }
+    }
+
+    pub(crate) async fn terminate_process(&self, process_id: i32) -> bool {
+        let (removed, had_reservation) = {
+            let mut store = self.process_store.lock().await;
+            let had_reservation = store.reserved_process_ids.remove(&process_id);
+            let removed = store.processes.remove(&process_id);
+            (removed, had_reservation)
+        };
+        if let Some(entry) = removed {
+            Self::unregister_network_approval_for_entry(&entry).await;
+            entry.process.terminate();
+            true
+        } else {
+            had_reservation
         }
     }
 
@@ -897,6 +914,13 @@ impl UnifiedExecProcessManager {
             Self::unregister_network_approval_for_entry(&entry).await;
             entry.process.terminate();
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentOsProcessCleaner for UnifiedExecProcessManager {
+    async fn cleanup_agent_os_process(&self, process_id: i32) -> bool {
+        self.terminate_process(process_id).await
     }
 }
 

@@ -1,17 +1,19 @@
 use crate::config::Config;
 pub use praxis_rollout::ARCHIVED_SESSIONS_SUBDIR;
 pub use praxis_rollout::INTERACTIVE_SESSION_SOURCES;
+pub use praxis_rollout::ListThreadsQuery;
 pub use praxis_rollout::RolloutRecorder;
 pub use praxis_rollout::RolloutRecorderParams;
 pub use praxis_rollout::SESSIONS_SUBDIR;
 pub use praxis_rollout::SessionMeta;
-pub use praxis_rollout::append_thread_name;
+pub use praxis_rollout::ThreadDirectory;
+pub use praxis_rollout::ThreadNameResolver;
+pub use praxis_rollout::ThreadNameWriter;
+pub use praxis_rollout::ThreadSummary;
+pub use praxis_rollout::ThreadSummaryPage;
 pub use praxis_rollout::find_archived_thread_path_by_id_str;
-#[deprecated(note = "use find_thread_path_by_id_str")]
-pub use praxis_rollout::find_conversation_path_by_id_str;
-pub use praxis_rollout::find_thread_name_by_id;
 pub use praxis_rollout::find_thread_path_by_id_str;
-pub use praxis_rollout::find_thread_path_by_name_str;
+pub use praxis_rollout::list_threads;
 pub use praxis_rollout::rollout_date_parts;
 
 impl praxis_rollout::RolloutConfigView for Config {
@@ -50,10 +52,6 @@ pub mod policy {
 
 pub mod recorder {
     pub use praxis_rollout::recorder::*;
-}
-
-pub mod session_index {
-    pub use praxis_rollout::session_index::*;
 }
 
 pub(crate) use crate::session_rollout_init_error::map_session_init_error;

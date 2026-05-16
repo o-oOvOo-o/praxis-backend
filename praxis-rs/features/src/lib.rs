@@ -124,7 +124,7 @@ pub enum Feature {
     CodexGitCommit,
     /// Enable runtime metrics snapshots via a manual reader.
     RuntimeMetrics,
-    /// Enable thread lifecycle analytics emitted via the app-server analytics pipeline.
+    /// Enable thread lifecycle analytics emitted via the app-gateway analytics pipeline.
     GeneralAnalytics,
     /// Persist rollout metadata to a local SQLite database.
     Sqlite,
@@ -138,8 +138,6 @@ pub enum Feature {
     EnableRequestCompression,
     /// Enable collab tools.
     Collab,
-    /// Enable task-path-based multi-agent routing.
-    MultiAgentV2,
     /// Enable CSV-backed agent job tools.
     SpawnCsv,
     /// Enable apps.
@@ -176,8 +174,8 @@ pub enum Feature {
     FastMode,
     /// Enable experimental realtime voice conversation mode in the TUI.
     RealtimeConversation,
-    /// Removed compatibility flag. The TUI now always uses the app-server implementation.
-    TuiAppServer,
+    /// Removed compatibility flag. The TUI now always uses the app-gateway implementation.
+    TuiAppGateway,
     /// Prevent idle system sleep while a turn is actively running.
     PreventIdleSleep,
     /// Legacy rollout flag for Responses API WebSocket transport experiments.
@@ -371,14 +369,14 @@ impl Features {
                         Feature::WebSearchCached,
                     );
                 }
-                "tui_app_server" => {
+                "tui_app_gateway" => {
                     continue;
                 }
                 _ => {}
             }
             match feature_for_key(k) {
                 Some(feat) => {
-                    if matches!(feat, Feature::TuiAppServer) {
+                    if matches!(feat, Feature::TuiAppGateway) {
                         continue;
                     }
                     if k != feat.key() {
@@ -714,12 +712,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: true,
     },
     FeatureSpec {
-        id: Feature::MultiAgentV2,
-        key: "multi_agent_v2",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
-    },
-    FeatureSpec {
         id: Feature::SpawnCsv,
         key: "enable_fanout",
         stage: Stage::UnderDevelopment,
@@ -826,8 +818,8 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::TuiAppServer,
-        key: "tui_app_server",
+        id: Feature::TuiAppGateway,
+        key: "tui_app_gateway",
         stage: Stage::Removed,
         default_enabled: true,
     },

@@ -4,14 +4,14 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use praxis_app_server_client::AppServerRequestHandle;
-use praxis_app_server_protocol::AccountLoginCompletedNotification;
-use praxis_app_server_protocol::AccountUpdatedNotification;
-use praxis_app_server_protocol::AuthMode as AppServerAuthMode;
-use praxis_app_server_protocol::CancelLoginAccountParams;
-use praxis_app_server_protocol::ClientRequest;
-use praxis_app_server_protocol::LoginAccountParams;
-use praxis_app_server_protocol::LoginAccountResponse;
+use praxis_app_gateway_client::AppGatewayRequestHandle;
+use praxis_app_gateway_protocol::AccountLoginCompletedNotification;
+use praxis_app_gateway_protocol::AccountUpdatedNotification;
+use praxis_app_gateway_protocol::AuthMode as AppGatewayAuthMode;
+use praxis_app_gateway_protocol::CancelLoginAccountParams;
+use praxis_app_gateway_protocol::ClientRequest;
+use praxis_app_gateway_protocol::LoginAccountParams;
+use praxis_app_gateway_protocol::LoginAccountResponse;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_login::DeviceCode;
 use praxis_login::read_openai_api_key_from_env;
@@ -83,8 +83,8 @@ pub(crate) enum SignInOption {
 }
 
 const API_KEY_DISABLED_MESSAGE: &str = "API key login is disabled.";
-fn onboarding_request_id() -> praxis_app_server_protocol::RequestId {
-    praxis_app_server_protocol::RequestId::String(Uuid::new_v4().to_string())
+fn onboarding_request_id() -> praxis_app_gateway_protocol::RequestId {
+    praxis_app_gateway_protocol::RequestId::String(Uuid::new_v4().to_string())
 }
 
 #[derive(Clone, Default)]
@@ -163,7 +163,7 @@ pub(crate) struct AuthModeWidget {
     pub praxis_home: PathBuf,
     pub cli_auth_credentials_store_mode: AuthCredentialsStoreMode,
     pub login_status: LoginStatus,
-    pub app_server_request_handle: AppServerRequestHandle,
+    pub app_gateway_request_handle: AppGatewayRequestHandle,
     pub forced_chatgpt_workspace_id: Option<String>,
     pub forced_login_method: Option<ForcedLoginMethod>,
     pub animations_enabled: bool,
@@ -174,11 +174,11 @@ impl AuthModeWidget {
         let mut sign_in_state = self.sign_in_state.write().unwrap();
         match &*sign_in_state {
             SignInState::ChatGptContinueInBrowser(state) => {
-                let request_handle = self.app_server_request_handle.clone();
+                let request_handle = self.app_gateway_request_handle.clone();
                 let login_id = state.login_id.clone();
                 tokio::spawn(async move {
                     let _ = request_handle
-                        .request_typed::<praxis_app_server_protocol::CancelLoginAccountResponse>(
+                        .request_typed::<praxis_app_gateway_protocol::CancelLoginAccountResponse>(
                             ClientRequest::CancelLoginAccount {
                                 request_id: onboarding_request_id(),
                                 params: CancelLoginAccountParams { login_id },
@@ -674,7 +674,7 @@ impl AuthModeWidget {
             return;
         }
         self.set_error(/*message*/ None);
-        let request_handle = self.app_server_request_handle.clone();
+        let request_handle = self.app_gateway_request_handle.clone();
         let sign_in_state = self.sign_in_state.clone();
         let error = self.error.clone();
         let request_frame = self.request_frame.clone();
@@ -717,8 +717,8 @@ impl AuthModeWidget {
     fn handle_existing_chatgpt_login(&mut self) -> bool {
         if matches!(
             self.login_status,
-            LoginStatus::AuthMode(AppServerAuthMode::Chatgpt)
-                | LoginStatus::AuthMode(AppServerAuthMode::ChatgptAuthTokens)
+            LoginStatus::AuthMode(AppGatewayAuthMode::Chatgpt)
+                | LoginStatus::AuthMode(AppGatewayAuthMode::ChatgptAuthTokens)
         ) {
             *self.sign_in_state.write().unwrap() = SignInState::ChatGptSuccess;
             self.request_frame.schedule_frame();
@@ -737,7 +737,7 @@ impl AuthModeWidget {
         }
 
         self.set_error(/*message*/ None);
-        let request_handle = self.app_server_request_handle.clone();
+        let request_handle = self.app_gateway_request_handle.clone();
         let sign_in_state = self.sign_in_state.clone();
         let error = self.error.clone();
         let request_frame = self.request_frame.clone();
@@ -860,8 +860,8 @@ impl WidgetRef for AuthModeWidget {
     }
 }
 
-pub(super) fn maybe_open_auth_url_in_browser(request_handle: &AppServerRequestHandle, url: &str) {
-    if !matches!(request_handle, AppServerRequestHandle::InProcess(_)) {
+pub(super) fn maybe_open_auth_url_in_browser(request_handle: &AppGatewayRequestHandle, url: &str) {
+    if !matches!(request_handle, AppGatewayRequestHandle::Native(_)) {
         return;
     }
 
@@ -873,10 +873,10 @@ pub(super) fn maybe_open_auth_url_in_browser(request_handle: &AppServerRequestHa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use praxis_app_server_client::AppServerRequestHandle;
-    use praxis_app_server_client::DEFAULT_IN_PROCESS_CHANNEL_CAPACITY;
-    use praxis_app_server_client::InProcessAppServerClient;
-    use praxis_app_server_client::InProcessClientStartArgs;
+    use praxis_app_gateway_client::AppGatewayRequestHandle;
+    use praxis_app_gateway_client::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
+    use praxis_app_gateway_client::NativeAppGatewayClient;
+    use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
     use praxis_arg0::Arg0DispatchPaths;
     use praxis_cloud_requirements::cloud_requirements_loader_for_storage;
     use praxis_core::config::ConfigBuilder;
@@ -894,7 +894,7 @@ mod tests {
             .build()
             .await
             .unwrap();
-        let client = InProcessAppServerClient::start(InProcessClientStartArgs {
+        let client = NativeAppGatewayClient::start(NativeAppGatewayClientStartArgs {
             arg0_paths: Arg0DispatchPaths::default(),
             config: Arc::new(config),
             cli_overrides: Vec::new(),
@@ -913,7 +913,7 @@ mod tests {
             client_version: "test".to_string(),
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
-            channel_capacity: DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+            channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
         })
         .await
         .unwrap();
@@ -925,7 +925,7 @@ mod tests {
             praxis_home: praxis_home_path.clone(),
             cli_auth_credentials_store_mode: AuthCredentialsStoreMode::File,
             login_status: LoginStatus::NotAuthenticated,
-            app_server_request_handle: AppServerRequestHandle::InProcess(client.request_handle()),
+            app_gateway_request_handle: AppGatewayRequestHandle::Native(client.request_handle()),
             forced_chatgpt_workspace_id: None,
             forced_login_method: Some(ForcedLoginMethod::Chatgpt),
             animations_enabled: true,
@@ -969,7 +969,7 @@ mod tests {
     #[tokio::test]
     async fn existing_chatgpt_auth_tokens_login_counts_as_signed_in() {
         let (mut widget, _tmp) = widget_forced_chatgpt().await;
-        widget.login_status = LoginStatus::AuthMode(AppServerAuthMode::ChatgptAuthTokens);
+        widget.login_status = LoginStatus::AuthMode(AppGatewayAuthMode::ChatgptAuthTokens);
 
         let handled = widget.handle_existing_chatgpt_login();
 

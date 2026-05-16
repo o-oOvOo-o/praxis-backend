@@ -3,16 +3,16 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
-use praxis_app_server_protocol::CollabAgentTool;
-use praxis_app_server_protocol::CollabAgentToolCallStatus;
-use praxis_app_server_protocol::CommandExecutionStatus;
-use praxis_app_server_protocol::McpToolCallStatus;
-use praxis_app_server_protocol::PatchApplyStatus;
-use praxis_app_server_protocol::PatchChangeKind;
-use praxis_app_server_protocol::ServerNotification;
-use praxis_app_server_protocol::ThreadItem;
-use praxis_app_server_protocol::ThreadTokenUsage;
-use praxis_app_server_protocol::TurnStatus;
+use praxis_app_gateway_protocol::CollabAgentTool;
+use praxis_app_gateway_protocol::CollabAgentToolCallStatus;
+use praxis_app_gateway_protocol::CommandExecutionStatus;
+use praxis_app_gateway_protocol::McpToolCallStatus;
+use praxis_app_gateway_protocol::PatchApplyStatus;
+use praxis_app_gateway_protocol::PatchChangeKind;
+use praxis_app_gateway_protocol::ServerNotification;
+use praxis_app_gateway_protocol::ThreadItem;
+use praxis_app_gateway_protocol::ThreadTokenUsage;
+use praxis_app_gateway_protocol::TurnStatus;
 use praxis_core::config::Config;
 use praxis_protocol::models::WebSearchAction;
 use praxis_protocol::protocol::SessionConfiguredEvent;
@@ -125,13 +125,13 @@ impl EventProcessorWithJsonOutput {
         }
     }
 
-    pub fn map_todo_items(plan: &[praxis_app_server_protocol::TurnPlanStep]) -> Vec<TodoItem> {
+    pub fn map_todo_items(plan: &[praxis_app_gateway_protocol::TurnPlanStep]) -> Vec<TodoItem> {
         plan.iter()
             .map(|step| TodoItem {
                 text: step.step.clone(),
                 completed: matches!(
                     step.status,
-                    praxis_app_server_protocol::TurnPlanStepStatus::Completed
+                    praxis_app_gateway_protocol::TurnPlanStepStatus::Completed
                 ),
             })
             .collect()
@@ -242,8 +242,10 @@ impl EventProcessorWithJsonOutput {
                 details: ThreadItemDetails::CollabToolCall(CollabToolCallItem {
                     tool: match tool {
                         CollabAgentTool::SpawnAgent => CollabTool::SpawnAgent,
-                        CollabAgentTool::SendInput => CollabTool::SendInput,
-                        CollabAgentTool::ResumeAgent => CollabTool::Wait,
+                        CollabAgentTool::SendMessage | CollabAgentTool::AssignTask => {
+                            CollabTool::SendInput
+                        }
+                        CollabAgentTool::ResumeThread => CollabTool::Wait,
                         CollabAgentTool::Wait => CollabTool::Wait,
                         CollabAgentTool::CloseAgent => CollabTool::CloseAgent,
                     },
@@ -257,25 +259,25 @@ impl EventProcessorWithJsonOutput {
                                 thread_id,
                                 CollabAgentState {
                                     status: match state.status {
-                                        praxis_app_server_protocol::CollabAgentStatus::PendingInit => {
+                                        praxis_app_gateway_protocol::CollabAgentStatus::PendingInit => {
                                             CollabAgentStatus::PendingInit
                                         }
-                                        praxis_app_server_protocol::CollabAgentStatus::Running => {
+                                        praxis_app_gateway_protocol::CollabAgentStatus::Running => {
                                             CollabAgentStatus::Running
                                         }
-                                        praxis_app_server_protocol::CollabAgentStatus::Interrupted => {
+                                        praxis_app_gateway_protocol::CollabAgentStatus::Interrupted => {
                                             CollabAgentStatus::Interrupted
                                         }
-                                        praxis_app_server_protocol::CollabAgentStatus::Completed => {
+                                        praxis_app_gateway_protocol::CollabAgentStatus::Completed => {
                                             CollabAgentStatus::Completed
                                         }
-                                        praxis_app_server_protocol::CollabAgentStatus::Errored => {
+                                        praxis_app_gateway_protocol::CollabAgentStatus::Errored => {
                                             CollabAgentStatus::Errored
                                         }
-                                        praxis_app_server_protocol::CollabAgentStatus::Shutdown => {
+                                        praxis_app_gateway_protocol::CollabAgentStatus::Shutdown => {
                                             CollabAgentStatus::Shutdown
                                         }
-                                        praxis_app_server_protocol::CollabAgentStatus::NotFound => {
+                                        praxis_app_gateway_protocol::CollabAgentStatus::NotFound => {
                                             CollabAgentStatus::NotFound
                                         }
                                     },
@@ -635,7 +637,7 @@ mod tests {
         let mut processor = EventProcessorWithJsonOutput::new(Some(output_path.clone()));
 
         let collected = processor.collect_thread_events(ServerNotification::ItemCompleted(
-            praxis_app_server_protocol::ItemCompletedNotification {
+            praxis_app_gateway_protocol::ItemCompletedNotification {
                 item: ThreadItem::AgentMessage {
                     id: "msg-1".to_string(),
                     text: "partial answer".to_string(),
@@ -651,13 +653,13 @@ mod tests {
         assert_eq!(processor.final_message(), Some("partial answer"));
 
         let status = processor.process_server_notification(ServerNotification::TurnCompleted(
-            praxis_app_server_protocol::TurnCompletedNotification {
+            praxis_app_gateway_protocol::TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
-                turn: praxis_app_server_protocol::Turn {
+                turn: praxis_app_gateway_protocol::Turn {
                     id: "turn-1".to_string(),
                     items: Vec::new(),
                     status: TurnStatus::Failed,
-                    error: Some(praxis_app_server_protocol::TurnError {
+                    error: Some(praxis_app_gateway_protocol::TurnError {
                         message: "turn failed".to_string(),
                         additional_details: None,
                         praxis_error_info: None,

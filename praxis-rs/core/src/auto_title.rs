@@ -13,7 +13,8 @@ use praxis_login::AuthManager;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::user_input::UserInput;
-use tracing::{debug, warn};
+use tracing::debug;
+use tracing::warn;
 
 use crate::praxis::Session;
 

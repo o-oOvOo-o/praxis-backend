@@ -1,9 +1,9 @@
 use crate::app_command::AppCommand;
 use crate::app_command::AppCommandView;
-use praxis_app_server_protocol::RequestId as AppServerRequestId;
-use praxis_app_server_protocol::ServerNotification;
-use praxis_app_server_protocol::ServerRequest;
-use praxis_app_server_protocol::ThreadItem;
+use praxis_app_gateway_protocol::RequestId as AppGatewayRequestId;
+use praxis_app_gateway_protocol::ServerNotification;
+use praxis_app_gateway_protocol::ServerRequest;
+use praxis_app_gateway_protocol::ThreadItem;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -46,7 +46,7 @@ pub(super) struct PendingInteractiveReplayState {
     request_permissions_call_ids_by_turn_id: HashMap<String, Vec<String>>,
     request_user_input_call_ids: HashSet<String>,
     request_user_input_call_ids_by_turn_id: HashMap<String, Vec<String>>,
-    pending_requests_by_request_id: HashMap<AppServerRequestId, PendingInteractiveRequest>,
+    pending_requests_by_request_id: HashMap<AppGatewayRequestId, PendingInteractiveRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,7 +210,7 @@ impl PendingInteractiveReplayState {
             ServerRequest::McpServerElicitationRequest { request_id, params } => {
                 let key = ElicitationRequestKey::new(
                     params.server_name.clone(),
-                    app_server_request_id_to_mcp_request_id(request_id),
+                    app_gateway_request_id_to_mcp_request_id(request_id),
                 );
                 self.elicitation_requests.insert(key.clone());
                 self.pending_requests_by_request_id.insert(
@@ -311,7 +311,7 @@ impl PendingInteractiveReplayState {
                 self.elicitation_requests
                     .remove(&ElicitationRequestKey::new(
                         params.server_name.clone(),
-                        app_server_request_id_to_mcp_request_id(request_id),
+                        app_gateway_request_id_to_mcp_request_id(request_id),
                     ));
             }
             ServerRequest::ToolRequestUserInput { params, .. } => {
@@ -366,7 +366,7 @@ impl PendingInteractiveReplayState {
                 .elicitation_requests
                 .contains(&ElicitationRequestKey::new(
                     params.server_name.clone(),
-                    app_server_request_id_to_mcp_request_id(request_id),
+                    app_gateway_request_id_to_mcp_request_id(request_id),
                 )),
             ServerRequest::ToolRequestUserInput { params, .. } => {
                 self.request_user_input_call_ids.contains(&params.item_id)
@@ -477,7 +477,7 @@ impl PendingInteractiveReplayState {
         self.pending_requests_by_request_id.clear();
     }
 
-    fn remove_request(&mut self, request_id: &AppServerRequestId) {
+    fn remove_request(&mut self, request_id: &AppGatewayRequestId) {
         let Some(pending) = self.pending_requests_by_request_id.remove(request_id) else {
             return;
         };
@@ -547,7 +547,7 @@ impl PendingInteractiveReplayState {
                 ServerRequest::McpServerElicitationRequest { request_id, params },
             ) => {
                 key.server_name == params.server_name
-                    && key.request_id == app_server_request_id_to_mcp_request_id(request_id)
+                    && key.request_id == app_gateway_request_id_to_mcp_request_id(request_id)
             }
             (
                 PendingInteractiveRequest::RequestPermissions { turn_id, item_id },
@@ -562,12 +562,14 @@ impl PendingInteractiveReplayState {
     }
 }
 
-fn app_server_request_id_to_mcp_request_id(
-    request_id: &AppServerRequestId,
+fn app_gateway_request_id_to_mcp_request_id(
+    request_id: &AppGatewayRequestId,
 ) -> praxis_protocol::mcp::RequestId {
     match request_id {
-        AppServerRequestId::String(value) => praxis_protocol::mcp::RequestId::String(value.clone()),
-        AppServerRequestId::Integer(value) => praxis_protocol::mcp::RequestId::Integer(*value),
+        AppGatewayRequestId::String(value) => {
+            praxis_protocol::mcp::RequestId::String(value.clone())
+        }
+        AppGatewayRequestId::Integer(value) => praxis_protocol::mcp::RequestId::Integer(*value),
     }
 }
 
@@ -575,21 +577,21 @@ fn app_server_request_id_to_mcp_request_id(
 mod tests {
     use super::super::ThreadBufferedEvent;
     use super::super::ThreadEventStore;
-    use praxis_app_server_protocol::CommandExecutionRequestApprovalParams;
-    use praxis_app_server_protocol::FileChangeRequestApprovalParams;
-    use praxis_app_server_protocol::McpElicitationObjectType;
-    use praxis_app_server_protocol::McpElicitationSchema;
-    use praxis_app_server_protocol::McpServerElicitationRequest;
-    use praxis_app_server_protocol::McpServerElicitationRequestParams;
-    use praxis_app_server_protocol::RequestId as AppServerRequestId;
-    use praxis_app_server_protocol::ServerNotification;
-    use praxis_app_server_protocol::ServerRequest;
-    use praxis_app_server_protocol::ServerRequestResolvedNotification;
-    use praxis_app_server_protocol::ThreadClosedNotification;
-    use praxis_app_server_protocol::ToolRequestUserInputParams;
-    use praxis_app_server_protocol::Turn;
-    use praxis_app_server_protocol::TurnCompletedNotification;
-    use praxis_app_server_protocol::TurnStatus;
+    use praxis_app_gateway_protocol::CommandExecutionRequestApprovalParams;
+    use praxis_app_gateway_protocol::FileChangeRequestApprovalParams;
+    use praxis_app_gateway_protocol::McpElicitationObjectType;
+    use praxis_app_gateway_protocol::McpElicitationSchema;
+    use praxis_app_gateway_protocol::McpServerElicitationRequest;
+    use praxis_app_gateway_protocol::McpServerElicitationRequestParams;
+    use praxis_app_gateway_protocol::RequestId as AppGatewayRequestId;
+    use praxis_app_gateway_protocol::ServerNotification;
+    use praxis_app_gateway_protocol::ServerRequest;
+    use praxis_app_gateway_protocol::ServerRequestResolvedNotification;
+    use praxis_app_gateway_protocol::ThreadClosedNotification;
+    use praxis_app_gateway_protocol::ToolRequestUserInputParams;
+    use praxis_app_gateway_protocol::Turn;
+    use praxis_app_gateway_protocol::TurnCompletedNotification;
+    use praxis_app_gateway_protocol::TurnStatus;
     use praxis_protocol::protocol::Op;
     use praxis_protocol::protocol::ReviewDecision;
     use pretty_assertions::assert_eq;
@@ -599,7 +601,7 @@ mod tests {
 
     fn request_user_input_request(call_id: &str, turn_id: &str) -> ServerRequest {
         ServerRequest::ToolRequestUserInput {
-            request_id: AppServerRequestId::Integer(1),
+            request_id: AppGatewayRequestId::Integer(1),
             params: ToolRequestUserInputParams {
                 thread_id: "thread-1".to_string(),
                 turn_id: turn_id.to_string(),
@@ -615,7 +617,7 @@ mod tests {
         turn_id: &str,
     ) -> ServerRequest {
         ServerRequest::CommandExecutionRequestApproval {
-            request_id: AppServerRequestId::Integer(2),
+            request_id: AppGatewayRequestId::Integer(2),
             params: CommandExecutionRequestApprovalParams {
                 thread_id: "thread-1".to_string(),
                 turn_id: turn_id.to_string(),
@@ -636,7 +638,7 @@ mod tests {
 
     fn patch_approval_request(call_id: &str, turn_id: &str) -> ServerRequest {
         ServerRequest::FileChangeRequestApproval {
-            request_id: AppServerRequestId::Integer(3),
+            request_id: AppGatewayRequestId::Integer(3),
             params: FileChangeRequestApprovalParams {
                 thread_id: "thread-1".to_string(),
                 turn_id: turn_id.to_string(),
@@ -649,7 +651,7 @@ mod tests {
 
     fn elicitation_request(server_name: &str, request_id: &str, turn_id: &str) -> ServerRequest {
         ServerRequest::McpServerElicitationRequest {
-            request_id: AppServerRequestId::String(request_id.to_string()),
+            request_id: AppGatewayRequestId::String(request_id.to_string()),
             params: McpServerElicitationRequestParams {
                 thread_id: "thread-1".to_string(),
                 turn_id: Some(turn_id.to_string()),
@@ -686,7 +688,7 @@ mod tests {
         })
     }
 
-    fn request_resolved(request_id: AppServerRequestId) -> ServerNotification {
+    fn request_resolved(request_id: AppGatewayRequestId) -> ServerNotification {
         ServerNotification::ServerRequestResolved(ServerRequestResolvedNotification {
             thread_id: "thread-1".to_string(),
             request_id,
@@ -733,7 +735,7 @@ mod tests {
         let mut store = ThreadEventStore::new(/*capacity*/ 8);
         store.push_request(request_user_input_request("call-1", "turn-1"));
 
-        store.push_notification(request_resolved(AppServerRequestId::Integer(1)));
+        store.push_notification(request_resolved(AppGatewayRequestId::Integer(1)));
 
         let snapshot = store.snapshot();
         assert!(
@@ -778,7 +780,7 @@ mod tests {
             "turn-1",
         ));
 
-        store.push_notification(request_resolved(AppServerRequestId::Integer(2)));
+        store.push_notification(request_resolved(AppGatewayRequestId::Integer(2)));
 
         let snapshot = store.snapshot();
         assert!(

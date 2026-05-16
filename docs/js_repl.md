@@ -99,25 +99,25 @@ Nested `codex.tool(...)` diagnostics are emitted through normal `tracing` output
 - `info` level logs a bounded summary.
 - `trace` level also logs the exact serialized response object or error string seen by JavaScript.
 
-For `codex app-server`, these logs are written to the server process `stderr`.
+For `praxis app-gateway`, these logs are written to the server process `stderr`.
 
 Examples:
 
 ```sh
 RUST_LOG=praxis_core::tools::js_repl=info \
 LOG_FORMAT=json \
-codex app-server \
-2> /tmp/praxis-app-server.log
+praxis app-gateway \
+2> /tmp/praxis-app-gateway.log
 ```
 
 ```sh
 RUST_LOG=praxis_core::tools::js_repl=trace \
 LOG_FORMAT=json \
-codex app-server \
-2> /tmp/praxis-app-server.log
+praxis app-gateway \
+2> /tmp/praxis-app-gateway.log
 ```
 
-In both cases, inspect `/tmp/praxis-app-server.log` or whatever sink captures the process `stderr`.
+In both cases, inspect `/tmp/praxis-app-gateway.log` or whatever sink captures the process `stderr`.
 
 ## Vendored parser asset (`meriyah.umd.min.js`)
 

@@ -6,11 +6,11 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use praxis_app_server_protocol::McpElicitationEnumSchema;
-use praxis_app_server_protocol::McpElicitationPrimitiveSchema;
-use praxis_app_server_protocol::McpElicitationSingleSelectEnumSchema;
-use praxis_app_server_protocol::McpServerElicitationRequest;
-use praxis_app_server_protocol::McpServerElicitationRequestParams;
+use praxis_app_gateway_protocol::McpElicitationEnumSchema;
+use praxis_app_gateway_protocol::McpElicitationPrimitiveSchema;
+use praxis_app_gateway_protocol::McpElicitationSingleSelectEnumSchema;
+use praxis_app_gateway_protocol::McpServerElicitationRequest;
+use praxis_app_gateway_protocol::McpServerElicitationRequestParams;
 use praxis_protocol::ThreadId;
 use praxis_protocol::approvals::ElicitationAction;
 use praxis_protocol::approvals::ElicitationRequest;
@@ -203,7 +203,7 @@ impl FooterTip {
 }
 
 impl McpServerElicitationFormRequest {
-    pub(crate) fn from_app_server_request(
+    pub(crate) fn from_app_gateway_request(
         thread_id: ThreadId,
         request_id: McpRequestId,
         request: McpServerElicitationRequestParams,

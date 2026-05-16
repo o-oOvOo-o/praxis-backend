@@ -1,6 +1,6 @@
-# Codex CLI (Rust Implementation)
+# Praxis CLI (Rust Implementation)
 
-We provide Codex CLI as a standalone, native executable to ensure a zero-dependency install.
+We provide Praxis CLI as a standalone, native executable to ensure a zero-dependency install.
 
 ## Installing Codex
 
@@ -20,7 +20,7 @@ You can also install via Homebrew (`brew install --cask codex`) or download a pl
 
 ## What's new in the Rust CLI
 
-The Rust implementation is now the maintained Codex CLI and serves as the default experience. It includes a number of features that the legacy TypeScript CLI never supported.
+The Rust implementation is now the maintained Praxis CLI and serves as the default experience. It includes a number of features that the legacy TypeScript CLI never supported.
 
 ### Config
 
@@ -30,7 +30,7 @@ Codex supports a rich set of configuration options. Note that the Rust CLI uses 
 
 #### MCP client
 
-Codex CLI functions as an MCP client that allows the Codex CLI and IDE extension to connect to MCP servers on startup. See the [`configuration documentation`](../docs/config.md#connecting-to-mcp-servers) for details.
+Praxis CLI functions as an MCP client that allows the Praxis CLI and IDE extension to connect to MCP servers on startup. See the [`configuration documentation`](../docs/config.md#connecting-to-mcp-servers) for details.
 
 #### MCP server (experimental)
 
@@ -48,14 +48,14 @@ Use `codex mcp` to add/list/get/remove MCP server launchers defined in `config.t
 
 You can enable notifications by configuring a script that is run whenever the agent finishes a turn. The [notify documentation](../docs/config.md#notify) includes a detailed example that explains how to get desktop notifications via [terminal-notifier](https://github.com/julienXX/terminal-notifier) on macOS. When Codex detects that it is running under WSL 2 inside Windows Terminal (`WT_SESSION` is set), the TUI automatically falls back to native Windows toast notifications so approval prompts and completed turns surface even though Windows Terminal does not implement OSC 9.
 
-### `codex exec` to run Codex programmatically/non-interactively
+### `praxis exec` to run Codex programmatically/non-interactively
 
-To run Codex non-interactively, run `codex exec PROMPT` (you can also pass the prompt via `stdin`) and Codex will work on your task until it decides that it is done and exits. If you provide both a prompt argument and piped stdin, Codex appends stdin as a `<stdin>` block after the prompt so patterns like `echo "my output" | codex exec "Summarize this concisely"` work naturally. Output is printed to the terminal directly. You can set the `RUST_LOG` environment variable to see more about what's going on.
-Use `codex exec --ephemeral ...` to run without persisting session rollout files to disk.
+To run Codex non-interactively, run `praxis exec PROMPT` (you can also pass the prompt via `stdin`) and Codex will work on your task until it decides that it is done and exits. If you provide both a prompt argument and piped stdin, Codex appends stdin as a `<stdin>` block after the prompt so patterns like `echo "my output" | praxis exec "Summarize this concisely"` work naturally. Output is printed to the terminal directly. You can set the `RUST_LOG` environment variable to see more about what's going on.
+Use `praxis exec --ephemeral ...` to run without persisting session rollout files to disk.
 
 ### Experimenting with the Codex Sandbox
 
-To test to see what happens when a command is run under the sandbox provided by Codex, we provide the following subcommands in Codex CLI:
+To test to see what happens when a command is run under the sandbox provided by Codex, we provide the following subcommands in Praxis CLI:
 
 ```
 # macOS

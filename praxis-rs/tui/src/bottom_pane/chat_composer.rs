@@ -55,7 +55,7 @@
 //! # Remote Image Rows (Up/Down/Delete)
 //!
 //! Remote image URLs are rendered as non-editable `[Image #N]` rows above the textarea (inside the
-//! same composer block). These rows represent image attachments rehydrated from app-server/backtrack
+//! same composer block). These rows represent image attachments rehydrated from app-gateway/backtrack
 //! history; TUI users can remove them, but cannot type into that row region.
 //!
 //! Keyboard behavior:
@@ -178,6 +178,7 @@ use crate::render::Insets;
 use crate::render::RectExt;
 use crate::render::renderable::Renderable;
 use crate::slash_command::SlashCommand;
+use crate::style::user_message_rule_style;
 use crate::style::user_message_style;
 use praxis_protocol::models::local_image_label_text;
 use praxis_protocol::user_input::ByteRange;
@@ -3706,7 +3707,10 @@ impl ChatComposer {
         let style = user_message_style();
         Block::default().style(style).render_ref(composer_rect, buf);
         if composer_rect.width > 0 {
-            let separator = Span::from("─".repeat(composer_rect.width as usize)).dim();
+            let separator = Span::styled(
+                "─".repeat(composer_rect.width as usize),
+                user_message_rule_style(),
+            );
             buf.set_span(
                 composer_rect.x,
                 composer_rect.y,

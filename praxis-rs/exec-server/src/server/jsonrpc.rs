@@ -1,8 +1,8 @@
-use praxis_app_server_protocol::JSONRPCError;
-use praxis_app_server_protocol::JSONRPCErrorError;
-use praxis_app_server_protocol::JSONRPCMessage;
-use praxis_app_server_protocol::JSONRPCResponse;
-use praxis_app_server_protocol::RequestId;
+use praxis_app_gateway_protocol::JSONRPCError;
+use praxis_app_gateway_protocol::JSONRPCErrorError;
+use praxis_app_gateway_protocol::JSONRPCMessage;
+use praxis_app_gateway_protocol::JSONRPCResponse;
+use praxis_app_gateway_protocol::RequestId;
 use serde_json::Value;
 
 pub(crate) fn invalid_request(message: String) -> JSONRPCErrorError {

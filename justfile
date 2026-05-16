@@ -10,7 +10,7 @@ alias c := codex
 codex *args:
     cargo run --bin codex -- "$@"
 
-# `codex exec`
+# `praxis exec`
 exec *args:
     cargo run --bin codex -- exec "$@"
 
@@ -23,10 +23,10 @@ tui-with-exec-server *args:
 file-search *args:
     cargo run --bin praxis-file-search -- "$@"
 
-# Build the CLI and run the app-server test client
-app-server-test-client *args:
+# Build the CLI and run the app-gateway test client
+app-gateway-test-client *args:
     cargo build -p praxis-cli
-    cargo run -p praxis-app-server-test-client -- --praxis-bin ./target/debug/codex "$@"
+    cargo run -p praxis-app-gateway-test-client -- --praxis-bin ./target/debug/praxis "$@"
 
 # format code
 fmt:
@@ -90,9 +90,9 @@ mcp-server-run *args:
 write-config-schema:
     cargo run -p praxis-core --bin praxis-write-config-schema
 
-# Regenerate vendored app-server protocol schema artifacts.
-write-app-server-schema *args:
-    cargo run -p praxis-app-server-protocol --bin write_schema_fixtures -- "$@"
+# Regenerate vendored app-gateway protocol schema artifacts.
+write-app-gateway-schema *args:
+    cargo run -p praxis-app-gateway-protocol --bin write_schema_fixtures -- "$@"
 
 [no-cd]
 write-hooks-schema:

@@ -408,7 +408,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "core_test_support",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-core",
  "praxis-features",
  "praxis-login",
@@ -5669,7 +5669,7 @@ name = "praxis-analytics"
 version = "0.0.0"
 dependencies = [
  "os_info",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-git-utils",
  "praxis-login",
  "praxis-plugin",
@@ -5722,7 +5722,75 @@ dependencies = [
 ]
 
 [[package]]
-name = "praxis-app-server"
+name = "praxis-app-gateway-client"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "praxis-app-gateway-native",
+ "praxis-app-gateway-protocol",
+ "praxis-arg0",
+ "praxis-core",
+ "praxis-feedback",
+ "praxis-protocol",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "toml 0.9.11+spec-1.1.0",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "praxis-app-gateway-core"
+version = "0.0.0"
+dependencies = [
+ "praxis-app-gateway-protocol",
+ "serde_json",
+]
+
+[[package]]
+name = "praxis-app-gateway-native"
+version = "0.0.0"
+dependencies = [
+ "praxis-app-gateway-core",
+ "praxis-app-gateway-protocol",
+ "praxis-app-gateway-runtime",
+ "praxis-arg0",
+ "praxis-core",
+ "praxis-feedback",
+ "praxis-protocol",
+ "toml 0.9.11+spec-1.1.0",
+]
+
+[[package]]
+name = "praxis-app-gateway-protocol"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "inventory",
+ "praxis-experimental-api-macros",
+ "praxis-git-utils",
+ "praxis-protocol",
+ "praxis-utils-absolute-path",
+ "pretty_assertions",
+ "rmcp",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "shlex",
+ "strum_macros 0.28.0",
+ "thiserror 2.0.18",
+ "tracing",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "praxis-app-gateway-runtime"
 version = "0.0.0"
 dependencies = [
  "anyhow",
@@ -5741,7 +5809,7 @@ dependencies = [
  "opentelemetry_sdk",
  "owo-colors",
  "praxis-analytics",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-arg0",
  "praxis-backend-client",
  "praxis-chatgpt",
@@ -5790,61 +5858,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "praxis-app-server-client"
+name = "praxis-app-gateway-service"
 version = "0.0.0"
 dependencies = [
- "futures",
- "praxis-app-server",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
+ "praxis-app-gateway-runtime",
  "praxis-arg0",
  "praxis-core",
- "praxis-feedback",
  "praxis-protocol",
- "pretty_assertions",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "toml 0.9.11+spec-1.1.0",
- "tracing",
- "url",
+ "praxis-utils-cli",
 ]
 
 [[package]]
-name = "praxis-app-server-protocol"
+name = "praxis-app-gateway-test-client"
 version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
- "inventory",
- "praxis-experimental-api-macros",
- "praxis-git-utils",
- "praxis-protocol",
- "praxis-utils-absolute-path",
- "praxis-utils-cargo-bin",
- "pretty_assertions",
- "rmcp",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_with",
- "shlex",
- "similar",
- "strum_macros 0.28.0",
- "tempfile",
- "thiserror 2.0.18",
- "tracing",
- "ts-rs",
- "uuid",
-]
-
-[[package]]
-name = "praxis-app-server-test-client"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-core",
  "praxis-otel",
  "praxis-protocol",
@@ -5954,9 +5985,9 @@ dependencies = [
  "clap_complete",
  "libc",
  "owo-colors",
- "praxis-app-server",
- "praxis-app-server-protocol",
- "praxis-app-server-test-client",
+ "praxis-app-gateway-protocol",
+ "praxis-app-gateway-service",
+ "praxis-app-gateway-test-client",
  "praxis-arg0",
  "praxis-chatgpt",
  "praxis-cloud-tasks",
@@ -6125,7 +6156,7 @@ dependencies = [
  "anyhow",
  "futures",
  "multimap",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-execpolicy",
  "praxis-protocol",
  "praxis-utils-absolute-path",
@@ -6149,7 +6180,7 @@ name = "praxis-connectors"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "pretty_assertions",
  "serde",
  "tokio",
@@ -6196,7 +6227,7 @@ dependencies = [
  "opentelemetry_sdk",
  "praxis-analytics",
  "praxis-api",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-apply-patch",
  "praxis-arg0",
  "praxis-async-utils",
@@ -6223,7 +6254,6 @@ dependencies = [
  "praxis-shell-command",
  "praxis-shell-escalation",
  "praxis-state",
- "praxis-terminal-detection",
  "praxis-tools",
  "praxis-utils-absolute-path",
  "praxis-utils-cache",
@@ -6284,7 +6314,7 @@ dependencies = [
  "dirs",
  "dunce",
  "praxis-analytics",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-config",
  "praxis-instructions",
  "praxis-login",
@@ -6311,7 +6341,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "pretty_assertions",
  "serde",
  "serde_json",
@@ -6329,8 +6359,8 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "owo-colors",
- "praxis-app-server-client",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-client",
+ "praxis-app-gateway-protocol",
  "praxis-apply-patch",
  "praxis-arg0",
  "praxis-cloud-requirements",
@@ -6370,7 +6400,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "futures",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-utils-absolute-path",
  "praxis-utils-cargo-bin",
  "praxis-utils-pty",
@@ -6511,6 +6541,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "praxis-host-sdk"
+version = "0.0.0"
+dependencies = [
+ "praxis-app-gateway-protocol",
+ "serde_json",
+]
+
+[[package]]
 name = "praxis-instructions"
 version = "0.0.0"
 dependencies = [
@@ -6575,7 +6613,7 @@ dependencies = [
  "keyring",
  "once_cell",
  "os_info",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-client",
  "praxis-config",
  "praxis-keyring-store",
@@ -6664,6 +6702,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "praxis-metra-gateway"
+version = "0.0.0"
+dependencies = [
+ "praxis-app-gateway-protocol",
+ "praxis-host-sdk",
+ "serde_json",
+]
+
+[[package]]
 name = "praxis-network-proxy"
 version = "0.0.0"
 dependencies = [
@@ -6727,7 +6774,7 @@ dependencies = [
  "opentelemetry_sdk",
  "os_info",
  "praxis-api",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-protocol",
  "praxis-utils-absolute-path",
  "praxis-utils-string",
@@ -6999,7 +7046,7 @@ dependencies = [
 name = "praxis-tools"
 version = "0.0.0"
 dependencies = [
- "praxis-app-server-protocol",
+ "praxis-app-gateway-protocol",
  "praxis-code-mode",
  "praxis-features",
  "praxis-protocol",
@@ -7033,12 +7080,11 @@ dependencies = [
  "insta",
  "itertools 0.14.0",
  "json5",
- "lazy_static",
  "libc",
  "pathdiff",
  "praxis-ansi-escape",
- "praxis-app-server-client",
- "praxis-app-server-protocol",
+ "praxis-app-gateway-client",
+ "praxis-app-gateway-protocol",
  "praxis-arg0",
  "praxis-chatgpt",
  "praxis-cli",
@@ -7092,6 +7138,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.9.11+spec-1.1.0",
+ "toml_edit 0.24.0+spec-1.1.0",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

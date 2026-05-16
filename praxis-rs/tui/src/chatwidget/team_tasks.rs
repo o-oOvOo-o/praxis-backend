@@ -9,7 +9,7 @@ use crate::turn_runtime::RuntimeTextCapitalization;
 impl ChatWidget {
     pub(super) fn on_team_updated_notification(
         &mut self,
-        notification: praxis_app_server_protocol::TeamUpdatedNotification,
+        notification: praxis_app_gateway_protocol::TeamUpdatedNotification,
     ) {
         if self
             .team_task_runtime
@@ -22,7 +22,7 @@ impl ChatWidget {
 
     pub(super) fn on_team_deleted_notification(
         &mut self,
-        notification: praxis_app_server_protocol::TeamDeletedNotification,
+        notification: praxis_app_gateway_protocol::TeamDeletedNotification,
     ) {
         if self
             .team_task_runtime
@@ -35,7 +35,7 @@ impl ChatWidget {
 
     pub(super) fn on_team_teammate_updated_notification(
         &mut self,
-        notification: praxis_app_server_protocol::TeamTeammateUpdatedNotification,
+        notification: praxis_app_gateway_protocol::TeamTeammateUpdatedNotification,
     ) {
         if self
             .team_task_runtime
@@ -48,7 +48,7 @@ impl ChatWidget {
 
     pub(super) fn on_team_task_updated_notification(
         &mut self,
-        notification: praxis_app_server_protocol::TeamTaskUpdatedNotification,
+        notification: praxis_app_gateway_protocol::TeamTaskUpdatedNotification,
     ) {
         if self
             .team_task_runtime

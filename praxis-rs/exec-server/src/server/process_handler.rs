@@ -1,4 +1,4 @@
-use praxis_app_server_protocol::JSONRPCErrorError;
+use praxis_app_gateway_protocol::JSONRPCErrorError;
 
 use crate::local_process::LocalProcess;
 use crate::protocol::ExecParams;

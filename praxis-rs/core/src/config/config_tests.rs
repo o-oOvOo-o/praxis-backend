@@ -3,7 +3,6 @@ use crate::config::edit::ConfigEditsBuilder;
 use crate::config::edit::apply_blocking;
 use crate::config_loader::RequirementSource;
 use crate::plugins::PluginsManager;
-use assert_matches::assert_matches;
 use praxis_config::CONFIG_TOML_FILE;
 use praxis_config::types::AppToolApproval;
 use praxis_config::types::ApprovalsReviewer;
@@ -14,9 +13,6 @@ use praxis_config::types::McpServerToolConfig;
 use praxis_config::types::McpServerTransportConfig;
 use praxis_config::types::MemoriesConfig;
 use praxis_config::types::MemoriesToml;
-use praxis_config::types::ModelAvailabilityNuxConfig;
-use praxis_config::types::NotificationMethod;
-use praxis_config::types::Notifications;
 use praxis_config::types::ToolSuggestDiscoverableType;
 use praxis_features::Feature;
 use praxis_features::FeaturesToml;
@@ -26,7 +22,6 @@ use praxis_protocol::permissions::FileSystemSandboxEntry;
 use praxis_protocol::permissions::FileSystemSandboxPolicy;
 use praxis_protocol::permissions::FileSystemSpecialPath;
 use praxis_protocol::permissions::NetworkSandboxPolicy;
-use serde::Deserialize;
 use tempfile::tempdir;
 
 use super::*;
@@ -38,6 +33,7 @@ use pretty_assertions::assert_eq;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+
 use std::path::Path;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -261,52 +257,6 @@ command = "print-token"
     assert!(
         err.to_string()
             .contains("model_providers.corp: provider auth cannot be combined with env_key")
-    );
-}
-
-#[test]
-fn config_toml_deserializes_model_availability_nux() {
-    let toml = r#"
-[tui.model_availability_nux]
-"gpt-foo" = 2
-"gpt-bar" = 4
-"#;
-    let cfg: ConfigToml =
-        toml::from_str(toml).expect("TOML deserialization should succeed for TUI NUX");
-
-    assert_eq!(
-        cfg.tui.expect("tui config should deserialize"),
-        Tui {
-            notifications: Notifications::default(),
-            notification_method: NotificationMethod::default(),
-            animations: true,
-            show_tooltips: true,
-            alternate_screen: AltScreenMode::default(),
-            status_line: None,
-            terminal_title: None,
-            theme: None,
-            model_availability_nux: ModelAvailabilityNuxConfig {
-                shown_count: HashMap::from([
-                    ("gpt-bar".to_string(), 4),
-                    ("gpt-foo".to_string(), 2),
-                ]),
-            },
-        }
-    );
-}
-
-#[test]
-fn runtime_config_defaults_model_availability_nux() {
-    let cfg = Config::load_from_base_config_with_overrides(
-        ConfigToml::default(),
-        ConfigOverrides::default(),
-        tempdir().expect("tempdir").path().to_path_buf(),
-    )
-    .expect("load config");
-
-    assert_eq!(
-        cfg.model_availability_nux,
-        ModelAvailabilityNuxConfig::default()
     );
 }
 
@@ -937,54 +887,6 @@ fn permissions_profiles_allow_network_enablement() -> std::io::Result<()> {
             .has_full_network_access()
     );
     Ok(())
-}
-
-#[test]
-fn tui_theme_deserializes_from_toml() {
-    let cfg = r#"
-[tui]
-theme = "dracula"
-"#;
-    let parsed = toml::from_str::<ConfigToml>(cfg).expect("TOML deserialization should succeed");
-    assert_eq!(
-        parsed.tui.as_ref().and_then(|t| t.theme.as_deref()),
-        Some("dracula"),
-    );
-}
-
-#[test]
-fn tui_theme_defaults_to_none() {
-    let cfg = r#"
-[tui]
-"#;
-    let parsed = toml::from_str::<ConfigToml>(cfg).expect("TOML deserialization should succeed");
-    assert_eq!(parsed.tui.as_ref().and_then(|t| t.theme.as_deref()), None);
-}
-
-#[test]
-fn tui_config_missing_notifications_field_defaults_to_enabled() {
-    let cfg = r#"
-[tui]
-"#;
-
-    let parsed =
-        toml::from_str::<ConfigToml>(cfg).expect("TUI config without notifications should succeed");
-    let tui = parsed.tui.expect("config should include tui section");
-
-    assert_eq!(
-        tui,
-        Tui {
-            notifications: Notifications::Enabled(true),
-            notification_method: NotificationMethod::Auto,
-            animations: true,
-            show_tooltips: true,
-            alternate_screen: AltScreenMode::Auto,
-            status_line: None,
-            terminal_title: None,
-            theme: None,
-            model_availability_nux: ModelAvailabilityNuxConfig::default(),
-        }
-    );
 }
 
 #[test]
@@ -4517,18 +4419,9 @@ fn test_precedence_fixture_with_o3_profile() -> std::io::Result<()> {
             notices: Default::default(),
             check_for_update_on_startup: true,
             disable_paste_burst: false,
-            tui_notifications: Default::default(),
-            tui_notification_method: Default::default(),
-            animations: true,
-            show_tooltips: true,
-            model_availability_nux: ModelAvailabilityNuxConfig::default(),
             analytics_enabled: Some(true),
             feedback_enabled: true,
             tool_suggest: ToolSuggestConfig::default(),
-            tui_alternate_screen: AltScreenMode::Auto,
-            tui_status_line: None,
-            tui_terminal_title: None,
-            tui_theme: None,
             otel: OtelConfig::default(),
         },
         o3_profile_config
@@ -4659,18 +4552,9 @@ fn test_precedence_fixture_with_gpt3_profile() -> std::io::Result<()> {
         notices: Default::default(),
         check_for_update_on_startup: true,
         disable_paste_burst: false,
-        tui_notifications: Default::default(),
-        tui_notification_method: Default::default(),
-        animations: true,
-        show_tooltips: true,
-        model_availability_nux: ModelAvailabilityNuxConfig::default(),
         analytics_enabled: Some(true),
         feedback_enabled: true,
         tool_suggest: ToolSuggestConfig::default(),
-        tui_alternate_screen: AltScreenMode::Auto,
-        tui_status_line: None,
-        tui_terminal_title: None,
-        tui_theme: None,
         otel: OtelConfig::default(),
     };
 
@@ -4799,18 +4683,9 @@ fn test_precedence_fixture_with_zdr_profile() -> std::io::Result<()> {
         notices: Default::default(),
         check_for_update_on_startup: true,
         disable_paste_burst: false,
-        tui_notifications: Default::default(),
-        tui_notification_method: Default::default(),
-        animations: true,
-        show_tooltips: true,
-        model_availability_nux: ModelAvailabilityNuxConfig::default(),
         analytics_enabled: Some(false),
         feedback_enabled: true,
         tool_suggest: ToolSuggestConfig::default(),
-        tui_alternate_screen: AltScreenMode::Auto,
-        tui_status_line: None,
-        tui_terminal_title: None,
-        tui_theme: None,
         otel: OtelConfig::default(),
     };
 
@@ -4925,18 +4800,9 @@ fn test_precedence_fixture_with_gpt5_profile() -> std::io::Result<()> {
         notices: Default::default(),
         check_for_update_on_startup: true,
         disable_paste_burst: false,
-        tui_notifications: Default::default(),
-        tui_notification_method: Default::default(),
-        animations: true,
-        show_tooltips: true,
-        model_availability_nux: ModelAvailabilityNuxConfig::default(),
         analytics_enabled: Some(true),
         feedback_enabled: true,
         tool_suggest: ToolSuggestConfig::default(),
-        tui_alternate_screen: AltScreenMode::Auto,
-        tui_status_line: None,
-        tui_terminal_title: None,
-        tui_theme: None,
         otel: OtelConfig::default(),
     };
 
@@ -6241,51 +6107,4 @@ speaker = "Desk Speakers"
         Some("Desk Speakers")
     );
     Ok(())
-}
-
-#[derive(Deserialize, Debug, PartialEq)]
-struct TuiTomlTest {
-    #[serde(default)]
-    notifications: Notifications,
-    #[serde(default)]
-    notification_method: NotificationMethod,
-}
-
-#[derive(Deserialize, Debug, PartialEq)]
-struct RootTomlTest {
-    tui: TuiTomlTest,
-}
-
-#[test]
-fn test_tui_notifications_true() {
-    let toml = r#"
-            [tui]
-            notifications = true
-        "#;
-    let parsed: RootTomlTest = toml::from_str(toml).expect("deserialize notifications=true");
-    assert_matches!(parsed.tui.notifications, Notifications::Enabled(true));
-}
-
-#[test]
-fn test_tui_notifications_custom_array() {
-    let toml = r#"
-            [tui]
-            notifications = ["foo"]
-        "#;
-    let parsed: RootTomlTest = toml::from_str(toml).expect("deserialize notifications=[\"foo\"]");
-    assert_matches!(
-        parsed.tui.notifications,
-        Notifications::Custom(ref v) if v == &vec!["foo".to_string()]
-    );
-}
-
-#[test]
-fn test_tui_notification_method() {
-    let toml = r#"
-            [tui]
-            notification_method = "bel"
-        "#;
-    let parsed: RootTomlTest =
-        toml::from_str(toml).expect("deserialize notification_method=\"bel\"");
-    assert_eq!(parsed.tui.notification_method, NotificationMethod::Bel);
 }

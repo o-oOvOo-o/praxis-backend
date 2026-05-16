@@ -253,6 +253,11 @@ impl BottomPane {
         self.request_redraw();
     }
 
+    pub fn set_animations_enabled(&mut self, enabled: bool) {
+        self.animations_enabled = enabled;
+        self.request_redraw();
+    }
+
     /// Update image-paste behavior for the active composer and repaint immediately.
     ///
     /// Callers use this to keep composer affordances aligned with model capabilities.

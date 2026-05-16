@@ -51,6 +51,7 @@ use std::time::Duration;
 use tracing::warn;
 
 mod agent_jobs;
+mod agent_os;
 mod backfill;
 mod logs;
 mod memories;
@@ -122,6 +123,9 @@ impl StateRuntime {
             praxis_home,
             default_provider,
         });
+        if let Err(err) = runtime.backfill_thread_source_columns().await {
+            warn!("failed to backfill thread source kind columns: {err}");
+        }
         if let Err(err) = runtime.run_logs_startup_maintenance().await {
             warn!(
                 "failed to run startup maintenance for logs db at {}: {err}",

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::RolloutRecorder;
 use crate::SkillsManager;
 use crate::agent::AgentControl;
+use crate::agent_os::AgentOsRuntime;
 use crate::client::ModelRuntimeRegistry;
 use crate::config::StartedNetworkProxy;
 use crate::exec_policy::ExecPolicyManager;
@@ -30,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 pub(crate) struct SessionServices {
     pub(crate) mcp_connection_manager: Arc<RwLock<McpConnectionManager>>,
     pub(crate) mcp_startup_cancellation_token: Mutex<CancellationToken>,
-    pub(crate) unified_exec_manager: UnifiedExecProcessManager,
+    pub(crate) unified_exec_manager: Arc<UnifiedExecProcessManager>,
     #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) shell_zsh_path: Option<PathBuf>,
     #[cfg_attr(not(unix), allow(dead_code))]
@@ -51,6 +52,7 @@ pub(crate) struct SessionServices {
     pub(crate) mcp_manager: Arc<McpManager>,
     pub(crate) skills_watcher: Arc<SkillsWatcher>,
     pub(crate) agent_control: AgentControl,
+    pub(crate) agent_os: Arc<AgentOsRuntime>,
     pub(crate) network_proxy: Option<StartedNetworkProxy>,
     pub(crate) network_approval: Arc<NetworkApprovalService>,
     pub(crate) state_db: Option<StateDbHandle>,

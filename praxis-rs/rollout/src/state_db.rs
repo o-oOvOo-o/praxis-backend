@@ -15,18 +15,148 @@ pub use praxis_state::LogEntry;
 use praxis_state::ThreadMetadataBuilder;
 use praxis_utils_path::normalize_for_path_comparison;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+use std::sync::MutexGuard as StdMutexGuard;
+use std::sync::OnceLock;
+use std::sync::RwLock;
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::warn;
 use uuid::Uuid;
 
 /// Core-facing handle to the SQLite-backed state runtime.
 pub type StateDbHandle = Arc<praxis_state::StateRuntime>;
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct StateDbKey {
+    sqlite_home: PathBuf,
+    model_provider_id: String,
+}
+
+struct StateDbCacheEntry {
+    runtime: OnceLock<StateDbHandle>,
+    init_lock: AsyncMutex<()>,
+}
+
+impl StateDbCacheEntry {
+    fn new() -> Self {
+        Self {
+            runtime: OnceLock::new(),
+            init_lock: AsyncMutex::new(()),
+        }
+    }
+}
+
+fn runtime_cache() -> &'static RwLock<HashMap<StateDbKey, Arc<StateDbCacheEntry>>> {
+    static CACHE: OnceLock<RwLock<HashMap<StateDbKey, Arc<StateDbCacheEntry>>>> = OnceLock::new();
+    CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn backfill_checked_homes() -> &'static StdMutex<HashSet<PathBuf>> {
+    static CHECKED: OnceLock<StdMutex<HashSet<PathBuf>>> = OnceLock::new();
+    CHECKED.get_or_init(|| StdMutex::new(HashSet::new()))
+}
+
+fn lock_no_poison<T>(mutex: &StdMutex<T>) -> StdMutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn runtime_cache_entry(key: StateDbKey) -> Arc<StateDbCacheEntry> {
+    if let Some(entry) = {
+        let cache = match runtime_cache().read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        cache.get(&key).cloned()
+    } {
+        return entry;
+    }
+
+    let mut cache = match runtime_cache().write() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    cache
+        .entry(key)
+        .or_insert_with(|| Arc::new(StateDbCacheEntry::new()))
+        .clone()
+}
+
 /// Initialize the state runtime for thread state persistence and backfill checks.
 pub async fn init(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
+    get_state_db(config).await
+}
+
+/// Get the process-cached state runtime without starting rollout metadata backfill.
+pub async fn get_state_runtime(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
     let config = RolloutConfig::from_view(config);
+    get_or_init_runtime(&config).await
+}
+
+/// Get the process-cached state DB, creating it when needed.
+pub async fn get_state_db(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
+    let config = RolloutConfig::from_view(config);
+    let runtime = get_or_init_runtime(&config).await?;
+    ensure_backfill_started(runtime.clone(), config).await;
+    Some(runtime)
+}
+
+/// Return whether rollout metadata backfill is complete for this runtime.
+pub async fn is_backfill_complete(
+    context: Option<&praxis_state::StateRuntime>,
+    stage: &str,
+) -> Option<bool> {
+    let ctx = context?;
+    match ctx.get_backfill_state().await {
+        Ok(state) => Some(state.status == praxis_state::BackfillStatus::Complete),
+        Err(err) => {
+            warn!("state db get_backfill_state failed during {stage}: {err}");
+            None
+        }
+    }
+}
+
+/// Open the state runtime when the SQLite file exists, without feature gating.
+///
+/// This is used for parity checks during the SQLite migration phase.
+pub async fn open_if_present(praxis_home: &Path, default_provider: &str) -> Option<StateDbHandle> {
+    let db_path = praxis_state::state_db_path(praxis_home);
+    if !tokio::fs::try_exists(&db_path).await.unwrap_or(false) {
+        return None;
+    }
+    let config = RolloutConfig {
+        praxis_home: praxis_home.to_path_buf(),
+        sqlite_home: praxis_home.to_path_buf(),
+        cwd: praxis_home.to_path_buf(),
+        model_provider_id: default_provider.to_string(),
+        generate_memories: false,
+    };
+    get_or_init_runtime(&config).await
+}
+
+async fn get_or_init_runtime(config: &RolloutConfig) -> Option<StateDbHandle> {
+    let key = StateDbKey {
+        sqlite_home: config.sqlite_home.clone(),
+        model_provider_id: config.model_provider_id.clone(),
+    };
+    let entry = runtime_cache_entry(key);
+
+    if let Some(runtime) = entry.runtime.get() {
+        return Some(runtime.clone());
+    }
+
+    let _init_guard = entry.init_lock.lock().await;
+    if let Some(runtime) = entry.runtime.get() {
+        return Some(runtime.clone());
+    }
+
     let runtime = match praxis_state::StateRuntime::init(
         config.sqlite_home.clone(),
         config.model_provider_id.clone(),
@@ -42,6 +172,21 @@ pub async fn init(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
             return None;
         }
     };
+    if entry.runtime.set(runtime.clone()).is_err() {
+        return entry.runtime.get().cloned();
+    }
+    Some(runtime)
+}
+
+async fn ensure_backfill_started(runtime: StateDbHandle, config: RolloutConfig) {
+    let key = config.sqlite_home.clone();
+    {
+        let mut checked = lock_no_poison(backfill_checked_homes());
+        if !checked.insert(key.clone()) {
+            return;
+        }
+    }
+
     let backfill_state = match runtime.get_backfill_state().await {
         Ok(state) => state,
         Err(err) => {
@@ -49,71 +194,26 @@ pub async fn init(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
                 "failed to read backfill state at {}: {err}",
                 config.praxis_home.display()
             );
-            return None;
+            lock_no_poison(backfill_checked_homes()).remove(&key);
+            return;
         }
     };
-    if backfill_state.status != praxis_state::BackfillStatus::Complete {
-        let runtime_for_backfill = runtime.clone();
-        let config = config.clone();
-        tokio::spawn(async move {
+    let backfill_sessions = backfill_state.status != praxis_state::BackfillStatus::Complete;
+
+    let runtime_for_backfill = runtime.clone();
+    tokio::spawn(async move {
+        if backfill_sessions {
             metadata::backfill_sessions(runtime_for_backfill.as_ref(), &config).await;
-        });
-    }
-    Some(runtime)
-}
-
-/// Get the DB if the feature is enabled and the DB exists.
-pub async fn get_state_db(config: &impl RolloutConfigView) -> Option<StateDbHandle> {
-    let state_path = praxis_state::state_db_path(config.sqlite_home());
-    if !tokio::fs::try_exists(&state_path).await.unwrap_or(false) {
-        return None;
-    }
-    let runtime = praxis_state::StateRuntime::init(
-        config.sqlite_home().to_path_buf(),
-        config.model_provider_id().to_string(),
-    )
-    .await
-    .ok()?;
-    require_backfill_complete(runtime, config.sqlite_home()).await
-}
-
-/// Open the state runtime when the SQLite file exists, without feature gating.
-///
-/// This is used for parity checks during the SQLite migration phase.
-pub async fn open_if_present(praxis_home: &Path, default_provider: &str) -> Option<StateDbHandle> {
-    let db_path = praxis_state::state_db_path(praxis_home);
-    if !tokio::fs::try_exists(&db_path).await.unwrap_or(false) {
-        return None;
-    }
-    let runtime =
-        praxis_state::StateRuntime::init(praxis_home.to_path_buf(), default_provider.to_string())
+        }
+        let complete = runtime_for_backfill
+            .get_backfill_state()
             .await
-            .ok()?;
-    require_backfill_complete(runtime, praxis_home).await
-}
-
-async fn require_backfill_complete(
-    runtime: StateDbHandle,
-    praxis_home: &Path,
-) -> Option<StateDbHandle> {
-    match runtime.get_backfill_state().await {
-        Ok(state) if state.status == praxis_state::BackfillStatus::Complete => Some(runtime),
-        Ok(state) => {
-            warn!(
-                "state db backfill not complete at {} (status: {})",
-                praxis_home.display(),
-                state.status.as_str()
-            );
-            None
+            .map(|state| state.status == praxis_state::BackfillStatus::Complete)
+            .unwrap_or(false);
+        if !complete {
+            lock_no_poison(backfill_checked_homes()).remove(&key);
         }
-        Err(err) => {
-            warn!(
-                "failed to read backfill state at {}: {err}",
-                praxis_home.display()
-            );
-            None
-        }
-    }
+    });
 }
 
 fn cursor_to_anchor(cursor: Option<&Cursor>) -> Option<praxis_state::Anchor> {
@@ -203,8 +303,10 @@ pub async fn list_threads_db(
     cursor: Option<&Cursor>,
     sort_key: ThreadSortKey,
     allowed_sources: &[SessionSource],
+    source_kinds: Option<&[praxis_state::ThreadSourceKind]>,
     model_providers: Option<&[String]>,
     archived: bool,
+    cwd: Option<&Path>,
     search_term: Option<&str>,
 ) -> Option<praxis_state::ThreadsPage> {
     let ctx = context?;
@@ -226,6 +328,9 @@ pub async fn list_threads_db(
         })
         .collect();
     let model_providers = model_providers.map(<[String]>::to_vec);
+    let cwd = cwd
+        .map(normalize_cwd_for_state_db)
+        .map(|path| path.display().to_string());
     match ctx
         .list_threads(
             page_size,
@@ -235,8 +340,10 @@ pub async fn list_threads_db(
                 ThreadSortKey::UpdatedAt => praxis_state::SortKey::UpdatedAt,
             },
             allowed_sources.as_slice(),
+            source_kinds,
             model_providers.as_deref(),
             archived,
+            cwd.as_deref(),
             search_term,
         )
         .await

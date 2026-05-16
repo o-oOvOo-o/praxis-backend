@@ -8,7 +8,7 @@ mod tests;
 use crate::config::ConfigToml;
 use crate::config_loader::layer_io::LoadedConfigLayers;
 use dunce::canonicalize as normalize_path;
-use praxis_app_server_protocol::ConfigLayerSource;
+use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::CONFIG_TOML_FILE;
 use praxis_config::ConfigRequirementsWithSources;
 use praxis_git_utils::resolve_root_git_project_for_trust;
@@ -114,7 +114,7 @@ pub(crate) async fn first_layer_config_error_from_entries(
 ///
 /// When loading the config stack for a thread, there should be a `cwd`
 /// associated with it such that `cwd` should be `Some(...)`. Only for
-/// thread-agnostic config loading (e.g., for the app server's `/config`
+/// thread-agnostic config loading (e.g., for the app gateway's `/config`
 /// endpoint) should `cwd` be `None`.
 pub async fn load_config_layers_state(
     praxis_home: &Path,

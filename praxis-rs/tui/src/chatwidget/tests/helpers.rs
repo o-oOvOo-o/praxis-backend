@@ -133,6 +133,7 @@ pub(super) fn test_model_catalog(config: &Config) -> Arc<ModelCatalog> {
     };
     Arc::new(ModelCatalog::new(
         praxis_core::test_support::all_model_presets().clone(),
+        HashMap::new(),
         collaboration_modes_config,
     ))
 }
@@ -157,6 +158,7 @@ pub(super) async fn make_chatwidget_manual(
     }
     let prevent_idle_sleep = cfg.features.enabled(Feature::PreventIdleSleep);
     let session_telemetry = test_session_telemetry(&cfg, resolved_model.as_str());
+    let tui_config = TuiRuntimeConfig::default();
     let mut bottom = BottomPane::new(BottomPaneParams {
         app_event_tx: app_event_tx.clone(),
         frame_requester: FrameRequester::test_dummy(),
@@ -164,7 +166,7 @@ pub(super) async fn make_chatwidget_manual(
         enhanced_keys_supported: false,
         placeholder_text: "Ask Praxis to do anything".to_string(),
         disable_paste_burst: false,
-        animations_enabled: cfg.animations,
+        animations_enabled: tui_config.animations,
         skills: None,
     });
     bottom.set_collaboration_modes_enabled(/*enabled*/ true);
@@ -186,8 +188,11 @@ pub(super) async fn make_chatwidget_manual(
         bottom_pane: bottom,
         active_cell: None,
         active_cell_revision: 0,
+        work_panel: WorkPanelState::default(),
         transcript_search: TranscriptSearchState::default(),
+        transcript_search_document_cache: None,
         config: cfg,
+        tui_config,
         current_collaboration_mode,
         active_collaboration_mask,
         has_chatgpt_account: false,

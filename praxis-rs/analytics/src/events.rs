@@ -9,7 +9,7 @@ use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AppServerRpcTransport {
+pub enum AppGatewayRpcTransport {
     Stdio,
     Websocket,
     InProcess,
@@ -61,11 +61,11 @@ pub(crate) struct SkillInvocationEventParams {
 }
 
 #[derive(Clone, Serialize)]
-pub(crate) struct PraxisAppServerClientMetadata {
+pub(crate) struct PraxisAppGatewayClientMetadata {
     pub(crate) product_client_id: String,
     pub(crate) client_name: Option<String>,
     pub(crate) client_version: Option<String>,
-    pub(crate) rpc_transport: AppServerRpcTransport,
+    pub(crate) rpc_transport: AppGatewayRpcTransport,
     pub(crate) experimental_api_enabled: Option<bool>,
 }
 
@@ -80,7 +80,7 @@ pub(crate) struct PraxisRuntimeMetadata {
 #[derive(Serialize)]
 pub(crate) struct ThreadInitializedEventParams {
     pub(crate) thread_id: String,
-    pub(crate) app_server_client: PraxisAppServerClientMetadata,
+    pub(crate) app_gateway_client: PraxisAppGatewayClientMetadata,
     pub(crate) runtime: PraxisRuntimeMetadata,
     pub(crate) model: String,
     pub(crate) ephemeral: bool,
@@ -213,7 +213,10 @@ pub(crate) fn praxis_plugin_used_metadata(
 
 pub(crate) fn thread_source_name(thread_source: &SessionSource) -> Option<&'static str> {
     match thread_source {
-        SessionSource::Cli | SessionSource::VSCode | SessionSource::Exec => Some("user"),
+        SessionSource::Cli
+        | SessionSource::VSCode
+        | SessionSource::Exec
+        | SessionSource::AppGateway => Some("user"),
         SessionSource::SubAgent(_) => Some("subagent"),
         SessionSource::Mcp | SessionSource::Custom(_) | SessionSource::Unknown => None,
     }

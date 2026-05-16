@@ -20,7 +20,6 @@ use crate::exec_cell::spinner;
 use crate::exec_command::relativize_to_home;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_presentation::FoldCategory;
-use crate::history_presentation::HistoryPresentationKey;
 use crate::live_wrap::take_prefix_by_width;
 use crate::markdown::append_markdown;
 use crate::render::line_utils::line_to_static;
@@ -34,6 +33,7 @@ use crate::test_support::PathBufExt;
 use crate::text_formatting::format_and_truncate_tool_result;
 use crate::text_formatting::format_json_compact;
 use crate::text_formatting::truncate_text;
+use crate::tui_config::TuiRuntimeConfig;
 use crate::ui_consts::LIVE_PREFIX_COLS;
 use crate::update_action::UpdateAction;
 use crate::version::PRAXIS_CLI_VERSION;
@@ -45,7 +45,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use image::DynamicImage;
 use image::ImageReader;
-use praxis_app_server_protocol::McpServerStatus;
+use praxis_app_gateway_protocol::McpServerStatus;
 use praxis_config::types::McpServerTransportConfig;
 use praxis_core::config::Config;
 #[cfg(test)]
@@ -75,7 +75,6 @@ use praxis_protocol::protocol::SessionConfiguredEvent;
 use praxis_protocol::request_user_input::RequestUserInputAnswer;
 use praxis_protocol::request_user_input::RequestUserInputQuestion;
 use praxis_protocol::user_input::TextElement;
-use praxis_rollout::session_index::SessionIndexEntry;
 use praxis_utils_cli::format_env_display::format_env_display;
 use ratatui::prelude::*;
 use ratatui::style::Color;
@@ -113,14 +112,6 @@ use unicode_width::UnicodeWidthStr;
 pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// Returns the logical lines for the main chat viewport.
     fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
-
-    /// Returns a stable presentation key for fold/cache state.
-    ///
-    /// Cells that opt into independent presentation state should provide a key
-    /// derived from stable cell identity or content.
-    fn presentation_key(&self) -> Option<HistoryPresentationKey> {
-        None
-    }
 
     /// Returns the logical lines that should be committed into scrollback history.
     ///
@@ -238,22 +229,6 @@ impl HistoryCellMouseTarget {
 pub(crate) const REASONING_TOGGLE_KEY_HINT: &str = "F6";
 pub(crate) const TOOL_OUTPUT_TOGGLE_KEY_HINT: &str = "F7";
 pub(crate) const DIFF_TOGGLE_KEY_HINT: &str = "F8";
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct HistoryPresentationState {
-    pub(crate) reasoning_expanded: bool,
-    pub(crate) tool_output_expanded: bool,
-    pub(crate) diff_expanded: bool,
-}
-
-pub(crate) fn history_presentation_state() -> HistoryPresentationState {
-    let state = crate::history_presentation::history_presentation_state();
-    HistoryPresentationState {
-        reasoning_expanded: state.reasoning_expanded,
-        tool_output_expanded: state.tool_output_expanded,
-        diff_expanded: state.diff_expanded,
-    }
-}
 
 pub(crate) fn history_presentation_revision() -> u64 {
     crate::history_presentation::history_presentation_revision()
@@ -563,26 +538,12 @@ impl ReasoningSummaryCell {
 
     fn lines(&self, width: u16) -> Vec<Line<'static>> {
         let expanded_lines = self.expanded_lines(width);
-        let expanded = crate::history_presentation::is_expanded(
-            Some(self.presentation_key_value()),
-            FoldCategory::Reasoning,
-        );
+        let expanded = crate::history_presentation::is_expanded(FoldCategory::Reasoning);
         if expanded || expanded_lines.is_empty() {
             expanded_lines
         } else {
             self.collapsed_lines(width, expanded_lines.len())
         }
-    }
-
-    fn presentation_key_value(&self) -> HistoryPresentationKey {
-        HistoryPresentationKey::from_hash(
-            "reasoning",
-            &(
-                self.header.as_str(),
-                self.content.as_str(),
-                self.cwd.as_os_str(),
-            ),
-        )
     }
 }
 
@@ -597,10 +558,6 @@ impl HistoryCell for ReasoningSummaryCell {
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
         self.lines(width)
-    }
-
-    fn presentation_key(&self) -> Option<HistoryPresentationKey> {
-        Some(self.presentation_key_value())
     }
 }
 
@@ -1143,10 +1100,7 @@ pub(crate) struct PatchHistoryCell {
 impl HistoryCell for PatchHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let lines = create_diff_summary(&self.changes, &self.cwd, width as usize);
-        let expanded = crate::history_presentation::is_expanded(
-            Some(self.presentation_key_value()),
-            FoldCategory::Diff,
-        );
+        let expanded = crate::history_presentation::is_expanded(FoldCategory::Diff);
         if expanded || lines.len() <= 1 {
             return lines;
         }
@@ -1160,22 +1114,6 @@ impl HistoryCell for PatchHistoryCell {
                 format!(" · {DIFF_TOGGLE_KEY_HINT} expand").dim(),
             ]),
         ]
-    }
-
-    fn presentation_key(&self) -> Option<HistoryPresentationKey> {
-        Some(self.presentation_key_value())
-    }
-}
-
-impl PatchHistoryCell {
-    fn presentation_key_value(&self) -> HistoryPresentationKey {
-        let mut paths = self
-            .changes
-            .keys()
-            .map(|path| path.as_os_str())
-            .collect::<Vec<_>>();
-        paths.sort();
-        HistoryPresentationKey::from_hash("diff", &(self.cwd.as_os_str(), paths))
     }
 }
 
@@ -1289,6 +1227,7 @@ impl HistoryCell for SessionInfoCell {
 
 pub(crate) fn new_session_info(
     config: &Config,
+    tui_config: &TuiRuntimeConfig,
     requested_model: &str,
     event: SessionConfiguredEvent,
     is_first_event: bool,
@@ -1303,7 +1242,7 @@ pub(crate) fn new_session_info(
         ..
     } = event;
     // Header box rendered as history (so it appears at the very top)
-    let mut header = if config.animations {
+    let mut header = if tui_config.animations {
         SessionHeaderHistoryCell::new_animated(
             model.clone(),
             reasoning_effort,
@@ -1320,7 +1259,7 @@ pub(crate) fn new_session_info(
             PRAXIS_CLI_VERSION,
         )
     };
-    header.set_startup_notice(if !is_first_event && config.show_tooltips {
+    header.set_startup_notice(if !is_first_event && tui_config.show_tooltips {
         tooltip_override.clone()
     } else {
         None
@@ -1518,14 +1457,13 @@ impl SessionHeaderHistoryCell {
 
     pub(crate) fn apply_startup_context(
         &mut self,
-        praxis_home: &Path,
-        current_session_id: Option<ThreadId>,
+        _praxis_home: &Path,
+        _current_session_id: Option<ThreadId>,
         auth_plan: Option<PlanType>,
-        recent_activity_limit: usize,
+        _recent_activity_limit: usize,
     ) {
         self.billing_label = plan_type_display(auth_plan);
-        self.recent_activity =
-            Self::load_recent_activity(praxis_home, current_session_id, recent_activity_limit);
+        self.recent_activity = Vec::new();
     }
 
     pub(crate) fn set_startup_notice(&mut self, notice: Option<String>) {
@@ -2198,47 +2136,6 @@ impl SessionHeaderHistoryCell {
         "0s ago".to_string()
     }
 
-    fn load_recent_activity(
-        praxis_home: &Path,
-        current_session_id: Option<ThreadId>,
-        limit: usize,
-    ) -> Vec<StartupRecentActivity> {
-        let path = praxis_home.join("session_index.jsonl");
-        let Ok(contents) = std::fs::read_to_string(path) else {
-            return Vec::new();
-        };
-
-        let mut latest_entries: HashMap<ThreadId, SessionIndexEntry> = HashMap::new();
-        for line in contents.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let Ok(entry) = serde_json::from_str::<SessionIndexEntry>(trimmed) else {
-                continue;
-            };
-            if entry.thread_name.trim().is_empty() || Some(entry.id) == current_session_id {
-                continue;
-            }
-            latest_entries.insert(entry.id, entry);
-        }
-
-        let mut items = latest_entries
-            .into_values()
-            .map(|entry| StartupRecentActivity {
-                thread_id: entry.id,
-                title: entry.thread_name,
-                updated_at: DateTime::parse_from_rfc3339(&entry.updated_at)
-                    .ok()
-                    .map(|ts| ts.with_timezone(&Utc)),
-            })
-            .collect::<Vec<_>>();
-        items.sort_by_key(|item| item.updated_at);
-        items.reverse();
-        items.truncate(limit);
-        items
-    }
-
     fn puppy_logo_lines(inner_width: usize, frame: PuppyAnimationFrame) -> Vec<Line<'static>> {
         if inner_width < 9 {
             return Vec::new();
@@ -2640,10 +2537,7 @@ impl HistoryCell for McpToolCallCell {
             lines.extend(prefix_lines(body_lines, "  └ ".dim(), "    ".into()));
         }
 
-        let expanded = crate::history_presentation::is_expanded(
-            self.presentation_key(),
-            FoldCategory::ToolOutput,
-        );
+        let expanded = crate::history_presentation::is_expanded(FoldCategory::ToolOutput);
         let detail_lines = self.detail_lines(width, expanded);
 
         if !detail_lines.is_empty() {
@@ -2676,17 +2570,6 @@ impl HistoryCell for McpToolCallCell {
             return None;
         }
         Some((self.start_time.elapsed().as_millis() / 50) as u64)
-    }
-
-    fn presentation_key(&self) -> Option<HistoryPresentationKey> {
-        Some(HistoryPresentationKey::from_hash(
-            "tool-output",
-            &(
-                self.call_id.as_str(),
-                self.invocation.server.as_str(),
-                self.invocation.tool.as_str(),
-            ),
-        ))
     }
 }
 
@@ -3075,9 +2958,9 @@ pub(crate) fn new_mcp_tools_output(
     PlainHistoryCell { lines }
 }
 
-/// Build the `/mcp` history cell from app-server `McpServerStatus` responses.
+/// Build the `/mcp` history cell from app-gateway `McpServerStatus` responses.
 ///
-/// The server list comes directly from the app-server status response, sorted
+/// The server list comes directly from the app-gateway status response, sorted
 /// alphabetically. Local config is only used to enrich returned servers with
 /// transport details such as command, URL, cwd, and environment display.
 ///
@@ -3116,16 +2999,16 @@ pub(crate) fn new_mcp_tools_output_from_statuses(
         lines.push(header.into());
         let auth_status = status
             .map(|status| match status.auth_status {
-                praxis_app_server_protocol::McpAuthStatus::Unsupported => {
+                praxis_app_gateway_protocol::McpAuthStatus::Unsupported => {
                     McpAuthStatus::Unsupported
                 }
-                praxis_app_server_protocol::McpAuthStatus::NotLoggedIn => {
+                praxis_app_gateway_protocol::McpAuthStatus::NotLoggedIn => {
                     McpAuthStatus::NotLoggedIn
                 }
-                praxis_app_server_protocol::McpAuthStatus::BearerToken => {
+                praxis_app_gateway_protocol::McpAuthStatus::BearerToken => {
                     McpAuthStatus::BearerToken
                 }
-                praxis_app_server_protocol::McpAuthStatus::OAuth => McpAuthStatus::OAuth,
+                praxis_app_gateway_protocol::McpAuthStatus::OAuth => McpAuthStatus::OAuth,
             })
             .unwrap_or(McpAuthStatus::Unsupported);
         lines.push(vec!["    • Auth: ".into(), auth_status.to_string().into()].into());
@@ -3905,13 +3788,18 @@ mod tests {
     const SMALL_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
     async fn test_config() -> Config {
         let praxis_home = std::env::temp_dir();
-        let mut config = ConfigBuilder::default()
+        ConfigBuilder::default()
             .praxis_home(praxis_home.clone())
             .build()
             .await
-            .expect("config");
-        config.animations = false;
-        config
+            .expect("config")
+    }
+
+    fn test_tui_config() -> TuiRuntimeConfig {
+        TuiRuntimeConfig {
+            animations: false,
+            ..Default::default()
+        }
     }
 
     fn test_cwd() -> PathBuf {
@@ -4175,8 +4063,10 @@ mod tests {
     #[tokio::test]
     async fn session_info_uses_availability_nux_tooltip_override() {
         let config = test_config().await;
+        let tui_config = test_tui_config();
         let cell = new_session_info(
             &config,
+            &tui_config,
             "gpt-5",
             session_configured_event("gpt-5"),
             /*is_first_event*/ false,
@@ -4193,8 +4083,10 @@ mod tests {
     async fn session_info_availability_nux_tooltip_snapshot() {
         let mut config = test_config().await;
         config.cwd = PathBuf::from("/tmp/project").abs();
+        let tui_config = test_tui_config();
         let cell = new_session_info(
             &config,
+            &tui_config,
             "gpt-5",
             session_configured_event("gpt-5"),
             /*is_first_event*/ false,
@@ -4216,8 +4108,10 @@ mod tests {
     #[tokio::test]
     async fn session_info_first_event_suppresses_tooltips_and_nux() {
         let config = test_config().await;
+        let tui_config = test_tui_config();
         let cell = new_session_info(
             &config,
+            &tui_config,
             "gpt-5",
             session_configured_event("gpt-5"),
             /*is_first_event*/ true,
@@ -4233,10 +4127,15 @@ mod tests {
 
     #[tokio::test]
     async fn session_info_hides_tooltips_when_disabled() {
-        let mut config = test_config().await;
-        config.show_tooltips = false;
+        let config = test_config().await;
+        let tui_config = TuiRuntimeConfig {
+            show_tooltips: false,
+            animations: false,
+            ..Default::default()
+        };
         let cell = new_session_info(
             &config,
+            &tui_config,
             "gpt-5",
             session_configured_event("gpt-5"),
             /*is_first_event*/ false,
@@ -4450,7 +4349,7 @@ mod tests {
             )]),
             resources: Vec::new(),
             resource_templates: Vec::new(),
-            auth_status: praxis_app_server_protocol::McpAuthStatus::Unsupported,
+            auth_status: praxis_app_gateway_protocol::McpAuthStatus::Unsupported,
         }];
 
         let cell = new_mcp_tools_output_from_statuses(&config, &statuses);

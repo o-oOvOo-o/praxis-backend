@@ -2,7 +2,7 @@
 //!
 //! When the TUI resumes or switches to an existing thread, it needs to populate
 //! `AgentNavigationState` and `ChatWidget` metadata for every subagent that was spawned during
-//! that thread's lifetime. The app server exposes a flat list of currently loaded threads via
+//! that thread's lifetime. The app gateway exposes a flat list of currently loaded threads via
 //! `thread/loaded/list`, but the TUI must figure out which of those are descendants of the
 //! primary thread.
 //!
@@ -14,8 +14,8 @@
 //! `SessionSource::SubAgent(ThreadSpawn { parent_thread_id, .. })` edges until no new children are
 //! found. The primary thread itself is never included in the output.
 
-use praxis_app_server_protocol::SessionSource;
-use praxis_app_server_protocol::Thread;
+use praxis_app_gateway_protocol::SessionSource;
+use praxis_app_gateway_protocol::Thread;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::SubAgentSource;
 use std::collections::HashMap;
@@ -100,9 +100,9 @@ pub(crate) fn find_loaded_subagent_threads_for_primary(
 mod tests {
     use super::LoadedSubagentThread;
     use super::find_loaded_subagent_threads_for_primary;
-    use praxis_app_server_protocol::SessionSource;
-    use praxis_app_server_protocol::Thread;
-    use praxis_app_server_protocol::ThreadStatus;
+    use praxis_app_gateway_protocol::SessionSource;
+    use praxis_app_gateway_protocol::Thread;
+    use praxis_app_gateway_protocol::ThreadStatus;
     use praxis_protocol::ThreadId;
     use praxis_protocol::protocol::SubAgentSource;
     use pretty_assertions::assert_eq;

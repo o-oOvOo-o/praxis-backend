@@ -1,0 +1,7 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "app-gateway-protocol",
+    crate_name = "praxis_app_gateway_protocol",
+    test_data_extra = glob(["schema/**"], allow_empty = True),
+)
