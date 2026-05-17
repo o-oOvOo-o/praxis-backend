@@ -78,23 +78,23 @@ The Rust CLI exposes a dedicated `--sandbox` (`-s`) flag that lets you pick the 
 
 ```shell
 # Run Codex with the default, read-only sandbox
-codex --sandbox read-only
+praxis --sandbox read-only
 
 # Allow the agent to write within the current workspace while still blocking network access
-codex --sandbox workspace-write
+praxis --sandbox workspace-write
 
 # Danger! Disable sandboxing entirely (only do this if you are already running in a container or other isolated env)
-codex --sandbox danger-full-access
+praxis --sandbox danger-full-access
 ```
 
-The same setting can be persisted in `~/.codex/config.toml` via the top-level `sandbox_mode = "MODE"` key, e.g. `sandbox_mode = "workspace-write"`.
-In `workspace-write`, Codex also includes `~/.codex/memories` in its writable roots so memory maintenance does not require an extra approval.
+The same setting can be persisted in `~/.praxis/config.toml` via the top-level `sandbox_mode = "MODE"` key, e.g. `sandbox_mode = "workspace-write"`.
+In `workspace-write`, Praxis also includes `~/.praxis/memories` in its writable roots so memory maintenance does not require an extra approval.
 
 ## Code Organization
 
 This folder is the root of a Cargo workspace. It contains quite a bit of experimental code, but here are the key crates:
 
-- [`core/`](./core) contains the business logic for Codex. Ultimately, we hope this to be a library crate that is generally useful for building other Rust/native applications that use Codex.
+- [`core/`](./core) contains the business logic for Praxis. Ultimately, we hope this to be a library crate that is generally useful for building other Rust/native applications that use Praxis.
 - [`exec/`](./exec) "headless" CLI for use in automation.
 - [`tui/`](./tui) CLI that launches a fullscreen TUI built with [Ratatui](https://ratatui.rs/).
 - [`cli/`](./cli) CLI multitool that provides the aforementioned CLIs via subcommands.

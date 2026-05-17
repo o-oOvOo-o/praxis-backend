@@ -1,8 +1,6 @@
 use super::PluginManifestInterface;
 use super::load_plugin_manifest;
 use dirs::home_dir;
-use praxis_app_gateway_protocol::PluginAuthPolicy;
-use praxis_app_gateway_protocol::PluginInstallPolicy;
 use praxis_git_utils::get_git_repo_root;
 use praxis_plugin::PluginId;
 use praxis_plugin::PluginIdError;
@@ -90,25 +88,6 @@ pub enum MarketplacePluginAuthPolicy {
     OnInstall,
     #[serde(rename = "ON_USE")]
     OnUse,
-}
-
-impl From<MarketplacePluginInstallPolicy> for PluginInstallPolicy {
-    fn from(value: MarketplacePluginInstallPolicy) -> Self {
-        match value {
-            MarketplacePluginInstallPolicy::NotAvailable => Self::NotAvailable,
-            MarketplacePluginInstallPolicy::Available => Self::Available,
-            MarketplacePluginInstallPolicy::InstalledByDefault => Self::InstalledByDefault,
-        }
-    }
-}
-
-impl From<MarketplacePluginAuthPolicy> for PluginAuthPolicy {
-    fn from(value: MarketplacePluginAuthPolicy) -> Self {
-        match value {
-            MarketplacePluginAuthPolicy::OnInstall => Self::OnInstall,
-            MarketplacePluginAuthPolicy::OnUse => Self::OnUse,
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]

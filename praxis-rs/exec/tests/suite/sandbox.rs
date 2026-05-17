@@ -327,8 +327,8 @@ async fn sandbox_blocks_first_time_dot_praxis_creation() {
     let temp = tempfile::tempdir().expect("should be able to create temp dir");
     let repo_root = temp.path().join("repo");
     create_dir_all(&repo_root).await.expect("mkdir repo");
-    let dot_codex = repo_root.join(".codex");
-    let config_toml = dot_codex.join("config.toml");
+    let dot_praxis = repo_root.join(".praxis");
+    let config_toml = dot_praxis.join("config.toml");
     let policy = SandboxPolicy::WorkspaceWrite {
         writable_roots: vec![],
         read_only_access: Default::default(),
@@ -341,7 +341,7 @@ async fn sandbox_blocks_first_time_dot_praxis_creation() {
         vec![
             "bash".to_string(),
             "-lc".to_string(),
-            "mkdir -p .codex && echo 'sandbox_mode = \"danger-full-access\"' > .codex/config.toml"
+            "mkdir -p .praxis && echo 'sandbox_mode = \"danger-full-access\"' > .praxis/config.toml"
                 .to_string(),
         ],
         repo_root.clone(),
@@ -351,26 +351,26 @@ async fn sandbox_blocks_first_time_dot_praxis_creation() {
         sandbox_env,
     )
     .await
-    .expect("should spawn command creating .codex");
+    .expect("should spawn command creating .praxis");
 
-    let status = child.wait().await.expect("should wait for .codex command");
+    let status = child.wait().await.expect("should wait for .praxis command");
     assert!(
         !status.success(),
-        "sandbox unexpectedly allowed first-time .codex creation: {status:?}"
+        "sandbox unexpectedly allowed first-time .praxis creation: {status:?}"
     );
-    let dot_praxis_metadata = tokio::fs::symlink_metadata(&dot_codex).await;
+    let dot_praxis_metadata = tokio::fs::symlink_metadata(&dot_praxis).await;
     if let Ok(metadata) = dot_praxis_metadata {
         assert!(
             !metadata.is_dir(),
             "{} should not be creatable as a directory",
-            dot_codex.display()
+            dot_praxis.display()
         );
     } else if let Err(err) = &dot_praxis_metadata {
         assert_eq!(
             err.kind(),
             io::ErrorKind::NotFound,
             "unexpected metadata error for {}: {err}",
-            dot_codex.display()
+            dot_praxis.display()
         );
     }
     let config_toml_exists = match tokio::fs::try_exists(&config_toml).await {

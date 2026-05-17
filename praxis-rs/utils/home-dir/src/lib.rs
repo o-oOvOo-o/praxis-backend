@@ -3,10 +3,13 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::path::PathBuf;
 
-const CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
-const CODEX_HOME_NAMESPACE_ENV_VAR: &str = "CODEX_HOME_NAMESPACE";
+const PRAXIS_HOME_ENV_VAR: &str = "PRAXIS_HOME";
+const PRAXIS_HOME_NAMESPACE_ENV_VAR: &str = "PRAXIS_HOME_NAMESPACE";
+const LEGACY_CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
+const LEGACY_CODEX_HOME_NAMESPACE_ENV_VAR: &str = "CODEX_HOME_NAMESPACE";
 const PRAXIS_HOME_DIRNAME: &str = ".praxis";
 const CODEX_HOME_DIRNAME: &str = ".codex";
+const PREVIOUS_PRAXIS_HOME_DIRNAME: &str = ".codep";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PraxisHomeNamespace {
@@ -39,27 +42,24 @@ impl PraxisHomeNamespace {
 }
 
 /// Returns the path to the Praxis configuration directory, which can be
-/// specified by the `CODEX_HOME` environment variable. If not set, defaults to
+/// specified by the `PRAXIS_HOME` environment variable. If not set, defaults to
 /// the namespace-specific home directory (`~/.praxis` for Praxis, `~/.codex` for
 /// Codex).
 ///
-/// - If `CODEX_HOME` is set, the value must exist and be a directory. The
+/// - If `PRAXIS_HOME` is set, the value must exist and be a directory. The
 ///   value will be canonicalized and this function will Err otherwise.
-/// - If `CODEX_HOME` is not set, this function does not verify that the
+/// - If `PRAXIS_HOME` is not set, this function does not verify that the
 ///   directory exists.
 pub fn find_praxis_home() -> std::io::Result<PathBuf> {
-    let praxis_home_env = std::env::var(CODEX_HOME_ENV_VAR)
-        .ok()
-        .filter(|val| !val.is_empty());
+    let praxis_home_env = active_home_env_override();
     let namespace = current_praxis_home_namespace();
-    find_praxis_home_from_env_and_namespace(praxis_home_env.as_deref(), namespace)
+    find_praxis_home_from_env_and_namespace(praxis_home_env.as_ref(), namespace)
 }
 
 pub fn current_praxis_home_namespace() -> PraxisHomeNamespace {
-    std::env::var(CODEX_HOME_NAMESPACE_ENV_VAR)
-        .ok()
-        .as_deref()
-        .and_then(PraxisHomeNamespace::from_str)
+    active_namespace_env_override()
+        .as_ref()
+        .and_then(|env| PraxisHomeNamespace::from_str(env.value.as_str()))
         .unwrap_or_else(|| infer_praxis_home_namespace_from_args(std::env::args_os()))
 }
 
@@ -82,18 +82,16 @@ pub fn default_praxis_home_for_namespace(
 ///
 /// The bridge is enabled only when:
 /// - the current namespace resolves to `praxis`
-/// - `CODEX_HOME` is not explicitly set
+/// - `PRAXIS_HOME` is not explicitly set
 /// - the provided `praxis_home` is the default `~/.praxis` location
 ///
 /// This keeps custom/test homes isolated while allowing the default Praxis UX
 /// to inherit Codex config/auth without sharing thread storage.
 pub fn praxis_shared_praxis_home(praxis_home: &Path) -> std::io::Result<Option<PathBuf>> {
-    let praxis_home_env = std::env::var(CODEX_HOME_ENV_VAR)
-        .ok()
-        .filter(|value| !value.trim().is_empty());
+    let praxis_home_env = active_home_env_override();
     let namespace = current_praxis_home_namespace();
     praxis_shared_praxis_home_with_namespace_hint(
-        praxis_home_env.as_deref(),
+        praxis_home_env.as_ref(),
         namespace,
         praxis_home,
     )
@@ -103,17 +101,15 @@ pub fn set_process_praxis_home_namespace(namespace: PraxisHomeNamespace) {
     // Safe because the binary entrypoint invokes this before the Tokio runtime
     // and worker threads are created.
     unsafe {
-        std::env::set_var(CODEX_HOME_NAMESPACE_ENV_VAR, namespace.as_str());
+        std::env::set_var(PRAXIS_HOME_NAMESPACE_ENV_VAR, namespace.as_str());
     }
 }
 
 pub fn set_process_praxis_home_namespace_if_unset_for_current_process() {
-    let home_is_explicit = std::env::var(CODEX_HOME_ENV_VAR)
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty());
-    let namespace_is_explicit = std::env::var(CODEX_HOME_NAMESPACE_ENV_VAR)
-        .ok()
-        .is_some_and(|value| PraxisHomeNamespace::from_str(&value).is_some());
+    let home_is_explicit = active_home_env_override().is_some();
+    let namespace_is_explicit = active_namespace_env_override()
+        .as_ref()
+        .is_some_and(|env| PraxisHomeNamespace::from_str(env.value.as_str()).is_some());
     if home_is_explicit || namespace_is_explicit {
         return;
     }
@@ -123,51 +119,53 @@ pub fn set_process_praxis_home_namespace_if_unset_for_current_process() {
 }
 
 fn find_praxis_home_from_env_and_namespace(
-    praxis_home_env: Option<&str>,
+    praxis_home_env: Option<&HomeEnvOverride>,
     namespace: PraxisHomeNamespace,
 ) -> std::io::Result<PathBuf> {
-    // Honor the `CODEX_HOME` environment variable when it is set to allow users
-    // (and tests) to override the default location.
     match praxis_home_env {
-        Some(val) => {
-            let path = PathBuf::from(val);
+        Some(env) => {
+            let path = PathBuf::from(env.value.as_str());
             let metadata = std::fs::metadata(&path).map_err(|err| match err.kind() {
                 std::io::ErrorKind::NotFound => std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("CODEX_HOME points to {val:?}, but that path does not exist"),
+                    format!(
+                        "{} points to {:?}, but that path does not exist",
+                        env.name, env.value
+                    ),
                 ),
                 _ => std::io::Error::new(
                     err.kind(),
-                    format!("failed to read CODEX_HOME {val:?}: {err}"),
+                    format!("failed to read {} {:?}: {err}", env.name, env.value),
                 ),
             })?;
 
             if !metadata.is_dir() {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
-                    format!("CODEX_HOME points to {val:?}, but that path is not a directory"),
+                    format!(
+                        "{} points to {:?}, but that path is not a directory",
+                        env.name, env.value
+                    ),
                 ))
             } else {
                 path.canonicalize().map_err(|err| {
                     std::io::Error::new(
                         err.kind(),
-                        format!("failed to canonicalize CODEX_HOME {val:?}: {err}"),
+                        format!("failed to canonicalize {} {:?}: {err}", env.name, env.value),
                     )
                 })
             }
         }
-        None => default_praxis_home_for_namespace(namespace),
+        None => default_praxis_home_for_namespace_with_rename(namespace),
     }
 }
 
 fn praxis_shared_praxis_home_with_namespace_hint(
-    praxis_home_env: Option<&str>,
+    praxis_home_env: Option<&HomeEnvOverride>,
     namespace: PraxisHomeNamespace,
     praxis_home: &Path,
 ) -> std::io::Result<Option<PathBuf>> {
-    if praxis_home_env.is_some_and(|value| !value.trim().is_empty())
-        || namespace != PraxisHomeNamespace::Praxis
-    {
+    if praxis_home_env.is_some() || namespace != PraxisHomeNamespace::Praxis {
         return Ok(None);
     }
 
@@ -177,6 +175,86 @@ fn praxis_shared_praxis_home_with_namespace_hint(
     }
 
     default_praxis_home_for_namespace(PraxisHomeNamespace::Codex).map(Some)
+}
+
+#[derive(Clone, Debug)]
+struct HomeEnvOverride {
+    name: &'static str,
+    value: String,
+}
+
+fn active_home_env_override() -> Option<HomeEnvOverride> {
+    env_override(PRAXIS_HOME_ENV_VAR).or_else(|| env_override(LEGACY_CODEX_HOME_ENV_VAR))
+}
+
+fn active_namespace_env_override() -> Option<HomeEnvOverride> {
+    env_override(PRAXIS_HOME_NAMESPACE_ENV_VAR)
+        .or_else(|| env_override(LEGACY_CODEX_HOME_NAMESPACE_ENV_VAR))
+}
+
+fn env_override(name: &'static str) -> Option<HomeEnvOverride> {
+    std::env::var(name)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| HomeEnvOverride { name, value })
+}
+
+fn default_praxis_home_for_namespace_with_rename(
+    namespace: PraxisHomeNamespace,
+) -> std::io::Result<PathBuf> {
+    let default_home = default_praxis_home_for_namespace(namespace)?;
+    if namespace == PraxisHomeNamespace::Praxis {
+        rename_previous_praxis_home_into_default(
+            default_home.as_path(),
+            previous_praxis_home_candidates()?,
+        )?;
+    }
+    Ok(default_home)
+}
+
+fn previous_praxis_home_candidates() -> std::io::Result<Vec<PathBuf>> {
+    let mut candidates = Vec::new();
+    let mut default_previous = home_dir().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Could not find home directory",
+        )
+    })?;
+    default_previous.push(PREVIOUS_PRAXIS_HOME_DIRNAME);
+    candidates.push(default_previous);
+    Ok(candidates)
+}
+
+fn rename_previous_praxis_home_into_default(
+    default_home: &Path,
+    previous_homes: Vec<PathBuf>,
+) -> std::io::Result<()> {
+    if default_home.exists() {
+        return Ok(());
+    }
+    for previous_home in previous_homes {
+        if previous_home == default_home {
+            continue;
+        }
+        let Ok(metadata) = std::fs::metadata(previous_home.as_path()) else {
+            continue;
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        std::fs::rename(previous_home.as_path(), default_home).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "failed to rename previous Praxis home {} to {}: {err}",
+                    previous_home.display(),
+                    default_home.display()
+                ),
+            )
+        })?;
+        return Ok(());
+    }
+    Ok(())
 }
 
 fn paths_match(lhs: &Path, rhs: &Path) -> bool {
@@ -231,7 +309,22 @@ fn find_praxis_home_with_namespace_hint(
     let namespace = namespace_env
         .and_then(PraxisHomeNamespace::from_str)
         .unwrap_or_else(|| infer_praxis_home_namespace_from_args(args));
-    find_praxis_home_from_env_and_namespace(praxis_home_env, namespace)
+    let home_env = praxis_home_env.map(|value| HomeEnvOverride {
+        name: PRAXIS_HOME_ENV_VAR,
+        value: value.to_string(),
+    });
+    find_praxis_home_from_env_and_namespace_without_rename(home_env.as_ref(), namespace)
+}
+
+#[cfg(test)]
+fn find_praxis_home_from_env_and_namespace_without_rename(
+    praxis_home_env: Option<&HomeEnvOverride>,
+    namespace: PraxisHomeNamespace,
+) -> std::io::Result<PathBuf> {
+    match praxis_home_env {
+        Some(env) => find_praxis_home_from_env_and_namespace(Some(env), namespace),
+        None => default_praxis_home_for_namespace(namespace),
+    }
 }
 
 #[cfg(test)]
@@ -271,12 +364,12 @@ fn namespace_default_dir_name_for_test(namespace: PraxisHomeNamespace) -> &'stat
 
 #[cfg(test)]
 fn namespace_env_var_for_test() -> &'static str {
-    CODEX_HOME_NAMESPACE_ENV_VAR
+    PRAXIS_HOME_NAMESPACE_ENV_VAR
 }
 
 #[cfg(test)]
 fn home_env_var_for_test() -> &'static str {
-    CODEX_HOME_ENV_VAR
+    PRAXIS_HOME_ENV_VAR
 }
 
 #[cfg(test)]
@@ -287,6 +380,19 @@ fn praxis_dir_name_for_test() -> &'static str {
 #[cfg(test)]
 fn codex_dir_name_for_test() -> &'static str {
     CODEX_HOME_DIRNAME
+}
+
+#[cfg(test)]
+fn previous_praxis_dir_name_for_test() -> &'static str {
+    PREVIOUS_PRAXIS_HOME_DIRNAME
+}
+
+#[cfg(test)]
+fn rename_previous_praxis_home_into_default_for_test(
+    default_home: &Path,
+    previous_homes: Vec<PathBuf>,
+) -> std::io::Result<()> {
+    rename_previous_praxis_home_into_default(default_home, previous_homes)
 }
 
 #[cfg(test)]
@@ -322,7 +428,11 @@ fn praxis_shared_praxis_home_for_test(
     namespace: PraxisHomeNamespace,
     praxis_home: &Path,
 ) -> std::io::Result<Option<PathBuf>> {
-    praxis_shared_praxis_home_with_namespace_hint(praxis_home_env, namespace, praxis_home)
+    let home_env = praxis_home_env.map(|value| HomeEnvOverride {
+        name: PRAXIS_HOME_ENV_VAR,
+        value: value.to_string(),
+    });
+    praxis_shared_praxis_home_with_namespace_hint(home_env.as_ref(), namespace, praxis_home)
 }
 
 #[cfg(test)]
@@ -339,8 +449,10 @@ mod tests {
     use super::namespace_default_dir_name_for_test;
     use super::namespace_env_var_for_test;
     use super::namespace_from_str_for_test;
+    use super::previous_praxis_dir_name_for_test;
     use super::praxis_dir_name_for_test;
     use super::praxis_shared_praxis_home_for_test;
+    use super::rename_previous_praxis_home_into_default_for_test;
     use dirs::home_dir;
     use pretty_assertions::assert_eq;
     use std::fs;
@@ -353,10 +465,10 @@ mod tests {
         let missing = temp_home.path().join("missing-praxis-home");
         let missing_str = missing
             .to_str()
-            .expect("missing codex home path should be valid utf-8");
+            .expect("missing praxis home path should be valid utf-8");
 
         let err = find_praxis_home_with_namespace_hint(Some(missing_str), None, &["praxis"])
-            .expect_err("missing CODEX_HOME");
+            .expect_err("missing PRAXIS_HOME");
         assert_eq!(err.kind(), ErrorKind::NotFound);
         assert!(
             err.to_string().contains(home_env_var_for_test()),
@@ -371,10 +483,10 @@ mod tests {
         fs::write(&file_path, "not a directory").expect("write temp file");
         let file_str = file_path
             .to_str()
-            .expect("file codex home path should be valid utf-8");
+            .expect("file praxis home path should be valid utf-8");
 
         let err = find_praxis_home_with_namespace_hint(Some(file_str), None, &["praxis"])
-            .expect_err("file CODEX_HOME");
+            .expect_err("file PRAXIS_HOME");
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert!(
             err.to_string().contains("not a directory"),
@@ -388,10 +500,10 @@ mod tests {
         let temp_str = temp_home
             .path()
             .to_str()
-            .expect("temp codex home path should be valid utf-8");
+            .expect("temp praxis home path should be valid utf-8");
 
         let resolved = find_praxis_home_with_namespace_hint(Some(temp_str), None, &["praxis"])
-            .expect("valid CODEX_HOME");
+            .expect("valid PRAXIS_HOME");
         let expected = temp_home
             .path()
             .canonicalize()
@@ -403,7 +515,7 @@ mod tests {
     fn find_praxis_home_without_env_uses_praxis_default_home_dir() {
         let resolved =
             find_praxis_home_with_namespace_hint(/*praxis_home_env*/ None, None, &["praxis"])
-                .expect("default CODEX_HOME");
+                .expect("default PRAXIS_HOME");
         let mut expected = home_dir().expect("home dir");
         expected.push(praxis_dir_name_for_test());
         assert_eq!(resolved, expected);
@@ -412,7 +524,7 @@ mod tests {
     #[test]
     fn namespace_env_can_switch_to_praxis_home_without_overriding_praxis_default() {
         let resolved = find_praxis_home_with_namespace_hint(None, Some("codex"), &["praxis"])
-            .expect("default CODEX_HOME");
+            .expect("default PRAXIS_HOME");
         let mut expected = home_dir().expect("home dir");
         expected.push(codex_dir_name_for_test());
         assert_eq!(resolved, expected);
@@ -469,8 +581,8 @@ mod tests {
             namespace_default_dir_name_for_test(PraxisHomeNamespace::Praxis),
             praxis_dir_name_for_test()
         );
-        assert_eq!(namespace_env_var_for_test(), "CODEX_HOME_NAMESPACE");
-        assert_eq!(home_env_var_for_test(), "CODEX_HOME");
+        assert_eq!(namespace_env_var_for_test(), "PRAXIS_HOME_NAMESPACE");
+        assert_eq!(home_env_var_for_test(), "PRAXIS_HOME");
     }
 
     #[test]
@@ -479,6 +591,25 @@ mod tests {
         let codex_home = default_home_for_test(PraxisHomeNamespace::Codex).expect("codex home");
         assert!(praxis_home.ends_with(praxis_dir_name_for_test()));
         assert!(codex_home.ends_with(codex_dir_name_for_test()));
+    }
+
+    #[test]
+    fn previous_praxis_home_is_renamed_to_default_without_public_namespace() {
+        let temp_home = TempDir::new().expect("temp home");
+        let previous_home = temp_home.path().join(previous_praxis_dir_name_for_test());
+        let default_home = temp_home.path().join(praxis_dir_name_for_test());
+        fs::create_dir_all(previous_home.join("sessions")).expect("create previous home");
+        fs::write(previous_home.join("sessions").join("thread.jsonl"), "{}")
+            .expect("write previous asset");
+
+        rename_previous_praxis_home_into_default_for_test(
+            default_home.as_path(),
+            vec![previous_home.clone()],
+        )
+        .expect("rename previous home");
+
+        assert!(!previous_home.exists());
+        assert!(default_home.join("sessions").join("thread.jsonl").is_file());
     }
 
     #[test]

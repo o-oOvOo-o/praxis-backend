@@ -2,11 +2,11 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::ConfigLayerStack;
 use praxis_config::ConfigLayerStackOrdering;
 use praxis_config::SkillConfig;
 use praxis_config::SkillsConfig;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use tracing::warn;
 
 use crate::SkillMetadata;

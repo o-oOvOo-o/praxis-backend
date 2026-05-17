@@ -1,14 +1,16 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use praxis_config::ConfigEditsBuilder;
 use praxis_config::McpServerConfig;
-use praxis_config::McpServerTransportConfig;
 use praxis_config::load_global_mcp_servers;
 use praxis_login::default_client::is_first_party_originator;
 use praxis_login::default_client::originator;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
+use praxis_protocol::protocol::SkillDependencies as ProtocolSkillDependencies;
+use praxis_protocol::protocol::SkillInterface as ProtocolSkillInterface;
+use praxis_protocol::protocol::SkillMetadata as ProtocolSkillMetadata;
+use praxis_protocol::protocol::SkillToolDependency as ProtocolSkillToolDependency;
 use praxis_protocol::request_user_input::RequestUserInputArgs;
 use praxis_protocol::request_user_input::RequestUserInputQuestion;
 use praxis_protocol::request_user_input::RequestUserInputQuestionOption;
@@ -20,11 +22,12 @@ use tracing::warn;
 use crate::SkillMetadata;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
-use crate::skills::model::SkillToolDependency;
 use praxis_mcp::mcp::auth::McpOAuthLoginSupport;
 use praxis_mcp::mcp::auth::oauth_login_support;
 use praxis_mcp::mcp::auth::resolve_oauth_scopes;
 use praxis_mcp::mcp::auth::should_retry_without_scopes;
+use praxis_mcp::mcp::canonical_mcp_server_key;
+use praxis_mcp::mcp::collect_missing_mcp_dependencies;
 
 const SKILL_MCP_DEPENDENCY_PROMPT_ID: &str = "skill_mcp_dependency_install";
 const MCP_DEPENDENCY_OPTION_INSTALL: &str = "Install";
@@ -55,7 +58,8 @@ pub(crate) async fn maybe_prompt_and_install_mcp_dependencies(
         .services
         .mcp_manager
         .configured_servers(config.as_ref());
-    let missing = collect_missing_mcp_dependencies(mentioned_skills, &installed);
+    let mentioned_skills_for_mcp = protocol_skill_metadata_for_mcp(mentioned_skills);
+    let missing = collect_missing_mcp_dependencies(&mentioned_skills_for_mcp, &installed);
     if missing.is_empty() {
         return;
     }
@@ -88,7 +92,8 @@ pub(crate) async fn maybe_install_mcp_dependencies(
 
     let praxis_home = config.praxis_home.clone();
     let installed = sess.services.mcp_manager.configured_servers(config);
-    let missing = collect_missing_mcp_dependencies(mentioned_skills, &installed);
+    let mentioned_skills_for_mcp = protocol_skill_metadata_for_mcp(mentioned_skills);
+    let missing = collect_missing_mcp_dependencies(&mentioned_skills_for_mcp, &installed);
     if missing.is_empty() {
         return;
     }
@@ -212,6 +217,47 @@ pub(crate) async fn maybe_install_mcp_dependencies(
     .await;
 }
 
+fn protocol_skill_metadata_for_mcp(skills: &[SkillMetadata]) -> Vec<ProtocolSkillMetadata> {
+    skills
+        .iter()
+        .map(|skill| ProtocolSkillMetadata {
+            name: skill.name.clone(),
+            description: skill.description.clone(),
+            short_description: skill.short_description.clone(),
+            interface: skill
+                .interface
+                .clone()
+                .map(|interface| ProtocolSkillInterface {
+                    display_name: interface.display_name,
+                    short_description: interface.short_description,
+                    icon_small: interface.icon_small,
+                    icon_large: interface.icon_large,
+                    brand_color: interface.brand_color,
+                    default_prompt: interface.default_prompt,
+                }),
+            dependencies: skill.dependencies.clone().map(|dependencies| {
+                ProtocolSkillDependencies {
+                    tools: dependencies
+                        .tools
+                        .into_iter()
+                        .map(|tool| ProtocolSkillToolDependency {
+                            r#type: tool.r#type,
+                            value: tool.value,
+                            description: tool.description,
+                            transport: tool.transport,
+                            command: tool.command,
+                            url: tool.url,
+                        })
+                        .collect(),
+                }
+            }),
+            path: skill.path_to_skills_md.clone(),
+            scope: skill.scope,
+            enabled: true,
+        })
+        .collect()
+}
+
 async fn should_install_mcp_dependencies(
     sess: &Session,
     turn_context: &TurnContext,
@@ -311,158 +357,4 @@ fn is_full_access_mode(turn_context: &TurnContext) -> bool {
             turn_context.sandbox_policy.get(),
             SandboxPolicy::DangerFullAccess | SandboxPolicy::ExternalSandbox { .. }
         )
-}
-
-fn canonical_mcp_key(transport: &str, identifier: &str, fallback: &str) -> String {
-    let identifier = identifier.trim();
-    if identifier.is_empty() {
-        fallback.to_string()
-    } else {
-        format!("mcp__{transport}__{identifier}")
-    }
-}
-
-fn canonical_mcp_server_key(name: &str, config: &McpServerConfig) -> String {
-    match &config.transport {
-        McpServerTransportConfig::Stdio { command, .. } => {
-            canonical_mcp_key("stdio", command, name)
-        }
-        McpServerTransportConfig::StreamableHttp { url, .. } => {
-            canonical_mcp_key("streamable_http", url, name)
-        }
-    }
-}
-
-fn canonical_mcp_dependency_key(dependency: &SkillToolDependency) -> Result<String, String> {
-    let transport = dependency.transport.as_deref().unwrap_or("streamable_http");
-    if transport.eq_ignore_ascii_case("streamable_http") {
-        let url = dependency
-            .url
-            .as_ref()
-            .ok_or_else(|| "missing url for streamable_http dependency".to_string())?;
-        return Ok(canonical_mcp_key("streamable_http", url, &dependency.value));
-    }
-    if transport.eq_ignore_ascii_case("stdio") {
-        let command = dependency
-            .command
-            .as_ref()
-            .ok_or_else(|| "missing command for stdio dependency".to_string())?;
-        return Ok(canonical_mcp_key("stdio", command, &dependency.value));
-    }
-    Err(format!("unsupported transport {transport}"))
-}
-
-fn mcp_dependency_to_server_config(
-    dependency: &SkillToolDependency,
-) -> Result<McpServerConfig, String> {
-    let transport = dependency.transport.as_deref().unwrap_or("streamable_http");
-    if transport.eq_ignore_ascii_case("streamable_http") {
-        let url = dependency
-            .url
-            .as_ref()
-            .ok_or_else(|| "missing url for streamable_http dependency".to_string())?;
-        return Ok(McpServerConfig {
-            transport: McpServerTransportConfig::StreamableHttp {
-                url: url.clone(),
-                bearer_token_env_var: None,
-                http_headers: None,
-                env_http_headers: None,
-            },
-            enabled: true,
-            required: false,
-            disabled_reason: None,
-            startup_timeout_sec: None,
-            tool_timeout_sec: None,
-            enabled_tools: None,
-            disabled_tools: None,
-            scopes: None,
-            oauth_resource: None,
-            tools: HashMap::new(),
-        });
-    }
-
-    if transport.eq_ignore_ascii_case("stdio") {
-        let command = dependency
-            .command
-            .as_ref()
-            .ok_or_else(|| "missing command for stdio dependency".to_string())?;
-        return Ok(McpServerConfig {
-            transport: McpServerTransportConfig::Stdio {
-                command: command.clone(),
-                args: Vec::new(),
-                env: None,
-                env_vars: Vec::new(),
-                cwd: None,
-            },
-            enabled: true,
-            required: false,
-            disabled_reason: None,
-            startup_timeout_sec: None,
-            tool_timeout_sec: None,
-            enabled_tools: None,
-            disabled_tools: None,
-            scopes: None,
-            oauth_resource: None,
-            tools: HashMap::new(),
-        });
-    }
-
-    Err(format!("unsupported transport {transport}"))
-}
-
-fn collect_missing_mcp_dependencies(
-    mentioned_skills: &[SkillMetadata],
-    installed: &HashMap<String, McpServerConfig>,
-) -> HashMap<String, McpServerConfig> {
-    let mut missing = HashMap::new();
-    let installed_keys: HashSet<String> = installed
-        .iter()
-        .map(|(name, config)| canonical_mcp_server_key(name, config))
-        .collect();
-    let mut seen_canonical_keys = HashSet::new();
-
-    for skill in mentioned_skills {
-        let Some(dependencies) = skill.dependencies.as_ref() else {
-            continue;
-        };
-
-        for tool in &dependencies.tools {
-            if !tool.r#type.eq_ignore_ascii_case("mcp") {
-                continue;
-            }
-            let dependency_key = match canonical_mcp_dependency_key(tool) {
-                Ok(key) => key,
-                Err(err) => {
-                    let dependency = tool.value.as_str();
-                    let skill_name = skill.name.as_str();
-                    warn!(
-                        "unable to auto-install MCP dependency {dependency} for skill {skill_name}: {err}",
-                    );
-                    continue;
-                }
-            };
-            if installed_keys.contains(&dependency_key)
-                || seen_canonical_keys.contains(&dependency_key)
-            {
-                continue;
-            }
-
-            let config = match mcp_dependency_to_server_config(tool) {
-                Ok(config) => config,
-                Err(err) => {
-                    let dependency = dependency_key.as_str();
-                    let skill_name = skill.name.as_str();
-                    warn!(
-                        "unable to auto-install MCP dependency {dependency} for skill {skill_name}: {err}",
-                    );
-                    continue;
-                }
-            };
-
-            missing.insert(tool.value.clone(), config);
-            seen_canonical_keys.insert(dependency_key);
-        }
-    }
-
-    missing
 }

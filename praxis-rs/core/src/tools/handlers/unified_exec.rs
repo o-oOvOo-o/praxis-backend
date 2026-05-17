@@ -276,37 +276,6 @@ impl ToolHandler for UnifiedExecHandler {
                     }
                 };
 
-                let ticket = match session
-                    .services
-                    .agent_os
-                    .request_command_ticket(session.conversation_id, &command, &cwd)
-                    .await
-                {
-                    Ok(ticket) => ticket,
-                    Err(err) => {
-                        manager.release_process_id(process_id).await;
-                        return Err(FunctionCallError::RespondToModel(err.to_string()));
-                    }
-                };
-                let command_record_id = match session
-                    .services
-                    .agent_os
-                    .begin_managed_command(
-                        &ticket,
-                        command_for_display.clone(),
-                        &command,
-                        cwd.clone(),
-                        Some(process_id),
-                    )
-                    .await
-                {
-                    Ok(command_id) => command_id,
-                    Err(err) => {
-                        manager.release_process_id(process_id).await;
-                        return Err(FunctionCallError::RespondToModel(err.to_string()));
-                    }
-                };
-
                 let intercept_result = intercept_apply_patch(
                     &command,
                     &cwd,
@@ -321,17 +290,6 @@ impl ToolHandler for UnifiedExecHandler {
                 match intercept_result {
                     Ok(Some(output)) => {
                         manager.release_process_id(process_id).await;
-                        let text = output.log_preview();
-                        let _ = session
-                            .services
-                            .agent_os
-                            .finish_managed_command(
-                                command_record_id.as_str(),
-                                Some(0),
-                                text.as_bytes(),
-                                /*release_leases*/ true,
-                            )
-                            .await;
                         return Ok(ExecCommandToolOutput {
                             event_call_id: String::new(),
                             chunk_id: String::new(),
@@ -347,17 +305,6 @@ impl ToolHandler for UnifiedExecHandler {
                     Ok(None) => {}
                     Err(err) => {
                         manager.release_process_id(process_id).await;
-                        let error_text = err.to_string();
-                        let _ = session
-                            .services
-                            .agent_os
-                            .finish_managed_command(
-                                command_record_id.as_str(),
-                                Some(-1),
-                                error_text.as_bytes(),
-                                /*release_leases*/ true,
-                            )
-                            .await;
                         return Err(err);
                     }
                 }
@@ -390,8 +337,8 @@ impl ToolHandler for UnifiedExecHandler {
                             let _ = session
                                 .services
                                 .agent_os
-                                .checkpoint_managed_command(
-                                    command_record_id.as_str(),
+                                .checkpoint_managed_process(
+                                    process_id,
                                     response.raw_output.as_slice(),
                                 )
                                 .await;
@@ -399,11 +346,10 @@ impl ToolHandler for UnifiedExecHandler {
                             let _ = session
                                 .services
                                 .agent_os
-                                .finish_managed_command(
-                                    command_record_id.as_str(),
+                                .finish_managed_process(
+                                    process_id,
                                     response.exit_code,
                                     response.raw_output.as_slice(),
-                                    /*release_leases*/ true,
                                 )
                                 .await;
                         }
@@ -414,12 +360,7 @@ impl ToolHandler for UnifiedExecHandler {
                         let _ = session
                             .services
                             .agent_os
-                            .finish_managed_command(
-                                command_record_id.as_str(),
-                                Some(-1),
-                                error_text.as_bytes(),
-                                /*release_leases*/ true,
-                            )
+                            .finish_managed_process(process_id, Some(-1), error_text.as_bytes())
                             .await;
                         return Err(FunctionCallError::RespondToModel(format!(
                             "exec_command failed for `{command_for_display}`: {err:?}"

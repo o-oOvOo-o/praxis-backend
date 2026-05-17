@@ -6,6 +6,7 @@ use crate::command_safety::is_dangerous_command::executable_name_lookup_key;
 use crate::command_safety::is_dangerous_command::find_git_subcommand;
 use crate::command_safety::is_dangerous_command::git_global_option_requires_prompt;
 use crate::command_safety::windows_safe_commands::is_safe_command_windows;
+use crate::parse_command::is_valid_sed_n_arg;
 
 pub fn is_known_safe_command(command: &[String]) -> bool {
     let command: Vec<String> = command
@@ -240,39 +241,6 @@ fn git_subcommand_args_are_read_only(args: &[String]) -> bool {
 /* ----------------------------------------------------------
 Example
 ---------------------------------------------------------- */
-
-/// Returns true if `arg` matches /^(\d+,)?\d+p$/
-fn is_valid_sed_n_arg(arg: Option<&str>) -> bool {
-    // unwrap or bail
-    let s = match arg {
-        Some(s) => s,
-        None => return false,
-    };
-
-    // must end with 'p', strip it
-    let core = match s.strip_suffix('p') {
-        Some(rest) => rest,
-        None => return false,
-    };
-
-    // split on ',' and ensure 1 or 2 numeric parts
-    let parts: Vec<&str> = core.split(',').collect();
-    match parts.as_slice() {
-        // single number, e.g. "10"
-        [num] => !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()),
-
-        // two numbers, e.g. "1,5"
-        [a, b] => {
-            !a.is_empty()
-                && !b.is_empty()
-                && a.chars().all(|c| c.is_ascii_digit())
-                && b.chars().all(|c| c.is_ascii_digit())
-        }
-
-        // anything else (more than one comma) is invalid
-        _ => false,
-    }
-}
 
 #[cfg(test)]
 mod tests {

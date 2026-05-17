@@ -61,6 +61,21 @@ impl StateRuntime {
         .await
     }
 
+    pub async fn upsert_agent_os_intent_plan_snapshot(
+        &self,
+        plan_id: &str,
+        snapshot_json: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        upsert_snapshot(
+            self.pool.as_ref(),
+            "agent_os_intent_plans",
+            "plan_id",
+            plan_id,
+            snapshot_json,
+        )
+        .await
+    }
+
     pub async fn upsert_agent_os_command_snapshot(
         &self,
         command_id: &str,
@@ -101,6 +116,21 @@ impl StateRuntime {
             "agent_os_artifacts",
             "artifact_id",
             artifact_id,
+            snapshot_json,
+        )
+        .await
+    }
+
+    pub async fn upsert_agent_os_worker_request_snapshot(
+        &self,
+        request_id: &str,
+        snapshot_json: &serde_json::Value,
+    ) -> anyhow::Result<()> {
+        upsert_snapshot(
+            self.pool.as_ref(),
+            "agent_os_worker_requests",
+            "request_id",
+            request_id,
             snapshot_json,
         )
         .await

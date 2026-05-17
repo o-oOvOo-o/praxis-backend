@@ -12,6 +12,7 @@ use crate::endpoint::realtime_websocket::protocol::RealtimeSessionMode;
 use crate::endpoint::realtime_websocket::protocol::RealtimeTranscriptDelta;
 use crate::endpoint::realtime_websocket::protocol::RealtimeTranscriptEntry;
 use crate::endpoint::realtime_websocket::protocol::parse_realtime_event;
+use crate::endpoint::websocket_headers::merge_request_headers;
 use crate::error::ApiError;
 use crate::provider::Provider;
 use futures::SinkExt;
@@ -507,21 +508,6 @@ impl RealtimeWebsocketClient {
             .await?;
         Ok(connection)
     }
-}
-
-fn merge_request_headers(
-    provider_headers: &HeaderMap,
-    extra_headers: HeaderMap,
-    default_headers: HeaderMap,
-) -> HeaderMap {
-    let mut headers = provider_headers.clone();
-    headers.extend(extra_headers);
-    for (name, value) in &default_headers {
-        if let http::header::Entry::Vacant(entry) = headers.entry(name) {
-            entry.insert(value.clone());
-        }
-    }
-    headers
 }
 
 fn with_session_id_header(

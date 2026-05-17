@@ -58,8 +58,6 @@ use praxis_analytics::AnalyticsEventsClient;
 use praxis_analytics::AppInvocation;
 use praxis_analytics::InvocationType;
 use praxis_analytics::build_track_events_context;
-use praxis_app_gateway_protocol::McpServerElicitationRequest;
-use praxis_app_gateway_protocol::McpServerElicitationRequestParams;
 use praxis_exec_server::Environment;
 use praxis_exec_server::EnvironmentManager;
 use praxis_features::FEATURES;
@@ -101,6 +99,8 @@ use praxis_protocol::items::TurnItem;
 use praxis_protocol::items::UserMessageItem;
 use praxis_protocol::items::build_hook_prompt_message;
 use praxis_protocol::mcp::CallToolResult;
+use praxis_protocol::mcp_elicitation::McpServerElicitationRequest;
+use praxis_protocol::mcp_elicitation::McpServerElicitationRequestParams;
 use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::models::format_allow_prefixes;
@@ -4916,24 +4916,6 @@ mod handlers {
         communication: InterAgentCommunication,
     ) {
         let trigger_turn = communication.trigger_turn;
-        match sess
-            .services
-            .agent_os
-            .ack_pending_runtime_commands(sess.conversation_id)
-            .await
-        {
-            Ok(acked_commands) => {
-                if !acked_commands.is_empty() {
-                    tracing::debug!(
-                        count = acked_commands.len(),
-                        "AgentOS runtime commands acknowledged by receiver"
-                    );
-                }
-            }
-            Err(err) => {
-                tracing::debug!("failed to acknowledge AgentOS runtime commands: {err}");
-            }
-        }
         sess.enqueue_mailbox_communication(communication);
         if trigger_turn {
             sess.maybe_start_turn_for_pending_work_with_sub_id(sub_id)

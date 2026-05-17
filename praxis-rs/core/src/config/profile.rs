@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::config::ToolsToml;
+use crate::config::service_types::Profile as ServiceProfile;
 use praxis_config::types::ApprovalsReviewer;
 use praxis_config::types::Personality;
 use praxis_config::types::WindowsToml;
@@ -65,7 +66,7 @@ pub struct ConfigProfile {
     pub oss_provider: Option<String>,
 }
 
-impl From<ConfigProfile> for praxis_app_gateway_protocol::Profile {
+impl From<ConfigProfile> for ServiceProfile {
     fn from(config_profile: ConfigProfile) -> Self {
         Self {
             model: config_profile.model,

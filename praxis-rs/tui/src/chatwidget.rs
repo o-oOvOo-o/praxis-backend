@@ -84,7 +84,6 @@ use praxis_app_gateway_protocol::CollabAgentStatus as AppGatewayCollabAgentStatu
 use praxis_app_gateway_protocol::CollabAgentTool;
 use praxis_app_gateway_protocol::CollabAgentToolCallStatus;
 use praxis_app_gateway_protocol::CommandExecutionRequestApprovalParams;
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_app_gateway_protocol::ErrorNotification;
 use praxis_app_gateway_protocol::FileChangeRequestApprovalParams;
 use praxis_app_gateway_protocol::GuardianApprovalReviewAction;
@@ -127,6 +126,7 @@ use praxis_otel::SessionTelemetry;
 use praxis_protocol::ThreadId;
 use praxis_protocol::account::PlanType;
 use praxis_protocol::approvals::ElicitationRequestEvent;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_protocol::config_types::CollaborationMode;
 use praxis_protocol::config_types::CollaborationModeMask;
 use praxis_protocol::config_types::ModeKind;

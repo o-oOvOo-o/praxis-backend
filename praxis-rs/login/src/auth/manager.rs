@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 use tokio::sync::Mutex as AsyncMutex;
 
-use praxis_app_gateway_protocol::AuthMode as ApiAuthMode;
+use praxis_protocol::auth::AuthMode as ApiAuthMode;
 use praxis_protocol::config_types::ForcedLoginMethod;
 use praxis_protocol::config_types::ModelProviderAuthInfo;
 

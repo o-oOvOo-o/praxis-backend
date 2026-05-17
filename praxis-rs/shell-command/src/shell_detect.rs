@@ -1,8 +1,11 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub(crate) enum ShellType {
+use serde::Deserialize;
+use serde::Serialize;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
+pub enum ShellType {
     Zsh,
     Bash,
     PowerShell,
@@ -10,7 +13,7 @@ pub(crate) enum ShellType {
     Cmd,
 }
 
-pub(crate) fn detect_shell_type(shell_path: &PathBuf) -> Option<ShellType> {
+pub fn detect_shell_type(shell_path: &PathBuf) -> Option<ShellType> {
     match shell_path.as_os_str().to_str() {
         Some("zsh") => Some(ShellType::Zsh),
         Some("sh") => Some(ShellType::Sh),

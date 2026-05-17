@@ -10,7 +10,7 @@ pub struct DynamicToolSpec {
     pub name: String,
     pub description: String,
     pub input_schema: JsonValue,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub defer_loading: bool,
 }
 

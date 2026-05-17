@@ -8,10 +8,10 @@ mod tests;
 use crate::config::ConfigToml;
 use crate::config_loader::layer_io::LoadedConfigLayers;
 use dunce::canonicalize as normalize_path;
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::CONFIG_TOML_FILE;
 use praxis_config::ConfigRequirementsWithSources;
 use praxis_git_utils::resolve_root_git_project_for_trust;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_protocol::config_types::SandboxMode;
 use praxis_protocol::config_types::TrustLevel;
 use praxis_protocol::protocol::AskForApproval;
@@ -67,9 +67,9 @@ pub use praxis_config::project_root_markers_from_config;
 pub(crate) use praxis_config::version_for_toml;
 
 /// On Unix systems, load default settings from this file path, if present.
-/// Note that /etc/codex/ is treated as a "config folder," so subfolders such
+/// Note that /etc/praxis/ is treated as a "config folder," so subfolders such
 /// as skills/ and rules/ will also be honored.
-pub const SYSTEM_CONFIG_TOML_FILE_UNIX: &str = "/etc/codex/config.toml";
+pub const SYSTEM_CONFIG_TOML_FILE_UNIX: &str = "/etc/praxis/config.toml";
 
 #[cfg(windows)]
 const DEFAULT_PROGRAM_DATA_DIR_WINDOWS: &str = r"C:\ProgramData";
@@ -91,7 +91,7 @@ pub(crate) async fn first_layer_config_error_from_entries(
 ///
 /// - cloud:    managed cloud requirements
 /// - admin:    managed preferences (*)
-/// - system    `/etc/codex/requirements.toml` (Unix) or
+/// - system    `/etc/praxis/requirements.toml` (Unix) or
 ///   `%ProgramData%\OpenAI\Praxis\requirements.toml` (Windows)
 ///
 /// For backwards compatibility, we also load from
@@ -100,12 +100,12 @@ pub(crate) async fn first_layer_config_error_from_entries(
 /// Configuration is built up from multiple layers in the following order:
 ///
 /// - admin:    managed preferences (*)
-/// - system    `/etc/codex/config.toml` (Unix) or
+/// - system    `/etc/praxis/config.toml` (Unix) or
 ///   `%ProgramData%\OpenAI\Praxis\config.toml` (Windows)
-/// - user      `${CODEX_HOME}/config.toml`
+/// - user      `${PRAXIS_HOME}/config.toml`
 /// - cwd       `${PWD}/config.toml` (loaded but disabled when the directory is untrusted)
-/// - tree      parent directories up to root looking for `./.codex/config.toml` (loaded but disabled when untrusted)
-/// - repo      `$(git rev-parse --show-toplevel)/.codex/config.toml` (loaded but disabled when untrusted)
+/// - tree      parent directories up to root looking for `./.praxis/config.toml` (loaded but disabled when untrusted)
+/// - repo      `$(git rev-parse --show-toplevel)/.praxis/config.toml` (loaded but disabled when untrusted)
 /// - runtime   e.g., --config flags, model selector in UI
 ///
 /// (*) Only available on macOS via managed device profiles.
@@ -184,7 +184,7 @@ pub async fn load_config_layers_state(
         .await?;
     layers.push(system_layer);
 
-    // Add a layer for $CODEX_HOME/config.toml if it exists. Note if the file
+    // Add a layer for $PRAXIS_HOME/config.toml if it exists. Note if the file
     // exists, but is malformed, then this error should be propagated to the
     // user.
     let user_file = resolve_user_config_toml_file(praxis_home).await?;
@@ -429,7 +429,7 @@ async fn load_requirements_toml(
 
 #[cfg(unix)]
 fn system_requirements_toml_file() -> io::Result<AbsolutePathBuf> {
-    AbsolutePathBuf::from_absolute_path(Path::new("/etc/codex/requirements.toml"))
+    AbsolutePathBuf::from_absolute_path(Path::new("/etc/praxis/requirements.toml"))
 }
 
 #[cfg(windows)]
@@ -807,8 +807,8 @@ async fn load_project_layers(
 
     let mut layers = Vec::new();
     for dir in dirs {
-        let dot_codex = dir.join(".codex");
-        if !tokio::fs::metadata(&dot_codex)
+        let dot_praxis = dir.join(".praxis");
+        if !tokio::fs::metadata(&dot_praxis)
             .await
             .map(|meta| meta.is_dir())
             .unwrap_or(false)
@@ -818,7 +818,7 @@ async fn load_project_layers(
 
         let layer_dir = AbsolutePathBuf::from_absolute_path(dir)?;
         let decision = trust_context.decision_for_dir(&layer_dir);
-        let dot_praxis_abs = AbsolutePathBuf::from_absolute_path(&dot_codex)?;
+        let dot_praxis_abs = AbsolutePathBuf::from_absolute_path(&dot_praxis)?;
         let dot_praxis_normalized = normalize_path(dot_praxis_abs.as_path())
             .unwrap_or_else(|_| dot_praxis_abs.to_path_buf());
         if dot_praxis_abs == praxis_home_abs || dot_praxis_normalized == praxis_home_normalized {
@@ -887,7 +887,7 @@ async fn load_project_layers(
 }
 
 /// The legacy mechanism for specifying admin-enforced configuration is to read
-/// from a file like `/etc/codex/managed_config.toml` that has the same
+/// from a file like `/etc/praxis/managed_config.toml` that has the same
 /// structure as `config.toml` where fields like `approval_policy` can specify
 /// exactly one value rather than a list of allowed values.
 ///

@@ -4,9 +4,9 @@ use crate::config_requirements::ConfigRequirementsToml;
 use super::fingerprint::record_origins;
 use super::fingerprint::version_for_toml;
 use super::merge::merge_toml_values;
-use praxis_app_gateway_protocol::ConfigLayer;
-use praxis_app_gateway_protocol::ConfigLayerMetadata;
-use praxis_app_gateway_protocol::ConfigLayerSource;
+use praxis_protocol::config_layers::ConfigLayer;
+use praxis_protocol::config_layers::ConfigLayerMetadata;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -94,7 +94,7 @@ impl ConfigLayerEntry {
         }
     }
 
-    // Get the `.codex/` folder associated with this config layer, if any.
+    // Get the `.praxis/` folder associated with this config layer, if any.
     pub fn config_folder(&self) -> Option<AbsolutePathBuf> {
         match &self.name {
             ConfigLayerSource::Mdm { .. } => None,

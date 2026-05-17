@@ -1,6 +1,6 @@
 use futures::SinkExt;
 use futures::StreamExt;
-use praxis_app_gateway_protocol::JSONRPCMessage;
+use praxis_protocol::jsonrpc_lite::JSONRPCMessage;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::sync::mpsc;

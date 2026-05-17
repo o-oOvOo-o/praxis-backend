@@ -12,9 +12,9 @@ use crate::plugins::test_support::TEST_CURATED_PLUGIN_SHA;
 use crate::plugins::test_support::write_curated_plugin_sha_with as write_curated_plugin_sha;
 use crate::plugins::test_support::write_file;
 use crate::plugins::test_support::write_openai_curated_marketplace;
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::types::McpServerTransportConfig;
 use praxis_login::CodexAuth;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_protocol::protocol::Product;
 use pretty_assertions::assert_eq;
 use std::fs;
@@ -32,10 +32,10 @@ const MAX_CAPABILITY_SUMMARY_DESCRIPTION_LEN: usize = 1024;
 
 fn write_plugin(root: &Path, dir_name: &str, manifest_name: &str) {
     let plugin_root = root.join(dir_name);
-    fs::create_dir_all(plugin_root.join(".codex-plugin")).unwrap();
+    fs::create_dir_all(plugin_root.join(".praxis-plugin")).unwrap();
     fs::create_dir_all(plugin_root.join("skills")).unwrap();
     fs::write(
-        plugin_root.join(".codex-plugin/plugin.json"),
+        plugin_root.join(".praxis-plugin/plugin.json"),
         format!(r#"{{"name":"{manifest_name}"}}"#),
     )
     .unwrap();
@@ -95,7 +95,7 @@ fn load_plugins_loads_default_skills_and_mcp_servers() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{
   "name": "sample",
   "description": "Plugin that includes the sample MCP server and Skills"
@@ -206,7 +206,7 @@ fn load_plugins_resolves_disabled_skill_names_against_loaded_plugin_skills() {
     let skill_path = plugin_root.join("skills/sample-search/SKILL.md");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"sample"}"#,
     );
     write_file(
@@ -244,7 +244,7 @@ fn load_plugins_ignores_unknown_disabled_skill_names() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"sample"}"#,
     );
     write_file(
@@ -288,7 +288,7 @@ fn plugin_telemetry_metadata_uses_default_mcp_config_path() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{
   "name": "sample"
 }"#,
@@ -332,7 +332,7 @@ fn capability_summary_sanitizes_plugin_descriptions_to_one_line() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{
   "name": "sample",
   "description": "Plugin that\n includes   the sample\tserver"
@@ -368,7 +368,7 @@ fn capability_summary_truncates_overlong_plugin_descriptions() {
     let too_long = "x".repeat(MAX_CAPABILITY_SUMMARY_DESCRIPTION_LEN + 1);
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         &format!(
             r#"{{
   "name": "sample",
@@ -405,7 +405,7 @@ fn load_plugins_uses_manifest_configured_component_paths() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{
   "name": "sample",
   "skills": "./custom-skills/",
@@ -515,7 +515,7 @@ fn load_plugins_ignores_manifest_component_paths_without_dot_slash() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{
   "name": "sample",
   "skills": "custom-skills",
@@ -622,7 +622,7 @@ fn load_plugins_preserves_disabled_plugins_without_effective_contributions() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"sample"}"#,
     );
     write_file(
@@ -677,7 +677,7 @@ fn effective_apps_dedupes_connector_ids_across_plugins() {
         .join("test/plugin-b/local");
 
     write_file(
-        &plugin_a_root.join(".codex-plugin/plugin.json"),
+        &plugin_a_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"plugin-a"}"#,
     );
     write_file(
@@ -691,7 +691,7 @@ fn effective_apps_dedupes_connector_ids_across_plugins() {
 }"#,
     );
     write_file(
-        &plugin_b_root.join(".codex-plugin/plugin.json"),
+        &plugin_b_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"plugin-b"}"#,
     );
     write_file(
@@ -842,7 +842,7 @@ fn load_plugins_returns_empty_when_feature_disabled() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"sample"}"#,
     );
     write_file(
@@ -871,7 +871,7 @@ fn load_plugins_rejects_invalid_plugin_keys() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"sample"}"#,
     );
 
@@ -1295,7 +1295,7 @@ async fn read_plugin_for_config_uses_user_layer_skill_settings_only() {
 }"#,
     );
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"enabled-plugin"}"#,
     );
     write_file(
@@ -1312,7 +1312,7 @@ enabled = true
 "#,
     );
     write_file(
-        &repo_root.join(".codex/config.toml"),
+        &repo_root.join(".praxis/config.toml"),
         r#"[[skills.config]]
 name = "enabled-plugin:sample-search"
 enabled = false
@@ -1368,7 +1368,7 @@ plugins = true
 "#,
     );
     fs::create_dir_all(curated_root.join(".agents/plugins")).unwrap();
-    fs::create_dir_all(plugin_root.join(".codex-plugin")).unwrap();
+    fs::create_dir_all(plugin_root.join(".praxis-plugin")).unwrap();
     fs::write(
         curated_root.join(".agents/plugins/marketplace.json"),
         r#"{
@@ -1389,7 +1389,7 @@ plugins = true
     )
     .unwrap();
     fs::write(
-        plugin_root.join(".codex-plugin/plugin.json"),
+        plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"linear"}"#,
     )
     .unwrap();
@@ -2276,18 +2276,18 @@ fn load_plugins_ignores_project_config_files() {
         .join("test/sample/local");
 
     write_file(
-        &plugin_root.join(".codex-plugin/plugin.json"),
+        &plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"sample"}"#,
     );
     write_file(
-        &project_root.join(".codex/config.toml"),
+        &project_root.join(".praxis/config.toml"),
         &plugin_config_toml(/*enabled*/ true, /*plugins_feature_enabled*/ true),
     );
 
     let stack = ConfigLayerStack::new(
         vec![ConfigLayerEntry::new(
             ConfigLayerSource::Project {
-                dot_praxis_folder: AbsolutePathBuf::try_from(project_root.join(".codex")).unwrap(),
+                dot_praxis_folder: AbsolutePathBuf::try_from(project_root.join(".praxis")).unwrap(),
             },
             toml::from_str(&plugin_config_toml(
                 /*enabled*/ true, /*plugins_feature_enabled*/ true,

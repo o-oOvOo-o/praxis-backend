@@ -1395,7 +1395,7 @@ fn simplify_once(commands: &[ParsedCommand]) -> Option<Vec<ParsedCommand>> {
 }
 
 /// Validates that this is a `sed -n 123,123p` command.
-fn is_valid_sed_n_arg(arg: Option<&str>) -> bool {
+pub(crate) fn is_valid_sed_n_arg(arg: Option<&str>) -> bool {
     let s = match arg {
         Some(s) => s,
         None => return false,

@@ -305,6 +305,10 @@ pub(crate) enum ToolError {
 }
 
 pub(crate) trait ToolRuntime<Req, Out>: Approvable<Req> + Sandboxable {
+    async fn preflight(&mut self, _req: &Req, _ctx: &ToolCtx) -> Result<(), ToolError> {
+        Ok(())
+    }
+
     fn network_approval_spec(&self, _req: &Req, _ctx: &ToolCtx) -> Option<NetworkApprovalSpec> {
         None
     }

@@ -4,6 +4,17 @@ use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config::managed_features::validate_explicit_feature_settings_in_config_toml;
 use crate::config::managed_features::validate_feature_requirements_in_config_toml;
+use crate::config::service_types::ConfigBatchWriteParams;
+use crate::config::service_types::ConfigReadParams;
+use crate::config::service_types::ConfigReadResponse;
+use crate::config::service_types::ConfigValueWriteParams;
+use crate::config::service_types::ConfigView;
+use crate::config::service_types::ConfigWriteErrorCode;
+use crate::config::service_types::ConfigWriteResponse;
+use crate::config::service_types::MergeStrategy;
+use crate::config::service_types::OverriddenMetadata;
+use crate::config::service_types::UserSavedConfig;
+use crate::config::service_types::WriteStatus;
 use crate::config_loader::CloudRequirementsLoader;
 use crate::config_loader::ConfigLayerEntry;
 use crate::config_loader::ConfigLayerStack;
@@ -16,19 +27,10 @@ use crate::path_utils;
 use crate::path_utils::SymlinkWritePaths;
 use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
-use praxis_app_gateway_protocol::Config as ApiConfig;
-use praxis_app_gateway_protocol::ConfigBatchWriteParams;
-use praxis_app_gateway_protocol::ConfigLayerMetadata;
-use praxis_app_gateway_protocol::ConfigLayerSource;
-use praxis_app_gateway_protocol::ConfigReadParams;
-use praxis_app_gateway_protocol::ConfigReadResponse;
-use praxis_app_gateway_protocol::ConfigValueWriteParams;
-use praxis_app_gateway_protocol::ConfigWriteErrorCode;
-use praxis_app_gateway_protocol::ConfigWriteResponse;
-use praxis_app_gateway_protocol::MergeStrategy;
-use praxis_app_gateway_protocol::OverriddenMetadata;
-use praxis_app_gateway_protocol::WriteStatus;
 use praxis_config::CONFIG_TOML_FILE;
+use praxis_config::toml_value_to_edit_item;
+use praxis_protocol::config_layers::ConfigLayerMetadata;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value as JsonValue;
 use std::borrow::Cow;
@@ -37,7 +39,6 @@ use std::path::PathBuf;
 use thiserror::Error;
 use tokio::task;
 use toml::Value as TomlValue;
-use toml_edit::Item as TomlItem;
 
 #[derive(Debug, Error)]
 pub enum ConfigServiceError {
@@ -175,7 +176,7 @@ impl ConfigService {
 
         let json_value = serde_json::to_value(&effective_config_toml)
             .map_err(|err| ConfigServiceError::json("failed to serialize configuration", err))?;
-        let config: ApiConfig = serde_json::from_value(json_value)
+        let config: ConfigView = serde_json::from_value(json_value)
             .map_err(|err| ConfigServiceError::json("failed to deserialize configuration", err))?;
 
         Ok(ConfigReadResponse {
@@ -233,9 +234,7 @@ impl ConfigService {
             .await
     }
 
-    pub async fn load_user_saved_config(
-        &self,
-    ) -> Result<praxis_app_gateway_protocol::UserSavedConfig, ConfigServiceError> {
+    pub async fn load_user_saved_config(&self) -> Result<UserSavedConfig, ConfigServiceError> {
         let layers = self
             .load_thread_agnostic_config()
             .await
@@ -319,7 +318,7 @@ impl ConfigService {
                 let edit = match updated_value {
                     Some(value) => ConfigEdit::SetPath {
                         segments: segments.clone(),
-                        value: toml_value_to_item(&value).map_err(|err| {
+                        value: toml_value_to_edit_item(&value).map_err(|err| {
                             ConfigServiceError::anyhow("failed to build config edits", err)
                         })?,
                     },
@@ -410,7 +409,7 @@ impl ConfigService {
     }
 
     /// Loads a "thread-agnostic" config, which means the config layers do not
-    /// include any in-repo .codex/ folders because there is no cwd/project root
+    /// include any in-repo .praxis/ folders because there is no cwd/project root
     /// associated with this query.
     async fn load_thread_agnostic_config(&self) -> std::io::Result<ConfigLayerStack> {
         let cwd: Option<AbsolutePathBuf> = None;
@@ -574,44 +573,6 @@ fn clear_path(root: &mut TomlValue, segments: &[String]) -> Result<bool, MergeEr
     };
 
     Ok(parent.remove(last).is_some())
-}
-
-fn toml_value_to_item(value: &TomlValue) -> anyhow::Result<TomlItem> {
-    match value {
-        TomlValue::Table(table) => {
-            let mut table_item = toml_edit::Table::new();
-            table_item.set_implicit(false);
-            for (key, val) in table {
-                table_item.insert(key, toml_value_to_item(val)?);
-            }
-            Ok(TomlItem::Table(table_item))
-        }
-        other => Ok(TomlItem::Value(toml_value_to_value(other)?)),
-    }
-}
-
-fn toml_value_to_value(value: &TomlValue) -> anyhow::Result<toml_edit::Value> {
-    match value {
-        TomlValue::String(val) => Ok(toml_edit::Value::from(val.clone())),
-        TomlValue::Integer(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Float(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Boolean(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Datetime(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Array(items) => {
-            let mut array = toml_edit::Array::new();
-            for item in items {
-                array.push(toml_value_to_value(item)?);
-            }
-            Ok(toml_edit::Value::Array(array))
-        }
-        TomlValue::Table(table) => {
-            let mut inline = toml_edit::InlineTable::new();
-            for (key, val) in table {
-                inline.insert(key, toml_value_to_value(val)?);
-            }
-            Ok(toml_edit::Value::InlineTable(inline))
-        }
-    }
 }
 
 fn validate_config(value: &TomlValue) -> Result<(), toml::de::Error> {

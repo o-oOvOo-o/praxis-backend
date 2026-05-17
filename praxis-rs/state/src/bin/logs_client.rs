@@ -14,8 +14,8 @@ use praxis_state::StateRuntime;
 #[command(name = "praxis-state-logs")]
 #[command(about = "Tail Praxis logs from the dedicated logs SQLite DB with simple filters")]
 struct Args {
-    /// Path to CODEX_HOME. Defaults to $CODEX_HOME or ~/.codex.
-    #[arg(long, env = "CODEX_HOME")]
+    /// Path to PRAXIS_HOME. Defaults to $PRAXIS_HOME or ~/.praxis.
+    #[arg(long, env = "PRAXIS_HOME")]
     praxis_home: Option<PathBuf>,
 
     /// Direct path to the logs SQLite database. Overrides --praxis-home.
@@ -118,9 +118,9 @@ fn resolve_db_path(args: &Args) -> anyhow::Result<PathBuf> {
 
 fn default_praxis_home() -> PathBuf {
     if let Some(home) = home_dir() {
-        return home.join(".codex");
+        return home.join(".praxis");
     }
-    PathBuf::from(".codex")
+    PathBuf::from(".praxis")
 }
 
 fn build_filter(args: &Args) -> anyhow::Result<LogFilter> {

@@ -20,13 +20,13 @@ use crate::protocol::TerminateParams;
 use crate::protocol::WriteParams;
 use crate::rpc::RpcRouter;
 use crate::server::ExecServerHandler;
-use praxis_app_gateway_protocol::FsCopyParams;
-use praxis_app_gateway_protocol::FsCreateDirectoryParams;
-use praxis_app_gateway_protocol::FsGetMetadataParams;
-use praxis_app_gateway_protocol::FsReadDirectoryParams;
-use praxis_app_gateway_protocol::FsReadFileParams;
-use praxis_app_gateway_protocol::FsRemoveParams;
-use praxis_app_gateway_protocol::FsWriteFileParams;
+use praxis_protocol::fs::FsCopyParams;
+use praxis_protocol::fs::FsCreateDirectoryParams;
+use praxis_protocol::fs::FsGetMetadataParams;
+use praxis_protocol::fs::FsReadDirectoryParams;
+use praxis_protocol::fs::FsReadFileParams;
+use praxis_protocol::fs::FsRemoveParams;
+use praxis_protocol::fs::FsWriteFileParams;
 
 pub(crate) fn build_router() -> RpcRouter<ExecServerHandler> {
     let mut router = RpcRouter::new();

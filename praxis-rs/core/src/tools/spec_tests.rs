@@ -6,10 +6,10 @@ use crate::shell::ShellType;
 use crate::tools::ToolRouter;
 use crate::tools::registry::tool_handler_key;
 use crate::tools::router::ToolRouterParams;
-use praxis_app_gateway_protocol::AppInfo;
 use praxis_features::Feature;
 use praxis_features::Features;
 use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_protocol::apps::AppInfo;
 use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
 use praxis_protocol::openai_models::ConfigShellToolType;
@@ -314,6 +314,11 @@ fn test_build_specs_gpt5_praxis_default() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 }
@@ -338,6 +343,11 @@ fn test_build_specs_gpt51_praxis_default() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 }
@@ -364,6 +374,11 @@ fn test_build_specs_gpt5_praxis_unified_exec_web_search() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 }
@@ -390,6 +405,11 @@ fn test_build_specs_gpt51_praxis_unified_exec_web_search() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 }
@@ -414,6 +434,11 @@ fn test_gpt_5_1_praxis_max_defaults() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 }
@@ -438,6 +463,11 @@ fn test_praxis_5_1_mini_defaults() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 }
@@ -461,6 +491,11 @@ fn test_gpt_5_defaults() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 }
@@ -485,6 +520,11 @@ fn test_gpt_5_1_defaults() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 }
@@ -511,6 +551,11 @@ fn test_gpt_5_1_praxis_max_unified_exec_web_search() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 }

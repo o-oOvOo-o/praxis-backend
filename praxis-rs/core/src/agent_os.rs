@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use tokio::io::AsyncReadExt;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -30,6 +31,9 @@ const MAX_COORDINATORS: usize = 3;
 const DEFAULT_TICKET_TTL_SECONDS: i64 = 30 * 60;
 const DEFAULT_LEASE_TTL_SECONDS: i64 = 30 * 60;
 const LEASE_JANITOR_INTERVAL_SECONDS: u64 = 30;
+const MAX_AGENT_OS_EVENTS_IN_MEMORY: usize = 1_000;
+const DEFAULT_ARTIFACT_READ_MAX_BYTES: usize = 64 * 1024;
+const HARD_ARTIFACT_READ_MAX_BYTES: usize = 1024 * 1024;
 
 #[async_trait]
 pub(crate) trait AgentOsProcessCleaner: Send + Sync {
@@ -43,7 +47,6 @@ pub(crate) enum ThreadRuntimeState {
     Running,
     WaitingForLease,
     WaitingForCoordinator,
-    Paused,
     Stopping,
     Stopped,
     Failed,
@@ -97,7 +100,7 @@ pub(crate) enum ResourceRequirement {
 }
 
 impl ResourceRequirement {
-    fn key(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         match self {
             Self::CpuHeavy => "cpu_heavy:global".to_string(),
             Self::BuildCache { scope } => format!("build_cache:{scope}"),
@@ -208,7 +211,6 @@ pub(crate) struct CapabilityProfile {
     pub(crate) can_spawn_long_process: bool,
     pub(crate) path_scopes: ScopedPaths,
     pub(crate) intent_scopes: ScopedIntents,
-    pub(crate) command_allowlist: Vec<String>,
     pub(crate) command_denylist: Vec<String>,
 }
 
@@ -238,6 +240,8 @@ pub(crate) struct TaskRecord {
     pub(crate) required_capabilities: Vec<String>,
     pub(crate) required_resources: Vec<ResourceRequirement>,
     pub(crate) token_budget: Option<u64>,
+    #[serde(default)]
+    pub(crate) artifact_read_bytes: u64,
     pub(crate) exploratory: bool,
     pub(crate) created_by: ThreadId,
     pub(crate) created_at: DateTime<Utc>,
@@ -295,6 +299,7 @@ pub(crate) struct ExecutionTicket {
     pub(crate) thread_id: ThreadId,
     pub(crate) coordination_scope: String,
     pub(crate) allowed_intent: ActionIntentKind,
+    pub(crate) intent_plan_id: Option<String>,
     pub(crate) command_fingerprint: String,
     pub(crate) cwd: PathBuf,
     pub(crate) risk_level: String,
@@ -309,12 +314,41 @@ pub(crate) struct ExecutionTicket {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct CommandIntentPlan {
+    pub(crate) plan_id: String,
+    pub(crate) task_id: String,
+    pub(crate) thread_id: ThreadId,
+    pub(crate) intent: ActionIntentKind,
+    pub(crate) confidence: f32,
+    pub(crate) command_fingerprint: String,
+    pub(crate) command: Vec<String>,
+    pub(crate) cwd: PathBuf,
+    pub(crate) required_capabilities: Vec<String>,
+    pub(crate) required_resources: Vec<ResourceRequirement>,
+    pub(crate) side_effects: Vec<String>,
+    pub(crate) risk_level: String,
+    pub(crate) status: CommandIntentPlanStatus,
+    pub(crate) consumed_by_ticket_id: Option<String>,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) expires_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum CommandIntentPlanStatus {
+    Pending,
+    Consumed,
+    Expired,
+    Rejected,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct CommandRecord {
     pub(crate) command_id: String,
     pub(crate) ticket_id: String,
     pub(crate) task_id: String,
     pub(crate) thread_id: ThreadId,
     pub(crate) intent: ActionIntentKind,
+    pub(crate) intent_plan_id: Option<String>,
     pub(crate) command_fingerprint: String,
     pub(crate) raw_command: String,
     pub(crate) cwd: PathBuf,
@@ -324,7 +358,16 @@ pub(crate) struct CommandRecord {
     pub(crate) exit_code: Option<i32>,
     pub(crate) lease_ids: Vec<String>,
     pub(crate) artifacts: Vec<String>,
+    pub(crate) baseline_dirty_files: Vec<PathBuf>,
+    baseline_dirty_fingerprints: HashMap<String, DirtyFileFingerprint>,
     pub(crate) dirty_files: Vec<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct DirtyFileFingerprint {
+    exists: bool,
+    len: Option<u64>,
+    modified_unix_millis: Option<i128>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -339,6 +382,15 @@ pub(crate) struct ArtifactRecord {
     pub(crate) created_at: DateTime<Utc>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct ArtifactBlobRead {
+    pub(crate) artifact: ArtifactRecord,
+    pub(crate) content: String,
+    pub(crate) bytes_read: usize,
+    pub(crate) blob_bytes: Option<u64>,
+    pub(crate) truncated: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum ArtifactType {
     CommandLog,
@@ -348,15 +400,38 @@ pub(crate) enum ArtifactType {
     PatchMetadata,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum WorkerRequestStatus {
+    Pending,
+    Approved,
+    Rejected,
+    Resolved,
+    Cancelled,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct EventLedgerEntry {
-    pub(crate) event_id: String,
-    pub(crate) event_type: String,
-    pub(crate) thread_id: Option<ThreadId>,
+pub(crate) struct WorkerRequestRecord {
+    pub(crate) request_id: String,
+    pub(crate) request_type: String,
+    pub(crate) thread_id: ThreadId,
     pub(crate) task_id: Option<String>,
-    pub(crate) command_id: Option<String>,
-    pub(crate) payload: serde_json::Value,
+    pub(crate) blocking: bool,
+    pub(crate) status: WorkerRequestStatus,
+    pub(crate) reason: String,
+    pub(crate) requested_resource: Option<String>,
+    pub(crate) artifact_refs: Vec<String>,
     pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct WorkerRequestCreateRequest {
+    pub(crate) request_type: String,
+    pub(crate) thread_id: ThreadId,
+    pub(crate) blocking: bool,
+    pub(crate) reason: String,
+    pub(crate) requested_resource: Option<String>,
+    pub(crate) artifact_refs: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -406,16 +481,30 @@ pub(crate) enum RuntimeCommandStatus {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct RuntimeCommand {
+pub(crate) struct RuntimeCommandRecord {
     pub(crate) command_id: String,
     pub(crate) from_thread_id: ThreadId,
     pub(crate) to_thread_id: ThreadId,
+    pub(crate) task_id: Option<String>,
     pub(crate) coordinator_epoch: u64,
+    pub(crate) fencing_token: u64,
     pub(crate) command_type: RuntimeCommandType,
     pub(crate) payload: serde_json::Value,
     pub(crate) status: RuntimeCommandStatus,
     pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
     pub(crate) expires_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct EventLedgerEntry {
+    pub(crate) event_id: String,
+    pub(crate) event_type: String,
+    pub(crate) thread_id: Option<ThreadId>,
+    pub(crate) task_id: Option<String>,
+    pub(crate) command_id: Option<String>,
+    pub(crate) payload: serde_json::Value,
+    pub(crate) created_at: DateTime<Utc>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -427,15 +516,6 @@ struct ActiveCoordinatorLease {
     expires_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ActiveCoordinatorStatus {
-    pub(crate) coordination_scope: String,
-    pub(crate) owner_thread_id: ThreadId,
-    pub(crate) epoch: u64,
-    pub(crate) fencing_token: u64,
-    pub(crate) expires_at: DateTime<Utc>,
-}
-
 #[derive(Default)]
 struct AgentOsState {
     threads: HashMap<ThreadId, ThreadRegistryEntry>,
@@ -443,9 +523,11 @@ struct AgentOsState {
     tasks: HashMap<String, TaskRecord>,
     leases: HashMap<String, ResourceLease>,
     tickets: HashMap<String, ExecutionTicket>,
+    intent_plans: HashMap<String, CommandIntentPlan>,
     commands: HashMap<String, CommandRecord>,
-    runtime_commands: HashMap<String, RuntimeCommand>,
     artifacts: HashMap<String, ArtifactRecord>,
+    worker_requests: HashMap<String, WorkerRequestRecord>,
+    runtime_commands: HashMap<String, RuntimeCommandRecord>,
     events: Vec<EventLedgerEntry>,
     active_coordinators: HashMap<String, ActiveCoordinatorLease>,
     fencing_counter: u64,
@@ -458,6 +540,52 @@ pub(crate) struct AgentOsRuntime {
     state_db: RwLock<Option<StateDbHandle>>,
     process_cleaner: RwLock<Option<Arc<dyn AgentOsProcessCleaner>>>,
     lease_janitor_started: AtomicBool,
+}
+
+#[derive(Clone)]
+pub(crate) struct ManagedCommandSpan {
+    agent_os: Arc<AgentOsRuntime>,
+    command_id: String,
+}
+
+struct DirtyAuditOutcome {
+    command: CommandRecord,
+    thread_snapshot: Option<ThreadRegistryEntry>,
+    task_snapshot: Option<TaskRecord>,
+    dirty_files: Vec<PathBuf>,
+    violation_path: Option<PathBuf>,
+}
+
+impl ManagedCommandSpan {
+    pub(crate) async fn finish_success(&self, raw_output: &[u8]) -> PraxisResult<Option<String>> {
+        self.finish(Some(0), raw_output).await
+    }
+
+    pub(crate) async fn finish_failure(&self, raw_output: &[u8]) -> PraxisResult<Option<String>> {
+        self.finish(Some(-1), raw_output).await
+    }
+
+    pub(crate) async fn finish(
+        &self,
+        exit_code: Option<i32>,
+        raw_output: &[u8],
+    ) -> PraxisResult<Option<String>> {
+        self.agent_os
+            .finish_managed_command(self.command_id.as_str(), exit_code, raw_output, true)
+            .await
+    }
+
+    pub(crate) async fn checkpoint(&self, raw_output: &[u8]) -> PraxisResult<Option<String>> {
+        self.agent_os
+            .checkpoint_managed_command(self.command_id.as_str(), raw_output)
+            .await
+    }
+
+    pub(crate) async fn record_dirty_files(&self, dirty_files: Vec<PathBuf>) -> PraxisResult<()> {
+        self.agent_os
+            .record_command_dirty_files(self.command_id.as_str(), dirty_files)
+            .await
+    }
 }
 
 impl AgentOsRuntime {
@@ -499,6 +627,9 @@ impl AgentOsRuntime {
                     break;
                 };
                 runtime.expire_leases().await;
+                runtime.expire_intent_plans().await;
+                runtime.expire_runtime_commands().await;
+                runtime.expire_tickets().await;
             }
         });
     }
@@ -645,6 +776,7 @@ impl AgentOsRuntime {
             required_capabilities: request.required_capabilities,
             required_resources: request.required_resources,
             token_budget: request.token_budget,
+            artifact_read_bytes: 0,
             exploratory: request.exploratory,
             created_by: request.created_by,
             created_at: now,
@@ -707,277 +839,6 @@ impl AgentOsRuntime {
         Ok(())
     }
 
-    pub(crate) async fn issue_runtime_command(
-        &self,
-        from_thread_id: ThreadId,
-        to_thread_id: ThreadId,
-        command_type: RuntimeCommandType,
-        payload: serde_json::Value,
-    ) -> PraxisResult<String> {
-        let now = Utc::now();
-        let command_id = format!("runtime-cmd-{}", Uuid::new_v4());
-        let (command, task_id, coordination_scope) = {
-            let mut state = self.state.write().await;
-            let sender = state.threads.get(&from_thread_id).ok_or_else(|| {
-                PraxisErr::UnsupportedOperation(format!(
-                    "unknown AgentOS sender thread `{from_thread_id}`"
-                ))
-            })?;
-            if sender.rank != COORDINATOR_RANK {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "only rank-0 coordinator threads can issue runtime commands".to_string(),
-                ));
-            }
-            let coordination_scope = sender.coordination_scope.clone();
-            let coordinator_epoch = {
-                let active = state
-                    .active_coordinators
-                    .get_mut(coordination_scope.as_str())
-                    .ok_or_else(|| {
-                        PraxisErr::UnsupportedOperation("no active coordinator lease".to_string())
-                    })?;
-                if active.expires_at <= now {
-                    if active.owner_thread_id != from_thread_id {
-                        return Err(PraxisErr::UnsupportedOperation(
-                            "active coordinator lease has expired".to_string(),
-                        ));
-                    }
-                    active.expires_at = now + Duration::seconds(DEFAULT_LEASE_TTL_SECONDS);
-                }
-                if active.owner_thread_id != from_thread_id {
-                    return Err(PraxisErr::UnsupportedOperation(
-                        "only the active rank-0 coordinator can dispatch runtime commands"
-                            .to_string(),
-                    ));
-                }
-                active.epoch
-            };
-            let receiver = state.threads.get(&to_thread_id).ok_or_else(|| {
-                PraxisErr::UnsupportedOperation(format!(
-                    "unknown AgentOS receiver thread `{to_thread_id}`"
-                ))
-            })?;
-            if receiver.coordination_scope != coordination_scope {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "runtime commands cannot cross coordination scopes".to_string(),
-                ));
-            }
-            let command = RuntimeCommand {
-                command_id: command_id.clone(),
-                from_thread_id,
-                to_thread_id,
-                coordinator_epoch,
-                command_type,
-                payload,
-                status: RuntimeCommandStatus::Pending,
-                created_at: now,
-                expires_at: now + Duration::seconds(DEFAULT_TICKET_TTL_SECONDS),
-            };
-            let task_id = receiver.current_task_id.clone();
-            state
-                .runtime_commands
-                .insert(command.command_id.clone(), command.clone());
-            (command, task_id, coordination_scope)
-        };
-
-        self.persist_runtime_command_snapshot(&command).await;
-        self.record_event(
-            "runtime_command_issued",
-            Some(to_thread_id),
-            task_id,
-            Some(command_id.clone()),
-            json!({
-                "from_thread_id": from_thread_id.to_string(),
-                "to_thread_id": to_thread_id.to_string(),
-                "coordination_scope": coordination_scope,
-                "command_type": command.command_type.as_str(),
-                "coordinator_epoch": command.coordinator_epoch,
-                "payload": command.payload,
-            }),
-        )
-        .await;
-        Ok(command_id)
-    }
-
-    pub(crate) async fn renew_active_coordinator(&self, thread_id: ThreadId) -> PraxisResult<()> {
-        let lease = {
-            let mut state = self.state.write().await;
-            let thread = state.threads.get(&thread_id).ok_or_else(|| {
-                PraxisErr::UnsupportedOperation(format!(
-                    "unknown AgentOS coordinator thread `{thread_id}`"
-                ))
-            })?;
-            let coordination_scope = thread.coordination_scope.clone();
-            let active = state
-                .active_coordinators
-                .get_mut(coordination_scope.as_str())
-                .ok_or_else(|| {
-                    PraxisErr::UnsupportedOperation("no active coordinator lease".to_string())
-                })?;
-            if active.owner_thread_id != thread_id {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "only the active coordinator can renew its lease".to_string(),
-                ));
-            }
-            active.expires_at = Utc::now() + Duration::seconds(DEFAULT_LEASE_TTL_SECONDS);
-            active.clone()
-        };
-        self.record_event(
-            "active_coordinator_renewed",
-            Some(thread_id),
-            None,
-            None,
-            json!({
-                "coordination_scope": lease.coordination_scope,
-                "epoch": lease.epoch,
-                "fencing_token": lease.fencing_token,
-                "expires_at": lease.expires_at,
-            }),
-        )
-        .await;
-        Ok(())
-    }
-
-    pub(crate) async fn takeover_active_coordinator(
-        &self,
-        thread_id: ThreadId,
-    ) -> PraxisResult<()> {
-        let now = Utc::now();
-        let lease = {
-            let mut state = self.state.write().await;
-            let thread = state.threads.get(&thread_id).ok_or_else(|| {
-                PraxisErr::UnsupportedOperation(format!(
-                    "unknown AgentOS coordinator thread `{thread_id}`"
-                ))
-            })?;
-            if thread.rank != COORDINATOR_RANK {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "only rank-0 threads can take over active coordinator lease".to_string(),
-                ));
-            }
-            let coordination_scope = thread.coordination_scope.clone();
-            if let Some(active) = state.active_coordinators.get(coordination_scope.as_str())
-                && active.expires_at > now
-                && active.owner_thread_id != thread_id
-            {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "active coordinator lease is still live".to_string(),
-                ));
-            }
-            state.coordinator_epoch = state.coordinator_epoch.saturating_add(1);
-            state.fencing_counter = state.fencing_counter.saturating_add(1);
-            let lease = ActiveCoordinatorLease {
-                coordination_scope: coordination_scope.clone(),
-                owner_thread_id: thread_id,
-                epoch: state.coordinator_epoch,
-                fencing_token: state.fencing_counter,
-                expires_at: now + Duration::seconds(DEFAULT_LEASE_TTL_SECONDS),
-            };
-            state
-                .active_coordinators
-                .insert(coordination_scope, lease.clone());
-            lease
-        };
-        self.record_event(
-            "active_coordinator_takeover",
-            Some(thread_id),
-            None,
-            None,
-            json!({
-                "coordination_scope": lease.coordination_scope,
-                "epoch": lease.epoch,
-                "fencing_token": lease.fencing_token,
-                "expires_at": lease.expires_at,
-            }),
-        )
-        .await;
-        Ok(())
-    }
-
-    pub(crate) async fn update_runtime_command_status(
-        &self,
-        command_id: &str,
-        status: RuntimeCommandStatus,
-    ) -> PraxisResult<()> {
-        let command = {
-            let mut state = self.state.write().await;
-            let command = state.runtime_commands.get_mut(command_id).ok_or_else(|| {
-                PraxisErr::UnsupportedOperation(format!("unknown runtime command `{command_id}`"))
-            })?;
-            command.status = status;
-            command.clone()
-        };
-        self.persist_runtime_command_snapshot(&command).await;
-        self.record_event(
-            "runtime_command_status_changed",
-            Some(command.to_thread_id),
-            None,
-            Some(command.command_id.clone()),
-            json!({
-                "status": format!("{:?}", command.status),
-                "from_thread_id": command.from_thread_id.to_string(),
-            }),
-        )
-        .await;
-        Ok(())
-    }
-
-    pub(crate) async fn ack_pending_runtime_commands(
-        &self,
-        thread_id: ThreadId,
-    ) -> PraxisResult<Vec<RuntimeCommand>> {
-        let now = Utc::now();
-        let (changed_commands, acked_commands) = {
-            let mut state = self.state.write().await;
-            let thread = state.threads.get(&thread_id).cloned().ok_or_else(|| {
-                PraxisErr::UnsupportedOperation(format!(
-                    "unknown AgentOS receiver thread `{thread_id}`"
-                ))
-            })?;
-            let active = state
-                .active_coordinators
-                .get(thread.coordination_scope.as_str())
-                .cloned();
-            let mut changed_commands = Vec::new();
-            let mut acked_commands = Vec::new();
-            for command in state.runtime_commands.values_mut().filter(|command| {
-                command.to_thread_id == thread_id && command.status == RuntimeCommandStatus::Pending
-            }) {
-                if command.expires_at <= now {
-                    command.status = RuntimeCommandStatus::Expired;
-                    changed_commands.push(command.clone());
-                    continue;
-                }
-                if let Some(active) = active.as_ref()
-                    && command.coordinator_epoch != active.epoch
-                {
-                    command.status = RuntimeCommandStatus::Rejected;
-                    changed_commands.push(command.clone());
-                    continue;
-                }
-                command.status = RuntimeCommandStatus::Acked;
-                changed_commands.push(command.clone());
-                acked_commands.push(command.clone());
-            }
-            (changed_commands, acked_commands)
-        };
-        for command in &changed_commands {
-            self.persist_runtime_command_snapshot(command).await;
-            self.record_event(
-                "runtime_command_status_changed",
-                Some(command.to_thread_id),
-                None,
-                Some(command.command_id.clone()),
-                json!({
-                    "status": format!("{:?}", command.status),
-                    "from_thread_id": command.from_thread_id.to_string(),
-                }),
-            )
-            .await;
-        }
-        Ok(acked_commands)
-    }
-
     pub(crate) async fn ensure_inter_thread_message_allowed(
         &self,
         from_thread_id: ThreadId,
@@ -1026,11 +887,9 @@ impl AgentOsRuntime {
         Ok(())
     }
 
-    pub(crate) async fn query_registry(&self) -> Vec<ThreadRegistryEntry> {
-        self.state.read().await.threads.values().cloned().collect()
-    }
-
     pub(crate) async fn query_leases(&self) -> Vec<ResourceLease> {
+        self.expire_tickets().await;
+        self.expire_leases().await;
         self.state.read().await.leases.values().cloned().collect()
     }
 
@@ -1044,80 +903,871 @@ impl AgentOsRuntime {
             .collect()
     }
 
-    pub(crate) async fn query_active_coordinators(&self) -> Vec<ActiveCoordinatorStatus> {
+    pub(crate) async fn query_worker_requests(&self) -> Vec<WorkerRequestRecord> {
         self.state
             .read()
             .await
-            .active_coordinators
+            .worker_requests
             .values()
-            .map(|lease| ActiveCoordinatorStatus {
-                coordination_scope: lease.coordination_scope.clone(),
-                owner_thread_id: lease.owner_thread_id,
-                epoch: lease.epoch,
-                fencing_token: lease.fencing_token,
-                expires_at: lease.expires_at,
-            })
+            .cloned()
             .collect()
     }
 
-    pub(crate) async fn pause_thread(&self, thread_id: ThreadId) {
-        self.mark_thread_state(thread_id, ThreadRuntimeState::Paused)
-            .await;
+    pub(crate) async fn query_runtime_commands(&self) -> Vec<RuntimeCommandRecord> {
+        self.expire_runtime_commands().await;
+        self.state
+            .read()
+            .await
+            .runtime_commands
+            .values()
+            .cloned()
+            .collect()
     }
 
-    pub(crate) async fn resume_thread(&self, thread_id: ThreadId) {
-        self.mark_thread_state(thread_id, ThreadRuntimeState::Idle)
-            .await;
+    pub(crate) async fn query_intent_plans(&self) -> Vec<CommandIntentPlan> {
+        self.expire_intent_plans().await;
+        self.state
+            .read()
+            .await
+            .intent_plans
+            .values()
+            .cloned()
+            .collect()
     }
 
-    pub(crate) async fn yield_lease(&self, lease_id: &str) {
-        self.release_leases(&[lease_id.to_string()]).await;
-    }
-
-    pub(crate) async fn renew_lease(
+    pub(crate) async fn preflight_command_intent(
         &self,
-        lease_id: &str,
-        owner_thread_id: ThreadId,
-    ) -> PraxisResult<()> {
-        let lease = {
+        thread_id: ThreadId,
+        command: &[String],
+        cwd: &Path,
+    ) -> PraxisResult<CommandIntentPlan> {
+        let intent = classify_command(command, cwd);
+        let now = Utc::now();
+        let (thread, task, profile) = {
             let mut state = self.state.write().await;
-            let lease = state.leases.get_mut(lease_id).ok_or_else(|| {
-                PraxisErr::UnsupportedOperation(format!("unknown lease `{lease_id}`"))
+            state.ensure_builtin_profiles();
+            let thread = state.threads.get(&thread_id).cloned().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "AgentOS thread `{thread_id}` is not registered"
+                ))
             })?;
-            if lease.owner_thread_id != owner_thread_id {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "lease can only be renewed by its owner".to_string(),
-                ));
-            }
-            lease.expires_at = Some(Utc::now() + Duration::seconds(DEFAULT_LEASE_TTL_SECONDS));
-            lease.clone()
+            let task_id = thread.current_task_id.clone().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(
+                    "side-effectful action rejected: thread has no current task_id".to_string(),
+                )
+            })?;
+            let task = state.tasks.get(&task_id).cloned().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "current task `{task_id}` is not registered"
+                ))
+            })?;
+            let profile = state
+                .profiles
+                .get(&thread.profile_id)
+                .cloned()
+                .ok_or_else(|| {
+                    PraxisErr::UnsupportedOperation(format!(
+                        "unknown capability profile `{}`",
+                        thread.profile_id
+                    ))
+                })?;
+            (thread, task, profile)
         };
-        self.persist_lease_snapshot(&lease).await;
+
+        profile
+            .validate_command_intent(&intent, command, cwd)
+            .map_err(PraxisErr::UnsupportedOperation)?;
+        let required_capabilities = profile.capability_names_for_action(&intent);
+        validate_task_action_contract(&task, &required_capabilities, &intent.required_resources)?;
+        let plan = CommandIntentPlan {
+            plan_id: format!("intent-plan-{}", Uuid::new_v4()),
+            task_id: task.task_id,
+            thread_id,
+            intent: intent.kind,
+            confidence: intent.confidence,
+            command_fingerprint: action_fingerprint(command, cwd, intent.kind),
+            command: command.to_vec(),
+            cwd: cwd.to_path_buf(),
+            required_capabilities,
+            required_resources: intent.required_resources,
+            side_effects: intent.side_effects,
+            risk_level: intent.risk_level,
+            status: CommandIntentPlanStatus::Pending,
+            consumed_by_ticket_id: None,
+            created_at: now,
+            expires_at: now + Duration::seconds(DEFAULT_TICKET_TTL_SECONDS),
+        };
+
+        self.insert_intent_plan(&plan).await;
+        self.persist_intent_plan_snapshot(&plan).await;
         self.record_event(
-            "lease_renewed",
-            Some(owner_thread_id),
-            Some(lease.task_id.clone()),
+            "command_intent_preflight",
+            Some(thread.thread_id),
+            Some(plan.task_id.clone()),
             None,
             json!({
-                "lease_id": lease.lease_id,
-                "resource_type": lease.resource_type,
-                "scope": lease.scope,
-                "expires_at": lease.expires_at,
+                "plan_id": &plan.plan_id,
+                "intent": plan.intent.as_str(),
+                "confidence": plan.confidence,
+                "risk_level": &plan.risk_level,
+                "status": format!("{:?}", plan.status),
+                "expires_at": plan.expires_at.to_rfc3339(),
+                "required_capabilities": &plan.required_capabilities,
+                "required_resources": plan
+                    .required_resources
+                    .iter()
+                    .map(ResourceRequirement::key)
+                    .collect::<Vec<_>>(),
+                "cwd": &plan.cwd,
             }),
         )
         .await;
-        Ok(())
+        Ok(plan)
     }
 
-    pub(crate) async fn cancel_command(&self, command_id: &str) -> PraxisResult<()> {
-        let _ = self
-            .finish_managed_command(
-                command_id,
-                Some(-1),
-                b"command cancelled by AgentOS",
-                /*release_leases*/ true,
+    pub(crate) async fn preflight_mutating_tool_intent(
+        &self,
+        thread_id: ThreadId,
+        tool_name: &str,
+        arguments_fingerprint_source: &str,
+    ) -> PraxisResult<CommandIntentPlan> {
+        let intent = classify_mutating_tool(tool_name);
+        let now = Utc::now();
+        let action = vec![
+            format!("tool:{tool_name}"),
+            arguments_fingerprint_source.to_string(),
+        ];
+        let (thread, task, profile) = {
+            let mut state = self.state.write().await;
+            state.ensure_builtin_profiles();
+            let thread = state.threads.get(&thread_id).cloned().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "AgentOS thread `{thread_id}` is not registered"
+                ))
+            })?;
+            let task_id = thread.current_task_id.clone().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(
+                    "side-effectful tool rejected: thread has no current task_id".to_string(),
+                )
+            })?;
+            let task = state.tasks.get(&task_id).cloned().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "current task `{task_id}` is not registered"
+                ))
+            })?;
+            let profile = state
+                .profiles
+                .get(&thread.profile_id)
+                .cloned()
+                .ok_or_else(|| {
+                    PraxisErr::UnsupportedOperation(format!(
+                        "unknown capability profile `{}`",
+                        thread.profile_id
+                    ))
+                })?;
+            (thread, task, profile)
+        };
+
+        profile
+            .validate_tool_intent(&intent)
+            .map_err(PraxisErr::UnsupportedOperation)?;
+        let required_capabilities = profile.capability_names_for_action(&intent);
+        validate_task_action_contract(&task, &required_capabilities, &intent.required_resources)?;
+        let plan = CommandIntentPlan {
+            plan_id: format!("intent-plan-{}", Uuid::new_v4()),
+            task_id: task.task_id,
+            thread_id,
+            intent: intent.kind,
+            confidence: intent.confidence,
+            command_fingerprint: action_fingerprint(&action, thread.cwd.as_path(), intent.kind),
+            command: action,
+            cwd: thread.cwd,
+            required_capabilities,
+            required_resources: intent.required_resources,
+            side_effects: intent.side_effects,
+            risk_level: intent.risk_level,
+            status: CommandIntentPlanStatus::Pending,
+            consumed_by_ticket_id: None,
+            created_at: now,
+            expires_at: now + Duration::seconds(DEFAULT_TICKET_TTL_SECONDS),
+        };
+        self.insert_intent_plan(&plan).await;
+        self.persist_intent_plan_snapshot(&plan).await;
+        self.record_event(
+            "mutating_tool_intent_preflight",
+            Some(thread_id),
+            Some(plan.task_id.clone()),
+            None,
+            json!({
+                "plan_id": &plan.plan_id,
+                "tool": tool_name,
+                "intent": plan.intent.as_str(),
+                "confidence": plan.confidence,
+                "risk_level": &plan.risk_level,
+                "status": format!("{:?}", plan.status),
+                "expires_at": plan.expires_at.to_rfc3339(),
+                "required_capabilities": &plan.required_capabilities,
+                "required_resources": plan
+                    .required_resources
+                    .iter()
+                    .map(ResourceRequirement::key)
+                    .collect::<Vec<_>>(),
+            }),
+        )
+        .await;
+        Ok(plan)
+    }
+
+    pub(crate) async fn poll_runtime_commands(
+        &self,
+        thread_id: ThreadId,
+        auto_ack: bool,
+    ) -> PraxisResult<Vec<RuntimeCommandRecord>> {
+        let now = Utc::now();
+        let (commands, changed_commands) = {
+            let mut state = self.state.write().await;
+            let thread = state.threads.get(&thread_id).cloned().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!("unknown AgentOS thread `{thread_id}`"))
+            })?;
+            let active = state
+                .active_coordinators
+                .get(thread.coordination_scope.as_str())
+                .cloned();
+            let mut commands = Vec::new();
+            let mut changed_commands = Vec::new();
+            for command in state.runtime_commands.values_mut() {
+                if command.to_thread_id != thread_id {
+                    continue;
+                }
+                if !matches!(
+                    command.status,
+                    RuntimeCommandStatus::Pending
+                        | RuntimeCommandStatus::Acked
+                        | RuntimeCommandStatus::Executing
+                ) {
+                    continue;
+                }
+                if command.expires_at <= now {
+                    command.status = RuntimeCommandStatus::Expired;
+                    command.updated_at = now;
+                    changed_commands.push(command.clone());
+                    continue;
+                }
+                let active_matches = active.as_ref().is_some_and(|active| {
+                    command.coordinator_epoch == active.epoch
+                        && command.fencing_token == active.fencing_token
+                });
+                if !active_matches {
+                    command.status = RuntimeCommandStatus::Rejected;
+                    command.updated_at = now;
+                    changed_commands.push(command.clone());
+                    continue;
+                }
+                if auto_ack && command.status == RuntimeCommandStatus::Pending {
+                    command.status = RuntimeCommandStatus::Acked;
+                    command.updated_at = now;
+                    changed_commands.push(command.clone());
+                }
+                commands.push(command.clone());
+            }
+            (commands, changed_commands)
+        };
+
+        for command in &changed_commands {
+            self.persist_runtime_command_snapshot(command).await;
+            self.record_event(
+                "runtime_command_status_updated",
+                Some(thread_id),
+                command.task_id.clone(),
+                None,
+                json!({
+                    "command_id": &command.command_id,
+                    "from_thread_id": command.from_thread_id.to_string(),
+                    "to_thread_id": command.to_thread_id.to_string(),
+                    "command_type": command.command_type.as_str(),
+                    "status": format!("{:?}", command.status),
+                    "source": "poll_runtime_commands",
+                }),
             )
+            .await;
+        }
+
+        Ok(commands)
+    }
+
+    pub(crate) async fn issue_runtime_command(
+        &self,
+        from_thread_id: ThreadId,
+        to_thread_id: ThreadId,
+        command_type: RuntimeCommandType,
+        task_id: Option<String>,
+        payload: serde_json::Value,
+    ) -> PraxisResult<RuntimeCommandRecord> {
+        let now = Utc::now();
+        let command_id = format!("runtime-command-{}", Uuid::new_v4());
+        let command = {
+            let mut state = self.state.write().await;
+            let sender = state.threads.get(&from_thread_id).cloned().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "unknown AgentOS sender thread `{from_thread_id}`"
+                ))
+            })?;
+            let receiver = state.threads.get(&to_thread_id).cloned().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "unknown AgentOS receiver thread `{to_thread_id}`"
+                ))
+            })?;
+            if sender.rank != COORDINATOR_RANK {
+                return Err(PraxisErr::UnsupportedOperation(
+                    "only rank-0 coordinators can issue runtime commands".to_string(),
+                ));
+            }
+            if sender.coordination_scope != receiver.coordination_scope {
+                return Err(PraxisErr::UnsupportedOperation(
+                    "runtime commands cannot cross coordination scopes".to_string(),
+                ));
+            }
+            if command_type == RuntimeCommandType::AssignTask {
+                let Some(task_id) = task_id.as_deref() else {
+                    return Err(PraxisErr::UnsupportedOperation(
+                        "AssignTask runtime commands require task_id".to_string(),
+                    ));
+                };
+                let task = state.tasks.get(task_id).ok_or_else(|| {
+                    PraxisErr::UnsupportedOperation(format!(
+                        "AssignTask references unknown task `{task_id}`"
+                    ))
+                })?;
+                if task.assigned_thread_id != Some(to_thread_id) {
+                    return Err(PraxisErr::UnsupportedOperation(
+                        "AssignTask runtime command task owner does not match receiver".to_string(),
+                    ));
+                }
+            }
+            let active = state
+                .active_coordinators
+                .get(sender.coordination_scope.as_str())
+                .ok_or_else(|| {
+                    PraxisErr::UnsupportedOperation("no active coordinator lease".to_string())
+                })?;
+            if active.owner_thread_id != from_thread_id {
+                return Err(PraxisErr::UnsupportedOperation(
+                    "only the active rank-0 coordinator can issue runtime commands".to_string(),
+                ));
+            }
+            if active.expires_at <= now {
+                return Err(PraxisErr::UnsupportedOperation(
+                    "active coordinator lease has expired".to_string(),
+                ));
+            }
+            let coordinator_epoch = active.epoch;
+            let fencing_token = active.fencing_token;
+            let command = RuntimeCommandRecord {
+                command_id: command_id.clone(),
+                from_thread_id,
+                to_thread_id,
+                task_id,
+                coordinator_epoch,
+                fencing_token,
+                command_type,
+                payload,
+                status: RuntimeCommandStatus::Pending,
+                created_at: now,
+                updated_at: now,
+                expires_at: now + Duration::seconds(DEFAULT_TICKET_TTL_SECONDS),
+            };
+            state.runtime_commands.insert(command_id, command.clone());
+            command
+        };
+
+        self.persist_runtime_command_snapshot(&command).await;
+        self.record_event(
+            "runtime_command_issued",
+            Some(command.from_thread_id),
+            command.task_id.clone(),
+            None,
+            json!({
+                "command_id": &command.command_id,
+                "to_thread_id": command.to_thread_id.to_string(),
+                "command_type": command.command_type.as_str(),
+                "status": format!("{:?}", command.status),
+                "coordinator_epoch": command.coordinator_epoch,
+                "fencing_token": command.fencing_token,
+            }),
+        )
+        .await;
+        Ok(command)
+    }
+
+    pub(crate) async fn update_runtime_command_status(
+        &self,
+        command_id: &str,
+        actor_thread_id: ThreadId,
+        status: RuntimeCommandStatus,
+    ) -> PraxisResult<RuntimeCommandRecord> {
+        let now = Utc::now();
+        let (command, thread_snapshot, task_snapshot) = {
+            let mut state = self.state.write().await;
+            let existing = state
+                .runtime_commands
+                .get(command_id)
+                .cloned()
+                .ok_or_else(|| {
+                    PraxisErr::UnsupportedOperation(format!(
+                        "unknown runtime command `{command_id}`"
+                    ))
+                })?;
+            if actor_thread_id != existing.from_thread_id
+                && actor_thread_id != existing.to_thread_id
+            {
+                return Err(PraxisErr::UnsupportedOperation(
+                    "runtime command status can only be updated by sender or receiver".to_string(),
+                ));
+            }
+            if matches!(
+                status,
+                RuntimeCommandStatus::Acked
+                    | RuntimeCommandStatus::Executing
+                    | RuntimeCommandStatus::Completed
+            ) && actor_thread_id != existing.to_thread_id
+            {
+                return Err(PraxisErr::UnsupportedOperation(
+                    "runtime command ack/execution status must be reported by the receiver"
+                        .to_string(),
+                ));
+            }
+            let active = state
+                .threads
+                .get(&existing.to_thread_id)
+                .and_then(|thread| {
+                    state
+                        .active_coordinators
+                        .get(thread.coordination_scope.as_str())
+                })
+                .cloned();
+            let active_matches = active.as_ref().is_some_and(|active| {
+                existing.coordinator_epoch == active.epoch
+                    && existing.fencing_token == active.fencing_token
+            });
+            let status = if matches!(
+                status,
+                RuntimeCommandStatus::Failed | RuntimeCommandStatus::Rejected
+            ) {
+                status
+            } else if existing.expires_at <= now {
+                RuntimeCommandStatus::Expired
+            } else if !active_matches {
+                RuntimeCommandStatus::Rejected
+            } else {
+                status
+            };
+            let command = state.runtime_commands.get_mut(command_id).ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!("unknown runtime command `{command_id}`"))
+            })?;
+            command.status = status;
+            command.updated_at = now;
+            let command_snapshot = command.clone();
+            let mut thread_snapshot = None;
+            let mut task_snapshot = None;
+            if command_snapshot.command_type == RuntimeCommandType::AssignTask
+                && let Some(task_id) = command_snapshot.task_id.as_deref()
+            {
+                if let Some(task) = state.tasks.get_mut(task_id) {
+                    task.status = match command_snapshot.status {
+                        RuntimeCommandStatus::Executing => TaskStatus::Running,
+                        RuntimeCommandStatus::Completed => TaskStatus::Completed,
+                        RuntimeCommandStatus::Failed | RuntimeCommandStatus::Expired => {
+                            TaskStatus::Failed
+                        }
+                        RuntimeCommandStatus::Rejected => TaskStatus::Cancelled,
+                        RuntimeCommandStatus::Pending | RuntimeCommandStatus::Acked => {
+                            TaskStatus::Assigned
+                        }
+                    };
+                    task.updated_at = now;
+                    task_snapshot = Some(task.clone());
+                }
+                if let Some(thread) = state.threads.get_mut(&command_snapshot.to_thread_id) {
+                    match command_snapshot.status {
+                        RuntimeCommandStatus::Executing => {
+                            thread.current_task_id = Some(task_id.to_string());
+                            thread.state = ThreadRuntimeState::Running;
+                        }
+                        RuntimeCommandStatus::Completed
+                        | RuntimeCommandStatus::Failed
+                        | RuntimeCommandStatus::Rejected
+                        | RuntimeCommandStatus::Expired => {
+                            if thread.current_task_id.as_deref() == Some(task_id) {
+                                thread.current_task_id = None;
+                            }
+                            thread.state = ThreadRuntimeState::Idle;
+                        }
+                        RuntimeCommandStatus::Pending | RuntimeCommandStatus::Acked => {
+                            thread.current_task_id = Some(task_id.to_string());
+                            thread.state = ThreadRuntimeState::Assigned;
+                        }
+                    }
+                    thread.heartbeat_at = now;
+                    thread_snapshot = Some(thread.clone());
+                }
+            }
+            (command_snapshot, thread_snapshot, task_snapshot)
+        };
+
+        self.persist_runtime_command_snapshot(&command).await;
+        if let Some(thread) = thread_snapshot {
+            self.persist_thread_snapshot(&thread).await;
+        }
+        if let Some(task) = task_snapshot {
+            self.persist_task_snapshot(&task).await;
+        }
+        self.record_event(
+            "runtime_command_status_updated",
+            Some(actor_thread_id),
+            command.task_id.clone(),
+            None,
+            json!({
+                "command_id": &command.command_id,
+                "from_thread_id": command.from_thread_id.to_string(),
+                "to_thread_id": command.to_thread_id.to_string(),
+                "command_type": command.command_type.as_str(),
+                "status": format!("{:?}", command.status),
+            }),
+        )
+        .await;
+        Ok(command)
+    }
+
+    pub(crate) async fn submit_worker_request(
+        &self,
+        request: WorkerRequestCreateRequest,
+    ) -> PraxisResult<WorkerRequestRecord> {
+        let request_type = request.request_type.trim().to_string();
+        if request_type.is_empty() {
+            return Err(PraxisErr::UnsupportedOperation(
+                "worker request_type cannot be empty".to_string(),
+            ));
+        }
+        let reason = request.reason.trim().to_string();
+        if reason.is_empty() {
+            return Err(PraxisErr::UnsupportedOperation(
+                "worker request reason cannot be empty".to_string(),
+            ));
+        }
+
+        let now = Utc::now();
+        let request_id = format!("worker-request-{}", Uuid::new_v4());
+        let (record, thread_snapshot) = {
+            let mut state = self.state.write().await;
+            let thread = state.threads.get_mut(&request.thread_id).ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "unknown AgentOS thread `{}`",
+                    request.thread_id
+                ))
+            })?;
+            let task_id = thread.current_task_id.clone();
+            if request.blocking {
+                thread.state = if request_type.eq_ignore_ascii_case("BlockedByLease") {
+                    ThreadRuntimeState::WaitingForLease
+                } else {
+                    ThreadRuntimeState::WaitingForCoordinator
+                };
+                thread.heartbeat_at = now;
+            }
+            let thread_snapshot = thread.clone();
+            let record = WorkerRequestRecord {
+                request_id: request_id.clone(),
+                request_type,
+                thread_id: request.thread_id,
+                task_id,
+                blocking: request.blocking,
+                status: WorkerRequestStatus::Pending,
+                reason,
+                requested_resource: request.requested_resource,
+                artifact_refs: request.artifact_refs,
+                created_at: now,
+                updated_at: now,
+            };
+            state.worker_requests.insert(request_id, record.clone());
+            (record, thread_snapshot)
+        };
+
+        self.persist_thread_snapshot(&thread_snapshot).await;
+        self.persist_worker_request_snapshot(&record).await;
+        self.record_event(
+            "worker_request_submitted",
+            Some(record.thread_id),
+            record.task_id.clone(),
+            None,
+            json!({
+                "request_id": &record.request_id,
+                "request_type": &record.request_type,
+                "blocking": record.blocking,
+                "status": format!("{:?}", record.status),
+                "reason": &record.reason,
+                "requested_resource": &record.requested_resource,
+                "artifact_refs": &record.artifact_refs,
+            }),
+        )
+        .await;
+
+        Ok(record)
+    }
+
+    pub(crate) async fn update_worker_request_status(
+        &self,
+        request_id: &str,
+        actor_thread_id: ThreadId,
+        status: WorkerRequestStatus,
+    ) -> PraxisResult<WorkerRequestRecord> {
+        let now = Utc::now();
+        let (record, thread_snapshot) = {
+            let mut state = self.state.write().await;
+            let existing = state
+                .worker_requests
+                .get(request_id)
+                .cloned()
+                .ok_or_else(|| {
+                    PraxisErr::UnsupportedOperation(format!(
+                        "unknown worker request `{request_id}`"
+                    ))
+                })?;
+            if actor_thread_id != existing.thread_id {
+                let requester =
+                    state
+                        .threads
+                        .get(&existing.thread_id)
+                        .cloned()
+                        .ok_or_else(|| {
+                            PraxisErr::UnsupportedOperation(format!(
+                                "unknown AgentOS request thread `{}`",
+                                existing.thread_id
+                            ))
+                        })?;
+                let actor = state
+                    .threads
+                    .get(&actor_thread_id)
+                    .cloned()
+                    .ok_or_else(|| {
+                        PraxisErr::UnsupportedOperation(format!(
+                            "unknown AgentOS actor thread `{actor_thread_id}`"
+                        ))
+                    })?;
+                if actor.rank != COORDINATOR_RANK
+                    || actor.coordination_scope != requester.coordination_scope
+                {
+                    return Err(PraxisErr::UnsupportedOperation(
+                        "worker request status can only be updated by owner or active coordinator"
+                            .to_string(),
+                    ));
+                }
+                let active = state
+                    .active_coordinators
+                    .get(actor.coordination_scope.as_str())
+                    .ok_or_else(|| {
+                        PraxisErr::UnsupportedOperation("no active coordinator lease".to_string())
+                    })?;
+                if active.owner_thread_id != actor_thread_id || active.expires_at <= now {
+                    return Err(PraxisErr::UnsupportedOperation(
+                        "only the active rank-0 coordinator can resolve worker requests"
+                            .to_string(),
+                    ));
+                }
+            }
+            let request = state.worker_requests.get_mut(request_id).ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!("unknown worker request `{request_id}`"))
+            })?;
+            request.status = status;
+            request.updated_at = now;
+            let record = request.clone();
+            let thread_snapshot = if record.blocking && status != WorkerRequestStatus::Pending {
+                state.threads.get_mut(&record.thread_id).map(|thread| {
+                    if matches!(
+                        thread.state,
+                        ThreadRuntimeState::WaitingForLease
+                            | ThreadRuntimeState::WaitingForCoordinator
+                    ) {
+                        thread.state = ThreadRuntimeState::Idle;
+                    }
+                    thread.heartbeat_at = now;
+                    thread.clone()
+                })
+            } else {
+                None
+            };
+            (record, thread_snapshot)
+        };
+
+        if let Some(thread) = thread_snapshot {
+            self.persist_thread_snapshot(&thread).await;
+        }
+        self.persist_worker_request_snapshot(&record).await;
+        self.record_event(
+            "worker_request_status_updated",
+            Some(actor_thread_id),
+            record.task_id.clone(),
+            None,
+            json!({
+                "request_id": &record.request_id,
+                "request_thread_id": record.thread_id.to_string(),
+                "request_type": &record.request_type,
+                "status": format!("{:?}", record.status),
+            }),
+        )
+        .await;
+        Ok(record)
+    }
+
+    pub(crate) async fn read_artifact_blob(
+        &self,
+        reader_thread_id: ThreadId,
+        artifact_id: &str,
+        max_bytes: Option<usize>,
+    ) -> PraxisResult<ArtifactBlobRead> {
+        let requested_max_bytes = max_bytes
+            .unwrap_or(DEFAULT_ARTIFACT_READ_MAX_BYTES)
+            .clamp(1, HARD_ARTIFACT_READ_MAX_BYTES);
+        let (artifact, reader_task_id, max_bytes) = self
+            .authorize_artifact_blob_read(reader_thread_id, artifact_id, requested_max_bytes)
             .await?;
+        let blob = artifact.metadata.get("blob").ok_or_else(|| {
+            PraxisErr::UnsupportedOperation(format!(
+                "artifact `{artifact_id}` has no blob metadata"
+            ))
+        })?;
+        let blob_path = blob
+            .get("blob_path")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "artifact `{artifact_id}` has no blob path"
+                ))
+            })?;
+        let blob_bytes = blob.get("blob_bytes").and_then(|value| value.as_u64());
+        let path = self.validated_artifact_blob_path(blob_path).await?;
+        let mut file = tokio::fs::File::open(path.as_path()).await.map_err(|err| {
+            PraxisErr::UnsupportedOperation(format!(
+                "failed to open artifact `{artifact_id}` blob: {err}"
+            ))
+        })?;
+        let mut bytes = Vec::with_capacity(max_bytes.min(64 * 1024));
+        let mut limited_file = file.take(max_bytes as u64);
+        limited_file.read_to_end(&mut bytes).await.map_err(|err| {
+            PraxisErr::UnsupportedOperation(format!(
+                "failed to read artifact `{artifact_id}` blob: {err}"
+            ))
+        })?;
+        let truncated = blob_bytes
+            .map(|total| total > bytes.len() as u64)
+            .unwrap_or(bytes.len() == max_bytes);
+        let content = String::from_utf8_lossy(&bytes).to_string();
+        self.record_artifact_read_budget(reader_task_id.as_str(), bytes.len() as u64)
+            .await?;
+        self.record_event(
+            "artifact_blob_read",
+            Some(reader_thread_id),
+            Some(reader_task_id.clone()),
+            None,
+            json!({
+                "artifact_id": &artifact.artifact_id,
+                "artifact_owner_thread_id": artifact.owner_thread_id.to_string(),
+                "artifact_task_id": &artifact.task_id,
+                "bytes_read": bytes.len(),
+                "blob_bytes": blob_bytes,
+                "truncated": truncated,
+            }),
+        )
+        .await;
+        Ok(ArtifactBlobRead {
+            artifact,
+            content,
+            bytes_read: bytes.len(),
+            blob_bytes,
+            truncated,
+        })
+    }
+
+    async fn authorize_artifact_blob_read(
+        &self,
+        reader_thread_id: ThreadId,
+        artifact_id: &str,
+        requested_max_bytes: usize,
+    ) -> PraxisResult<(ArtifactRecord, String, usize)> {
+        let state = self.state.read().await;
+        let reader = state.threads.get(&reader_thread_id).ok_or_else(|| {
+            PraxisErr::UnsupportedOperation(format!(
+                "unknown AgentOS reader thread `{reader_thread_id}`"
+            ))
+        })?;
+        let reader_task_id = reader.current_task_id.clone().ok_or_else(|| {
+            PraxisErr::UnsupportedOperation(
+                "artifact read rejected: reader thread has no current task_id".to_string(),
+            )
+        })?;
+        let reader_task = state.tasks.get(&reader_task_id).ok_or_else(|| {
+            PraxisErr::UnsupportedOperation(format!(
+                "artifact read rejected: current task `{reader_task_id}` is not registered"
+            ))
+        })?;
+        let artifact = state.artifacts.get(artifact_id).cloned().ok_or_else(|| {
+            PraxisErr::UnsupportedOperation(format!("unknown artifact `{artifact_id}`"))
+        })?;
+        let owner_scope_matches = state
+            .threads
+            .get(&artifact.owner_thread_id)
+            .is_some_and(|owner| owner.coordination_scope == reader.coordination_scope);
+        if !owner_scope_matches && artifact.owner_thread_id != reader_thread_id {
+            return Err(PraxisErr::UnsupportedOperation(
+                "artifact read rejected: artifact owner is outside reader coordination scope"
+                    .to_string(),
+            ));
+        }
+        let artifact_ref_allowed = reader_task
+            .artifact_refs
+            .iter()
+            .any(|reference| reference == artifact_id || reference == &artifact.uri);
+        let same_task = artifact.task_id == reader_task_id;
+        let coordinator = reader.rank == COORDINATOR_RANK;
+        if !same_task && !artifact_ref_allowed && !reader_task.exploratory && !coordinator {
+            return Err(PraxisErr::UnsupportedOperation(format!(
+                "artifact read rejected: artifact `{artifact_id}` is not in task artifact_refs"
+            )));
+        }
+        let max_bytes = if let Some(token_budget) = reader_task.token_budget {
+            let remaining = token_budget.saturating_sub(reader_task.artifact_read_bytes);
+            if remaining == 0 {
+                return Err(PraxisErr::UnsupportedOperation(format!(
+                    "artifact read rejected: task `{reader_task_id}` token budget is exhausted"
+                )));
+            }
+            requested_max_bytes.min(remaining as usize)
+        } else {
+            requested_max_bytes
+        };
+        Ok((artifact, reader_task_id, max_bytes.max(1)))
+    }
+
+    async fn record_artifact_read_budget(
+        &self,
+        task_id: &str,
+        bytes_read: u64,
+    ) -> PraxisResult<()> {
+        if bytes_read == 0 {
+            return Ok(());
+        }
+        let task_snapshot = {
+            let mut state = self.state.write().await;
+            let task = state.tasks.get_mut(task_id).ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "artifact read budget rejected: task `{task_id}` is not registered"
+                ))
+            })?;
+            task.artifact_read_bytes = task.artifact_read_bytes.saturating_add(bytes_read);
+            task.updated_at = Utc::now();
+            task.clone()
+        };
+        self.persist_task_snapshot(&task_snapshot).await;
         Ok(())
     }
 
@@ -1128,9 +1778,12 @@ impl AgentOsRuntime {
         cwd: &Path,
     ) -> PraxisResult<ExecutionTicket> {
         self.expire_leases().await;
+        self.expire_intent_plans().await;
         let intent = classify_command(command, cwd);
         let now = Utc::now();
-        let (thread, task, profile, coordinator_epoch, coordinator_fencing) = {
+        let command_fingerprint = action_fingerprint(command, cwd, intent.kind);
+        let ticket_id = format!("exec-ticket-{}", Uuid::new_v4());
+        let (thread, task, profile, coordinator_epoch, coordinator_fencing, intent_plan_id) = {
             let mut state = self.state.write().await;
             state.ensure_builtin_profiles();
             let thread = state.threads.get(&thread_id).cloned().ok_or_else(|| {
@@ -1162,6 +1815,15 @@ impl AgentOsRuntime {
                 .active_coordinators
                 .get(thread.coordination_scope.as_str())
                 .cloned();
+            let intent_plan_id = Self::find_matching_intent_plan_locked(
+                &state,
+                thread_id,
+                task.task_id.as_str(),
+                intent.kind,
+                command_fingerprint.as_str(),
+                cwd,
+            )
+            .map(|plan| plan.plan_id.clone());
             (
                 thread,
                 task,
@@ -1171,12 +1833,226 @@ impl AgentOsRuntime {
                     .as_ref()
                     .map(|value| value.fencing_token)
                     .unwrap_or(0),
+                intent_plan_id,
             )
         };
 
         profile
             .validate_command_intent(&intent, command, cwd)
             .map_err(PraxisErr::UnsupportedOperation)?;
+        let required_capabilities = profile.capability_names_for_action(&intent);
+        validate_task_action_contract(&task, &required_capabilities, &intent.required_resources)?;
+        let intent_plan_id = intent_plan_id.ok_or_else(|| {
+            PraxisErr::UnsupportedOperation(
+                "execution ticket rejected: command has no matching AgentOS intent preflight plan"
+                    .to_string(),
+            )
+        })?;
+        let ticket_intent_plan_id = intent_plan_id.clone();
+
+        let lease_ids = match self
+            .acquire_required_leases(
+                thread_id,
+                task.task_id.as_str(),
+                thread.priority.max(task.priority),
+                &intent.required_resources,
+            )
+            .await
+        {
+            Ok(lease_ids) => lease_ids,
+            Err(err) => {
+                self.mark_thread_state(thread_id, ThreadRuntimeState::WaitingForLease)
+                    .await;
+                return Err(err);
+            }
+        };
+
+        let ticket = ExecutionTicket {
+            ticket_id,
+            task_id: task.task_id,
+            thread_id,
+            coordination_scope: thread.coordination_scope,
+            allowed_intent: intent.kind,
+            intent_plan_id: Some(intent_plan_id),
+            command_fingerprint,
+            cwd: cwd.to_path_buf(),
+            risk_level: intent.risk_level.clone(),
+            capabilities: required_capabilities,
+            lease_ids,
+            file_scopes: profile.path_scopes.allow.clone(),
+            token_budget: task.token_budget,
+            expires_at: now + Duration::seconds(DEFAULT_TICKET_TTL_SECONDS),
+            fencing_token: coordinator_fencing,
+            coordinator_epoch,
+            created_at: now,
+        };
+
+        let plan_snapshot_result = {
+            let mut state = self.state.write().await;
+            match state.intent_plans.get_mut(ticket_intent_plan_id.as_str()) {
+                Some(plan)
+                    if plan.status != CommandIntentPlanStatus::Pending
+                        || plan.expires_at <= now =>
+                {
+                    Err(PraxisErr::UnsupportedOperation(format!(
+                        "execution ticket rejected: intent plan `{ticket_intent_plan_id}` is not pending"
+                    )))
+                }
+                Some(plan)
+                    if plan.thread_id != ticket.thread_id
+                        || plan.task_id != ticket.task_id
+                        || plan.intent != ticket.allowed_intent
+                        || plan.command_fingerprint != ticket.command_fingerprint
+                        || normalize_path_for_scope(plan.cwd.as_path())
+                            != normalize_path_for_scope(ticket.cwd.as_path()) =>
+                {
+                    Err(PraxisErr::UnsupportedOperation(format!(
+                        "execution ticket rejected: intent plan `{ticket_intent_plan_id}` does not match ticket action"
+                    )))
+                }
+                Some(plan) => {
+                    plan.status = CommandIntentPlanStatus::Consumed;
+                    plan.consumed_by_ticket_id = Some(ticket.ticket_id.clone());
+                    let plan_snapshot = plan.clone();
+                    state
+                        .tickets
+                        .insert(ticket.ticket_id.clone(), ticket.clone());
+                    Ok(plan_snapshot)
+                }
+                None => Err(PraxisErr::UnsupportedOperation(format!(
+                    "execution ticket references missing intent plan `{ticket_intent_plan_id}`"
+                ))),
+            }
+        };
+        let plan_snapshot_result = match plan_snapshot_result {
+            Ok(plan) => plan,
+            Err(err) => {
+                self.release_leases(&ticket.lease_ids).await;
+                return Err(err);
+            }
+        };
+        self.persist_ticket_snapshot(&ticket).await;
+        self.persist_intent_plan_snapshot(&plan_snapshot_result)
+            .await;
+        self.record_event(
+            "ticket_issued",
+            Some(thread_id),
+            Some(ticket.task_id.clone()),
+            None,
+            json!({
+                "ticket_id": &ticket.ticket_id,
+                "intent_plan_id": &ticket.intent_plan_id,
+                "intent": ticket.allowed_intent.as_str(),
+                "leases": &ticket.lease_ids,
+            }),
+        )
+        .await;
+        self.record_event(
+            "command_intent_plan_consumed",
+            Some(thread_id),
+            Some(ticket.task_id.clone()),
+            None,
+            json!({
+                "plan_id": plan_snapshot_result.plan_id,
+                "ticket_id": &ticket.ticket_id,
+                "intent": ticket.allowed_intent.as_str(),
+            }),
+        )
+        .await;
+        Ok(ticket)
+    }
+
+    pub(crate) async fn request_mutating_tool_ticket(
+        &self,
+        thread_id: ThreadId,
+        tool_name: &str,
+        arguments_fingerprint_source: &str,
+    ) -> PraxisResult<ExecutionTicket> {
+        self.expire_leases().await;
+        self.expire_intent_plans().await;
+        let intent = classify_mutating_tool(tool_name);
+        let now = Utc::now();
+        let action = vec![
+            format!("tool:{tool_name}"),
+            arguments_fingerprint_source.to_string(),
+        ];
+        let (
+            thread,
+            task,
+            profile,
+            coordinator_epoch,
+            coordinator_fencing,
+            intent_plan_id,
+            command_fingerprint,
+        ) = {
+            let mut state = self.state.write().await;
+            state.ensure_builtin_profiles();
+            let thread = state.threads.get(&thread_id).cloned().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "AgentOS thread `{thread_id}` is not registered"
+                ))
+            })?;
+            let task_id = thread.current_task_id.clone().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(
+                    "side-effectful tool rejected: thread has no current task_id".to_string(),
+                )
+            })?;
+            let task = state.tasks.get(&task_id).cloned().ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "current task `{task_id}` is not registered"
+                ))
+            })?;
+            let profile = state
+                .profiles
+                .get(&thread.profile_id)
+                .cloned()
+                .ok_or_else(|| {
+                    PraxisErr::UnsupportedOperation(format!(
+                        "unknown capability profile `{}`",
+                        thread.profile_id
+                    ))
+                })?;
+            let active = state
+                .active_coordinators
+                .get(thread.coordination_scope.as_str())
+                .cloned();
+            let command_fingerprint =
+                action_fingerprint(&action, thread.cwd.as_path(), intent.kind);
+            let intent_plan_id = Self::find_matching_intent_plan_locked(
+                &state,
+                thread_id,
+                task.task_id.as_str(),
+                intent.kind,
+                command_fingerprint.as_str(),
+                thread.cwd.as_path(),
+            )
+            .map(|plan| plan.plan_id.clone());
+            (
+                thread,
+                task,
+                profile,
+                active.as_ref().map(|value| value.epoch).unwrap_or(0),
+                active
+                    .as_ref()
+                    .map(|value| value.fencing_token)
+                    .unwrap_or(0),
+                intent_plan_id,
+                command_fingerprint,
+            )
+        };
+
+        profile
+            .validate_tool_intent(&intent)
+            .map_err(PraxisErr::UnsupportedOperation)?;
+        let required_capabilities = profile.capability_names_for_action(&intent);
+        validate_task_action_contract(&task, &required_capabilities, &intent.required_resources)?;
+        let intent_plan_id = intent_plan_id.ok_or_else(|| {
+            PraxisErr::UnsupportedOperation(
+                "tool ticket rejected: tool has no matching AgentOS intent preflight plan"
+                    .to_string(),
+            )
+        })?;
+        let ticket_intent_plan_id = intent_plan_id.clone();
 
         let lease_ids = match self
             .acquire_required_leases(
@@ -1201,10 +2077,11 @@ impl AgentOsRuntime {
             thread_id,
             coordination_scope: thread.coordination_scope,
             allowed_intent: intent.kind,
-            command_fingerprint: action_fingerprint(command, cwd, intent.kind),
-            cwd: cwd.to_path_buf(),
+            intent_plan_id: Some(intent_plan_id),
+            command_fingerprint,
+            cwd: thread.cwd,
             risk_level: intent.risk_level.clone(),
-            capabilities: profile.capability_names_for_action(&intent),
+            capabilities: required_capabilities,
             lease_ids,
             file_scopes: profile.path_scopes.allow.clone(),
             token_budget: task.token_budget,
@@ -1214,29 +2091,142 @@ impl AgentOsRuntime {
             created_at: now,
         };
 
-        {
+        let plan_snapshot_result = {
             let mut state = self.state.write().await;
-            state
-                .tickets
-                .insert(ticket.ticket_id.clone(), ticket.clone());
-        }
+            match state.intent_plans.get_mut(ticket_intent_plan_id.as_str()) {
+                Some(plan)
+                    if plan.status != CommandIntentPlanStatus::Pending
+                        || plan.expires_at <= now =>
+                {
+                    Err(PraxisErr::UnsupportedOperation(format!(
+                        "tool ticket rejected: intent plan `{ticket_intent_plan_id}` is not pending"
+                    )))
+                }
+                Some(plan)
+                    if plan.thread_id != ticket.thread_id
+                        || plan.task_id != ticket.task_id
+                        || plan.intent != ticket.allowed_intent
+                        || plan.command_fingerprint != ticket.command_fingerprint
+                        || normalize_path_for_scope(plan.cwd.as_path())
+                            != normalize_path_for_scope(ticket.cwd.as_path()) =>
+                {
+                    Err(PraxisErr::UnsupportedOperation(format!(
+                        "tool ticket rejected: intent plan `{ticket_intent_plan_id}` does not match ticket action"
+                    )))
+                }
+                Some(plan) => {
+                    plan.status = CommandIntentPlanStatus::Consumed;
+                    plan.consumed_by_ticket_id = Some(ticket.ticket_id.clone());
+                    let plan_snapshot = plan.clone();
+                    state
+                        .tickets
+                        .insert(ticket.ticket_id.clone(), ticket.clone());
+                    Ok(plan_snapshot)
+                }
+                None => Err(PraxisErr::UnsupportedOperation(format!(
+                    "tool ticket references missing intent plan `{ticket_intent_plan_id}`"
+                ))),
+            }
+        };
+        let plan_snapshot_result = match plan_snapshot_result {
+            Ok(plan) => plan,
+            Err(err) => {
+                self.release_leases(&ticket.lease_ids).await;
+                return Err(err);
+            }
+        };
         self.persist_ticket_snapshot(&ticket).await;
+        self.persist_intent_plan_snapshot(&plan_snapshot_result)
+            .await;
         self.record_event(
-            "ticket_issued",
+            "tool_ticket_issued",
             Some(thread_id),
             Some(ticket.task_id.clone()),
             None,
             json!({
                 "ticket_id": &ticket.ticket_id,
+                "intent_plan_id": &ticket.intent_plan_id,
+                "tool": tool_name,
                 "intent": ticket.allowed_intent.as_str(),
                 "leases": &ticket.lease_ids,
+            }),
+        )
+        .await;
+        self.record_event(
+            "command_intent_plan_consumed",
+            Some(thread_id),
+            Some(ticket.task_id.clone()),
+            None,
+            json!({
+                "plan_id": plan_snapshot_result.plan_id,
+                "ticket_id": &ticket.ticket_id,
+                "tool": tool_name,
+                "intent": ticket.allowed_intent.as_str(),
             }),
         )
         .await;
         Ok(ticket)
     }
 
-    pub(crate) async fn begin_managed_command(
+    pub(crate) async fn finish_tool_ticket(
+        &self,
+        ticket: &ExecutionTicket,
+        success: bool,
+    ) -> PraxisResult<()> {
+        let removed_ticket = {
+            let mut state = self.state.write().await;
+            state.tickets.remove(ticket.ticket_id.as_str())
+        };
+        if removed_ticket.is_none() {
+            return Err(PraxisErr::UnsupportedOperation(format!(
+                "tool ticket `{}` is not live",
+                ticket.ticket_id
+            )));
+        }
+        let lease_ids = ticket.lease_ids.clone();
+        self.release_leases(&lease_ids).await;
+        self.persist_finished_ticket_snapshot(ticket, Some(success))
+            .await;
+        self.record_event(
+            "tool_ticket_finished",
+            Some(ticket.thread_id),
+            Some(ticket.task_id.clone()),
+            None,
+            json!({
+                "ticket_id": ticket.ticket_id,
+                "success": success,
+            }),
+        )
+        .await;
+        Ok(())
+    }
+
+    pub(crate) async fn start_managed_command(
+        self: &Arc<Self>,
+        thread_id: ThreadId,
+        command: String,
+        argv: &[String],
+        cwd: &Path,
+        process_id: Option<i32>,
+    ) -> PraxisResult<ManagedCommandSpan> {
+        let ticket = self.request_command_ticket(thread_id, argv, cwd).await?;
+        let command_id = match self
+            .begin_managed_command(&ticket, command, argv, cwd.to_path_buf(), process_id)
+            .await
+        {
+            Ok(command_id) => command_id,
+            Err(err) => {
+                self.revoke_unstarted_ticket(&ticket, err.to_string()).await;
+                return Err(err);
+            }
+        };
+        Ok(ManagedCommandSpan {
+            agent_os: Arc::clone(self),
+            command_id,
+        })
+    }
+
+    async fn begin_managed_command(
         &self,
         ticket: &ExecutionTicket,
         command: String,
@@ -1257,12 +2247,20 @@ impl AgentOsRuntime {
                 "execution ticket cwd does not match requested command".to_string(),
             ));
         }
+        let baseline_dirty_files = if requires_dirty_audit(ticket.allowed_intent) {
+            audit_git_dirty_files(cwd.as_path()).await
+        } else {
+            Vec::new()
+        };
+        let baseline_dirty_fingerprints =
+            dirty_file_fingerprints(cwd.as_path(), &baseline_dirty_files);
         let record = CommandRecord {
             command_id: command_id.clone(),
             ticket_id: ticket.ticket_id.clone(),
             task_id: ticket.task_id.clone(),
             thread_id: ticket.thread_id,
             intent: ticket.allowed_intent,
+            intent_plan_id: ticket.intent_plan_id.clone(),
             command_fingerprint,
             raw_command: command,
             cwd,
@@ -1272,6 +2270,8 @@ impl AgentOsRuntime {
             exit_code: None,
             lease_ids: ticket.lease_ids.clone(),
             artifacts: Vec::new(),
+            baseline_dirty_files,
+            baseline_dirty_fingerprints,
             dirty_files: Vec::new(),
         };
 
@@ -1302,6 +2302,8 @@ impl AgentOsRuntime {
         for lease in lease_snapshots {
             self.persist_lease_snapshot(&lease).await;
         }
+        self.persist_started_ticket_snapshot(ticket, command_id.as_str())
+            .await;
         self.persist_command_snapshot(&record).await;
         self.record_event(
             "command_started",
@@ -1310,6 +2312,7 @@ impl AgentOsRuntime {
             Some(command_id.clone()),
             json!({
                 "ticket_id": &ticket.ticket_id,
+                "intent_plan_id": &ticket.intent_plan_id,
                 "intent": ticket.allowed_intent.as_str(),
             }),
         )
@@ -1317,7 +2320,7 @@ impl AgentOsRuntime {
         Ok(command_id)
     }
 
-    pub(crate) async fn finish_managed_command(
+    async fn finish_managed_command(
         &self,
         command_id: &str,
         exit_code: Option<i32>,
@@ -1325,7 +2328,7 @@ impl AgentOsRuntime {
         release_leases: bool,
     ) -> PraxisResult<Option<String>> {
         let now = Utc::now();
-        let (mut command, thread_snapshot, task_snapshot, lease_ids) = {
+        let (mut command, mut thread_snapshot, mut task_snapshot, lease_ids) = {
             let mut state = self.state.write().await;
             let command_snapshot = {
                 let command = state.commands.get_mut(command_id).ok_or_else(|| {
@@ -1361,17 +2364,19 @@ impl AgentOsRuntime {
             None
         } else {
             Some(
-                self.create_artifact(
+                self.create_blob_artifact(
                     command.task_id.clone(),
                     command.thread_id,
                     artifact_type_for_intent(command.intent),
-                    format!("artifact://command-log/{command_id}"),
+                    "command-log",
                     summarize_output(raw_output),
                     json!({
                         "command_id": command_id,
                         "bytes": raw_output.len(),
                         "exit_code": exit_code,
                     }),
+                    "log",
+                    raw_output,
                 )
                 .await?,
             )
@@ -1385,8 +2390,72 @@ impl AgentOsRuntime {
                 .insert(command_id.to_string(), command.clone());
         }
 
+        if let Some(outcome) = self.audit_finished_command_dirty_files(&command).await? {
+            let dirty_file_report =
+                format_dirty_file_report(&outcome.dirty_files, outcome.violation_path.as_ref());
+            let dirty_file_artifact_id = self
+                .create_blob_artifact(
+                    outcome.command.task_id.clone(),
+                    outcome.command.thread_id,
+                    ArtifactType::DirtyFileReport,
+                    "dirty-file-report",
+                    dirty_file_report.clone(),
+                    json!({
+                        "command_id": command_id,
+                        "dirty_files": outcome
+                            .dirty_files
+                            .iter()
+                            .map(|path| path.display().to_string())
+                            .collect::<Vec<_>>(),
+                        "violation_path": outcome
+                            .violation_path
+                            .as_ref()
+                            .map(|path| path.display().to_string()),
+                    }),
+                    "txt",
+                    dirty_file_report.as_bytes(),
+                )
+                .await?;
+            command = outcome.command;
+            command.artifacts.push(dirty_file_artifact_id.clone());
+            {
+                let mut state = self.state.write().await;
+                state
+                    .commands
+                    .insert(command_id.to_string(), command.clone());
+            }
+            thread_snapshot = outcome.thread_snapshot.or(thread_snapshot);
+            task_snapshot = outcome.task_snapshot.or(task_snapshot);
+            self.record_event(
+                "command_dirty_file_audit",
+                Some(command.thread_id),
+                Some(command.task_id.clone()),
+                Some(command.command_id.clone()),
+                json!({
+                    "artifact_id": dirty_file_artifact_id,
+                    "dirty_files": command
+                        .dirty_files
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>(),
+                    "violation_path": outcome
+                        .violation_path
+                        .as_ref()
+                        .map(|path| path.display().to_string()),
+                }),
+            )
+            .await;
+        }
+
         if release_leases {
             self.release_leases(&lease_ids).await;
+        }
+        let finished_ticket = {
+            let mut state = self.state.write().await;
+            state.tickets.remove(command.ticket_id.as_str())
+        };
+        if let Some(ticket) = finished_ticket.as_ref() {
+            self.persist_finished_ticket_snapshot(ticket, None).await;
         }
         if let Some(thread) = thread_snapshot {
             self.persist_thread_snapshot(&thread).await;
@@ -1410,7 +2479,30 @@ impl AgentOsRuntime {
         Ok(artifact_id)
     }
 
-    pub(crate) async fn checkpoint_managed_command(
+    async fn revoke_unstarted_ticket(&self, ticket: &ExecutionTicket, reason: String) {
+        {
+            let mut state = self.state.write().await;
+            state.tickets.remove(ticket.ticket_id.as_str());
+        }
+        self.release_leases(&ticket.lease_ids).await;
+        self.persist_revoked_ticket_snapshot(ticket, reason.as_str())
+            .await;
+        self.record_event(
+            "ticket_revoked",
+            Some(ticket.thread_id),
+            Some(ticket.task_id.clone()),
+            None,
+            json!({
+                "ticket_id": &ticket.ticket_id,
+                "intent_plan_id": &ticket.intent_plan_id,
+                "reason": reason,
+                "stage": "begin_managed_command",
+            }),
+        )
+        .await;
+    }
+
+    async fn checkpoint_managed_command(
         &self,
         command_id: &str,
         raw_output: &[u8],
@@ -1430,20 +2522,19 @@ impl AgentOsRuntime {
             })?;
         self.renew_command_leases(&command).await;
         let artifact_id = self
-            .create_artifact(
+            .create_blob_artifact(
                 command.task_id.clone(),
                 command.thread_id,
                 artifact_type_for_intent(command.intent),
-                format!(
-                    "artifact://command-checkpoint/{command_id}/{}",
-                    Uuid::new_v4()
-                ),
+                "command-checkpoint",
                 summarize_output(raw_output),
                 json!({
                     "command_id": command_id,
                     "bytes": raw_output.len(),
                     "checkpoint": true,
                 }),
+                "log",
+                raw_output,
             )
             .await?;
         let command_snapshot = {
@@ -1496,7 +2587,98 @@ impl AgentOsRuntime {
             .await
     }
 
-    pub(crate) async fn record_command_dirty_files(
+    async fn audit_finished_command_dirty_files(
+        &self,
+        command: &CommandRecord,
+    ) -> PraxisResult<Option<DirtyAuditOutcome>> {
+        if !requires_dirty_audit(command.intent) {
+            return Ok(None);
+        }
+
+        let after_dirty_files = audit_git_dirty_files(command.cwd.as_path()).await;
+        let dirty_files = dirty_file_delta(
+            command.cwd.as_path(),
+            &command.baseline_dirty_files,
+            &command.baseline_dirty_fingerprints,
+            &after_dirty_files,
+        );
+        if dirty_files.is_empty() {
+            return Ok(None);
+        }
+
+        let (command_snapshot, thread_snapshot, task_snapshot, violation) = {
+            let mut state = self.state.write().await;
+            let task_snapshot = state.tasks.get(&command.task_id).cloned();
+            let violation_path = task_snapshot.as_ref().and_then(|task| {
+                dirty_files
+                    .iter()
+                    .find(|path| !dirty_file_allowed_by_task(task, path))
+                    .cloned()
+            });
+
+            let command_record = state.commands.get_mut(&command.command_id).ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!("unknown command `{}`", command.command_id))
+            })?;
+            push_unique_dirty_files(&mut command_record.dirty_files, &dirty_files);
+            let command_snapshot = command_record.clone();
+
+            let (thread_snapshot, task_snapshot) = if violation_path.is_some() {
+                let thread_snapshot = state.threads.get_mut(&command.thread_id).map(|thread| {
+                    thread.state = ThreadRuntimeState::Failed;
+                    thread.heartbeat_at = Utc::now();
+                    thread.clone()
+                });
+                let task_snapshot = state.tasks.get_mut(&command.task_id).map(|task| {
+                    task.status = TaskStatus::Failed;
+                    task.updated_at = Utc::now();
+                    task.clone()
+                });
+                (thread_snapshot, task_snapshot)
+            } else {
+                (None, task_snapshot)
+            };
+
+            (
+                command_snapshot,
+                thread_snapshot,
+                task_snapshot,
+                violation_path,
+            )
+        };
+
+        self.persist_command_snapshot(&command_snapshot).await;
+        if let Some(thread) = thread_snapshot.as_ref() {
+            self.persist_thread_snapshot(thread).await;
+        }
+        if let Some(task) = task_snapshot.as_ref() {
+            self.persist_task_snapshot(task).await;
+        }
+
+        if let Some(path) = violation.as_ref() {
+            self.record_event(
+                "policy_violation",
+                Some(command_snapshot.thread_id),
+                Some(command_snapshot.task_id.clone()),
+                Some(command_snapshot.command_id.clone()),
+                json!({
+                    "reason": "dirty_file_outside_task_scope",
+                    "path": path.display().to_string(),
+                    "detected_by": "post_command_dirty_audit",
+                }),
+            )
+            .await;
+        }
+
+        Ok(Some(DirtyAuditOutcome {
+            command: command_snapshot,
+            thread_snapshot,
+            task_snapshot,
+            dirty_files,
+            violation_path: violation,
+        }))
+    }
+
+    async fn record_command_dirty_files(
         &self,
         command_id: &str,
         dirty_files: Vec<PathBuf>,
@@ -1543,11 +2725,7 @@ impl AgentOsRuntime {
             let command = state.commands.get_mut(command_id).ok_or_else(|| {
                 PraxisErr::UnsupportedOperation(format!("unknown command `{command_id}`"))
             })?;
-            for path in dirty_files {
-                if !command.dirty_files.contains(&path) {
-                    command.dirty_files.push(path);
-                }
-            }
+            push_unique_dirty_files(&mut command.dirty_files, &dirty_files);
             command.clone()
         };
         self.persist_command_snapshot(&command).await;
@@ -1734,6 +2912,46 @@ impl AgentOsRuntime {
         }
     }
 
+    async fn expire_tickets(&self) {
+        let now = Utc::now();
+        let expired = {
+            let mut state = self.state.write().await;
+            let active_ticket_ids = state
+                .commands
+                .values()
+                .filter(|command| command.ended_at.is_none())
+                .map(|command| command.ticket_id.clone())
+                .collect::<HashSet<_>>();
+            let ids = state
+                .tickets
+                .iter()
+                .filter(|(_, ticket)| ticket.expires_at <= now)
+                .filter(|(ticket_id, _)| !active_ticket_ids.contains(ticket_id.as_str()))
+                .map(|(ticket_id, _)| ticket_id.clone())
+                .collect::<Vec<_>>();
+            ids.into_iter()
+                .filter_map(|ticket_id| state.tickets.remove(ticket_id.as_str()))
+                .collect::<Vec<_>>()
+        };
+        for ticket in expired {
+            self.release_leases(&ticket.lease_ids).await;
+            self.persist_revoked_ticket_snapshot(&ticket, "ticket expired before completion")
+                .await;
+            self.record_event(
+                "ticket_expired",
+                Some(ticket.thread_id),
+                Some(ticket.task_id.clone()),
+                None,
+                json!({
+                    "ticket_id": &ticket.ticket_id,
+                    "intent_plan_id": &ticket.intent_plan_id,
+                    "expires_at": ticket.expires_at.to_rfc3339(),
+                }),
+            )
+            .await;
+        }
+    }
+
     async fn cleanup_process(&self, process_id: i32) -> bool {
         let cleaner = self.process_cleaner.read().await.clone();
         if let Some(cleaner) = cleaner {
@@ -1743,25 +2961,35 @@ impl AgentOsRuntime {
         }
     }
 
-    async fn create_artifact(
+    async fn create_blob_artifact(
         &self,
         task_id: String,
         owner_thread_id: ThreadId,
         artifact_type: ArtifactType,
-        uri: String,
+        uri_namespace: &str,
         summary: String,
         metadata: serde_json::Value,
+        extension: &str,
+        blob: &[u8],
     ) -> PraxisResult<String> {
+        let artifact_id = format!("artifact-{}", Uuid::new_v4());
+        let blob_path = self
+            .write_artifact_blob(artifact_id.as_str(), extension, blob)
+            .await;
         let artifact = ArtifactRecord {
-            artifact_id: format!("artifact-{}", Uuid::new_v4()),
+            artifact_id: artifact_id.clone(),
             task_id,
             owner_thread_id,
             artifact_type,
-            uri,
+            uri: format!("artifact://{uri_namespace}/{artifact_id}"),
             summary,
-            metadata,
+            metadata: metadata_with_blob(metadata, blob.len(), blob_path.as_ref()),
             created_at: Utc::now(),
         };
+        self.insert_artifact_record(artifact).await
+    }
+
+    async fn insert_artifact_record(&self, artifact: ArtifactRecord) -> PraxisResult<String> {
         let artifact_id = artifact.artifact_id.clone();
         {
             let mut state = self.state.write().await;
@@ -1772,7 +3000,7 @@ impl AgentOsRuntime {
         self.persist_artifact_snapshot(&artifact).await;
         self.record_event(
             "artifact_created",
-            Some(owner_thread_id),
+            Some(artifact.owner_thread_id),
             Some(artifact.task_id.clone()),
             None,
             json!({
@@ -1783,6 +3011,51 @@ impl AgentOsRuntime {
         )
         .await;
         Ok(artifact_id)
+    }
+
+    async fn write_artifact_blob(
+        &self,
+        artifact_id: &str,
+        extension: &str,
+        blob: &[u8],
+    ) -> Option<PathBuf> {
+        let db = self.state_db.read().await.clone()?;
+        let root = db.praxis_home().join("artifacts").join("agent-os");
+        if let Err(err) = tokio::fs::create_dir_all(root.as_path()).await {
+            tracing::warn!("failed to create AgentOS artifact directory: {err}");
+            return None;
+        }
+        let extension = sanitize_artifact_extension(extension);
+        let path = root.join(format!("{artifact_id}.{extension}"));
+        if let Err(err) = tokio::fs::write(path.as_path(), blob).await {
+            tracing::warn!("failed to write AgentOS artifact blob: {err}");
+            return None;
+        }
+        Some(path)
+    }
+
+    async fn validated_artifact_blob_path(&self, blob_path: &str) -> PraxisResult<PathBuf> {
+        let db = self.state_db.read().await.clone().ok_or_else(|| {
+            PraxisErr::UnsupportedOperation(
+                "AgentOS artifact blob store is unavailable without state DB".to_string(),
+            )
+        })?;
+        let root = db.praxis_home().join("artifacts").join("agent-os");
+        let root = std::fs::canonicalize(root.as_path()).map_err(|err| {
+            PraxisErr::UnsupportedOperation(format!(
+                "failed to resolve AgentOS artifact root: {err}"
+            ))
+        })?;
+        let path = PathBuf::from(blob_path);
+        let path = std::fs::canonicalize(path.as_path()).map_err(|err| {
+            PraxisErr::UnsupportedOperation(format!("failed to resolve artifact blob path: {err}"))
+        })?;
+        if !path.starts_with(root.as_path()) {
+            return Err(PraxisErr::UnsupportedOperation(
+                "artifact blob path escapes AgentOS artifact root".to_string(),
+            ));
+        }
+        Ok(path)
     }
 
     async fn mark_thread_state(&self, thread_id: ThreadId, state_value: ThreadRuntimeState) {
@@ -1860,6 +3133,31 @@ impl AgentOsRuntime {
                 )));
             }
         }
+        if let Some(plan_id) = ticket.intent_plan_id.as_deref() {
+            let plan = state.intent_plans.get(plan_id).ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(format!(
+                    "execution ticket references missing intent plan `{plan_id}`"
+                ))
+            })?;
+            if plan.status != CommandIntentPlanStatus::Consumed
+                || plan.consumed_by_ticket_id.as_deref() != Some(ticket.ticket_id.as_str())
+            {
+                return Err(PraxisErr::UnsupportedOperation(format!(
+                    "execution ticket intent plan `{plan_id}` was not consumed by this ticket"
+                )));
+            }
+            if plan.thread_id != ticket.thread_id
+                || plan.task_id != ticket.task_id
+                || plan.intent != ticket.allowed_intent
+                || plan.command_fingerprint != ticket.command_fingerprint
+                || normalize_path_for_scope(plan.cwd.as_path())
+                    != normalize_path_for_scope(ticket.cwd.as_path())
+            {
+                return Err(PraxisErr::UnsupportedOperation(format!(
+                    "execution ticket intent plan `{plan_id}` does not match ticket action"
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -1904,6 +3202,148 @@ impl AgentOsRuntime {
         }
     }
 
+    fn find_matching_intent_plan_locked<'a>(
+        state: &'a AgentOsState,
+        thread_id: ThreadId,
+        task_id: &str,
+        intent: ActionIntentKind,
+        command_fingerprint: &str,
+        cwd: &Path,
+    ) -> Option<&'a CommandIntentPlan> {
+        let cwd = normalize_path_for_scope(cwd);
+        let now = Utc::now();
+        state
+            .intent_plans
+            .values()
+            .filter(|plan| plan.status == CommandIntentPlanStatus::Pending)
+            .filter(|plan| plan.expires_at > now)
+            .filter(|plan| plan.thread_id == thread_id)
+            .filter(|plan| plan.task_id == task_id)
+            .filter(|plan| plan.intent == intent)
+            .filter(|plan| plan.command_fingerprint == command_fingerprint)
+            .filter(|plan| normalize_path_for_scope(plan.cwd.as_path()) == cwd)
+            .max_by_key(|plan| plan.created_at)
+    }
+
+    async fn insert_intent_plan(&self, plan: &CommandIntentPlan) {
+        let superseded_plans = {
+            let mut state = self.state.write().await;
+            let normalized_cwd = normalize_path_for_scope(plan.cwd.as_path());
+            let superseded_plans = state
+                .intent_plans
+                .values_mut()
+                .filter(|existing| existing.status == CommandIntentPlanStatus::Pending)
+                .filter(|existing| existing.thread_id == plan.thread_id)
+                .filter(|existing| existing.task_id == plan.task_id.as_str())
+                .filter(|existing| existing.intent == plan.intent)
+                .filter(|existing| {
+                    existing.command_fingerprint == plan.command_fingerprint.as_str()
+                })
+                .filter(|existing| {
+                    normalize_path_for_scope(existing.cwd.as_path()) == normalized_cwd
+                })
+                .map(|existing| {
+                    existing.status = CommandIntentPlanStatus::Rejected;
+                    existing.clone()
+                })
+                .collect::<Vec<_>>();
+            state
+                .intent_plans
+                .insert(plan.plan_id.clone(), plan.clone());
+            superseded_plans
+        };
+        for superseded in superseded_plans {
+            self.persist_intent_plan_snapshot(&superseded).await;
+            self.record_event(
+                "command_intent_plan_superseded",
+                Some(superseded.thread_id),
+                Some(superseded.task_id.clone()),
+                None,
+                json!({
+                    "plan_id": &superseded.plan_id,
+                    "replaced_by_plan_id": &plan.plan_id,
+                    "intent": superseded.intent.as_str(),
+                }),
+            )
+            .await;
+        }
+    }
+
+    async fn expire_intent_plans(&self) {
+        let now = Utc::now();
+        let expired = {
+            let mut state = self.state.write().await;
+            state
+                .intent_plans
+                .values_mut()
+                .filter(|plan| plan.status == CommandIntentPlanStatus::Pending)
+                .filter(|plan| plan.expires_at <= now)
+                .map(|plan| {
+                    plan.status = CommandIntentPlanStatus::Expired;
+                    plan.clone()
+                })
+                .collect::<Vec<_>>()
+        };
+        for plan in expired {
+            self.persist_intent_plan_snapshot(&plan).await;
+            self.record_event(
+                "command_intent_plan_expired",
+                Some(plan.thread_id),
+                Some(plan.task_id.clone()),
+                None,
+                json!({
+                    "plan_id": &plan.plan_id,
+                    "intent": plan.intent.as_str(),
+                    "expires_at": plan.expires_at.to_rfc3339(),
+                }),
+            )
+            .await;
+        }
+    }
+
+    async fn expire_runtime_commands(&self) {
+        let now = Utc::now();
+        let expired = {
+            let mut state = self.state.write().await;
+            state
+                .runtime_commands
+                .values_mut()
+                .filter(|command| {
+                    matches!(
+                        command.status,
+                        RuntimeCommandStatus::Pending
+                            | RuntimeCommandStatus::Acked
+                            | RuntimeCommandStatus::Executing
+                    )
+                })
+                .filter(|command| command.expires_at <= now)
+                .map(|command| {
+                    command.status = RuntimeCommandStatus::Expired;
+                    command.updated_at = now;
+                    command.clone()
+                })
+                .collect::<Vec<_>>()
+        };
+        for command in expired {
+            self.persist_runtime_command_snapshot(&command).await;
+            self.record_event(
+                "runtime_command_status_updated",
+                Some(command.to_thread_id),
+                command.task_id.clone(),
+                None,
+                json!({
+                    "command_id": &command.command_id,
+                    "from_thread_id": command.from_thread_id.to_string(),
+                    "to_thread_id": command.to_thread_id.to_string(),
+                    "command_type": command.command_type.as_str(),
+                    "status": format!("{:?}", command.status),
+                    "source": "expire_runtime_commands",
+                }),
+            )
+            .await;
+        }
+    }
+
     async fn record_event(
         &self,
         event_type: &str,
@@ -1924,6 +3364,10 @@ impl AgentOsRuntime {
         {
             let mut state = self.state.write().await;
             state.events.push(entry.clone());
+            if state.events.len() > MAX_AGENT_OS_EVENTS_IN_MEMORY {
+                let trim_count = state.events.len() - MAX_AGENT_OS_EVENTS_IN_MEMORY;
+                state.events.drain(0..trim_count);
+            }
         }
         if let Some(db) = self.state_db.read().await.clone() {
             let thread_id = entry.thread_id.map(|id| id.to_string());
@@ -1994,14 +3438,98 @@ impl AgentOsRuntime {
         let Some(db) = self.state_db.read().await.clone() else {
             return;
         };
-        let Ok(snapshot) = serde_json::to_value(ticket) else {
+        let Ok(mut snapshot) = serde_json::to_value(ticket) else {
             return;
         };
+        if let Some(object) = snapshot.as_object_mut() {
+            object.insert("status".to_string(), json!("Issued"));
+        }
         if let Err(err) = db
             .upsert_agent_os_ticket_snapshot(ticket.ticket_id.as_str(), &snapshot)
             .await
         {
             tracing::warn!("failed to persist AgentOS ticket snapshot: {err}");
+        }
+    }
+
+    async fn persist_started_ticket_snapshot(&self, ticket: &ExecutionTicket, command_id: &str) {
+        let Some(db) = self.state_db.read().await.clone() else {
+            return;
+        };
+        let Ok(mut snapshot) = serde_json::to_value(ticket) else {
+            return;
+        };
+        if let Some(object) = snapshot.as_object_mut() {
+            object.insert("status".to_string(), json!("Started"));
+            object.insert("command_id".to_string(), json!(command_id));
+            object.insert("started_at".to_string(), json!(Utc::now().to_rfc3339()));
+        }
+        if let Err(err) = db
+            .upsert_agent_os_ticket_snapshot(ticket.ticket_id.as_str(), &snapshot)
+            .await
+        {
+            tracing::warn!("failed to persist started AgentOS ticket snapshot: {err}");
+        }
+    }
+
+    async fn persist_revoked_ticket_snapshot(&self, ticket: &ExecutionTicket, reason: &str) {
+        let Some(db) = self.state_db.read().await.clone() else {
+            return;
+        };
+        let Ok(mut snapshot) = serde_json::to_value(ticket) else {
+            return;
+        };
+        if let Some(object) = snapshot.as_object_mut() {
+            object.insert("status".to_string(), json!("Revoked"));
+            object.insert("revoked_reason".to_string(), json!(reason));
+            object.insert("revoked_at".to_string(), json!(Utc::now().to_rfc3339()));
+        }
+        if let Err(err) = db
+            .upsert_agent_os_ticket_snapshot(ticket.ticket_id.as_str(), &snapshot)
+            .await
+        {
+            tracing::warn!("failed to persist revoked AgentOS ticket snapshot: {err}");
+        }
+    }
+
+    async fn persist_finished_ticket_snapshot(
+        &self,
+        ticket: &ExecutionTicket,
+        success: Option<bool>,
+    ) {
+        let Some(db) = self.state_db.read().await.clone() else {
+            return;
+        };
+        let Ok(mut snapshot) = serde_json::to_value(ticket) else {
+            return;
+        };
+        if let Some(object) = snapshot.as_object_mut() {
+            object.insert("status".to_string(), json!("Finished"));
+            object.insert("finished_at".to_string(), json!(Utc::now().to_rfc3339()));
+            if let Some(success) = success {
+                object.insert("success".to_string(), json!(success));
+            }
+        }
+        if let Err(err) = db
+            .upsert_agent_os_ticket_snapshot(ticket.ticket_id.as_str(), &snapshot)
+            .await
+        {
+            tracing::warn!("failed to persist finished AgentOS ticket snapshot: {err}");
+        }
+    }
+
+    async fn persist_intent_plan_snapshot(&self, plan: &CommandIntentPlan) {
+        let Some(db) = self.state_db.read().await.clone() else {
+            return;
+        };
+        let Ok(snapshot) = serde_json::to_value(plan) else {
+            return;
+        };
+        if let Err(err) = db
+            .upsert_agent_os_intent_plan_snapshot(plan.plan_id.as_str(), &snapshot)
+            .await
+        {
+            tracing::warn!("failed to persist AgentOS intent plan snapshot: {err}");
         }
     }
 
@@ -2020,7 +3548,7 @@ impl AgentOsRuntime {
         }
     }
 
-    async fn persist_runtime_command_snapshot(&self, command: &RuntimeCommand) {
+    async fn persist_runtime_command_snapshot(&self, command: &RuntimeCommandRecord) {
         let Some(db) = self.state_db.read().await.clone() else {
             return;
         };
@@ -2047,6 +3575,21 @@ impl AgentOsRuntime {
             .await
         {
             tracing::warn!("failed to persist AgentOS artifact snapshot: {err}");
+        }
+    }
+
+    async fn persist_worker_request_snapshot(&self, request: &WorkerRequestRecord) {
+        let Some(db) = self.state_db.read().await.clone() else {
+            return;
+        };
+        let Ok(snapshot) = serde_json::to_value(request) else {
+            return;
+        };
+        if let Err(err) = db
+            .upsert_agent_os_worker_request_snapshot(request.request_id.as_str(), &snapshot)
+            .await
+        {
+            tracing::warn!("failed to persist AgentOS worker request snapshot: {err}");
         }
     }
 }
@@ -2133,6 +3676,60 @@ impl CapabilityProfile {
         Ok(())
     }
 
+    fn validate_tool_intent(&self, intent: &ActionIntent) -> Result<(), String> {
+        if self.intent_scopes.deny.contains(&intent.kind) {
+            return Err(format!("intent `{}` is denied", intent.kind.as_str()));
+        }
+        if !self.intent_scopes.allow.is_empty() && !self.intent_scopes.allow.contains(&intent.kind)
+        {
+            return Err(format!(
+                "intent `{}` is outside allowed intents",
+                intent.kind.as_str()
+            ));
+        }
+        if intent
+            .required_resources
+            .iter()
+            .any(|resource| matches!(resource, ResourceRequirement::RepoWrite { .. }))
+            && !self.can_write_files
+        {
+            return Err("profile cannot write files".to_string());
+        }
+        if intent
+            .required_resources
+            .iter()
+            .any(|resource| matches!(resource, ResourceRequirement::Network { .. }))
+            && !self.can_network
+        {
+            return Err("profile cannot use network or external side-effect tools".to_string());
+        }
+        if intent
+            .required_resources
+            .iter()
+            .any(|resource| matches!(resource, ResourceRequirement::Gpu { .. }))
+            && !self.can_use_gpu
+        {
+            return Err("profile cannot use GPU resources".to_string());
+        }
+        if intent
+            .required_resources
+            .iter()
+            .any(|resource| matches!(resource, ResourceRequirement::Port { .. }))
+            && !self.can_hold_ports
+        {
+            return Err("profile cannot hold ports".to_string());
+        }
+        if intent
+            .required_resources
+            .iter()
+            .any(|resource| matches!(resource, ResourceRequirement::GitIndex { .. }))
+            && !self.can_modify_git
+        {
+            return Err("profile cannot modify git".to_string());
+        }
+        Ok(())
+    }
+
     fn command_denies(&self, command: &[String]) -> bool {
         let rendered = denylist_surface(command).to_ascii_lowercase();
         self.command_denylist
@@ -2208,7 +3805,6 @@ pub(crate) fn rank_for_session_source(source: &SessionSource) -> u8 {
 pub(crate) fn profile_for_rank(rank: u8) -> &'static str {
     match rank {
         COORDINATOR_RANK => "coordinator",
-        1 => "builder",
         _ => "worker",
     }
 }
@@ -2300,6 +3896,18 @@ pub(crate) fn classify_command(command: &[String], cwd: &Path) -> ActionIntent {
     }
 }
 
+fn classify_mutating_tool(tool_name: &str) -> ActionIntent {
+    ActionIntent {
+        kind: ActionIntentKind::UnknownRisky,
+        confidence: 0.50,
+        required_resources: vec![ResourceRequirement::Network {
+            scope: "external_tool".to_string(),
+        }],
+        side_effects: vec![format!("mutating external tool `{tool_name}`")],
+        risk_level: "high".to_string(),
+    }
+}
+
 fn builtin_profiles() -> Vec<CapabilityProfile> {
     vec![
         CapabilityProfile {
@@ -2320,31 +3928,6 @@ fn builtin_profiles() -> Vec<CapabilityProfile> {
                 deny: Vec::new(),
             },
             intent_scopes: ScopedIntents::default(),
-            command_allowlist: Vec::new(),
-            command_denylist: dangerous_command_denylist(),
-        },
-        CapabilityProfile {
-            profile_id: "builder".to_string(),
-            can_read_files: true,
-            can_write_files: true,
-            can_run_shell: true,
-            can_cpu_heavy: true,
-            can_compile: true,
-            can_run_app: false,
-            can_use_gpu: true,
-            can_hold_ports: false,
-            can_network: false,
-            can_modify_git: false,
-            can_spawn_long_process: false,
-            path_scopes: ScopedPaths {
-                allow: vec!["**".to_string()],
-                deny: vec!["state/migrations/**".to_string(), ".github/**".to_string()],
-            },
-            intent_scopes: ScopedIntents {
-                allow: Vec::new(),
-                deny: vec![ActionIntentKind::RunApp, ActionIntentKind::GitMutation],
-            },
-            command_allowlist: Vec::new(),
             command_denylist: dangerous_command_denylist(),
         },
         CapabilityProfile {
@@ -2375,7 +3958,6 @@ fn builtin_profiles() -> Vec<CapabilityProfile> {
                     ActionIntentKind::Network,
                 ],
             },
-            command_allowlist: Vec::new(),
             command_denylist: dangerous_command_denylist(),
         },
     ]
@@ -2432,6 +4014,10 @@ fn requires_write(intent: ActionIntentKind) -> bool {
     )
 }
 
+fn requires_dirty_audit(intent: ActionIntentKind) -> bool {
+    requires_write(intent) || matches!(intent, ActionIntentKind::GitMutation)
+}
+
 fn requires_compile(intent: ActionIntentKind) -> bool {
     matches!(intent, ActionIntentKind::Compile | ActionIntentKind::Test)
 }
@@ -2444,6 +4030,62 @@ fn requires_cpu_heavy(intent: ActionIntentKind) -> bool {
             | ActionIntentKind::LongProcess
             | ActionIntentKind::UnknownRisky
     )
+}
+
+fn validate_task_action_contract(
+    task: &TaskRecord,
+    required_capabilities: &[String],
+    required_resources: &[ResourceRequirement],
+) -> PraxisResult<()> {
+    if !task.required_capabilities.is_empty() {
+        let declared = task
+            .required_capabilities
+            .iter()
+            .map(|capability| capability.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        if let Some(missing) = required_capabilities
+            .iter()
+            .find(|capability| !declared.contains(&capability.to_ascii_lowercase()))
+        {
+            return Err(PraxisErr::UnsupportedOperation(format!(
+                "action rejected: required capability `{missing}` is outside task capability contract"
+            )));
+        }
+    }
+    if !task.required_resources.is_empty() {
+        for resource in required_resources {
+            if !task
+                .required_resources
+                .iter()
+                .any(|declared| task_resource_allows(declared, resource))
+            {
+                return Err(PraxisErr::UnsupportedOperation(format!(
+                    "action rejected: required resource `{}` is outside task resource contract",
+                    resource.key()
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn task_resource_allows(declared: &ResourceRequirement, required: &ResourceRequirement) -> bool {
+    if declared.key() == required.key() {
+        return true;
+    }
+    match (declared, required) {
+        (ResourceRequirement::Port { port: declared }, ResourceRequirement::Port { port }) => {
+            declared == port
+        }
+        (ResourceRequirement::Gpu { scope: declared }, ResourceRequirement::Gpu { scope }) => {
+            declared == "default" || declared == scope
+        }
+        (
+            ResourceRequirement::Network { scope: declared },
+            ResourceRequirement::Network { scope },
+        ) => declared == "default" || declared == scope,
+        _ => declared.resource_type() == required.resource_type(),
+    }
 }
 
 fn capacity_for_requirement(requirement: &ResourceRequirement) -> usize {
@@ -2489,6 +4131,179 @@ fn dirty_file_allowed_by_task(task: &TaskRecord, path: &Path) -> bool {
     task.scope
         .iter()
         .any(|pattern| scope_matches(pattern, &value))
+}
+
+fn dirty_file_delta(
+    cwd: &Path,
+    before: &[PathBuf],
+    before_fingerprints: &HashMap<String, DirtyFileFingerprint>,
+    after: &[PathBuf],
+) -> Vec<PathBuf> {
+    let before = before
+        .iter()
+        .map(|path| normalize_path_for_scope(path))
+        .collect::<HashSet<_>>();
+    let mut seen = HashSet::new();
+    after
+        .iter()
+        .filter_map(|path| {
+            let normalized = normalize_path_for_scope(path);
+            if !seen.insert(normalized.clone()) {
+                return None;
+            }
+            if before.contains(&normalized) {
+                let current = dirty_file_fingerprint(cwd, path);
+                if before_fingerprints.get(&normalized) == Some(&current) {
+                    return None;
+                }
+            }
+            Some(path.clone())
+        })
+        .collect()
+}
+
+fn push_unique_dirty_files(target: &mut Vec<PathBuf>, dirty_files: &[PathBuf]) {
+    let mut seen = target
+        .iter()
+        .map(|path| normalize_path_for_scope(path))
+        .collect::<HashSet<_>>();
+    for path in dirty_files {
+        if seen.insert(normalize_path_for_scope(path)) {
+            target.push(path.clone());
+        }
+    }
+}
+
+async fn audit_git_dirty_files(cwd: &Path) -> Vec<PathBuf> {
+    let output = tokio::process::Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .arg("status")
+        .arg("--porcelain=v1")
+        .arg("-z")
+        .output()
+        .await;
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_git_status_porcelain_z(&output.stdout)
+}
+
+fn dirty_file_fingerprints(
+    cwd: &Path,
+    dirty_files: &[PathBuf],
+) -> HashMap<String, DirtyFileFingerprint> {
+    dirty_files
+        .iter()
+        .map(|path| {
+            (
+                normalize_path_for_scope(path),
+                dirty_file_fingerprint(cwd, path),
+            )
+        })
+        .collect()
+}
+
+fn dirty_file_fingerprint(cwd: &Path, path: &Path) -> DirtyFileFingerprint {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return DirtyFileFingerprint {
+            exists: false,
+            len: None,
+            modified_unix_millis: None,
+        };
+    };
+    let modified_unix_millis = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as i128);
+    DirtyFileFingerprint {
+        exists: true,
+        len: Some(metadata.len()),
+        modified_unix_millis,
+    }
+}
+
+fn parse_git_status_porcelain_z(output: &[u8]) -> Vec<PathBuf> {
+    let entries = output
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    let mut idx = 0;
+    while idx < entries.len() {
+        let entry = entries[idx];
+        if entry.len() < 4 || entry[2] != b' ' {
+            idx += 1;
+            continue;
+        }
+        let status = entry[0];
+        let path = String::from_utf8_lossy(&entry[3..]).to_string();
+        if !path.is_empty() {
+            paths.push(PathBuf::from(path));
+        }
+        idx += if matches!(status, b'R' | b'C') { 2 } else { 1 };
+    }
+    paths
+}
+
+fn format_dirty_file_report(dirty_files: &[PathBuf], violation_path: Option<&PathBuf>) -> String {
+    let mut report = if dirty_files.is_empty() {
+        "No dirty files detected.".to_string()
+    } else {
+        dirty_files
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    if let Some(path) = violation_path {
+        report.push_str("\n\nPolicy violation: dirty file outside task scope: ");
+        report.push_str(path.display().to_string().as_str());
+    }
+    report
+}
+
+fn sanitize_artifact_extension(extension: &str) -> String {
+    let extension = extension
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .collect::<String>();
+    if extension.is_empty() {
+        "bin".to_string()
+    } else {
+        extension
+    }
+}
+
+fn metadata_with_blob(
+    metadata: serde_json::Value,
+    blob_bytes: usize,
+    blob_path: Option<&PathBuf>,
+) -> serde_json::Value {
+    let blob_metadata = json!({
+        "blob_bytes": blob_bytes,
+        "blob_path": blob_path.map(|path| path.display().to_string()),
+        "blob_persisted": blob_path.is_some(),
+    });
+    match metadata {
+        serde_json::Value::Object(mut object) => {
+            object.insert("blob".to_string(), blob_metadata);
+            serde_json::Value::Object(object)
+        }
+        value => json!({
+            "metadata": value,
+            "blob": blob_metadata,
+        }),
+    }
 }
 
 fn action_fingerprint(command: &[String], cwd: &Path, intent: ActionIntentKind) -> String {

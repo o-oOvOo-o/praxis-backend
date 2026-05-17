@@ -3,6 +3,7 @@ use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_utils_absolute_path::AbsolutePathBuf;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::Error as _;
@@ -133,7 +134,7 @@ pub struct McpServerRequirement {
     pub identity: McpServerIdentity,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 pub struct NetworkDomainPermissionsToml {
     #[serde(flatten)]
     pub entries: BTreeMap<String, NetworkDomainPermissionToml>,
@@ -165,7 +166,9 @@ impl NetworkDomainPermissionsToml {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkDomainPermissionToml {
     Allow,
@@ -182,7 +185,7 @@ impl std::fmt::Display for NetworkDomainPermissionToml {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 pub struct NetworkUnixSocketPermissionsToml {
     #[serde(flatten)]
     pub entries: BTreeMap<String, NetworkUnixSocketPermissionToml>,
@@ -202,7 +205,9 @@ impl NetworkUnixSocketPermissionsToml {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum NetworkUnixSocketPermissionToml {
     Allow,
@@ -1021,7 +1026,7 @@ mod tests {
         )?;
 
         let source_location = RequirementSource::MdmManagedPreferences {
-            domain: "com.codex".to_string(),
+            domain: "com.openai.praxis".to_string(),
             key: "allowed_approval_policies".to_string(),
         };
 
@@ -1065,7 +1070,7 @@ mod tests {
             "#,
         )?;
         let source_location = RequirementSource::MdmManagedPreferences {
-            domain: "com.codex".to_string(),
+            domain: "com.openai.praxis".to_string(),
             key: "allowed_approval_policies".to_string(),
         };
         populated_target.merge_unset_fields(source_location, source);

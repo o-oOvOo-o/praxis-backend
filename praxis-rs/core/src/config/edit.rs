@@ -3,6 +3,7 @@ use crate::path_utils::resolve_symlink_write_paths;
 use crate::path_utils::write_atomically;
 use anyhow::Context;
 use praxis_config::CONFIG_TOML_FILE;
+use praxis_config::toml_value_to_edit_item;
 use praxis_config::types::McpServerConfig;
 use praxis_features::FEATURES;
 use praxis_protocol::config_types::Personality;
@@ -343,7 +344,7 @@ impl ConfigDocument {
             } => {
                 let provider_value =
                     TomlValue::try_from(provider).context("failed to serialize model provider")?;
-                let provider_item = toml_value_to_item(&provider_value)
+                let provider_item = toml_value_to_edit_item(&provider_value)
                     .context("failed to convert model provider to toml_edit item")?;
                 Ok(self.write_value(
                     Scope::Global,
@@ -701,44 +702,6 @@ impl ConfigDocument {
                     .clone_from(existing_value.decor());
             }
             _ => {}
-        }
-    }
-}
-
-fn toml_value_to_item(value: &TomlValue) -> anyhow::Result<TomlItem> {
-    match value {
-        TomlValue::Table(table) => {
-            let mut table_item = TomlTable::new();
-            table_item.set_implicit(false);
-            for (key, val) in table {
-                table_item.insert(key, toml_value_to_item(val)?);
-            }
-            Ok(TomlItem::Table(table_item))
-        }
-        other => Ok(TomlItem::Value(toml_value_to_value(other)?)),
-    }
-}
-
-fn toml_value_to_value(value: &TomlValue) -> anyhow::Result<toml_edit::Value> {
-    match value {
-        TomlValue::String(val) => Ok(toml_edit::Value::from(val.clone())),
-        TomlValue::Integer(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Float(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Boolean(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Datetime(val) => Ok(toml_edit::Value::from(*val)),
-        TomlValue::Array(items) => {
-            let mut array = toml_edit::Array::new();
-            for item in items {
-                array.push(toml_value_to_value(item)?);
-            }
-            Ok(toml_edit::Value::Array(array))
-        }
-        TomlValue::Table(table) => {
-            let mut inline = toml_edit::InlineTable::new();
-            for (key, val) in table {
-                inline.insert(key, toml_value_to_value(val)?);
-            }
-            Ok(toml_edit::Value::InlineTable(inline))
         }
     }
 }

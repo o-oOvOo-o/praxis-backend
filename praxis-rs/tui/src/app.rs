@@ -69,7 +69,6 @@ use praxis_app_gateway_client::AppGatewayRequestHandle;
 use praxis_app_gateway_client::TypedRequestError;
 use praxis_app_gateway_protocol::ClientRequest;
 use praxis_app_gateway_protocol::CodexErrorInfo as AppGatewayCodexErrorInfo;
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_app_gateway_protocol::FeedbackUploadParams;
 use praxis_app_gateway_protocol::FeedbackUploadResponse;
 use praxis_app_gateway_protocol::GetAccountRateLimitsResponse;
@@ -112,6 +111,7 @@ use praxis_features::Feature;
 use praxis_otel::SessionTelemetry;
 use praxis_protocol::ThreadId;
 use praxis_protocol::approvals::ExecApprovalRequestEvent;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_protocol::config_types::Personality;
 #[cfg(target_os = "windows")]
 use praxis_protocol::config_types::WindowsSandboxLevel;

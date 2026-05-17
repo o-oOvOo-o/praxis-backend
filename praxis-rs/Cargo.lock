@@ -5669,7 +5669,6 @@ name = "praxis-analytics"
 version = "0.0.0"
 dependencies = [
  "os_info",
- "praxis-app-gateway-protocol",
  "praxis-git-utils",
  "praxis-login",
  "praxis-plugin",
@@ -6156,7 +6155,6 @@ dependencies = [
  "anyhow",
  "futures",
  "multimap",
- "praxis-app-gateway-protocol",
  "praxis-execpolicy",
  "praxis-protocol",
  "praxis-utils-absolute-path",
@@ -6180,7 +6178,7 @@ name = "praxis-connectors"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "praxis-app-gateway-protocol",
+ "praxis-protocol",
  "pretty_assertions",
  "serde",
  "tokio",
@@ -6227,7 +6225,6 @@ dependencies = [
  "opentelemetry_sdk",
  "praxis-analytics",
  "praxis-api",
- "praxis-app-gateway-protocol",
  "praxis-apply-patch",
  "praxis-arg0",
  "praxis-async-utils",
@@ -6314,7 +6311,6 @@ dependencies = [
  "dirs",
  "dunce",
  "praxis-analytics",
- "praxis-app-gateway-protocol",
  "praxis-config",
  "praxis-instructions",
  "praxis-login",
@@ -6400,7 +6396,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "futures",
- "praxis-app-gateway-protocol",
+ "praxis-protocol",
  "praxis-utils-absolute-path",
  "praxis-utils-cargo-bin",
  "praxis-utils-pty",
@@ -6613,7 +6609,6 @@ dependencies = [
  "keyring",
  "once_cell",
  "os_info",
- "praxis-app-gateway-protocol",
  "praxis-client",
  "praxis-config",
  "praxis-keyring-store",
@@ -6774,7 +6769,6 @@ dependencies = [
  "opentelemetry_sdk",
  "os_info",
  "praxis-api",
- "praxis-app-gateway-protocol",
  "praxis-protocol",
  "praxis-utils-absolute-path",
  "praxis-utils-string",
@@ -7046,7 +7040,6 @@ dependencies = [
 name = "praxis-tools"
 version = "0.0.0"
 dependencies = [
- "praxis-app-gateway-protocol",
  "praxis-code-mode",
  "praxis-features",
  "praxis-protocol",

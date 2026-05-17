@@ -4,6 +4,7 @@ Runtime: unified exec
 Handles approval + sandbox orchestration for unified exec requests, delegating to
 the process manager to spawn PTYs once an ExecRequest is prepared.
 */
+use crate::agent_os::ManagedCommandSpan;
 use crate::command_canonicalization::canonicalize_command_for_approval;
 use crate::error::PraxisErr;
 use crate::error::SandboxErr;
@@ -40,6 +41,7 @@ use praxis_network_proxy::NetworkProxy;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_sandboxing::SandboxablePreference;
+use praxis_shell_command::parse_command::shlex_join;
 use praxis_shell_command::powershell::prefix_powershell_script_with_utf8;
 use praxis_tools::UnifiedExecShellMode;
 use std::collections::HashMap;
@@ -182,6 +184,20 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
 }
 
 impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRuntime<'a> {
+    async fn preflight(
+        &mut self,
+        req: &UnifiedExecRequest,
+        ctx: &ToolCtx,
+    ) -> Result<(), ToolError> {
+        ctx.session
+            .services
+            .agent_os
+            .preflight_command_intent(ctx.session.conversation_id, &req.command, &req.cwd)
+            .await
+            .map(|_| ())
+            .map_err(|err| ToolError::Rejected(err.to_string()))
+    }
+
     fn network_approval_spec(
         &self,
         req: &UnifiedExecRequest,
@@ -244,7 +260,8 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
                             "unified_exec zsh-fork is not supported when exec_server_url is configured".to_string(),
                         ));
                     }
-                    return self
+                    let command_span = start_agent_os_unified_exec_command(req, ctx).await?;
+                    let result = self
                         .manager
                         .open_session_with_exec_env(
                             req.process_id,
@@ -254,15 +271,11 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
                             ctx.turn.environment.as_ref(),
                         )
                         .await
-                        .map_err(|err| match err {
-                            UnifiedExecError::SandboxDenied { output, .. } => {
-                                ToolError::Praxis(PraxisErr::Sandbox(SandboxErr::Denied {
-                                    output: Box::new(output),
-                                    network_policy_decision: None,
-                                }))
-                            }
-                            other => ToolError::Rejected(other.to_string()),
-                        });
+                        .map_err(map_unified_exec_open_error);
+                    if let Err(err) = &result {
+                        finish_failed_agent_os_unified_exec_command(&command_span, err).await;
+                    }
+                    return result;
                 }
                 None => {
                     tracing::warn!(
@@ -281,7 +294,9 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
         let exec_env = attempt
             .env_for(command, options, req.network.as_ref())
             .map_err(|err| ToolError::Praxis(err.into()))?;
-        self.manager
+        let command_span = start_agent_os_unified_exec_command(req, ctx).await?;
+        let result = self
+            .manager
             .open_session_with_exec_env(
                 req.process_id,
                 &exec_env,
@@ -290,14 +305,50 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
                 ctx.turn.environment.as_ref(),
             )
             .await
-            .map_err(|err| match err {
-                UnifiedExecError::SandboxDenied { output, .. } => {
-                    ToolError::Praxis(PraxisErr::Sandbox(SandboxErr::Denied {
-                        output: Box::new(output),
-                        network_policy_decision: None,
-                    }))
-                }
-                other => ToolError::Rejected(other.to_string()),
-            })
+            .map_err(map_unified_exec_open_error);
+        if let Err(err) = &result {
+            finish_failed_agent_os_unified_exec_command(&command_span, err).await;
+        }
+        result
+    }
+}
+
+async fn start_agent_os_unified_exec_command(
+    req: &UnifiedExecRequest,
+    ctx: &ToolCtx,
+) -> Result<ManagedCommandSpan, ToolError> {
+    ctx.session
+        .services
+        .agent_os
+        .start_managed_command(
+            ctx.session.conversation_id,
+            shlex_join(&req.command),
+            &req.command,
+            &req.cwd,
+            Some(req.process_id),
+        )
+        .await
+        .map_err(|err| ToolError::Rejected(err.to_string()))
+}
+
+async fn finish_failed_agent_os_unified_exec_command(
+    command_span: &ManagedCommandSpan,
+    err: &ToolError,
+) {
+    let error_text = format!("{err:?}");
+    if let Err(finish_err) = command_span.finish_failure(error_text.as_bytes()).await {
+        tracing::warn!("failed to finish failed AgentOS unified exec command span: {finish_err}");
+    }
+}
+
+fn map_unified_exec_open_error(err: UnifiedExecError) -> ToolError {
+    match err {
+        UnifiedExecError::SandboxDenied { output, .. } => {
+            ToolError::Praxis(PraxisErr::Sandbox(SandboxErr::Denied {
+                output: Box::new(output),
+                network_policy_decision: None,
+            }))
+        }
+        other => ToolError::Rejected(other.to_string()),
     }
 }

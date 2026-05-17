@@ -9,7 +9,8 @@ workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-praxis-app-gateway-protocol = { workspace = true }
+praxis-login = { workspace = true }
+praxis-protocol = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 urlencoding = { workspace = true }
 

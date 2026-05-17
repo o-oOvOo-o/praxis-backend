@@ -11,12 +11,12 @@ use std::time::Instant;
 
 use anyhow::Context;
 use async_channel::unbounded;
-pub use praxis_app_gateway_protocol::AppBranding;
-pub use praxis_app_gateway_protocol::AppInfo;
-pub use praxis_app_gateway_protocol::AppMetadata;
 use praxis_connectors::AllConnectorsCacheKey;
 use praxis_connectors::DirectoryListResponse;
 use praxis_login::token_data::TokenData;
+pub use praxis_protocol::apps::AppBranding;
+pub use praxis_protocol::apps::AppInfo;
+pub use praxis_protocol::apps::AppMetadata;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_tools::DiscoverableTool;
 use rmcp::model::ToolAnnotations;
@@ -38,8 +38,6 @@ use praxis_features::Feature;
 use praxis_login::AuthManager;
 use praxis_login::CodexAuth;
 use praxis_login::default_client::create_client;
-use praxis_login::default_client::is_first_party_chat_originator;
-use praxis_login::default_client::originator;
 use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
 use praxis_mcp::mcp::ToolPluginProvenance;
 use praxis_mcp::mcp::auth::compute_auth_statuses;
@@ -505,7 +503,7 @@ pub fn connector_display_label(connector: &AppInfo) -> String {
 }
 
 pub fn connector_mention_slug(connector: &AppInfo) -> String {
-    sanitize_slug(&connector_display_label(connector))
+    praxis_connectors::connector_name_slug(&connector_display_label(connector))
 }
 
 pub(crate) fn accessible_connectors_from_mcp_tools(
@@ -698,20 +696,11 @@ pub(crate) fn praxis_app_tool_is_enabled(config: &Config, tool_info: &ToolInfo) 
     .enabled
 }
 
-const DISALLOWED_CONNECTOR_IDS: &[&str] = &[
-    "asdk_app_6938a94a61d881918ef32cb999ff937c",
-    "connector_2b0a9009c9c64bf9933a3dae3f2b1254",
-    "connector_3f8d1a79f27c4c7ba1a897ab13bf37dc",
-    "connector_68de829bf7648191acd70a907364c67c",
-    "connector_68e004f14af881919eb50893d3d9f523",
-    "connector_69272cb413a081919685ec3c88d1744e",
-];
-const FIRST_PARTY_CHAT_DISALLOWED_CONNECTOR_IDS: &[&str] =
-    &["connector_0f9c9d4592e54d0a9a12b3f44a1e2010"];
-const DISALLOWED_CONNECTOR_PREFIX: &str = "connector_openai_";
-
 pub fn filter_disallowed_connectors(connectors: Vec<AppInfo>) -> Vec<AppInfo> {
-    filter_disallowed_connectors_for_originator(connectors, originator().value.as_str())
+    connectors
+        .into_iter()
+        .filter(|connector| praxis_connectors::is_connector_id_allowed(connector.id.as_str()))
+        .collect()
 }
 
 fn filter_disallowed_connectors_for_originator(
@@ -721,20 +710,12 @@ fn filter_disallowed_connectors_for_originator(
     connectors
         .into_iter()
         .filter(|connector| {
-            is_connector_id_allowed_for_originator(connector.id.as_str(), originator_value)
+            praxis_connectors::is_connector_id_allowed_for_originator(
+                connector.id.as_str(),
+                originator_value,
+            )
         })
         .collect()
-}
-
-fn is_connector_id_allowed_for_originator(connector_id: &str, originator_value: &str) -> bool {
-    let disallowed_connector_ids = if is_first_party_chat_originator(originator_value) {
-        FIRST_PARTY_CHAT_DISALLOWED_CONNECTOR_IDS
-    } else {
-        DISALLOWED_CONNECTOR_IDS
-    };
-
-    !connector_id.starts_with(DISALLOWED_CONNECTOR_PREFIX)
-        && !disallowed_connector_ids.contains(&connector_id)
 }
 
 fn read_apps_config(config: &Config) -> Option<AppsConfigToml> {
@@ -948,29 +929,11 @@ fn normalize_connector_value(value: Option<&str>) -> Option<String> {
 }
 
 pub fn connector_install_url(name: &str, connector_id: &str) -> String {
-    let slug = sanitize_slug(name);
-    format!("https://chatgpt.com/apps/{slug}/{connector_id}")
+    praxis_connectors::connector_install_url(name, connector_id)
 }
 
 pub fn sanitize_name(name: &str) -> String {
-    sanitize_slug(name).replace("-", "_")
-}
-
-fn sanitize_slug(name: &str) -> String {
-    let mut normalized = String::with_capacity(name.len());
-    for character in name.chars() {
-        if character.is_ascii_alphanumeric() {
-            normalized.push(character.to_ascii_lowercase());
-        } else {
-            normalized.push('-');
-        }
-    }
-    let normalized = normalized.trim_matches('-');
-    if normalized.is_empty() {
-        "app".to_string()
-    } else {
-        normalized.to_string()
-    }
+    praxis_connectors::sanitize_connector_name(name)
 }
 
 fn format_connector_label(name: &str, _id: &str) -> String {

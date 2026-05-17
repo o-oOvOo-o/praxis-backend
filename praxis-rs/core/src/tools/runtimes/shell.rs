@@ -38,6 +38,7 @@ use praxis_network_proxy::NetworkProxy;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_sandboxing::SandboxablePreference;
+use praxis_shell_command::parse_command::shlex_join;
 use praxis_shell_command::powershell::prefix_powershell_script_with_utf8;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -202,6 +203,16 @@ impl Approvable<ShellRequest> for ShellRuntime {
 }
 
 impl ToolRuntime<ShellRequest, ExecToolCallOutput> for ShellRuntime {
+    async fn preflight(&mut self, req: &ShellRequest, ctx: &ToolCtx) -> Result<(), ToolError> {
+        ctx.session
+            .services
+            .agent_os
+            .preflight_command_intent(ctx.session.conversation_id, &req.command, &req.cwd)
+            .await
+            .map(|_| ())
+            .map_err(|err| ToolError::Rejected(err.to_string()))
+    }
+
     fn network_approval_spec(
         &self,
         req: &ShellRequest,
@@ -234,12 +245,50 @@ impl ToolRuntime<ShellRequest, ExecToolCallOutput> for ShellRuntime {
         };
 
         if self.backend == ShellRuntimeBackend::ShellCommandZshFork {
-            match zsh_fork_backend::maybe_run_shell_command(req, attempt, ctx, &command).await? {
-                Some(out) => return Ok(out),
-                None => {
+            let command_span = start_agent_os_shell_command(req, ctx).await?;
+            match zsh_fork_backend::maybe_run_shell_command(req, attempt, ctx, &command).await {
+                Ok(Some(out)) => {
+                    if let Err(err) = command_span
+                        .finish(Some(out.exit_code), out.aggregated_output.text.as_bytes())
+                        .await
+                    {
+                        tracing::warn!("failed to finish AgentOS zsh-fork command span: {err}");
+                    }
+                    return Ok(out);
+                }
+                Ok(None) => {
+                    if let Err(err) = command_span
+                        .finish_failure(b"zsh-fork conditions were not met; falling back")
+                        .await
+                    {
+                        tracing::warn!(
+                            "failed to finish skipped AgentOS zsh-fork command span: {err}"
+                        );
+                    }
+                    ctx.session
+                        .services
+                        .agent_os
+                        .preflight_command_intent(
+                            ctx.session.conversation_id,
+                            &req.command,
+                            &req.cwd,
+                        )
+                        .await
+                        .map_err(|err| ToolError::Rejected(err.to_string()))?;
                     tracing::warn!(
                         "ZshFork backend specified, but conditions for using it were not met, falling back to normal execution",
                     );
+                }
+                Err(err) => {
+                    let error_text = format!("{err:?}");
+                    if let Err(finish_err) =
+                        command_span.finish_failure(error_text.as_bytes()).await
+                    {
+                        tracing::warn!(
+                            "failed to finish failed AgentOS zsh-fork command span: {finish_err}"
+                        );
+                    }
+                    return Err(err);
                 }
             }
         }
@@ -257,9 +306,49 @@ impl ToolRuntime<ShellRequest, ExecToolCallOutput> for ShellRuntime {
         let env = attempt
             .env_for(command, options, req.network.as_ref())
             .map_err(|err| ToolError::Praxis(err.into()))?;
-        let out = execute_env(env, Self::stdout_stream(ctx))
+        let command_span = start_agent_os_shell_command(req, ctx).await?;
+        let result = execute_env(env, Self::stdout_stream(ctx))
             .await
-            .map_err(ToolError::Praxis)?;
-        Ok(out)
+            .map_err(ToolError::Praxis);
+        match &result {
+            Ok(output) => {
+                if let Err(err) = command_span
+                    .finish(
+                        Some(output.exit_code),
+                        output.aggregated_output.text.as_bytes(),
+                    )
+                    .await
+                {
+                    tracing::warn!("failed to finish AgentOS shell command span: {err}");
+                }
+            }
+            Err(err) => {
+                let error_text = format!("{err:?}");
+                if let Err(finish_err) = command_span.finish_failure(error_text.as_bytes()).await {
+                    tracing::warn!(
+                        "failed to finish failed AgentOS shell command span: {finish_err}"
+                    );
+                }
+            }
+        }
+        result
     }
+}
+
+async fn start_agent_os_shell_command(
+    req: &ShellRequest,
+    ctx: &ToolCtx,
+) -> Result<crate::agent_os::ManagedCommandSpan, ToolError> {
+    ctx.session
+        .services
+        .agent_os
+        .start_managed_command(
+            ctx.session.conversation_id,
+            shlex_join(&req.command),
+            &req.command,
+            &req.cwd,
+            None,
+        )
+        .await
+        .map_err(|err| ToolError::Rejected(err.to_string()))
 }

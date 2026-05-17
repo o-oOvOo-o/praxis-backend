@@ -281,7 +281,7 @@ impl FileSystemSandboxPolicy {
 
             if let Ok(cwd_root) = AbsolutePathBuf::from_absolute_path(cwd) {
                 for protected_path in default_read_only_subpaths_for_writable_root(
-                    &cwd_root, /*protect_missing_dot_codex*/ true,
+                    &cwd_root, /*protect_missing_dot_praxis*/ true,
                 ) {
                     append_default_read_only_path_if_no_explicit_rule(
                         &mut file_system_policy.entries,
@@ -292,7 +292,7 @@ impl FileSystemSandboxPolicy {
             for writable_root in writable_roots {
                 for protected_path in default_read_only_subpaths_for_writable_root(
                     writable_root,
-                    /*protect_missing_dot_codex*/ false,
+                    /*protect_missing_dot_praxis*/ false,
                 ) {
                     append_default_read_only_path_if_no_explicit_rule(
                         &mut file_system_policy.entries,
@@ -476,11 +476,11 @@ impl FileSystemSandboxPolicy {
                 .iter()
                 .filter(|path| normalize_effective_absolute_path((*path).clone()) == root)
                 .collect();
-            let protect_missing_dot_codex = AbsolutePathBuf::from_absolute_path(cwd)
+            let protect_missing_dot_praxis = AbsolutePathBuf::from_absolute_path(cwd)
                 .ok()
                 .is_some_and(|cwd| normalize_effective_absolute_path(cwd) == root);
             let mut read_only_subpaths: Vec<AbsolutePathBuf> =
-                default_read_only_subpaths_for_writable_root(&root, protect_missing_dot_codex)
+                default_read_only_subpaths_for_writable_root(&root, protect_missing_dot_praxis)
                     .into_iter()
                     .filter(|path| !has_explicit_resolved_path_entry(&resolved_entries, path))
                     .collect();
@@ -489,8 +489,8 @@ impl FileSystemSandboxPolicy {
             // as separate WritableRoot values and are checked independently.
             // Preserve symlink path components that live under the writable root
             // so downstream sandboxes can still mask the symlink inode itself.
-            // Example: if `<root>/.codex -> <root>/decoy`, bwrap must still see
-            // `<root>/.codex`, not only the resolved `<root>/decoy`.
+            // Example: if `<root>/.praxis -> <root>/decoy`, bwrap must still see
+            // `<root>/.praxis`, not only the resolved `<root>/decoy`.
             read_only_subpaths.extend(
                 resolved_entries
                     .iter()
@@ -545,7 +545,7 @@ impl FileSystemSandboxPolicy {
             WritableRoot {
                 root,
                 // Preserve literal in-root protected paths like `.git` and
-                // `.codex` so downstream sandboxes can still detect and mask
+                // `.praxis` so downstream sandboxes can still detect and mask
                 // the symlink itself instead of only its resolved target.
                 read_only_subpaths: dedup_absolute_paths(
                     read_only_subpaths,
@@ -1095,9 +1095,9 @@ fn normalize_effective_absolute_path(path: AbsolutePathBuf) -> AbsolutePathBuf {
     path
 }
 
-fn default_read_only_subpaths_for_writable_root(
+pub(crate) fn default_read_only_subpaths_for_writable_root(
     writable_root: &AbsolutePathBuf,
-    protect_missing_dot_codex: bool,
+    protect_missing_dot_praxis: bool,
 ) -> Vec<AbsolutePathBuf> {
     let mut subpaths: Vec<AbsolutePathBuf> = Vec::new();
     #[allow(clippy::expect_used)]
@@ -1125,14 +1125,14 @@ fn default_read_only_subpaths_for_writable_root(
         subpaths.push(top_level_agents);
     }
 
-    // Keep top-level project metadata under .codex read-only to the agent by
+    // Keep top-level project metadata under .praxis read-only to the agent by
     // default. For the workspace root itself, protect it even before the
     // directory exists so first-time creation still goes through the
     // protected-path approval flow.
     #[allow(clippy::expect_used)]
-    let top_level_codex = writable_root.join(".codex").expect("valid relative path");
-    if protect_missing_dot_codex || top_level_codex.as_path().is_dir() {
-        subpaths.push(top_level_codex);
+    let top_level_praxis = writable_root.join(".praxis").expect("valid relative path");
+    if protect_missing_dot_praxis || top_level_praxis.as_path().is_dir() {
+        subpaths.push(top_level_praxis);
     }
 
     dedup_absolute_paths(subpaths, /*normalize_effective_paths*/ false)
@@ -1296,13 +1296,13 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn writable_roots_proactively_protect_missing_dot_codex() {
+    fn writable_roots_proactively_protect_missing_dot_praxis() {
         let cwd = TempDir::new().expect("tempdir");
         let expected_root = AbsolutePathBuf::from_absolute_path(
             cwd.path().canonicalize().expect("canonicalize cwd"),
         )
         .expect("absolute canonical root");
-        let expected_dot_codex = expected_root.join(".codex").expect("expected .codex path");
+        let expected_dot_praxis = expected_root.join(".praxis").expect("expected .praxis path");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
             path: FileSystemPath::Special {
@@ -1317,7 +1317,7 @@ mod tests {
         assert!(
             writable_roots[0]
                 .read_only_subpaths
-                .contains(&expected_dot_codex)
+                .contains(&expected_dot_praxis)
         );
     }
 
@@ -1329,7 +1329,7 @@ mod tests {
             cwd.path().canonicalize().expect("canonicalize cwd"),
         )
         .expect("absolute canonical root");
-        let explicit_dot_codex = expected_root.join(".codex").expect("expected .codex path");
+        let explicit_dot_praxis = expected_root.join(".praxis").expect("expected .praxis path");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
@@ -1340,7 +1340,7 @@ mod tests {
             },
             FileSystemSandboxEntry {
                 path: FileSystemPath::Path {
-                    path: explicit_dot_codex.clone(),
+                    path: explicit_dot_praxis.clone(),
                 },
                 access: FileSystemAccessMode::Write,
             },
@@ -1354,12 +1354,12 @@ mod tests {
         assert!(
             !workspace_root
                 .read_only_subpaths
-                .contains(&explicit_dot_codex),
-            "explicit .codex rule should win over the default protected carveout"
+                .contains(&explicit_dot_praxis),
+            "explicit .praxis rule should win over the default protected carveout"
         );
         assert!(
             policy.can_write_path_with_cwd(
-                explicit_dot_codex
+                explicit_dot_praxis
                     .join("config.toml")
                     .expect("config.toml")
                     .as_path(),
@@ -1371,7 +1371,7 @@ mod tests {
     #[test]
     fn legacy_workspace_write_projection_blocks_missing_dot_praxis_writes() {
         let cwd = TempDir::new().expect("tempdir");
-        let dot_praxis_config = cwd.path().join(".codex").join("config.toml");
+        let dot_praxis_config = cwd.path().join(".praxis").join("config.toml");
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
             read_only_access: ReadOnlyAccess::Restricted {
@@ -1392,11 +1392,11 @@ mod tests {
     #[test]
     fn legacy_workspace_write_projection_accepts_relative_cwd() {
         let relative_cwd = Path::new("workspace");
-        let expected_dot_codex = AbsolutePathBuf::from_absolute_path(
+        let expected_dot_praxis = AbsolutePathBuf::from_absolute_path(
             std::env::current_dir()
                 .expect("current dir")
                 .join(relative_cwd)
-                .join(".codex"),
+                .join(".praxis"),
         )
         .expect("absolute dot codex");
         let policy = SandboxPolicy::WorkspaceWrite {
@@ -1424,7 +1424,7 @@ mod tests {
                 },
                 FileSystemSandboxEntry {
                     path: FileSystemPath::Path {
-                        path: expected_dot_codex,
+                        path: expected_dot_praxis,
                     },
                     access: FileSystemAccessMode::Read,
                 },
@@ -1432,7 +1432,7 @@ mod tests {
         );
         assert!(
             !file_system_policy
-                .can_write_path_with_cwd(Path::new(".codex/config.toml"), relative_cwd,)
+                .can_write_path_with_cwd(Path::new(".praxis/config.toml"), relative_cwd,)
         );
     }
 
@@ -1443,10 +1443,10 @@ mod tests {
         let real_root = cwd.path().join("real");
         let link_root = cwd.path().join("link");
         let blocked = real_root.join("blocked");
-        let praxis_dir = real_root.join(".codex");
+        let praxis_dir = real_root.join(".praxis");
 
         fs::create_dir_all(&blocked).expect("create blocked");
-        fs::create_dir_all(&praxis_dir).expect("create .codex");
+        fs::create_dir_all(&praxis_dir).expect("create .praxis");
         symlink_dir(&real_root, &link_root).expect("create symlinked root");
 
         let link_root =
@@ -1460,10 +1460,10 @@ mod tests {
             blocked.canonicalize().expect("canonicalize blocked"),
         )
         .expect("absolute canonical blocked");
-        let expected_codex = AbsolutePathBuf::from_absolute_path(
-            praxis_dir.canonicalize().expect("canonicalize .codex"),
+        let expected_praxis = AbsolutePathBuf::from_absolute_path(
+            praxis_dir.canonicalize().expect("canonicalize .praxis"),
         )
-        .expect("absolute canonical .codex");
+        .expect("absolute canonical .praxis");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
@@ -1492,7 +1492,7 @@ mod tests {
         assert!(
             writable_roots[0]
                 .read_only_subpaths
-                .contains(&expected_codex)
+                .contains(&expected_praxis)
         );
     }
 
@@ -1504,11 +1504,11 @@ mod tests {
         let link_root = cwd.path().join("link");
         let blocked = real_root.join("blocked");
         let agents_dir = real_root.join(".agents");
-        let praxis_dir = real_root.join(".codex");
+        let praxis_dir = real_root.join(".praxis");
 
         fs::create_dir_all(&blocked).expect("create blocked");
         fs::create_dir_all(&agents_dir).expect("create .agents");
-        fs::create_dir_all(&praxis_dir).expect("create .codex");
+        fs::create_dir_all(&praxis_dir).expect("create .praxis");
         symlink_dir(&real_root, &link_root).expect("create symlinked cwd");
 
         let link_blocked =
@@ -1525,10 +1525,10 @@ mod tests {
             agents_dir.canonicalize().expect("canonicalize .agents"),
         )
         .expect("absolute canonical .agents");
-        let expected_codex = AbsolutePathBuf::from_absolute_path(
-            praxis_dir.canonicalize().expect("canonicalize .codex"),
+        let expected_praxis = AbsolutePathBuf::from_absolute_path(
+            praxis_dir.canonicalize().expect("canonicalize .praxis"),
         )
-        .expect("absolute canonical .codex");
+        .expect("absolute canonical .praxis");
 
         let policy = FileSystemSandboxPolicy::restricted(vec![
             FileSystemSandboxEntry {
@@ -1574,7 +1574,7 @@ mod tests {
         assert!(
             writable_roots[0]
                 .read_only_subpaths
-                .contains(&expected_codex)
+                .contains(&expected_praxis)
         );
     }
 
@@ -1584,18 +1584,18 @@ mod tests {
         let cwd = TempDir::new().expect("tempdir");
         let root = cwd.path().join("root");
         let decoy = root.join("decoy-codex");
-        let dot_codex = root.join(".codex");
+        let dot_praxis = root.join(".praxis");
         fs::create_dir_all(&decoy).expect("create decoy");
-        symlink_dir(&decoy, &dot_codex).expect("create .codex symlink");
+        symlink_dir(&decoy, &dot_praxis).expect("create .praxis symlink");
 
         let root = AbsolutePathBuf::from_absolute_path(&root).expect("absolute root");
-        let expected_dot_codex = AbsolutePathBuf::from_absolute_path(
+        let expected_dot_praxis = AbsolutePathBuf::from_absolute_path(
             root.as_path()
                 .canonicalize()
                 .expect("canonicalize root")
-                .join(".codex"),
+                .join(".praxis"),
         )
-        .expect("absolute .codex symlink");
+        .expect("absolute .praxis symlink");
         let unexpected_decoy =
             AbsolutePathBuf::from_absolute_path(decoy.canonicalize().expect("canonicalize decoy"))
                 .expect("absolute canonical decoy");
@@ -1609,7 +1609,7 @@ mod tests {
         assert_eq!(writable_roots.len(), 1);
         assert_eq!(
             writable_roots[0].read_only_subpaths,
-            vec![expected_dot_codex]
+            vec![expected_dot_praxis]
         );
         assert!(
             !writable_roots[0]
@@ -1785,10 +1785,10 @@ mod tests {
         let real_tmpdir = cwd.path().join("real-tmpdir");
         let link_tmpdir = cwd.path().join("link-tmpdir");
         let blocked = real_tmpdir.join("blocked");
-        let praxis_dir = real_tmpdir.join(".codex");
+        let praxis_dir = real_tmpdir.join(".praxis");
 
         fs::create_dir_all(&blocked).expect("create blocked");
-        fs::create_dir_all(&praxis_dir).expect("create .codex");
+        fs::create_dir_all(&praxis_dir).expect("create .praxis");
         symlink_dir(&real_tmpdir, &link_tmpdir).expect("create symlinked tmpdir");
 
         let link_blocked =
@@ -1803,10 +1803,10 @@ mod tests {
             blocked.canonicalize().expect("canonicalize blocked"),
         )
         .expect("absolute canonical blocked");
-        let expected_codex = AbsolutePathBuf::from_absolute_path(
-            praxis_dir.canonicalize().expect("canonicalize .codex"),
+        let expected_praxis = AbsolutePathBuf::from_absolute_path(
+            praxis_dir.canonicalize().expect("canonicalize .praxis"),
         )
-        .expect("absolute canonical .codex");
+        .expect("absolute canonical .praxis");
 
         unsafe {
             std::env::set_var("TMPDIR", &link_tmpdir);
@@ -1841,7 +1841,7 @@ mod tests {
         assert!(
             writable_roots[0]
                 .read_only_subpaths
-                .contains(&expected_codex)
+                .contains(&expected_praxis)
         );
     }
 

@@ -15,7 +15,6 @@ workspace = true
 [dependencies]
 anyhow = { workspace = true }
 praxis-analytics = { workspace = true }
-praxis-app-gateway-protocol = { workspace = true }
 praxis-config = { workspace = true }
 praxis-instructions = { workspace = true }
 praxis-login = { workspace = true }

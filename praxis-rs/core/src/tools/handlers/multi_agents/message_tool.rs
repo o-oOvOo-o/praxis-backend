@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::agent_os::ResourceRequirement;
+use crate::agent_os::RuntimeCommandStatus;
 use crate::agent_os::RuntimeCommandType;
 use crate::agent_os::TaskCreateRequest;
 use praxis_protocol::protocol::InterAgentCommunication;
@@ -53,9 +54,7 @@ pub(crate) struct AssignTaskArgs {
     pub(crate) target: String,
     #[serde(default)]
     pub(crate) message: Option<String>,
-    #[serde(default)]
-    pub(crate) objective: Option<String>,
-    #[serde(default)]
+    pub(crate) objective: String,
     pub(crate) scope: Vec<String>,
     #[serde(default)]
     pub(crate) constraints: Vec<String>,
@@ -81,6 +80,7 @@ pub(crate) struct AssignTaskArgs {
 /// Tool result shared by the message-delivery tools.
 pub(crate) struct MessageToolResult {
     submission_id: String,
+    runtime_command_id: Option<String>,
 }
 
 impl ToolOutput for MessageToolResult {
@@ -133,16 +133,7 @@ pub(crate) async fn handle_assign_task_tool(
     invocation: ToolInvocation,
     args: AssignTaskArgs,
 ) -> Result<MessageToolResult, FunctionCallError> {
-    let objective = args
-        .objective
-        .clone()
-        .or_else(|| args.message.clone())
-        .ok_or_else(|| {
-            FunctionCallError::RespondToModel(
-                "`assign_task` requires `objective` or legacy `message`".to_string(),
-            )
-        })
-        .and_then(message_content)?;
+    let objective = message_content(args.objective)?;
     let prompt = args
         .message
         .map(message_content)
@@ -240,19 +231,12 @@ async fn handle_message_submission(
             .await
             .map_err(|err| collab_agent_error(receiver_thread_id, err))?;
     }
-    let task_id = if mode == MessageDeliveryMode::TriggerTurn {
-        let task = structured_task.unwrap_or_else(|| StructuredTaskInput {
-            objective: prompt.clone(),
-            scope: Vec::new(),
-            constraints: Vec::new(),
-            acceptance_criteria: Vec::new(),
-            artifact_refs: Vec::new(),
-            required_capabilities: Vec::new(),
-            required_resources: Vec::new(),
-            token_budget: None,
-            priority: 0,
-            exploratory: true,
-        });
+    let (task_id, runtime_command_payload) = if mode == MessageDeliveryMode::TriggerTurn {
+        let task = structured_task.ok_or_else(|| {
+            FunctionCallError::RespondToModel(
+                "AgentOS task dispatch requires structured task metadata".to_string(),
+            )
+        })?;
         let task_id = session
             .services
             .agent_os
@@ -278,36 +262,39 @@ async fn handle_message_submission(
             .assign_task(task_id.as_str(), receiver_thread_id)
             .await
             .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
-        let _runtime_command_id = session
-            .services
-            .agent_os
-            .issue_runtime_command(
-                session.conversation_id,
-                receiver_thread_id,
-                RuntimeCommandType::AssignTask,
-                serde_json::json!({
-                    "task_id": &task_id,
-                    "objective": &task.objective,
-                    "scope": &task.scope,
-                    "constraints": &task.constraints,
-                    "acceptance_criteria": &task.acceptance_criteria,
-                    "artifact_refs": &task.artifact_refs,
-                    "required_capabilities": &task.required_capabilities,
-                    "required_resources": task
-                        .required_resources
-                        .iter()
-                        .map(resource_requirement_name)
-                        .collect::<Vec<_>>(),
-                    "token_budget": task.token_budget,
-                    "priority": task.priority,
-                    "exploratory": task.exploratory,
-                    "prompt": &prompt,
-                    "interrupt": interrupt,
-                }),
-            )
-            .await
-            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
-        Some(task_id)
+        let runtime_command_payload = serde_json::json!({
+            "objective": &task.objective,
+            "prompt": &prompt,
+            "scope": &task.scope,
+            "constraints": &task.constraints,
+            "acceptance_criteria": &task.acceptance_criteria,
+            "artifact_refs": &task.artifact_refs,
+            "required_capabilities": &task.required_capabilities,
+            "required_resources": task.required_resources.iter().map(|resource| resource.key()).collect::<Vec<_>>(),
+            "token_budget": task.token_budget,
+            "priority": task.priority,
+            "exploratory": task.exploratory,
+            "interrupt": interrupt,
+        });
+        (Some(task_id), Some(runtime_command_payload))
+    } else {
+        (None, None)
+    };
+    let runtime_command = if let Some(payload) = runtime_command_payload {
+        Some(
+            session
+                .services
+                .agent_os
+                .issue_runtime_command(
+                    session.conversation_id,
+                    receiver_thread_id,
+                    RuntimeCommandType::AssignTask,
+                    task_id.clone(),
+                    payload,
+                )
+                .await
+                .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?,
+        )
     } else {
         None
     };
@@ -363,12 +350,34 @@ async fn handle_message_submission(
             .into(),
         )
         .await;
-    let submission_id = result?;
+    let submission_id = match result {
+        Ok(submission_id) => submission_id,
+        Err(err) => {
+            if let Some(command) = runtime_command.as_ref() {
+                let _ = session
+                    .services
+                    .agent_os
+                    .update_runtime_command_status(
+                        command.command_id.as_str(),
+                        session.conversation_id,
+                        RuntimeCommandStatus::Failed,
+                    )
+                    .await;
+            }
+            return Err(err);
+        }
+    };
+    let runtime_command_id = runtime_command
+        .as_ref()
+        .map(|command| command.command_id.clone());
     if let Some(task_id) = task_id {
         tracing::debug!(%task_id, %receiver_thread_id, "AgentOS task assigned through multi-agent tool");
     }
 
-    Ok(MessageToolResult { submission_id })
+    Ok(MessageToolResult {
+        submission_id,
+        runtime_command_id,
+    })
 }
 
 fn parse_required_resources(
@@ -444,18 +453,4 @@ fn optional_scope(scope: Option<&str>, default_scope: &str) -> String {
         .filter(|scope| !scope.is_empty())
         .unwrap_or(default_scope)
         .to_string()
-}
-
-fn resource_requirement_name(resource: &ResourceRequirement) -> String {
-    match resource {
-        ResourceRequirement::CpuHeavy => "cpu_heavy".to_string(),
-        ResourceRequirement::BuildCache { scope } => format!("build_cache:{scope}"),
-        ResourceRequirement::AppRuntime { scope } => format!("app_runtime:{scope}"),
-        ResourceRequirement::Port { port } => format!("port:{port}"),
-        ResourceRequirement::RepoWrite { scope } => format!("repo_write:{scope}"),
-        ResourceRequirement::LlmBudget { scope } => format!("llm_budget:{scope}"),
-        ResourceRequirement::Gpu { scope } => format!("gpu:{scope}"),
-        ResourceRequirement::Network { scope } => format!("network:{scope}"),
-        ResourceRequirement::GitIndex { scope } => format!("git_index:{scope}"),
-    }
 }

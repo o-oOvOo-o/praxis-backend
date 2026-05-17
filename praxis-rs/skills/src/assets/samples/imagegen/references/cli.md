@@ -12,11 +12,11 @@ This file is for the fallback CLI mode only. Read it only after the user explici
 Real API calls require **network access** + `OPENAI_API_KEY`. `--dry-run` does not.
 
 ## Quick start (works from any repo)
-Set a stable path to the skill CLI (default `CODEX_HOME` is `~/.codex`):
+Set a stable path to the skill CLI (default `PRAXIS_HOME` is `~/.praxis`):
 
 ```
-export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
-export IMAGE_GEN="$CODEX_HOME/skills/imagegen/scripts/image_gen.py"
+export PRAXIS_HOME="${PRAXIS_HOME:-$HOME/.praxis}"
+export IMAGE_GEN="$PRAXIS_HOME/skills/imagegen/scripts/image_gen.py"
 ```
 
 Install dependencies into that environment with its package manager. In uv-managed environments, `uv pip install ...` remains the preferred path.

@@ -3,11 +3,11 @@
 mod common;
 
 use common::exec_server::exec_server;
-use praxis_app_gateway_protocol::JSONRPCError;
-use praxis_app_gateway_protocol::JSONRPCMessage;
-use praxis_app_gateway_protocol::JSONRPCResponse;
 use praxis_exec_server::InitializeParams;
 use praxis_exec_server::InitializeResponse;
+use praxis_protocol::jsonrpc_lite::JSONRPCError;
+use praxis_protocol::jsonrpc_lite::JSONRPCMessage;
+use praxis_protocol::jsonrpc_lite::JSONRPCResponse;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -21,7 +21,7 @@ async fn exec_server_reports_malformed_websocket_json_and_keeps_running() -> any
     let JSONRPCMessage::Error(JSONRPCError { id, error }) = response else {
         panic!("expected malformed-message error response");
     };
-    assert_eq!(id, praxis_app_gateway_protocol::RequestId::Integer(-1));
+    assert_eq!(id, praxis_protocol::jsonrpc_lite::RequestId::Integer(-1));
     assert_eq!(error.code, -32600);
     assert!(
         error

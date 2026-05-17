@@ -1,7 +1,7 @@
 use crate::client::AnalyticsEventsQueue;
 use crate::events::AppGatewayRpcTransport;
-use crate::events::PraxisAppMentionedEventRequest;
 use crate::events::PraxisAppGatewayClientMetadata;
+use crate::events::PraxisAppMentionedEventRequest;
 use crate::events::PraxisAppUsedEventRequest;
 use crate::events::PraxisPluginEventRequest;
 use crate::events::PraxisPluginUsedEventRequest;
@@ -14,6 +14,7 @@ use crate::events::praxis_app_metadata;
 use crate::events::praxis_plugin_metadata;
 use crate::events::praxis_plugin_used_metadata;
 use crate::facts::AnalyticsFact;
+use crate::facts::AppGatewayInitializeFact;
 use crate::facts::AppInvocation;
 use crate::facts::AppMentionedInput;
 use crate::facts::AppUsedInput;
@@ -24,29 +25,18 @@ use crate::facts::PluginStateChangedInput;
 use crate::facts::PluginUsedInput;
 use crate::facts::SkillInvocation;
 use crate::facts::SkillInvokedInput;
+use crate::facts::ThreadInitializedFact;
 use crate::facts::TrackEventsContext;
 use crate::reducer::AnalyticsReducer;
 use crate::reducer::normalize_path_for_skill_id;
 use crate::reducer::skill_id_for_local_skill;
-use praxis_app_gateway_protocol::ApprovalsReviewer as AppGatewayApprovalsReviewer;
-use praxis_app_gateway_protocol::AskForApproval as AppGatewayAskForApproval;
-use praxis_app_gateway_protocol::ClientInfo;
-use praxis_app_gateway_protocol::ClientResponse;
-use praxis_app_gateway_protocol::InitializeCapabilities;
-use praxis_app_gateway_protocol::InitializeParams;
-use praxis_app_gateway_protocol::RequestId;
-use praxis_app_gateway_protocol::SandboxPolicy as AppGatewaySandboxPolicy;
-use praxis_app_gateway_protocol::SessionSource as AppGatewaySessionSource;
-use praxis_app_gateway_protocol::Thread;
-use praxis_app_gateway_protocol::ThreadResumeResponse;
-use praxis_app_gateway_protocol::ThreadStartResponse;
-use praxis_app_gateway_protocol::ThreadStatus as AppGatewayThreadStatus;
 use praxis_login::default_client::DEFAULT_ORIGINATOR;
 use praxis_login::default_client::originator;
 use praxis_plugin::AppConnectorId;
 use praxis_plugin::PluginCapabilitySummary;
 use praxis_plugin::PluginId;
 use praxis_plugin::PluginTelemetryMetadata;
+use praxis_protocol::protocol::SessionSource;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 use std::collections::HashSet;
@@ -55,61 +45,19 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 
-fn sample_thread(thread_id: &str, ephemeral: bool) -> Thread {
-    Thread {
-        id: thread_id.to_string(),
-        preview: "first prompt".to_string(),
-        summary: None,
+fn sample_thread_initialized(
+    thread_id: &str,
+    ephemeral: bool,
+    model: &str,
+    initialization_mode: ThreadInitializationMode,
+) -> ThreadInitializedFact {
+    ThreadInitializedFact {
+        thread_id: thread_id.to_string(),
+        model: model.to_string(),
         ephemeral,
-        model_provider: "openai".to_string(),
+        thread_source: SessionSource::Exec,
+        initialization_mode,
         created_at: 1,
-        updated_at: 2,
-        status: AppGatewayThreadStatus::Idle,
-        path: None,
-        cwd: PathBuf::from("/tmp"),
-        cli_version: "0.0.0".to_string(),
-        source: AppGatewaySessionSource::Exec,
-        agent_nickname: None,
-        agent_role: None,
-        git_info: None,
-        name: None,
-        total_cost_usd: None,
-        last_cost_usd: None,
-        turns: Vec::new(),
-    }
-}
-
-fn sample_thread_start_response(thread_id: &str, ephemeral: bool, model: &str) -> ClientResponse {
-    ClientResponse::ThreadStart {
-        request_id: RequestId::Integer(1),
-        response: ThreadStartResponse {
-            thread: sample_thread(thread_id, ephemeral),
-            model: model.to_string(),
-            model_provider: "openai".to_string(),
-            service_tier: None,
-            cwd: PathBuf::from("/tmp"),
-            approval_policy: AppGatewayAskForApproval::OnFailure,
-            approvals_reviewer: AppGatewayApprovalsReviewer::User,
-            sandbox: AppGatewaySandboxPolicy::DangerFullAccess,
-            reasoning_effort: None,
-        },
-    }
-}
-
-fn sample_thread_resume_response(thread_id: &str, ephemeral: bool, model: &str) -> ClientResponse {
-    ClientResponse::ThreadResume {
-        request_id: RequestId::Integer(2),
-        response: ThreadResumeResponse {
-            thread: sample_thread(thread_id, ephemeral),
-            model: model.to_string(),
-            model_provider: "openai".to_string(),
-            service_tier: None,
-            cwd: PathBuf::from("/tmp"),
-            approval_policy: AppGatewayAskForApproval::OnFailure,
-            approvals_reviewer: AppGatewayApprovalsReviewer::User,
-            sandbox: AppGatewaySandboxPolicy::DangerFullAccess,
-            reasoning_effort: None,
-        },
     }
 }
 
@@ -123,7 +71,7 @@ fn expected_absolute_path(path: &PathBuf) -> String {
 #[test]
 fn normalize_path_for_skill_id_repo_scoped_uses_relative_path() {
     let repo_root = PathBuf::from("/repo/root");
-    let skill_path = PathBuf::from("/repo/root/.codex/skills/doc/SKILL.md");
+    let skill_path = PathBuf::from("/repo/root/.praxis/skills/doc/SKILL.md");
 
     let path = normalize_path_for_skill_id(
         Some("https://example.com/repo.git"),
@@ -131,12 +79,12 @@ fn normalize_path_for_skill_id_repo_scoped_uses_relative_path() {
         skill_path.as_path(),
     );
 
-    assert_eq!(path, ".codex/skills/doc/SKILL.md");
+    assert_eq!(path, ".praxis/skills/doc/SKILL.md");
 }
 
 #[test]
 fn normalize_path_for_skill_id_user_scoped_uses_absolute_path() {
-    let skill_path = PathBuf::from("/Users/abc/.codex/skills/doc/SKILL.md");
+    let skill_path = PathBuf::from("/Users/abc/.praxis/skills/doc/SKILL.md");
 
     let path = normalize_path_for_skill_id(
         /*repo_url*/ None,
@@ -150,7 +98,7 @@ fn normalize_path_for_skill_id_user_scoped_uses_absolute_path() {
 
 #[test]
 fn normalize_path_for_skill_id_admin_scoped_uses_absolute_path() {
-    let skill_path = PathBuf::from("/etc/codex/skills/doc/SKILL.md");
+    let skill_path = PathBuf::from("/etc/praxis/skills/doc/SKILL.md");
 
     let path = normalize_path_for_skill_id(
         /*repo_url*/ None,
@@ -165,7 +113,7 @@ fn normalize_path_for_skill_id_admin_scoped_uses_absolute_path() {
 #[test]
 fn normalize_path_for_skill_id_repo_root_not_in_skill_path_uses_absolute_path() {
     let repo_root = PathBuf::from("/repo/root");
-    let skill_path = PathBuf::from("/other/path/.codex/skills/doc/SKILL.md");
+    let skill_path = PathBuf::from("/other/path/.praxis/skills/doc/SKILL.md");
 
     let path = normalize_path_for_skill_id(
         Some("https://example.com/repo.git"),
@@ -352,13 +300,14 @@ async fn initialize_caches_client_and_thread_lifecycle_publishes_once_initialize
 
     reducer
         .ingest(
-            AnalyticsFact::Response {
+            AnalyticsFact::ThreadInitialized {
                 connection_id: 7,
-                response: Box::new(sample_thread_start_response(
+                thread: sample_thread_initialized(
                     "thread-no-client",
                     /*ephemeral*/ false,
                     "gpt-5",
-                )),
+                    ThreadInitializationMode::New,
+                ),
             },
             &mut events,
         )
@@ -369,16 +318,10 @@ async fn initialize_caches_client_and_thread_lifecycle_publishes_once_initialize
         .ingest(
             AnalyticsFact::Initialize {
                 connection_id: 7,
-                params: InitializeParams {
-                    client_info: ClientInfo {
-                        name: "praxis-tui".to_string(),
-                        title: None,
-                        version: "1.0.0".to_string(),
-                    },
-                    capabilities: Some(InitializeCapabilities {
-                        experimental_api: false,
-                        opt_out_notification_methods: None,
-                    }),
+                initialize: AppGatewayInitializeFact {
+                    client_name: "praxis-tui".to_string(),
+                    client_version: Some("1.0.0".to_string()),
+                    experimental_api_enabled: Some(false),
                 },
                 product_client_id: DEFAULT_ORIGINATOR.to_string(),
                 runtime: PraxisRuntimeMetadata {
@@ -396,11 +339,14 @@ async fn initialize_caches_client_and_thread_lifecycle_publishes_once_initialize
 
     reducer
         .ingest(
-            AnalyticsFact::Response {
+            AnalyticsFact::ThreadInitialized {
                 connection_id: 7,
-                response: Box::new(sample_thread_resume_response(
-                    "thread-1", /*ephemeral*/ true, "gpt-5",
-                )),
+                thread: sample_thread_initialized(
+                    "thread-1",
+                    /*ephemeral*/ true,
+                    "gpt-5",
+                    ThreadInitializationMode::Resumed,
+                ),
             },
             &mut events,
         )
@@ -543,7 +489,7 @@ async fn reducer_ingests_skill_invoked_fact() {
         thread_id: "thread-1".to_string(),
         turn_id: "turn-1".to_string(),
     };
-    let skill_path = PathBuf::from("/Users/abc/.codex/skills/doc/SKILL.md");
+    let skill_path = PathBuf::from("/Users/abc/.praxis/skills/doc/SKILL.md");
     let expected_skill_id = skill_id_for_local_skill(
         /*repo_url*/ None,
         /*repo_root*/ None,

@@ -5,13 +5,13 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::sync::atomic::Ordering;
 
-use praxis_app_gateway_protocol::JSONRPCError;
-use praxis_app_gateway_protocol::JSONRPCErrorError;
-use praxis_app_gateway_protocol::JSONRPCMessage;
-use praxis_app_gateway_protocol::JSONRPCNotification;
-use praxis_app_gateway_protocol::JSONRPCRequest;
-use praxis_app_gateway_protocol::JSONRPCResponse;
-use praxis_app_gateway_protocol::RequestId;
+use praxis_protocol::jsonrpc_lite::JSONRPCError;
+use praxis_protocol::jsonrpc_lite::JSONRPCErrorError;
+use praxis_protocol::jsonrpc_lite::JSONRPCMessage;
+use praxis_protocol::jsonrpc_lite::JSONRPCNotification;
+use praxis_protocol::jsonrpc_lite::JSONRPCRequest;
+use praxis_protocol::jsonrpc_lite::JSONRPCResponse;
+use praxis_protocol::jsonrpc_lite::RequestId;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -448,8 +448,8 @@ async fn drain_pending(pending: &Mutex<HashMap<RequestId, PendingRequest>>) {
 mod tests {
     use std::time::Duration;
 
-    use praxis_app_gateway_protocol::JSONRPCMessage;
-    use praxis_app_gateway_protocol::JSONRPCResponse;
+    use praxis_protocol::jsonrpc_lite::JSONRPCMessage;
+    use praxis_protocol::jsonrpc_lite::JSONRPCResponse;
     use pretty_assertions::assert_eq;
     use tokio::io::AsyncBufReadExt;
     use tokio::io::AsyncWriteExt;

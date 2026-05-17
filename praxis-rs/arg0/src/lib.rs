@@ -139,7 +139,7 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
 /// `praxis-linux-sandbox` we *directly* execute
 /// [`praxis_linux_sandbox::run_main`] (which never returns). Otherwise we:
 ///
-/// 1.  Load `.env` values from `~/.codex/.env` before creating any threads.
+/// 1.  Load `.env` values from `~/.praxis/.env` before creating any threads.
 /// 2.  Construct a Tokio multi-thread runtime.
 /// 3.  Capture the current executable path and derive the
 ///     `praxis-linux-sandbox` helper path (falling back to the current
@@ -202,12 +202,12 @@ fn build_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
     Ok(builder.build()?)
 }
 
-const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
+const ILLEGAL_ENV_VAR_PREFIXES: &[&str] = &["PRAXIS_", "CODEX_"];
 
-/// Load env vars from ~/.codex/.env.
+/// Load env vars from ~/.praxis/.env.
 ///
 /// Security: Do not allow `.env` files to create or modify any variables
-/// with names starting with `CODEX_`.
+/// with names starting with protected Praxis or legacy prefixes.
 fn load_dotenv() {
     if let Ok(praxis_home) = find_praxis_home()
         && let Ok(iter) = dotenvy::from_path_iter(praxis_home.join(".env"))
@@ -216,13 +216,17 @@ fn load_dotenv() {
     }
 }
 
-/// Helper to set vars from a dotenvy iterator while filtering out `CODEX_` keys.
+/// Helper to set vars from a dotenvy iterator while filtering protected keys.
 fn set_filtered<I>(iter: I)
 where
     I: IntoIterator<Item = Result<(String, String), dotenvy::Error>>,
 {
     for (key, value) in iter.into_iter().flatten() {
-        if !key.to_ascii_uppercase().starts_with(ILLEGAL_ENV_VAR_PREFIX) {
+        let key_upper = key.to_ascii_uppercase();
+        if !ILLEGAL_ENV_VAR_PREFIXES
+            .iter()
+            .any(|prefix| key_upper.starts_with(prefix))
+        {
             // It is safe to call set_var() because our process is
             // single-threaded at this point in its execution.
             unsafe { std::env::set_var(&key, &value) };
@@ -261,7 +265,7 @@ pub fn prepend_path_entry_for_praxis_aliases() -> std::io::Result<Arg0PathEntryG
     }
 
     std::fs::create_dir_all(&praxis_home)?;
-    // Use a CODEX_HOME-scoped temp root to avoid cluttering the top-level directory.
+    // Use a PRAXIS_HOME-scoped temp root to avoid cluttering the top-level directory.
     let temp_root = praxis_home.join("tmp").join("arg0");
     std::fs::create_dir_all(&temp_root)?;
     #[cfg(unix)]
@@ -447,14 +451,14 @@ mod tests {
             temp_dir,
             lock_file,
             Arg0DispatchPaths {
-                praxis_self_exe: Some(PathBuf::from("/usr/bin/codex")),
+                praxis_self_exe: Some(PathBuf::from("/usr/bin/praxis")),
                 praxis_linux_sandbox_exe: Some(alias_path.clone()),
                 main_execve_wrapper_exe: None,
             },
         );
 
         assert_eq!(
-            linux_sandbox_exe_path(Some(&path_entry), Some(PathBuf::from("/usr/bin/codex"))),
+            linux_sandbox_exe_path(Some(&path_entry), Some(PathBuf::from("/usr/bin/praxis"))),
             Some(alias_path),
         );
         Ok(())

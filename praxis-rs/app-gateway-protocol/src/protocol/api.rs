@@ -6,6 +6,7 @@ use crate::RequestId;
 use crate::protocol::common::AuthMode;
 use praxis_experimental_api_macros::ExperimentalApi;
 use praxis_protocol::account::PlanType;
+#[cfg(test)]
 use praxis_protocol::approvals::ElicitationRequest as CoreElicitationRequest;
 use praxis_protocol::approvals::ExecPolicyAmendment as CoreExecPolicyAmendment;
 use praxis_protocol::approvals::GuardianAssessmentAction as CoreGuardianAssessmentAction;
@@ -62,7 +63,6 @@ use praxis_protocol::protocol::HookRunStatus as CoreHookRunStatus;
 use praxis_protocol::protocol::HookRunSummary as CoreHookRunSummary;
 use praxis_protocol::protocol::HookScope as CoreHookScope;
 use praxis_protocol::protocol::ModelRerouteReason as CoreModelRerouteReason;
-use praxis_protocol::protocol::NetworkAccess as CoreNetworkAccess;
 use praxis_protocol::protocol::NonSteerableTurnKind as CoreNonSteerableTurnKind;
 use praxis_protocol::protocol::PatchApplyStatus as CorePatchApplyStatus;
 use praxis_protocol::protocol::RateLimitSnapshot as CoreRateLimitSnapshot;
@@ -94,6 +94,29 @@ use serde_json::Value as JsonValue;
 use serde_with::serde_as;
 use thiserror::Error;
 use ts_rs::TS;
+
+pub use praxis_protocol::apps::{AppBranding, AppInfo, AppMetadata, AppReview, AppScreenshot};
+pub use praxis_protocol::config_layers::{ConfigLayer, ConfigLayerMetadata, ConfigLayerSource};
+pub use praxis_protocol::dynamic_tools::DynamicToolSpec;
+pub use praxis_protocol::fs::{
+    FsCopyParams, FsCopyResponse, FsCreateDirectoryParams, FsCreateDirectoryResponse,
+    FsGetMetadataParams, FsGetMetadataResponse, FsReadDirectoryEntry, FsReadDirectoryParams,
+    FsReadDirectoryResponse, FsReadFileParams, FsReadFileResponse, FsRemoveParams,
+    FsRemoveResponse, FsWriteFileParams, FsWriteFileResponse,
+};
+pub use praxis_protocol::mcp_elicitation::{
+    McpElicitationArrayType, McpElicitationBooleanSchema, McpElicitationBooleanType,
+    McpElicitationConstOption, McpElicitationEnumSchema, McpElicitationLegacyTitledEnumSchema,
+    McpElicitationMultiSelectEnumSchema, McpElicitationNumberSchema, McpElicitationNumberType,
+    McpElicitationObjectType, McpElicitationPrimitiveSchema, McpElicitationSchema,
+    McpElicitationSingleSelectEnumSchema, McpElicitationStringFormat, McpElicitationStringSchema,
+    McpElicitationStringType, McpElicitationTitledEnumItems,
+    McpElicitationTitledMultiSelectEnumSchema, McpElicitationTitledSingleSelectEnumSchema,
+    McpElicitationUntitledEnumItems, McpElicitationUntitledMultiSelectEnumSchema,
+    McpElicitationUntitledSingleSelectEnumSchema, McpServerElicitationAction,
+    McpServerElicitationRequest, McpServerElicitationRequestParams,
+};
+pub use praxis_protocol::protocol::NetworkAccess;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -493,87 +516,6 @@ impl From<CoreHookRunSummary> for HookRunSummary {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "camelCase")]
-#[ts(tag = "type")]
-pub enum ConfigLayerSource {
-    /// Managed preferences layer delivered by MDM (macOS only).
-    #[serde(rename_all = "camelCase")]
-    #[ts(rename_all = "camelCase")]
-    Mdm {
-        domain: String,
-        key: String,
-    },
-
-    /// Managed config layer from a file (usually `managed_config.toml`).
-    #[serde(rename_all = "camelCase")]
-    #[ts(rename_all = "camelCase")]
-    System {
-        /// This is the path to the system config.toml file, though it is not
-        /// guaranteed to exist.
-        file: AbsolutePathBuf,
-    },
-
-    /// User config layer from $CODEX_HOME/config.toml. This layer is special
-    /// in that it is expected to be:
-    /// - writable by the user
-    /// - generally outside the workspace directory
-    #[serde(rename_all = "camelCase")]
-    #[ts(rename_all = "camelCase")]
-    User {
-        /// This is the path to the user's config.toml file, though it is not
-        /// guaranteed to exist.
-        file: AbsolutePathBuf,
-    },
-
-    /// Path to a .codex/ folder within a project. There could be multiple of
-    /// these between `cwd` and the project/repo root.
-    #[serde(rename_all = "camelCase")]
-    #[ts(rename_all = "camelCase")]
-    Project {
-        dot_praxis_folder: AbsolutePathBuf,
-    },
-
-    /// Session-layer overrides supplied via `-c`/`--config`.
-    SessionFlags,
-
-    /// `managed_config.toml` was designed to be a config that was loaded
-    /// as the last layer on top of everything else. This scheme did not quite
-    /// work out as intended, but we keep this variant as a "best effort" while
-    /// we phase out `managed_config.toml` in favor of `requirements.toml`.
-    #[serde(rename_all = "camelCase")]
-    #[ts(rename_all = "camelCase")]
-    LegacyManagedConfigTomlFromFile {
-        file: AbsolutePathBuf,
-    },
-
-    LegacyManagedConfigTomlFromMdm,
-}
-
-impl ConfigLayerSource {
-    /// A settings from a layer with a higher precedence will override a setting
-    /// from a layer with a lower precedence.
-    pub fn precedence(&self) -> i16 {
-        match self {
-            ConfigLayerSource::Mdm { .. } => 0,
-            ConfigLayerSource::System { .. } => 10,
-            ConfigLayerSource::User { .. } => 20,
-            ConfigLayerSource::Project { .. } => 25,
-            ConfigLayerSource::SessionFlags => 30,
-            ConfigLayerSource::LegacyManagedConfigTomlFromFile { .. } => 40,
-            ConfigLayerSource::LegacyManagedConfigTomlFromMdm => 50,
-        }
-    }
-}
-
-/// Compares [ConfigLayerSource] by precedence, so `A < B` means settings from
-/// layer `A` will be overridden by settings from layer `B`.
-impl PartialOrd for ConfigLayerSource {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.precedence().cmp(&other.precedence()))
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub struct SandboxWorkspaceWrite {
@@ -602,16 +544,6 @@ pub struct SandboxSettings {
 pub struct Tools {
     pub web_search: Option<WebSearchToolConfig>,
     pub view_image: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct DynamicToolSpec {
-    pub name: String,
-    pub description: String,
-    pub input_schema: JsonValue,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub defer_loading: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
@@ -762,23 +694,6 @@ pub struct Config {
     pub apps: Option<AppsConfig>,
     #[serde(default, flatten)]
     pub additional: HashMap<String, JsonValue>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigLayerMetadata {
-    pub name: ConfigLayerSource,
-    pub version: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigLayer {
-    pub name: ConfigLayerSource,
-    pub version: String,
-    pub config: JsonValue,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disabled_reason: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -940,7 +855,7 @@ pub struct ExternalAgentConfigDetectResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalAgentConfigDetectParams {
-    /// If true, include detection under the user's home (~/.claude, ~/.codex, etc.).
+    /// If true, include detection under the user's home (~/.claude, ~/.praxis, etc.).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub include_home: bool,
     /// Zero or more working directories to include for repo-scoped detection.
@@ -1194,14 +1109,6 @@ pub enum FileChangeApprovalDecision {
 }
 
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum NetworkAccess {
-    #[default]
-    Restricted,
-    Enabled,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(tag = "type")]
 pub enum ReadOnlyAccess {
@@ -1289,10 +1196,7 @@ impl SandboxPolicy {
             },
             SandboxPolicy::ExternalSandbox { network_access } => {
                 praxis_protocol::protocol::SandboxPolicy::ExternalSandbox {
-                    network_access: match network_access {
-                        NetworkAccess::Restricted => CoreNetworkAccess::Restricted,
-                        NetworkAccess::Enabled => CoreNetworkAccess::Enabled,
-                    },
+                    network_access: *network_access,
                 }
             }
             SandboxPolicy::WorkspaceWrite {
@@ -1326,12 +1230,7 @@ impl From<praxis_protocol::protocol::SandboxPolicy> for SandboxPolicy {
                 network_access,
             },
             praxis_protocol::protocol::SandboxPolicy::ExternalSandbox { network_access } => {
-                SandboxPolicy::ExternalSandbox {
-                    network_access: match network_access {
-                        CoreNetworkAccess::Restricted => NetworkAccess::Restricted,
-                        CoreNetworkAccess::Enabled => NetworkAccess::Enabled,
-                    },
-                }
+                SandboxPolicy::ExternalSandbox { network_access }
             }
             praxis_protocol::protocol::SandboxPolicy::WorkspaceWrite {
                 writable_roots,
@@ -1929,79 +1828,6 @@ pub struct AppsListParams {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-/// EXPERIMENTAL - app metadata returned by app-list APIs.
-pub struct AppBranding {
-    pub category: Option<String>,
-    pub developer: Option<String>,
-    pub website: Option<String>,
-    pub privacy_policy: Option<String>,
-    pub terms_of_service: Option<String>,
-    pub is_discoverable_app: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AppReview {
-    pub status: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AppScreenshot {
-    pub url: Option<String>,
-    #[serde(alias = "file_id")]
-    pub file_id: Option<String>,
-    #[serde(alias = "user_prompt")]
-    pub user_prompt: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AppMetadata {
-    pub review: Option<AppReview>,
-    pub categories: Option<Vec<String>>,
-    pub sub_categories: Option<Vec<String>>,
-    pub seo_description: Option<String>,
-    pub screenshots: Option<Vec<AppScreenshot>>,
-    pub developer: Option<String>,
-    pub version: Option<String>,
-    pub version_id: Option<String>,
-    pub version_notes: Option<String>,
-    pub first_party_type: Option<String>,
-    pub first_party_requires_install: Option<bool>,
-    pub show_in_composer_when_unlinked: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-/// EXPERIMENTAL - app metadata returned by app-list APIs.
-pub struct AppInfo {
-    pub id: String,
-    pub name: String,
-    pub description: Option<String>,
-    pub logo_url: Option<String>,
-    pub logo_url_dark: Option<String>,
-    pub distribution_channel: Option<String>,
-    pub branding: Option<AppBranding>,
-    pub app_metadata: Option<AppMetadata>,
-    pub labels: Option<HashMap<String, String>>,
-    pub install_url: Option<String>,
-    #[serde(default)]
-    pub is_accessible: bool,
-    /// Whether this app is enabled in config.toml.
-    /// Example:
-    /// ```toml
-    /// [apps.bad_app]
-    /// enabled = false
-    /// ```
-    #[serde(default = "default_enabled")]
-    pub is_enabled: bool,
-    #[serde(default)]
-    pub plugin_display_names: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
 /// EXPERIMENTAL - app metadata summary for plugin responses.
 pub struct AppSummary {
     pub id: String,
@@ -2084,142 +1910,6 @@ pub struct FeedbackUploadParams {
 pub struct FeedbackUploadResponse {
     pub thread_id: String,
 }
-
-/// Read a file from the host filesystem.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsReadFileParams {
-    /// Absolute path to read.
-    pub path: AbsolutePathBuf,
-}
-
-/// Base64-encoded file contents returned by `fs/readFile`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsReadFileResponse {
-    /// File contents encoded as base64.
-    pub data_base64: String,
-}
-
-/// Write a file on the host filesystem.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsWriteFileParams {
-    /// Absolute path to write.
-    pub path: AbsolutePathBuf,
-    /// File contents encoded as base64.
-    pub data_base64: String,
-}
-
-/// Successful response for `fs/writeFile`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsWriteFileResponse {}
-
-/// Create a directory on the host filesystem.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsCreateDirectoryParams {
-    /// Absolute directory path to create.
-    pub path: AbsolutePathBuf,
-    /// Whether parent directories should also be created. Defaults to `true`.
-    #[ts(optional = nullable)]
-    pub recursive: Option<bool>,
-}
-
-/// Successful response for `fs/createDirectory`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsCreateDirectoryResponse {}
-
-/// Request metadata for an absolute path.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsGetMetadataParams {
-    /// Absolute path to inspect.
-    pub path: AbsolutePathBuf,
-}
-
-/// Metadata returned by `fs/getMetadata`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsGetMetadataResponse {
-    /// Whether the path currently resolves to a directory.
-    pub is_directory: bool,
-    /// Whether the path currently resolves to a regular file.
-    pub is_file: bool,
-    /// File creation time in Unix milliseconds when available, otherwise `0`.
-    #[ts(type = "number")]
-    pub created_at_ms: i64,
-    /// File modification time in Unix milliseconds when available, otherwise `0`.
-    #[ts(type = "number")]
-    pub modified_at_ms: i64,
-}
-
-/// List direct child names for a directory.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsReadDirectoryParams {
-    /// Absolute directory path to read.
-    pub path: AbsolutePathBuf,
-}
-
-/// A directory entry returned by `fs/readDirectory`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsReadDirectoryEntry {
-    /// Direct child entry name only, not an absolute or relative path.
-    pub file_name: String,
-    /// Whether this entry resolves to a directory.
-    pub is_directory: bool,
-    /// Whether this entry resolves to a regular file.
-    pub is_file: bool,
-}
-
-/// Directory entries returned by `fs/readDirectory`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsReadDirectoryResponse {
-    /// Direct child entries in the requested directory.
-    pub entries: Vec<FsReadDirectoryEntry>,
-}
-
-/// Remove a file or directory tree from the host filesystem.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsRemoveParams {
-    /// Absolute path to remove.
-    pub path: AbsolutePathBuf,
-    /// Whether directory removal should recurse. Defaults to `true`.
-    #[ts(optional = nullable)]
-    pub recursive: Option<bool>,
-    /// Whether missing paths should be ignored. Defaults to `true`.
-    #[ts(optional = nullable)]
-    pub force: Option<bool>,
-}
-
-/// Successful response for `fs/remove`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsRemoveResponse {}
-
-/// Copy a file or directory tree on the host filesystem.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsCopyParams {
-    /// Absolute source path.
-    pub source_path: AbsolutePathBuf,
-    /// Absolute destination path.
-    pub destination_path: AbsolutePathBuf,
-    /// Required for directory copies; ignored for file copies.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub recursive: bool,
-}
-
-/// Successful response for `fs/copy`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct FsCopyResponse {}
 
 /// Start filesystem watch notifications for an absolute path.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -5546,414 +5236,6 @@ pub struct FileChangeRequestApprovalResponse {
     pub decision: FileChangeApprovalDecision,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub enum McpServerElicitationAction {
-    Accept,
-    Decline,
-    Cancel,
-}
-
-impl McpServerElicitationAction {
-    pub fn to_core(self) -> praxis_protocol::approvals::ElicitationAction {
-        match self {
-            Self::Accept => praxis_protocol::approvals::ElicitationAction::Accept,
-            Self::Decline => praxis_protocol::approvals::ElicitationAction::Decline,
-            Self::Cancel => praxis_protocol::approvals::ElicitationAction::Cancel,
-        }
-    }
-}
-
-impl From<McpServerElicitationAction> for rmcp::model::ElicitationAction {
-    fn from(value: McpServerElicitationAction) -> Self {
-        match value {
-            McpServerElicitationAction::Accept => Self::Accept,
-            McpServerElicitationAction::Decline => Self::Decline,
-            McpServerElicitationAction::Cancel => Self::Cancel,
-        }
-    }
-}
-
-impl From<rmcp::model::ElicitationAction> for McpServerElicitationAction {
-    fn from(value: rmcp::model::ElicitationAction) -> Self {
-        match value {
-            rmcp::model::ElicitationAction::Accept => Self::Accept,
-            rmcp::model::ElicitationAction::Decline => Self::Decline,
-            rmcp::model::ElicitationAction::Cancel => Self::Cancel,
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct McpServerElicitationRequestParams {
-    pub thread_id: String,
-    /// Active Praxis turn when this elicitation was observed, if app-gateway could correlate one.
-    ///
-    /// This is nullable because MCP models elicitation as a standalone server-to-client request
-    /// identified by the MCP server request id. It may be triggered during a turn, but turn
-    /// context is app-gateway correlation rather than part of the protocol identity of the
-    /// elicitation itself.
-    pub turn_id: Option<String>,
-    pub server_name: String,
-    #[serde(flatten)]
-    pub request: McpServerElicitationRequest,
-    // TODO: When core can correlate an elicitation with an MCP tool call, expose the associated
-    // McpToolCall item id here as an optional field. The current core event does not carry that
-    // association.
-}
-
-/// Typed form schema for MCP `elicitation/create` requests.
-///
-/// This matches the `requestedSchema` shape from the MCP 2025-11-25
-/// `ElicitRequestFormParams` schema.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpElicitationSchema {
-    #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
-    #[ts(optional, rename = "$schema")]
-    pub schema_uri: Option<String>,
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationObjectType,
-    pub properties: BTreeMap<String, McpElicitationPrimitiveSchema>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub required: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum McpElicitationObjectType {
-    Object,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(untagged)]
-pub enum McpElicitationPrimitiveSchema {
-    Enum(McpElicitationEnumSchema),
-    String(McpElicitationStringSchema),
-    Number(McpElicitationNumberSchema),
-    Boolean(McpElicitationBooleanSchema),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpElicitationStringSchema {
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationStringType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub min_length: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub max_length: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub format: Option<McpElicitationStringFormat>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub default: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum McpElicitationStringType {
-    String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "kebab-case")]
-#[ts(rename_all = "kebab-case")]
-pub enum McpElicitationStringFormat {
-    Email,
-    Uri,
-    Date,
-    DateTime,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpElicitationNumberSchema {
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationNumberType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub minimum: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub maximum: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub default: Option<f64>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum McpElicitationNumberType {
-    Number,
-    Integer,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpElicitationBooleanSchema {
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationBooleanType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub default: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum McpElicitationBooleanType {
-    Boolean,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(untagged)]
-pub enum McpElicitationEnumSchema {
-    SingleSelect(McpElicitationSingleSelectEnumSchema),
-    MultiSelect(McpElicitationMultiSelectEnumSchema),
-    Legacy(McpElicitationLegacyTitledEnumSchema),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpElicitationLegacyTitledEnumSchema {
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationStringType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub description: Option<String>,
-    #[serde(rename = "enum")]
-    #[ts(rename = "enum")]
-    pub enum_: Vec<String>,
-    #[serde(rename = "enumNames", skip_serializing_if = "Option::is_none")]
-    #[ts(optional, rename = "enumNames")]
-    pub enum_names: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub default: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(untagged)]
-pub enum McpElicitationSingleSelectEnumSchema {
-    Untitled(McpElicitationUntitledSingleSelectEnumSchema),
-    Titled(McpElicitationTitledSingleSelectEnumSchema),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpElicitationUntitledSingleSelectEnumSchema {
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationStringType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub description: Option<String>,
-    #[serde(rename = "enum")]
-    #[ts(rename = "enum")]
-    pub enum_: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub default: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpElicitationTitledSingleSelectEnumSchema {
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationStringType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub description: Option<String>,
-    #[serde(rename = "oneOf")]
-    #[ts(rename = "oneOf")]
-    pub one_of: Vec<McpElicitationConstOption>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub default: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(untagged)]
-pub enum McpElicitationMultiSelectEnumSchema {
-    Untitled(McpElicitationUntitledMultiSelectEnumSchema),
-    Titled(McpElicitationTitledMultiSelectEnumSchema),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpElicitationUntitledMultiSelectEnumSchema {
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationArrayType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub min_items: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub max_items: Option<u64>,
-    pub items: McpElicitationUntitledEnumItems,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub default: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct McpElicitationTitledMultiSelectEnumSchema {
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationArrayType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub min_items: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub max_items: Option<u64>,
-    pub items: McpElicitationTitledEnumItems,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub default: Option<Vec<String>>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum McpElicitationArrayType {
-    Array,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(deny_unknown_fields)]
-pub struct McpElicitationUntitledEnumItems {
-    #[serde(rename = "type")]
-    #[ts(rename = "type")]
-    pub type_: McpElicitationStringType,
-    #[serde(rename = "enum")]
-    #[ts(rename = "enum")]
-    pub enum_: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(deny_unknown_fields)]
-pub struct McpElicitationTitledEnumItems {
-    #[serde(rename = "anyOf", alias = "oneOf")]
-    #[ts(rename = "anyOf")]
-    pub any_of: Vec<McpElicitationConstOption>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(deny_unknown_fields)]
-pub struct McpElicitationConstOption {
-    #[serde(rename = "const")]
-    #[ts(rename = "const")]
-    pub const_: String,
-    pub title: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(tag = "mode", rename_all = "camelCase")]
-#[ts(tag = "mode")]
-pub enum McpServerElicitationRequest {
-    #[serde(rename_all = "camelCase")]
-    #[ts(rename_all = "camelCase")]
-    Form {
-        #[serde(rename = "_meta")]
-        #[ts(rename = "_meta")]
-        meta: Option<JsonValue>,
-        message: String,
-        requested_schema: McpElicitationSchema,
-    },
-    #[serde(rename_all = "camelCase")]
-    #[ts(rename_all = "camelCase")]
-    Url {
-        #[serde(rename = "_meta")]
-        #[ts(rename = "_meta")]
-        meta: Option<JsonValue>,
-        message: String,
-        url: String,
-        elicitation_id: String,
-    },
-}
-
-impl TryFrom<CoreElicitationRequest> for McpServerElicitationRequest {
-    type Error = serde_json::Error;
-
-    fn try_from(value: CoreElicitationRequest) -> Result<Self, Self::Error> {
-        match value {
-            CoreElicitationRequest::Form {
-                meta,
-                message,
-                requested_schema,
-            } => Ok(Self::Form {
-                meta,
-                message,
-                requested_schema: serde_json::from_value(requested_schema)?,
-            }),
-            CoreElicitationRequest::Url {
-                meta,
-                message,
-                url,
-                elicitation_id,
-            } => Ok(Self::Url {
-                meta,
-                message,
-                url,
-                elicitation_id,
-            }),
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerElicitationRequestResponse {
@@ -5971,7 +5253,7 @@ pub struct McpServerElicitationRequestResponse {
 impl From<McpServerElicitationRequestResponse> for rmcp::model::CreateElicitationResult {
     fn from(value: McpServerElicitationRequestResponse) -> Self {
         Self {
-            action: value.action.into(),
+            action: rmcp_elicitation_action_from_api(value.action),
             content: value.content,
         }
     }
@@ -5980,10 +5262,30 @@ impl From<McpServerElicitationRequestResponse> for rmcp::model::CreateElicitatio
 impl From<rmcp::model::CreateElicitationResult> for McpServerElicitationRequestResponse {
     fn from(value: rmcp::model::CreateElicitationResult) -> Self {
         Self {
-            action: value.action.into(),
+            action: api_elicitation_action_from_rmcp(value.action),
             content: value.content,
             meta: None,
         }
+    }
+}
+
+fn rmcp_elicitation_action_from_api(
+    value: McpServerElicitationAction,
+) -> rmcp::model::ElicitationAction {
+    match value {
+        McpServerElicitationAction::Accept => rmcp::model::ElicitationAction::Accept,
+        McpServerElicitationAction::Decline => rmcp::model::ElicitationAction::Decline,
+        McpServerElicitationAction::Cancel => rmcp::model::ElicitationAction::Cancel,
+    }
+}
+
+fn api_elicitation_action_from_rmcp(
+    value: rmcp::model::ElicitationAction,
+) -> McpServerElicitationAction {
+    match value {
+        rmcp::model::ElicitationAction::Accept => McpServerElicitationAction::Accept,
+        rmcp::model::ElicitationAction::Decline => McpServerElicitationAction::Decline,
+        rmcp::model::ElicitationAction::Cancel => McpServerElicitationAction::Cancel,
     }
 }
 
@@ -7791,7 +7093,7 @@ mod tests {
                 },
                 CoreUserInput::Skill {
                     name: "skill-creator".to_string(),
-                    path: PathBuf::from("/repo/.codex/skills/skill-creator/SKILL.md"),
+                    path: PathBuf::from("/repo/.praxis/skills/skill-creator/SKILL.md"),
                 },
                 CoreUserInput::Mention {
                     name: "Demo App".to_string(),
@@ -7817,7 +7119,7 @@ mod tests {
                     },
                     UserInput::Skill {
                         name: "skill-creator".to_string(),
-                        path: PathBuf::from("/repo/.codex/skills/skill-creator/SKILL.md"),
+                        path: PathBuf::from("/repo/.praxis/skills/skill-creator/SKILL.md"),
                     },
                     UserInput::Mention {
                         name: "Demo App".to_string(),
@@ -8138,38 +7440,6 @@ mod tests {
                 ],
                 "success": true,
             })
-        );
-    }
-
-    #[test]
-    fn dynamic_tool_spec_deserializes_defer_loading() {
-        let value = json!({
-            "name": "lookup_ticket",
-            "description": "Fetch a ticket",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": { "type": "string" }
-                }
-            },
-            "deferLoading": true,
-        });
-
-        let actual: DynamicToolSpec = serde_json::from_value(value).expect("deserialize");
-
-        assert_eq!(
-            actual,
-            DynamicToolSpec {
-                name: "lookup_ticket".to_string(),
-                description: "Fetch a ticket".to_string(),
-                input_schema: json!({
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" }
-                    }
-                }),
-                defer_loading: true,
-            }
         );
     }
 
