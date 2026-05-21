@@ -417,7 +417,7 @@ fn spawn_rollout_page_loader(
                 request_token,
                 search_token,
                 search_term,
-                filter_cwd,
+                filter_cwd: _,
                 sort_key,
             } = request;
             let cursor = match cursor.as_ref() {
@@ -434,7 +434,7 @@ fn spawn_rollout_page_loader(
                     model_providers: None,
                     source_kinds: None,
                     archived: false,
-                    cwd: filter_cwd,
+                    cwd: None,
                     search_term,
                     fallback_provider: String::new(),
                 })
@@ -1032,6 +1032,13 @@ impl PickerState {
             .iter()
             .filter(|row| self.row_matches_filter(row));
         self.filtered_rows = base_iter.cloned().collect();
+        if self.filtered_rows.is_empty()
+            && !self.show_all
+            && self.filter_cwd.is_some()
+            && !self.all_rows.is_empty()
+        {
+            self.filtered_rows = self.all_rows.clone();
+        }
         if self.selected >= self.filtered_rows.len() {
             self.selected = self.filtered_rows.len().saturating_sub(1);
         }
@@ -1324,7 +1331,7 @@ fn thread_list_params(
     sort_key: ThreadSortKey,
     include_non_interactive: bool,
     search_term: Option<String>,
-    filter_cwd: Option<PathBuf>,
+    _filter_cwd: Option<PathBuf>,
 ) -> ThreadListParams {
     ThreadListParams {
         cursor,
@@ -1337,7 +1344,7 @@ fn thread_list_params(
         source_kinds: (!include_non_interactive)
             .then_some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode]),
         archived: Some(false),
-        cwd: filter_cwd.map(|path| path.display().to_string()),
+        cwd: None,
         search_term,
     }
 }
@@ -2203,7 +2210,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_thread_list_params_forwards_cwd_filter() {
+    fn thread_list_params_do_not_send_cwd_filter() {
         let cwd = PathBuf::from("project");
         let params = thread_list_params(
             None,
@@ -2213,7 +2220,7 @@ mod tests {
             Some(cwd.clone()),
         );
 
-        assert_eq!(params.cwd, Some(cwd.display().to_string()));
+        assert_eq!(params.cwd, None);
     }
 
     #[test]
@@ -2239,6 +2246,34 @@ mod tests {
         };
 
         assert!(state.row_matches_filter(&row));
+    }
+
+    #[test]
+    fn picker_falls_back_to_all_rows_when_cwd_filter_has_no_matches() {
+        let loader: PageLoader = Arc::new(|_| {});
+        let mut state = PickerState::new(
+            PathBuf::from("/tmp"),
+            FrameRequester::test_dummy(),
+            loader,
+            /*show_all*/ false,
+            Some(PathBuf::from("/workspace/current")),
+            SessionPickerAction::Resume,
+        );
+        state.all_rows = vec![Row {
+            path: None,
+            preview: String::from("old session"),
+            thread_id: Some(ThreadId::new()),
+            thread_name: None,
+            created_at: None,
+            updated_at: None,
+            cwd: Some(PathBuf::from("/workspace/other")),
+            git_branch: None,
+        }];
+
+        state.apply_filter();
+
+        assert_eq!(state.filtered_rows.len(), 1);
+        assert_eq!(state.filtered_rows[0].preview, "old session");
     }
 
     #[test]

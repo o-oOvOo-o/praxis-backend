@@ -119,6 +119,8 @@ impl ToolOrchestrator {
         // 1) Approval
         let mut already_approved = false;
 
+        tool.preflight(req, tool_ctx).await?;
+
         let requirement = tool.exec_approval_requirement(req).unwrap_or_else(|| {
             default_exec_approval_requirement(approval_policy, &turn_ctx.file_system_sandbox_policy)
         });

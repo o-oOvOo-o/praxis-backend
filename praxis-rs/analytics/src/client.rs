@@ -3,6 +3,7 @@ use crate::events::TrackEventRequest;
 use crate::events::TrackEventsRequest;
 use crate::events::current_runtime_metadata;
 use crate::facts::AnalyticsFact;
+use crate::facts::AppGatewayInitializeFact;
 use crate::facts::AppInvocation;
 use crate::facts::AppMentionedInput;
 use crate::facts::AppUsedInput;
@@ -11,10 +12,9 @@ use crate::facts::PluginState;
 use crate::facts::PluginStateChangedInput;
 use crate::facts::SkillInvocation;
 use crate::facts::SkillInvokedInput;
+use crate::facts::ThreadInitializedFact;
 use crate::facts::TrackEventsContext;
 use crate::reducer::AnalyticsReducer;
-use praxis_app_gateway_protocol::ClientResponse;
-use praxis_app_gateway_protocol::InitializeParams;
 use praxis_login::AuthManager;
 use praxis_login::default_client::create_client;
 use praxis_plugin::PluginTelemetryMetadata;
@@ -131,13 +131,13 @@ impl AnalyticsEventsClient {
     pub fn track_initialize(
         &self,
         connection_id: u64,
-        params: InitializeParams,
+        initialize: AppGatewayInitializeFact,
         product_client_id: String,
         rpc_transport: AppGatewayRpcTransport,
     ) {
         self.record_fact(AnalyticsFact::Initialize {
             connection_id,
-            params,
+            initialize,
             product_client_id,
             runtime: current_runtime_metadata(),
             rpc_transport,
@@ -214,10 +214,10 @@ impl AnalyticsEventsClient {
         self.queue.try_send(input);
     }
 
-    pub fn track_response(&self, connection_id: u64, response: ClientResponse) {
-        self.record_fact(AnalyticsFact::Response {
+    pub fn track_thread_initialized(&self, connection_id: u64, thread: ThreadInitializedFact) {
+        self.record_fact(AnalyticsFact::ThreadInitialized {
             connection_id,
-            response: Box::new(response),
+            thread,
         });
     }
 }

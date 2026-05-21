@@ -19,7 +19,7 @@ setup_remote_env() {
   local container_name
   local praxis_exec_server_binary_path
 
-  container_name="${CODEX_TEST_REMOTE_ENV_CONTAINER_NAME:-praxis-remote-test-env-local-$(date +%s)-${RANDOM}}"
+  container_name="${PRAXIS_TEST_REMOTE_ENV_CONTAINER_NAME:-praxis-remote-test-env-local-$(date +%s)-${RANDOM}}"
   praxis_exec_server_binary_path="${REPO_ROOT}/praxis-rs/target/debug/praxis-exec-server"
 
   if ! command -v docker >/dev/null 2>&1; then
@@ -50,13 +50,13 @@ setup_remote_env() {
   docker rm -f "${container_name}" >/dev/null 2>&1 || true
   docker run -d --name "${container_name}" ubuntu:24.04 sleep infinity >/dev/null
 
-  export CODEX_TEST_REMOTE_ENV="${container_name}"
+  export PRAXIS_TEST_REMOTE_ENV="${container_name}"
 }
 
 praxis_remote_env_cleanup() {
-  if [[ -n "${CODEX_TEST_REMOTE_ENV:-}" ]]; then
-    docker rm -f "${CODEX_TEST_REMOTE_ENV}" >/dev/null 2>&1 || true
-    unset CODEX_TEST_REMOTE_ENV
+  if [[ -n "${PRAXIS_TEST_REMOTE_ENV:-}" ]]; then
+    docker rm -f "${PRAXIS_TEST_REMOTE_ENV}" >/dev/null 2>&1 || true
+    unset PRAXIS_TEST_REMOTE_ENV
   fi
 }
 
@@ -69,7 +69,7 @@ old_shell_options="$(set +o)"
 set -euo pipefail
 if setup_remote_env; then
   status=0
-  echo "CODEX_TEST_REMOTE_ENV=${CODEX_TEST_REMOTE_ENV}"
+  echo "PRAXIS_TEST_REMOTE_ENV=${PRAXIS_TEST_REMOTE_ENV}"
   echo "Remote env ready. Run your command, then call: praxis_remote_env_cleanup"
 else
   status=$?

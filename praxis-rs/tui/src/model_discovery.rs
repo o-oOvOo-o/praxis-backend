@@ -1007,7 +1007,7 @@ fn discover_praxis_config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let mut seen = BTreeSet::new();
 
-    if let Some(home_override) = std::env::var_os("CODEX_HOME").map(PathBuf::from) {
+    if let Some(home_override) = std::env::var_os("PRAXIS_HOME").map(PathBuf::from) {
         let config = home_override.join("config.toml");
         if config.is_file() && seen.insert(normalize_path(&config)) {
             paths.push(config);

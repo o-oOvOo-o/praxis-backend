@@ -84,7 +84,6 @@ use praxis_app_gateway_protocol::CollabAgentStatus as AppGatewayCollabAgentStatu
 use praxis_app_gateway_protocol::CollabAgentTool;
 use praxis_app_gateway_protocol::CollabAgentToolCallStatus;
 use praxis_app_gateway_protocol::CommandExecutionRequestApprovalParams;
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_app_gateway_protocol::ErrorNotification;
 use praxis_app_gateway_protocol::FileChangeRequestApprovalParams;
 use praxis_app_gateway_protocol::GuardianApprovalReviewAction;
@@ -127,6 +126,7 @@ use praxis_otel::SessionTelemetry;
 use praxis_protocol::ThreadId;
 use praxis_protocol::account::PlanType;
 use praxis_protocol::approvals::ElicitationRequestEvent;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_protocol::config_types::CollaborationMode;
 use praxis_protocol::config_types::CollaborationModeMask;
 use praxis_protocol::config_types::ModeKind;
@@ -240,6 +240,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
+use ratatui::widgets::Block;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use ratatui::widgets::Wrap;
@@ -273,6 +274,15 @@ const IN_APP_TOAST_DURATION: Duration = Duration::from_secs(4);
 const IN_APP_TOAST_PRIORITY_DURATION: Duration = Duration::from_secs(6);
 const ACTIVE_CELL_ANIMATION_FRAME_DELAY_FOCUSED: Duration = Duration::from_millis(60);
 const ACTIVE_CELL_ANIMATION_FRAME_DELAY_UNFOCUSED: Duration = Duration::from_millis(140);
+const DEEPSEEK_HEADER_HEIGHT: u16 = 1;
+const DEEPSEEK_FOOTER_HEIGHT: u16 = 1;
+const DEEPSEEK_CHROME_MIN_HEIGHT: u16 = 6;
+const DEEPSEEK_HEADER_BG: Color = Color::Rgb(8, 14, 22);
+const DEEPSEEK_FOOTER_BG: Color = Color::Rgb(5, 10, 18);
+const DEEPSEEK_BLUE: Color = Color::Rgb(86, 156, 214);
+const DEEPSEEK_SKY: Color = Color::Rgb(125, 211, 252);
+const DEEPSEEK_MUTED: Color = Color::Rgb(148, 163, 184);
+const DEEPSEEK_TEXT: Color = Color::Rgb(226, 232, 240);
 
 /// Choose the keybinding used to edit the most-recently queued message.
 ///
@@ -7258,9 +7268,7 @@ impl ChatWidget {
                 self.on_request_user_input(request_user_input_from_params(params));
             }
             ServerRequest::DynamicToolCall { .. }
-            | ServerRequest::ChatgptAuthTokensRefresh { .. }
-            | ServerRequest::ApplyPatchApproval { .. }
-            | ServerRequest::ExecCommandApproval { .. } => {
+            | ServerRequest::ChatgptAuthTokensRefresh { .. } => {
                 if replay_kind.is_none() {
                     self.add_error_message(TUI_STUB_MESSAGE.to_string());
                 }
@@ -12231,20 +12239,34 @@ impl Drop for ChatWidget {
 
 impl Renderable for ChatWidget {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        let layout = self.layout_for_area(area);
+        self.render_deepseek_background(area, buf);
+        let header_area = self.deepseek_header_area(area);
+        let footer_area = self.deepseek_footer_area(area);
+        let body_area = self.deepseek_body_area(area);
+
+        if let Some(header_area) = header_area {
+            self.render_deepseek_header(header_area, buf);
+        }
+
+        let layout = self.layout_for_area(body_area);
         self.render_active_cell(layout, buf);
         self.render_work_panel(layout, buf);
         self.render_bottom_pane(layout, buf);
         self.render_in_app_toast_overlay(layout, buf);
+
+        if let Some(footer_area) = footer_area {
+            self.render_deepseek_footer(footer_area, buf);
+        }
         self.last_rendered_width.set(Some(area.width as usize));
     }
 
     fn desired_height(&self, width: u16) -> u16 {
         self.desired_total_height(width)
+            .saturating_add(Self::deepseek_chrome_height_for_width(width))
     }
 
     fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        let layout = self.layout_for_area(area);
+        let layout = self.layout_for_area(self.deepseek_body_area(area));
         if layout.bottom_content_area.is_empty() {
             None
         } else {
@@ -12254,6 +12276,176 @@ impl Renderable for ChatWidget {
 }
 
 impl ChatWidget {
+    fn deepseek_chrome_enabled(area: Rect) -> bool {
+        area.height >= DEEPSEEK_CHROME_MIN_HEIGHT
+    }
+
+    fn deepseek_chrome_height_for_width(_width: u16) -> u16 {
+        DEEPSEEK_HEADER_HEIGHT.saturating_add(DEEPSEEK_FOOTER_HEIGHT)
+    }
+
+    fn deepseek_header_area(&self, area: Rect) -> Option<Rect> {
+        Self::deepseek_chrome_enabled(area).then_some(Rect::new(
+            area.x,
+            area.y,
+            area.width,
+            DEEPSEEK_HEADER_HEIGHT.min(area.height),
+        ))
+    }
+
+    fn deepseek_footer_area(&self, area: Rect) -> Option<Rect> {
+        Self::deepseek_chrome_enabled(area).then_some(Rect::new(
+            area.x,
+            area.bottom().saturating_sub(DEEPSEEK_FOOTER_HEIGHT),
+            area.width,
+            DEEPSEEK_FOOTER_HEIGHT.min(area.height),
+        ))
+    }
+
+    fn deepseek_body_area(&self, area: Rect) -> Rect {
+        if !Self::deepseek_chrome_enabled(area) {
+            return area;
+        }
+        Rect::new(
+            area.x,
+            area.y.saturating_add(DEEPSEEK_HEADER_HEIGHT),
+            area.width,
+            area.height
+                .saturating_sub(DEEPSEEK_HEADER_HEIGHT)
+                .saturating_sub(DEEPSEEK_FOOTER_HEIGHT),
+        )
+    }
+
+    fn render_deepseek_background(&self, area: Rect, buf: &mut Buffer) {
+        if area.is_empty() {
+            return;
+        }
+        Block::default().style(Style::default()).render(area, buf);
+    }
+
+    fn render_deepseek_header(&self, area: Rect, buf: &mut Buffer) {
+        if area.is_empty() {
+            return;
+        }
+        Block::default()
+            .style(Style::default().bg(DEEPSEEK_HEADER_BG))
+            .render(area, buf);
+
+        let workspace = self
+            .config
+            .cwd
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("workspace");
+        let thread = self
+            .thread_name
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or("new thread");
+        let mode = self.collaboration_mode_label().unwrap_or("Default");
+        let provider = self.current_model_provider_id();
+        let budget = self.status_budget_message();
+
+        let mut spans = vec![
+            Span::styled(
+                " Praxis ",
+                Style::default()
+                    .fg(DEEPSEEK_SKY)
+                    .bg(DEEPSEEK_HEADER_BG)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(workspace.to_string(), Style::default().fg(DEEPSEEK_TEXT)),
+            Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)),
+            Span::styled(mode.to_string(), Style::default().fg(DEEPSEEK_BLUE)),
+            Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)),
+            Span::styled(
+                self.model_display_name().to_string(),
+                Style::default().fg(DEEPSEEK_TEXT),
+            ),
+            Span::styled(
+                format!(" ({provider})"),
+                Style::default().fg(DEEPSEEK_MUTED),
+            ),
+            Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)),
+            Span::styled(thread.to_string(), Style::default().fg(DEEPSEEK_MUTED)),
+        ];
+        if let Some(budget) = budget {
+            spans.push(Span::styled(
+                format!("  {budget}"),
+                Style::default().fg(DEEPSEEK_MUTED),
+            ));
+        }
+
+        let line = truncate_line_with_ellipsis_if_overflow(
+            Line::from(spans).style(Style::default().bg(DEEPSEEK_HEADER_BG)),
+            area.width as usize,
+        );
+        Paragraph::new(line)
+            .style(Style::default().bg(DEEPSEEK_HEADER_BG))
+            .render(area, buf);
+    }
+
+    fn render_deepseek_footer(&self, area: Rect, buf: &mut Buffer) {
+        if area.is_empty() {
+            return;
+        }
+        Block::default()
+            .style(Style::default().bg(DEEPSEEK_FOOTER_BG))
+            .render(area, buf);
+
+        let running = self.bottom_pane.is_task_running();
+        let state_label = if running {
+            self.current_status.header.as_str()
+        } else {
+            "Ready"
+        };
+        let queued_count = self
+            .queued_user_messages
+            .len()
+            .saturating_add(self.rejected_steers_queue.len())
+            .saturating_add(self.pending_steers.len());
+        let mut spans = vec![
+            Span::styled(
+                format!(" {state_label}"),
+                Style::default()
+                    .fg(if running {
+                        DEEPSEEK_SKY
+                    } else {
+                        DEEPSEEK_MUTED
+                    })
+                    .bg(DEEPSEEK_FOOTER_BG)
+                    .add_modifier(if running {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+            ),
+            Span::styled("  ", Style::default().bg(DEEPSEEK_FOOTER_BG)),
+            Span::styled(
+                if running {
+                    "Esc interrupt | type to steer"
+                } else {
+                    "Enter send | Shift+Enter newline"
+                },
+                Style::default().fg(DEEPSEEK_MUTED).bg(DEEPSEEK_FOOTER_BG),
+            ),
+        ];
+        if queued_count > 0 {
+            spans.push(Span::styled(
+                format!("  queued {queued_count}"),
+                Style::default().fg(DEEPSEEK_BLUE).bg(DEEPSEEK_FOOTER_BG),
+            ));
+        }
+        let line = truncate_line_with_ellipsis_if_overflow(
+            Line::from(spans).style(Style::default().bg(DEEPSEEK_FOOTER_BG)),
+            area.width as usize,
+        );
+        Paragraph::new(line)
+            .style(Style::default().bg(DEEPSEEK_FOOTER_BG))
+            .render(area, buf);
+    }
+
     fn active_cell_render_cache_key(&self, width: u16) -> Option<ActiveCellRenderCacheKey> {
         let cell = self.active_cell.as_ref()?;
         Some(ActiveCellRenderCacheKey {
@@ -12353,6 +12545,7 @@ impl ChatWidget {
             toast_height: visible_toasts,
             work_panel_outer_height,
             show_work_panel: self.work_panel.has_content(),
+            fill_available_top: false,
         })
     }
 

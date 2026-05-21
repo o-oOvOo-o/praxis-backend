@@ -5,12 +5,25 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use std::time::Instant;
 
-use praxis_app_gateway_protocol::AppBranding;
-use praxis_app_gateway_protocol::AppInfo;
-use praxis_app_gateway_protocol::AppMetadata;
+use praxis_login::default_client::is_first_party_chat_originator;
+use praxis_login::default_client::originator;
+use praxis_protocol::apps::AppBranding;
+use praxis_protocol::apps::AppInfo;
+use praxis_protocol::apps::AppMetadata;
 use serde::Deserialize;
 
 pub const CONNECTORS_CACHE_TTL: Duration = Duration::from_secs(3600);
+const DISALLOWED_CONNECTOR_IDS: &[&str] = &[
+    "asdk_app_6938a94a61d881918ef32cb999ff937c",
+    "connector_2b0a9009c9c64bf9933a3dae3f2b1254",
+    "connector_3f8d1a79f27c4c7ba1a897ab13bf37dc",
+    "connector_68de829bf7648191acd70a907364c67c",
+    "connector_68e004f14af881919eb50893d3d9f523",
+    "connector_69272cb413a081919685ec3c88d1744e",
+];
+const FIRST_PARTY_CHAT_DISALLOWED_CONNECTOR_IDS: &[&str] =
+    &["connector_0f9c9d4592e54d0a9a12b3f44a1e2010"];
+const DISALLOWED_CONNECTOR_PREFIX: &str = "connector_openai_";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AllConnectorsCacheKey {
@@ -368,12 +381,31 @@ fn directory_app_to_app_info(app: DirectoryApp) -> AppInfo {
     }
 }
 
-fn connector_install_url(name: &str, connector_id: &str) -> String {
+pub fn is_connector_id_allowed(connector_id: &str) -> bool {
+    is_connector_id_allowed_for_originator(connector_id, originator().value.as_str())
+}
+
+pub fn is_connector_id_allowed_for_originator(connector_id: &str, originator_value: &str) -> bool {
+    let disallowed_connector_ids = if is_first_party_chat_originator(originator_value) {
+        FIRST_PARTY_CHAT_DISALLOWED_CONNECTOR_IDS
+    } else {
+        DISALLOWED_CONNECTOR_IDS
+    };
+
+    !connector_id.starts_with(DISALLOWED_CONNECTOR_PREFIX)
+        && !disallowed_connector_ids.contains(&connector_id)
+}
+
+pub fn connector_install_url(name: &str, connector_id: &str) -> String {
     let slug = connector_name_slug(name);
     format!("https://chatgpt.com/apps/{slug}/{connector_id}")
 }
 
-fn connector_name_slug(name: &str) -> String {
+pub fn sanitize_connector_name(name: &str) -> String {
+    connector_name_slug(name).replace("-", "_")
+}
+
+pub fn connector_name_slug(name: &str) -> String {
     let mut normalized = String::with_capacity(name.len());
     for character in name.chars() {
         if character.is_ascii_alphanumeric() {

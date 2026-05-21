@@ -1,13 +1,15 @@
 use super::*;
+use crate::config::ServiceAppConfig as AppConfig;
+use crate::config::ServiceAppToolApproval as AppToolApproval;
+use crate::config::ServiceAppsConfig as AppsConfig;
 use anyhow::Result;
-use praxis_app_gateway_protocol::AppConfig;
-use praxis_app_gateway_protocol::AppToolApproval;
-use praxis_app_gateway_protocol::AppsConfig;
-use praxis_app_gateway_protocol::AskForApproval;
+use praxis_config::toml_value_to_edit_item;
+use praxis_protocol::protocol::AskForApproval;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
 use tempfile::tempdir;
+use toml_edit::Item as TomlItem;
 
 #[test]
 fn toml_value_to_item_handles_nested_config_tables() {
@@ -20,7 +22,7 @@ X-Doc = "42"
 "#;
 
     let value: TomlValue = toml::from_str(config).expect("parse config example");
-    let item = toml_value_to_item(&value).expect("convert to toml_edit item");
+    let item = toml_value_to_edit_item(&value).expect("convert to toml_edit item");
 
     let root = item.as_table().expect("root table");
     assert!(!root.is_implicit(), "root table should be explicit");

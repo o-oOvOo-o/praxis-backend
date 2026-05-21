@@ -919,6 +919,14 @@ impl UnifiedExecProcessManager {
 
 #[async_trait::async_trait]
 impl AgentOsProcessCleaner for UnifiedExecProcessManager {
+    fn runtime_kind(&self) -> &'static str {
+        crate::agent_os::process_runtime_kind::UNIFIED_EXEC
+    }
+
+    fn runtime_owner_id(&self) -> String {
+        UnifiedExecProcessManager::runtime_owner_id(self).to_string()
+    }
+
     async fn cleanup_agent_os_process(&self, process_id: i32) -> bool {
         self.terminate_process(process_id).await
     }

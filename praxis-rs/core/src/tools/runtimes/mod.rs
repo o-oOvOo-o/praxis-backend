@@ -12,7 +12,10 @@ use praxis_sandboxing::SandboxCommand;
 use std::collections::HashMap;
 use std::path::Path;
 
+pub(crate) mod agent_os_command;
 pub mod apply_patch;
+pub(crate) mod managed_execution_pipeline;
+pub(crate) mod runtime_approval;
 pub mod shell;
 pub mod unified_exec;
 

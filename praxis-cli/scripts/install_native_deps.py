@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install Codex native binaries (Rust CLI plus ripgrep helpers)."""
+"""Install Praxis native binaries (Rust CLI plus ripgrep helpers)."""
 
 import argparse
 from contextlib import contextmanager
@@ -19,10 +19,10 @@ from urllib.parse import urlparse
 from urllib.request import urlopen
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-CODEX_CLI_ROOT = SCRIPT_DIR.parent
-DEFAULT_WORKFLOW_URL = "https://github.com/openai/codex/actions/runs/17952349351"  # rust-v0.40.0
+PRAXIS_CLI_ROOT = SCRIPT_DIR.parent
+DEFAULT_WORKFLOW_URL = ""  # pass --workflow-url for Praxis release artifacts
 VENDOR_DIR_NAME = "vendor"
-RG_MANIFEST = CODEX_CLI_ROOT / "bin" / "rg"
+RG_MANIFEST = PRAXIS_CLI_ROOT / "bin" / "rg"
 BINARY_TARGETS = (
     "x86_64-unknown-linux-musl",
     "aarch64-unknown-linux-musl",
@@ -44,7 +44,9 @@ class BinaryComponent:
 WINDOWS_TARGETS = tuple(target for target in BINARY_TARGETS if "windows" in target)
 
 BINARY_COMPONENTS = {
-    "codex": BinaryComponent(
+    # Compatibility: release artifacts are still named codex while the
+    # product/package entrypoint is Praxis.
+    "praxis-cli": BinaryComponent(
         artifact_prefix="codex",
         dest_dir="codex",
         binary_basename="codex",
@@ -120,13 +122,10 @@ def _gha_group(title: str):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Install native Codex binaries.")
+    parser = argparse.ArgumentParser(description="Install native Praxis binaries.")
     parser.add_argument(
         "--workflow-url",
-        help=(
-            "GitHub Actions workflow URL that produced the artifacts. Defaults to a "
-            "known good run when omitted."
-        ),
+        help="GitHub Actions workflow URL that produced the Praxis release artifacts.",
     )
     parser.add_argument(
         "--component",
@@ -134,9 +133,9 @@ def parse_args() -> argparse.Namespace:
         action="append",
         choices=tuple(list(BINARY_COMPONENTS) + ["rg"]),
         help=(
-            "Limit installation to the specified components."
-            " May be repeated. Defaults to codex, praxis-windows-sandbox-setup,"
-            " praxis-command-runner, and rg."
+            "Limit installation to the specified components. "
+            "May be repeated. Defaults to praxis-cli, "
+            "praxis-windows-sandbox-setup, praxis-command-runner, and rg."
         ),
     )
     parser.add_argument(
@@ -154,12 +153,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    praxis_cli_root = (args.root or CODEX_CLI_ROOT).resolve()
+    praxis_cli_root = (args.root or PRAXIS_CLI_ROOT).resolve()
     vendor_dir = praxis_cli_root / VENDOR_DIR_NAME
     vendor_dir.mkdir(parents=True, exist_ok=True)
 
     components = args.components or [
-        "codex",
+        "praxis-cli",
         "praxis-windows-sandbox-setup",
         "praxis-command-runner",
         "rg",
@@ -167,7 +166,7 @@ def main() -> int:
 
     workflow_url = (args.workflow_url or DEFAULT_WORKFLOW_URL).strip()
     if not workflow_url:
-        workflow_url = DEFAULT_WORKFLOW_URL
+        raise RuntimeError("--workflow-url is required for Praxis native artifacts")
 
     workflow_id = workflow_url.rstrip("/").split("/")[-1]
     print(f"Downloading native artifacts from workflow {workflow_id}...")
@@ -267,7 +266,7 @@ def _download_artifacts(workflow_id: str, dest_dir: Path) -> None:
         "--dir",
         str(dest_dir),
         "--repo",
-        "openai/codex",
+        "o-oOvOo-o/praxis-backend",
         workflow_id,
     ]
     subprocess.check_call(cmd)

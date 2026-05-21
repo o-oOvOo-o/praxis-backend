@@ -5,7 +5,7 @@ use crate::ResponsesApiTool;
 use crate::ToolSearchOutputTool;
 use crate::ToolSpec;
 use crate::mcp_tool_to_deferred_responses_api_tool;
-use praxis_app_gateway_protocol::AppInfo;
+use praxis_protocol::apps::AppInfo;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;

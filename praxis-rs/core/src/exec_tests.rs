@@ -17,8 +17,12 @@ fn make_exec_output(
         stdout: StreamOutput::new(stdout.to_string()),
         stderr: StreamOutput::new(stderr.to_string()),
         aggregated_output: StreamOutput::new(aggregated.to_string()),
+        model_output: None,
         duration: Duration::from_millis(1),
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     }
 }
 
@@ -105,10 +109,15 @@ async fn read_output_limits_retained_bytes_for_shell_capture() {
         /*stream*/ None,
         /*is_stderr*/ false,
         Some(EXEC_OUTPUT_MAX_BYTES),
+        /*raw_output_spool*/ true,
     )
     .await
     .expect("read");
-    assert_eq!(out.text.len(), EXEC_OUTPUT_MAX_BYTES);
+    assert_eq!(out.output.text.len(), EXEC_OUTPUT_MAX_BYTES);
+    assert!(out.spool.is_some());
+    if let Some(spool) = out.spool {
+        let _ = tokio::fs::remove_file(spool.path).await;
+    }
 }
 
 #[test]
@@ -203,10 +212,18 @@ async fn read_output_retains_all_bytes_for_full_buffer_capture() {
 
     let out = read_output(
         reader, /*stream*/ None, /*is_stderr*/ false, /*max_bytes*/ None,
+        /*raw_output_spool*/ true,
     )
     .await
     .expect("read");
-    assert_eq!(out.text.len(), expected_len);
+    assert_eq!(out.output.text.len(), expected_len);
+    assert_eq!(
+        out.spool.as_ref().map(|spool| spool.bytes),
+        Some(expected_len)
+    );
+    if let Some(spool) = out.spool {
+        let _ = tokio::fs::remove_file(spool.path).await;
+    }
 }
 
 #[test]

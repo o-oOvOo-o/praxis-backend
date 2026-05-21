@@ -201,8 +201,12 @@ struct DebugAppGatewaySendMessageApiCommand {
 struct ResumeCommand {
     /// Optional source namespace (`praxis` or `codex`) followed by a conversation/session id
     /// (UUID) or thread name. If omitted, defaults to Praxis sessions.
-    #[arg(value_name = "TARGET", num_args = 0..=2)]
-    targets: Vec<String>,
+    #[arg(value_name = "SOURCE_OR_TARGET")]
+    target: Option<String>,
+
+    /// Optional conversation/session id or thread name when the first argument is a source.
+    #[arg(value_name = "TARGET")]
+    target_extra: Option<String>,
 
     /// Continue the most recent session without showing the picker.
     #[arg(long = "last", default_value_t = false)]
@@ -227,8 +231,12 @@ struct ResumeCommand {
 struct ForkCommand {
     /// Optional source namespace (`praxis` or `codex`) followed by a conversation/session id
     /// (UUID) or thread name. If omitted, defaults to Praxis sessions.
-    #[arg(value_name = "TARGET", num_args = 0..=2)]
-    targets: Vec<String>,
+    #[arg(value_name = "SOURCE_OR_TARGET")]
+    target: Option<String>,
+
+    /// Optional conversation/session id or thread name when the first argument is a source.
+    #[arg(value_name = "TARGET")]
+    target_extra: Option<String>,
 
     /// Fork the most recent session without showing the picker.
     #[arg(long = "last", default_value_t = false)]
@@ -667,6 +675,13 @@ fn parse_session_target_args(
     }
 }
 
+fn collect_session_target_args(
+    target: Option<String>,
+    target_extra: Option<String>,
+) -> Vec<String> {
+    target.into_iter().chain(target_extra).collect()
+}
+
 fn validate_session_target_with_last(
     parsed_target: &ParsedSessionTarget,
     last: bool,
@@ -823,13 +838,15 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             app_cmd::run_app(app_cli).await?;
         }
         Some(Subcommand::Resume(ResumeCommand {
-            targets,
+            target,
+            target_extra,
             last,
             all,
             include_non_interactive,
             remote,
             config_overrides,
         })) => {
+            let targets = collect_session_target_args(target, target_extra);
             let parsed_target = parse_session_target_args(targets, "resume")?;
             validate_session_target_with_last(&parsed_target, last, "resume")?;
             interactive = finalize_resume_interactive(
@@ -854,12 +871,14 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             handle_app_exit(exit_info)?;
         }
         Some(Subcommand::Fork(ForkCommand {
-            targets,
+            target,
+            target_extra,
             last,
             all,
             remote,
             config_overrides,
         })) => {
+            let targets = collect_session_target_args(target, target_extra);
             let parsed_target = parse_session_target_args(targets, "fork")?;
             validate_session_target_with_last(&parsed_target, last, "fork")?;
             interactive = finalize_fork_interactive(
@@ -1488,7 +1507,8 @@ mod tests {
         } = cli;
 
         let Subcommand::Resume(ResumeCommand {
-            targets,
+            target,
+            target_extra,
             last,
             all,
             include_non_interactive,
@@ -1499,6 +1519,7 @@ mod tests {
             unreachable!()
         };
 
+        let targets = collect_session_target_args(target, target_extra);
         let parsed_target = parse_session_target_args(targets, "resume").expect("parse target");
 
         finalize_resume_interactive(
@@ -1524,7 +1545,8 @@ mod tests {
         } = cli;
 
         let Subcommand::Fork(ForkCommand {
-            targets,
+            target,
+            target_extra,
             last,
             all,
             remote: _,
@@ -1534,6 +1556,7 @@ mod tests {
             unreachable!()
         };
 
+        let targets = collect_session_target_args(target, target_extra);
         let parsed_target = parse_session_target_args(targets, "fork").expect("parse target");
 
         finalize_fork_interactive(
@@ -1738,11 +1761,16 @@ mod tests {
     fn resume_codex_last_keeps_codex_lookup_source() {
         let cli =
             MultitoolCli::try_parse_from(["codex", "resume", "codex", "--last"]).expect("parse");
-        let Subcommand::Resume(ResumeCommand { targets, last, .. }) =
-            cli.subcommand.expect("resume present")
+        let Subcommand::Resume(ResumeCommand {
+            target,
+            target_extra,
+            last,
+            ..
+        }) = cli.subcommand.expect("resume present")
         else {
             unreachable!()
         };
+        let targets = collect_session_target_args(target, target_extra);
         let parsed_target = parse_session_target_args(targets, "resume").expect("parse target");
         validate_session_target_with_last(&parsed_target, last, "resume").expect("validate");
         assert!(last);

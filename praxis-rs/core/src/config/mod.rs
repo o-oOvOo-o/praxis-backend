@@ -28,8 +28,6 @@ use crate::unified_exec::MIN_EMPTY_YIELD_TIME_MS;
 use crate::windows_sandbox::WindowsSandboxLevelExt;
 use crate::windows_sandbox::resolve_windows_sandbox_mode;
 use crate::windows_sandbox::resolve_windows_sandbox_private_desktop;
-use praxis_app_gateway_protocol::Tools;
-use praxis_app_gateway_protocol::UserSavedConfig;
 use praxis_config::types::ApprovalsReviewer;
 use praxis_config::types::AppsConfigToml;
 use praxis_config::types::DEFAULT_OTEL_ENVIRONMENT;
@@ -109,6 +107,7 @@ mod permissions;
 pub mod profile;
 pub mod schema;
 pub mod service;
+pub mod service_types;
 pub use managed_features::ManagedFeatures;
 pub use network_proxy_spec::NetworkProxySpec;
 pub use network_proxy_spec::StartedNetworkProxy;
@@ -131,6 +130,24 @@ pub use praxis_sandboxing::system_bwrap_warning;
 pub use praxis_utils_home_dir::PraxisHomeNamespace;
 pub use service::ConfigService;
 pub use service::ConfigServiceError;
+pub use service_types::AppConfig as ServiceAppConfig;
+pub use service_types::AppToolApproval as ServiceAppToolApproval;
+pub use service_types::AppsConfig as ServiceAppsConfig;
+pub use service_types::ConfigBatchWriteParams;
+pub use service_types::ConfigReadParams;
+pub use service_types::ConfigReadResponse;
+pub use service_types::ConfigValueWriteParams;
+pub use service_types::ConfigView;
+pub use service_types::ConfigWriteEdit;
+pub use service_types::ConfigWriteErrorCode;
+pub use service_types::ConfigWriteResponse;
+pub use service_types::MergeStrategy;
+pub use service_types::OverriddenMetadata;
+pub use service_types::Profile as ServiceProfile;
+pub use service_types::SandboxSettings;
+pub use service_types::Tools;
+pub use service_types::UserSavedConfig;
+pub use service_types::WriteStatus;
 
 pub use praxis_git_utils::GhostSnapshotConfig;
 
@@ -293,7 +310,7 @@ pub struct Config {
     /// appends one extra argument containing a JSON payload describing the
     /// event.
     ///
-    /// Example `~/.codex/config.toml` snippet:
+    /// Example `~/.praxis/config.toml` snippet:
     ///
     /// ```toml
     /// notify = ["notify-send", "Praxis"]
@@ -326,7 +343,7 @@ pub struct Config {
     /// keyring: Use an OS-specific keyring service.
     ///          Credentials stored in the keyring will only be readable by Praxis unless the user explicitly grants access via OS-level keyring access.
     ///          https://github.com/openai/codex/blob/main/praxis-rs/rmcp-client/src/oauth.rs#L2
-    /// file: CODEX_HOME/.credentials.json
+    /// file: PRAXIS_HOME/.credentials.json
     ///       This file will be readable to Praxis and other applications running as the same user.
     /// auto (default): keyring if available, otherwise file.
     pub mcp_oauth_credentials_store_mode: OAuthCredentialsStoreMode,
@@ -369,17 +386,17 @@ pub struct Config {
     /// Memories subsystem settings.
     pub memories: MemoriesConfig,
 
-    /// Directory containing all Praxis state (defaults to `~/.codex` but can be
-    /// overridden by the `CODEX_HOME` environment variable).
+    /// Directory containing all Praxis state (defaults to `~/.praxis` but can be
+    /// overridden by the `PRAXIS_HOME` environment variable).
     pub praxis_home: PathBuf,
 
     /// Directory where Praxis stores the SQLite state DB.
     pub sqlite_home: PathBuf,
 
-    /// Directory where Praxis writes log files (defaults to `$CODEX_HOME/log`).
+    /// Directory where Praxis writes log files (defaults to `$PRAXIS_HOME/log`).
     pub log_dir: PathBuf,
 
-    /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
+    /// Settings that govern if and what will be written to `~/.praxis/history.jsonl`.
     pub history: History,
 
     /// When true, session is not persisted on disk. Default to `false`
@@ -901,7 +918,7 @@ pub async fn load_global_mcp_servers(
     // result.
     let cli_overrides = Vec::<(String, TomlValue)>::new();
     // There is no cwd/project context for this query, so this will not include
-    // MCP servers defined in in-repo .codex/ folders.
+    // MCP servers defined in in-repo .praxis/ folders.
     let cwd: Option<AbsolutePathBuf> = None;
     let config_layer_stack = load_config_layers_state(
         praxis_home,
@@ -1014,7 +1031,7 @@ pub(crate) fn set_project_trust_level_inner(
     Ok(())
 }
 
-/// Patch `CODEX_HOME/config.toml` project state to set trust level.
+/// Patch `PRAXIS_HOME/config.toml` project state to set trust level.
 /// Use with caution.
 pub fn set_project_trust_level(
     praxis_home: &Path,
@@ -1063,7 +1080,7 @@ pub fn set_default_oss_provider(praxis_home: &Path, provider: &str) -> std::io::
         .map_err(|err| std::io::Error::other(format!("failed to persist config.toml: {err}")))
 }
 
-/// Base config deserialized from ~/.codex/config.toml.
+/// Base config deserialized from ~/.praxis/config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigToml {
@@ -1214,16 +1231,16 @@ pub struct ConfigToml {
     #[serde(default)]
     pub profiles: HashMap<String, ConfigProfile>,
 
-    /// Settings that govern if and what will be written to `~/.codex/history.jsonl`.
+    /// Settings that govern if and what will be written to `~/.praxis/history.jsonl`.
     #[serde(default)]
     pub history: Option<History>,
 
     /// Directory where Praxis stores the SQLite state DB.
-    /// Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`.
+    /// Defaults to `$PRAXIS_SQLITE_HOME` when set. Otherwise uses `$PRAXIS_HOME`.
     pub sqlite_home: Option<AbsolutePathBuf>,
 
     /// Directory where Praxis writes client/runtime log files.
-    /// Defaults to `$CODEX_HOME/log`.
+    /// Defaults to `$PRAXIS_HOME/log`.
     pub log_dir: Option<AbsolutePathBuf>,
 
     /// Optional URI-based file opener. If set, citations to files in the model
@@ -1329,7 +1346,7 @@ pub struct ConfigToml {
     pub ghost_snapshot: Option<GhostSnapshotToml>,
 
     /// Markers used to detect the project root when searching parent
-    /// directories for `.codex` folders. Defaults to [".git"] when unset.
+    /// directories for `.praxis` folders. Defaults to [".git"] when unset.
     #[serde(default)]
     pub project_root_markers: Option<Vec<String>>,
 
@@ -1391,7 +1408,9 @@ impl From<ConfigToml> for UserSavedConfig {
         Self {
             approval_policy: config_toml.approval_policy.map(Into::into),
             sandbox_mode: config_toml.sandbox_mode.map(Into::into),
-            sandbox_settings: config_toml.sandbox_workspace_write.map(From::from),
+            sandbox_settings: config_toml
+                .sandbox_workspace_write
+                .map(sandbox_settings_from_workspace_write),
             forced_chatgpt_workspace_id: config_toml.forced_chatgpt_workspace_id,
             forced_login_method: config_toml.forced_login_method,
             model: config_toml.model,
@@ -1402,6 +1421,17 @@ impl From<ConfigToml> for UserSavedConfig {
             profile: config_toml.profile,
             profiles,
         }
+    }
+}
+
+fn sandbox_settings_from_workspace_write(
+    sandbox_workspace_write: SandboxWorkspaceWrite,
+) -> SandboxSettings {
+    SandboxSettings {
+        writable_roots: sandbox_workspace_write.writable_roots,
+        network_access: Some(sandbox_workspace_write.network_access),
+        exclude_tmpdir_env_var: Some(sandbox_workspace_write.exclude_tmpdir_env_var),
+        exclude_slash_tmp: Some(sandbox_workspace_write.exclude_slash_tmp),
     }
 }
 
@@ -2818,12 +2848,12 @@ fn toml_uses_deprecated_instructions_file(value: &TomlValue) -> bool {
 }
 
 /// Returns the path to the Praxis configuration directory, which can be
-/// specified by the `CODEX_HOME` environment variable. If not set, defaults to
-/// `~/.codex`.
+/// specified by the `PRAXIS_HOME` environment variable. If not set, defaults to
+/// `~/.praxis`.
 ///
-/// - If `CODEX_HOME` is set, the value must exist and be a directory. The
+/// - If `PRAXIS_HOME` is set, the value must exist and be a directory. The
 ///   value will be canonicalized and this function will Err otherwise.
-/// - If `CODEX_HOME` is not set, this function does not verify that the
+/// - If `PRAXIS_HOME` is not set, this function does not verify that the
 ///   directory exists.
 pub fn find_praxis_home() -> std::io::Result<PathBuf> {
     praxis_utils_home_dir::find_praxis_home()
@@ -2837,6 +2867,14 @@ pub fn default_praxis_home_for_namespace(
     namespace: PraxisHomeNamespace,
 ) -> std::io::Result<PathBuf> {
     praxis_utils_home_dir::default_praxis_home_for_namespace(namespace)
+}
+
+pub fn default_upstream_codex_home() -> std::io::Result<PathBuf> {
+    praxis_utils_home_dir::default_upstream_codex_home()
+}
+
+pub fn default_legacy_codep_home() -> std::io::Result<PathBuf> {
+    praxis_utils_home_dir::default_legacy_codep_home()
 }
 
 /// Returns the path to the folder where Praxis logs are stored. Does not verify

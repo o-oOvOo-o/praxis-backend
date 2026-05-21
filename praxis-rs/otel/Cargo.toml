@@ -17,7 +17,6 @@ chrono = { workspace = true }
 praxis-utils-absolute-path = { workspace = true }
 praxis-utils-string = { workspace = true }
 praxis-api = { workspace = true }
-praxis-app-gateway-protocol = { workspace = true }
 praxis-protocol = { workspace = true }
 eventsource-stream = { workspace = true }
 gethostname = { workspace = true }

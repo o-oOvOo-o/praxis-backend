@@ -1,13 +1,12 @@
 use crate::events::AppGatewayRpcTransport;
-use crate::events::PraxisAppMentionedEventRequest;
 use crate::events::PraxisAppGatewayClientMetadata;
+use crate::events::PraxisAppMentionedEventRequest;
 use crate::events::PraxisAppUsedEventRequest;
 use crate::events::PraxisPluginEventRequest;
 use crate::events::PraxisPluginUsedEventRequest;
 use crate::events::PraxisRuntimeMetadata;
 use crate::events::SkillInvocationEventParams;
 use crate::events::SkillInvocationEventRequest;
-use crate::events::ThreadInitializationMode;
 use crate::events::ThreadInitializedEvent;
 use crate::events::ThreadInitializedEventParams;
 use crate::events::TrackEventRequest;
@@ -17,6 +16,7 @@ use crate::events::praxis_plugin_metadata;
 use crate::events::praxis_plugin_used_metadata;
 use crate::events::thread_source_name;
 use crate::facts::AnalyticsFact;
+use crate::facts::AppGatewayInitializeFact;
 use crate::facts::AppMentionedInput;
 use crate::facts::AppUsedInput;
 use crate::facts::CustomAnalyticsFact;
@@ -24,12 +24,10 @@ use crate::facts::PluginState;
 use crate::facts::PluginStateChangedInput;
 use crate::facts::PluginUsedInput;
 use crate::facts::SkillInvokedInput;
-use praxis_app_gateway_protocol::ClientResponse;
-use praxis_app_gateway_protocol::InitializeParams;
+use crate::facts::ThreadInitializedFact;
 use praxis_git_utils::collect_git_info;
 use praxis_git_utils::get_git_repo_root;
 use praxis_login::default_client::originator;
-use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SkillScope;
 use sha1::Digest;
 use std::collections::HashMap;
@@ -50,31 +48,25 @@ impl AnalyticsReducer {
         match input {
             AnalyticsFact::Initialize {
                 connection_id,
-                params,
+                initialize,
                 product_client_id,
                 runtime,
                 rpc_transport,
             } => {
                 self.ingest_initialize(
                     connection_id,
-                    params,
+                    initialize,
                     product_client_id,
                     runtime,
                     rpc_transport,
                 );
             }
-            AnalyticsFact::Request {
-                connection_id: _connection_id,
-                request_id: _request_id,
-                request: _request,
-            } => {}
-            AnalyticsFact::Response {
+            AnalyticsFact::ThreadInitialized {
                 connection_id,
-                response,
+                thread,
             } => {
-                self.ingest_response(connection_id, *response, out);
+                self.ingest_thread_initialized(connection_id, thread, out);
             }
-            AnalyticsFact::Notification(_notification) => {}
             AnalyticsFact::Custom(input) => match input {
                 CustomAnalyticsFact::SkillInvoked(input) => {
                     self.ingest_skill_invoked(input, out).await;
@@ -98,7 +90,7 @@ impl AnalyticsReducer {
     fn ingest_initialize(
         &mut self,
         connection_id: u64,
-        params: InitializeParams,
+        initialize: AppGatewayInitializeFact,
         product_client_id: String,
         runtime: PraxisRuntimeMetadata,
         rpc_transport: AppGatewayRpcTransport,
@@ -108,12 +100,10 @@ impl AnalyticsReducer {
             ConnectionState {
                 app_gateway_client: PraxisAppGatewayClientMetadata {
                     product_client_id,
-                    client_name: Some(params.client_info.name),
-                    client_version: Some(params.client_info.version),
+                    client_name: Some(initialize.client_name),
+                    client_version: initialize.client_version,
                     rpc_transport,
-                    experimental_api_enabled: params
-                        .capabilities
-                        .map(|capabilities| capabilities.experimental_api),
+                    experimental_api_enabled: initialize.experimental_api_enabled,
                 },
                 runtime,
             },
@@ -216,31 +206,12 @@ impl AnalyticsReducer {
         });
     }
 
-    fn ingest_response(
+    fn ingest_thread_initialized(
         &mut self,
         connection_id: u64,
-        response: ClientResponse,
+        thread: ThreadInitializedFact,
         out: &mut Vec<TrackEventRequest>,
     ) {
-        let (thread, model, initialization_mode) = match response {
-            ClientResponse::ThreadStart { response, .. } => (
-                response.thread,
-                response.model,
-                ThreadInitializationMode::New,
-            ),
-            ClientResponse::ThreadResume { response, .. } => (
-                response.thread,
-                response.model,
-                ThreadInitializationMode::Resumed,
-            ),
-            ClientResponse::ThreadFork { response, .. } => (
-                response.thread,
-                response.model,
-                ThreadInitializationMode::Forked,
-            ),
-            _ => return,
-        };
-        let thread_source: SessionSource = thread.source.into();
         let Some(connection_state) = self.connections.get(&connection_id) else {
             return;
         };
@@ -248,16 +219,16 @@ impl AnalyticsReducer {
             ThreadInitializedEvent {
                 event_type: "praxis_thread_initialized",
                 event_params: ThreadInitializedEventParams {
-                    thread_id: thread.id,
+                    thread_id: thread.thread_id,
                     app_gateway_client: connection_state.app_gateway_client.clone(),
                     runtime: connection_state.runtime.clone(),
-                    model,
+                    model: thread.model,
                     ephemeral: thread.ephemeral,
-                    thread_source: thread_source_name(&thread_source),
-                    initialization_mode,
+                    thread_source: thread_source_name(&thread.thread_source),
+                    initialization_mode: thread.initialization_mode,
                     subagent_source: None,
                     parent_thread_id: None,
-                    created_at: u64::try_from(thread.created_at).unwrap_or_default(),
+                    created_at: thread.created_at,
                 },
             },
         ));

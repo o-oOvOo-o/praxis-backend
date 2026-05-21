@@ -3,6 +3,7 @@ pub mod apply_patch;
 mod dynamic;
 mod js_repl;
 mod list_dir;
+mod managed_execution;
 mod mcp;
 mod mcp_resource;
 pub(crate) mod multi_agents;

@@ -10,7 +10,9 @@ use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian;
 use crate::sandboxing::ExecOptions;
-use crate::sandboxing::execute_env;
+use crate::tools::runtimes::managed_execution_pipeline::RuntimeExecutionRoute;
+use crate::tools::runtimes::managed_execution_pipeline::run_prestarted_one_shot_with_known_dirty_files;
+use crate::tools::runtimes::managed_execution_pipeline::start_agent_os_span_for_route;
 use crate::tools::sandboxing::Approvable;
 use crate::tools::sandboxing::ApprovalCtx;
 use crate::tools::sandboxing::ExecApprovalRequirement;
@@ -224,10 +226,27 @@ impl ToolRuntime<ApplyPatchRequest, ExecToolCallOutput> for ApplyPatchRuntime {
         let env = attempt
             .env_for(command, options, /*network*/ None)
             .map_err(|err| ToolError::Praxis(err.into()))?;
-        let out = execute_env(env, Self::stdout_stream(ctx))
-            .await
-            .map_err(ToolError::Praxis)?;
-        Ok(out)
+        let agent_os_command = vec!["apply_patch".to_string(), req.action.patch.clone()];
+        let command_span = start_agent_os_span_for_route(
+            ctx,
+            &agent_os_command,
+            &req.action.cwd,
+            RuntimeExecutionRoute::apply_patch(),
+        )
+        .await?;
+        let dirty_files = req
+            .file_paths
+            .iter()
+            .map(|path| path.clone().into_path_buf())
+            .collect();
+        run_prestarted_one_shot_with_known_dirty_files(
+            &command_span,
+            RuntimeExecutionRoute::apply_patch(),
+            dirty_files,
+            env,
+            Self::stdout_stream(ctx),
+        )
+        .await
     }
 }
 

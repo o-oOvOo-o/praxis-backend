@@ -77,8 +77,12 @@ fn sandbox_denied_uses_aggregated_output_when_stderr_empty() {
         stdout: StreamOutput::new(String::new()),
         stderr: StreamOutput::new(String::new()),
         aggregated_output: StreamOutput::new("aggregate detail".to_string()),
+        model_output: None,
         duration: Duration::from_millis(10),
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
     let err = PraxisErr::Sandbox(SandboxErr::Denied {
         output: Box::new(output),
@@ -94,8 +98,12 @@ fn sandbox_denied_reports_both_streams_when_available() {
         stdout: StreamOutput::new("stdout detail".to_string()),
         stderr: StreamOutput::new("stderr detail".to_string()),
         aggregated_output: StreamOutput::new(String::new()),
+        model_output: None,
         duration: Duration::from_millis(10),
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
     let err = PraxisErr::Sandbox(SandboxErr::Denied {
         output: Box::new(output),
@@ -111,8 +119,12 @@ fn sandbox_denied_reports_stdout_when_no_stderr() {
         stdout: StreamOutput::new("stdout only".to_string()),
         stderr: StreamOutput::new(String::new()),
         aggregated_output: StreamOutput::new(String::new()),
+        model_output: None,
         duration: Duration::from_millis(8),
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
     let err = PraxisErr::Sandbox(SandboxErr::Denied {
         output: Box::new(output),
@@ -155,8 +167,12 @@ fn sandbox_denied_reports_exit_code_when_no_output_available() {
         stdout: StreamOutput::new(String::new()),
         stderr: StreamOutput::new(String::new()),
         aggregated_output: StreamOutput::new(String::new()),
+        model_output: None,
         duration: Duration::from_millis(5),
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
     let err = PraxisErr::Sandbox(SandboxErr::Denied {
         output: Box::new(output),

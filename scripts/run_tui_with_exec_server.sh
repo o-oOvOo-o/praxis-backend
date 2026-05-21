@@ -4,8 +4,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cargo_root="$repo_root/praxis-rs"
-listen_url="${CODEX_EXEC_SERVER_LISTEN_URL:-ws://127.0.0.1:0}"
-start_timeout_seconds="${CODEX_EXEC_SERVER_START_TIMEOUT_SECONDS:-120}"
+listen_url="${PRAXIS_EXEC_SERVER_LISTEN_URL:-${CODEX_EXEC_SERVER_LISTEN_URL:-ws://127.0.0.1:0}}"
+start_timeout_seconds="${PRAXIS_EXEC_SERVER_START_TIMEOUT_SECONDS:-${CODEX_EXEC_SERVER_START_TIMEOUT_SECONDS:-120}}"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/praxis-tui-with-exec-server.XXXXXX")"
 stdout_log="$tmp_dir/exec-server.stdout"
 stderr_log="$tmp_dir/exec-server.stderr"
@@ -54,8 +54,8 @@ if [[ -z "$exec_server_url" ]]; then
   exit 1
 fi
 
-export CODEX_EXEC_SERVER_URL="$exec_server_url"
-echo "Starting praxis-tui with CODEX_EXEC_SERVER_URL=$CODEX_EXEC_SERVER_URL" >&2
+export PRAXIS_EXEC_SERVER_URL="$exec_server_url"
+echo "Starting praxis-tui with PRAXIS_EXEC_SERVER_URL=$PRAXIS_EXEC_SERVER_URL" >&2
 
 cd "$cargo_root"
 cargo run -p praxis-tui --bin praxis-tui -- -c mcp_oauth_credentials_store=file "$@"

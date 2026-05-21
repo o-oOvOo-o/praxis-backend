@@ -69,7 +69,6 @@ use praxis_app_gateway_client::AppGatewayRequestHandle;
 use praxis_app_gateway_client::TypedRequestError;
 use praxis_app_gateway_protocol::ClientRequest;
 use praxis_app_gateway_protocol::CodexErrorInfo as AppGatewayCodexErrorInfo;
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_app_gateway_protocol::FeedbackUploadParams;
 use praxis_app_gateway_protocol::FeedbackUploadResponse;
 use praxis_app_gateway_protocol::GetAccountRateLimitsResponse;
@@ -112,6 +111,7 @@ use praxis_features::Feature;
 use praxis_otel::SessionTelemetry;
 use praxis_protocol::ThreadId;
 use praxis_protocol::approvals::ExecApprovalRequestEvent;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_protocol::config_types::Personality;
 #[cfg(target_os = "windows")]
 use praxis_protocol::config_types::WindowsSandboxLevel;
@@ -2165,7 +2165,7 @@ impl App {
     }
 
     /// Intercept composer-history operations and handle them locally against
-    /// `$CODEX_HOME/history.jsonl`, bypassing the app-gateway RPC layer.
+    /// `$PRAXIS_HOME/history.jsonl`, bypassing the app-gateway RPC layer.
     async fn try_handle_local_history_op(
         &mut self,
         thread_id: ThreadId,
@@ -4051,15 +4051,18 @@ impl App {
                     }
                     // Allow widgets to process any pending timers before rendering.
                     self.chat_widget.pre_draw_tick(tui.is_terminal_focused());
-                    tui.draw(
-                        self.chat_widget.desired_height(tui.terminal.size()?.width),
-                        |frame| {
-                            self.chat_widget.render(frame.area(), frame.buffer);
-                            if let Some((x, y)) = self.chat_widget.cursor_pos(frame.area()) {
-                                frame.set_cursor_position((x, y));
-                            }
-                        },
-                    )?;
+                    let terminal_size = tui.terminal.size()?;
+                    let draw_height = if tui.is_alt_screen_active() {
+                        terminal_size.height
+                    } else {
+                        self.chat_widget.desired_height(terminal_size.width)
+                    };
+                    tui.draw(draw_height, |frame| {
+                        self.chat_widget.render(frame.area(), frame.buffer);
+                        if let Some((x, y)) = self.chat_widget.cursor_pos(frame.area()) {
+                            frame.set_cursor_position((x, y));
+                        }
+                    })?;
                     if self.chat_widget.external_editor_state() == ExternalEditorState::Requested {
                         self.chat_widget
                             .set_external_editor_state(ExternalEditorState::Active);

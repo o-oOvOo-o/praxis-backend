@@ -422,6 +422,22 @@ fn emit_feedback_request_tags_preserves_auth_env_fields_for_legacy_emitters() {
 }
 
 #[test]
+fn truncate_to_char_boundary_preserves_valid_utf8() {
+    let mut text = "ab中文cd".to_string();
+    truncate_to_char_boundary(&mut text, 4);
+    assert_eq!(text, "ab");
+    assert!(text.is_char_boundary(text.len()));
+}
+
+#[test]
+fn truncate_to_char_boundary_keeps_boundary_limit() {
+    let mut text = "ab中文cd".to_string();
+    truncate_to_char_boundary(&mut text, 5);
+    assert_eq!(text, "ab中");
+    assert!(text.is_char_boundary(text.len()));
+}
+
+#[test]
 fn normalize_thread_name_trims_and_rejects_empty() {
     assert_eq!(normalize_thread_name("   "), None);
     assert_eq!(

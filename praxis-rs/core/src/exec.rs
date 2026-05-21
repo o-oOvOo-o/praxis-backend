@@ -3,9 +3,11 @@ use std::os::unix::process::ExitStatusExt;
 
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::future::Future;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::process::ExitStatus;
 use std::time::Duration;
 use std::time::Instant;
@@ -13,9 +15,11 @@ use std::time::Instant;
 use async_channel::Sender;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::process::Child;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::error::PraxisErr;
 use crate::error::Result;
@@ -201,6 +205,9 @@ pub struct StdoutStream {
     pub tx_event: Sender<Event>,
 }
 
+pub(crate) type SpawnObserver =
+    Box<dyn FnOnce(Option<u32>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn process_exec_tool_call(
     params: ExecParams,
@@ -315,7 +322,7 @@ pub fn build_exec_request(
 pub(crate) async fn execute_exec_request(
     exec_request: ExecRequest,
     stdout_stream: Option<StdoutStream>,
-    after_spawn: Option<Box<dyn FnOnce() + Send>>,
+    after_spawn: Option<SpawnObserver>,
 ) -> Result<ExecToolCallOutput> {
     let ExecRequest {
         command,
@@ -331,6 +338,7 @@ pub(crate) async fn execute_exec_request(
         file_system_sandbox_policy,
         network_sandbox_policy,
         windows_restricted_token_filesystem_overlay,
+        raw_output_spool,
         arg0,
     } = exec_request;
 
@@ -356,6 +364,7 @@ pub(crate) async fn execute_exec_request(
         &file_system_sandbox_policy,
         windows_restricted_token_filesystem_overlay.as_ref(),
         network_sandbox_policy,
+        raw_output_spool,
         stdout_stream,
         after_spawn,
     )
@@ -435,6 +444,7 @@ async fn exec_windows_sandbox(
     params: ExecParams,
     sandbox_policy: &SandboxPolicy,
     windows_restricted_token_filesystem_overlay: Option<&WindowsRestrictedTokenFilesystemOverlay>,
+    raw_output_spool_enabled: bool,
 ) -> Result<RawExecToolCallOutput> {
     use crate::config::find_praxis_home;
     use praxis_windows_sandbox::run_windows_sandbox_capture_elevated;
@@ -541,6 +551,11 @@ async fn exec_windows_sandbox(
     };
 
     let exit_status = synthetic_exit_status(capture.exit_code);
+    let raw_output_spool = if raw_output_spool_enabled {
+        write_capture_output_spool(&capture.stdout, &capture.stderr).await
+    } else {
+        None
+    };
     let mut stdout_text = capture.stdout;
     if let Some(max_bytes) = capture_policy.retained_bytes_cap()
         && stdout_text.len() > max_bytes
@@ -569,6 +584,7 @@ async fn exec_windows_sandbox(
         stderr,
         aggregated_output,
         timed_out: capture.timed_out,
+        raw_output_spool,
     })
 }
 
@@ -606,8 +622,11 @@ fn finalize_exec_result(
                 stdout,
                 stderr,
                 aggregated_output,
+                model_output: None,
                 duration,
                 timed_out,
+                agent_os_artifact_id: None,
+                raw_output_spool: raw_output.raw_output_spool,
             };
 
             if timed_out {
@@ -726,6 +745,7 @@ struct RawExecToolCallOutput {
     pub stderr: StreamOutput<Vec<u8>>,
     pub aggregated_output: StreamOutput<Vec<u8>>,
     pub timed_out: bool,
+    pub raw_output_spool: Option<ExecOutputSpool>,
 }
 
 impl StreamOutput<String> {
@@ -744,6 +764,121 @@ impl StreamOutput<Vec<u8>> {
             truncated_after_lines: self.truncated_after_lines,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct ExecStreamSpool {
+    pub path: PathBuf,
+    pub bytes: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct ExecOutputSpool {
+    pub stdout: Option<ExecStreamSpool>,
+    pub stderr: Option<ExecStreamSpool>,
+}
+
+impl ExecOutputSpool {
+    pub fn from_streams(
+        stdout: Option<ExecStreamSpool>,
+        stderr: Option<ExecStreamSpool>,
+    ) -> Option<Self> {
+        let spool = Self { stdout, stderr };
+        (!spool.is_empty()).then_some(spool)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.total_bytes() == 0
+    }
+
+    pub fn total_bytes(&self) -> usize {
+        self.stdout
+            .as_ref()
+            .map_or(0, |stream| stream.bytes)
+            .saturating_add(self.stderr.as_ref().map_or(0, |stream| stream.bytes))
+    }
+
+    pub async fn cleanup(&self) {
+        if let Some(stdout) = &self.stdout {
+            let _ = tokio::fs::remove_file(stdout.path.as_path()).await;
+        }
+        if let Some(stderr) = &self.stderr {
+            let _ = tokio::fs::remove_file(stderr.path.as_path()).await;
+        }
+    }
+}
+
+struct ReadOutputResult {
+    output: StreamOutput<Vec<u8>>,
+    spool: Option<ExecStreamSpool>,
+}
+
+struct OutputSpoolWriter {
+    path: PathBuf,
+    file: tokio::fs::File,
+    bytes: usize,
+}
+
+impl OutputSpoolWriter {
+    async fn create(is_stderr: bool) -> Option<Self> {
+        let stream_name = if is_stderr { "stderr" } else { "stdout" };
+        let path = std::env::temp_dir().join(format!(
+            "praxis-exec-output-{}-{stream_name}.log",
+            Uuid::new_v4()
+        ));
+        match tokio::fs::File::create(path.as_path()).await {
+            Ok(file) => Some(Self {
+                path,
+                file,
+                bytes: 0,
+            }),
+            Err(err) => {
+                tracing::warn!("failed to create exec output spool file: {err}");
+                None
+            }
+        }
+    }
+
+    async fn write_chunk(&mut self, chunk: &[u8]) -> io::Result<()> {
+        self.file.write_all(chunk).await?;
+        self.bytes = self.bytes.saturating_add(chunk.len());
+        Ok(())
+    }
+
+    async fn finish(mut self) -> Option<ExecStreamSpool> {
+        if let Err(err) = self.file.flush().await {
+            tracing::warn!("failed to flush exec output spool file: {err}");
+            let _ = tokio::fs::remove_file(self.path.as_path()).await;
+            return None;
+        }
+        if self.bytes == 0 {
+            let _ = tokio::fs::remove_file(self.path.as_path()).await;
+            return None;
+        }
+        Some(ExecStreamSpool {
+            path: self.path,
+            bytes: self.bytes,
+        })
+    }
+}
+
+async fn write_capture_output_spool(stdout: &[u8], stderr: &[u8]) -> Option<ExecOutputSpool> {
+    async fn write_stream(bytes: &[u8], is_stderr: bool) -> Option<ExecStreamSpool> {
+        if bytes.is_empty() {
+            return None;
+        }
+        let mut spool = OutputSpoolWriter::create(is_stderr).await?;
+        if let Err(err) = spool.write_chunk(bytes).await {
+            tracing::warn!("failed to write exec output capture spool: {err}");
+            let _ = tokio::fs::remove_file(spool.path.as_path()).await;
+            return None;
+        }
+        spool.finish().await
+    }
+
+    let stdout = write_stream(stdout, false).await;
+    let stderr = write_stream(stderr, true).await;
+    ExecOutputSpool::from_streams(stdout, stderr)
 }
 
 #[inline]
@@ -806,8 +941,16 @@ pub struct ExecToolCallOutput {
     pub stdout: StreamOutput<String>,
     pub stderr: StreamOutput<String>,
     pub aggregated_output: StreamOutput<String>,
+    pub model_output: Option<StreamOutput<String>>,
     pub duration: Duration,
     pub timed_out: bool,
+    /// AgentOS artifact containing the full raw command output, when the
+    /// command was executed through the managed execution path.  Tool output
+    /// formatters use this to keep huge logs out of the model context.
+    pub agent_os_artifact_id: Option<String>,
+    /// Temporary raw stdout/stderr spool files produced by the exec reader.
+    /// Managed runtimes consume these into AgentOS artifacts before formatting.
+    pub raw_output_spool: Option<ExecOutputSpool>,
 }
 
 impl Default for ExecToolCallOutput {
@@ -817,8 +960,11 @@ impl Default for ExecToolCallOutput {
             stdout: StreamOutput::new(String::new()),
             stderr: StreamOutput::new(String::new()),
             aggregated_output: StreamOutput::new(String::new()),
+            model_output: None,
             duration: Duration::ZERO,
             timed_out: false,
+            agent_os_artifact_id: None,
+            raw_output_spool: None,
         }
     }
 }
@@ -831,8 +977,9 @@ async fn exec(
     _file_system_sandbox_policy: &FileSystemSandboxPolicy,
     _windows_restricted_token_filesystem_overlay: Option<&WindowsRestrictedTokenFilesystemOverlay>,
     network_sandbox_policy: NetworkSandboxPolicy,
+    raw_output_spool: bool,
     stdout_stream: Option<StdoutStream>,
-    after_spawn: Option<Box<dyn FnOnce() + Send>>,
+    after_spawn: Option<SpawnObserver>,
 ) -> Result<RawExecToolCallOutput> {
     #[cfg(target_os = "windows")]
     if _sandbox == SandboxType::WindowsRestrictedToken {
@@ -840,6 +987,7 @@ async fn exec(
             params,
             _sandbox_policy,
             _windows_restricted_token_filesystem_overlay,
+            raw_output_spool,
         )
         .await;
     }
@@ -880,9 +1028,16 @@ async fn exec(
     })
     .await?;
     if let Some(after_spawn) = after_spawn {
-        after_spawn();
+        after_spawn(child.id()).await;
     }
-    consume_output(child, expiration, capture_policy, stdout_stream).await
+    consume_output(
+        child,
+        expiration,
+        capture_policy,
+        raw_output_spool,
+        stdout_stream,
+    )
+    .await
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -1063,6 +1218,7 @@ async fn consume_output(
     mut child: Child,
     expiration: ExecExpiration,
     capture_policy: ExecCapturePolicy,
+    raw_output_spool: bool,
     stdout_stream: Option<StdoutStream>,
 ) -> Result<RawExecToolCallOutput> {
     // Both stdout and stderr were configured with `Stdio::piped()`
@@ -1086,12 +1242,14 @@ async fn consume_output(
         stdout_stream.clone(),
         /*is_stderr*/ false,
         retained_bytes_cap,
+        raw_output_spool,
     ));
     let stderr_handle = tokio::spawn(read_output(
         BufReader::new(stderr_reader),
         stdout_stream.clone(),
         /*is_stderr*/ true,
         retained_bytes_cap,
+        raw_output_spool,
     ));
 
     let expiration_wait = async {
@@ -1123,9 +1281,9 @@ async fn consume_output(
     use tokio::task::JoinHandle;
 
     async fn await_output(
-        handle: &mut JoinHandle<std::io::Result<StreamOutput<Vec<u8>>>>,
+        handle: &mut JoinHandle<std::io::Result<ReadOutputResult>>,
         timeout: Duration,
-    ) -> std::io::Result<StreamOutput<Vec<u8>>> {
+    ) -> std::io::Result<ReadOutputResult> {
         match tokio::time::timeout(timeout, &mut *handle).await {
             Ok(join_res) => match join_res {
                 Ok(io_res) => io_res,
@@ -1134,9 +1292,12 @@ async fn consume_output(
             Err(_elapsed) => {
                 // Timeout: abort the task to avoid hanging on open pipes.
                 handle.abort();
-                Ok(StreamOutput {
-                    text: Vec::new(),
-                    truncated_after_lines: None,
+                Ok(ReadOutputResult {
+                    output: StreamOutput {
+                        text: Vec::new(),
+                        truncated_after_lines: None,
+                    },
+                    spool: None,
                 })
             }
         }
@@ -1145,8 +1306,12 @@ async fn consume_output(
     let mut stdout_handle = stdout_handle;
     let mut stderr_handle = stderr_handle;
 
-    let stdout = await_output(&mut stdout_handle, capture_policy.io_drain_timeout()).await?;
-    let stderr = await_output(&mut stderr_handle, capture_policy.io_drain_timeout()).await?;
+    let stdout_result = await_output(&mut stdout_handle, capture_policy.io_drain_timeout()).await?;
+    let stderr_result = await_output(&mut stderr_handle, capture_policy.io_drain_timeout()).await?;
+    let raw_output_spool =
+        ExecOutputSpool::from_streams(stdout_result.spool.clone(), stderr_result.spool.clone());
+    let stdout = stdout_result.output;
+    let stderr = stderr_result.output;
     let aggregated_output = aggregate_output(&stdout, &stderr, retained_bytes_cap);
 
     Ok(RawExecToolCallOutput {
@@ -1155,6 +1320,7 @@ async fn consume_output(
         stderr,
         aggregated_output,
         timed_out,
+        raw_output_spool,
     })
 }
 
@@ -1163,7 +1329,8 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
     stream: Option<StdoutStream>,
     is_stderr: bool,
     max_bytes: Option<usize>,
-) -> io::Result<StreamOutput<Vec<u8>>> {
+    raw_output_spool: bool,
+) -> io::Result<ReadOutputResult> {
     let mut buf = Vec::with_capacity(
         max_bytes.map_or(AGGREGATE_BUFFER_INITIAL_CAPACITY, |max_bytes| {
             AGGREGATE_BUFFER_INITIAL_CAPACITY.min(max_bytes)
@@ -1171,17 +1338,32 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
     );
     let mut tmp = [0u8; READ_CHUNK_SIZE];
     let mut emitted_deltas: usize = 0;
+    let mut spool = if raw_output_spool {
+        OutputSpoolWriter::create(is_stderr).await
+    } else {
+        None
+    };
 
     loop {
         let n = reader.read(&mut tmp).await?;
         if n == 0 {
             break;
         }
+        let chunk = &tmp[..n];
+
+        if let Some(spool_writer) = spool.as_mut()
+            && let Err(err) = spool_writer.write_chunk(chunk).await
+        {
+            tracing::warn!("failed to write exec output spool: {err}");
+            let path = spool_writer.path.clone();
+            spool = None;
+            let _ = tokio::fs::remove_file(path.as_path()).await;
+        }
 
         if let Some(stream) = &stream
             && emitted_deltas < MAX_EXEC_OUTPUT_DELTAS_PER_CALL
         {
-            let chunk = tmp[..n].to_vec();
+            let chunk = chunk.to_vec();
             let msg = EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
                 call_id: stream.call_id.clone(),
                 stream: if is_stderr {
@@ -1201,16 +1383,23 @@ async fn read_output<R: AsyncRead + Unpin + Send + 'static>(
         }
 
         if let Some(max_bytes) = max_bytes {
-            append_capped(&mut buf, &tmp[..n], max_bytes);
+            append_capped(&mut buf, chunk, max_bytes);
         } else {
-            buf.extend_from_slice(&tmp[..n]);
+            buf.extend_from_slice(chunk);
         }
         // Continue reading to EOF to avoid back-pressure
     }
 
-    Ok(StreamOutput {
-        text: buf,
-        truncated_after_lines: None,
+    let spool = match spool {
+        Some(spool) => spool.finish().await,
+        None => None,
+    };
+    Ok(ReadOutputResult {
+        output: StreamOutput {
+            text: buf,
+            truncated_after_lines: None,
+        },
+        spool,
     })
 }
 

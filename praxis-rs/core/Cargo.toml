@@ -28,7 +28,6 @@ chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 praxis-analytics = { workspace = true }
 praxis-api = { workspace = true }
-praxis-app-gateway-protocol = { workspace = true }
 praxis-apply-patch = { workspace = true }
 praxis-async-utils = { workspace = true }
 praxis-code-mode = { workspace = true }

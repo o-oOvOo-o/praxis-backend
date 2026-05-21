@@ -138,7 +138,7 @@ async fn plugin_list_keeps_valid_marketplaces_when_another_marketplace_fails_to_
     std::fs::create_dir_all(
         valid_repo_root
             .path()
-            .join("plugins/valid-plugin/.codex-plugin"),
+            .join("plugins/valid-plugin/.praxis-plugin"),
     )?;
     std::fs::create_dir_all(invalid_repo_root.path().join(".git"))?;
     std::fs::create_dir_all(invalid_repo_root.path().join(".agents/plugins"))?;
@@ -175,7 +175,7 @@ async fn plugin_list_keeps_valid_marketplaces_when_another_marketplace_fails_to_
     std::fs::write(
         valid_repo_root
             .path()
-            .join("plugins/valid-plugin/.codex-plugin/plugin.json"),
+            .join("plugins/valid-plugin/.praxis-plugin/plugin.json"),
         r#"{"name":"valid-plugin"}"#,
     )?;
     std::fs::write(invalid_marketplace_path.as_path(), "{not json")?;
@@ -475,9 +475,9 @@ enabled = true
   ]
 }"#,
     )?;
-    std::fs::create_dir_all(workspace_enabled.path().join(".codex"))?;
+    std::fs::create_dir_all(workspace_enabled.path().join(".praxis"))?;
     std::fs::write(
-        workspace_enabled.path().join(".codex/config.toml"),
+        workspace_enabled.path().join(".praxis/config.toml"),
         r#"[plugins."shared-plugin@praxis-curated"]
 enabled = false
 "#,
@@ -536,7 +536,7 @@ async fn plugin_list_returns_plugin_interface_with_absolute_asset_paths() -> Res
     let plugin_root = repo_root.path().join("plugins/demo-plugin");
     std::fs::create_dir_all(repo_root.path().join(".git"))?;
     std::fs::create_dir_all(repo_root.path().join(".agents/plugins"))?;
-    std::fs::create_dir_all(plugin_root.join(".codex-plugin"))?;
+    std::fs::create_dir_all(plugin_root.join(".praxis-plugin"))?;
     write_plugins_enabled_config(praxis_home.path())?;
     std::fs::write(
         repo_root.path().join(".agents/plugins/marketplace.json"),
@@ -559,7 +559,7 @@ async fn plugin_list_returns_plugin_interface_with_absolute_asset_paths() -> Res
 }"#,
     )?;
     std::fs::write(
-        plugin_root.join(".codex-plugin/plugin.json"),
+        plugin_root.join(".praxis-plugin/plugin.json"),
         r##"{
   "name": "demo-plugin",
   "interface": {
@@ -670,7 +670,7 @@ async fn plugin_list_accepts_legacy_string_default_prompt() -> Result<()> {
     let plugin_root = repo_root.path().join("plugins/demo-plugin");
     std::fs::create_dir_all(repo_root.path().join(".git"))?;
     std::fs::create_dir_all(repo_root.path().join(".agents/plugins"))?;
-    std::fs::create_dir_all(plugin_root.join(".codex-plugin"))?;
+    std::fs::create_dir_all(plugin_root.join(".praxis-plugin"))?;
     write_plugins_enabled_config(praxis_home.path())?;
     std::fs::write(
         repo_root.path().join(".agents/plugins/marketplace.json"),
@@ -688,7 +688,7 @@ async fn plugin_list_accepts_legacy_string_default_prompt() -> Result<()> {
 }"#,
     )?;
     std::fs::write(
-        plugin_root.join(".codex-plugin/plugin.json"),
+        plugin_root.join(".praxis-plugin/plugin.json"),
         r##"{
   "name": "demo-plugin",
   "interface": {
@@ -1128,7 +1128,7 @@ fn write_installed_plugin(
         .join("plugins/cache")
         .join(marketplace_name)
         .join(plugin_name)
-        .join("local/.codex-plugin");
+        .join("local/.praxis-plugin");
     std::fs::create_dir_all(&plugin_root)?;
     std::fs::write(
         plugin_root.join("plugin.json"),
@@ -1195,7 +1195,7 @@ fn write_openai_curated_marketplace(
     )?;
 
     for plugin_name in plugin_names {
-        let plugin_root = curated_root.join(format!("plugins/{plugin_name}/.codex-plugin"));
+        let plugin_root = curated_root.join(format!("plugins/{plugin_name}/.praxis-plugin"));
         std::fs::create_dir_all(&plugin_root)?;
         std::fs::write(
             plugin_root.join("plugin.json"),

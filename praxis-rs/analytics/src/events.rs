@@ -17,7 +17,7 @@ pub enum AppGatewayRpcTransport {
 
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum ThreadInitializationMode {
+pub enum ThreadInitializationMode {
     New,
     Forked,
     Resumed,

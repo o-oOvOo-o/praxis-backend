@@ -176,7 +176,10 @@ fn exec_root_span() -> tracing::Span {
 
 pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     if let Err(err) = set_default_originator("praxis_exec".to_string()) {
-        tracing::warn!(?err, "Failed to set praxis exec originator override {err:?}");
+        tracing::warn!(
+            ?err,
+            "Failed to set praxis exec originator override {err:?}"
+        );
     }
 
     let Cli {
@@ -1395,30 +1398,6 @@ async fn handle_server_request(
                 request_id,
                 &method,
                 "chatgpt auth token refresh is not supported in exec mode".to_string(),
-            )
-            .await
-        }
-        ServerRequest::ApplyPatchApproval { request_id, params } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                format!(
-                    "apply_patch approval is not supported in exec mode for thread `{}`",
-                    params.conversation_id
-                ),
-            )
-            .await
-        }
-        ServerRequest::ExecCommandApproval { request_id, params } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                format!(
-                    "exec command approval is not supported in exec mode for thread `{}`",
-                    params.conversation_id
-                ),
             )
             .await
         }

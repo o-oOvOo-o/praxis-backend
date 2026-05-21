@@ -3,21 +3,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
-use praxis_app_gateway_protocol::FsCopyParams;
-use praxis_app_gateway_protocol::FsCopyResponse;
-use praxis_app_gateway_protocol::FsCreateDirectoryParams;
-use praxis_app_gateway_protocol::FsCreateDirectoryResponse;
-use praxis_app_gateway_protocol::FsGetMetadataParams;
-use praxis_app_gateway_protocol::FsGetMetadataResponse;
-use praxis_app_gateway_protocol::FsReadDirectoryParams;
-use praxis_app_gateway_protocol::FsReadDirectoryResponse;
-use praxis_app_gateway_protocol::FsReadFileParams;
-use praxis_app_gateway_protocol::FsReadFileResponse;
-use praxis_app_gateway_protocol::FsRemoveParams;
-use praxis_app_gateway_protocol::FsRemoveResponse;
-use praxis_app_gateway_protocol::FsWriteFileParams;
-use praxis_app_gateway_protocol::FsWriteFileResponse;
-use praxis_app_gateway_protocol::JSONRPCNotification;
+use praxis_protocol::fs::FsCopyParams;
+use praxis_protocol::fs::FsCopyResponse;
+use praxis_protocol::fs::FsCreateDirectoryParams;
+use praxis_protocol::fs::FsCreateDirectoryResponse;
+use praxis_protocol::fs::FsGetMetadataParams;
+use praxis_protocol::fs::FsGetMetadataResponse;
+use praxis_protocol::fs::FsReadDirectoryParams;
+use praxis_protocol::fs::FsReadDirectoryResponse;
+use praxis_protocol::fs::FsReadFileParams;
+use praxis_protocol::fs::FsReadFileResponse;
+use praxis_protocol::fs::FsRemoveParams;
+use praxis_protocol::fs::FsRemoveResponse;
+use praxis_protocol::fs::FsWriteFileParams;
+use praxis_protocol::fs::FsWriteFileResponse;
+use praxis_protocol::jsonrpc_lite::JSONRPCNotification;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
@@ -628,9 +628,9 @@ async fn handle_server_notification(
 
 #[cfg(test)]
 mod tests {
-    use praxis_app_gateway_protocol::JSONRPCMessage;
-    use praxis_app_gateway_protocol::JSONRPCNotification;
-    use praxis_app_gateway_protocol::JSONRPCResponse;
+    use praxis_protocol::jsonrpc_lite::JSONRPCMessage;
+    use praxis_protocol::jsonrpc_lite::JSONRPCNotification;
+    use praxis_protocol::jsonrpc_lite::JSONRPCResponse;
     use pretty_assertions::assert_eq;
     use tokio::io::AsyncBufReadExt;
     use tokio::io::AsyncWrite;

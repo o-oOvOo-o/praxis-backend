@@ -232,6 +232,192 @@ pub fn create_list_agents_tool() -> ToolSpec {
     })
 }
 
+pub fn create_read_agent_artifact_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "artifact_id".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "AgentOS artifact id returned by list_agents or another AgentOS tool."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "max_bytes".to_string(),
+            JsonSchema::Number {
+                description: Some(
+                    "Optional byte limit for the blob read. The runtime clamps this to a safe maximum."
+                        .to_string(),
+                ),
+            },
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "read_agent_artifact".to_string(),
+        description: "Read a bounded slice of an AgentOS artifact blob by id. Use this instead of asking workers to paste long logs in chat.".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["artifact_id".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+        output_schema: Some(read_agent_artifact_output_schema()),
+    })
+}
+
+pub fn create_submit_worker_request_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "request_type".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Structured request type such as NeedCompile, NeedReview, NeedDecision, NeedGPU, NeedPort, NeedMoreBudget, BlockedByLease, or BlockedByFileConflict."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "reason".to_string(),
+            JsonSchema::String {
+                description: Some("Short reason for the coordinator queue.".to_string()),
+            },
+        ),
+        (
+            "blocking".to_string(),
+            JsonSchema::Boolean {
+                description: Some(
+                    "Whether the worker is blocked until the coordinator resolves this request."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "requested_resource".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Optional lease/resource key, port, GPU id, command, or decision target."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
+            "artifact_refs".to_string(),
+            JsonSchema::Array {
+                items: Box::new(JsonSchema::String { description: None }),
+                description: Some("Optional artifact ids related to the request.".to_string()),
+            },
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "submit_worker_request".to_string(),
+        description: "Submit a structured AgentOS worker request to the active coordinator queue. Use this instead of asking another worker directly.".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["request_type".to_string(), "reason".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+        output_schema: Some(submit_worker_request_output_schema()),
+    })
+}
+
+pub fn create_update_worker_request_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "request_id".to_string(),
+            JsonSchema::String {
+                description: Some("AgentOS worker request id.".to_string()),
+            },
+        ),
+        (
+            "status".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "New request status: Pending, Approved, Rejected, Resolved, or Cancelled."
+                        .to_string(),
+                ),
+            },
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "update_worker_request".to_string(),
+        description: "Update a structured AgentOS worker request. The owner or active rank-0 coordinator may resolve it.".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["request_id".to_string(), "status".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+        output_schema: Some(update_worker_request_output_schema()),
+    })
+}
+
+pub fn create_update_runtime_command_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "command_id".to_string(),
+            JsonSchema::String {
+                description: Some("AgentOS runtime command id.".to_string()),
+            },
+        ),
+        (
+            "status".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "New command status: Acked, Executing, Completed, Failed, or Rejected."
+                        .to_string(),
+                ),
+            },
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "update_runtime_command".to_string(),
+        description: "Update an AgentOS RuntimeCommand status from the sender or receiver thread."
+            .to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["command_id".to_string(), "status".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+        output_schema: Some(update_runtime_command_output_schema()),
+    })
+}
+
+pub fn create_poll_runtime_commands_tool() -> ToolSpec {
+    let properties = BTreeMap::from([(
+        "auto_ack".to_string(),
+        JsonSchema::Boolean {
+            description: Some(
+                "When true or omitted, pending commands for this thread are marked Acked as they are returned."
+                    .to_string(),
+            ),
+        },
+    )]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: "poll_runtime_commands".to_string(),
+        description: "Poll this thread's AgentOS RuntimeCommand inbox. Stale or expired commands are rejected by the runtime before results are returned.".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::Object {
+            properties,
+            required: None,
+            additional_properties: Some(false.into()),
+        },
+        output_schema: Some(poll_runtime_commands_output_schema()),
+    })
+}
+
 pub fn create_close_agent_tool() -> ToolSpec {
     let properties = BTreeMap::from([(
         "target".to_string(),
@@ -316,9 +502,13 @@ fn message_submission_output_schema() -> Value {
             "submission_id": {
                 "type": "string",
                 "description": "Identifier for the queued input submission."
+            },
+            "runtime_command_id": {
+                "type": ["string", "null"],
+                "description": "AgentOS RuntimeCommand id for structured assign_task dispatches."
             }
         },
-        "required": ["submission_id"],
+        "required": ["submission_id", "runtime_command_id"],
         "additionalProperties": false
     })
 }
@@ -349,9 +539,366 @@ fn list_agents_output_schema() -> Value {
                     "additionalProperties": false
                 },
                 "description": "Live agents visible in the current root thread tree."
+            },
+            "agent_os": {
+                "type": "object",
+                "properties": {
+                    "leases": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "lease_id": { "type": "string" },
+                                "resource_type": { "type": "string" },
+                                "scope": { "type": "string" },
+                                "mode": { "type": "string" },
+                                "owner_thread_id": { "type": "string" },
+                                "task_id": { "type": "string" },
+                                "priority": { "type": "integer" },
+                                "expires_at": { "type": ["string", "null"] }
+                            },
+                            "required": [
+                                "lease_id",
+                                "resource_type",
+                                "scope",
+                                "mode",
+                                "owner_thread_id",
+                                "task_id",
+                                "priority",
+                                "expires_at"
+                            ],
+                            "additionalProperties": false
+                        }
+                    },
+                    "recent_artifacts": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "artifact_id": { "type": "string" },
+                                "task_id": { "type": "string" },
+                                "owner_thread_id": { "type": "string" },
+                                "artifact_type": { "type": "string" },
+                                "uri": { "type": "string" },
+                                "summary": { "type": "string" },
+                                "blob_persisted": { "type": "boolean" },
+                                "blob_bytes": { "type": ["integer", "null"] },
+                                "blob_path": { "type": ["string", "null"] },
+                                "created_at": { "type": "string" }
+                            },
+                            "required": [
+                                "artifact_id",
+                                "task_id",
+                                "owner_thread_id",
+                                "artifact_type",
+                                "uri",
+                                "summary",
+                                "blob_persisted",
+                                "blob_bytes",
+                                "blob_path",
+                                "created_at"
+                            ],
+                            "additionalProperties": false
+                        }
+                    },
+                    "pending_worker_requests": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "request_id": { "type": "string" },
+                                "request_type": { "type": "string" },
+                                "thread_id": { "type": "string" },
+                                "task_id": { "type": ["string", "null"] },
+                                "blocking": { "type": "boolean" },
+                                "status": { "type": "string" },
+                                "reason": { "type": "string" },
+                                "requested_resource": { "type": ["string", "null"] },
+                                "artifact_refs": {
+                                    "type": "array",
+                                    "items": { "type": "string" }
+                                },
+                                "created_at": { "type": "string" }
+                            },
+                            "required": [
+                                "request_id",
+                                "request_type",
+                                "thread_id",
+                                "task_id",
+                                "blocking",
+                                "status",
+                                "reason",
+                                "requested_resource",
+                                "artifact_refs",
+                                "created_at"
+                            ],
+                            "additionalProperties": false
+                        }
+                    },
+                    "pending_runtime_commands": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "command_id": { "type": "string" },
+                                "from_thread_id": { "type": "string" },
+                                "to_thread_id": { "type": "string" },
+                                "task_id": { "type": ["string", "null"] },
+                                "command_type": { "type": "string" },
+                                "status": { "type": "string" },
+                                "coordinator_epoch": { "type": "integer" },
+                                "fencing_token": { "type": "integer" },
+                                "created_at": { "type": "string" },
+                                "expires_at": { "type": "string" }
+                            },
+                            "required": [
+                                "command_id",
+                                "from_thread_id",
+                                "to_thread_id",
+                                "task_id",
+                                "command_type",
+                                "status",
+                                "coordinator_epoch",
+                                "fencing_token",
+                                "created_at",
+                                "expires_at"
+                            ],
+                            "additionalProperties": false
+                        }
+                    },
+                    "recent_intent_plans": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "plan_id": { "type": "string" },
+                                "task_id": { "type": "string" },
+                                "thread_id": { "type": "string" },
+                                "intent": { "type": "string" },
+                                "confidence": { "type": "number" },
+                                "command_fingerprint": { "type": "string" },
+                                "cwd": { "type": "string" },
+                                "required_capabilities": {
+                                    "type": "array",
+                                    "items": { "type": "string" }
+                                },
+                                "required_resources": {
+                                    "type": "array",
+                                    "items": { "type": "string" }
+                                },
+                                "risk_level": { "type": "string" },
+                                "status": { "type": "string" },
+                                "consumed_by_ticket_id": { "type": ["string", "null"] },
+                                "created_at": { "type": "string" },
+                                "expires_at": { "type": "string" }
+                            },
+                            "required": [
+                                "plan_id",
+                                "task_id",
+                                "thread_id",
+                                "intent",
+                                "confidence",
+                                "command_fingerprint",
+                                "cwd",
+                                "required_capabilities",
+                                "required_resources",
+                                "risk_level",
+                                "status",
+                                "consumed_by_ticket_id",
+                                "created_at",
+                                "expires_at"
+                            ],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": [
+                    "leases",
+                    "recent_artifacts",
+                    "pending_worker_requests",
+                    "pending_runtime_commands",
+                    "recent_intent_plans"
+                ],
+                "additionalProperties": false
             }
         },
-        "required": ["agents"],
+        "required": ["agents", "agent_os"],
+        "additionalProperties": false
+    })
+}
+
+fn read_agent_artifact_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "artifact_id": {
+                "type": "string"
+            },
+            "task_id": {
+                "type": "string"
+            },
+            "owner_thread_id": {
+                "type": "string"
+            },
+            "artifact_type": {
+                "type": "string"
+            },
+            "uri": {
+                "type": "string"
+            },
+            "content": {
+                "type": "string"
+            },
+            "bytes_read": {
+                "type": "integer"
+            },
+            "blob_bytes": {
+                "type": ["integer", "null"]
+            },
+            "truncated": {
+                "type": "boolean"
+            }
+        },
+        "required": [
+            "artifact_id",
+            "task_id",
+            "owner_thread_id",
+            "artifact_type",
+            "uri",
+            "content",
+            "bytes_read",
+            "blob_bytes",
+            "truncated"
+        ],
+        "additionalProperties": false
+    })
+}
+
+fn submit_worker_request_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "request_id": { "type": "string" },
+            "request_type": { "type": "string" },
+            "thread_id": { "type": "string" },
+            "task_id": { "type": ["string", "null"] },
+            "blocking": { "type": "boolean" },
+            "status": { "type": "string" },
+            "reason": { "type": "string" },
+            "requested_resource": { "type": ["string", "null"] },
+            "artifact_refs": {
+                "type": "array",
+                "items": { "type": "string" }
+            },
+            "created_at": { "type": "string" }
+        },
+        "required": [
+            "request_id",
+            "request_type",
+            "thread_id",
+            "task_id",
+            "blocking",
+            "status",
+            "reason",
+            "requested_resource",
+            "artifact_refs",
+            "created_at"
+        ],
+        "additionalProperties": false
+    })
+}
+
+fn update_worker_request_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "request_id": { "type": "string" },
+            "request_type": { "type": "string" },
+            "thread_id": { "type": "string" },
+            "task_id": { "type": ["string", "null"] },
+            "blocking": { "type": "boolean" },
+            "status": { "type": "string" },
+            "updated_at": { "type": "string" }
+        },
+        "required": [
+            "request_id",
+            "request_type",
+            "thread_id",
+            "task_id",
+            "blocking",
+            "status",
+            "updated_at"
+        ],
+        "additionalProperties": false
+    })
+}
+
+fn update_runtime_command_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "command_id": { "type": "string" },
+            "from_thread_id": { "type": "string" },
+            "to_thread_id": { "type": "string" },
+            "task_id": { "type": ["string", "null"] },
+            "command_type": { "type": "string" },
+            "status": { "type": "string" },
+            "updated_at": { "type": "string" }
+        },
+        "required": [
+            "command_id",
+            "from_thread_id",
+            "to_thread_id",
+            "task_id",
+            "command_type",
+            "status",
+            "updated_at"
+        ],
+        "additionalProperties": false
+    })
+}
+
+fn poll_runtime_commands_output_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "commands": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "command_id": { "type": "string" },
+                        "from_thread_id": { "type": "string" },
+                        "to_thread_id": { "type": "string" },
+                        "task_id": { "type": ["string", "null"] },
+                        "command_type": { "type": "string" },
+                        "payload": { "type": "object" },
+                        "status": { "type": "string" },
+                        "coordinator_epoch": { "type": "integer" },
+                        "fencing_token": { "type": "integer" },
+                        "created_at": { "type": "string" },
+                        "updated_at": { "type": "string" },
+                        "expires_at": { "type": "string" }
+                    },
+                    "required": [
+                        "command_id",
+                        "from_thread_id",
+                        "to_thread_id",
+                        "task_id",
+                        "command_type",
+                        "payload",
+                        "status",
+                        "coordinator_epoch",
+                        "fencing_token",
+                        "created_at",
+                        "updated_at",
+                        "expires_at"
+                    ],
+                    "additionalProperties": false
+                }
+            }
+        },
+        "required": ["commands"],
         "additionalProperties": false
     })
 }

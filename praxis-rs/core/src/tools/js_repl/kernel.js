@@ -88,7 +88,7 @@ let previousBindings = [];
 let cellCounter = 0;
 let internalBindingCounter = 0;
 const internalBindingSalt = (() => {
-  const raw = process.env.CODEX_THREAD_ID ?? "";
+  const raw = process.env.PRAXIS_THREAD_ID ?? "";
   const sanitized = raw.replace(/[^A-Za-z0-9_$]/g, "_");
   return sanitized || "session";
 })();

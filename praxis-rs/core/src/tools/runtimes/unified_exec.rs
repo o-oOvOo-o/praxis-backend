@@ -9,16 +9,17 @@ use crate::error::PraxisErr;
 use crate::error::SandboxErr;
 use crate::exec::ExecCapturePolicy;
 use crate::exec::ExecExpiration;
-use crate::guardian::GuardianApprovalRequest;
-use crate::guardian::review_approval_request;
-use crate::guardian::routes_approval_to_guardian;
-use crate::sandboxing::ExecOptions;
 use crate::sandboxing::SandboxPermissions;
-use crate::shell::ShellType;
 use crate::tools::network_approval::NetworkApprovalMode;
 use crate::tools::network_approval::NetworkApprovalSpec;
-use crate::tools::runtimes::build_sandbox_command;
-use crate::tools::runtimes::maybe_wrap_shell_lc_with_snapshot;
+use crate::tools::runtimes::managed_execution_pipeline::RuntimeExecutionRoute;
+use crate::tools::runtimes::managed_execution_pipeline::ShellSandboxSpec;
+use crate::tools::runtimes::managed_execution_pipeline::preflight_command_intent;
+use crate::tools::runtimes::managed_execution_pipeline::prepare_shell_sandboxed_command;
+use crate::tools::runtimes::managed_execution_pipeline::run_process_open_with_agent_os;
+use crate::tools::runtimes::runtime_approval::RuntimeApprovalKind;
+use crate::tools::runtimes::runtime_approval::RuntimeApprovalPlan;
+use crate::tools::runtimes::runtime_approval::start_runtime_approval_async;
 use crate::tools::runtimes::shell::zsh_fork_backend;
 use crate::tools::sandboxing::Approvable;
 use crate::tools::sandboxing::ApprovalCtx;
@@ -30,7 +31,6 @@ use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
 use crate::tools::sandboxing::ToolRuntime;
 use crate::tools::sandboxing::sandbox_override_for_first_attempt;
-use crate::tools::sandboxing::with_cached_approval;
 use crate::unified_exec::NoopSpawnLifecycle;
 use crate::unified_exec::UnifiedExecError;
 use crate::unified_exec::UnifiedExecProcess;
@@ -40,7 +40,6 @@ use praxis_network_proxy::NetworkProxy;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_sandboxing::SandboxablePreference;
-use praxis_shell_command::powershell::prefix_powershell_script_with_utf8;
 use praxis_tools::UnifiedExecShellMode;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -120,53 +119,20 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
         req: &'b UnifiedExecRequest,
         ctx: ApprovalCtx<'b>,
     ) -> BoxFuture<'b, ReviewDecision> {
-        let keys = self.approval_keys(req);
-        let session = ctx.session;
-        let turn = ctx.turn;
-        let call_id = ctx.call_id.to_string();
-        let command = req.command.clone();
-        let cwd = req.cwd.clone();
-        let retry_reason = ctx.retry_reason.clone();
-        let reason = retry_reason.clone().or_else(|| req.justification.clone());
-        Box::pin(async move {
-            if routes_approval_to_guardian(turn) {
-                return review_approval_request(
-                    session,
-                    turn,
-                    GuardianApprovalRequest::ExecCommand {
-                        id: call_id,
-                        command,
-                        cwd,
-                        sandbox_permissions: req.sandbox_permissions,
-                        additional_permissions: req.additional_permissions.clone(),
-                        justification: req.justification.clone(),
-                        tty: req.tty,
-                    },
-                    retry_reason,
-                )
-                .await;
-            }
-            with_cached_approval(&session.services, "unified_exec", keys, || async move {
-                let available_decisions = None;
-                session
-                    .request_command_approval(
-                        turn,
-                        call_id,
-                        /*approval_id*/ None,
-                        command,
-                        cwd,
-                        reason,
-                        ctx.network_approval_context.clone(),
-                        req.exec_approval_requirement
-                            .proposed_execpolicy_amendment()
-                            .cloned(),
-                        req.additional_permissions.clone(),
-                        available_decisions,
-                    )
-                    .await
-            })
-            .await
-        })
+        start_runtime_approval_async(
+            self.approval_keys(req),
+            RuntimeApprovalPlan {
+                tool_name: "unified_exec",
+                kind: RuntimeApprovalKind::UnifiedExec { tty: req.tty },
+                command: req.command.clone(),
+                cwd: req.cwd.clone(),
+                sandbox_permissions: req.sandbox_permissions,
+                additional_permissions: req.additional_permissions.clone(),
+                justification: req.justification.clone(),
+                exec_approval_requirement: req.exec_approval_requirement.clone(),
+            },
+            ctx,
+        )
     }
 
     fn exec_approval_requirement(
@@ -182,6 +148,14 @@ impl Approvable<UnifiedExecRequest> for UnifiedExecRuntime<'_> {
 }
 
 impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRuntime<'a> {
+    async fn preflight(
+        &mut self,
+        req: &UnifiedExecRequest,
+        ctx: &ToolCtx,
+    ) -> Result<(), ToolError> {
+        preflight_command_intent(ctx, &req.command, &req.cwd).await
+    }
+
     fn network_approval_spec(
         &self,
         req: &UnifiedExecRequest,
@@ -200,40 +174,35 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
         attempt: &SandboxAttempt<'_>,
         ctx: &ToolCtx,
     ) -> Result<UnifiedExecProcess, ToolError> {
-        let base_command = &req.command;
-        let session_shell = ctx.session.user_shell();
-        let command = maybe_wrap_shell_lc_with_snapshot(
-            base_command,
-            session_shell.as_ref(),
-            &req.cwd,
-            &req.explicit_env_overrides,
-        );
-        let command = if matches!(session_shell.shell_type, ShellType::PowerShell) {
-            prefix_powershell_script_with_utf8(&command)
-        } else {
-            command
-        };
-
-        let mut env = req.env.clone();
-        if let Some(network) = req.network.as_ref() {
-            network.apply_to_env(&mut env);
-        }
+        let manager = self.manager;
+        let runtime_owner_id = manager.runtime_owner_id();
         if let UnifiedExecShellMode::ZshFork(zsh_fork_config) = &self.shell_mode {
-            let command =
-                build_sandbox_command(&command, &req.cwd, &env, req.additional_permissions.clone())
-                    .map_err(|_| ToolError::Rejected("missing command line for PTY".to_string()))?;
-            let options = ExecOptions {
-                expiration: ExecExpiration::DefaultTimeout,
-                capture_policy: ExecCapturePolicy::ShellTool,
-            };
-            let exec_env = attempt
-                .env_for(command, options, req.network.as_ref())
-                .map_err(|err| ToolError::Praxis(err.into()))?;
+            let prepared = prepare_shell_sandboxed_command(
+                ctx,
+                attempt,
+                ShellSandboxSpec {
+                    raw_command: &req.command,
+                    cwd: &req.cwd,
+                    env: &req.env,
+                    explicit_env_overrides: &req.explicit_env_overrides,
+                    additional_permissions: req.additional_permissions.clone(),
+                    network: req.network.as_ref(),
+                    expiration: ExecExpiration::DefaultTimeout,
+                    capture_policy: ExecCapturePolicy::ShellTool,
+                    apply_managed_network_env: true,
+                },
+            )
+            .map_err(|err| match err {
+                ToolError::Rejected(_) => {
+                    ToolError::Rejected("missing command line for PTY".to_string())
+                }
+                other => other,
+            })?;
             match zsh_fork_backend::maybe_prepare_unified_exec(
                 req,
                 attempt,
                 ctx,
-                exec_env,
+                prepared.exec_request,
                 zsh_fork_config,
             )
             .await?
@@ -244,25 +213,25 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
                             "unified_exec zsh-fork is not supported when exec_server_url is configured".to_string(),
                         ));
                     }
-                    return self
-                        .manager
-                        .open_session_with_exec_env(
-                            req.process_id,
-                            &prepared.exec_request,
-                            req.tty,
-                            prepared.spawn_lifecycle,
-                            ctx.turn.environment.as_ref(),
-                        )
-                        .await
-                        .map_err(|err| match err {
-                            UnifiedExecError::SandboxDenied { output, .. } => {
-                                ToolError::Praxis(PraxisErr::Sandbox(SandboxErr::Denied {
-                                    output: Box::new(output),
-                                    network_policy_decision: None,
-                                }))
-                            }
-                            other => ToolError::Rejected(other.to_string()),
-                        });
+                    return run_process_open_with_agent_os(
+                        ctx,
+                        &req.command,
+                        &req.cwd,
+                        RuntimeExecutionRoute::unified_exec(runtime_owner_id, req.process_id),
+                        move || async move {
+                            manager
+                                .open_session_with_exec_env(
+                                    req.process_id,
+                                    &prepared.exec_request,
+                                    req.tty,
+                                    prepared.spawn_lifecycle,
+                                    ctx.turn.environment.as_ref(),
+                                )
+                                .await
+                                .map_err(map_unified_exec_open_error)
+                        },
+                    )
+                    .await;
                 }
                 None => {
                     tracing::warn!(
@@ -271,33 +240,56 @@ impl<'a> ToolRuntime<UnifiedExecRequest, UnifiedExecProcess> for UnifiedExecRunt
                 }
             }
         }
-        let command =
-            build_sandbox_command(&command, &req.cwd, &env, req.additional_permissions.clone())
-                .map_err(|_| ToolError::Rejected("missing command line for PTY".to_string()))?;
-        let options = ExecOptions {
-            expiration: ExecExpiration::DefaultTimeout,
-            capture_policy: ExecCapturePolicy::ShellTool,
-        };
-        let exec_env = attempt
-            .env_for(command, options, req.network.as_ref())
-            .map_err(|err| ToolError::Praxis(err.into()))?;
-        self.manager
-            .open_session_with_exec_env(
-                req.process_id,
-                &exec_env,
-                req.tty,
-                Box::new(NoopSpawnLifecycle),
-                ctx.turn.environment.as_ref(),
-            )
-            .await
-            .map_err(|err| match err {
-                UnifiedExecError::SandboxDenied { output, .. } => {
-                    ToolError::Praxis(PraxisErr::Sandbox(SandboxErr::Denied {
-                        output: Box::new(output),
-                        network_policy_decision: None,
-                    }))
-                }
-                other => ToolError::Rejected(other.to_string()),
-            })
+        let prepared = prepare_shell_sandboxed_command(
+            ctx,
+            attempt,
+            ShellSandboxSpec {
+                raw_command: &req.command,
+                cwd: &req.cwd,
+                env: &req.env,
+                explicit_env_overrides: &req.explicit_env_overrides,
+                additional_permissions: req.additional_permissions.clone(),
+                network: req.network.as_ref(),
+                expiration: ExecExpiration::DefaultTimeout,
+                capture_policy: ExecCapturePolicy::ShellTool,
+                apply_managed_network_env: true,
+            },
+        )
+        .map_err(|err| match err {
+            ToolError::Rejected(_) => {
+                ToolError::Rejected("missing command line for PTY".to_string())
+            }
+            other => other,
+        })?;
+        run_process_open_with_agent_os(
+            ctx,
+            &req.command,
+            &req.cwd,
+            RuntimeExecutionRoute::unified_exec(runtime_owner_id, req.process_id),
+            move || async move {
+                manager
+                    .open_session_with_exec_env(
+                        req.process_id,
+                        &prepared.exec_request,
+                        req.tty,
+                        Box::new(NoopSpawnLifecycle),
+                        ctx.turn.environment.as_ref(),
+                    )
+                    .await
+                    .map_err(map_unified_exec_open_error)
+            },
+        )
+        .await
+    }
+}
+fn map_unified_exec_open_error(err: UnifiedExecError) -> ToolError {
+    match err {
+        UnifiedExecError::SandboxDenied { output, .. } => {
+            ToolError::Praxis(PraxisErr::Sandbox(SandboxErr::Denied {
+                output: Box::new(output),
+                network_policy_decision: None,
+            }))
+        }
+        other => ToolError::Rejected(other.to_string()),
     }
 }

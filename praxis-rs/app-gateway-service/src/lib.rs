@@ -12,7 +12,7 @@ use praxis_core::config_loader::LoaderOverrides;
 use praxis_protocol::protocol::SessionSource;
 use praxis_utils_cli::CliConfigOverrides;
 
-pub use praxis_app_gateway_runtime::AppGatewayWebsocketAuthArgs as AppGatewayWebsocketAuthArgs;
+pub use praxis_app_gateway_runtime::AppGatewayWebsocketAuthArgs;
 pub use praxis_app_gateway_runtime::AppGatewayWebsocketAuthSettings as ServiceGatewayAuthSettings;
 pub use praxis_app_gateway_runtime::WebsocketAuthCliMode;
 
@@ -59,14 +59,14 @@ impl ServiceListenAddr {
         }
     }
 
-    fn into_current_transport(self) -> IoResult<praxis_app_gateway_runtime::AppGatewayRuntimeTransport> {
+    fn into_current_transport(
+        self,
+    ) -> IoResult<praxis_app_gateway_runtime::AppGatewayRuntimeTransport> {
         match self {
             Self::Stdio => Ok(praxis_app_gateway_runtime::AppGatewayRuntimeTransport::Stdio),
-            Self::WebSocket { bind_address } => {
-                Ok(praxis_app_gateway_runtime::AppGatewayRuntimeTransport::WebSocket {
-                    bind_address,
-                })
-            }
+            Self::WebSocket { bind_address } => Ok(
+                praxis_app_gateway_runtime::AppGatewayRuntimeTransport::WebSocket { bind_address },
+            ),
             Self::NamedPipe { .. } => Err(IoError::new(
                 ErrorKind::Unsupported,
                 "service gateway named-pipe transport is not wired yet",

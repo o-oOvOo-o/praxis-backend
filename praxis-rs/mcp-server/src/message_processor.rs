@@ -33,8 +33,8 @@ use tokio::sync::Mutex;
 use tokio::task;
 
 use crate::outgoing_message::OutgoingMessageSender;
-use crate::praxis_tool_config::CodexToolCallParam;
-use crate::praxis_tool_config::CodexToolCallReplyParam;
+use crate::praxis_tool_config::PraxisToolCallParam;
+use crate::praxis_tool_config::PraxisToolCallReplyParam;
 use crate::praxis_tool_config::create_tool_for_praxis_tool_call_param;
 use crate::praxis_tool_config::create_tool_for_praxis_tool_call_reply_param;
 
@@ -336,7 +336,8 @@ impl MessageProcessor {
         } = params;
 
         match name.as_ref() {
-            "codex" => self.handle_tool_call_codex(id, arguments).await,
+            "praxis" => self.handle_tool_call_praxis(id, arguments).await,
+            "codex" => self.handle_tool_call_praxis(id, arguments).await,
             "praxis-reply" => {
                 self.handle_tool_call_praxis_session_reply(id, arguments)
                     .await
@@ -353,14 +354,14 @@ impl MessageProcessor {
         }
     }
 
-    async fn handle_tool_call_codex(
+    async fn handle_tool_call_praxis(
         &self,
         id: RequestId,
         arguments: Option<rmcp::model::JsonObject>,
     ) {
         let arguments = arguments.map(serde_json::Value::Object);
         let (initial_prompt, config): (String, Config) = match arguments {
-            Some(json_val) => match serde_json::from_value::<CodexToolCallParam>(json_val) {
+            Some(json_val) => match serde_json::from_value::<PraxisToolCallParam>(json_val) {
                 Ok(tool_cfg) => match tool_cfg.into_config(self.arg0_paths.clone()).await {
                     Ok(cfg) => cfg,
                     Err(e) => {
@@ -392,7 +393,7 @@ impl MessageProcessor {
             None => {
                 let result = CallToolResult {
                     content: vec![rmcp::model::Content::text(
-                        "Missing arguments for codex tool-call; the `prompt` field is required.",
+                        "Missing arguments for praxis tool-call; the `prompt` field is required.",
                     )],
                     structured_content: None,
                     is_error: Some(true),
@@ -433,8 +434,8 @@ impl MessageProcessor {
         tracing::info!("tools/call -> params: {:?}", arguments);
 
         // parse arguments
-        let praxis_tool_call_reply_param: CodexToolCallReplyParam = match arguments {
-            Some(json_val) => match serde_json::from_value::<CodexToolCallReplyParam>(json_val) {
+        let praxis_tool_call_reply_param: PraxisToolCallReplyParam = match arguments {
+            Some(json_val) => match serde_json::from_value::<PraxisToolCallReplyParam>(json_val) {
                 Ok(params) => params,
                 Err(e) => {
                     tracing::error!("Failed to parse Praxis tool call reply parameters: {e}");

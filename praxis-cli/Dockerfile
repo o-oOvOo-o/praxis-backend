@@ -38,17 +38,17 @@ USER node
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin
 
-# Install codex
-COPY dist/codex.tgz codex.tgz
-RUN npm install -g codex.tgz \
+# Install Praxis
+COPY dist/praxis.tgz praxis.tgz
+RUN npm install -g praxis.tgz \
   && npm cache clean --force \
   && rm -rf /usr/local/share/npm-global/lib/node_modules/praxis-cli/node_modules/.cache \
   && rm -rf /usr/local/share/npm-global/lib/node_modules/praxis-cli/tests \
   && rm -rf /usr/local/share/npm-global/lib/node_modules/praxis-cli/docs
 
 # Inside the container we consider the environment already sufficiently locked
-# down, therefore instruct Codex CLI to allow running without sandboxing.
-ENV CODEX_UNSAFE_ALLOW_NO_SANDBOX=1
+# down, therefore instruct Praxis CLI to allow running without sandboxing.
+ENV PRAXIS_UNSAFE_ALLOW_NO_SANDBOX=1
 
 # Copy and set up firewall script as root.
 USER root

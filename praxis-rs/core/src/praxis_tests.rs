@@ -62,12 +62,12 @@ use core_test_support::tracing::install_test_tracing;
 use core_test_support::wait_for_event;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
-use praxis_app_gateway_protocol::AppInfo;
 use praxis_execpolicy::Decision;
 use praxis_execpolicy::NetworkRuleProtocol;
 use praxis_execpolicy::Policy;
 use praxis_network_proxy::NetworkProxyConfig;
 use praxis_otel::TelemetryAuthMode;
+use praxis_protocol::apps::AppInfo;
 use praxis_protocol::config_types::CollaborationMode;
 use praxis_protocol::config_types::ModeKind;
 use praxis_protocol::config_types::Settings;
@@ -2013,8 +2013,12 @@ async fn includes_timed_out_message() {
         stdout: StreamOutput::new(String::new()),
         stderr: StreamOutput::new(String::new()),
         aggregated_output: StreamOutput::new("Command output".to_string()),
+        model_output: None,
         duration: StdDuration::from_secs(1),
         timed_out: true,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
     let (_, turn_context) = make_session_and_context().await;
 

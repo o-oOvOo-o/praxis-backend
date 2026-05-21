@@ -1,4 +1,5 @@
 use crate::model::ThreadMetadata;
+use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::RolloutItem;
@@ -34,9 +35,8 @@ pub fn rollout_item_affects_thread_metadata(item: &RolloutItem) -> bool {
     match item {
         RolloutItem::SessionMeta(_) | RolloutItem::TurnContext(_) => true,
         RolloutItem::EventMsg(EventMsg::TokenCount(_) | EventMsg::UserMessage(_)) => true,
-        RolloutItem::EventMsg(_) | RolloutItem::ResponseItem(_) | RolloutItem::Compacted(_) => {
-            false
-        }
+        RolloutItem::ResponseItem(item) => response_item_user_message_preview(item).is_some(),
+        RolloutItem::EventMsg(_) | RolloutItem::Compacted(_) => false,
     }
 }
 
@@ -99,8 +99,16 @@ fn apply_event_msg(metadata: &mut ThreadMetadata, event: &EventMsg) {
     }
 }
 
-fn apply_response_item(_metadata: &mut ThreadMetadata, _item: &ResponseItem) {
-    // Title and first_user_message are derived from EventMsg::UserMessage only.
+fn apply_response_item(metadata: &mut ThreadMetadata, item: &ResponseItem) {
+    let Some(message) = response_item_user_message_preview(item) else {
+        return;
+    };
+    if metadata.first_user_message.is_none() {
+        metadata.first_user_message = Some(message.clone());
+    }
+    if metadata.title.is_empty() && message != IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER {
+        metadata.title = message;
+    }
 }
 
 fn strip_user_message_prefix(text: &str) -> &str {
@@ -120,6 +128,35 @@ fn user_message_preview(user: &UserMessageEvent) -> Option<String> {
         .as_ref()
         .is_some_and(|images| !images.is_empty())
         || !user.local_images.is_empty()
+    {
+        return Some(IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string());
+    }
+    None
+}
+
+fn response_item_user_message_preview(item: &ResponseItem) -> Option<String> {
+    let ResponseItem::Message { role, content, .. } = item else {
+        return None;
+    };
+    if !role.eq_ignore_ascii_case("user") {
+        return None;
+    }
+
+    let text = content
+        .iter()
+        .filter_map(|item| match item {
+            ContentItem::InputText { text } => Some(text.trim()),
+            ContentItem::InputImage { .. } | ContentItem::OutputText { .. } => None,
+        })
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if !text.is_empty() {
+        return Some(text);
+    }
+    if content
+        .iter()
+        .any(|item| matches!(item, ContentItem::InputImage { .. }))
     {
         return Some(IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string());
     }
@@ -161,7 +198,7 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn response_item_user_messages_do_not_set_title_or_first_user_message() {
+    fn response_item_user_messages_set_title_and_first_user_message() {
         let mut metadata = metadata_for_test();
         let item = RolloutItem::ResponseItem(ResponseItem::Message {
             id: None,
@@ -175,8 +212,11 @@ mod tests {
 
         apply_rollout_item(&mut metadata, &item, "test-provider");
 
-        assert_eq!(metadata.first_user_message, None);
-        assert_eq!(metadata.title, "");
+        assert_eq!(
+            metadata.first_user_message.as_deref(),
+            Some("hello from response item")
+        );
+        assert_eq!(metadata.title, "hello from response item");
     }
 
     #[test]

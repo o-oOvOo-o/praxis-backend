@@ -41,7 +41,7 @@ function Get-ReleaseUrl {
         [string]$ResolvedVersion
     )
 
-    return "https://github.com/openai/codex/releases/download/rust-v$ResolvedVersion/$AssetName"
+    return "https://github.com/o-oOvOo-o/praxis-backend/releases/download/rust-v$ResolvedVersion/$AssetName"
 }
 
 function Path-Contains {
@@ -70,9 +70,9 @@ function Resolve-Version {
         return $normalizedVersion
     }
 
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/openai/codex/releases/latest"
+    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/o-oOvOo-o/praxis-backend/releases/latest"
     if (-not $release.tag_name) {
-        Write-Error "Failed to resolve the latest Codex release version."
+        Write-Error "Failed to resolve the latest Praxis release version."
         exit 1
     }
 
@@ -85,7 +85,7 @@ if ($env:OS -ne "Windows_NT") {
 }
 
 if (-not [Environment]::Is64BitOperatingSystem) {
-    Write-Error "Codex requires a 64-bit version of Windows."
+    Write-Error "Praxis requires a 64-bit version of Windows."
     exit 1
 }
 
@@ -110,16 +110,16 @@ switch ($architecture) {
     }
 }
 
-if ([string]::IsNullOrWhiteSpace($env:CODEX_INSTALL_DIR)) {
-    $installDir = Join-Path $env:LOCALAPPDATA "Programs\OpenAI\Codex\bin"
+if ([string]::IsNullOrWhiteSpace($env:PRAXIS_INSTALL_DIR)) {
+    $installDir = Join-Path $env:LOCALAPPDATA "Programs\OpenAI\Praxis\bin"
 } else {
-    $installDir = $env:CODEX_INSTALL_DIR
+    $installDir = $env:PRAXIS_INSTALL_DIR
 }
 
-$codexPath = Join-Path $installDir "codex.exe"
-$installMode = if (Test-Path $codexPath) { "Updating" } else { "Installing" }
+$praxisPath = Join-Path $installDir "praxis.exe"
+$installMode = if (Test-Path $praxisPath) { "Updating" } else { "Installing" }
 
-Write-Step "$installMode Codex CLI"
+Write-Step "$installMode Praxis CLI"
 Write-Step "Detected platform: $platformLabel"
 
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
@@ -136,7 +136,7 @@ try {
     $extractDir = Join-Path $tempDir "extract"
     $url = Get-ReleaseUrl -AssetName $packageAsset -ResolvedVersion $resolvedVersion
 
-    Write-Step "Downloading Codex CLI"
+    Write-Step "Downloading Praxis CLI"
     Invoke-WebRequest -Uri $url -OutFile $archivePath
 
     New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
@@ -145,7 +145,7 @@ try {
     $vendorRoot = Join-Path $extractDir "package/vendor/$target"
     Write-Step "Installing to $installDir"
     $copyMap = @{
-        "codex/codex.exe" = "codex.exe"
+        "codex/codex.exe" = "praxis.exe"
         "codex/praxis-command-runner.exe" = "praxis-command-runner.exe"
         "codex/praxis-windows-sandbox-setup.exe" = "praxis-windows-sandbox-setup.exe"
         "path/rg.exe" = "rg.exe"
@@ -187,10 +187,10 @@ if (-not (Path-Contains -PathValue $userPath -Entry $installDir)) {
 }
 
 if ($pathNeedsNewShell) {
-    Write-Step ('Run now: $env:Path = "{0};$env:Path"; codex' -f $installDir)
-    Write-Step "Or open a new PowerShell window and run: codex"
+    Write-Step ('Run now: $env:Path = "{0};$env:Path"; praxis' -f $installDir)
+    Write-Step "Or open a new PowerShell window and run: praxis"
 } else {
-    Write-Step "Run: codex"
+    Write-Step "Run: praxis"
 }
 
-Write-Host "Codex CLI $resolvedVersion installed successfully."
+Write-Host "Praxis CLI $resolvedVersion installed successfully."

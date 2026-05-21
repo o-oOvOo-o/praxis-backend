@@ -1,7 +1,6 @@
-//! We do not do true JSON-RPC 2.0, as we neither send nor expect the
-//! "jsonrpc": "2.0" field.
+//! JSON-RPC envelope types shared by app-gateway and exec transports.
 
-use praxis_protocol::protocol::W3cTraceContext;
+use crate::protocol::W3cTraceContext;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -31,7 +30,7 @@ impl fmt::Display for RequestId {
 
 pub type Result = serde_json::Value;
 
-/// Refers to any valid JSON-RPC object that can be decoded off the wire, or encoded to be sent.
+/// Any valid JSON-RPC object decoded from or encoded to the wire.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
 #[serde(untagged)]
 pub enum JSONRPCMessage {
@@ -64,14 +63,14 @@ pub struct JSONRPCNotification {
     pub params: Option<serde_json::Value>,
 }
 
-/// A successful (non-error) response to a request.
+/// A successful response to a request.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
 pub struct JSONRPCResponse {
     pub id: RequestId,
     pub result: Result,
 }
 
-/// A response to a request that indicates an error occurred.
+/// An error response to a request.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
 pub struct JSONRPCError {
     pub error: JSONRPCErrorError,

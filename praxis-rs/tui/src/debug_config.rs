@@ -1,5 +1,4 @@
 use crate::history_cell::PlainHistoryCell;
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_core::config::Config;
 use praxis_core::config_loader::ConfigLayerEntry;
 use praxis_core::config_loader::ConfigLayerStack;
@@ -11,6 +10,7 @@ use praxis_core::config_loader::RequirementSource;
 use praxis_core::config_loader::ResidencyRequirement;
 use praxis_core::config_loader::SandboxModeRequirement;
 use praxis_core::config_loader::WebSearchModeRequirement;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_protocol::protocol::SessionNetworkProxyRuntime;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
@@ -421,7 +421,6 @@ fn format_network_unix_socket_permission(
 mod tests {
     use super::render_debug_config_lines;
     use super::session_all_proxy_url;
-    use praxis_app_gateway_protocol::ConfigLayerSource;
     use praxis_core::config::Constrained;
     use praxis_core::config_loader::ConfigLayerEntry;
     use praxis_core::config_loader::ConfigLayerStack;
@@ -440,6 +439,7 @@ mod tests {
     use praxis_core::config_loader::SandboxModeRequirement;
     use praxis_core::config_loader::Sourced;
     use praxis_core::config_loader::WebSearchModeRequirement;
+    use praxis_protocol::config_layers::ConfigLayerSource;
     use praxis_protocol::config_types::WebSearchMode;
     use praxis_protocol::protocol::AskForApproval;
     use praxis_protocol::protocol::SandboxPolicy;
@@ -474,7 +474,7 @@ mod tests {
         let system_file = if cfg!(windows) {
             absolute_path("C:\\etc\\codex\\config.toml")
         } else {
-            absolute_path("/etc/codex/config.toml")
+            absolute_path("/etc/praxis/config.toml")
         };
         let project_folder = if cfg!(windows) {
             absolute_path("C:\\repo\\.codex")
@@ -515,7 +515,7 @@ mod tests {
         let requirements_file = if cfg!(windows) {
             absolute_path("C:\\ProgramData\\OpenAI\\Praxis\\requirements.toml")
         } else {
-            absolute_path("/etc/codex/requirements.toml")
+            absolute_path("/etc/praxis/requirements.toml")
         };
 
         let requirements = ConfigRequirements {
@@ -587,7 +587,7 @@ mod tests {
         let user_file = if cfg!(windows) {
             absolute_path("C:\\users\\alice\\.codex\\config.toml")
         } else {
-            absolute_path("/home/alice/.codex/config.toml")
+            absolute_path("/home/alice/.praxis/config.toml")
         };
         let stack = ConfigLayerStack::new(
             vec![ConfigLayerEntry::new(

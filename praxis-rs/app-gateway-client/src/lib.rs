@@ -19,6 +19,7 @@ mod remote;
 
 use std::error::Error;
 use std::fmt;
+use std::future::Future;
 use std::io::Error as IoError;
 use std::io::ErrorKind;
 use std::io::Result as IoResult;
@@ -64,6 +65,200 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 /// the same JSON-RPC result envelope used by socket/stdio transports because
 /// `MessageProcessor` continues to produce that shape internally.
 pub type RequestResult = std::result::Result<JsonRpcResult, JSONRPCErrorError>;
+
+#[derive(Clone, Copy)]
+pub(crate) struct CommandEndpointLabels {
+    pub(crate) worker_closed: &'static str,
+    pub(crate) request_closed: &'static str,
+    pub(crate) notify_closed: &'static str,
+    pub(crate) resolve_closed: &'static str,
+    pub(crate) reject_closed: &'static str,
+}
+
+pub(crate) trait AppGatewayClientCommand: Sized {
+    fn request_command(
+        request: Box<ClientRequest>,
+        response_tx: oneshot::Sender<IoResult<RequestResult>>,
+    ) -> Self;
+
+    fn notify_command(
+        notification: ClientNotification,
+        response_tx: oneshot::Sender<IoResult<()>>,
+    ) -> Self;
+
+    fn resolve_server_request_command(
+        request_id: RequestId,
+        result: JsonRpcResult,
+        response_tx: oneshot::Sender<IoResult<()>>,
+    ) -> Self;
+
+    fn reject_server_request_command(
+        request_id: RequestId,
+        error: JSONRPCErrorError,
+        response_tx: oneshot::Sender<IoResult<()>>,
+    ) -> Self;
+}
+
+pub(crate) struct AppGatewayCommandEndpoint<C: AppGatewayClientCommand> {
+    command_tx: mpsc::Sender<C>,
+    labels: CommandEndpointLabels,
+}
+
+impl<C: AppGatewayClientCommand> Clone for AppGatewayCommandEndpoint<C> {
+    fn clone(&self) -> Self {
+        Self {
+            command_tx: self.command_tx.clone(),
+            labels: self.labels,
+        }
+    }
+}
+
+impl<C: AppGatewayClientCommand> AppGatewayCommandEndpoint<C> {
+    pub(crate) fn new(command_tx: mpsc::Sender<C>, labels: CommandEndpointLabels) -> Self {
+        Self { command_tx, labels }
+    }
+
+    pub(crate) async fn request(&self, request: ClientRequest) -> IoResult<RequestResult> {
+        send_request_command(
+            &self.command_tx,
+            request,
+            C::request_command,
+            self.labels.worker_closed,
+            self.labels.request_closed,
+        )
+        .await
+    }
+
+    pub(crate) async fn request_typed<T>(
+        &self,
+        request: ClientRequest,
+    ) -> Result<T, TypedRequestError>
+    where
+        T: DeserializeOwned,
+    {
+        request_typed_with(request, |request| self.request(request)).await
+    }
+
+    pub(crate) async fn notify(&self, notification: ClientNotification) -> IoResult<()> {
+        send_unit_command(
+            &self.command_tx,
+            |response_tx| C::notify_command(notification, response_tx),
+            self.labels.worker_closed,
+            self.labels.notify_closed,
+        )
+        .await
+    }
+
+    pub(crate) async fn resolve_server_request(
+        &self,
+        request_id: RequestId,
+        result: JsonRpcResult,
+    ) -> IoResult<()> {
+        send_unit_command(
+            &self.command_tx,
+            |response_tx| C::resolve_server_request_command(request_id, result, response_tx),
+            self.labels.worker_closed,
+            self.labels.resolve_closed,
+        )
+        .await
+    }
+
+    pub(crate) async fn reject_server_request(
+        &self,
+        request_id: RequestId,
+        error: JSONRPCErrorError,
+    ) -> IoResult<()> {
+        send_unit_command(
+            &self.command_tx,
+            |response_tx| C::reject_server_request_command(request_id, error, response_tx),
+            self.labels.worker_closed,
+            self.labels.reject_closed,
+        )
+        .await
+    }
+}
+
+fn initialize_params_from_metadata(
+    client_name: &str,
+    client_version: &str,
+    experimental_api: bool,
+    opt_out_notification_methods: &[String],
+) -> InitializeParams {
+    let capabilities = InitializeCapabilities {
+        experimental_api,
+        opt_out_notification_methods: if opt_out_notification_methods.is_empty() {
+            None
+        } else {
+            Some(opt_out_notification_methods.to_vec())
+        },
+    };
+
+    InitializeParams {
+        client_info: ClientInfo {
+            name: client_name.to_string(),
+            title: None,
+            version: client_version.to_string(),
+        },
+        capabilities: Some(capabilities),
+    }
+}
+
+async fn send_request_command<C>(
+    command_tx: &mpsc::Sender<C>,
+    request: ClientRequest,
+    make_command: impl FnOnce(Box<ClientRequest>, oneshot::Sender<IoResult<RequestResult>>) -> C,
+    worker_closed_message: &'static str,
+    response_closed_message: &'static str,
+) -> IoResult<RequestResult> {
+    let (response_tx, response_rx) = oneshot::channel();
+    command_tx
+        .send(make_command(Box::new(request), response_tx))
+        .await
+        .map_err(|_| IoError::new(ErrorKind::BrokenPipe, worker_closed_message))?;
+    response_rx
+        .await
+        .map_err(|_| IoError::new(ErrorKind::BrokenPipe, response_closed_message))?
+}
+
+async fn send_unit_command<C>(
+    command_tx: &mpsc::Sender<C>,
+    make_command: impl FnOnce(oneshot::Sender<IoResult<()>>) -> C,
+    worker_closed_message: &'static str,
+    response_closed_message: &'static str,
+) -> IoResult<()> {
+    let (response_tx, response_rx) = oneshot::channel();
+    command_tx
+        .send(make_command(response_tx))
+        .await
+        .map_err(|_| IoError::new(ErrorKind::BrokenPipe, worker_closed_message))?;
+    response_rx
+        .await
+        .map_err(|_| IoError::new(ErrorKind::BrokenPipe, response_closed_message))?
+}
+
+async fn request_typed_with<T, F, Fut>(
+    request: ClientRequest,
+    send_request: F,
+) -> Result<T, TypedRequestError>
+where
+    T: DeserializeOwned,
+    F: FnOnce(ClientRequest) -> Fut,
+    Fut: Future<Output = IoResult<RequestResult>>,
+{
+    let method = request_method_name(&request);
+    let response = send_request(request)
+        .await
+        .map_err(|source| TypedRequestError::Transport {
+            method: method.clone(),
+            source,
+        })?;
+    let result = response.map_err(|source| TypedRequestError::Server {
+        method: method.clone(),
+        source,
+    })?;
+    serde_json::from_value(result)
+        .map_err(|source| TypedRequestError::Deserialize { method, source })
+}
 
 #[derive(Debug, Clone)]
 pub enum AppGatewayEvent {
@@ -290,23 +485,12 @@ pub struct NativeAppGatewayClientStartArgs {
 impl NativeAppGatewayClientStartArgs {
     /// Builds initialize params from caller-provided metadata.
     pub fn initialize_params(&self) -> InitializeParams {
-        let capabilities = InitializeCapabilities {
-            experimental_api: self.experimental_api,
-            opt_out_notification_methods: if self.opt_out_notification_methods.is_empty() {
-                None
-            } else {
-                Some(self.opt_out_notification_methods.clone())
-            },
-        };
-
-        InitializeParams {
-            client_info: ClientInfo {
-                name: self.client_name.clone(),
-                title: None,
-                version: self.client_version.clone(),
-            },
-            capabilities: Some(capabilities),
-        }
+        initialize_params_from_metadata(
+            self.client_name.as_str(),
+            self.client_version.as_str(),
+            self.experimental_api,
+            &self.opt_out_notification_methods,
+        )
     }
 
     fn into_runtime_start_args(self) -> NativeRuntimeStartArgs {
@@ -355,6 +539,67 @@ enum ClientCommand {
     },
 }
 
+impl AppGatewayClientCommand for ClientCommand {
+    fn request_command(
+        request: Box<ClientRequest>,
+        response_tx: oneshot::Sender<IoResult<RequestResult>>,
+    ) -> Self {
+        Self::Request {
+            request,
+            response_tx,
+        }
+    }
+
+    fn notify_command(
+        notification: ClientNotification,
+        response_tx: oneshot::Sender<IoResult<()>>,
+    ) -> Self {
+        Self::Notify {
+            notification,
+            response_tx,
+        }
+    }
+
+    fn resolve_server_request_command(
+        request_id: RequestId,
+        result: JsonRpcResult,
+        response_tx: oneshot::Sender<IoResult<()>>,
+    ) -> Self {
+        Self::ResolveServerRequest {
+            request_id,
+            result,
+            response_tx,
+        }
+    }
+
+    fn reject_server_request_command(
+        request_id: RequestId,
+        error: JSONRPCErrorError,
+        response_tx: oneshot::Sender<IoResult<()>>,
+    ) -> Self {
+        Self::RejectServerRequest {
+            request_id,
+            error,
+            response_tx,
+        }
+    }
+}
+
+fn native_command_endpoint(
+    command_tx: mpsc::Sender<ClientCommand>,
+) -> AppGatewayCommandEndpoint<ClientCommand> {
+    AppGatewayCommandEndpoint::new(
+        command_tx,
+        CommandEndpointLabels {
+            worker_closed: "in-process app-gateway worker channel is closed",
+            request_closed: "in-process app-gateway request channel is closed",
+            notify_closed: "in-process app-gateway notify channel is closed",
+            resolve_closed: "in-process app-gateway resolve channel is closed",
+            reject_closed: "in-process app-gateway reject channel is closed",
+        },
+    )
+}
+
 /// Async facade over the in-process app-gateway runtime.
 ///
 /// This type owns a worker task that bridges between:
@@ -368,13 +613,14 @@ enum ClientCommand {
 /// boundary.
 pub struct NativeAppGatewayClient {
     command_tx: mpsc::Sender<ClientCommand>,
+    command_endpoint: AppGatewayCommandEndpoint<ClientCommand>,
     event_rx: mpsc::Receiver<NativeGatewayEvent>,
     worker_handle: tokio::task::JoinHandle<()>,
 }
 
 #[derive(Clone)]
 pub struct NativeAppGatewayRequestHandle {
-    command_tx: mpsc::Sender<ClientCommand>,
+    command_endpoint: AppGatewayCommandEndpoint<ClientCommand>,
 }
 
 #[derive(Clone)]
@@ -505,8 +751,10 @@ impl NativeAppGatewayClient {
             }
         });
 
+        let command_endpoint = native_command_endpoint(command_tx.clone());
         Ok(Self {
             command_tx,
+            command_endpoint,
             event_rx,
             worker_handle,
         })
@@ -514,7 +762,7 @@ impl NativeAppGatewayClient {
 
     pub fn request_handle(&self) -> NativeAppGatewayRequestHandle {
         NativeAppGatewayRequestHandle {
-            command_tx: self.command_tx.clone(),
+            command_endpoint: self.command_endpoint.clone(),
         }
     }
 
@@ -523,25 +771,7 @@ impl NativeAppGatewayClient {
     /// Callers that expect a concrete response type should usually prefer
     /// [`request_typed`](Self::request_typed).
     pub async fn request(&self, request: ClientRequest) -> IoResult<RequestResult> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(ClientCommand::Request {
-                request: Box::new(request),
-                response_tx,
-            })
-            .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "in-process app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "in-process app-gateway request channel is closed",
-            )
-        })?
+        self.command_endpoint.request(request).await
     }
 
     /// Sends a typed client request and decodes the successful response body.
@@ -554,43 +784,12 @@ impl NativeAppGatewayClient {
     where
         T: DeserializeOwned,
     {
-        let method = request_method_name(&request);
-        let response =
-            self.request(request)
-                .await
-                .map_err(|source| TypedRequestError::Transport {
-                    method: method.clone(),
-                    source,
-                })?;
-        let result = response.map_err(|source| TypedRequestError::Server {
-            method: method.clone(),
-            source,
-        })?;
-        serde_json::from_value(result)
-            .map_err(|source| TypedRequestError::Deserialize { method, source })
+        self.command_endpoint.request_typed(request).await
     }
 
     /// Sends a typed client notification.
     pub async fn notify(&self, notification: ClientNotification) -> IoResult<()> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(ClientCommand::Notify {
-                notification,
-                response_tx,
-            })
-            .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "in-process app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "in-process app-gateway notify channel is closed",
-            )
-        })?
+        self.command_endpoint.notify(notification).await
     }
 
     /// Resolves a pending server request.
@@ -602,26 +801,9 @@ impl NativeAppGatewayClient {
         request_id: RequestId,
         result: JsonRpcResult,
     ) -> IoResult<()> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(ClientCommand::ResolveServerRequest {
-                request_id,
-                result,
-                response_tx,
-            })
+        self.command_endpoint
+            .resolve_server_request(request_id, result)
             .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "in-process app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "in-process app-gateway resolve channel is closed",
-            )
-        })?
     }
 
     /// Rejects a pending server request with JSON-RPC error payload.
@@ -630,26 +812,9 @@ impl NativeAppGatewayClient {
         request_id: RequestId,
         error: JSONRPCErrorError,
     ) -> IoResult<()> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(ClientCommand::RejectServerRequest {
-                request_id,
-                error,
-                response_tx,
-            })
+        self.command_endpoint
+            .reject_server_request(request_id, error)
             .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "in-process app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "in-process app-gateway reject channel is closed",
-            )
-        })?
     }
 
     /// Returns the next in-process event, or `None` when worker exits.
@@ -668,6 +833,7 @@ impl NativeAppGatewayClient {
     pub async fn shutdown(self) -> IoResult<()> {
         let Self {
             command_tx,
+            command_endpoint: _command_endpoint,
             event_rx,
             worker_handle,
         } = self;
@@ -702,45 +868,14 @@ impl NativeAppGatewayClient {
 
 impl NativeAppGatewayRequestHandle {
     pub async fn request(&self, request: ClientRequest) -> IoResult<RequestResult> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(ClientCommand::Request {
-                request: Box::new(request),
-                response_tx,
-            })
-            .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "in-process app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "in-process app-gateway request channel is closed",
-            )
-        })?
+        self.command_endpoint.request(request).await
     }
 
     pub async fn request_typed<T>(&self, request: ClientRequest) -> Result<T, TypedRequestError>
     where
         T: DeserializeOwned,
     {
-        let method = request_method_name(&request);
-        let response =
-            self.request(request)
-                .await
-                .map_err(|source| TypedRequestError::Transport {
-                    method: method.clone(),
-                    source,
-                })?;
-        let result = response.map_err(|source| TypedRequestError::Server {
-            method: method.clone(),
-            source,
-        })?;
-        serde_json::from_value(result)
-            .map_err(|source| TypedRequestError::Deserialize { method, source })
+        self.command_endpoint.request_typed(request).await
     }
 }
 
@@ -1825,64 +1960,56 @@ mod tests {
 
     #[test]
     fn event_requires_delivery_marks_transcript_and_terminal_events() {
-        assert!(event_requires_delivery(
-            &NativeGatewayEvent::Notification(
-                praxis_app_gateway_protocol::ServerNotification::TurnCompleted(
-                    praxis_app_gateway_protocol::TurnCompletedNotification {
-                        thread_id: "thread".to_string(),
-                        turn: praxis_app_gateway_protocol::Turn {
-                            id: "turn".to_string(),
-                            items: Vec::new(),
-                            status: praxis_app_gateway_protocol::TurnStatus::Completed,
-                            error: None,
-                        },
-                    }
-                )
+        assert!(event_requires_delivery(&NativeGatewayEvent::Notification(
+            praxis_app_gateway_protocol::ServerNotification::TurnCompleted(
+                praxis_app_gateway_protocol::TurnCompletedNotification {
+                    thread_id: "thread".to_string(),
+                    turn: praxis_app_gateway_protocol::Turn {
+                        id: "turn".to_string(),
+                        items: Vec::new(),
+                        status: praxis_app_gateway_protocol::TurnStatus::Completed,
+                        error: None,
+                    },
+                }
             )
-        ));
-        assert!(event_requires_delivery(
-            &NativeGatewayEvent::Notification(
-                praxis_app_gateway_protocol::ServerNotification::AgentMessageDelta(
-                    praxis_app_gateway_protocol::AgentMessageDeltaNotification {
-                        thread_id: "thread".to_string(),
-                        turn_id: "turn".to_string(),
-                        item_id: "item".to_string(),
-                        delta: "hello".to_string(),
-                    }
-                )
+        )));
+        assert!(event_requires_delivery(&NativeGatewayEvent::Notification(
+            praxis_app_gateway_protocol::ServerNotification::AgentMessageDelta(
+                praxis_app_gateway_protocol::AgentMessageDeltaNotification {
+                    thread_id: "thread".to_string(),
+                    turn_id: "turn".to_string(),
+                    item_id: "item".to_string(),
+                    delta: "hello".to_string(),
+                }
             )
-        ));
-        assert!(event_requires_delivery(
-            &NativeGatewayEvent::Notification(
-                praxis_app_gateway_protocol::ServerNotification::ItemCompleted(
-                    praxis_app_gateway_protocol::ItemCompletedNotification {
-                        thread_id: "thread".to_string(),
-                        turn_id: "turn".to_string(),
-                        item: praxis_app_gateway_protocol::ThreadItem::AgentMessage {
-                            id: "item".to_string(),
-                            text: "hello".to_string(),
-                            phase: None,
-                            memory_citation: None,
-                        },
-                    }
-                )
+        )));
+        assert!(event_requires_delivery(&NativeGatewayEvent::Notification(
+            praxis_app_gateway_protocol::ServerNotification::ItemCompleted(
+                praxis_app_gateway_protocol::ItemCompletedNotification {
+                    thread_id: "thread".to_string(),
+                    turn_id: "turn".to_string(),
+                    item: praxis_app_gateway_protocol::ThreadItem::AgentMessage {
+                        id: "item".to_string(),
+                        text: "hello".to_string(),
+                        phase: None,
+                        memory_citation: None,
+                    },
+                }
             )
-        ));
+        )));
         assert!(!event_requires_delivery(&NativeGatewayEvent::Lagged {
             skipped: 1
         }));
-        assert!(!event_requires_delivery(
-            &NativeGatewayEvent::Notification(
-                praxis_app_gateway_protocol::ServerNotification::CommandExecutionOutputDelta(
-                    praxis_app_gateway_protocol::CommandExecutionOutputDeltaNotification {
-                        thread_id: "thread".to_string(),
-                        turn_id: "turn".to_string(),
-                        item_id: "item".to_string(),
-                        delta: "stdout".to_string(),
-                    }
-                )
+        assert!(!event_requires_delivery(&NativeGatewayEvent::Notification(
+            praxis_app_gateway_protocol::ServerNotification::CommandExecutionOutputDelta(
+                praxis_app_gateway_protocol::CommandExecutionOutputDeltaNotification {
+                    thread_id: "thread".to_string(),
+                    turn_id: "turn".to_string(),
+                    item_id: "item".to_string(),
+                    delta: "stdout".to_string(),
+                }
             )
-        ));
+        )));
     }
 
     #[tokio::test]

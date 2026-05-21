@@ -73,7 +73,9 @@ impl AppGatewayRuntimeTransport {
 
         if let Some(socket_addr) = listen_url.strip_prefix("ws://") {
             let bind_address = socket_addr.parse::<SocketAddr>().map_err(|_| {
-                AppGatewayRuntimeTransportParseError::InvalidWebSocketListenUrl(listen_url.to_string())
+                AppGatewayRuntimeTransportParseError::InvalidWebSocketListenUrl(
+                    listen_url.to_string(),
+                )
             })?;
             return Ok(Self::WebSocket { bind_address });
         }
@@ -394,8 +396,10 @@ mod tests {
 
     #[test]
     fn app_gateway_transport_parses_stdio_listen_url() {
-        let transport = AppGatewayRuntimeTransport::from_listen_url(AppGatewayRuntimeTransport::DEFAULT_LISTEN_URL)
-            .expect("stdio listen URL should parse");
+        let transport = AppGatewayRuntimeTransport::from_listen_url(
+            AppGatewayRuntimeTransport::DEFAULT_LISTEN_URL,
+        )
+        .expect("stdio listen URL should parse");
         assert_eq!(transport, AppGatewayRuntimeTransport::Stdio);
     }
 
@@ -554,7 +558,10 @@ mod tests {
             TransportEvent::IncomingMessage {
                 connection_id: queued_connection_id,
                 message:
-                    JSONRPCMessage::Response(praxis_app_gateway_protocol::JSONRPCResponse { id, result }),
+                    JSONRPCMessage::Response(praxis_app_gateway_protocol::JSONRPCResponse {
+                        id,
+                        result,
+                    }),
             } => {
                 assert_eq!(queued_connection_id, connection_id);
                 assert_eq!(id, praxis_app_gateway_protocol::RequestId::Integer(7));
@@ -654,14 +661,14 @@ mod tests {
             &mut connections,
             OutgoingEnvelope::ToConnection {
                 connection_id,
-                message: OutgoingMessage::AppGatewayNotification(ServerNotification::ConfigWarning(
-                    ConfigWarningNotification {
+                message: OutgoingMessage::AppGatewayNotification(
+                    ServerNotification::ConfigWarning(ConfigWarningNotification {
                         summary: "task_started".to_string(),
                         details: None,
                         path: None,
                         range: None,
-                    },
-                )),
+                    }),
+                ),
                 write_complete_tx: None,
             },
         )
@@ -694,14 +701,14 @@ mod tests {
             &mut connections,
             OutgoingEnvelope::ToConnection {
                 connection_id,
-                message: OutgoingMessage::AppGatewayNotification(ServerNotification::ConfigWarning(
-                    ConfigWarningNotification {
+                message: OutgoingMessage::AppGatewayNotification(
+                    ServerNotification::ConfigWarning(ConfigWarningNotification {
                         summary: "task_started".to_string(),
                         details: None,
                         path: None,
                         range: None,
-                    },
-                )),
+                    }),
+                ),
                 write_complete_tx: None,
             },
         )
@@ -734,14 +741,14 @@ mod tests {
             &mut connections,
             OutgoingEnvelope::ToConnection {
                 connection_id,
-                message: OutgoingMessage::AppGatewayNotification(ServerNotification::ConfigWarning(
-                    ConfigWarningNotification {
+                message: OutgoingMessage::AppGatewayNotification(
+                    ServerNotification::ConfigWarning(ConfigWarningNotification {
                         summary: "task_started".to_string(),
                         details: None,
                         path: None,
                         range: None,
-                    },
-                )),
+                    }),
+                ),
                 write_complete_tx: None,
             },
         )

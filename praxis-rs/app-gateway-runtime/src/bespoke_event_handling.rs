@@ -103,7 +103,8 @@ use praxis_app_gateway_protocol::build_turns_from_rollout_items;
 use praxis_app_gateway_protocol::convert_patch_changes;
 use praxis_core::PraxisThread;
 use praxis_core::ThreadManager;
-use praxis_core::review_format::format_review_findings_block;
+use praxis_core::review_format::REVIEW_FALLBACK_MESSAGE;
+use praxis_core::review_format::render_review_output_text;
 use praxis_core::review_prompts;
 use praxis_protocol::ThreadId;
 use praxis_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem;
@@ -2305,28 +2306,6 @@ fn request_permissions_response_from_client_result(
         .into(),
         scope: response.scope.to_core(),
     })
-}
-
-const REVIEW_FALLBACK_MESSAGE: &str = "Reviewer failed to output a response.";
-
-fn render_review_output_text(output: &ReviewOutputEvent) -> String {
-    let mut sections = Vec::new();
-    let explanation = output.overall_explanation.trim();
-    if !explanation.is_empty() {
-        sections.push(explanation.to_string());
-    }
-    if !output.findings.is_empty() {
-        let findings = format_review_findings_block(&output.findings, /*selection*/ None);
-        let trimmed = findings.trim();
-        if !trimmed.is_empty() {
-            sections.push(trimmed.to_string());
-        }
-    }
-    if sections.is_empty() {
-        REVIEW_FALLBACK_MESSAGE.to_string()
-    } else {
-        sections.join("\n\n")
-    }
 }
 
 fn map_file_change_approval_decision(

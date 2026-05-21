@@ -1,5 +1,5 @@
-use praxis_app_gateway_protocol::AppInfo;
 use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_protocol::apps::AppInfo;
 use praxis_protocol::protocol::APPS_INSTRUCTIONS_CLOSE_TAG;
 use praxis_protocol::protocol::APPS_INSTRUCTIONS_OPEN_TAG;
 

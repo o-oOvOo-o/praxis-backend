@@ -12,5 +12,5 @@ pnpm install
 pnpm run build
 rm -rf ./dist/openai-praxis-*.tgz
 pnpm pack --pack-destination ./dist
-mv ./dist/openai-praxis-*.tgz ./dist/codex.tgz
-docker build -t codex -f "./Dockerfile" .
+mv ./dist/openai-praxis-*.tgz ./dist/praxis.tgz
+docker build -t praxis -f "./Dockerfile" .

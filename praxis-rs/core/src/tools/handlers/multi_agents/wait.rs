@@ -1,8 +1,10 @@
 use super::*;
-use std::collections::HashMap;
+use crate::agent_os::AgentOsRuntime;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::select;
 use tokio::time::Instant;
-use tokio::time::timeout_at;
+use tokio::time::sleep_until;
 
 pub(crate) struct Handler;
 
@@ -39,6 +41,8 @@ impl ToolHandler for Handler {
         };
 
         let mut mailbox_seq_rx = session.subscribe_mailbox_seq();
+        let agent_os = Arc::clone(&session.services.agent_os);
+        let before_agent_os_seq = agent_os.change_sequence();
 
         session
             .send_event(
@@ -54,8 +58,14 @@ impl ToolHandler for Handler {
             .await;
 
         let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
-        let timed_out = !wait_for_mailbox_change(&mut mailbox_seq_rx, deadline).await;
-        let result = WaitAgentResult::from_timed_out(timed_out);
+        let outcome = wait_for_mailbox_or_agent_os_change(
+            &mut mailbox_seq_rx,
+            agent_os,
+            before_agent_os_seq,
+            deadline,
+        )
+        .await;
+        let result = WaitAgentResult::from_outcome(outcome);
 
         session
             .send_event(
@@ -64,7 +74,7 @@ impl ToolHandler for Handler {
                     sender_thread_id: session.conversation_id,
                     call_id,
                     agent_statuses: Vec::new(),
-                    statuses: HashMap::new(),
+                    statuses: std::collections::HashMap::new(),
                 }
                 .into(),
             )
@@ -84,18 +94,43 @@ struct WaitArgs {
 pub(crate) struct WaitAgentResult {
     pub(crate) message: String,
     pub(crate) timed_out: bool,
+    pub(crate) source: String,
+    pub(crate) agent_os_sequence: Option<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct WaitOutcome {
+    source: WaitSource,
+    agent_os_sequence: Option<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum WaitSource {
+    Mailbox,
+    AgentOs,
+    Timeout,
 }
 
 impl WaitAgentResult {
-    fn from_timed_out(timed_out: bool) -> Self {
-        let message = if timed_out {
-            "Wait timed out."
-        } else {
-            "Wait completed."
+    fn from_outcome(outcome: WaitOutcome) -> Self {
+        let (message, timed_out, source) = match outcome.source {
+            WaitSource::Mailbox => (
+                "Wait completed because mailbox input arrived.".to_string(),
+                false,
+                "mailbox".to_string(),
+            ),
+            WaitSource::AgentOs => (
+                "Wait completed because AgentOS runtime state changed.".to_string(),
+                false,
+                "agent_os".to_string(),
+            ),
+            WaitSource::Timeout => ("Wait timed out.".to_string(), true, "timeout".to_string()),
         };
         Self {
-            message: message.to_string(),
+            message,
             timed_out,
+            source,
+            agent_os_sequence: outcome.agent_os_sequence,
         }
     }
 }
@@ -118,12 +153,61 @@ impl ToolOutput for WaitAgentResult {
     }
 }
 
-async fn wait_for_mailbox_change(
+async fn wait_for_mailbox_or_agent_os_change(
     mailbox_seq_rx: &mut tokio::sync::watch::Receiver<u64>,
+    agent_os: Arc<AgentOsRuntime>,
+    before_agent_os_seq: u64,
     deadline: Instant,
-) -> bool {
-    match timeout_at(deadline, mailbox_seq_rx.changed()).await {
-        Ok(Ok(())) => true,
-        Ok(Err(_)) | Err(_) => false,
+) -> WaitOutcome {
+    let mut agent_os_rx = agent_os.subscribe_changes();
+    loop {
+        let current_seq = agent_os.change_sequence();
+        if current_seq > before_agent_os_seq {
+            return WaitOutcome {
+                source: WaitSource::AgentOs,
+                agent_os_sequence: Some(current_seq),
+            };
+        }
+        if Instant::now() >= deadline {
+            return WaitOutcome {
+                source: WaitSource::Timeout,
+                agent_os_sequence: Some(current_seq),
+            };
+        }
+        select! {
+            mailbox = mailbox_seq_rx.changed() => {
+                if mailbox.is_ok() {
+                    return WaitOutcome {
+                        source: WaitSource::Mailbox,
+                        agent_os_sequence: Some(agent_os.change_sequence()),
+                    };
+                }
+                return WaitOutcome {
+                    source: WaitSource::Timeout,
+                    agent_os_sequence: Some(agent_os.change_sequence()),
+                };
+            }
+            agent_os_changed = agent_os_rx.changed() => {
+                if agent_os_changed.is_err() {
+                    return WaitOutcome {
+                        source: WaitSource::Timeout,
+                        agent_os_sequence: Some(agent_os.change_sequence()),
+                    };
+                }
+                let current_seq = *agent_os_rx.borrow();
+                if current_seq > before_agent_os_seq {
+                    return WaitOutcome {
+                        source: WaitSource::AgentOs,
+                        agent_os_sequence: Some(current_seq),
+                    };
+                }
+            }
+            _ = sleep_until(deadline) => {
+                return WaitOutcome {
+                    source: WaitSource::Timeout,
+                    agent_os_sequence: Some(agent_os.change_sequence()),
+                };
+            }
+        }
     }
 }

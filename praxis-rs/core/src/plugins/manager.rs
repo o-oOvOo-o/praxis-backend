@@ -31,6 +31,8 @@ use crate::config::CONFIG_TOML_FILE;
 use crate::config::Config;
 use crate::config::ConfigService;
 use crate::config::ConfigServiceError;
+use crate::config::ConfigValueWriteParams;
+use crate::config::MergeStrategy;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::config_loader::ConfigLayerStack;
@@ -40,8 +42,6 @@ use crate::config_rules::skill_config_rules_from_stack;
 use crate::loader::SkillRoot;
 use crate::loader::load_skills_from_roots;
 use praxis_analytics::AnalyticsEventsClient;
-use praxis_app_gateway_protocol::ConfigValueWriteParams;
-use praxis_app_gateway_protocol::MergeStrategy;
 use praxis_config::types::McpServerConfig;
 use praxis_config::types::PluginConfig;
 use praxis_features::Feature;
@@ -327,13 +327,13 @@ impl PluginsManager {
         praxis_home: PathBuf,
         restriction_product: Option<Product>,
     ) -> Self {
-        // Product restrictions are enforced at marketplace admission time for a given CODEX_HOME:
+        // Product restrictions are enforced at marketplace admission time for a given PRAXIS_HOME:
         // listing, install, and curated refresh all consult this restriction context before new
         // plugins enter local config or cache. After admission, runtime plugin loading trusts the
-        // contents of that CODEX_HOME and does not re-filter configured plugins by product, so
+        // contents of that PRAXIS_HOME and does not re-filter configured plugins by product, so
         // already-admitted plugins may continue exposing MCP servers/tools from shared local state.
         //
-        // This assumes a single CODEX_HOME is only used by one product.
+        // This assumes a single PRAXIS_HOME is only used by one product.
         Self {
             praxis_home: praxis_home.clone(),
             store: PluginStore::new(praxis_home),

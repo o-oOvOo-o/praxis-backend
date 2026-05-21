@@ -141,7 +141,7 @@ pub fn require_logon_sandbox_creds(
     let network_identity = SandboxNetworkIdentity::from_policy(policy, proxy_enforced);
     let desired_offline_proxy_settings =
         offline_proxy_settings_from_env(env_map, network_identity);
-    // NOTE: Do not add CODEX_HOME/.sandbox to `needed_write`; it must remain non-writable by the
+    // NOTE: Do not add PRAXIS_HOME/.sandbox to `needed_write`; it must remain non-writable by the
     // restricted capability token. The setup helper's `lock_sandbox_dir` is responsible for
     // granting the sandbox group access to this directory without granting the capability SID.
     let mut setup_reason: Option<String> = None;

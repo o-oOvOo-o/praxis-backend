@@ -66,8 +66,11 @@ pub use runtime::logs_db_path;
 pub use runtime::state_db_filename;
 pub use runtime::state_db_path;
 
-/// Environment variable for overriding the SQLite state database home directory.
-pub const SQLITE_HOME_ENV: &str = "CODEX_SQLITE_HOME";
+/// Environment variable for overriding the Praxis SQLite state database home directory.
+///
+/// Deliberately separate from CODEX_SQLITE_HOME so Praxis never reads or writes
+/// upstream Codex state_*.sqlite files.
+pub const SQLITE_HOME_ENV: &str = "PRAXIS_SQLITE_HOME";
 
 pub const LOGS_DB_FILENAME: &str = "logs";
 pub const LOGS_DB_VERSION: u32 = 2;

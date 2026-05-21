@@ -22,6 +22,7 @@ use crate::transport::AppGatewayRuntimeTransport;
 use async_trait::async_trait;
 use futures::FutureExt;
 use praxis_analytics::AnalyticsEventsClient;
+use praxis_analytics::AppGatewayInitializeFact;
 use praxis_analytics::AppGatewayRpcTransport;
 use praxis_app_gateway_protocol::AppListUpdatedNotification;
 use praxis_app_gateway_protocol::ChatgptAuthTokensRefreshParams;
@@ -560,7 +561,10 @@ impl MessageProcessor {
                 // shared thread when another connected client did not opt into
                 // experimental API). Proposed direction is instance-global first-write-wins
                 // with initialize-time mismatch rejection.
-                let analytics_initialize_params = params.clone();
+                let analytics_experimental_api_enabled = params
+                    .capabilities
+                    .as_ref()
+                    .map(|capabilities| capabilities.experimental_api);
                 let (experimental_api_enabled, opt_out_notification_methods) =
                     match params.capabilities {
                         Some(capabilities) => (
@@ -608,7 +612,11 @@ impl MessageProcessor {
                 if self.config.features.enabled(Feature::GeneralAnalytics) {
                     self.analytics_events_client.track_initialize(
                         connection_id.0,
-                        analytics_initialize_params,
+                        AppGatewayInitializeFact {
+                            client_name: name.clone(),
+                            client_version: Some(version.clone()),
+                            experimental_api_enabled: analytics_experimental_api_enabled,
+                        },
                         originator,
                         self.rpc_transport,
                     );
@@ -625,7 +633,7 @@ impl MessageProcessor {
                     Err(err) => {
                         let error = JSONRPCErrorError {
                             code: INTERNAL_ERROR_CODE,
-                            message: format!("Invalid CODEX_HOME: {err}"),
+                            message: format!("Invalid PRAXIS_HOME: {err}"),
                             data: None,
                         };
                         self.outgoing.send_error(connection_request_id, error).await;

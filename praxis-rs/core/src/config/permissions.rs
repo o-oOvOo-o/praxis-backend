@@ -21,6 +21,11 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
+pub use praxis_config::NetworkDomainPermissionToml;
+pub use praxis_config::NetworkDomainPermissionsToml;
+pub use praxis_config::NetworkUnixSocketPermissionToml;
+pub use praxis_config::NetworkUnixSocketPermissionsToml;
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 pub struct PermissionsToml {
     #[serde(flatten)]
@@ -57,98 +62,6 @@ impl FilesystemPermissionsToml {
 pub enum FilesystemPermissionToml {
     Access(FileSystemAccessMode),
     Scoped(BTreeMap<String, FileSystemAccessMode>),
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-pub struct NetworkDomainPermissionsToml {
-    #[serde(flatten)]
-    pub entries: BTreeMap<String, NetworkDomainPermissionToml>,
-}
-
-impl NetworkDomainPermissionsToml {
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn allowed_domains(&self) -> Option<Vec<String>> {
-        let allowed_domains: Vec<String> = self
-            .entries
-            .iter()
-            .filter(|(_, permission)| matches!(permission, NetworkDomainPermissionToml::Allow))
-            .map(|(pattern, _)| pattern.clone())
-            .collect();
-        (!allowed_domains.is_empty()).then_some(allowed_domains)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn denied_domains(&self) -> Option<Vec<String>> {
-        let denied_domains: Vec<String> = self
-            .entries
-            .iter()
-            .filter(|(_, permission)| matches!(permission, NetworkDomainPermissionToml::Deny))
-            .map(|(pattern, _)| pattern.clone())
-            .collect();
-        (!denied_domains.is_empty()).then_some(denied_domains)
-    }
-}
-
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum NetworkDomainPermissionToml {
-    Allow,
-    Deny,
-}
-
-impl std::fmt::Display for NetworkDomainPermissionToml {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let permission = match self {
-            Self::Allow => "allow",
-            Self::Deny => "deny",
-        };
-        f.write_str(permission)
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
-pub struct NetworkUnixSocketPermissionsToml {
-    #[serde(flatten)]
-    pub entries: BTreeMap<String, NetworkUnixSocketPermissionToml>,
-}
-
-impl NetworkUnixSocketPermissionsToml {
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    pub(crate) fn allow_unix_sockets(&self) -> Vec<String> {
-        self.entries
-            .iter()
-            .filter(|(_, permission)| matches!(permission, NetworkUnixSocketPermissionToml::Allow))
-            .map(|(path, _)| path.clone())
-            .collect()
-    }
-}
-
-#[derive(
-    Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum NetworkUnixSocketPermissionToml {
-    Allow,
-    None,
-}
-
-impl std::fmt::Display for NetworkUnixSocketPermissionToml {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let permission = match self {
-            Self::Allow => "allow",
-            Self::None => "none",
-        };
-        f.write_str(permission)
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]

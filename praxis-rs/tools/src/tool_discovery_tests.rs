@@ -1,5 +1,5 @@
 use super::*;
-use praxis_app_gateway_protocol::AppInfo;
+use praxis_protocol::apps::AppInfo;
 use pretty_assertions::assert_eq;
 use rmcp::model::JsonObject;
 use rmcp::model::Tool;

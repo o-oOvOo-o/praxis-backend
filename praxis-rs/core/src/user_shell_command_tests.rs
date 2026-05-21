@@ -20,8 +20,12 @@ async fn formats_basic_record() {
         stdout: StreamOutput::new("hi".to_string()),
         stderr: StreamOutput::new(String::new()),
         aggregated_output: StreamOutput::new("hi".to_string()),
+        model_output: None,
         duration: Duration::from_secs(1),
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
     let (_, turn_context) = make_session_and_context().await;
     let item = user_shell_command_record_item("echo hi", &exec_output, &turn_context);
@@ -44,8 +48,12 @@ async fn uses_aggregated_output_over_streams() {
         stdout: StreamOutput::new("stdout-only".to_string()),
         stderr: StreamOutput::new("stderr-only".to_string()),
         aggregated_output: StreamOutput::new("combined output wins".to_string()),
+        model_output: None,
         duration: Duration::from_millis(120),
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
     let (_, turn_context) = make_session_and_context().await;
     let record = format_user_shell_command_record("false", &exec_output, &turn_context);

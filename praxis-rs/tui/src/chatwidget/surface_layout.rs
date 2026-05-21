@@ -37,6 +37,7 @@ pub(super) struct ChatSurfaceLayoutInput {
     pub(super) toast_height: u16,
     pub(super) work_panel_outer_height: u16,
     pub(super) show_work_panel: bool,
+    pub(super) fill_available_top: bool,
 }
 
 pub(super) fn chat_surface_split_for_width(width: u16, show_work_panel: bool) -> ChatSurfaceSplit {
@@ -84,7 +85,11 @@ pub(super) fn layout_chat_surface(input: ChatSurfaceLayoutInput) -> ChatWidgetLa
         Some(_) => input.agent_outer_height.max(input.work_panel_outer_height),
         None => input.agent_outer_height,
     };
-    let top_height = top_requested.min(available_for_top);
+    let top_height = if input.fill_available_top {
+        available_for_top
+    } else {
+        top_requested.min(available_for_top)
+    };
 
     let active_outer_area = if top_height > 0 && split.agent_width > 0 {
         Some(Rect::new(area.x, area.y, split.agent_width, top_height))
@@ -179,6 +184,7 @@ mod tests {
             toast_height: 1,
             work_panel_outer_height: 12,
             show_work_panel: true,
+            fill_available_top: false,
         });
 
         assert_eq!(layout.active_outer_area, Some(Rect::new(0, 0, 97, 12)));

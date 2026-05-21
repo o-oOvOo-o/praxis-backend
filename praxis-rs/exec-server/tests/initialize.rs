@@ -3,10 +3,10 @@
 mod common;
 
 use common::exec_server::exec_server;
-use praxis_app_gateway_protocol::JSONRPCMessage;
-use praxis_app_gateway_protocol::JSONRPCResponse;
 use praxis_exec_server::InitializeParams;
 use praxis_exec_server::InitializeResponse;
+use praxis_protocol::jsonrpc_lite::JSONRPCMessage;
+use praxis_protocol::jsonrpc_lite::JSONRPCResponse;
 use pretty_assertions::assert_eq;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

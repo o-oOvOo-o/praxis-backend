@@ -10,6 +10,7 @@ ExecRequest for execution.
 use crate::exec::ExecCapturePolicy;
 use crate::exec::ExecExpiration;
 use crate::exec::ExecToolCallOutput;
+use crate::exec::SpawnObserver;
 use crate::exec::StdoutStream;
 use crate::exec::WindowsRestrictedTokenFilesystemOverlay;
 use crate::exec::execute_exec_request;
@@ -49,6 +50,7 @@ pub struct ExecRequest {
     pub network_sandbox_policy: NetworkSandboxPolicy,
     pub(crate) windows_restricted_token_filesystem_overlay:
         Option<WindowsRestrictedTokenFilesystemOverlay>,
+    pub(crate) raw_output_spool: bool,
     pub arg0: Option<String>,
 }
 
@@ -83,6 +85,7 @@ impl ExecRequest {
             file_system_sandbox_policy,
             network_sandbox_policy,
             windows_restricted_token_filesystem_overlay: None,
+            raw_output_spool: false,
             arg0,
         }
     }
@@ -132,6 +135,7 @@ impl ExecRequest {
             file_system_sandbox_policy,
             network_sandbox_policy,
             windows_restricted_token_filesystem_overlay: None,
+            raw_output_spool: false,
             arg0,
         }
     }
@@ -144,10 +148,34 @@ pub async fn execute_env(
     execute_exec_request(exec_request, stdout_stream, /*after_spawn*/ None).await
 }
 
+pub(crate) async fn execute_env_with_spawn_observer(
+    exec_request: ExecRequest,
+    stdout_stream: Option<StdoutStream>,
+    after_spawn: Option<SpawnObserver>,
+) -> crate::error::Result<ExecToolCallOutput> {
+    execute_exec_request(exec_request, stdout_stream, after_spawn).await
+}
+
 pub async fn execute_exec_request_with_after_spawn(
     exec_request: ExecRequest,
     stdout_stream: Option<StdoutStream>,
     after_spawn: Option<Box<dyn FnOnce() + Send>>,
+) -> crate::error::Result<ExecToolCallOutput> {
+    let after_spawn = after_spawn.map(|callback| {
+        Box::new(move |_process_id| {
+            let future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> =
+                Box::pin(async move { callback() });
+            future
+        }) as SpawnObserver
+    });
+    execute_exec_request(exec_request, stdout_stream, after_spawn).await
+}
+
+#[cfg(unix)]
+pub(crate) async fn execute_exec_request_with_spawn_observer(
+    exec_request: ExecRequest,
+    stdout_stream: Option<StdoutStream>,
+    after_spawn: Option<SpawnObserver>,
 ) -> crate::error::Result<ExecToolCallOutput> {
     execute_exec_request(exec_request, stdout_stream, after_spawn).await
 }

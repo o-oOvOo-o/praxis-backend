@@ -1,19 +1,11 @@
-use crate::shell_detect::detect_shell_type;
 use crate::shell_snapshot::ShellSnapshot;
+pub use praxis_shell_command::shell_detect::ShellType;
+use praxis_shell_command::shell_detect::detect_shell_type;
 use serde::Deserialize;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::watch;
-
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
-pub enum ShellType {
-    Zsh,
-    Bash,
-    PowerShell,
-    Sh,
-    Cmd,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Shell {

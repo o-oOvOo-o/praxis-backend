@@ -68,8 +68,8 @@ use praxis_utils_path as path_utils;
 /// Rollouts are recorded as JSONL and can be inspected with tools such as:
 ///
 /// ```ignore
-/// $ jq -C . ~/.codex/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// $ fx ~/.codex/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
+/// $ jq -C . ~/.praxis/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
+/// $ fx ~/.praxis/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
 /// ```
 #[derive(Clone)]
 pub struct RolloutRecorder {
@@ -269,7 +269,7 @@ impl RolloutRecorder {
                     || db_page.next_anchor.is_some();
                 if !can_return_db_page {
                     tracing::warn!(
-                        "state db returned a partial first page before backfill completed; falling back to filesystem list once"
+                        "state db returned a partial first page before backfill completed; falling back to session files"
                     );
                 } else {
                     // Hot resume/list paths are DB-only. Backfill may still be running, but
@@ -288,7 +288,7 @@ impl RolloutRecorder {
                 return Ok(ThreadsPage::default());
             } else {
                 tracing::warn!(
-                    "state db list failed before backfill completed; falling back to filesystem list once"
+                    "state db list failed before backfill completed; falling back to session files"
                 );
             }
         }
@@ -300,7 +300,7 @@ impl RolloutRecorder {
             return Ok(ThreadsPage::default());
         }
 
-        // Legacy path for environments where SQLite cannot be opened.
+        // Filesystem fallback is bounded and keeps resume usable while the index catches up.
         let fs_page = if archived {
             let root = praxis_home.join(ARCHIVED_SESSIONS_SUBDIR);
             get_threads_in_root(
@@ -385,7 +385,7 @@ impl RolloutRecorder {
                 return Ok(None);
             }
             tracing::warn!(
-                "state db did not resolve latest thread before backfill completed; falling back to filesystem lookup once"
+                "state db did not resolve latest thread before backfill completed; falling back to session files"
             );
         }
 
@@ -739,7 +739,7 @@ fn precompute_log_file_info(
     config: &impl RolloutConfigView,
     conversation_id: ThreadId,
 ) -> std::io::Result<LogFileInfo> {
-    // Resolve ~/.codex/sessions/YYYY/MM/DD path.
+    // Resolve ~/.praxis/sessions/YYYY/MM/DD path.
     let timestamp = OffsetDateTime::now_local()
         .map_err(|e| IoError::other(format!("failed to get local time: {e}")))?;
     let mut dir = config.praxis_home().to_path_buf();

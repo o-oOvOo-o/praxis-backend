@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
-use praxis_app_gateway_protocol::AppInfo;
-use praxis_app_gateway_protocol::McpElicitationObjectType;
-use praxis_app_gateway_protocol::McpElicitationSchema;
-use praxis_app_gateway_protocol::McpServerElicitationRequest;
-use praxis_app_gateway_protocol::McpServerElicitationRequestParams;
+use praxis_protocol::apps::AppInfo;
+use praxis_protocol::mcp_elicitation::McpElicitationObjectType;
+use praxis_protocol::mcp_elicitation::McpElicitationSchema;
+use praxis_protocol::mcp_elicitation::McpServerElicitationRequest;
+use praxis_protocol::mcp_elicitation::McpServerElicitationRequestParams;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;

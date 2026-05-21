@@ -90,20 +90,6 @@ impl PendingAppGatewayRequests {
                 })
             }
             ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
-            ServerRequest::ApplyPatchApproval { request_id, .. } => {
-                Some(UnsupportedAppGatewayRequest {
-                    request_id: request_id.clone(),
-                    message: "Legacy patch approval requests are not available in TUI yet."
-                        .to_string(),
-                })
-            }
-            ServerRequest::ExecCommandApproval { request_id, .. } => {
-                Some(UnsupportedAppGatewayRequest {
-                    request_id: request_id.clone(),
-                    message: "Legacy command approval requests are not available in TUI yet."
-                        .to_string(),
-                })
-            }
         }
     }
 

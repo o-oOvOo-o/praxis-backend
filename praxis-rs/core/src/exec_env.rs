@@ -5,7 +5,14 @@ use praxis_protocol::ThreadId;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-pub const CODEX_THREAD_ID_ENV_VAR: &str = "CODEX_THREAD_ID";
+pub const PRAXIS_THREAD_ID_ENV_VAR: &str = "PRAXIS_THREAD_ID";
+
+const CODEX_STATE_ENV_VARS: &[&str] = &[
+    "CODEX_HOME",
+    "CODEX_HOME_NAMESPACE",
+    "CODEX_SQLITE_HOME",
+    "CODEX_THREAD_ID",
+];
 
 /// Construct an environment map based on the rules in the specified policy. The
 /// resulting map can be passed directly to `Command::envs()` after calling
@@ -15,13 +22,29 @@ pub const CODEX_THREAD_ID_ENV_VAR: &str = "CODEX_THREAD_ID";
 /// The derivation follows the algorithm documented in the struct-level comment
 /// for [`ShellEnvironmentPolicy`].
 ///
-/// `CODEX_THREAD_ID` is injected when a thread id is provided, even when
+/// `PRAXIS_THREAD_ID` is injected when a thread id is provided, even when
 /// `include_only` is set.
+///
+/// Praxis also strips inherited Codex state variables by default.  Those
+/// variables belong to the upstream Codex CLI and must not leak through Praxis
+/// into nested shells or child Codex processes.  A command policy may still set
+/// them explicitly via `set` when a task intentionally needs to control an
+/// upstream Codex process.
 pub fn create_env(
     policy: &ShellEnvironmentPolicy,
     thread_id: Option<ThreadId>,
 ) -> HashMap<String, String> {
     populate_env(std::env::vars(), policy, thread_id)
+}
+
+fn is_codex_state_env_var(name: &str) -> bool {
+    if cfg!(target_os = "windows") {
+        CODEX_STATE_ENV_VARS
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(name))
+    } else {
+        CODEX_STATE_ENV_VARS.contains(&name)
+    }
 }
 
 fn populate_env<I>(
@@ -75,19 +98,26 @@ where
         env_map.retain(|k, _| !matches_any(k, &policy.exclude));
     }
 
-    // Step 4 – Apply user-provided overrides.
+    // Step 4 – Strip inherited upstream Codex state variables.  These are not
+    // secrets, so the KEY/SECRET/TOKEN default filter will not remove them, but
+    // they can make nested official Codex processes attach to the wrong thread
+    // or write into a stale state database.  Do this before user-provided
+    // overrides so an explicit command policy can still opt back in.
+    env_map.retain(|k, _| !is_codex_state_env_var(k));
+
+    // Step 5 – Apply user-provided overrides.
     for (key, val) in &policy.r#set {
         env_map.insert(key.clone(), val.clone());
     }
 
-    // Step 5 – If include_only is non-empty, keep *only* the matching vars.
+    // Step 6 – If include_only is non-empty, keep *only* the matching vars.
     if !policy.include_only.is_empty() {
         env_map.retain(|k, _| matches_any(k, &policy.include_only));
     }
 
-    // Step 6 – Populate the thread ID environment variable when provided.
+    // Step 7 – Populate the Praxis thread ID environment variable when provided.
     if let Some(thread_id) = thread_id {
-        env_map.insert(CODEX_THREAD_ID_ENV_VAR.to_string(), thread_id.to_string());
+        env_map.insert(PRAXIS_THREAD_ID_ENV_VAR.to_string(), thread_id.to_string());
     }
 
     env_map

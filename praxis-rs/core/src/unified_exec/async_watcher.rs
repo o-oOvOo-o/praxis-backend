@@ -209,8 +209,12 @@ pub(crate) async fn emit_exec_end_for_unified_exec(
         stdout: StreamOutput::new(aggregated_output.clone()),
         stderr: StreamOutput::new(String::new()),
         aggregated_output: StreamOutput::new(aggregated_output),
+        model_output: None,
         duration,
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
     let event_ctx = ToolEventCtx::new(
         session_ref.as_ref(),
@@ -252,8 +256,12 @@ pub(crate) async fn emit_failed_exec_end_for_unified_exec(
         stdout: StreamOutput::new(stdout),
         stderr: StreamOutput::new(message),
         aggregated_output: StreamOutput::new(aggregated_output),
+        model_output: None,
         duration,
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
     let event_ctx = ToolEventCtx::new(
         session_ref.as_ref(),

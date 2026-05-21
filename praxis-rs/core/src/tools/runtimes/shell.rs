@@ -8,20 +8,29 @@ builds sandbox transform inputs, and runs them under the current SandboxAttempt.
 pub(crate) mod unix_escalation;
 pub(crate) mod zsh_fork_backend;
 
+use crate::agent_os::AgentOsProcessCleaner;
+use crate::agent_os::process_runtime_kind;
+use crate::agent_os::process_runtime_owner;
 use crate::command_canonicalization::canonicalize_command_for_approval;
 use crate::exec::ExecCapturePolicy;
 use crate::exec::ExecToolCallOutput;
-use crate::guardian::GuardianApprovalRequest;
-use crate::guardian::review_approval_request;
-use crate::guardian::routes_approval_to_guardian;
-use crate::sandboxing::ExecOptions;
 use crate::sandboxing::SandboxPermissions;
-use crate::sandboxing::execute_env;
-use crate::shell::ShellType;
 use crate::tools::network_approval::NetworkApprovalMode;
 use crate::tools::network_approval::NetworkApprovalSpec;
-use crate::tools::runtimes::build_sandbox_command;
-use crate::tools::runtimes::maybe_wrap_shell_lc_with_snapshot;
+use crate::tools::runtimes::agent_os_command::finish_abandoned_agent_os_span;
+use crate::tools::runtimes::agent_os_command::finish_agent_os_span_with_output;
+use crate::tools::runtimes::agent_os_command::finish_failed_agent_os_span;
+use crate::tools::runtimes::managed_execution_pipeline::RuntimeBackend;
+use crate::tools::runtimes::managed_execution_pipeline::RuntimeExecutionRoute;
+use crate::tools::runtimes::managed_execution_pipeline::ShellSandboxSpec;
+use crate::tools::runtimes::managed_execution_pipeline::preflight_command_intent;
+use crate::tools::runtimes::managed_execution_pipeline::prepare_session_shell_command;
+use crate::tools::runtimes::managed_execution_pipeline::prepare_shell_sandboxed_command;
+use crate::tools::runtimes::managed_execution_pipeline::run_one_shot_exec_with_agent_os;
+use crate::tools::runtimes::managed_execution_pipeline::start_agent_os_span_for_backend;
+use crate::tools::runtimes::runtime_approval::RuntimeApprovalKind;
+use crate::tools::runtimes::runtime_approval::RuntimeApprovalPlan;
+use crate::tools::runtimes::runtime_approval::start_runtime_approval_async;
 use crate::tools::sandboxing::Approvable;
 use crate::tools::sandboxing::ApprovalCtx;
 use crate::tools::sandboxing::ExecApprovalRequirement;
@@ -32,13 +41,11 @@ use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
 use crate::tools::sandboxing::ToolRuntime;
 use crate::tools::sandboxing::sandbox_override_for_first_attempt;
-use crate::tools::sandboxing::with_cached_approval;
 use futures::future::BoxFuture;
 use praxis_network_proxy::NetworkProxy;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_sandboxing::SandboxablePreference;
-use praxis_shell_command::powershell::prefix_powershell_script_with_utf8;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -83,6 +90,91 @@ pub(crate) enum ShellRuntimeBackend {
     /// adapter, with fallback to the standard shell runtime flow if
     /// prerequisites are not met.
     ShellCommandZshFork,
+}
+
+impl RuntimeBackend for ShellRuntimeBackend {
+    fn execution_route(&self) -> RuntimeExecutionRoute<'_> {
+        match self {
+            Self::ShellCommandZshFork => RuntimeExecutionRoute::zsh_fork(),
+            Self::Generic | Self::ShellCommandClassic => RuntimeExecutionRoute::shell(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ShellHostProcessCleaner {
+    runtime_kind: &'static str,
+    runtime_owner_id: &'static str,
+}
+
+impl ShellHostProcessCleaner {
+    pub(crate) fn shell() -> Self {
+        Self {
+            runtime_kind: process_runtime_kind::SHELL,
+            runtime_owner_id: process_runtime_owner::SHELL,
+        }
+    }
+
+    pub(crate) fn zsh_fork() -> Self {
+        Self {
+            runtime_kind: process_runtime_kind::ZSH_FORK,
+            runtime_owner_id: process_runtime_owner::ZSH_FORK,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AgentOsProcessCleaner for ShellHostProcessCleaner {
+    fn runtime_kind(&self) -> &'static str {
+        self.runtime_kind
+    }
+
+    fn runtime_owner_id(&self) -> String {
+        self.runtime_owner_id.to_string()
+    }
+
+    async fn cleanup_agent_os_process(&self, process_id: i32) -> bool {
+        kill_host_process_tree(process_id).await
+    }
+}
+
+async fn kill_host_process_tree(process_id: i32) -> bool {
+    let Ok(process_id) = u32::try_from(process_id) else {
+        return false;
+    };
+    kill_host_process_tree_by_pid(process_id).await
+}
+
+#[cfg(unix)]
+async fn kill_host_process_tree_by_pid(process_id: u32) -> bool {
+    match praxis_utils_pty::process_group::kill_process_group_by_pid(process_id) {
+        Ok(()) => true,
+        Err(err) => {
+            tracing::warn!("failed to kill shell process group for pid {process_id}: {err}");
+            false
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn kill_host_process_tree_by_pid(process_id: u32) -> bool {
+    let process_id = process_id.to_string();
+    match tokio::process::Command::new("taskkill")
+        .args(["/PID", process_id.as_str(), "/T", "/F"])
+        .status()
+        .await
+    {
+        Ok(status) => status.success(),
+        Err(err) => {
+            tracing::warn!("failed to run taskkill for shell pid {process_id}: {err}");
+            false
+        }
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+async fn kill_host_process_tree_by_pid(_process_id: u32) -> bool {
+    false
 }
 
 #[derive(Default)]
@@ -144,52 +236,20 @@ impl Approvable<ShellRequest> for ShellRuntime {
         req: &'a ShellRequest,
         ctx: ApprovalCtx<'a>,
     ) -> BoxFuture<'a, ReviewDecision> {
-        let keys = self.approval_keys(req);
-        let command = req.command.clone();
-        let cwd = req.cwd.clone();
-        let retry_reason = ctx.retry_reason.clone();
-        let reason = retry_reason.clone().or_else(|| req.justification.clone());
-        let session = ctx.session;
-        let turn = ctx.turn;
-        let call_id = ctx.call_id.to_string();
-        Box::pin(async move {
-            if routes_approval_to_guardian(turn) {
-                return review_approval_request(
-                    session,
-                    turn,
-                    GuardianApprovalRequest::Shell {
-                        id: call_id,
-                        command,
-                        cwd,
-                        sandbox_permissions: req.sandbox_permissions,
-                        additional_permissions: req.additional_permissions.clone(),
-                        justification: req.justification.clone(),
-                    },
-                    retry_reason,
-                )
-                .await;
-            }
-            with_cached_approval(&session.services, "shell", keys, move || async move {
-                let available_decisions = None;
-                session
-                    .request_command_approval(
-                        turn,
-                        call_id,
-                        /*approval_id*/ None,
-                        command,
-                        cwd,
-                        reason,
-                        ctx.network_approval_context.clone(),
-                        req.exec_approval_requirement
-                            .proposed_execpolicy_amendment()
-                            .cloned(),
-                        req.additional_permissions.clone(),
-                        available_decisions,
-                    )
-                    .await
-            })
-            .await
-        })
+        start_runtime_approval_async(
+            self.approval_keys(req),
+            RuntimeApprovalPlan {
+                tool_name: "shell",
+                kind: RuntimeApprovalKind::Shell,
+                command: req.command.clone(),
+                cwd: req.cwd.clone(),
+                sandbox_permissions: req.sandbox_permissions,
+                additional_permissions: req.additional_permissions.clone(),
+                justification: req.justification.clone(),
+                exec_approval_requirement: req.exec_approval_requirement.clone(),
+            },
+            ctx,
+        )
     }
 
     fn exec_approval_requirement(&self, req: &ShellRequest) -> Option<ExecApprovalRequirement> {
@@ -202,6 +262,10 @@ impl Approvable<ShellRequest> for ShellRuntime {
 }
 
 impl ToolRuntime<ShellRequest, ExecToolCallOutput> for ShellRuntime {
+    async fn preflight(&mut self, req: &ShellRequest, ctx: &ToolCtx) -> Result<(), ToolError> {
+        preflight_command_intent(ctx, &req.command, &req.cwd).await
+    }
+
     fn network_approval_spec(
         &self,
         req: &ShellRequest,
@@ -220,46 +284,81 @@ impl ToolRuntime<ShellRequest, ExecToolCallOutput> for ShellRuntime {
         attempt: &SandboxAttempt<'_>,
         ctx: &ToolCtx,
     ) -> Result<ExecToolCallOutput, ToolError> {
-        let session_shell = ctx.session.user_shell();
-        let command = maybe_wrap_shell_lc_with_snapshot(
-            &req.command,
-            session_shell.as_ref(),
-            &req.cwd,
-            &req.explicit_env_overrides,
-        );
-        let command = if matches!(session_shell.shell_type, ShellType::PowerShell) {
-            prefix_powershell_script_with_utf8(&command)
-        } else {
-            command
-        };
-
         if self.backend == ShellRuntimeBackend::ShellCommandZshFork {
-            match zsh_fork_backend::maybe_run_shell_command(req, attempt, ctx, &command).await? {
-                Some(out) => return Ok(out),
-                None => {
-                    tracing::warn!(
-                        "ZshFork backend specified, but conditions for using it were not met, falling back to normal execution",
-                    );
+            if zsh_fork_backend::can_run_shell_command(ctx) {
+                let command = prepare_session_shell_command(
+                    ctx,
+                    &req.command,
+                    &req.cwd,
+                    &req.explicit_env_overrides,
+                );
+                let command_span = start_agent_os_span_for_backend(
+                    ctx,
+                    &req.command,
+                    &req.cwd,
+                    &ShellRuntimeBackend::ShellCommandZshFork,
+                )
+                .await?;
+                match zsh_fork_backend::maybe_run_shell_command(
+                    req,
+                    attempt,
+                    ctx,
+                    &command,
+                    &command_span,
+                )
+                .await
+                {
+                    Ok(Some(mut out)) => {
+                        finish_agent_os_span_with_output(&command_span, &mut out, "zsh-fork").await;
+                        return Ok(out);
+                    }
+                    Ok(None) => {
+                        finish_abandoned_agent_os_span(
+                            &command_span,
+                            "zsh-fork",
+                            b"zsh-fork declined after capability precheck; falling back",
+                        )
+                        .await;
+                        preflight_command_intent(ctx, &req.command, &req.cwd).await?;
+                        tracing::warn!(
+                            "ZshFork backend specified, but declined after precheck, falling back to normal execution",
+                        );
+                    }
+                    Err(err) => {
+                        finish_failed_agent_os_span(&command_span, "zsh-fork", &err).await;
+                        return Err(err);
+                    }
                 }
+            } else {
+                tracing::warn!(
+                    "ZshFork backend specified, but side-effect-free capability checks failed, falling back to normal execution",
+                );
             }
         }
 
-        let command = build_sandbox_command(
-            &command,
-            &req.cwd,
-            &req.env,
-            req.additional_permissions.clone(),
+        let prepared = prepare_shell_sandboxed_command(
+            ctx,
+            attempt,
+            ShellSandboxSpec {
+                raw_command: &req.command,
+                cwd: &req.cwd,
+                env: &req.env,
+                explicit_env_overrides: &req.explicit_env_overrides,
+                additional_permissions: req.additional_permissions.clone(),
+                network: req.network.as_ref(),
+                expiration: req.timeout_ms.into(),
+                capture_policy: ExecCapturePolicy::ShellTool,
+                apply_managed_network_env: false,
+            },
         )?;
-        let options = ExecOptions {
-            expiration: req.timeout_ms.into(),
-            capture_policy: ExecCapturePolicy::ShellTool,
-        };
-        let env = attempt
-            .env_for(command, options, req.network.as_ref())
-            .map_err(|err| ToolError::Praxis(err.into()))?;
-        let out = execute_env(env, Self::stdout_stream(ctx))
-            .await
-            .map_err(ToolError::Praxis)?;
-        Ok(out)
+        run_one_shot_exec_with_agent_os(
+            ctx,
+            &req.command,
+            &req.cwd,
+            ShellRuntimeBackend::Generic.execution_route(),
+            prepared.exec_request,
+            Self::stdout_stream(ctx),
+        )
+        .await
     }
 }

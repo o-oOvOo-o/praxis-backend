@@ -454,7 +454,7 @@ async fn list_directory_page(
                 return Ok(DirectoryPage::Db(db_page));
             }
             warn!(
-                "state db returned a partial first directory page before backfill completed; falling back to filesystem list once"
+                "state db returned a partial first directory page before backfill completed; falling back to session files"
             );
         } else if backfill_complete {
             warn!("state db directory list failed after backfill completed; returning empty page");
@@ -466,7 +466,7 @@ async fn list_directory_page(
             return Ok(DirectoryPage::Fs(ThreadsPage::default()));
         } else {
             warn!(
-                "state db directory list failed before backfill completed; falling back to filesystem list once"
+                "state db directory list failed before backfill completed; falling back to session files"
             );
         }
     }

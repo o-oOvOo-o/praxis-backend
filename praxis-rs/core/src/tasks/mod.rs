@@ -268,8 +268,8 @@ impl Session {
 
     /// Starts a regular turn when the session is idle and pending work is waiting.
     ///
-    /// Pending work currently includes queued next-turn items and mailbox mail marked with
-    /// `trigger_turn`.
+    /// Pending work includes queued next-turn items, runtime commands, and mailbox mail marked
+    /// with `trigger_turn`.
     ///
     /// This helper generates a fresh sub-id for the synthetic turn before delegating to the
     /// explicit-sub-id variant.
@@ -281,15 +281,20 @@ impl Session {
     /// Starts a regular turn with the provided sub-id when pending work should wake an idle
     /// session.
     ///
-    /// The turn is created only when there are queued next-turn items or mailbox mail marked with
-    /// `trigger_turn`, and only if the session is currently idle.
+    /// The turn is created only when structured pending work should wake the session, and only if
+    /// the session is currently idle.
     pub(crate) async fn maybe_start_turn_for_pending_work_with_sub_id(
         self: &Arc<Self>,
         sub_id: String,
     ) {
-        if !self.has_queued_response_items_for_next_turn().await
-            && !self.has_trigger_turn_mailbox_items().await
-        {
+        let has_queued_response_items = self.has_queued_response_items_for_next_turn().await;
+        let has_runtime_command = self
+            .services
+            .agent_os
+            .has_claimable_runtime_command_for_thread(self.conversation_id)
+            .await;
+        let has_trigger_turn_mailbox_items = self.has_trigger_turn_mailbox_items().await;
+        if !has_queued_response_items && !has_runtime_command && !has_trigger_turn_mailbox_items {
             return;
         }
 
@@ -458,6 +463,18 @@ impl Session {
             last_agent_message,
         });
         self.send_event(turn_context.as_ref(), event).await;
+        if let Err(err) = self
+            .services
+            .agent_os
+            .complete_active_runtime_command_for_thread(
+                self.conversation_id,
+                /*succeeded*/ true,
+                "turn_finished",
+            )
+            .await
+        {
+            warn!("failed to complete AgentOS runtime command for finished turn: {err}");
+        }
 
         crate::thread_cost::persist_turn_cost_estimate(
             self,
@@ -545,6 +562,18 @@ impl Session {
             reason,
         });
         self.send_event(task.turn_context.as_ref(), event).await;
+        if let Err(err) = self
+            .services
+            .agent_os
+            .complete_active_runtime_command_for_thread(
+                self.conversation_id,
+                /*succeeded*/ false,
+                "turn_aborted",
+            )
+            .await
+        {
+            warn!("failed to fail AgentOS runtime command for aborted turn: {err}");
+        }
     }
 }
 

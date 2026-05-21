@@ -839,17 +839,17 @@ async fn project_layers_prefer_closest_cwd() -> std::io::Result<()> {
     let tmp = tempdir()?;
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
-    tokio::fs::create_dir_all(nested.join(".codex")).await?;
-    tokio::fs::create_dir_all(project_root.join(".codex")).await?;
+    tokio::fs::create_dir_all(nested.join(".praxis")).await?;
+    tokio::fs::create_dir_all(project_root.join(".praxis")).await?;
     tokio::fs::write(project_root.join(".git"), "gitdir: here").await?;
 
     tokio::fs::write(
-        project_root.join(".codex").join(CONFIG_TOML_FILE),
+        project_root.join(".praxis").join(CONFIG_TOML_FILE),
         "foo = \"root\"\n",
     )
     .await?;
     tokio::fs::write(
-        nested.join(".codex").join(CONFIG_TOML_FILE),
+        nested.join(".praxis").join(CONFIG_TOML_FILE),
         "foo = \"child\"\n",
     )
     .await?;
@@ -882,10 +882,13 @@ async fn project_layers_prefer_closest_cwd() -> std::io::Result<()> {
         })
         .collect();
     assert_eq!(project_layers.len(), 2);
-    assert_eq!(project_layers[0].as_path(), nested.join(".codex").as_path());
+    assert_eq!(
+        project_layers[0].as_path(),
+        nested.join(".praxis").as_path()
+    );
     assert_eq!(
         project_layers[1].as_path(),
-        project_root.join(".codex").as_path()
+        project_root.join(".praxis").as_path()
     );
 
     let config = layers.effective_config();
@@ -903,8 +906,8 @@ async fn project_paths_resolve_relative_to_dot_praxis_and_override_in_order() ->
     let tmp = tempdir()?;
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
-    tokio::fs::create_dir_all(project_root.join(".codex")).await?;
-    tokio::fs::create_dir_all(nested.join(".codex")).await?;
+    tokio::fs::create_dir_all(project_root.join(".praxis")).await?;
+    tokio::fs::create_dir_all(nested.join(".praxis")).await?;
     tokio::fs::write(project_root.join(".git"), "gitdir: here").await?;
 
     let root_cfg = r#"
@@ -913,15 +916,19 @@ model_instructions_file = "root.txt"
     let nested_cfg = r#"
 model_instructions_file = "child.txt"
 "#;
-    tokio::fs::write(project_root.join(".codex").join(CONFIG_TOML_FILE), root_cfg).await?;
-    tokio::fs::write(nested.join(".codex").join(CONFIG_TOML_FILE), nested_cfg).await?;
     tokio::fs::write(
-        project_root.join(".codex").join("root.txt"),
+        project_root.join(".praxis").join(CONFIG_TOML_FILE),
+        root_cfg,
+    )
+    .await?;
+    tokio::fs::write(nested.join(".praxis").join(CONFIG_TOML_FILE), nested_cfg).await?;
+    tokio::fs::write(
+        project_root.join(".praxis").join("root.txt"),
         "root instructions",
     )
     .await?;
     tokio::fs::write(
-        nested.join(".codex").join("child.txt"),
+        nested.join(".praxis").join("child.txt"),
         "child instructions",
     )
     .await?;
@@ -996,7 +1003,7 @@ async fn project_layer_is_added_when_dot_praxis_exists_without_config_toml() -> 
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
     tokio::fs::create_dir_all(&nested).await?;
-    tokio::fs::create_dir_all(project_root.join(".codex")).await?;
+    tokio::fs::create_dir_all(project_root.join(".praxis")).await?;
     tokio::fs::write(project_root.join(".git"), "gitdir: here").await?;
 
     let praxis_home = tmp.path().join("home");
@@ -1027,7 +1034,7 @@ async fn project_layer_is_added_when_dot_praxis_exists_without_config_toml() -> 
         vec![&ConfigLayerEntry {
             name: super::ConfigLayerSource::Project {
                 dot_praxis_folder: AbsolutePathBuf::from_absolute_path(
-                    project_root.join(".codex")
+                    project_root.join(".praxis")
                 )?,
             },
             config: TomlValue::Table(toml::map::Map::new()),
@@ -1045,7 +1052,7 @@ async fn project_layer_is_added_when_dot_praxis_exists_without_config_toml() -> 
 async fn praxis_home_is_not_loaded_as_project_layer_from_home_dir() -> std::io::Result<()> {
     let tmp = tempdir()?;
     let home_dir = tmp.path().join("home");
-    let praxis_home = home_dir.join(".codex");
+    let praxis_home = home_dir.join(".praxis");
     tokio::fs::create_dir_all(&praxis_home).await?;
     tokio::fs::write(praxis_home.join(CONFIG_TOML_FILE), "foo = \"user\"\n").await?;
 
@@ -1082,22 +1089,26 @@ async fn praxis_home_within_project_tree_is_not_double_loaded() -> std::io::Resu
     let tmp = tempdir()?;
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
-    let project_dot_codex = project_root.join(".codex");
-    let nested_dot_codex = nested.join(".codex");
+    let project_dot_praxis = project_root.join(".praxis");
+    let nested_dot_praxis = nested.join(".praxis");
 
-    tokio::fs::create_dir_all(&nested_dot_codex).await?;
+    tokio::fs::create_dir_all(&nested_dot_praxis).await?;
     tokio::fs::create_dir_all(project_root.join(".git")).await?;
-    tokio::fs::write(nested_dot_codex.join(CONFIG_TOML_FILE), "foo = \"child\"\n").await?;
+    tokio::fs::write(
+        nested_dot_praxis.join(CONFIG_TOML_FILE),
+        "foo = \"child\"\n",
+    )
+    .await?;
 
-    tokio::fs::create_dir_all(&project_dot_codex).await?;
+    tokio::fs::create_dir_all(&project_dot_praxis).await?;
     make_config_for_test(
-        &project_dot_codex,
+        &project_dot_praxis,
         &project_root,
         TrustLevel::Trusted,
         /*project_root_markers*/ None,
     )
     .await?;
-    let user_config_path = project_dot_codex.join(CONFIG_TOML_FILE);
+    let user_config_path = project_dot_praxis.join(CONFIG_TOML_FILE);
     let user_config_contents = tokio::fs::read_to_string(&user_config_path).await?;
     tokio::fs::write(
         &user_config_path,
@@ -1107,7 +1118,7 @@ async fn praxis_home_within_project_tree_is_not_double_loaded() -> std::io::Resu
 
     let cwd = AbsolutePathBuf::from_absolute_path(&nested)?;
     let layers = load_config_layers_state(
-        &project_dot_codex,
+        &project_dot_praxis,
         Some(cwd),
         &[] as &[(String, TomlValue)],
         LoaderOverrides::default(),
@@ -1128,7 +1139,7 @@ async fn praxis_home_within_project_tree_is_not_double_loaded() -> std::io::Resu
     assert_eq!(
         vec![&ConfigLayerEntry {
             name: super::ConfigLayerSource::Project {
-                dot_praxis_folder: AbsolutePathBuf::from_absolute_path(&nested_dot_codex)?,
+                dot_praxis_folder: AbsolutePathBuf::from_absolute_path(&nested_dot_praxis)?,
             },
             config: child_config.clone(),
             raw_toml: None,
@@ -1150,9 +1161,9 @@ async fn project_layers_disabled_when_untrusted_or_unknown() -> std::io::Result<
     let tmp = tempdir()?;
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
-    tokio::fs::create_dir_all(nested.join(".codex")).await?;
+    tokio::fs::create_dir_all(nested.join(".praxis")).await?;
     tokio::fs::write(
-        nested.join(".codex").join(CONFIG_TOML_FILE),
+        nested.join(".praxis").join(CONFIG_TOML_FILE),
         "foo = \"child\"\n",
     )
     .await?;
@@ -1253,14 +1264,14 @@ async fn cli_override_can_update_project_local_mcp_server_when_project_is_truste
     let tmp = tempdir()?;
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
-    let dot_codex = project_root.join(".codex");
+    let dot_praxis = project_root.join(".praxis");
     let praxis_home = tmp.path().join("home");
     tokio::fs::create_dir_all(&nested).await?;
-    tokio::fs::create_dir_all(&dot_codex).await?;
+    tokio::fs::create_dir_all(&dot_praxis).await?;
     tokio::fs::create_dir_all(&praxis_home).await?;
     tokio::fs::write(project_root.join(".git"), "gitdir: here").await?;
     tokio::fs::write(
-        dot_codex.join(CONFIG_TOML_FILE),
+        dot_praxis.join(CONFIG_TOML_FILE),
         r#"
 [mcp_servers.sentry]
 url = "https://mcp.sentry.dev/mcp"
@@ -1302,14 +1313,14 @@ async fn cli_override_for_disabled_project_local_mcp_server_returns_invalid_tran
     let tmp = tempdir()?;
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
-    let dot_codex = project_root.join(".codex");
+    let dot_praxis = project_root.join(".praxis");
     let praxis_home = tmp.path().join("home");
     tokio::fs::create_dir_all(&nested).await?;
-    tokio::fs::create_dir_all(&dot_codex).await?;
+    tokio::fs::create_dir_all(&dot_praxis).await?;
     tokio::fs::create_dir_all(&praxis_home).await?;
     tokio::fs::write(project_root.join(".git"), "gitdir: here").await?;
     tokio::fs::write(
-        dot_codex.join(CONFIG_TOML_FILE),
+        dot_praxis.join(CONFIG_TOML_FILE),
         r#"
 [mcp_servers.sentry]
 url = "https://mcp.sentry.dev/mcp"
@@ -1343,9 +1354,9 @@ async fn invalid_project_config_ignored_when_untrusted_or_unknown() -> std::io::
     let tmp = tempdir()?;
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
-    tokio::fs::create_dir_all(nested.join(".codex")).await?;
+    tokio::fs::create_dir_all(nested.join(".praxis")).await?;
     tokio::fs::write(project_root.join(".git"), "gitdir: here").await?;
-    tokio::fs::write(nested.join(".codex").join(CONFIG_TOML_FILE), "foo =").await?;
+    tokio::fs::write(nested.join(".praxis").join(CONFIG_TOML_FILE), "foo =").await?;
 
     let cwd = AbsolutePathBuf::from_absolute_path(&nested)?;
     let cases = [
@@ -1451,16 +1462,16 @@ async fn project_root_markers_supports_alternate_markers() -> std::io::Result<()
     let tmp = tempdir()?;
     let project_root = tmp.path().join("project");
     let nested = project_root.join("child");
-    tokio::fs::create_dir_all(project_root.join(".codex")).await?;
-    tokio::fs::create_dir_all(nested.join(".codex")).await?;
+    tokio::fs::create_dir_all(project_root.join(".praxis")).await?;
+    tokio::fs::create_dir_all(nested.join(".praxis")).await?;
     tokio::fs::write(project_root.join(".hg"), "hg").await?;
     tokio::fs::write(
-        project_root.join(".codex").join(CONFIG_TOML_FILE),
+        project_root.join(".praxis").join(CONFIG_TOML_FILE),
         "foo = \"root\"\n",
     )
     .await?;
     tokio::fs::write(
-        nested.join(".codex").join(CONFIG_TOML_FILE),
+        nested.join(".praxis").join(CONFIG_TOML_FILE),
         "foo = \"child\"\n",
     )
     .await?;
@@ -1494,10 +1505,13 @@ async fn project_root_markers_supports_alternate_markers() -> std::io::Result<()
         })
         .collect();
     assert_eq!(project_layers.len(), 2);
-    assert_eq!(project_layers[0].as_path(), nested.join(".codex").as_path());
+    assert_eq!(
+        project_layers[0].as_path(),
+        nested.join(".praxis").as_path()
+    );
     assert_eq!(
         project_layers[1].as_path(),
-        project_root.join(".codex").as_path()
+        project_root.join(".praxis").as_path()
     );
 
     let merged = layers.effective_config();
@@ -1518,7 +1532,6 @@ mod requirements_exec_policy_tests {
     use crate::config_loader::ConfigRequirementsWithSources;
     use crate::config_loader::RequirementSource;
     use crate::exec_policy::load_exec_policy;
-    use praxis_app_gateway_protocol::ConfigLayerSource;
     use praxis_config::RequirementsExecPolicyDecisionToml;
     use praxis_config::RequirementsExecPolicyParseError;
     use praxis_config::RequirementsExecPolicyPatternTokenToml;
@@ -1527,6 +1540,7 @@ mod requirements_exec_policy_tests {
     use praxis_execpolicy::Decision;
     use praxis_execpolicy::Evaluation;
     use praxis_execpolicy::RuleMatch;
+    use praxis_protocol::config_layers::ConfigLayerSource;
     use praxis_utils_absolute_path::AbsolutePathBuf;
     use pretty_assertions::assert_eq;
     use std::path::Path;

@@ -23,8 +23,6 @@ use crate::skills_watcher::SkillsWatcherEvent;
 use crate::tasks::interrupted_turn_history_marker;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
-use praxis_app_gateway_protocol::ThreadHistoryBuilder;
-use praxis_app_gateway_protocol::TurnStatus;
 use praxis_exec_server::EnvironmentManager;
 use praxis_login::AuthManager;
 use praxis_login::CodexAuth;
@@ -44,6 +42,8 @@ use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::TurnAbortReason;
 use praxis_protocol::protocol::TurnAbortedEvent;
 use praxis_protocol::protocol::W3cTraceContext;
+use praxis_protocol::turn_lifecycle::TurnLifecycleStatus;
+use praxis_protocol::turn_lifecycle::TurnLifecycleTracker;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -1042,7 +1042,7 @@ struct SnapshotTurnState {
 
 fn snapshot_turn_state(history: &InitialHistory) -> SnapshotTurnState {
     let rollout_items = history.get_rollout_items();
-    let mut builder = ThreadHistoryBuilder::new();
+    let mut builder = TurnLifecycleTracker::new();
     for item in &rollout_items {
         builder.handle_rollout_item(item);
     }
@@ -1051,7 +1051,7 @@ fn snapshot_turn_state(history: &InitialHistory) -> SnapshotTurnState {
         let active_turn_snapshot = builder.active_turn_snapshot();
         if active_turn_snapshot
             .as_ref()
-            .is_some_and(|turn| turn.status != TurnStatus::InProgress)
+            .is_some_and(|turn| turn.status != TurnLifecycleStatus::InProgress)
         {
             return SnapshotTurnState {
                 ends_mid_turn: false,

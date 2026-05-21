@@ -176,6 +176,7 @@ pub(crate) async fn execute_user_shell_command(
         file_system_sandbox_policy: FileSystemSandboxPolicy::from(&sandbox_policy),
         network_sandbox_policy: NetworkSandboxPolicy::from(&sandbox_policy),
         windows_restricted_token_filesystem_overlay: None,
+        raw_output_spool: false,
         arg0: None,
     };
 
@@ -197,8 +198,12 @@ pub(crate) async fn execute_user_shell_command(
                 stdout: StreamOutput::new(String::new()),
                 stderr: StreamOutput::new(aborted_message.clone()),
                 aggregated_output: StreamOutput::new(aborted_message.clone()),
+                model_output: None,
                 duration: Duration::ZERO,
                 timed_out: false,
+
+                agent_os_artifact_id: None,
+                raw_output_spool: None,
             };
             persist_user_shell_output(
                 &session,
@@ -273,8 +278,12 @@ pub(crate) async fn execute_user_shell_command(
                 stdout: StreamOutput::new(String::new()),
                 stderr: StreamOutput::new(message.clone()),
                 aggregated_output: StreamOutput::new(message.clone()),
+                model_output: None,
                 duration: Duration::ZERO,
                 timed_out: false,
+
+                agent_os_artifact_id: None,
+                raw_output_spool: None,
             };
             session
                 .send_event(

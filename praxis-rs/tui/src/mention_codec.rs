@@ -1,8 +1,12 @@
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+use praxis_core::mention_syntax::MentionNameMode;
 use praxis_core::mention_syntax::PLUGIN_TEXT_MENTION_SIGIL;
 use praxis_core::mention_syntax::TOOL_MENTION_SIGIL;
+use praxis_core::mention_syntax::is_common_env_var;
+use praxis_core::mention_syntax::is_tool_mention_name_char;
+use praxis_core::mention_syntax::parse_linked_mention;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LinkedMention {
@@ -38,11 +42,11 @@ pub(crate) fn encode_history_mentions(text: &str, mentions: &[LinkedMention]) ->
         if bytes[index] == TOOL_MENTION_SIGIL as u8 {
             let name_start = index + 1;
             if let Some(first) = bytes.get(name_start)
-                && is_mention_name_char(*first)
+                && is_tool_mention_name_char(*first)
             {
                 let mut name_end = name_start + 1;
                 while let Some(next) = bytes.get(name_end)
-                    && is_mention_name_char(*next)
+                    && is_tool_mention_name_char(*next)
                 {
                     name_end += 1;
                 }
@@ -110,16 +114,28 @@ fn parse_history_linked_mention<'a>(
     start: usize,
 ) -> Option<(&'a str, &'a str, usize)> {
     // TUI writes `$name`, but may read plugin `[@name](plugin://...)` links from other clients.
-    if let Some(mention @ (name, path, _)) =
-        parse_linked_tool_mention(text, text_bytes, start, TOOL_MENTION_SIGIL)
+    if let Some(mention @ (name, path, _)) = parse_linked_mention(
+        text,
+        text_bytes,
+        start,
+        TOOL_MENTION_SIGIL,
+        MentionNameMode::Tool,
+    )
+    .map(|m| (m.name, m.path, m.end_index))
         && !is_common_env_var(name)
         && is_tool_path(path)
     {
         return Some(mention);
     }
 
-    if let Some(mention @ (name, path, _)) =
-        parse_linked_tool_mention(text, text_bytes, start, PLUGIN_TEXT_MENTION_SIGIL)
+    if let Some(mention @ (name, path, _)) = parse_linked_mention(
+        text,
+        text_bytes,
+        start,
+        PLUGIN_TEXT_MENTION_SIGIL,
+        MentionNameMode::Tool,
+    )
+    .map(|m| (m.name, m.path, m.end_index))
         && !is_common_env_var(name)
         && path.starts_with("plugin://")
     {
@@ -127,85 +143,6 @@ fn parse_history_linked_mention<'a>(
     }
 
     None
-}
-
-fn parse_linked_tool_mention<'a>(
-    text: &'a str,
-    text_bytes: &[u8],
-    start: usize,
-    sigil: char,
-) -> Option<(&'a str, &'a str, usize)> {
-    let sigil_index = start + 1;
-    if text_bytes.get(sigil_index) != Some(&(sigil as u8)) {
-        return None;
-    }
-
-    let name_start = sigil_index + 1;
-    let first_name_byte = text_bytes.get(name_start)?;
-    if !is_mention_name_char(*first_name_byte) {
-        return None;
-    }
-
-    let mut name_end = name_start + 1;
-    while let Some(next_byte) = text_bytes.get(name_end)
-        && is_mention_name_char(*next_byte)
-    {
-        name_end += 1;
-    }
-
-    if text_bytes.get(name_end) != Some(&b']') {
-        return None;
-    }
-
-    let mut path_start = name_end + 1;
-    while let Some(next_byte) = text_bytes.get(path_start)
-        && next_byte.is_ascii_whitespace()
-    {
-        path_start += 1;
-    }
-    if text_bytes.get(path_start) != Some(&b'(') {
-        return None;
-    }
-
-    let mut path_end = path_start + 1;
-    while let Some(next_byte) = text_bytes.get(path_end)
-        && *next_byte != b')'
-    {
-        path_end += 1;
-    }
-    if text_bytes.get(path_end) != Some(&b')') {
-        return None;
-    }
-
-    let path = text[path_start + 1..path_end].trim();
-    if path.is_empty() {
-        return None;
-    }
-
-    let name = &text[name_start..name_end];
-    Some((name, path, path_end + 1))
-}
-
-fn is_mention_name_char(byte: u8) -> bool {
-    matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-')
-}
-
-fn is_common_env_var(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    matches!(
-        upper.as_str(),
-        "PATH"
-            | "HOME"
-            | "USER"
-            | "SHELL"
-            | "PWD"
-            | "TMPDIR"
-            | "TEMP"
-            | "TMP"
-            | "LANG"
-            | "TERM"
-            | "XDG_CONFIG_HOME"
-    )
 }
 
 fn is_tool_path(path: &str) -> bool {

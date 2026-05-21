@@ -22,6 +22,7 @@ use crate::responses::blocked_header_value;
 use crate::responses::blocked_message_with_policy;
 use crate::responses::blocked_text_response_with_policy;
 use crate::responses::json_response;
+use crate::responses::text_response;
 use crate::runtime::unix_socket_permissions_supported;
 use crate::state::BlockedRequest;
 use crate::state::BlockedRequestArgs;
@@ -940,14 +941,6 @@ async fn proxy_disabled_response(
 fn internal_error(context: &str, err: impl std::fmt::Display) -> Response {
     error!("{context}: {err}");
     text_response(StatusCode::INTERNAL_SERVER_ERROR, "error")
-}
-
-fn text_response(status: StatusCode, body: &str) -> Response {
-    Response::builder()
-        .status(status)
-        .header("content-type", "text/plain")
-        .body(Body::from(body.to_string()))
-        .unwrap_or_else(|_| Response::new(Body::from(body.to_string())))
 }
 
 fn emit_http_block_decision_audit_event(

@@ -37,7 +37,6 @@ members = [
     "exec",
     "exec-server",
     "execpolicy",
-    "execpolicy-legacy",
     "keyring-store",
     "file-search",
     "linux-sandbox",

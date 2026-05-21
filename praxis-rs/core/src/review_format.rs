@@ -11,7 +11,7 @@ fn format_location(item: &ReviewFinding) -> String {
     format!("{path}:{start}-{end}")
 }
 
-const REVIEW_FALLBACK_MESSAGE: &str = "Reviewer failed to output a response.";
+pub const REVIEW_FALLBACK_MESSAGE: &str = "Reviewer failed to output a response.";
 
 /// Format a full review findings block as plain text lines.
 ///

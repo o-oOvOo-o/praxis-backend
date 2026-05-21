@@ -300,7 +300,7 @@ fn create_proxy_socket_dir() -> io::Result<PathBuf> {
 }
 
 fn proxy_socket_parent_dir() -> PathBuf {
-    if let Some(praxis_home) = std::env::var_os("CODEX_HOME") {
+    if let Some(praxis_home) = std::env::var_os("PRAXIS_HOME") {
         let candidate = PathBuf::from(praxis_home).join("tmp");
         if ensure_private_proxy_socket_parent_dir(candidate.as_path()).is_ok() {
             return candidate;

@@ -58,8 +58,6 @@ use praxis_analytics::AnalyticsEventsClient;
 use praxis_analytics::AppInvocation;
 use praxis_analytics::InvocationType;
 use praxis_analytics::build_track_events_context;
-use praxis_app_gateway_protocol::McpServerElicitationRequest;
-use praxis_app_gateway_protocol::McpServerElicitationRequestParams;
 use praxis_exec_server::Environment;
 use praxis_exec_server::EnvironmentManager;
 use praxis_features::FEATURES;
@@ -101,6 +99,8 @@ use praxis_protocol::items::TurnItem;
 use praxis_protocol::items::UserMessageItem;
 use praxis_protocol::items::build_hook_prompt_message;
 use praxis_protocol::mcp::CallToolResult;
+use praxis_protocol::mcp_elicitation::McpServerElicitationRequest;
+use praxis_protocol::mcp_elicitation::McpServerElicitationRequestParams;
 use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::models::format_allow_prefixes;
@@ -254,6 +254,7 @@ use crate::SkillLoadOutcome;
 use crate::SkillMetadata;
 use crate::SkillsManager;
 use crate::agent_os::AgentOsRuntime;
+use crate::agent_os::RuntimeCommandRecord;
 use crate::agent_os::ThreadRegistration;
 use crate::agent_os::coordination_scope_for_session_source;
 use crate::agent_os::profile_for_rank;
@@ -314,6 +315,7 @@ use crate::tools::network_approval::build_blocked_request_observer;
 use crate::tools::network_approval::build_network_policy_decider;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolRouterParams;
+use crate::tools::runtimes::shell::ShellHostProcessCleaner;
 use crate::tools::sandboxing::ApprovalStore;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::turn_timing::TurnTimingState;
@@ -1920,7 +1922,7 @@ impl Session {
 
         agent_os.attach_state_db(state_db_ctx.clone()).await;
         let agent_rank = rank_for_session_source(&session_configuration.session_source);
-        if let Err(err) = agent_os
+        agent_os
             .register_thread(ThreadRegistration {
                 thread_id: conversation_id,
                 coordination_scope: coordination_scope_for_session_source(
@@ -1935,26 +1937,26 @@ impl Session {
                 worktree: None,
                 priority: if agent_rank == 0 { 100 } else { 0 },
             })
-            .await
-        {
-            warn!("failed to register AgentOS thread {conversation_id}: {err}");
-        }
-        if let Err(err) = agent_os
+            .await?;
+        agent_os
             .ensure_bootstrap_task(
                 conversation_id,
                 "Session bootstrap task",
                 vec![session_configuration.cwd.display().to_string()],
             )
-            .await
-        {
-            warn!("failed to create AgentOS bootstrap task for {conversation_id}: {err}");
-        }
+            .await?;
 
         let unified_exec_manager = Arc::new(UnifiedExecProcessManager::new(
             config.background_terminal_max_timeout,
         ));
         agent_os
             .attach_process_cleaner(Arc::clone(&unified_exec_manager))
+            .await;
+        agent_os
+            .attach_process_cleaner(Arc::new(ShellHostProcessCleaner::shell()))
+            .await;
+        agent_os
+            .attach_process_cleaner(Arc::new(ShellHostProcessCleaner::zsh_fork()))
             .await;
 
         let services = SessionServices {
@@ -4205,6 +4207,7 @@ impl Session {
                 None => Vec::new(),
             }
         };
+        let runtime_command_items = self.claim_runtime_command_input_items().await;
         let mailbox_items = {
             let mut mailbox_rx = self.mailbox_rx.lock().await;
             mailbox_rx
@@ -4213,14 +4216,58 @@ impl Session {
                 .map(|mail| mail.to_response_input_item())
                 .collect::<Vec<_>>()
         };
-        if pending_input.is_empty() {
-            mailbox_items
-        } else if mailbox_items.is_empty() {
-            pending_input
-        } else {
-            let mut pending_input = pending_input;
-            pending_input.extend(mailbox_items);
-            pending_input
+
+        let mut combined = Vec::with_capacity(
+            pending_input.len() + runtime_command_items.len() + mailbox_items.len(),
+        );
+        // Priority order matters: explicit pending input first, structured
+        // AgentOS commands second, compatibility mailbox notifications last.
+        // This makes RuntimeCommandBus the task source of truth while keeping
+        // legacy mailbox delivery as a wake-up/notification channel.
+        combined.extend(pending_input);
+        combined.extend(runtime_command_items);
+        combined.extend(mailbox_items);
+        combined
+    }
+
+    async fn claim_runtime_command_input_items(&self) -> Vec<ResponseInputItem> {
+        match self
+            .services
+            .agent_os
+            .claim_runtime_commands_for_turn(self.conversation_id)
+            .await
+        {
+            Ok(commands) => commands
+                .into_iter()
+                .map(Self::runtime_command_to_response_input_item)
+                .collect(),
+            Err(err) => {
+                tracing::warn!(
+                    %err,
+                    thread_id = %self.conversation_id,
+                    "failed to claim AgentOS runtime commands for turn"
+                );
+                Vec::new()
+            }
+        }
+    }
+
+    fn runtime_command_to_response_input_item(command: RuntimeCommandRecord) -> ResponseInputItem {
+        let payload = serde_json::json!({
+            "type": "agentos_runtime_command",
+            "command_id": command.command_id,
+            "command_type": command.command_type.as_str(),
+            "task_id": command.task_id,
+            "from_thread_id": command.from_thread_id.to_string(),
+            "to_thread_id": command.to_thread_id.to_string(),
+            "status": format!("{:?}", command.status),
+            "payload": command.payload,
+        });
+        ResponseInputItem::Message {
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: serde_json::to_string(&payload).unwrap_or_default(),
+            }],
         }
     }
 
@@ -4245,6 +4292,14 @@ impl Session {
 
     pub async fn has_pending_input(&self) -> bool {
         if self.mailbox_rx.lock().await.has_pending() {
+            return true;
+        }
+        if self
+            .services
+            .agent_os
+            .has_claimable_runtime_command_for_thread(self.conversation_id)
+            .await
+        {
             return true;
         }
         let active = self.active_turn.lock().await;
@@ -4916,24 +4971,6 @@ mod handlers {
         communication: InterAgentCommunication,
     ) {
         let trigger_turn = communication.trigger_turn;
-        match sess
-            .services
-            .agent_os
-            .ack_pending_runtime_commands(sess.conversation_id)
-            .await
-        {
-            Ok(acked_commands) => {
-                if !acked_commands.is_empty() {
-                    tracing::debug!(
-                        count = acked_commands.len(),
-                        "AgentOS runtime commands acknowledged by receiver"
-                    );
-                }
-            }
-            Err(err) => {
-                tracing::debug!("failed to acknowledge AgentOS runtime commands: {err}");
-            }
-        }
         sess.enqueue_mailbox_communication(communication);
         if trigger_turn {
             sess.maybe_start_turn_for_pending_work_with_sub_id(sub_id)

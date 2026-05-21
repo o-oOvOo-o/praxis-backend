@@ -3,6 +3,7 @@ use crate::auth::add_auth_headers_to_header_map;
 use crate::common::ResponseEvent;
 use crate::common::ResponseStream;
 use crate::common::ResponsesWsRequest;
+use crate::endpoint::websocket_headers::merge_request_headers;
 use crate::error::ApiError;
 use crate::provider::Provider;
 use crate::rate_limits::parse_rate_limit_event;
@@ -323,21 +324,6 @@ impl<A: AuthProvider> ResponsesWebsocketClient<A> {
             telemetry,
         ))
     }
-}
-
-fn merge_request_headers(
-    provider_headers: &HeaderMap,
-    extra_headers: HeaderMap,
-    default_headers: HeaderMap,
-) -> HeaderMap {
-    let mut headers = provider_headers.clone();
-    headers.extend(extra_headers);
-    for (name, value) in &default_headers {
-        if let http::header::Entry::Vacant(entry) = headers.entry(name) {
-            entry.insert(value.clone());
-        }
-    }
-    headers
 }
 
 async fn connect_websocket(

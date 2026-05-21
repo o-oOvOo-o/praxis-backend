@@ -49,8 +49,12 @@ fn build_js_repl_exec_output(
         stdout: StreamOutput::new(stdout),
         stderr: StreamOutput::new(stderr),
         aggregated_output: StreamOutput::new(aggregated_output),
+        model_output: None,
         duration,
         timed_out: false,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     }
 }
 

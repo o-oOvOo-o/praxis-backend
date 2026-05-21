@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use praxis_app_gateway_protocol::AppInfo;
 use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_protocol::apps::AppInfo;
 use praxis_rmcp_client::ElicitationAction;
 use praxis_tools::DiscoverableTool;
 use praxis_tools::DiscoverableToolAction;

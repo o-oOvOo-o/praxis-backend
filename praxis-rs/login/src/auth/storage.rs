@@ -21,27 +21,27 @@ use tracing::warn;
 
 use crate::token_data::TokenData;
 use once_cell::sync::Lazy;
-use praxis_app_gateway_protocol::AuthMode;
 use praxis_keyring_store::DefaultKeyringStore;
 use praxis_keyring_store::KeyringStore;
-use praxis_utils_home_dir::praxis_shared_praxis_home;
+use praxis_protocol::auth::AuthMode;
+use praxis_utils_home_dir::upstream_codex_read_through_home;
 
 /// Determine where Praxis should store CLI auth credentials.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthCredentialsStoreMode {
     #[default]
-    /// Persist credentials in CODEX_HOME/auth.json.
+    /// Persist credentials in PRAXIS_HOME/auth.json.
     File,
     /// Persist credentials in the keyring. Fail if unavailable.
     Keyring,
-    /// Use keyring when available; otherwise, fall back to a file in CODEX_HOME.
+    /// Use keyring when available; otherwise, fall back to a file in PRAXIS_HOME.
     Auto,
     /// Store credentials in memory only for the current process.
     Ephemeral,
 }
 
-/// Expected structure for $CODEX_HOME/auth.json.
+/// Expected structure for auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 pub struct AuthDotJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -86,7 +86,7 @@ impl FileAuthStorage {
         Self { praxis_home }
     }
 
-    /// Attempt to read and parse the `auth.json` file in the given `CODEX_HOME` directory.
+    /// Attempt to read and parse an `auth.json` file.
     /// Returns the full AuthDotJson structure.
     pub(super) fn try_read_auth_json(&self, auth_file: &Path) -> std::io::Result<AuthDotJson> {
         let mut file = File::open(auth_file)?;
@@ -266,6 +266,45 @@ impl AuthStorageBackend for AutoAuthStorage {
     }
 }
 
+#[derive(Clone, Debug)]
+struct ReadThroughAuthStorage {
+    primary: Arc<dyn AuthStorageBackend>,
+    read_only_fallback: Arc<dyn AuthStorageBackend>,
+}
+
+impl ReadThroughAuthStorage {
+    fn new(
+        primary: Arc<dyn AuthStorageBackend>,
+        read_only_fallback: Arc<dyn AuthStorageBackend>,
+    ) -> Self {
+        Self {
+            primary,
+            read_only_fallback,
+        }
+    }
+}
+
+impl AuthStorageBackend for ReadThroughAuthStorage {
+    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
+        match self.primary.load()? {
+            Some(auth) => Ok(Some(auth)),
+            None => self.read_only_fallback.load(),
+        }
+    }
+
+    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
+        // The Codex bridge is read-through only.  New Praxis login state must
+        // be persisted under PRAXIS_HOME / the Praxis keyring namespace so a
+        // Praxis login/logout can never mutate upstream ~/.codex/auth.json.
+        self.primary.save(auth)
+    }
+
+    fn delete(&self) -> std::io::Result<bool> {
+        // Do not delete read-through Codex credentials.
+        self.primary.delete()
+    }
+}
+
 // A global in-memory store for mapping praxis_home -> AuthDotJson.
 static EPHEMERAL_AUTH_STORE: Lazy<Mutex<HashMap<String, AuthDotJson>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -322,8 +361,23 @@ fn create_auth_storage_with_keyring_store(
     mode: AuthCredentialsStoreMode,
     keyring_store: Arc<dyn KeyringStore>,
 ) -> Arc<dyn AuthStorageBackend> {
-    let praxis_home = resolve_auth_storage_home(praxis_home);
-    create_auth_storage_with_resolved_home(praxis_home, mode, keyring_store)
+    let primary = create_auth_storage_with_resolved_home(
+        praxis_home.clone(),
+        mode,
+        Arc::clone(&keyring_store),
+    );
+
+    if mode == AuthCredentialsStoreMode::Ephemeral {
+        return primary;
+    }
+
+    match upstream_codex_read_through_home(&praxis_home) {
+        Ok(Some(shared_home)) => {
+            let fallback: Arc<dyn AuthStorageBackend> = Arc::new(FileAuthStorage::new(shared_home));
+            Arc::new(ReadThroughAuthStorage::new(primary, fallback))
+        }
+        Ok(None) | Err(_) => primary,
+    }
 }
 
 fn create_auth_storage_with_resolved_home(
@@ -340,13 +394,6 @@ fn create_auth_storage_with_resolved_home(
             Arc::new(AutoAuthStorage::new(praxis_home, keyring_store))
         }
         AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAuthStorage::new(praxis_home)),
-    }
-}
-
-fn resolve_auth_storage_home(praxis_home: PathBuf) -> PathBuf {
-    match praxis_shared_praxis_home(&praxis_home) {
-        Ok(Some(shared_home)) => shared_home,
-        Ok(None) | Err(_) => praxis_home,
     }
 }
 

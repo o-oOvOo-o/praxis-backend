@@ -58,8 +58,13 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::multi_agents::AssignTaskHandler;
     use crate::tools::handlers::multi_agents::CloseAgentHandler;
     use crate::tools::handlers::multi_agents::ListAgentsHandler;
+    use crate::tools::handlers::multi_agents::PollRuntimeCommandsHandler;
+    use crate::tools::handlers::multi_agents::ReadAgentArtifactHandler;
     use crate::tools::handlers::multi_agents::SendMessageHandler;
     use crate::tools::handlers::multi_agents::SpawnAgentHandler;
+    use crate::tools::handlers::multi_agents::SubmitWorkerRequestHandler;
+    use crate::tools::handlers::multi_agents::UpdateRuntimeCommandHandler;
+    use crate::tools::handlers::multi_agents::UpdateWorkerRequestHandler;
     use crate::tools::handlers::multi_agents::WaitAgentHandler;
     use crate::tools::handlers::team::TeamReadHandler;
     use crate::tools::handlers::team::TeamSendMessageHandler;
@@ -172,6 +177,12 @@ pub(crate) fn build_specs_with_discoverable_tools(
             ToolHandlerKind::Plan => {
                 builder.register_handler(handler.name, plan_handler.clone());
             }
+            ToolHandlerKind::PollRuntimeCommands => {
+                builder.register_handler(handler.name, Arc::new(PollRuntimeCommandsHandler));
+            }
+            ToolHandlerKind::ReadAgentArtifact => {
+                builder.register_handler(handler.name, Arc::new(ReadAgentArtifactHandler));
+            }
             ToolHandlerKind::RequestPermissions => {
                 builder.register_handler(handler.name, request_permissions_handler.clone());
             }
@@ -189,6 +200,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
             }
             ToolHandlerKind::SpawnAgent => {
                 builder.register_handler(handler.name, Arc::new(SpawnAgentHandler));
+            }
+            ToolHandlerKind::SubmitWorkerRequest => {
+                builder.register_handler(handler.name, Arc::new(SubmitWorkerRequestHandler));
             }
             ToolHandlerKind::TeamRead => {
                 builder.register_handler(handler.name, Arc::new(TeamReadHandler));
@@ -223,6 +237,12 @@ pub(crate) fn build_specs_with_discoverable_tools(
             }
             ToolHandlerKind::UnifiedExec => {
                 builder.register_handler(handler.name, unified_exec_handler.clone());
+            }
+            ToolHandlerKind::UpdateRuntimeCommand => {
+                builder.register_handler(handler.name, Arc::new(UpdateRuntimeCommandHandler));
+            }
+            ToolHandlerKind::UpdateWorkerRequest => {
+                builder.register_handler(handler.name, Arc::new(UpdateWorkerRequestHandler));
             }
             ToolHandlerKind::ViewImage => {
                 builder.register_handler(handler.name, view_image_handler.clone());

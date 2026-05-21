@@ -30,6 +30,8 @@ use crate::create_list_dir_tool;
 use crate::create_list_mcp_resource_templates_tool;
 use crate::create_list_mcp_resources_tool;
 use crate::create_local_shell_tool;
+use crate::create_poll_runtime_commands_tool;
+use crate::create_read_agent_artifact_tool;
 use crate::create_read_mcp_resource_tool;
 use crate::create_report_agent_job_result_tool;
 use crate::create_request_permissions_tool;
@@ -39,6 +41,7 @@ use crate::create_shell_command_tool;
 use crate::create_shell_tool;
 use crate::create_spawn_agent_tool;
 use crate::create_spawn_agents_on_csv_tool;
+use crate::create_submit_worker_request_tool;
 use crate::create_team_read_tool;
 use crate::create_team_send_message_tool;
 use crate::create_team_task_create_tool;
@@ -48,6 +51,8 @@ use crate::create_test_sync_tool;
 use crate::create_tool_search_tool;
 use crate::create_tool_suggest_tool;
 use crate::create_update_plan_tool;
+use crate::create_update_runtime_command_tool;
+use crate::create_update_worker_request_tool;
 use crate::create_view_image_tool;
 use crate::create_wait_agent_tool;
 use crate::create_wait_tool;
@@ -376,12 +381,54 @@ pub fn build_tool_registry_plan(
             /*supports_parallel_tool_calls*/ false,
             config.code_mode_enabled,
         );
+        plan.push_spec(
+            create_read_agent_artifact_tool(),
+            /*supports_parallel_tool_calls*/ true,
+            config.code_mode_enabled,
+        );
+        plan.push_spec(
+            create_poll_runtime_commands_tool(),
+            /*supports_parallel_tool_calls*/ true,
+            config.code_mode_enabled,
+        );
+        plan.push_spec(
+            create_submit_worker_request_tool(),
+            /*supports_parallel_tool_calls*/ true,
+            config.code_mode_enabled,
+        );
+        plan.push_spec(
+            create_update_worker_request_tool(),
+            /*supports_parallel_tool_calls*/ true,
+            config.code_mode_enabled,
+        );
+        plan.push_spec(
+            create_update_runtime_command_tool(),
+            /*supports_parallel_tool_calls*/ true,
+            config.code_mode_enabled,
+        );
         plan.register_handler("spawn_agent", ToolHandlerKind::SpawnAgent);
         plan.register_handler("send_message", ToolHandlerKind::SendMessage);
         plan.register_handler("assign_task", ToolHandlerKind::AssignTask);
         plan.register_handler("wait_agent", ToolHandlerKind::WaitAgent);
         plan.register_handler("close_agent", ToolHandlerKind::CloseAgent);
         plan.register_handler("list_agents", ToolHandlerKind::ListAgents);
+        plan.register_handler("read_agent_artifact", ToolHandlerKind::ReadAgentArtifact);
+        plan.register_handler(
+            "poll_runtime_commands",
+            ToolHandlerKind::PollRuntimeCommands,
+        );
+        plan.register_handler(
+            "submit_worker_request",
+            ToolHandlerKind::SubmitWorkerRequest,
+        );
+        plan.register_handler(
+            "update_worker_request",
+            ToolHandlerKind::UpdateWorkerRequest,
+        );
+        plan.register_handler(
+            "update_runtime_command",
+            ToolHandlerKind::UpdateRuntimeCommand,
+        );
 
         plan.push_spec(
             create_team_read_tool(),

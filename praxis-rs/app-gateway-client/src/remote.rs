@@ -15,18 +15,19 @@ use std::io::ErrorKind;
 use std::io::Result as IoResult;
 use std::time::Duration;
 
+use crate::AppGatewayClientCommand;
+use crate::AppGatewayCommandEndpoint;
 use crate::AppGatewayEvent;
+use crate::CommandEndpointLabels;
 use crate::RequestResult;
 use crate::SHUTDOWN_TIMEOUT;
 use crate::TypedRequestError;
-use crate::request_method_name;
+use crate::initialize_params_from_metadata;
 use crate::server_notification_requires_delivery;
 use futures::SinkExt;
 use futures::StreamExt;
-use praxis_app_gateway_protocol::ClientInfo;
 use praxis_app_gateway_protocol::ClientNotification;
 use praxis_app_gateway_protocol::ClientRequest;
-use praxis_app_gateway_protocol::InitializeCapabilities;
 use praxis_app_gateway_protocol::InitializeParams;
 use praxis_app_gateway_protocol::JSONRPCError;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
@@ -69,23 +70,12 @@ pub struct RemoteAppGatewayConnectArgs {
 
 impl RemoteAppGatewayConnectArgs {
     fn initialize_params(&self) -> InitializeParams {
-        let capabilities = InitializeCapabilities {
-            experimental_api: self.experimental_api,
-            opt_out_notification_methods: if self.opt_out_notification_methods.is_empty() {
-                None
-            } else {
-                Some(self.opt_out_notification_methods.clone())
-            },
-        };
-
-        InitializeParams {
-            client_info: ClientInfo {
-                name: self.client_name.clone(),
-                title: None,
-                version: self.client_version.clone(),
-            },
-            capabilities: Some(capabilities),
-        }
+        initialize_params_from_metadata(
+            self.client_name.as_str(),
+            self.client_version.as_str(),
+            self.experimental_api,
+            &self.opt_out_notification_methods,
+        )
     }
 }
 
@@ -123,8 +113,70 @@ enum RemoteClientCommand {
     },
 }
 
+impl AppGatewayClientCommand for RemoteClientCommand {
+    fn request_command(
+        request: Box<ClientRequest>,
+        response_tx: oneshot::Sender<IoResult<RequestResult>>,
+    ) -> Self {
+        Self::Request {
+            request,
+            response_tx,
+        }
+    }
+
+    fn notify_command(
+        notification: ClientNotification,
+        response_tx: oneshot::Sender<IoResult<()>>,
+    ) -> Self {
+        Self::Notify {
+            notification,
+            response_tx,
+        }
+    }
+
+    fn resolve_server_request_command(
+        request_id: RequestId,
+        result: JsonRpcResult,
+        response_tx: oneshot::Sender<IoResult<()>>,
+    ) -> Self {
+        Self::ResolveServerRequest {
+            request_id,
+            result,
+            response_tx,
+        }
+    }
+
+    fn reject_server_request_command(
+        request_id: RequestId,
+        error: JSONRPCErrorError,
+        response_tx: oneshot::Sender<IoResult<()>>,
+    ) -> Self {
+        Self::RejectServerRequest {
+            request_id,
+            error,
+            response_tx,
+        }
+    }
+}
+
+fn remote_command_endpoint(
+    command_tx: mpsc::Sender<RemoteClientCommand>,
+) -> AppGatewayCommandEndpoint<RemoteClientCommand> {
+    AppGatewayCommandEndpoint::new(
+        command_tx,
+        CommandEndpointLabels {
+            worker_closed: "remote app-gateway worker channel is closed",
+            request_closed: "remote app-gateway request channel is closed",
+            notify_closed: "remote app-gateway notify channel is closed",
+            resolve_closed: "remote app-gateway resolve channel is closed",
+            reject_closed: "remote app-gateway reject channel is closed",
+        },
+    )
+}
+
 pub struct RemoteAppGatewayClient {
     command_tx: mpsc::Sender<RemoteClientCommand>,
+    command_endpoint: AppGatewayCommandEndpoint<RemoteClientCommand>,
     event_rx: mpsc::Receiver<AppGatewayEvent>,
     pending_events: VecDeque<AppGatewayEvent>,
     worker_handle: tokio::task::JoinHandle<()>,
@@ -132,7 +184,7 @@ pub struct RemoteAppGatewayClient {
 
 #[derive(Clone)]
 pub struct RemoteAppGatewayRequestHandle {
-    command_tx: mpsc::Sender<RemoteClientCommand>,
+    command_endpoint: AppGatewayCommandEndpoint<RemoteClientCommand>,
 }
 
 impl RemoteAppGatewayClient {
@@ -457,8 +509,10 @@ impl RemoteAppGatewayClient {
             }
         });
 
+        let command_endpoint = remote_command_endpoint(command_tx.clone());
         Ok(Self {
             command_tx,
+            command_endpoint,
             event_rx,
             pending_events: pending_events.into(),
             worker_handle,
@@ -467,72 +521,23 @@ impl RemoteAppGatewayClient {
 
     pub fn request_handle(&self) -> RemoteAppGatewayRequestHandle {
         RemoteAppGatewayRequestHandle {
-            command_tx: self.command_tx.clone(),
+            command_endpoint: self.command_endpoint.clone(),
         }
     }
 
     pub async fn request(&self, request: ClientRequest) -> IoResult<RequestResult> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(RemoteClientCommand::Request {
-                request: Box::new(request),
-                response_tx,
-            })
-            .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "remote app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "remote app-gateway request channel is closed",
-            )
-        })?
+        self.command_endpoint.request(request).await
     }
 
     pub async fn request_typed<T>(&self, request: ClientRequest) -> Result<T, TypedRequestError>
     where
         T: DeserializeOwned,
     {
-        let method = request_method_name(&request);
-        let response =
-            self.request(request)
-                .await
-                .map_err(|source| TypedRequestError::Transport {
-                    method: method.clone(),
-                    source,
-                })?;
-        let result = response.map_err(|source| TypedRequestError::Server {
-            method: method.clone(),
-            source,
-        })?;
-        serde_json::from_value(result)
-            .map_err(|source| TypedRequestError::Deserialize { method, source })
+        self.command_endpoint.request_typed(request).await
     }
 
     pub async fn notify(&self, notification: ClientNotification) -> IoResult<()> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(RemoteClientCommand::Notify {
-                notification,
-                response_tx,
-            })
-            .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "remote app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "remote app-gateway notify channel is closed",
-            )
-        })?
+        self.command_endpoint.notify(notification).await
     }
 
     pub async fn resolve_server_request(
@@ -540,26 +545,9 @@ impl RemoteAppGatewayClient {
         request_id: RequestId,
         result: JsonRpcResult,
     ) -> IoResult<()> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(RemoteClientCommand::ResolveServerRequest {
-                request_id,
-                result,
-                response_tx,
-            })
+        self.command_endpoint
+            .resolve_server_request(request_id, result)
             .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "remote app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "remote app-gateway resolve channel is closed",
-            )
-        })?
     }
 
     pub async fn reject_server_request(
@@ -567,26 +555,9 @@ impl RemoteAppGatewayClient {
         request_id: RequestId,
         error: JSONRPCErrorError,
     ) -> IoResult<()> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(RemoteClientCommand::RejectServerRequest {
-                request_id,
-                error,
-                response_tx,
-            })
+        self.command_endpoint
+            .reject_server_request(request_id, error)
             .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "remote app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "remote app-gateway reject channel is closed",
-            )
-        })?
     }
 
     pub async fn next_event(&mut self) -> Option<AppGatewayEvent> {
@@ -599,6 +570,7 @@ impl RemoteAppGatewayClient {
     pub async fn shutdown(self) -> IoResult<()> {
         let Self {
             command_tx,
+            command_endpoint: _command_endpoint,
             event_rx,
             pending_events: _pending_events,
             worker_handle,
@@ -630,45 +602,14 @@ impl RemoteAppGatewayClient {
 
 impl RemoteAppGatewayRequestHandle {
     pub async fn request(&self, request: ClientRequest) -> IoResult<RequestResult> {
-        let (response_tx, response_rx) = oneshot::channel();
-        self.command_tx
-            .send(RemoteClientCommand::Request {
-                request: Box::new(request),
-                response_tx,
-            })
-            .await
-            .map_err(|_| {
-                IoError::new(
-                    ErrorKind::BrokenPipe,
-                    "remote app-gateway worker channel is closed",
-                )
-            })?;
-        response_rx.await.map_err(|_| {
-            IoError::new(
-                ErrorKind::BrokenPipe,
-                "remote app-gateway request channel is closed",
-            )
-        })?
+        self.command_endpoint.request(request).await
     }
 
     pub async fn request_typed<T>(&self, request: ClientRequest) -> Result<T, TypedRequestError>
     where
         T: DeserializeOwned,
     {
-        let method = request_method_name(&request);
-        let response =
-            self.request(request)
-                .await
-                .map_err(|source| TypedRequestError::Transport {
-                    method: method.clone(),
-                    source,
-                })?;
-        let result = response.map_err(|source| TypedRequestError::Server {
-            method: method.clone(),
-            source,
-        })?;
-        serde_json::from_value(result)
-            .map_err(|source| TypedRequestError::Deserialize { method, source })
+        self.command_endpoint.request_typed(request).await
     }
 }
 
@@ -797,7 +738,9 @@ async fn initialize_remote_connection(
     Ok(pending_events)
 }
 
-fn app_gateway_event_from_notification(notification: JSONRPCNotification) -> Option<AppGatewayEvent> {
+fn app_gateway_event_from_notification(
+    notification: JSONRPCNotification,
+) -> Option<AppGatewayEvent> {
     match ServerNotification::try_from(notification) {
         Ok(notification) => Some(AppGatewayEvent::ServerNotification(notification)),
         Err(_) => None,

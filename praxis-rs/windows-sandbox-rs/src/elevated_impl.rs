@@ -135,7 +135,7 @@ mod windows_impl {
         }
     }
 
-    /// Resolves the command runner path, preferring CODEX_HOME/.sandbox/bin.
+    /// Resolves the command runner path, preferring PRAXIS_HOME/.sandbox/bin.
     fn find_runner_exe(praxis_home: &Path, log_dir: Option<&Path>) -> PathBuf {
         resolve_helper_for_launch(HelperExecutable::CommandRunner, praxis_home, log_dir)
     }

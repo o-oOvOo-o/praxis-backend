@@ -1,6 +1,6 @@
 //! Command parsing and safety utilities shared across Praxis crates.
 
-mod shell_detect;
+pub mod shell_detect;
 
 pub mod bash;
 pub mod command_safety;

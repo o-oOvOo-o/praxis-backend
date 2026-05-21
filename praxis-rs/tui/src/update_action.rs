@@ -1,11 +1,11 @@
 /// Update action the CLI should perform after the TUI exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateAction {
-    /// Update via `npm install -g @openai/codex@latest`.
+    /// Update via `npm install -g @openai/praxis@latest`.
     NpmGlobalLatest,
-    /// Update via `bun install -g @openai/codex@latest`.
+    /// Update via `bun install -g @openai/praxis@latest`.
     BunGlobalLatest,
-    /// Update via `brew upgrade codex`.
+    /// Update via `brew upgrade --cask praxis`.
     BrewUpgrade,
 }
 
@@ -13,9 +13,9 @@ impl UpdateAction {
     /// Returns the list of command-line arguments for invoking the update.
     pub fn command_args(self) -> (&'static str, &'static [&'static str]) {
         match self {
-            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "codex"]),
+            UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/praxis"]),
+            UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/praxis"]),
+            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "praxis"]),
         }
     }
 
@@ -30,8 +30,8 @@ impl UpdateAction {
 #[cfg(not(debug_assertions))]
 pub(crate) fn get_update_action() -> Option<UpdateAction> {
     let exe = std::env::current_exe().unwrap_or_default();
-    let managed_by_npm = std::env::var_os("CODEX_MANAGED_BY_NPM").is_some();
-    let managed_by_bun = std::env::var_os("CODEX_MANAGED_BY_BUN").is_some();
+    let managed_by_npm = std::env::var_os("PRAXIS_MANAGED_BY_NPM").is_some();
+    let managed_by_bun = std::env::var_os("PRAXIS_MANAGED_BY_BUN").is_some();
 
     detect_update_action(
         cfg!(target_os = "macos"),
@@ -54,6 +54,10 @@ fn detect_update_action(
         Some(UpdateAction::BunGlobalLatest)
     } else if is_macos
         && (current_exe.starts_with("/opt/homebrew") || current_exe.starts_with("/usr/local"))
+        && current_exe
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "praxis")
     {
         Some(UpdateAction::BrewUpgrade)
     } else {
@@ -97,7 +101,7 @@ mod tests {
         assert_eq!(
             detect_update_action(
                 /*is_macos*/ true,
-                std::path::Path::new("/opt/homebrew/bin/codex"),
+                std::path::Path::new("/opt/homebrew/bin/praxis"),
                 /*managed_by_npm*/ false,
                 /*managed_by_bun*/ false
             ),
@@ -106,11 +110,20 @@ mod tests {
         assert_eq!(
             detect_update_action(
                 /*is_macos*/ true,
-                std::path::Path::new("/usr/local/bin/codex"),
+                std::path::Path::new("/usr/local/bin/praxis"),
                 /*managed_by_npm*/ false,
                 /*managed_by_bun*/ false
             ),
             Some(UpdateAction::BrewUpgrade)
+        );
+        assert_eq!(
+            detect_update_action(
+                /*is_macos*/ true,
+                std::path::Path::new("/opt/homebrew/bin/codex"),
+                /*managed_by_npm*/ false,
+                /*managed_by_bun*/ false
+            ),
+            None
         );
     }
 }

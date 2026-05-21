@@ -8,7 +8,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
-praxis-app-gateway-protocol = { workspace = true }
+anyhow = { workspace = true }
 praxis-execpolicy = { workspace = true }
 praxis-protocol = { workspace = true }
 praxis-utils-absolute-path = { workspace = true }
@@ -27,7 +27,6 @@ tracing = { workspace = true }
 wildmatch = { workspace = true }
 
 [dev-dependencies]
-anyhow = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

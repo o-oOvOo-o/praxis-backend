@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Unified entry point for the Codex CLI.
+// Unified entry point for the Praxis CLI.
 
 import { spawn } from "node:child_process";
 import { existsSync } from "fs";
@@ -75,13 +75,13 @@ if (!platformPackage) {
   throw new Error(`Unsupported target triple: ${targetTriple}`);
 }
 
-const codexBinaryName = process.platform === "win32" ? "codex.exe" : "codex";
+const nativeBinaryName = process.platform === "win32" ? "codex.exe" : "codex";
 const localVendorRoot = path.join(__dirname, "..", "vendor");
 const localBinaryPath = path.join(
   localVendorRoot,
   targetTriple,
   "codex",
-  codexBinaryName,
+  nativeBinaryName,
 );
 
 let vendorRoot;
@@ -95,10 +95,10 @@ try {
     const packageManager = detectPackageManager();
     const updateCommand =
       packageManager === "bun"
-        ? "bun install -g @openai/codex@latest"
-        : "npm install -g @openai/codex@latest";
+        ? "bun install -g @openai/praxis@latest"
+        : "npm install -g @openai/praxis@latest";
     throw new Error(
-      `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
+      `Missing optional dependency ${platformPackage}. Reinstall Praxis: ${updateCommand}`,
     );
   }
 }
@@ -107,15 +107,15 @@ if (!vendorRoot) {
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g @openai/codex@latest"
-      : "npm install -g @openai/codex@latest";
+      ? "bun install -g @openai/praxis@latest"
+      : "npm install -g @openai/praxis@latest";
   throw new Error(
-    `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
+    `Missing optional dependency ${platformPackage}. Reinstall Praxis: ${updateCommand}`,
   );
 }
 
 const archRoot = path.join(vendorRoot, targetTriple);
-const binaryPath = path.join(archRoot, "codex", codexBinaryName);
+const binaryPath = path.join(archRoot, "codex", nativeBinaryName);
 
 // Use an asynchronous spawn instead of spawnSync so that Node is able to
 // respond to signals (e.g. Ctrl-C / SIGINT) while the native binary is
@@ -134,7 +134,7 @@ function getUpdatedPath(newDirs) {
 }
 
 /**
- * Use heuristics to detect the package manager that was used to install Codex
+ * Use heuristics to detect the package manager that was used to install Praxis
  * in order to give the user a hint about how to update it.
  */
 function detectPackageManager() {
@@ -166,10 +166,27 @@ if (existsSync(pathDir)) {
 const updatedPath = getUpdatedPath(additionalDirs);
 
 const env = { ...process.env, PATH: updatedPath };
+
+// Praxis may read selected upstream Codex config/auth through explicit
+// read-through bridges, but it must never inherit Codex state variables into
+// its own native process.  This prevents shell-profile aliases or nested
+// sessions from forcing Praxis to attach to stale ~/.codex state databases or
+// leaking PRAXIS child commands back into upstream Codex threads.
+for (const key of [
+  "CODEX_HOME",
+  "CODEX_HOME_NAMESPACE",
+  "CODEX_SQLITE_HOME",
+  "CODEX_THREAD_ID",
+]) {
+  delete env[key];
+}
+if (!env.PRAXIS_HOME_NAMESPACE) {
+  env.PRAXIS_HOME_NAMESPACE = "praxis";
+}
 const packageManagerEnvVar =
   detectPackageManager() === "bun"
-    ? "CODEX_MANAGED_BY_BUN"
-    : "CODEX_MANAGED_BY_NPM";
+    ? "PRAXIS_MANAGED_BY_BUN"
+    : "PRAXIS_MANAGED_BY_NPM";
 env[packageManagerEnvVar] = "1";
 
 const child = spawn(binaryPath, process.argv.slice(2), {

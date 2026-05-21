@@ -1,11 +1,8 @@
 use crate::events::AppGatewayRpcTransport;
 use crate::events::PraxisRuntimeMetadata;
-use praxis_app_gateway_protocol::ClientRequest;
-use praxis_app_gateway_protocol::ClientResponse;
-use praxis_app_gateway_protocol::InitializeParams;
-use praxis_app_gateway_protocol::RequestId;
-use praxis_app_gateway_protocol::ServerNotification;
+use crate::events::ThreadInitializationMode;
 use praxis_plugin::PluginTelemetryMetadata;
+use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SkillScope;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -50,25 +47,34 @@ pub struct AppInvocation {
     pub invocation_type: Option<InvocationType>,
 }
 
+pub struct AppGatewayInitializeFact {
+    pub client_name: String,
+    pub client_version: Option<String>,
+    pub experimental_api_enabled: Option<bool>,
+}
+
+pub struct ThreadInitializedFact {
+    pub thread_id: String,
+    pub model: String,
+    pub ephemeral: bool,
+    pub thread_source: SessionSource,
+    pub initialization_mode: ThreadInitializationMode,
+    pub created_at: u64,
+}
+
 #[allow(dead_code)]
 pub(crate) enum AnalyticsFact {
     Initialize {
         connection_id: u64,
-        params: InitializeParams,
+        initialize: AppGatewayInitializeFact,
         product_client_id: String,
         runtime: PraxisRuntimeMetadata,
         rpc_transport: AppGatewayRpcTransport,
     },
-    Request {
+    ThreadInitialized {
         connection_id: u64,
-        request_id: RequestId,
-        request: Box<ClientRequest>,
+        thread: ThreadInitializedFact,
     },
-    Response {
-        connection_id: u64,
-        response: Box<ClientResponse>,
-    },
-    Notification(Box<ServerNotification>),
     // Facts that do not naturally exist on the app-gateway protocol surface, or
     // would require non-trivial protocol reshaping on this branch.
     Custom(CustomAnalyticsFact),

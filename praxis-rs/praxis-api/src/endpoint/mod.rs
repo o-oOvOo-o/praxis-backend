@@ -5,3 +5,4 @@ pub mod realtime_websocket;
 pub mod responses;
 pub mod responses_websocket;
 mod session;
+mod websocket_headers;

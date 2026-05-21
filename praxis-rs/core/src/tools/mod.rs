@@ -5,6 +5,8 @@ pub(crate) mod handlers;
 pub mod js_repl;
 pub(crate) mod network_approval;
 pub mod orchestrator;
+mod output_policy;
+pub(crate) mod output_reducer;
 pub mod parallel;
 pub mod registry;
 pub mod router;
@@ -12,6 +14,7 @@ pub mod runtimes;
 pub mod sandboxing;
 pub mod spec;
 
+use self::output_policy::apply_artifact_output_policy;
 use crate::exec::ExecToolCallOutput;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::formatted_truncate_text;
@@ -73,9 +76,10 @@ pub fn format_exec_output_for_model_freeform(
     // round to 1 decimal place
     let duration_seconds = ((exec_output.duration.as_secs_f32()) * 10.0).round() / 10.0;
 
-    let content = build_content_with_timeout(exec_output);
+    let raw_content = build_content_with_timeout(exec_output);
+    let content = apply_artifact_output_policy(exec_output, &raw_content);
 
-    let total_lines = content.lines().count();
+    let total_lines = raw_content.lines().count();
 
     let formatted_output = truncate_text(&content, truncation_policy);
 
@@ -98,6 +102,7 @@ pub fn format_exec_output_str(
     truncation_policy: TruncationPolicy,
 ) -> String {
     let content = build_content_with_timeout(exec_output);
+    let content = apply_artifact_output_policy(exec_output, &content);
 
     // Truncate for model consumption before serialization.
     formatted_truncate_text(&content, truncation_policy)
@@ -105,13 +110,19 @@ pub fn format_exec_output_str(
 
 /// Extracts exec output content and prepends a timeout message if the command timed out.
 fn build_content_with_timeout(exec_output: &ExecToolCallOutput) -> String {
+    let content = exec_output
+        .model_output
+        .as_ref()
+        .unwrap_or(&exec_output.aggregated_output)
+        .text
+        .as_str();
     if exec_output.timed_out {
         format!(
             "command timed out after {} milliseconds\n{}",
             exec_output.duration.as_millis(),
-            exec_output.aggregated_output.text
+            content
         )
     } else {
-        exec_output.aggregated_output.text.clone()
+        content.to_string()
     }
 }

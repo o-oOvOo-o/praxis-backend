@@ -775,8 +775,8 @@ fn build_payload_roots(
 }
 
 fn filter_sensitive_write_roots(mut roots: Vec<PathBuf>, praxis_home: &Path) -> Vec<PathBuf> {
-    // Never grant capability write access to CODEX_HOME or anything under CODEX_HOME/.sandbox,
-    // CODEX_HOME/.sandbox-bin, or CODEX_HOME/.sandbox-secrets. These locations contain sandbox
+    // Never grant capability write access to PRAXIS_HOME or anything under PRAXIS_HOME/.sandbox,
+    // PRAXIS_HOME/.sandbox-bin, or PRAXIS_HOME/.sandbox-secrets. These locations contain sandbox
     // control/state and helper binaries and must remain tamper-resistant.
     let praxis_home_key = canonical_path_key(praxis_home);
     let sbx_dir_key = canonical_path_key(&sandbox_dir(praxis_home));

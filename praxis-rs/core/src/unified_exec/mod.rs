@@ -27,6 +27,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Weak;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use praxis_network_proxy::NetworkProxy;
 use praxis_protocol::models::PermissionProfile;
@@ -65,6 +67,8 @@ pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: usize = 10_000;
 pub(crate) const UNIFIED_EXEC_OUTPUT_MAX_BYTES: usize = 1024 * 1024; // 1 MiB
 pub(crate) const UNIFIED_EXEC_OUTPUT_MAX_TOKENS: usize = UNIFIED_EXEC_OUTPUT_MAX_BYTES / 4;
 pub(crate) const MAX_UNIFIED_EXEC_PROCESSES: usize = 64;
+
+static NEXT_UNIFIED_EXEC_MANAGER_ID: AtomicU64 = AtomicU64::new(1);
 
 // Send a warning message to the models when it reaches this number of processes.
 pub(crate) const WARNING_UNIFIED_EXEC_PROCESSES: usize = 60;
@@ -125,15 +129,22 @@ impl ProcessStore {
 pub(crate) struct UnifiedExecProcessManager {
     process_store: Mutex<ProcessStore>,
     max_write_stdin_yield_time_ms: u64,
+    runtime_owner_id: String,
 }
 
 impl UnifiedExecProcessManager {
     pub(crate) fn new(max_write_stdin_yield_time_ms: u64) -> Self {
+        let manager_id = NEXT_UNIFIED_EXEC_MANAGER_ID.fetch_add(1, Ordering::Relaxed);
         Self {
             process_store: Mutex::new(ProcessStore::default()),
             max_write_stdin_yield_time_ms: max_write_stdin_yield_time_ms
                 .max(MIN_EMPTY_YIELD_TIME_MS),
+            runtime_owner_id: format!("unified_exec-{manager_id}"),
         }
+    }
+
+    pub(crate) fn runtime_owner_id(&self) -> &str {
+        self.runtime_owner_id.as_str()
     }
 }
 

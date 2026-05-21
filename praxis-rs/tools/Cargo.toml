@@ -8,7 +8,6 @@ version.workspace = true
 workspace = true
 
 [dependencies]
-praxis-app-gateway-protocol = { workspace = true }
 praxis-code-mode = { workspace = true }
 praxis-features = { workspace = true }
 praxis-protocol = { workspace = true }

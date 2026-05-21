@@ -12,7 +12,8 @@ use crate::process::ExecBackend;
 use crate::remote_file_system::RemoteFileSystem;
 use crate::remote_process::RemoteProcess;
 
-pub const CODEX_EXEC_SERVER_URL_ENV_VAR: &str = "CODEX_EXEC_SERVER_URL";
+pub const PRAXIS_EXEC_SERVER_URL_ENV_VAR: &str = "PRAXIS_EXEC_SERVER_URL";
+const LEGACY_CODEX_EXEC_SERVER_URL_ENV_VAR: &str = "CODEX_EXEC_SERVER_URL";
 
 pub trait ExecutorEnvironment: Send + Sync {
     fn get_exec_backend(&self) -> Arc<dyn ExecBackend>;
@@ -33,7 +34,11 @@ impl EnvironmentManager {
     }
 
     pub fn from_env() -> Self {
-        Self::new(std::env::var(CODEX_EXEC_SERVER_URL_ENV_VAR).ok())
+        Self::new(
+            std::env::var(PRAXIS_EXEC_SERVER_URL_ENV_VAR)
+                .ok()
+                .or_else(|| std::env::var(LEGACY_CODEX_EXEC_SERVER_URL_ENV_VAR).ok()),
+        )
     }
 
     pub fn exec_server_url(&self) -> Option<&str> {

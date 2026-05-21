@@ -342,7 +342,8 @@ fn handle_server_request(
             send_jsonrpc_response(stdin, request_id, response)
         }
         praxis_app_gateway_protocol::ServerRequest::FileChangeRequestApproval {
-            request_id, ..
+            request_id,
+            ..
         } => {
             let response = praxis_app_gateway_protocol::FileChangeRequestApprovalResponse {
                 decision: FileChangeApprovalDecision::Decline,

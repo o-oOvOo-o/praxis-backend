@@ -14,7 +14,7 @@ present but too old to support
 no-`--argv0` compatibility path for the inner re-exec. If `bwrap` is missing,
 the helper falls back to the vendored bubblewrap path compiled into this
 binary.
-Codex also surfaces a startup warning when `bwrap` is missing so users know it
+Praxis also surfaces a startup warning when `bwrap` is missing so users know it
 is falling back to the vendored helper.
 
 **Current Behavior**
@@ -26,7 +26,7 @@ is falling back to the vendored helper.
   no-`--argv0` compatibility path for the inner re-exec.
 - If `bwrap` is missing, the helper falls back to the vendored bubblewrap
   path.
-- If `bwrap` is missing, Codex also surfaces a startup warning instead of
+- If `bwrap` is missing, Praxis also surfaces a startup warning instead of
   printing directly from the sandbox helper.
 - Legacy Landlock + mount protections remain available as an explicit legacy
   fallback path.

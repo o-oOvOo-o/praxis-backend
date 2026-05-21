@@ -241,16 +241,19 @@ mod spawn_agents_on_csv {
         let db = required_state_db(&session)?;
         let input_path = turn.resolve_path(Some(args.csv_path));
         let input_path_display = input_path.display().to_string();
-        let csv_content = tokio::fs::read_to_string(&input_path)
+        let parse_path = input_path.clone();
+        let (headers, rows) = tokio::task::spawn_blocking(move || parse_csv_file(&parse_path))
             .await
             .map_err(|err| {
                 FunctionCallError::RespondToModel(format!(
-                    "failed to read csv input {input_path_display}: {err}"
+                    "failed to parse csv input {input_path_display}: {err}"
+                ))
+            })?
+            .map_err(|err| {
+                FunctionCallError::RespondToModel(format!(
+                    "failed to parse csv input {input_path_display}: {err}"
                 ))
             })?;
-        let (headers, rows) = parse_csv(csv_content.as_str()).map_err(|err| {
-            FunctionCallError::RespondToModel(format!("failed to parse csv input: {err}"))
-        })?;
         if headers.is_empty() {
             return Err(FunctionCallError::RespondToModel(
                 "csv input must include a header row".to_string(),
@@ -1101,10 +1104,21 @@ fn default_output_csv_path(input_csv_path: &Path, job_id: &str) -> PathBuf {
 }
 
 fn parse_csv(content: &str) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
+    parse_csv_reader(content.as_bytes())
+}
+
+fn parse_csv_file(path: &Path) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
+    let file = std::fs::File::open(path).map_err(|err| err.to_string())?;
+    parse_csv_reader(file)
+}
+
+fn parse_csv_reader<R: std::io::Read>(
+    reader: R,
+) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(true)
         .flexible(true)
-        .from_reader(content.as_bytes());
+        .from_reader(reader);
     let headers_record = reader.headers().map_err(|err| err.to_string())?;
     let mut headers: Vec<String> = headers_record.iter().map(str::to_string).collect();
     if let Some(first) = headers.first_mut() {

@@ -44,7 +44,7 @@ The generated JSON Schema for `config.toml` lives at `praxis-rs/core/config.sche
 
 Codex stores the SQLite-backed state DB under `sqlite_home` (config key) or the
 `CODEX_SQLITE_HOME` environment variable. When unset, WorkspaceWrite sandbox
-sessions default to a temp directory; other modes default to `CODEX_HOME`.
+sessions default to a temp directory; other modes default to `PRAXIS_HOME`.
 
 ## Custom CA Certificates
 

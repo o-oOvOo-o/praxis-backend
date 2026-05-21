@@ -13,9 +13,9 @@ use crate::ToolRegistryPlanAppTool;
 use crate::ToolsConfigParams;
 use crate::WaitAgentTimeoutOptions;
 use crate::mcp_call_tool_result_output_schema;
-use praxis_app_gateway_protocol::AppInfo;
 use praxis_features::Feature;
 use praxis_features::Features;
+use praxis_protocol::apps::AppInfo;
 use praxis_protocol::config_types::WebSearchConfig;
 use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
@@ -103,6 +103,11 @@ fn test_full_toolset_specs_for_gpt5_praxis_unified_exec_web_search() {
         create_wait_agent_tool(wait_agent_timeout_options()),
         create_close_agent_tool(),
         create_list_agents_tool(),
+        create_read_agent_artifact_tool(),
+        create_poll_runtime_commands_tool(),
+        create_submit_worker_request_tool(),
+        create_update_worker_request_tool(),
+        create_update_runtime_command_tool(),
     ];
     for spec in collab_specs {
         expected.insert(spec.name().to_string(), spec);
@@ -159,6 +164,11 @@ fn test_build_specs_collab_tools_enabled() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
     assert_lacks_tool_name(&tools, "spawn_agents_on_csv");
@@ -205,6 +215,11 @@ fn test_build_specs_multi_agent_uses_task_names_and_hides_resume() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
         ],
     );
 
@@ -385,6 +400,11 @@ fn test_build_specs_enable_fanout_enables_agent_jobs_and_collab_tools() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
             "spawn_agents_on_csv",
         ],
     );
@@ -496,6 +516,11 @@ fn test_build_specs_agent_job_worker_tools_enabled() {
             "wait_agent",
             "close_agent",
             "list_agents",
+            "read_agent_artifact",
+            "poll_runtime_commands",
+            "submit_worker_request",
+            "update_worker_request",
+            "update_runtime_command",
             "spawn_agents_on_csv",
             "report_agent_job_result",
         ],

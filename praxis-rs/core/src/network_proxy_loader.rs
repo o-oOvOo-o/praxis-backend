@@ -14,7 +14,6 @@ use crate::exec_policy::load_exec_policy;
 use anyhow::Context;
 use anyhow::Result;
 use async_trait::async_trait;
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::CONFIG_TOML_FILE;
 use praxis_network_proxy::ConfigReloader;
 use praxis_network_proxy::ConfigState;
@@ -25,6 +24,7 @@ use praxis_network_proxy::NetworkProxyState;
 use praxis_network_proxy::build_config_state;
 use praxis_network_proxy::normalize_host;
 use praxis_network_proxy::validate_policy_against_constraints;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -42,7 +42,7 @@ pub async fn build_network_proxy_state_and_reloader() -> Result<(ConfigState, Mt
 }
 
 async fn build_config_state_with_mtimes() -> Result<(ConfigState, Vec<LayerMtime>)> {
-    let praxis_home = find_praxis_home().context("failed to resolve CODEX_HOME")?;
+    let praxis_home = find_praxis_home().context("failed to resolve PRAXIS_HOME")?;
     let cli_overrides = Vec::new();
     let overrides = LoaderOverrides::default();
     let config_layer_stack = load_config_layers_state(

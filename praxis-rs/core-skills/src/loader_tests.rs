@@ -12,7 +12,7 @@ use std::path::Path;
 use tempfile::TempDir;
 use toml::Value as TomlValue;
 
-const REPO_ROOT_CONFIG_DIR_NAME: &str = ".codex";
+const REPO_ROOT_CONFIG_DIR_NAME: &str = ".praxis";
 
 struct TestConfig {
     cwd: PathBuf,
@@ -59,12 +59,12 @@ fn project_layers_for_cwd(cwd: &Path) -> Vec<ConfigLayerEntry> {
     layers
         .into_iter()
         .filter_map(|dir| {
-            let dot_codex = dir.join(REPO_ROOT_CONFIG_DIR_NAME);
-            dot_codex.is_dir().then(|| {
+            let dot_praxis = dir.join(REPO_ROOT_CONFIG_DIR_NAME);
+            dot_praxis.is_dir().then(|| {
                 ConfigLayerEntry::new(
                     ConfigLayerSource::Project {
-                        dot_praxis_folder: AbsolutePathBuf::from_absolute_path(dot_codex)
-                            .expect("project .codex path should be absolute"),
+                        dot_praxis_folder: AbsolutePathBuf::from_absolute_path(dot_praxis)
+                            .expect("project .praxis path should be absolute"),
                     },
                     TomlValue::Table(toml::map::Map::new()),
                 )
@@ -194,11 +194,11 @@ fn skill_roots_from_layer_stack_includes_disabled_project_layers() -> anyhow::Re
     fs::create_dir_all(&user_folder)?;
 
     let project_root = tmp.path().join("repo");
-    let dot_codex = project_root.join(".codex");
-    fs::create_dir_all(&dot_codex)?;
+    let dot_praxis = project_root.join(".praxis");
+    fs::create_dir_all(&dot_praxis)?;
 
     let user_file = AbsolutePathBuf::from_absolute_path(user_folder.join("config.toml"))?;
-    let project_dot_codex = AbsolutePathBuf::from_absolute_path(&dot_codex)?;
+    let project_dot_praxis = AbsolutePathBuf::from_absolute_path(&dot_praxis)?;
 
     let layers = vec![
         ConfigLayerEntry::new(
@@ -207,7 +207,7 @@ fn skill_roots_from_layer_stack_includes_disabled_project_layers() -> anyhow::Re
         ),
         ConfigLayerEntry::new_disabled(
             ConfigLayerSource::Project {
-                dot_praxis_folder: project_dot_codex,
+                dot_praxis_folder: project_dot_praxis,
             },
             TomlValue::Table(toml::map::Map::new()),
             "marked untrusted",
@@ -227,7 +227,7 @@ fn skill_roots_from_layer_stack_includes_disabled_project_layers() -> anyhow::Re
     assert_eq!(
         got,
         vec![
-            (SkillScope::Repo, dot_codex.join("skills")),
+            (SkillScope::Repo, dot_praxis.join("skills")),
             (SkillScope::User, user_folder.join("skills")),
             (
                 SkillScope::User,
@@ -1095,9 +1095,9 @@ async fn namespaces_plugin_skills_using_plugin_name() {
         "sample-search",
         "description: search sample data",
     );
-    fs::create_dir_all(plugin_root.join(".codex-plugin")).unwrap();
+    fs::create_dir_all(plugin_root.join(".praxis-plugin")).unwrap();
     fs::write(
-        plugin_root.join(".codex-plugin/plugin.json"),
+        plugin_root.join(".praxis-plugin/plugin.json"),
         r#"{"name":"sample"}"#,
     )
     .unwrap();

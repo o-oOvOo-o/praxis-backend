@@ -52,18 +52,51 @@ impl ToolHandler for DynamicToolHandler {
         };
 
         let args: Value = parse_arguments(&arguments)?;
-        let response = request_dynamic_tool(&session, turn.as_ref(), call_id, tool_name, args)
+        let arguments_fingerprint_source =
+            serde_json::to_string(&args).unwrap_or_else(|_| arguments.clone());
+        session
+            .services
+            .agent_os
+            .preflight_mutating_tool_intent(
+                session.conversation_id,
+                tool_name.as_str(),
+                arguments_fingerprint_source.as_str(),
+            )
             .await
-            .ok_or_else(|| {
-                FunctionCallError::RespondToModel(
-                    "dynamic tool call was cancelled before receiving a response".to_string(),
-                )
-            })?;
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+        let ticket = session
+            .services
+            .agent_os
+            .request_mutating_tool_ticket(
+                session.conversation_id,
+                tool_name.as_str(),
+                arguments_fingerprint_source.as_str(),
+            )
+            .await
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+        let Some(response) =
+            request_dynamic_tool(&session, turn.as_ref(), call_id, tool_name, args).await
+        else {
+            let _ = session
+                .services
+                .agent_os
+                .finish_tool_ticket(&ticket, /*success*/ false)
+                .await;
+            return Err(FunctionCallError::RespondToModel(
+                "dynamic tool call was cancelled before receiving a response".to_string(),
+            ));
+        };
 
         let DynamicToolResponse {
             content_items,
             success,
         } = response;
+        session
+            .services
+            .agent_os
+            .finish_tool_ticket(&ticket, success)
+            .await
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
         let body = content_items
             .into_iter()
             .map(FunctionCallOutputContentItem::from)

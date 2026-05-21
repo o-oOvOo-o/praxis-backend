@@ -14,7 +14,7 @@
 //! keystore that always encrypts secrets when they are transferred across the bus. If DBus isn't installed the keystore will fall back to the json
 //! file because we don't use the "vendored" feature.
 //!
-//! If the keyring is not available or fails, we fall back to CODEX_HOME/.credentials.json which is consistent with other coding CLI agents.
+//! If the keyring is not available or fails, we fall back to PRAXIS_HOME/.credentials.json which is consistent with other coding CLI agents.
 
 use anyhow::Context;
 use anyhow::Error;
@@ -71,7 +71,7 @@ pub enum OAuthCredentialsStoreMode {
     /// Credentials stored in the keyring will only be readable by Praxis unless the user explicitly grants access via OS-level keyring access.
     #[default]
     Auto,
-    /// CODEX_HOME/.credentials.json
+    /// PRAXIS_HOME/.credentials.json
     /// This file will be readable to Praxis and other applications running as the same user.
     File,
     /// Keyring when available, otherwise fail.
@@ -614,21 +614,21 @@ mod tests {
 
     use praxis_keyring_store::tests::MockKeyringStore;
 
-    struct TempCodexHome {
+    struct TempPraxisHome {
         _guard: MutexGuard<'static, ()>,
         _dir: tempfile::TempDir,
     }
 
-    impl TempCodexHome {
+    impl TempPraxisHome {
         fn new() -> Self {
             static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
             let guard = LOCK
                 .get_or_init(Mutex::default)
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            let dir = tempdir().expect("create CODEX_HOME temp dir");
+            let dir = tempdir().expect("create PRAXIS_HOME temp dir");
             unsafe {
-                std::env::set_var("CODEX_HOME", dir.path());
+                std::env::set_var("PRAXIS_HOME", dir.path());
             }
             Self {
                 _guard: guard,
@@ -637,17 +637,17 @@ mod tests {
         }
     }
 
-    impl Drop for TempCodexHome {
+    impl Drop for TempPraxisHome {
         fn drop(&mut self) {
             unsafe {
-                std::env::remove_var("CODEX_HOME");
+                std::env::remove_var("PRAXIS_HOME");
             }
         }
     }
 
     #[test]
     fn load_oauth_tokens_reads_from_keyring_when_available() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempPraxisHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let expected = tokens.clone();
@@ -664,7 +664,7 @@ mod tests {
 
     #[test]
     fn load_oauth_tokens_falls_back_when_missing_in_keyring() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempPraxisHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let expected = tokens.clone();
@@ -683,7 +683,7 @@ mod tests {
 
     #[test]
     fn load_oauth_tokens_falls_back_when_keyring_errors() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempPraxisHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let expected = tokens.clone();
@@ -704,7 +704,7 @@ mod tests {
 
     #[test]
     fn save_oauth_tokens_prefers_keyring_when_available() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempPraxisHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;
@@ -726,7 +726,7 @@ mod tests {
 
     #[test]
     fn save_oauth_tokens_writes_fallback_when_keyring_fails() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempPraxisHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;
@@ -756,7 +756,7 @@ mod tests {
 
     #[test]
     fn delete_oauth_tokens_removes_all_storage() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempPraxisHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let serialized = serde_json::to_string(&tokens)?;
@@ -778,7 +778,7 @@ mod tests {
 
     #[test]
     fn delete_oauth_tokens_file_mode_removes_keyring_only_entry() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempPraxisHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let serialized = serde_json::to_string(&tokens)?;
@@ -800,7 +800,7 @@ mod tests {
 
     #[test]
     fn delete_oauth_tokens_propagates_keyring_errors() -> Result<()> {
-        let _env = TempCodexHome::new();
+        let _env = TempPraxisHome::new();
         let store = MockKeyringStore::default();
         let tokens = sample_tokens();
         let key = super::compute_store_key(&tokens.server_name, &tokens.url)?;

@@ -31,7 +31,6 @@ use praxis_core::config::ConfigBuilder;
 use praxis_core::config::ConfigOverrides;
 use praxis_core::config::PraxisHomeNamespace;
 use praxis_core::config::current_praxis_home_namespace;
-use praxis_core::config::default_praxis_home_for_namespace;
 use praxis_core::config::find_praxis_home;
 use praxis_core::config::load_config_as_toml_with_cli_overrides;
 use praxis_core::config::resolve_oss_provider;
@@ -622,12 +621,22 @@ struct SessionLookupContext {
 pub(crate) async fn build_praxis_bridge_lookup_config(
     primary_config: &Config,
 ) -> std::io::Result<Config> {
-    let praxis_home = default_praxis_home_for_namespace(PraxisHomeNamespace::Codex)?;
-    ConfigBuilder::default()
-        .praxis_home(praxis_home)
+    let codex_home = praxis_core::config::default_upstream_codex_home()?;
+    let mut bridge_config = ConfigBuilder::default()
+        .praxis_home(codex_home)
         .fallback_cwd(Some(primary_config.cwd.to_path_buf()))
         .build()
-        .await
+        .await?;
+
+    // The Codex source is a read-through lookup/fork bridge.  It may read
+    // ~/.codex/sessions, config, and auth, but all Praxis-generated indexes,
+    // logs, and bridge state must stay under the primary Praxis home.  Without
+    // this override, opening the Codex picker can migrate/write
+    // ~/.codex/state_*.sqlite and corrupt or age-skew upstream Codex state.
+    let bridge_state_home = primary_config.praxis_home.join("codex_bridge_state");
+    bridge_config.sqlite_home = bridge_state_home.clone();
+    bridge_config.log_dir = primary_config.log_dir.join("codex_bridge");
+    Ok(bridge_config)
 }
 
 pub(crate) fn picker_source_switch_enabled(app_gateway_target: &AppGatewayTarget) -> bool {
@@ -1512,6 +1521,10 @@ async fn run_ratatui_app(
         }
     };
 
+    if use_alt_screen {
+        tui.enter_alt_screen()?;
+    }
+
     let app_result = App::run(
         &mut tui,
         AppGatewaySession::new(app_gateway),
@@ -1531,6 +1544,9 @@ async fn run_ratatui_app(
     )
     .await;
 
+    while tui.is_alt_screen_active() {
+        let _ = tui.leave_alt_screen();
+    }
     terminal_restore_guard.restore_silently();
     // Mark the end of the recorded session.
     session_log::log_session_end();

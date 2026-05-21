@@ -1,9 +1,11 @@
 use super::ShellRequest;
+use crate::agent_os::ManagedCommandSpan;
 use crate::error::PraxisErr;
 use crate::error::SandboxErr;
 use crate::exec::ExecCapturePolicy;
 use crate::exec::ExecExpiration;
 use crate::exec::ExecToolCallOutput;
+use crate::exec::SpawnObserver;
 use crate::exec::is_likely_sandbox_denied;
 use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::review_approval_request;
@@ -91,6 +93,7 @@ pub(super) async fn try_run_zsh_fork(
     attempt: &SandboxAttempt<'_>,
     ctx: &ToolCtx,
     command: &[String],
+    command_span: Option<&ManagedCommandSpan>,
 ) -> Result<Option<ExecToolCallOutput>, ToolError> {
     let Some(shell_zsh_path) = ctx.session.services.shell_zsh_path.as_ref() else {
         tracing::warn!("ZshFork backend specified, but shell_zsh_path is not configured.");
@@ -132,6 +135,7 @@ pub(super) async fn try_run_zsh_fork(
         file_system_sandbox_policy,
         network_sandbox_policy,
         windows_restricted_token_filesystem_overlay: _windows_restricted_token_filesystem_overlay,
+        raw_output_spool: _raw_output_spool,
         arg0,
     } = sandbox_exec_request;
     let ParsedShellCommand { script, login, .. } = extract_shell_script(&command)?;
@@ -156,6 +160,7 @@ pub(super) async fn try_run_zsh_fork(
         sandbox_policy_cwd: ctx.turn.cwd.to_path_buf(),
         praxis_linux_sandbox_exe: ctx.turn.praxis_linux_sandbox_exe.clone(),
         use_legacy_landlock: ctx.turn.features.use_legacy_landlock(),
+        agent_os_command_span: command_span.cloned(),
     };
     let main_execve_wrapper_exe = ctx
         .session
@@ -254,6 +259,7 @@ pub(crate) async fn prepare_unified_exec_zsh_fork(
         sandbox_policy_cwd: ctx.turn.cwd.to_path_buf(),
         praxis_linux_sandbox_exe: ctx.turn.praxis_linux_sandbox_exe.clone(),
         use_legacy_landlock: ctx.turn.features.use_legacy_landlock(),
+        agent_os_command_span: None,
     };
     let escalation_policy = CoreShellActionProvider {
         policy: Arc::clone(&exec_policy),
@@ -669,6 +675,7 @@ struct CoreShellCommandExecutor {
     sandbox_policy_cwd: PathBuf,
     praxis_linux_sandbox_exe: Option<PathBuf>,
     use_legacy_landlock: bool,
+    agent_os_command_span: Option<ManagedCommandSpan>,
 }
 
 struct PrepareSandboxedExecParams<'a> {
@@ -700,7 +707,7 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
             }
         }
 
-        let result = crate::sandboxing::execute_exec_request_with_after_spawn(
+        let result = crate::sandboxing::execute_exec_request_with_spawn_observer(
             crate::sandboxing::ExecRequest {
                 command: self.command.clone(),
                 cwd: self.cwd.clone(),
@@ -715,10 +722,11 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
                 file_system_sandbox_policy: self.file_system_sandbox_policy.clone(),
                 network_sandbox_policy: self.network_sandbox_policy,
                 windows_restricted_token_filesystem_overlay: None,
+                raw_output_spool: self.agent_os_command_span.is_some(),
                 arg0: self.arg0.clone(),
             },
             /*stdout_stream*/ None,
-            after_spawn,
+            compose_spawn_observer(after_spawn, self.agent_os_command_span.clone()),
         )
         .await?;
 
@@ -795,6 +803,40 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
 
         Ok(prepared)
     }
+}
+
+fn compose_spawn_observer(
+    after_spawn: Option<Box<dyn FnOnce() + Send>>,
+    agent_os_command_span: Option<ManagedCommandSpan>,
+) -> Option<SpawnObserver> {
+    if after_spawn.is_none() && agent_os_command_span.is_none() {
+        return None;
+    }
+    Some(Box::new(move |process_id| {
+        let future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = Box::pin(
+            async move {
+                if let Some(after_spawn) = after_spawn {
+                    after_spawn();
+                }
+                let Some(command_span) = agent_os_command_span else {
+                    return;
+                };
+                let Some(process_id) = process_id.and_then(|value| i32::try_from(value).ok())
+                else {
+                    tracing::warn!(
+                        "AgentOS zsh-fork process registry could not attach missing or oversized pid"
+                    );
+                    return;
+                };
+                if let Err(err) = command_span.attach_process(process_id).await {
+                    tracing::warn!(
+                        "failed to attach AgentOS zsh-fork process id {process_id}: {err}"
+                    );
+                }
+            },
+        );
+        future
+    }))
 }
 
 impl CoreShellCommandExecutor {
@@ -904,8 +946,12 @@ fn map_exec_result(
         stdout: crate::exec::StreamOutput::new(result.stdout.clone()),
         stderr: crate::exec::StreamOutput::new(result.stderr.clone()),
         aggregated_output: crate::exec::StreamOutput::new(result.output.clone()),
+        model_output: None,
         duration: result.duration,
         timed_out: result.timed_out,
+
+        agent_os_artifact_id: None,
+        raw_output_spool: None,
     };
 
     if result.timed_out {

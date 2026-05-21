@@ -22,10 +22,12 @@ use praxis_feedback::CodexFeedback;
 use praxis_protocol::protocol::SessionSource;
 use toml::Value as TomlValue;
 
-pub use praxis_app_gateway_runtime::in_process::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY as DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
+pub use praxis_app_gateway_runtime::in_process::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
 
-pub type NativeGatewayRequestResult =
-    std::result::Result<praxis_app_gateway_protocol::Result, praxis_app_gateway_protocol::JSONRPCErrorError>;
+pub type NativeGatewayRequestResult = std::result::Result<
+    praxis_app_gateway_protocol::Result,
+    praxis_app_gateway_protocol::JSONRPCErrorError,
+>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeGatewayAttachParams {
@@ -119,9 +121,9 @@ impl From<praxis_app_gateway_runtime::in_process::InProcessServerEvent> for Nati
             praxis_app_gateway_runtime::in_process::InProcessServerEvent::ServerNotification(
                 notification,
             ) => Self::Notification(notification),
-            praxis_app_gateway_runtime::in_process::InProcessServerEvent::ServerRequest(request) => {
-                Self::ServerRequest(request)
-            }
+            praxis_app_gateway_runtime::in_process::InProcessServerEvent::ServerRequest(
+                request,
+            ) => Self::ServerRequest(request),
         }
     }
 }
@@ -138,7 +140,10 @@ impl NativeRuntimeHandle {
         self.inner.request(request).await
     }
 
-    pub fn notify(&self, notification: praxis_app_gateway_protocol::ClientNotification) -> IoResult<()> {
+    pub fn notify(
+        &self,
+        notification: praxis_app_gateway_protocol::ClientNotification,
+    ) -> IoResult<()> {
         self.inner.notify(notification)
     }
 
@@ -186,7 +191,10 @@ impl NativeRuntimeSender {
         self.inner.request(request).await
     }
 
-    pub fn notify(&self, notification: praxis_app_gateway_protocol::ClientNotification) -> IoResult<()> {
+    pub fn notify(
+        &self,
+        notification: praxis_app_gateway_protocol::ClientNotification,
+    ) -> IoResult<()> {
         self.inner.notify(notification)
     }
 
@@ -208,7 +216,8 @@ impl NativeRuntimeSender {
 }
 
 pub async fn start_native_runtime(args: NativeRuntimeStartArgs) -> IoResult<NativeRuntimeHandle> {
-    let inner = praxis_app_gateway_runtime::in_process::start(args.into_current_start_args()).await?;
+    let inner =
+        praxis_app_gateway_runtime::in_process::start(args.into_current_start_args()).await?;
     Ok(NativeRuntimeHandle { inner })
 }
 

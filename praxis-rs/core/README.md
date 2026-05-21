@@ -1,6 +1,6 @@
 # praxis-core
 
-This crate implements the business logic for Codex. It is designed to be used by the various Codex UIs written in Rust.
+This crate implements the business logic for Praxis. It is designed to be used by the various Praxis UIs written in Rust.
 
 ## Dependencies
 

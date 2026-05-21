@@ -1,4 +1,5 @@
 use super::ShellRequest;
+use crate::agent_os::ManagedCommandSpan;
 use crate::exec::ExecToolCallOutput;
 use crate::sandboxing::ExecRequest;
 use crate::tools::runtimes::unified_exec::UnifiedExecRequest;
@@ -13,6 +14,15 @@ pub(crate) struct PreparedUnifiedExecSpawn {
     pub(crate) spawn_lifecycle: SpawnLifecycleHandle,
 }
 
+/// Cheap capability check for the shell-command zsh-fork backend.
+///
+/// The shell runtime calls this before acquiring an AgentOS execution ticket.
+/// Unsupported zsh-fork paths therefore fall back without briefly holding
+/// command leases or creating abandoned command records.
+pub(crate) fn can_run_shell_command(ctx: &ToolCtx) -> bool {
+    imp::can_run_shell_command(ctx)
+}
+
 /// Runs the zsh-fork shell-command backend when this request should be handled
 /// by executable-level escalation instead of the default shell runtime.
 ///
@@ -23,8 +33,9 @@ pub(crate) async fn maybe_run_shell_command(
     attempt: &SandboxAttempt<'_>,
     ctx: &ToolCtx,
     command: &[String],
+    command_span: &ManagedCommandSpan,
 ) -> Result<Option<ExecToolCallOutput>, ToolError> {
-    imp::maybe_run_shell_command(req, attempt, ctx, command).await
+    imp::maybe_run_shell_command(req, attempt, ctx, command, command_span).await
 }
 
 /// Prepares unified exec to launch through the zsh-fork backend when the
@@ -46,8 +57,10 @@ pub(crate) async fn maybe_prepare_unified_exec(
 #[cfg(unix)]
 mod imp {
     use super::*;
+    use crate::shell::ShellType;
     use crate::tools::runtimes::shell::unix_escalation;
     use crate::unified_exec::SpawnLifecycle;
+    use praxis_protocol::config_types::Feature;
     use praxis_shell_escalation::ESCALATE_SOCKET_ENV_VAR;
     use praxis_shell_escalation::EscalationSession;
 
@@ -71,13 +84,20 @@ mod imp {
         }
     }
 
+    pub(super) fn can_run_shell_command(ctx: &ToolCtx) -> bool {
+        ctx.session.services.shell_zsh_path.is_some()
+            && ctx.session.features().enabled(Feature::ShellZshFork)
+            && matches!(ctx.session.user_shell().shell_type, ShellType::Zsh)
+    }
+
     pub(super) async fn maybe_run_shell_command(
         req: &ShellRequest,
         attempt: &SandboxAttempt<'_>,
         ctx: &ToolCtx,
         command: &[String],
+        command_span: &ManagedCommandSpan,
     ) -> Result<Option<ExecToolCallOutput>, ToolError> {
-        unix_escalation::try_run_zsh_fork(req, attempt, ctx, command).await
+        unix_escalation::try_run_zsh_fork(req, attempt, ctx, command, Some(command_span)).await
     }
 
     pub(super) async fn maybe_prepare_unified_exec(
@@ -113,13 +133,18 @@ mod imp {
 mod imp {
     use super::*;
 
+    pub(super) fn can_run_shell_command(_ctx: &ToolCtx) -> bool {
+        false
+    }
+
     pub(super) async fn maybe_run_shell_command(
         req: &ShellRequest,
         attempt: &SandboxAttempt<'_>,
         ctx: &ToolCtx,
         command: &[String],
+        command_span: &ManagedCommandSpan,
     ) -> Result<Option<ExecToolCallOutput>, ToolError> {
-        let _ = (req, attempt, ctx, command);
+        let _ = (req, attempt, ctx, command, command_span);
         Ok(None)
     }
 

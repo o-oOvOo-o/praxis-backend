@@ -43,7 +43,7 @@ pub static CODEX_ALIASES_TEMP_DIR: Option<TestCodexAliasesGuard> = {
         .unwrap();
     let previous_praxis_home = std::env::var_os(CODEX_HOME_ENV_VAR);
     // arg0_dispatch() creates helper links under CODEX_HOME/tmp. Point it at a
-    // test-owned temp dir so startup never mutates the developer's real ~/.codex.
+    // test-owned temp dir so startup never mutates the developer's real ~/.praxis.
     //
     // Safety: #[ctor] runs before tests start, so no test threads exist yet.
     unsafe {

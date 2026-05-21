@@ -38,5 +38,5 @@ pub use auth::login_with_api_key;
 pub use auth::logout;
 pub use auth::read_openai_api_key_from_env;
 pub use auth::save_auth;
-pub use praxis_app_gateway_protocol::AuthMode;
+pub use praxis_protocol::auth::AuthMode;
 pub use token_data::TokenData;

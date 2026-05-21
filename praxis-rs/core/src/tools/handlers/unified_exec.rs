@@ -7,10 +7,8 @@ use crate::tools::context::ExecCommandToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
-use crate::tools::handlers::apply_granted_turn_permissions;
 use crate::tools::handlers::apply_patch::intercept_apply_patch;
-use crate::tools::handlers::implicit_granted_permissions;
-use crate::tools::handlers::normalize_and_validate_additional_permissions;
+use crate::tools::handlers::managed_execution::prepare_managed_execution_permissions;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::handlers::parse_arguments_with_base_path;
 use crate::tools::handlers::resolve_workdir_base_path;
@@ -23,7 +21,6 @@ use crate::unified_exec::UnifiedExecContext;
 use crate::unified_exec::UnifiedExecProcessManager;
 use crate::unified_exec::WriteStdinRequest;
 use async_trait::async_trait;
-use praxis_features::Feature;
 use praxis_otel::SessionTelemetry;
 use praxis_otel::metrics::names::TOOL_CALL_UNIFIED_EXEC_METRIC;
 use praxis_protocol::models::PermissionProfile;
@@ -194,7 +191,6 @@ impl ToolHandler for UnifiedExecHandler {
                     &workdir,
                 )
                 .await;
-                let process_id = manager.allocate_process_id().await;
                 let command = get_command(
                     &args,
                     session.user_shell(),
@@ -216,96 +212,21 @@ impl ToolHandler for UnifiedExecHandler {
                     ..
                 } = args;
 
-                let exec_permission_approvals_enabled =
-                    session.features().enabled(Feature::ExecPermissionApprovals);
-                let requested_additional_permissions = additional_permissions.clone();
-                let effective_additional_permissions = apply_granted_turn_permissions(
-                    context.session.as_ref(),
-                    sandbox_permissions,
-                    additional_permissions,
-                )
-                .await;
-                let additional_permissions_allowed = exec_permission_approvals_enabled
-                    || (session.features().enabled(Feature::RequestPermissionsTool)
-                        && effective_additional_permissions.permissions_preapproved);
-
-                // Sticky turn permissions have already been approved, so they should
-                // continue through the normal exec approval flow for the command.
-                if effective_additional_permissions
-                    .sandbox_permissions
-                    .requests_sandbox_override()
-                    && !effective_additional_permissions.permissions_preapproved
-                    && !matches!(
-                        context.turn.approval_policy.value(),
-                        praxis_protocol::protocol::AskForApproval::OnRequest
-                    )
-                {
-                    let approval_policy = context.turn.approval_policy.value();
-                    manager.release_process_id(process_id).await;
-                    return Err(FunctionCallError::RespondToModel(format!(
-                        "approval policy is {approval_policy:?}; reject command — you cannot ask for escalated permissions if the approval policy is {approval_policy:?}"
-                    )));
-                }
-
                 let workdir = workdir.filter(|value| !value.is_empty());
 
                 let workdir = workdir.map(|dir| context.turn.resolve_path(Some(dir)));
                 let cwd = workdir.clone().unwrap_or(cwd);
-                let normalized_additional_permissions = match implicit_granted_permissions(
+                let managed_permissions = prepare_managed_execution_permissions(
+                    context.session.as_ref(),
                     sandbox_permissions,
-                    requested_additional_permissions.as_ref(),
-                    &effective_additional_permissions,
+                    additional_permissions,
+                    context.turn.approval_policy.value(),
+                    &cwd,
                 )
-                .map_or_else(
-                    || {
-                        normalize_and_validate_additional_permissions(
-                            additional_permissions_allowed,
-                            context.turn.approval_policy.value(),
-                            effective_additional_permissions.sandbox_permissions,
-                            effective_additional_permissions.additional_permissions,
-                            effective_additional_permissions.permissions_preapproved,
-                            &cwd,
-                        )
-                    },
-                    |permissions| Ok(Some(permissions)),
-                ) {
-                    Ok(normalized) => normalized,
-                    Err(err) => {
-                        manager.release_process_id(process_id).await;
-                        return Err(FunctionCallError::RespondToModel(err));
-                    }
-                };
-
-                let ticket = match session
-                    .services
-                    .agent_os
-                    .request_command_ticket(session.conversation_id, &command, &cwd)
-                    .await
-                {
-                    Ok(ticket) => ticket,
-                    Err(err) => {
-                        manager.release_process_id(process_id).await;
-                        return Err(FunctionCallError::RespondToModel(err.to_string()));
-                    }
-                };
-                let command_record_id = match session
-                    .services
-                    .agent_os
-                    .begin_managed_command(
-                        &ticket,
-                        command_for_display.clone(),
-                        &command,
-                        cwd.clone(),
-                        Some(process_id),
-                    )
-                    .await
-                {
-                    Ok(command_id) => command_id,
-                    Err(err) => {
-                        manager.release_process_id(process_id).await;
-                        return Err(FunctionCallError::RespondToModel(err.to_string()));
-                    }
-                };
+                .await?;
+                let effective_additional_permissions = managed_permissions.effective;
+                let normalized_additional_permissions =
+                    managed_permissions.normalized_additional_permissions;
 
                 let intercept_result = intercept_apply_patch(
                     &command,
@@ -320,18 +241,6 @@ impl ToolHandler for UnifiedExecHandler {
                 .await;
                 match intercept_result {
                     Ok(Some(output)) => {
-                        manager.release_process_id(process_id).await;
-                        let text = output.log_preview();
-                        let _ = session
-                            .services
-                            .agent_os
-                            .finish_managed_command(
-                                command_record_id.as_str(),
-                                Some(0),
-                                text.as_bytes(),
-                                /*release_leases*/ true,
-                            )
-                            .await;
                         return Ok(ExecCommandToolOutput {
                             event_call_id: String::new(),
                             chunk_id: String::new(),
@@ -346,22 +255,12 @@ impl ToolHandler for UnifiedExecHandler {
                     }
                     Ok(None) => {}
                     Err(err) => {
-                        manager.release_process_id(process_id).await;
-                        let error_text = err.to_string();
-                        let _ = session
-                            .services
-                            .agent_os
-                            .finish_managed_command(
-                                command_record_id.as_str(),
-                                Some(-1),
-                                error_text.as_bytes(),
-                                /*release_leases*/ true,
-                            )
-                            .await;
                         return Err(err);
                     }
                 }
 
+                let process_id = manager.allocate_process_id().await;
+                let runtime_owner_id = manager.runtime_owner_id().to_string();
                 emit_unified_exec_tty_metric(&turn.session_telemetry, tty);
                 let exec_result = manager
                     .exec_command(
@@ -390,8 +289,9 @@ impl ToolHandler for UnifiedExecHandler {
                             let _ = session
                                 .services
                                 .agent_os
-                                .checkpoint_managed_command(
-                                    command_record_id.as_str(),
+                                .checkpoint_managed_process(
+                                    process_id,
+                                    Some(runtime_owner_id.as_str()),
                                     response.raw_output.as_slice(),
                                 )
                                 .await;
@@ -399,11 +299,11 @@ impl ToolHandler for UnifiedExecHandler {
                             let _ = session
                                 .services
                                 .agent_os
-                                .finish_managed_command(
-                                    command_record_id.as_str(),
+                                .finish_managed_process(
+                                    process_id,
+                                    Some(runtime_owner_id.as_str()),
                                     response.exit_code,
                                     response.raw_output.as_slice(),
-                                    /*release_leases*/ true,
                                 )
                                 .await;
                         }
@@ -414,11 +314,11 @@ impl ToolHandler for UnifiedExecHandler {
                         let _ = session
                             .services
                             .agent_os
-                            .finish_managed_command(
-                                command_record_id.as_str(),
+                            .finish_managed_process(
+                                process_id,
+                                Some(runtime_owner_id.as_str()),
                                 Some(-1),
                                 error_text.as_bytes(),
-                                /*release_leases*/ true,
                             )
                             .await;
                         return Err(FunctionCallError::RespondToModel(format!(
@@ -454,7 +354,11 @@ impl ToolHandler for UnifiedExecHandler {
                     let _ = session
                         .services
                         .agent_os
-                        .checkpoint_managed_process(args.session_id, response.raw_output.as_slice())
+                        .checkpoint_managed_process(
+                            args.session_id,
+                            Some(manager.runtime_owner_id()),
+                            response.raw_output.as_slice(),
+                        )
                         .await;
                 } else {
                     let _ = session
@@ -462,6 +366,7 @@ impl ToolHandler for UnifiedExecHandler {
                         .agent_os
                         .finish_managed_process(
                             args.session_id,
+                            Some(manager.runtime_owner_id()),
                             response.exit_code,
                             response.raw_output.as_slice(),
                         )

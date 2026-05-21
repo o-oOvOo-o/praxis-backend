@@ -463,12 +463,12 @@ async fn sandbox_blocks_git_and_praxis_writes_inside_writable_root() {
 
     let tmpdir = tempfile::tempdir().expect("tempdir");
     let dot_git = tmpdir.path().join(".git");
-    let dot_codex = tmpdir.path().join(".codex");
+    let dot_praxis = tmpdir.path().join(".praxis");
     std::fs::create_dir_all(&dot_git).expect("create .git");
-    std::fs::create_dir_all(&dot_codex).expect("create .codex");
+    std::fs::create_dir_all(&dot_praxis).expect("create .praxis");
 
     let git_target = dot_git.join("config");
-    let praxis_target = dot_codex.join("config.toml");
+    let praxis_target = dot_praxis.join("config.toml");
 
     let git_output = expect_denied(
         run_cmd_result_with_writable_roots(
@@ -499,7 +499,7 @@ async fn sandbox_blocks_git_and_praxis_writes_inside_writable_root() {
             /*network_access*/ true,
         )
         .await,
-        ".codex write should be denied under bubblewrap",
+        ".praxis write should be denied under bubblewrap",
     );
     assert_ne!(git_output.exit_code, 0);
     assert_ne!(praxis_output.exit_code, 0);
@@ -518,10 +518,10 @@ async fn sandbox_blocks_praxis_symlink_replacement_attack() {
     let decoy = tmpdir.path().join("decoy-codex");
     std::fs::create_dir_all(&decoy).expect("create decoy dir");
 
-    let dot_codex = tmpdir.path().join(".codex");
-    symlink(&decoy, &dot_codex).expect("create .codex symlink");
+    let dot_praxis = tmpdir.path().join(".praxis");
+    symlink(&decoy, &dot_praxis).expect("create .praxis symlink");
 
-    let praxis_target = dot_codex.join("config.toml");
+    let praxis_target = dot_praxis.join("config.toml");
 
     let praxis_output = expect_denied(
         run_cmd_result_with_writable_roots(
@@ -536,7 +536,7 @@ async fn sandbox_blocks_praxis_symlink_replacement_attack() {
             /*network_access*/ true,
         )
         .await,
-        ".codex symlink replacement should be denied",
+        ".praxis symlink replacement should be denied",
     );
     assert_ne!(praxis_output.exit_code, 0);
 }

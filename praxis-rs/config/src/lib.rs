@@ -11,6 +11,7 @@ mod project_root_markers;
 mod requirements_exec_policy;
 mod skills_config;
 mod state;
+mod toml_edit_utils;
 pub mod types;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
@@ -78,3 +79,5 @@ pub use state::ConfigLayerEntry;
 pub use state::ConfigLayerStack;
 pub use state::ConfigLayerStackOrdering;
 pub use state::LoaderOverrides;
+pub use toml_edit_utils::toml_value_to_edit_item;
+pub use toml_edit_utils::toml_value_to_edit_value;

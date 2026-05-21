@@ -8,12 +8,12 @@ use crate::model::SkillToolDependency;
 use crate::system::system_cache_root_dir;
 use dirs::home_dir;
 use dunce::canonicalize as canonicalize_path;
-use praxis_app_gateway_protocol::ConfigLayerSource;
 use praxis_config::ConfigLayerStack;
 use praxis_config::ConfigLayerStackOrdering;
 use praxis_config::default_project_root_markers;
 use praxis_config::merge_toml_values;
 use praxis_config::project_root_markers_from_config;
+use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_protocol::protocol::Product;
 use praxis_protocol::protocol::SkillScope;
 use praxis_utils_absolute_path::AbsolutePathBufGuard;
@@ -249,7 +249,7 @@ fn skill_roots_from_layer_stack_inner(
                     });
                 }
 
-                // Embedded system skills are cached under `$CODEX_HOME/skills/.system` and are a
+                // Embedded system skills are cached under `$PRAXIS_HOME/skills/.system` and are a
                 // special case (not a config layer).
                 roots.push(SkillRoot {
                     path: system_cache_root_dir(config_folder.as_path()),
@@ -257,8 +257,8 @@ fn skill_roots_from_layer_stack_inner(
                 });
             }
             ConfigLayerSource::System { .. } => {
-                // The system config layer lives under `/etc/codex/` on Unix, so treat
-                // `/etc/codex/skills` as admin-scoped skills.
+                // The system config layer lives under `/etc/praxis/` on Unix, so treat
+                // `/etc/praxis/skills` as admin-scoped skills.
                 roots.push(SkillRoot {
                     path: config_folder.as_path().join(SKILLS_DIR_NAME),
                     scope: SkillScope::Admin,
