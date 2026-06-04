@@ -3,6 +3,7 @@ use praxis_protocol::ThreadId;
 use praxis_protocol::models::ShellCommandToolCallParams;
 use praxis_protocol::models::ShellToolCallParams;
 use serde_json::Value as JsonValue;
+use std::path::Path;
 use std::sync::Arc;
 
 use crate::exec::ExecCapturePolicy;
@@ -36,9 +37,31 @@ use crate::tools::sandboxing::ToolCtx;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::ExecCommandSource;
 use praxis_shell_command::is_safe_command::is_known_safe_command;
+use praxis_shell_command::parse_command::extract_shell_command;
 use praxis_tools::ShellCommandBackendConfig;
 
 pub struct ShellHandler;
+
+const SOURCE_OVERWRITE_GUARD_MESSAGE: &str = "shell command blocked: this looks like a direct shell overwrite of a source/project file. Use the apply_patch tool for code edits instead.";
+const SOURCE_WRITE_EXTENSIONS: &[&str] = &[
+    ".rs", ".ts", ".tsx", ".js", ".jsx", ".py", ".toml", ".json", ".yaml", ".yml", ".css", ".html",
+    ".sql", ".cs", ".cpp", ".cxx", ".cc", ".c", ".h", ".hpp", ".wgsl", ".glsl", ".hlsl", ".vue",
+    ".svelte", ".md", ".sh", ".ps1", ".psm1", ".bat", ".cmd", ".go", ".rb", ".php", ".java", ".kt",
+    ".swift", ".lua", ".xml", ".ini", ".ron",
+];
+const SOURCE_WRITE_EXCLUDED_DIRS: &[&str] = &[
+    "\\target\\",
+    "/target/",
+    "\\node_modules\\",
+    "/node_modules/",
+    "\\dist\\",
+    "/dist/",
+    "\\build\\",
+    "/build/",
+    "\\.next\\",
+    "/.next/",
+];
+const LARGE_SOURCE_WRITE_COMMAND_BYTES: usize = 4096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ShellCommandBackend {
@@ -70,6 +93,144 @@ fn shell_command_payload_command(payload: &ToolPayload) -> Option<String> {
     parse_arguments::<ShellCommandToolCallParams>(arguments)
         .ok()
         .map(|params| params.command)
+}
+
+fn guard_shell_source_overwrite(command: &[String], cwd: &Path) -> Result<(), FunctionCallError> {
+    for text in shell_guard_texts(command) {
+        if shell_text_requires_apply_patch(&text, cwd) {
+            return Err(FunctionCallError::RespondToModel(
+                SOURCE_OVERWRITE_GUARD_MESSAGE.to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn shell_guard_texts(command: &[String]) -> Vec<String> {
+    let mut texts = Vec::new();
+    if let Some((_, script)) = extract_shell_command(command) {
+        texts.push(script.to_string());
+    }
+    let rendered = praxis_shell_command::parse_command::shlex_join(command);
+    if texts.iter().all(|text| text != &rendered) {
+        texts.push(rendered);
+    }
+    texts
+}
+
+fn shell_text_requires_apply_patch(text: &str, cwd: &Path) -> bool {
+    let lower = text.to_ascii_lowercase();
+    if !contains_source_file_reference(&lower, cwd) {
+        return false;
+    }
+
+    let writes_with_file_cmdlet = lower.contains("set-content")
+        || lower.contains("out-file")
+        || lower.contains("writealltext")
+        || lower.contains("writealllines")
+        || lower.contains("writeallbytes")
+        || lower.contains("tee-object");
+    let writes_with_program_api = lower.contains("write_text")
+        || lower.contains("writefilesync")
+        || lower.contains("writefile(")
+        || lower.contains("createwritestream")
+        || lower.contains("std::fs::write")
+        || (lower.contains("open(")
+            && (lower.contains("'w'")
+                || lower.contains("\"w\"")
+                || lower.contains(",'w'")
+                || lower.contains(", \"w\"")));
+    let uses_shell_redirection = redirects_to_source_file(&lower);
+    let large_pipe_write = text.len() >= LARGE_SOURCE_WRITE_COMMAND_BYTES
+        && lower.contains("|")
+        && (lower.contains("set-content") || lower.contains("out-file"));
+
+    writes_with_file_cmdlet || writes_with_program_api || uses_shell_redirection || large_pipe_write
+}
+
+fn redirects_to_source_file(lower: &str) -> bool {
+    redirection_targets(lower).any(|target| {
+        !target_in_excluded_dir(target)
+            && SOURCE_WRITE_EXTENSIONS
+                .iter()
+                .any(|extension| target.contains(extension))
+    })
+}
+
+fn redirection_targets(text: &str) -> impl Iterator<Item = &str> {
+    let mut targets = Vec::new();
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'>' {
+            index += 1;
+            continue;
+        }
+        let mut cursor = index + 1;
+        if cursor < bytes.len() && bytes[cursor] == b'>' {
+            cursor += 1;
+        }
+        if cursor < bytes.len() && bytes[cursor] == b'&' {
+            index = cursor + 1;
+            continue;
+        }
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() {
+            break;
+        }
+        let quote = matches!(bytes[cursor], b'\'' | b'"').then_some(bytes[cursor]);
+        if quote.is_some() {
+            cursor += 1;
+        }
+        let start = cursor;
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if Some(byte) == quote {
+                break;
+            }
+            if quote.is_none()
+                && (byte.is_ascii_whitespace() || matches!(byte, b';' | b'|' | b'&' | b')'))
+            {
+                break;
+            }
+            cursor += 1;
+        }
+        if cursor > start {
+            targets.push(&text[start..cursor]);
+        }
+        index = cursor.saturating_add(1);
+    }
+    targets.into_iter()
+}
+
+fn target_in_excluded_dir(target: &str) -> bool {
+    SOURCE_WRITE_EXCLUDED_DIRS
+        .iter()
+        .any(|excluded| target.contains(excluded))
+}
+
+fn contains_source_file_reference(lower: &str, cwd: &Path) -> bool {
+    if SOURCE_WRITE_EXCLUDED_DIRS
+        .iter()
+        .any(|excluded| lower.contains(excluded))
+    {
+        return false;
+    }
+
+    let cwd = cwd.to_string_lossy().to_ascii_lowercase();
+    if !cwd.is_empty()
+        && SOURCE_WRITE_EXCLUDED_DIRS
+            .iter()
+            .any(|excluded| cwd.contains(excluded))
+    {
+        return false;
+    }
+
+    SOURCE_WRITE_EXTENSIONS
+        .iter()
+        .any(|extension| lower.contains(extension))
 }
 
 struct RunExecLikeArgs {
@@ -438,6 +599,8 @@ impl ShellHandler {
             Ok(None) => {}
             Err(err) => return Err(err),
         }
+
+        guard_shell_source_overwrite(&exec_params.command, &exec_params.cwd)?;
 
         let source = ExecCommandSource::Agent;
         let emitter = ToolEmitter::shell(

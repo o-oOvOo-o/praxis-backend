@@ -341,6 +341,8 @@ impl ToolOrchestrator {
                         .windows_sandbox_private_desktop,
                 };
 
+                tool.preflight(req, tool_ctx).await?;
+
                 // Second attempt.
                 let (retry_result, retry_deferred_network_approval) = Self::run_attempt(
                     tool,

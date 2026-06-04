@@ -424,6 +424,10 @@ client_request_definitions! {
         params: api::ThreadSetNameParams,
         response: api::ThreadSetNameResponse,
     },
+    ThreadRegenerateName => "thread/name/regenerate" {
+        params: api::ThreadRegenerateNameParams,
+        response: api::ThreadRegenerateNameResponse,
+    },
     ThreadMetadataUpdate => "thread/metadata/update" {
         params: api::ThreadMetadataUpdateParams,
         response: api::ThreadMetadataUpdateResponse,
@@ -461,46 +465,15 @@ client_request_definitions! {
         params: api::ThreadReadParams,
         response: api::ThreadReadResponse,
     },
-    #[experimental("team/create")]
-    TeamCreate => "team/create" {
-        params: api::TeamCreateParams,
-        response: api::TeamCreateResponse,
+    #[experimental("thread/control/acquire")]
+    ThreadControlAcquire => "thread/control/acquire" {
+        params: api::ThreadControlAcquireParams,
+        response: api::ThreadControlAcquireResponse,
     },
-    #[experimental("team/read")]
-    TeamRead => "team/read" {
-        params: api::TeamReadParams,
-        response: api::TeamReadResponse,
-    },
-    #[experimental("team/delete")]
-    TeamDelete => "team/delete" {
-        params: api::TeamDeleteParams,
-        response: api::TeamDeleteResponse,
-    },
-    #[experimental("team/teammate/create")]
-    TeamTeammateCreate => "team/teammate/create" {
-        params: api::TeamTeammateCreateParams,
-        inspect_params: true,
-        response: api::TeamTeammateCreateResponse,
-    },
-    #[experimental("team/teammate/message")]
-    TeamTeammateMessage => "team/teammate/message" {
-        params: api::TeamTeammateMessageParams,
-        response: api::TeamTeammateMessageResponse,
-    },
-    #[experimental("team/task/create")]
-    TeamTaskCreate => "team/task/create" {
-        params: api::TeamTaskCreateParams,
-        response: api::TeamTaskCreateResponse,
-    },
-    #[experimental("team/task/list")]
-    TeamTaskList => "team/task/list" {
-        params: api::TeamTaskListParams,
-        response: api::TeamTaskListResponse,
-    },
-    #[experimental("team/task/update")]
-    TeamTaskUpdate => "team/task/update" {
-        params: api::TeamTaskUpdateParams,
-        response: api::TeamTaskUpdateResponse,
+    #[experimental("thread/control/release")]
+    ThreadControlRelease => "thread/control/release" {
+        params: api::ThreadControlReleaseParams,
+        response: api::ThreadControlReleaseResponse,
     },
     SkillsList => "skills/list" {
         params: api::SkillsListParams,
@@ -1072,19 +1045,12 @@ server_notification_definitions! {
     ThreadArchived => "thread/archived" (api::ThreadArchivedNotification),
     ThreadUnarchived => "thread/unarchived" (api::ThreadUnarchivedNotification),
     ThreadClosed => "thread/closed" (api::ThreadClosedNotification),
-    #[experimental("team/updated")]
-    TeamUpdated => "team/updated" (api::TeamUpdatedNotification),
-    #[experimental("team/deleted")]
-    TeamDeleted => "team/deleted" (api::TeamDeletedNotification),
-    #[experimental("team/teammate/updated")]
-    TeamTeammateUpdated => "team/teammate/updated" (api::TeamTeammateUpdatedNotification),
-    #[experimental("team/task/updated")]
-    TeamTaskUpdated => "team/task/updated" (api::TeamTaskUpdatedNotification),
-    #[experimental("team/mailbox/updated")]
-    TeamMailboxUpdated => "team/mailbox/updated" (api::TeamMailboxUpdatedNotification),
     SkillsChanged => "skills/changed" (api::SkillsChangedNotification),
     ThreadNameUpdated => "thread/name/updated" (api::ThreadNameUpdatedNotification),
     ThreadTokenUsageUpdated => "thread/tokenUsage/updated" (api::ThreadTokenUsageUpdatedNotification),
+    #[experimental("thread/control/changed")]
+    ThreadControlChanged => "thread/control/changed" (api::ThreadControlChangedNotification),
+    ThreadGoalUpdated => "thread/goal/updated" (api::ThreadGoalUpdatedNotification),
     TurnStarted => "turn/started" (api::TurnStartedNotification),
     HookStarted => "hook/started" (api::HookStartedNotification),
     TurnCompleted => "turn/completed" (api::TurnCompletedNotification),
@@ -1406,6 +1372,7 @@ mod tests {
                     summary: None,
                     ephemeral: true,
                     model_provider: "openai".to_string(),
+                    model: Some("gpt-5".to_string()),
                     created_at: 1,
                     updated_at: 2,
                     status: api::ThreadStatus::Idle,
@@ -1419,6 +1386,8 @@ mod tests {
                     name: None,
                     total_cost_usd: None,
                     last_cost_usd: None,
+                    token_usage: None,
+                    control_state: None,
                     selfwork_plan_path: None,
                     turns: Vec::new(),
                 },

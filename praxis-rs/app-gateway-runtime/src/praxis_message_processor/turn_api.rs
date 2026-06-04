@@ -56,7 +56,6 @@ use crate::error_code::INTERNAL_ERROR_CODE;
 use crate::error_code::INVALID_PARAMS_ERROR_CODE;
 use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::outgoing_message::ConnectionRequestId;
-use crate::thread_status::resolve_thread_status;
 
 impl PraxisMessageProcessor {
     /// If a client sends `developer_instructions: null` during a mode switch,
@@ -723,12 +722,11 @@ impl PraxisMessageProcessor {
                     self.thread_watch_manager
                         .upsert_thread_silently(thread.clone())
                         .await;
-                    thread.status = resolve_thread_status(
-                        self.thread_watch_manager
-                            .loaded_status_for_thread(&thread.id)
-                            .await,
-                        /*has_in_progress_turn*/ false,
-                    );
+                    self.apply_thread_runtime_state(
+                        &mut thread,
+                        /*has_live_in_progress_turn*/ false,
+                    )
+                    .await;
                     let notif = ThreadStartedNotification { thread };
                     self.outgoing
                         .send_server_notification(ServerNotification::ThreadStarted(notif))

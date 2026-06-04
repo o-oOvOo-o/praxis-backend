@@ -3,6 +3,7 @@ use crate::agent::registry::AgentMetadata;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::resolve_role_config;
+#[cfg(test)]
 use crate::agent::status::is_final;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
@@ -11,6 +12,8 @@ use crate::find_thread_path_by_id_str;
 use crate::praxis_thread::ThreadConfigSnapshot;
 use crate::rollout::RolloutRecorder;
 use crate::session_prefix::format_subagent_context_line;
+#[cfg(test)]
+use crate::session_prefix::format_subagent_notification_message;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::thread_manager::ThreadManagerState;
 use crate::thread_rollout_truncation::truncate_rollout_to_last_n_fork_turns;
@@ -588,9 +591,6 @@ impl AgentControl {
         } else {
             state.send_op(agent_id, Op::Shutdown {}).await
         };
-        if let Ok(thread) = state.get_thread(agent_id).await {
-            Self::sync_closed_team_teammate_for_thread(thread.as_ref(), agent_id).await;
-        }
         let _ = state.remove_thread(&agent_id).await;
         self.state.release_spawned_thread(agent_id);
         result
@@ -648,6 +648,57 @@ impl AgentControl {
 
     pub(crate) fn get_agent_metadata(&self, agent_id: ThreadId) -> Option<AgentMetadata> {
         self.state.agent_metadata_for_thread(agent_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn maybe_start_completion_watcher(
+        &self,
+        child_thread_id: ThreadId,
+        session_source: Option<SessionSource>,
+        child_reference: String,
+        child_agent_path: Option<AgentPath>,
+    ) {
+        let Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id, ..
+        })) = session_source
+        else {
+            return;
+        };
+
+        let control = self.clone();
+        tokio::spawn(async move {
+            let status = match control.subscribe_status(child_thread_id).await {
+                Ok(mut status_rx) => loop {
+                    let status = status_rx.borrow().clone();
+                    if is_final(&status) {
+                        break status;
+                    }
+                    if status_rx.changed().await.is_err() {
+                        break AgentStatus::NotFound;
+                    }
+                },
+                Err(PraxisErr::ThreadNotFound(_)) => AgentStatus::NotFound,
+                Err(err) => AgentStatus::Errored(err.to_string()),
+            };
+
+            let author = child_agent_path
+                .clone()
+                .or_else(|| AgentPath::try_from(child_reference.as_str()).ok())
+                .unwrap_or_else(AgentPath::root);
+            let recipient = parent_agent_path_from_child_path(child_agent_path.as_ref())
+                .unwrap_or_else(AgentPath::root);
+            let message = format_subagent_notification_message(child_reference.as_str(), &status);
+            let communication = InterAgentCommunication::new(
+                author,
+                recipient,
+                Vec::new(),
+                message,
+                /*trigger_turn*/ false,
+            );
+            let _ = control
+                .send_inter_agent_communication(parent_thread_id, communication)
+                .await;
+        });
     }
 
     pub(crate) async fn get_agent_config_snapshot(
@@ -1103,37 +1154,6 @@ impl AgentControl {
 
         Ok(descendants)
     }
-
-    async fn sync_closed_team_teammate_for_thread(
-        thread: &crate::PraxisThread,
-        thread_id: ThreadId,
-    ) {
-        let Some(state_db_ctx) = thread.state_db() else {
-            return;
-        };
-        let thread_id_text = thread_id.to_string();
-        let Ok(Some(teammate)) = state_db_ctx
-            .get_team_teammate_by_thread_id(thread_id_text.as_str())
-            .await
-        else {
-            return;
-        };
-        if let Err(err) = state_db_ctx
-            .set_team_teammate_status(
-                teammate.team_id.as_str(),
-                teammate.teammate_id.as_str(),
-                praxis_state::TeamTeammateStatus::Closed,
-                Some(thread_id_text.as_str()),
-                None,
-            )
-            .await
-        {
-            warn!(
-                "failed to mark teammate {} in team {} closed for thread {}: {err}",
-                teammate.teammate_id, teammate.team_id, thread_id
-            );
-        }
-    }
 }
 
 fn merge_live_agent_metadata(
@@ -1249,6 +1269,13 @@ fn agent_matches_prefix(agent_path: Option<&AgentPath>, prefix: &AgentPath) -> b
                 .strip_prefix(prefix.as_str())
                 .is_some_and(|suffix| suffix.starts_with('/'))
     })
+}
+
+#[cfg(test)]
+fn parent_agent_path_from_child_path(child_agent_path: Option<&AgentPath>) -> Option<AgentPath> {
+    child_agent_path
+        .and_then(|path| path.as_str().rsplit_once('/').map(|(parent, _)| parent))
+        .and_then(|parent| AgentPath::try_from(parent).ok())
 }
 
 pub(crate) fn render_input_preview(initial_operation: &Op) -> String {

@@ -31,6 +31,19 @@ pub enum ToolUserShellType {
     Cmd,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ToolWireProfile {
+    Responses,
+    Claude,
+    Common,
+}
+
+impl ToolWireProfile {
+    fn uses_function_wrapped_freeform_tools(self) -> bool {
+        matches!(self, Self::Claude | Self::Common)
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum UnifiedExecShellMode {
     Direct,
@@ -258,6 +271,13 @@ impl ToolsConfig {
 
     pub fn with_web_search_config(mut self, web_search_config: Option<WebSearchConfig>) -> Self {
         self.web_search_config = web_search_config;
+        self
+    }
+
+    pub fn with_tool_wire_profile(mut self, profile: ToolWireProfile) -> Self {
+        if self.apply_patch_tool_type.is_none() && profile.uses_function_wrapped_freeform_tools() {
+            self.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+        }
         self
     }
 

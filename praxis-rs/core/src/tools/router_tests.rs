@@ -5,11 +5,13 @@ use crate::praxis::make_session_and_context;
 use crate::tools::context::ToolPayload;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use praxis_protocol::models::ResponseItem;
+use praxis_protocol::openai_models::ApplyPatchToolType;
 
 use super::ToolCall;
 use super::ToolCallSource;
 use super::ToolRouter;
 use super::ToolRouterParams;
+use super::freeform_input_from_function_arguments;
 
 #[tokio::test]
 async fn js_repl_tools_only_blocks_direct_tool_calls() -> anyhow::Result<()> {
@@ -160,5 +162,84 @@ async fn build_tool_call_uses_namespace_for_registry_name() -> anyhow::Result<()
         other => panic!("expected function payload, got {other:?}"),
     }
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn function_wrapped_freeform_keeps_function_output_type() -> anyhow::Result<()> {
+    let (session, mut turn) = make_session_and_context().await;
+    let cwd = tempfile::tempdir()?;
+    turn.cwd = praxis_utils_absolute_path::AbsolutePathBuf::try_from(cwd.path().to_path_buf())?;
+    turn.tools_config.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
+
+    let session = Arc::new(session);
+    let turn = Arc::new(turn);
+    let router = ToolRouter::from_config(
+        &turn.tools_config,
+        ToolRouterParams {
+            mcp_tools: None,
+            app_tools: None,
+            discoverable_tools: None,
+            dynamic_tools: turn.dynamic_tools.as_slice(),
+        },
+    );
+    let patch = "*** Begin Patch\n*** Add File: done.txt\n+ok\n*** End Patch\n";
+    let call = ToolCall {
+        tool_name: "apply_patch".to_string(),
+        tool_namespace: None,
+        call_id: "call-common-apply-patch".to_string(),
+        payload: ToolPayload::Function {
+            arguments: serde_json::json!({ "input": patch }).to_string(),
+        },
+    };
+    let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
+
+    let result = router
+        .dispatch_tool_call_with_code_mode_result(
+            session,
+            turn,
+            tracker,
+            call,
+            ToolCallSource::Direct,
+        )
+        .await?;
+    let response = result.into_response();
+
+    match response {
+        praxis_protocol::models::ResponseInputItem::FunctionCallOutput { call_id, output } => {
+            assert_eq!(call_id, "call-common-apply-patch");
+            assert!(output.success.unwrap_or(false));
+            assert!(output.to_string().contains("Success. Updated"));
+        }
+        other => panic!("expected FunctionCallOutput, got {other:?}"),
+    }
+    assert_eq!(
+        std::fs::read_to_string(cwd.path().join("done.txt"))?,
+        "ok\n"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn function_wrapped_freeform_uses_input_field() -> anyhow::Result<()> {
+    let input = freeform_input_from_function_arguments(
+        "exec",
+        r#"{"input":"console.log('hello from common provider')"}"#,
+    )?;
+
+    assert_eq!(input, "console.log('hello from common provider')");
+    Ok(())
+}
+
+#[test]
+fn function_wrapped_apply_patch_accepts_patch_alias() -> anyhow::Result<()> {
+    let patch = "*** Begin Patch\n*** End Patch\n";
+    let input = freeform_input_from_function_arguments(
+        "apply_patch",
+        &serde_json::json!({ "patch": patch }).to_string(),
+    )?;
+
+    assert_eq!(input, patch);
     Ok(())
 }

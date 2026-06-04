@@ -1,6 +1,7 @@
 pub(crate) mod agent_jobs;
 pub mod apply_patch;
 mod dynamic;
+mod goal;
 mod js_repl;
 mod list_dir;
 mod managed_execution;
@@ -12,12 +13,12 @@ mod plan;
 mod request_permissions;
 mod request_user_input;
 mod shell;
-pub(crate) mod team;
 mod test_sync;
 mod tool_search;
 mod tool_suggest;
 pub(crate) mod unified_exec;
 mod view_image;
+mod web_search;
 
 use praxis_sandboxing::policy_transforms::intersect_permission_profiles;
 use praxis_sandboxing::policy_transforms::merge_permission_profiles;
@@ -35,6 +36,9 @@ pub(crate) use crate::tools::code_mode::CodeModeExecuteHandler;
 pub(crate) use crate::tools::code_mode::CodeModeWaitHandler;
 pub use apply_patch::ApplyPatchHandler;
 pub use dynamic::DynamicToolHandler;
+pub use goal::CreateGoalHandler;
+pub use goal::GetGoalHandler;
+pub use goal::UpdateGoalHandler;
 pub use js_repl::JsReplHandler;
 pub use js_repl::JsReplResetHandler;
 pub use list_dir::ListDirHandler;
@@ -52,6 +56,7 @@ pub use tool_search::ToolSearchHandler;
 pub use tool_suggest::ToolSuggestHandler;
 pub use unified_exec::UnifiedExecHandler;
 pub use view_image::ViewImageHandler;
+pub use web_search::WebSearchHandler;
 
 fn parse_arguments<T>(arguments: &str) -> Result<T, FunctionCallError>
 where

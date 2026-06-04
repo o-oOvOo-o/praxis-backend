@@ -13,6 +13,7 @@ use crate::app_gateway_session::AppGatewaySession;
 use crate::app_gateway_session::AppGatewayStartedThread;
 use crate::app_gateway_session::ThreadSessionState;
 use crate::app_gateway_session::app_gateway_rate_limit_snapshots_to_core;
+use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::FeedbackAudience;
 use crate::bottom_pane::McpServerElicitationFormRequest;
@@ -48,12 +49,14 @@ use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::renderable::Renderable;
 use crate::resume_picker::SessionSelection;
 use crate::resume_picker::SessionTarget;
+use crate::status::format_tokens_compact;
 #[cfg(test)]
 use crate::test_support::PathBufExt;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::tui_config;
 use crate::tui_config::TuiRuntimeConfig;
+use crate::ui_language::UiLanguage;
 use crate::update_action::UpdateAction;
 use crate::version::PRAXIS_CLI_VERSION;
 use color_eyre::eyre::Result;
@@ -61,6 +64,7 @@ use color_eyre::eyre::WrapErr;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use crossterm::event::KeyModifiers;
 use crossterm::event::MouseButton;
 use crossterm::event::MouseEvent;
 use crossterm::event::MouseEventKind;
@@ -87,14 +91,24 @@ use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::SkillsListResponse;
+use praxis_app_gateway_protocol::Thread;
+use praxis_app_gateway_protocol::ThreadActiveFlag;
+use praxis_app_gateway_protocol::ThreadControlState;
+use praxis_app_gateway_protocol::ThreadControllerKind;
 use praxis_app_gateway_protocol::ThreadItem;
+use praxis_app_gateway_protocol::ThreadListParams;
+use praxis_app_gateway_protocol::ThreadListResponse;
 use praxis_app_gateway_protocol::ThreadLoadedListParams;
 use praxis_app_gateway_protocol::ThreadRollbackResponse;
+use praxis_app_gateway_protocol::ThreadSortKey;
+use praxis_app_gateway_protocol::ThreadSourceKind;
+use praxis_app_gateway_protocol::ThreadStatus;
 use praxis_app_gateway_protocol::Turn;
 use praxis_app_gateway_protocol::TurnError as AppGatewayTurnError;
 use praxis_app_gateway_protocol::TurnStatus;
 use praxis_config::types::ApprovalsReviewer;
 use praxis_config::types::ModelAvailabilityNuxConfig;
+use praxis_core::ModelProviderInfo;
 use praxis_core::config::Config;
 use praxis_core::config::ConfigBuilder;
 use praxis_core::config::ConfigOverrides;
@@ -131,14 +145,24 @@ use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SkillErrorInfo;
 use praxis_protocol::protocol::TokenUsage;
+use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_terminal_detection::user_agent;
 use praxis_utils_absolute_path::AbsolutePathBuf;
+use ratatui::layout::Rect;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use ratatui::widgets::Wrap;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
@@ -156,6 +180,8 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::task::JoinHandle;
 use toml::Value as TomlValue;
+use unicode_width::UnicodeWidthChar;
+use unicode_width::UnicodeWidthStr;
 use uuid::Uuid;
 mod agent_navigation;
 mod app_gateway_adapter;
@@ -171,6 +197,7 @@ use self::pending_interactive_replay::PendingInteractiveReplayState;
 
 const EXTERNAL_EDITOR_HINT: &str = "Save and close external editor to continue.";
 const THREAD_EVENT_CHANNEL_CAPACITY: usize = 32768;
+const APP_GATEWAY_EVENT_DRAIN_BUDGET: usize = 512;
 
 enum ThreadInteractiveRequest {
     Approval(ApprovalRequest),
@@ -916,12 +943,7 @@ async fn handle_model_migration_prompt_if_needed(
                 config.model = Some(target_model.clone());
                 config.model_reasoning_effort = mapped_effort;
                 let provider_id = config.model_provider_id.clone();
-                app_event_tx.send(AppEvent::UpdateModelSelection {
-                    model: target_model.clone(),
-                    provider_id: provider_id.clone(),
-                });
-                app_event_tx.send(AppEvent::UpdateReasoningEffort(mapped_effort));
-                app_event_tx.send(AppEvent::PersistModelSelection {
+                app_event_tx.send(AppEvent::ApplyModelSelection {
                     model: target_model.clone(),
                     provider_id,
                     provider: None,
@@ -993,6 +1015,8 @@ pub(crate) struct App {
     feedback_audience: FeedbackAudience,
     remote_app_gateway_url: Option<String>,
     remote_app_gateway_auth_token: Option<String>,
+    app_gateway_reconnect_pending: bool,
+    last_app_gateway_reconnect_attempt: Option<Instant>,
     /// Set when the user confirms an update; propagated on exit.
     pub(crate) pending_update_action: Option<UpdateAction>,
 
@@ -1018,10 +1042,15 @@ pub(crate) struct App {
     primary_session_configured: Option<ThreadSessionState>,
     pending_primary_events: VecDeque<ThreadBufferedEvent>,
     pending_app_gateway_requests: PendingAppGatewayRequests,
+    center: CenterState,
+    center_observed_thread_ids: HashSet<ThreadId>,
+    mouse: MouseInteractionState,
 }
 
 pub(crate) const TRANSCRIPT_SCROLLBACK_BACKFILL_CELL_BUDGET: usize = 64;
 pub(crate) const TRANSCRIPT_SCROLLBACK_BACKFILL_LINE_BUDGET: usize = 512;
+const CENTER_PANEL_BG: Color = Color::Rgb(12, 14, 13);
+const APP_GATEWAY_RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub(crate) struct TranscriptScrollbackBackfill {
@@ -1035,6 +1064,886 @@ struct WindowsSandboxState {
     setup_started_at: Option<Instant>,
     // One-shot suppression of the next world-writable scan after user confirmation.
     skip_world_writable_scan_once: bool,
+}
+
+#[derive(Debug, Default)]
+struct CenterState {
+    enabled: bool,
+    rows: Vec<CenterThreadRow>,
+    usage_by_thread: HashMap<ThreadId, TokenUsageInfo>,
+    pinned_thread_ids: HashSet<ThreadId>,
+    search_query: String,
+    search_focused: bool,
+    selected: usize,
+    list_scroll: usize,
+    chat_scroll_from_bottom: usize,
+    last_refresh_at: Option<Instant>,
+    refresh_in_flight: bool,
+    refresh_request_id: u64,
+    pending_refresh_cursor: Option<String>,
+    next_cursor: Option<String>,
+    list_area: Option<Rect>,
+    chat_area: Option<Rect>,
+    toolbar_new_area: Option<Rect>,
+    toolbar_search_area: Option<Rect>,
+    overlay: CenterOverlayState,
+}
+
+#[derive(Debug, Clone)]
+struct CenterThreadRow {
+    thread_id: ThreadId,
+    path: Option<PathBuf>,
+    name: String,
+    preview: String,
+    cwd: PathBuf,
+    status: ThreadStatus,
+    control_state: Option<ThreadControlState>,
+    source: String,
+    updated_at: i64,
+    token_usage: Option<TokenUsageInfo>,
+}
+
+#[derive(Debug, Default)]
+struct MouseInteractionState {
+    down: Option<MouseDownState>,
+    drag: Option<MouseDragSelection>,
+    selection: Option<MouseDragSelection>,
+    hover_center_thread_index: Option<usize>,
+    hover_center_target: Option<CenterMouseTarget>,
+    center_list_snapshot: Option<PaneTextSnapshot>,
+    chat_snapshot: Option<PaneTextSnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MousePane {
+    CenterList,
+    Chat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CenterMouseTarget {
+    NewThread,
+    Search,
+    Thread(usize),
+    LoadMore,
+    ContextMenu(CenterMenuAction),
+    RenameSave,
+    RenameCancel,
+    ArchiveConfirm,
+    ArchiveCancel,
+    DeleteConfirm,
+    DeleteCancel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CenterMenuAction {
+    Open,
+    TogglePin,
+    Rename,
+    Archive,
+    Delete,
+    ForkLocal,
+    CopyThreadId,
+}
+
+#[derive(Debug, Clone)]
+struct CenterContextMenuState {
+    thread_id: ThreadId,
+    anchor_column: u16,
+    anchor_row: u16,
+    selected: usize,
+    area: Option<Rect>,
+}
+
+#[derive(Debug, Clone)]
+struct CenterRenameState {
+    thread_id: ThreadId,
+    value: String,
+    cursor: usize,
+    area: Option<Rect>,
+}
+
+#[derive(Debug, Clone)]
+struct CenterArchiveConfirmState {
+    thread_id: ThreadId,
+    area: Option<Rect>,
+}
+
+#[derive(Debug, Clone)]
+struct CenterDeleteConfirmState {
+    thread_id: ThreadId,
+    area: Option<Rect>,
+}
+
+#[derive(Debug, Clone, Default)]
+enum CenterOverlayState {
+    #[default]
+    None,
+    ContextMenu(CenterContextMenuState),
+    Rename(CenterRenameState),
+    ConfirmArchive(CenterArchiveConfirmState),
+    ConfirmDelete(CenterDeleteConfirmState),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MouseDownState {
+    pane: MousePane,
+    column: u16,
+    row: u16,
+    center_thread_index: Option<usize>,
+    center_target: Option<CenterMouseTarget>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MouseDragSelection {
+    pane: MousePane,
+    start_column: u16,
+    start_row: u16,
+    end_column: u16,
+    end_row: u16,
+}
+
+#[derive(Debug, Clone)]
+struct PaneTextSnapshot {
+    area: Rect,
+    lines: Vec<String>,
+}
+
+impl CenterThreadRow {
+    fn from_thread(thread: Thread) -> Option<Self> {
+        let thread_id = ThreadId::from_string(&thread.id).ok()?;
+        let mut name = thread
+            .name
+            .clone()
+            .or_else(|| thread.agent_nickname.clone())
+            .or_else(|| thread.summary.clone())
+            .or_else(|| {
+                let preview = thread.preview.trim();
+                (!preview.is_empty()).then(|| preview.to_string())
+            })
+            .unwrap_or_else(|| center_fallback_thread_name(&thread.id));
+        name = center_single_line(&name);
+        let preview = if thread.preview.trim().is_empty() {
+            thread
+                .agent_role
+                .clone()
+                .unwrap_or_else(|| thread.model_provider.clone())
+        } else {
+            thread.preview.clone()
+        };
+
+        Some(Self {
+            thread_id,
+            path: thread.path,
+            name,
+            preview,
+            cwd: thread.cwd,
+            status: thread.status,
+            control_state: thread.control_state,
+            source: format!("{:?}", thread.source),
+            updated_at: thread.updated_at,
+            token_usage: thread.token_usage.map(token_usage_info_from_app_gateway),
+        })
+    }
+}
+
+fn sort_center_thread_rows(
+    rows: &mut [CenterThreadRow],
+    active_thread_id: Option<ThreadId>,
+    pinned_thread_ids: &HashSet<ThreadId>,
+) {
+    rows.sort_by(|a, b| {
+        let a_active = Some(a.thread_id) == active_thread_id;
+        let b_active = Some(b.thread_id) == active_thread_id;
+        let a_pinned = pinned_thread_ids.contains(&a.thread_id);
+        let b_pinned = pinned_thread_ids.contains(&b.thread_id);
+        b_active
+            .cmp(&a_active)
+            .then_with(|| b_pinned.cmp(&a_pinned))
+            .then_with(|| center_row_priority(b).cmp(&center_row_priority(a)))
+            .then_with(|| b.updated_at.cmp(&a.updated_at))
+    });
+}
+
+fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
+    !area.is_empty()
+        && column >= area.x
+        && column < area.right()
+        && row >= area.y
+        && row < area.bottom()
+}
+
+fn offset_usize(value: usize, delta: isize) -> usize {
+    if delta < 0 {
+        value.saturating_sub(delta.unsigned_abs())
+    } else {
+        value.saturating_add(delta as usize)
+    }
+}
+
+fn capture_pane_text(buf: &ratatui::buffer::Buffer, area: Rect) -> Vec<String> {
+    if area.is_empty() {
+        return Vec::new();
+    }
+
+    let mut lines = Vec::with_capacity(area.height as usize);
+    for y in area.y..area.bottom() {
+        let mut line = String::new();
+        for x in area.x..area.right() {
+            line.push_str(buf[(x, y)].symbol());
+        }
+        lines.push(line.trim_end().to_string());
+    }
+    lines
+}
+
+fn ordered_selection_points(
+    area: Rect,
+    selection: MouseDragSelection,
+) -> Option<((u16, u16), (u16, u16))> {
+    if area.is_empty() {
+        return None;
+    }
+
+    let clamp_x = |x: u16| x.clamp(area.x, area.right().saturating_sub(1));
+    let clamp_y = |y: u16| y.clamp(area.y, area.bottom().saturating_sub(1));
+    let start = (
+        clamp_x(selection.start_column),
+        clamp_y(selection.start_row),
+    );
+    let end = (clamp_x(selection.end_column), clamp_y(selection.end_row));
+    if (start.1, start.0) <= (end.1, end.0) {
+        Some((start, end))
+    } else {
+        Some((end, start))
+    }
+}
+
+fn selected_cells(area: Rect, selection: MouseDragSelection) -> Vec<(u16, u16)> {
+    let Some(((start_x, start_y), (end_x, end_y))) = ordered_selection_points(area, selection)
+    else {
+        return Vec::new();
+    };
+
+    let mut cells = Vec::new();
+    for y in start_y..=end_y {
+        let row_start = if y == start_y { start_x } else { area.x };
+        let row_end = if y == end_y {
+            end_x
+        } else {
+            area.right().saturating_sub(1)
+        };
+        if row_start > row_end {
+            continue;
+        }
+        for x in row_start..=row_end {
+            cells.push((x, y));
+        }
+    }
+    cells
+}
+
+fn extract_line_range(line: &str, start: usize, end_inclusive: usize) -> String {
+    let width = end_inclusive.saturating_sub(start).saturating_add(1);
+    line.chars().skip(start).take(width).collect::<String>()
+}
+
+fn extract_pane_selection(snapshot: &PaneTextSnapshot, selection: MouseDragSelection) -> String {
+    let Some(((start_x, start_y), (end_x, end_y))) =
+        ordered_selection_points(snapshot.area, selection)
+    else {
+        return String::new();
+    };
+
+    let start_row = usize::from(start_y.saturating_sub(snapshot.area.y));
+    let end_row = usize::from(end_y.saturating_sub(snapshot.area.y));
+    let start_col = usize::from(start_x.saturating_sub(snapshot.area.x));
+    let end_col = usize::from(end_x.saturating_sub(snapshot.area.x));
+    let last_col = usize::from(snapshot.area.width.saturating_sub(1));
+
+    let mut selected = Vec::new();
+    for row in start_row..=end_row {
+        let Some(line) = snapshot.lines.get(row) else {
+            continue;
+        };
+        let row_start = if row == start_row { start_col } else { 0 };
+        let row_end = if row == end_row { end_col } else { last_col };
+        if row_start > row_end {
+            continue;
+        }
+        selected.push(
+            extract_line_range(line, row_start, row_end)
+                .trim_end()
+                .to_string(),
+        );
+    }
+    selected.join("\n").trim_end().to_string()
+}
+
+impl CenterState {
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            ..Self::default()
+        }
+    }
+
+    fn clamp_list_scroll(&mut self, visible_rows: usize) {
+        self.list_scroll = self
+            .list_scroll
+            .min(self.list_item_count().saturating_sub(visible_rows));
+    }
+
+    fn top_visible_thread_id(&self) -> Option<ThreadId> {
+        self.rows.get(self.list_scroll).map(|row| row.thread_id)
+    }
+
+    fn row_index(&self, thread_id: ThreadId) -> Option<usize> {
+        self.rows.iter().position(|row| row.thread_id == thread_id)
+    }
+
+    fn clamp_selection(&mut self, visible_rows: usize) {
+        self.selected = self.selected.min(self.list_item_count().saturating_sub(1));
+        self.clamp_list_scroll(visible_rows);
+        self.ensure_selected_visible(visible_rows);
+    }
+
+    fn keep_top_visible_thread(
+        &mut self,
+        thread_id: Option<ThreadId>,
+        visible_rows: usize,
+    ) -> bool {
+        let Some(thread_id) = thread_id else {
+            return false;
+        };
+        let Some(index) = self.rows.iter().position(|row| row.thread_id == thread_id) else {
+            return false;
+        };
+        self.list_scroll = index;
+        self.clamp_list_scroll(visible_rows);
+        true
+    }
+
+    fn ensure_selected_visible(&mut self, visible_rows: usize) {
+        if visible_rows == 0 {
+            return;
+        }
+        if self.selected < self.list_scroll {
+            self.list_scroll = self.selected;
+        } else if self.selected >= self.list_scroll.saturating_add(visible_rows) {
+            self.list_scroll = self.selected.saturating_add(1).saturating_sub(visible_rows);
+        }
+        self.clamp_list_scroll(visible_rows);
+    }
+
+    fn clear_overlay(&mut self) {
+        self.overlay = CenterOverlayState::None;
+    }
+
+    fn clear_search_focus(&mut self) {
+        self.search_focused = false;
+    }
+
+    fn has_load_more_row(&self) -> bool {
+        self.next_cursor.is_some()
+    }
+
+    fn list_item_count(&self) -> usize {
+        self.rows.len() + usize::from(self.has_load_more_row())
+    }
+
+    fn is_load_more_index(&self, index: usize) -> bool {
+        self.has_load_more_row() && index == self.rows.len()
+    }
+
+    fn is_loading_more(&self) -> bool {
+        self.refresh_in_flight && self.pending_refresh_cursor.is_some()
+    }
+}
+
+const CENTER_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+const CENTER_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
+const CENTER_REPLAY_TURN_LIMIT: usize = 64;
+const CENTER_LIST_TOP_PADDING: u16 = 4;
+const CENTER_ROW_HEIGHT: u16 = 3;
+const CENTER_SPLIT_GAP: u16 = 1;
+const CENTER_LIST_MIN_WIDTH: u16 = 32;
+const CENTER_LIST_MAX_WIDTH: u16 = 52;
+const CENTER_CHAT_MIN_WIDTH: u16 = 48;
+const CENTER_CONTEXT_MENU_WIDTH: u16 = 22;
+const CENTER_RENAME_POPUP_WIDTH: u16 = 34;
+const CENTER_CONFIRM_POPUP_WIDTH: u16 = 30;
+const CENTER_STATUS_LABEL_WIDTH: usize = 10;
+const CENTER_THREAD_PAGE_LIMIT: u32 = 20;
+
+fn center_thread_list_params(
+    search_term: Option<String>,
+    cursor: Option<String>,
+) -> ThreadListParams {
+    ThreadListParams {
+        cursor,
+        limit: Some(CENTER_THREAD_PAGE_LIMIT),
+        sort_key: Some(ThreadSortKey::UpdatedAt),
+        model_providers: None,
+        source_kinds: Some(center_thread_source_kinds()),
+        archived: Some(false),
+        cwd: None,
+        search_term,
+    }
+}
+
+fn token_usage_thread_list_params(limit: usize) -> ThreadListParams {
+    ThreadListParams {
+        cursor: None,
+        limit: Some(limit as u32),
+        sort_key: Some(ThreadSortKey::UpdatedAt),
+        model_providers: None,
+        source_kinds: Some(center_thread_source_kinds()),
+        archived: Some(false),
+        cwd: None,
+        search_term: None,
+    }
+}
+
+fn center_thread_source_kinds() -> Vec<ThreadSourceKind> {
+    vec![
+        ThreadSourceKind::Cli,
+        ThreadSourceKind::VsCode,
+        ThreadSourceKind::Exec,
+        ThreadSourceKind::AppGateway,
+        ThreadSourceKind::SubAgent,
+        ThreadSourceKind::SubAgentReview,
+        ThreadSourceKind::SubAgentCompact,
+        ThreadSourceKind::SubAgentThreadSpawn,
+        ThreadSourceKind::SubAgentOther,
+        ThreadSourceKind::Unknown,
+    ]
+}
+
+fn center_list_width(total_width: u16) -> u16 {
+    if total_width <= CENTER_SPLIT_GAP.saturating_add(1) {
+        return total_width;
+    }
+    let desired = (total_width / 4).clamp(CENTER_LIST_MIN_WIDTH, CENTER_LIST_MAX_WIDTH);
+    let chat_floor = CENTER_CHAT_MIN_WIDTH.min(total_width / 2).max(1);
+    desired
+        .min(total_width.saturating_sub(CENTER_SPLIT_GAP + chat_floor))
+        .max(1)
+}
+
+fn center_toolbar_areas(area: Rect) -> (Rect, Rect) {
+    if area.width <= 4 || area.height <= 2 {
+        return (Rect::default(), Rect::default());
+    }
+    let inner_x = area.x.saturating_add(1);
+    let inner_width = area.width.saturating_sub(2);
+    let y = area.y.saturating_add(1);
+    let new_width = inner_width.min(7);
+    let new_area = Rect::new(inner_x, y, new_width, 1);
+    let search_x = inner_x.saturating_add(new_width).saturating_add(1);
+    let search_width = area.right().saturating_sub(1).saturating_sub(search_x);
+    let search_area = Rect::new(search_x, y, search_width, 1);
+    (new_area, search_area)
+}
+
+fn center_popup_area(
+    list_area: Rect,
+    anchor_column: u16,
+    anchor_row: u16,
+    width: u16,
+    height: u16,
+) -> Rect {
+    if list_area.is_empty() || width == 0 || height == 0 {
+        return Rect::default();
+    }
+    let width = width.min(list_area.width.saturating_sub(2).max(1));
+    let height = height.min(list_area.height.saturating_sub(2).max(1));
+    let min_x = list_area.x.saturating_add(1);
+    let min_y = list_area.y.saturating_add(1);
+    let max_x = list_area
+        .right()
+        .saturating_sub(width)
+        .saturating_sub(1)
+        .max(min_x);
+    let max_y = list_area
+        .bottom()
+        .saturating_sub(height)
+        .saturating_sub(1)
+        .max(min_y);
+    let x = anchor_column.clamp(min_x, max_x);
+    let y = anchor_row.clamp(min_y, max_y);
+    Rect::new(x, y, width, height)
+}
+
+fn center_dialog_area(list_area: Rect, width: u16, height: u16) -> Rect {
+    if list_area.is_empty() || width == 0 || height == 0 {
+        return Rect::default();
+    }
+    let width = width.min(list_area.width.saturating_sub(2).max(1));
+    let height = height.min(list_area.height.saturating_sub(2).max(1));
+    let x = list_area.x + list_area.width.saturating_sub(width) / 2;
+    let y = list_area.y + list_area.height.saturating_sub(height) / 2;
+    Rect::new(x, y, width, height)
+}
+
+fn center_fallback_thread_name(id: &str) -> String {
+    format!("thread {}", id.chars().take(8).collect::<String>())
+}
+
+fn center_search_term(query: &str) -> Option<String> {
+    let query = query.trim();
+    (!query.is_empty()).then(|| query.to_string())
+}
+
+fn center_menu_actions() -> &'static [CenterMenuAction] {
+    &[
+        CenterMenuAction::Open,
+        CenterMenuAction::TogglePin,
+        CenterMenuAction::Rename,
+        CenterMenuAction::Archive,
+        CenterMenuAction::Delete,
+        CenterMenuAction::ForkLocal,
+        CenterMenuAction::CopyThreadId,
+    ]
+}
+
+fn center_menu_action_label(
+    action: CenterMenuAction,
+    pinned: bool,
+    locked: bool,
+    language: UiLanguage,
+) -> &'static str {
+    match language {
+        UiLanguage::En => match action {
+            CenterMenuAction::Open if locked => "View locked",
+            CenterMenuAction::Open => "Open",
+            CenterMenuAction::TogglePin if pinned => "Unpin",
+            CenterMenuAction::TogglePin => "Pin",
+            CenterMenuAction::Rename if locked => "Rename locked",
+            CenterMenuAction::Rename => "Rename...",
+            CenterMenuAction::Archive if locked => "Archive locked",
+            CenterMenuAction::Archive => "Archive",
+            CenterMenuAction::Delete if locked => "Delete locked",
+            CenterMenuAction::Delete => "Delete...",
+            CenterMenuAction::ForkLocal if locked => "Fork locked",
+            CenterMenuAction::ForkLocal => "Fork local",
+            CenterMenuAction::CopyThreadId => "Copy thread id",
+        },
+        UiLanguage::Cn => match action {
+            CenterMenuAction::Open if locked => "查看锁定线程",
+            CenterMenuAction::Open => "打开",
+            CenterMenuAction::TogglePin if pinned => "取消置顶",
+            CenterMenuAction::TogglePin => "置顶",
+            CenterMenuAction::Rename if locked => "重命名被锁定",
+            CenterMenuAction::Rename => "重命名...",
+            CenterMenuAction::Archive if locked => "归档被锁定",
+            CenterMenuAction::Archive => "归档",
+            CenterMenuAction::Delete if locked => "删除被锁定",
+            CenterMenuAction::Delete => "删除...",
+            CenterMenuAction::ForkLocal if locked => "派生被锁定",
+            CenterMenuAction::ForkLocal => "派生到本地",
+            CenterMenuAction::CopyThreadId => "复制线程 id",
+        },
+    }
+}
+
+fn center_menu_action_disabled(action: CenterMenuAction, locked: bool) -> bool {
+    locked
+        && matches!(
+            action,
+            CenterMenuAction::Rename
+                | CenterMenuAction::Archive
+                | CenterMenuAction::Delete
+                | CenterMenuAction::ForkLocal
+        )
+}
+
+fn center_menu_action_at(area: Option<Rect>, column: u16, row: u16) -> Option<CenterMenuAction> {
+    let area = area?;
+    if !rect_contains(area, column, row) {
+        return None;
+    }
+    let line_index = row.checked_sub(area.y.saturating_add(1))?;
+    center_menu_actions().get(line_index as usize).copied()
+}
+
+fn center_rename_target_at(area: Option<Rect>, column: u16, row: u16) -> Option<CenterMouseTarget> {
+    let area = area?;
+    if !rect_contains(area, column, row) {
+        return None;
+    }
+    let action_y = area.bottom().saturating_sub(2);
+    if row != action_y {
+        return None;
+    }
+    let save_area = Rect::new(area.x.saturating_add(2), action_y, 8, 1);
+    let cancel_area = Rect::new(area.x.saturating_add(12), action_y, 10, 1);
+    if rect_contains(save_area, column, row) {
+        Some(CenterMouseTarget::RenameSave)
+    } else if rect_contains(cancel_area, column, row) {
+        Some(CenterMouseTarget::RenameCancel)
+    } else {
+        None
+    }
+}
+
+fn center_archive_target_at(
+    area: Option<Rect>,
+    column: u16,
+    row: u16,
+) -> Option<CenterMouseTarget> {
+    let area = area?;
+    if !rect_contains(area, column, row) {
+        return None;
+    }
+    let action_y = area.bottom().saturating_sub(2);
+    if row != action_y {
+        return None;
+    }
+    let confirm_area = Rect::new(area.x.saturating_add(2), action_y, 10, 1);
+    let cancel_area = Rect::new(area.x.saturating_add(14), action_y, 10, 1);
+    if rect_contains(confirm_area, column, row) {
+        Some(CenterMouseTarget::ArchiveConfirm)
+    } else if rect_contains(cancel_area, column, row) {
+        Some(CenterMouseTarget::ArchiveCancel)
+    } else {
+        None
+    }
+}
+
+fn center_delete_target_at(area: Option<Rect>, column: u16, row: u16) -> Option<CenterMouseTarget> {
+    let area = area?;
+    if !rect_contains(area, column, row) {
+        return None;
+    }
+    let confirm_area = Rect::new(area.x + 2, area.y + 3, 10, 1);
+    let cancel_area = Rect::new(area.x + 14, area.y + 3, 10, 1);
+    if rect_contains(confirm_area, column, row) {
+        Some(CenterMouseTarget::DeleteConfirm)
+    } else if rect_contains(cancel_area, column, row) {
+        Some(CenterMouseTarget::DeleteCancel)
+    } else {
+        None
+    }
+}
+
+fn previous_char_boundary(value: &str, cursor: usize) -> usize {
+    value[..cursor]
+        .char_indices()
+        .last()
+        .map(|(index, _)| index)
+        .unwrap_or(0)
+}
+
+fn next_char_boundary(value: &str, cursor: usize) -> usize {
+    value[cursor..]
+        .char_indices()
+        .nth(1)
+        .map(|(offset, _)| cursor + offset)
+        .unwrap_or(value.len())
+}
+
+fn center_status_priority(status: &ThreadStatus) -> u8 {
+    match status {
+        ThreadStatus::Active { .. } => 2,
+        ThreadStatus::Idle => 1,
+        ThreadStatus::SystemError | ThreadStatus::NotLoaded => 0,
+    }
+}
+
+fn center_row_priority(row: &CenterThreadRow) -> u8 {
+    if center_row_is_controlled(row) {
+        return 3;
+    }
+    center_status_priority(&row.status)
+}
+
+fn center_row_is_controlled(row: &CenterThreadRow) -> bool {
+    row.control_state.is_some() || center_status_has_controlled_flag(&row.status)
+}
+
+fn center_status_has_controlled_flag(status: &ThreadStatus) -> bool {
+    matches!(
+        status,
+        ThreadStatus::Active { active_flags }
+            if active_flags.contains(&ThreadActiveFlag::Controlled)
+    )
+}
+
+fn center_status_has_running_flag(status: &ThreadStatus) -> bool {
+    matches!(
+        status,
+        ThreadStatus::Active { active_flags }
+            if active_flags.contains(&ThreadActiveFlag::Running)
+    )
+}
+
+fn center_status_without_control(status: &ThreadStatus) -> ThreadStatus {
+    match status {
+        ThreadStatus::Active { active_flags } => {
+            let active_flags: Vec<ThreadActiveFlag> = active_flags
+                .iter()
+                .copied()
+                .filter(|flag| *flag != ThreadActiveFlag::Controlled)
+                .collect();
+            if active_flags.is_empty() {
+                ThreadStatus::Idle
+            } else {
+                ThreadStatus::Active { active_flags }
+            }
+        }
+        status => status.clone(),
+    }
+}
+
+fn center_row_should_auto_observe(row: &CenterThreadRow) -> bool {
+    center_row_is_controlled(row) || matches!(row.status, ThreadStatus::Active { .. })
+}
+
+fn center_row_status_label(row: &CenterThreadRow) -> String {
+    let activity = match &row.status {
+        ThreadStatus::Active { active_flags }
+            if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval)
+                || active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) =>
+        {
+            "WAIT"
+        }
+        ThreadStatus::Active { .. } if center_status_has_running_flag(&row.status) => "RUN",
+        ThreadStatus::Active { .. } if center_row_is_controlled(row) => "LOCK",
+        ThreadStatus::Active { .. } => "RUN",
+        ThreadStatus::Idle if center_row_is_controlled(row) => "LOCK",
+        ThreadStatus::Idle => "IDLE",
+        ThreadStatus::SystemError => "ERR",
+        ThreadStatus::NotLoaded if center_row_is_controlled(row) => "LOCK",
+        ThreadStatus::NotLoaded => "COLD",
+    };
+    let Some(control_label) = center_row_control_label(row) else {
+        return activity.to_string();
+    };
+    format!("{activity} {control_label}")
+}
+
+fn center_row_control_label(row: &CenterThreadRow) -> Option<String> {
+    if let Some(control_state) = row.control_state.as_ref() {
+        let label = match (control_state.controller.kind, control_state.controller.rank) {
+            (ThreadControllerKind::External, _) => "EXT".to_string(),
+            (ThreadControllerKind::Thread, Some(rank)) => format!("R{rank}"),
+            (ThreadControllerKind::Thread, None) => "CTRL".to_string(),
+        };
+        return Some(if control_state.read_only {
+            format!("{label}*")
+        } else {
+            label
+        });
+    }
+    center_status_has_controlled_flag(&row.status).then(|| "CTRL".to_string())
+}
+
+fn center_row_control_marker(row: &CenterThreadRow) -> &'static str {
+    if let Some(control_state) = row.control_state.as_ref() {
+        return match control_state.controller.kind {
+            ThreadControllerKind::External => "E",
+            ThreadControllerKind::Thread => "R",
+        };
+    }
+    if center_status_has_controlled_flag(&row.status) {
+        "C"
+    } else {
+        " "
+    }
+}
+
+fn center_control_detail(control_state: &ThreadControlState, language: UiLanguage) -> String {
+    let controller_kind = match control_state.controller.kind {
+        ThreadControllerKind::Thread => language.center_controller_kind(true),
+        ThreadControllerKind::External => language.center_controller_kind(false),
+    };
+    let rank = control_state
+        .controller
+        .rank
+        .map(|rank| format!("R{rank} "))
+        .unwrap_or_default();
+    let label = control_state
+        .controller
+        .label
+        .as_deref()
+        .unwrap_or(control_state.controller.id.as_str());
+    let mode = language.center_control_mode(control_state.read_only);
+    let reason = control_state
+        .reason
+        .as_deref()
+        .map(center_single_line)
+        .filter(|reason| !reason.is_empty())
+        .map(|reason| format!("  {reason}"))
+        .unwrap_or_default();
+    match language {
+        UiLanguage::En => format!("{mode} by {rank}{controller_kind}:{label}{reason}"),
+        UiLanguage::Cn => format!(
+            "{mode}{} {rank}{controller_kind}:{label}{reason}",
+            language.center_control_by()
+        ),
+    }
+}
+
+fn center_cache_label(info: Option<&TokenUsageInfo>, expanded: bool) -> Option<String> {
+    let info = info?;
+    let mut parts = Vec::new();
+    if let Some(part) = center_cache_segment("L", &info.last_token_usage, expanded) {
+        parts.push(part);
+    }
+    if let Some(part) = center_cache_segment("T", &info.total_token_usage, expanded) {
+        parts.push(part);
+    }
+    (!parts.is_empty()).then(|| format!("cache {}", parts.join("/")))
+}
+
+fn center_cache_segment(
+    prefix: &str,
+    usage: &praxis_protocol::protocol::TokenUsage,
+    expanded: bool,
+) -> Option<String> {
+    let percent = usage.cache_hit_percent()?;
+    if !expanded {
+        return Some(format!("{prefix}{percent}%"));
+    }
+    let reported = usage.cache_reported_input();
+    let cached = usage.cached_input().min(reported);
+    Some(format!(
+        "{prefix}{percent}%({}/{})",
+        format_tokens_compact(cached),
+        format_tokens_compact(reported)
+    ))
+}
+
+fn center_truncate(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+
+    let text = center_single_line(text);
+    if UnicodeWidthStr::width(text.as_str()) <= max_chars {
+        return text;
+    }
+    if max_chars == 1 {
+        return "~".to_string();
+    }
+
+    let mut out = String::new();
+    let mut used = 1; // reserve room for the ASCII truncation marker
+    for ch in text.chars() {
+        let width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + width > max_chars {
+            break;
+        }
+        used += width;
+        out.push(ch);
+    }
+    out.push('~');
+    out
+}
+
+fn center_single_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn normalize_harness_overrides_for_cwd(
@@ -1071,6 +1980,12 @@ fn active_turn_missing_steer_error(error: &TypedRequestError) -> bool {
         return false;
     };
     source.message == "no active turn to steer"
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProviderConfigWriteMode {
+    UpsertIfMissing,
+    ForceUpsert,
 }
 
 impl App {
@@ -1137,6 +2052,117 @@ impl App {
                 action,
                 "failed to refresh config before thread transition; continuing with current in-memory config"
             );
+        }
+    }
+
+    async fn apply_model_provider_selection(
+        &mut self,
+        model: String,
+        provider_id: String,
+        provider: Option<ModelProviderInfo>,
+        effort: Option<ReasoningEffortConfig>,
+        write_mode: ProviderConfigWriteMode,
+        configured_provider_label: Option<String>,
+    ) {
+        let profile_name = self.active_profile.clone();
+        let profile = profile_name.as_deref();
+        let provider_for_selection = provider
+            .clone()
+            .or_else(|| self.config.model_providers.get(&provider_id).cloned());
+        let Some(provider_for_selection) = provider_for_selection else {
+            self.chat_widget.add_error_message(format!(
+                "Cannot select {provider_id}::{model}: provider is not configured."
+            ));
+            return;
+        };
+
+        let force_upsert = matches!(write_mode, ProviderConfigWriteMode::ForceUpsert);
+        let should_upsert = force_upsert || !self.config.model_providers.contains_key(&provider_id);
+        let mut builder = ConfigEditsBuilder::new(&self.config.praxis_home).with_profile(profile);
+        if should_upsert {
+            builder = builder.upsert_model_provider(provider_id.as_str(), &provider_for_selection);
+        }
+
+        match builder
+            .set_model_provider(Some(provider_id.as_str()))
+            .set_model(Some(model.as_str()), effort)
+            .apply()
+            .await
+        {
+            Ok(()) => {
+                if let Err(err) = self.refresh_in_memory_config_from_disk().await {
+                    tracing::warn!(
+                        error = %err,
+                        "failed to refresh in-memory config after model selection"
+                    );
+                }
+                self.config.model_provider_id = provider_id.clone();
+                self.config
+                    .model_providers
+                    .insert(provider_id.clone(), provider_for_selection.clone());
+                self.config.model_provider = provider_for_selection.clone();
+                self.config.model = Some(model.clone());
+                self.chat_widget.set_model_selection(
+                    &model,
+                    &provider_id,
+                    Some(&provider_for_selection),
+                );
+                self.on_update_reasoning_effort(effort);
+                self.chat_widget.submit_op(AppCommand::reload_user_config());
+                self.chat_widget
+                    .submit_op(AppCommand::override_turn_context(
+                        /*cwd*/ None,
+                        /*approval_policy*/ None,
+                        /*approvals_reviewer*/ None,
+                        /*sandbox_policy*/ None,
+                        /*windows_sandbox_level*/ None,
+                        Some(provider_id.clone()),
+                        Some(model.clone()),
+                        Some(effort),
+                        /*summary*/ None,
+                        /*service_tier*/ None,
+                        /*collaboration_mode*/ None,
+                        /*personality*/ None,
+                    ));
+                let effort_label = effort
+                    .map(|selected_effort| selected_effort.to_string())
+                    .unwrap_or_else(|| "default".to_string());
+                tracing::info!(
+                    "Selected provider: {provider_id}, Selected model: {model}, Selected effort: {effort_label}"
+                );
+                let mut message = if let Some(label) = configured_provider_label {
+                    format!("{label} provider configured; model changed to {model}")
+                } else {
+                    format!("Model changed to {model}")
+                };
+                if let Some(label) = Self::reasoning_label_for(&model, effort) {
+                    message.push(' ');
+                    message.push_str(label);
+                }
+                if let Some(profile) = profile {
+                    message.push_str(" for ");
+                    message.push_str(profile);
+                    message.push_str(" profile");
+                }
+                self.chat_widget.add_model_change_message(message);
+            }
+            Err(err) => {
+                tracing::error!(
+                    error = %err,
+                    "failed to persist model/provider selection"
+                );
+                if let Some(label) = configured_provider_label {
+                    self.chat_widget
+                        .add_error_message(format!("Failed to save {label} provider: {err}"));
+                } else if let Some(profile) = profile {
+                    self.chat_widget.add_error_message(format!(
+                        "Failed to save model for profile `{profile}`: {err}"
+                    ));
+                } else {
+                    self.chat_widget
+                        .add_error_message(format!("Failed to save default model: {err}"));
+                }
+            }
         }
     }
 
@@ -1547,7 +2573,7 @@ impl App {
         Ok(())
     }
 
-    fn reset_app_ui_state_after_clear(&mut self) {
+    fn reset_thread_view_state(&mut self) {
         self.overlay = None;
         self.transcript_cells.clear();
         self.deferred_history_lines.clear();
@@ -1555,6 +2581,10 @@ impl App {
         self.backtrack = BacktrackState::default();
         self.backtrack_render_pending = false;
         self.transcript_scrollback_backfill = None;
+    }
+
+    fn reset_app_ui_state_after_clear(&mut self) {
+        self.reset_thread_view_state();
     }
 
     async fn shutdown_current_thread(&mut self, app_gateway: &mut AppGatewaySession) {
@@ -2245,6 +3275,7 @@ impl App {
                 approvals_reviewer,
                 sandbox_policy,
                 model,
+                model_provider,
                 effort,
                 summary,
                 service_tier,
@@ -2287,6 +3318,7 @@ impl App {
                             approvals_reviewer
                                 .unwrap_or(self.chat_widget.config_ref().approvals_reviewer),
                             sandbox_policy.clone(),
+                            model_provider.clone(),
                             model.to_string(),
                             effort,
                             *summary,
@@ -2697,6 +3729,7 @@ impl App {
         self.chat_widget
             .set_initial_user_message_submit_suppressed(/*suppressed*/ true);
         self.chat_widget.handle_thread_session(session);
+        let turns = self.turns_for_visible_replay(turns);
         self.chat_widget
             .replay_thread_turns(turns, ReplayKind::ResumeInitialMessages);
         let pending = std::mem::take(&mut self.pending_primary_events);
@@ -2787,7 +3820,12 @@ impl App {
         started: AppGatewayStartedThread,
         snapshot: &mut ThreadEventSnapshot,
     ) {
-        let AppGatewayStartedThread { session, turns } = started;
+        let AppGatewayStartedThread {
+            session,
+            turns,
+            status: _,
+            control_state: _,
+        } = started;
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
             let mut store = channel.store.lock().await;
             store.set_session(session.clone(), turns.clone());
@@ -3122,6 +4160,7 @@ impl App {
     /// This helper copies every known nickname/role from `AgentNavigationState` into the
     /// replacement widget so that replayed collab items render agent names immediately.
     fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
+        chat_widget.set_ui_language(self.chat_widget.ui_language());
         // Transfer the last-written terminal title to the replacement widget
         // so it knows what OSC title is currently displayed. Without this, the
         // new widget would redundantly clear and rewrite the same title, causing
@@ -3191,12 +4230,12 @@ impl App {
 
         let previous_thread_id = self.active_thread_id;
         self.store_active_thread_receiver().await;
-        self.active_thread_id = None;
         let Some((receiver, mut snapshot)) = self.activate_thread_for_replay(thread_id).await
         else {
             self.chat_widget
                 .add_error_message(format!("Agent thread {thread_id} is already active."));
             if let Some(previous_thread_id) = previous_thread_id {
+                self.active_thread_id = None;
                 self.activate_thread_channel(previous_thread_id).await;
             }
             return Ok(());
@@ -3247,13 +4286,11 @@ impl App {
     }
 
     fn reset_for_thread_switch(&mut self, tui: &mut tui::Tui) -> Result<()> {
-        self.overlay = None;
-        self.transcript_cells.clear();
-        self.deferred_history_lines.clear();
-        self.has_emitted_history_lines = false;
-        self.backtrack = BacktrackState::default();
-        self.backtrack_render_pending = false;
-        self.transcript_scrollback_backfill = None;
+        tui.clear_pending_history_lines();
+        self.reset_thread_view_state();
+        if self.center.enabled {
+            return Ok(());
+        }
         tui.terminal.clear_scrollback()?;
         tui.terminal.clear()?;
         Ok(())
@@ -3270,6 +4307,7 @@ impl App {
         self.primary_session_configured = None;
         self.pending_primary_events.clear();
         self.pending_app_gateway_requests.clear();
+        self.center_observed_thread_ids.clear();
         self.chat_widget.set_pending_thread_approvals(Vec::new());
         self.sync_active_agent_label();
     }
@@ -3290,6 +4328,12 @@ impl App {
             self.chat_widget.thread_id(),
             self.chat_widget.thread_name(),
         );
+        let queued_input_for_lazy_thread = self
+            .chat_widget
+            .thread_id()
+            .is_none()
+            .then(|| self.chat_widget.capture_thread_input_state())
+            .flatten();
         self.shutdown_current_thread(app_gateway).await;
         let tracked_thread_ids: Vec<ThreadId> =
             self.thread_event_channels.keys().copied().collect();
@@ -3308,13 +4352,21 @@ impl App {
                     self.chat_widget.add_error_message(format!(
                         "Failed to attach to fresh app-gateway thread: {err}"
                     ));
-                } else if let Some(summary) = summary {
-                    let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
-                    if let Some(command) = summary.resume_command {
-                        let spans = vec!["To continue this session, run ".into(), command.cyan()];
-                        lines.push(spans.into());
+                } else {
+                    if let Some(input_state) = queued_input_for_lazy_thread {
+                        self.chat_widget
+                            .restore_thread_input_state(Some(input_state));
+                        self.chat_widget.maybe_send_next_queued_input();
                     }
-                    self.chat_widget.add_plain_history_lines(lines);
+                    if let Some(summary) = summary {
+                        let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
+                        if let Some(command) = summary.resume_command {
+                            let spans =
+                                vec!["To continue this session, run ".into(), command.cyan()];
+                            lines.push(spans.into());
+                        }
+                        self.chat_widget.add_plain_history_lines(lines);
+                    }
                 }
             }
             Err(err) => {
@@ -3333,6 +4385,12 @@ impl App {
         app_gateway: &mut AppGatewaySession,
         started: AppGatewayStartedThread,
     ) -> Result<()> {
+        let AppGatewayStartedThread {
+            session,
+            turns,
+            status: _,
+            control_state,
+        } = started;
         self.reset_thread_event_state();
         let init = self.chatwidget_init_for_forked_or_resumed_thread(
             tui,
@@ -3340,8 +4398,9 @@ impl App {
             self.tui_config.clone(),
         );
         self.replace_chat_widget(ChatWidget::new_with_app_event(init));
-        self.enqueue_primary_thread_session(started.session, started.turns)
-            .await?;
+        self.enqueue_primary_thread_session(session, turns).await?;
+        self.chat_widget
+            .set_thread_control_state(control_state.as_ref());
         self.backfill_loaded_subagent_threads(app_gateway).await;
         Ok(())
     }
@@ -3522,8 +4581,9 @@ impl App {
         self.chat_widget
             .restore_thread_input_state(snapshot.input_state);
         if !snapshot.turns.is_empty() {
+            let turns = self.turns_for_visible_replay(snapshot.turns);
             self.chat_widget
-                .replay_thread_turns(snapshot.turns, ReplayKind::ThreadSnapshot);
+                .replay_thread_turns(turns, ReplayKind::ThreadSnapshot);
         }
         for event in snapshot.events {
             self.handle_thread_event_replay(event);
@@ -3561,6 +4621,73 @@ impl App {
         waiting_for_initial_session_configured && primary_thread_id.is_some()
     }
 
+    fn turns_for_visible_replay(&self, turns: Vec<Turn>) -> Vec<Turn> {
+        if !self.center.enabled || turns.len() <= CENTER_REPLAY_TURN_LIMIT {
+            return turns;
+        }
+        let skip = turns.len().saturating_sub(CENTER_REPLAY_TURN_LIMIT);
+        turns.into_iter().skip(skip).collect()
+    }
+
+    async fn drain_app_gateway_events(&mut self, app_gateway: &mut AppGatewaySession) {
+        for _ in 0..APP_GATEWAY_EVENT_DRAIN_BUDGET {
+            let Some(event) = app_gateway.try_next_event() else {
+                break;
+            };
+            self.handle_app_gateway_event(app_gateway, event).await;
+        }
+    }
+
+    fn mark_app_gateway_disconnected(&mut self, message: String) {
+        if self.remote_app_gateway_url.is_some() {
+            if !self.app_gateway_reconnect_pending {
+                self.chat_widget
+                    .add_error_message(format!("{message}; reconnecting to Praxis gateway..."));
+            }
+            self.app_gateway_reconnect_pending = true;
+            return;
+        }
+        self.chat_widget.add_error_message(message.clone());
+        self.app_event_tx.send(AppEvent::FatalExitRequest(message));
+    }
+
+    fn should_retry_app_gateway_reconnect(&self) -> bool {
+        self.app_gateway_reconnect_pending
+            && self
+                .last_app_gateway_reconnect_attempt
+                .is_none_or(|last| last.elapsed() >= APP_GATEWAY_RECONNECT_INTERVAL)
+    }
+
+    async fn try_reconnect_app_gateway(&mut self, app_gateway: &mut AppGatewaySession) -> bool {
+        if !self.should_retry_app_gateway_reconnect() {
+            return false;
+        }
+        let Some(websocket_url) = self.remote_app_gateway_url.clone() else {
+            return false;
+        };
+        self.last_app_gateway_reconnect_attempt = Some(Instant::now());
+        match app_gateway
+            .reconnect_remote(websocket_url, self.remote_app_gateway_auth_token.clone())
+            .await
+        {
+            Ok(()) => {
+                self.app_gateway_reconnect_pending = false;
+                self.last_app_gateway_reconnect_attempt = None;
+                self.center_observed_thread_ids.clear();
+                self.chat_widget
+                    .add_info_message("Reconnected to Praxis gateway.".to_string(), None);
+                self.refresh_center_threads(app_gateway, true);
+                self.observe_existing_center_threads_if_needed(app_gateway)
+                    .await;
+                true
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to reconnect to Praxis gateway");
+                false
+            }
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn run(
         tui: &mut tui::Tui,
@@ -3578,6 +4705,7 @@ impl App {
         should_prompt_windows_sandbox_nux_at_startup: bool,
         remote_app_gateway_url: Option<String>,
         remote_app_gateway_auth_token: Option<String>,
+        center_mode: bool,
     ) -> Result<AppExitInfo> {
         use tokio_stream::StreamExt;
         let (app_event_tx, mut app_event_rx) = unbounded_channel();
@@ -3654,9 +4782,15 @@ impl App {
         let enhanced_keys_supported = tui.enhanced_keys_supported();
         let wait_for_initial_session_configured =
             Self::should_wait_for_initial_session(&session_selection);
+        let defer_empty_center_session = center_mode
+            && matches!(
+                session_selection,
+                SessionSelection::StartFresh | SessionSelection::Exit
+            )
+            && initial_prompt.as_deref().is_none_or(str::is_empty)
+            && initial_images.is_empty();
         let (mut chat_widget, initial_started_thread) = match session_selection {
             SessionSelection::StartFresh | SessionSelection::Exit => {
-                let started = app_gateway.start_thread(&config).await?;
                 let startup_tooltip_override = prepare_startup_tooltip_override(
                     &mut config,
                     &mut tui_config,
@@ -3664,6 +4798,11 @@ impl App {
                     is_first_run,
                 )
                 .await;
+                let started = if defer_empty_center_session {
+                    None
+                } else {
+                    Some(app_gateway.start_thread(&config).await?)
+                };
                 let init = crate::chatwidget::ChatWidgetInit {
                     config: config.clone(),
                     tui_config: tui_config.clone(),
@@ -3689,7 +4828,7 @@ impl App {
                         .clone(),
                     session_telemetry: session_telemetry.clone(),
                 };
-                (ChatWidget::new_with_app_event(init), Some(started))
+                (ChatWidget::new_with_app_event(init), started)
             }
             SessionSelection::Resume(target_session) => {
                 let resumed = app_gateway
@@ -3829,6 +4968,8 @@ impl App {
             feedback_audience,
             remote_app_gateway_url,
             remote_app_gateway_auth_token,
+            app_gateway_reconnect_pending: false,
+            last_app_gateway_reconnect_attempt: None,
             pending_update_action: None,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState::default(),
@@ -3842,11 +4983,15 @@ impl App {
             primary_session_configured: None,
             pending_primary_events: VecDeque::new(),
             pending_app_gateway_requests: PendingAppGatewayRequests::default(),
+            center: CenterState::new(center_mode),
+            center_observed_thread_ids: HashSet::new(),
+            mouse: MouseInteractionState::default(),
         };
         if let Some(started) = initial_started_thread {
             app.enqueue_primary_thread_session(started.session, started.turns)
                 .await?;
         }
+        app.refresh_center_threads(&app_gateway, true);
 
         // On startup, if Agent mode (workspace-write) or ReadOnly is active, warn about world-writable dirs on Windows.
         #[cfg(target_os = "windows")]
@@ -3947,7 +5092,11 @@ impl App {
                     }
                     app_gateway_event = app_gateway.next_event(), if listen_for_app_gateway_events => {
                         match app_gateway_event {
-                            Some(event) => app.handle_app_gateway_event(&app_gateway, event).await,
+                            Some(event) => {
+                                app.handle_app_gateway_event(&mut app_gateway, event).await;
+                                app.drain_app_gateway_events(&mut app_gateway).await;
+                                tui.frame_requester().schedule_frame();
+                            }
                             None => {
                                 listen_for_app_gateway_events = false;
                                 tracing::warn!("app-gateway event stream closed");
@@ -4036,6 +5185,7 @@ impl App {
                     self.chat_widget.handle_paste(pasted);
                 }
                 TuiEvent::Draw => {
+                    self.refresh_center_threads(app_gateway, false);
                     if self.backtrack_render_pending {
                         self.start_transcript_scrollback_backfill(tui);
                     }
@@ -4054,12 +5204,19 @@ impl App {
                     let terminal_size = tui.terminal.size()?;
                     let draw_height = if tui.is_alt_screen_active() {
                         terminal_size.height
+                    } else if self.center.enabled {
+                        terminal_size.height
                     } else {
                         self.chat_widget.desired_height(terminal_size.width)
                     };
                     tui.draw(draw_height, |frame| {
-                        self.chat_widget.render(frame.area(), frame.buffer);
-                        if let Some((x, y)) = self.chat_widget.cursor_pos(frame.area()) {
+                        let chat_area = self.render_center_or_chat(frame.area(), frame.buffer);
+                        let cursor_pos = if self.center.enabled {
+                            self.chat_widget.center_cursor_pos(chat_area)
+                        } else {
+                            self.chat_widget.cursor_pos(chat_area)
+                        };
+                        if let Some((x, y)) = cursor_pos {
                             frame.set_cursor_position((x, y));
                         }
                     })?;
@@ -4093,8 +5250,8 @@ impl App {
                 true
             }
             KeyCode::F(8) => {
-                history_cell::toggle_diff_expanded();
-                true
+                let visible_patch_cell_ids = self.chat_widget.visible_patch_cell_ids();
+                history_cell::toggle_visible_diff_cells(&visible_patch_cell_ids)
             }
             _ => false,
         };
@@ -4116,18 +5273,179 @@ impl App {
         app_gateway: &mut AppGatewaySession,
         mouse_event: MouseEvent,
     ) -> Result<Option<AppRunControl>> {
-        if !matches!(mouse_event.kind, MouseEventKind::Down(MouseButton::Left)) {
+        match mouse_event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                self.handle_mouse_down(mouse_event.column, mouse_event.row);
+                tui.frame_requester().schedule_frame();
+                Ok(None)
+            }
+            MouseEventKind::Down(MouseButton::Right) => {
+                self.handle_mouse_right_down(mouse_event.column, mouse_event.row);
+                tui.frame_requester().schedule_frame();
+                Ok(None)
+            }
+            MouseEventKind::Drag(MouseButton::Left) => {
+                self.handle_mouse_drag(mouse_event.column, mouse_event.row);
+                tui.frame_requester().schedule_frame();
+                Ok(None)
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                let control = self
+                    .handle_mouse_up(tui, app_gateway, mouse_event.column, mouse_event.row)
+                    .await?;
+                tui.frame_requester().schedule_frame();
+                Ok(control)
+            }
+            MouseEventKind::Moved => {
+                self.handle_mouse_move(mouse_event.column, mouse_event.row);
+                tui.frame_requester().schedule_frame();
+                Ok(None)
+            }
+            MouseEventKind::ScrollUp => {
+                self.handle_center_mouse_scroll(mouse_event.column, mouse_event.row, -3);
+                tui.frame_requester().schedule_frame();
+                Ok(None)
+            }
+            MouseEventKind::ScrollDown => {
+                self.handle_center_mouse_scroll(mouse_event.column, mouse_event.row, 3);
+                tui.frame_requester().schedule_frame();
+                Ok(None)
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn handle_mouse_down(&mut self, column: u16, row: u16) {
+        let Some(pane) = self.mouse_pane_at(column, row) else {
+            self.mouse.down = None;
+            self.mouse.drag = None;
+            self.mouse.selection = None;
+            return;
+        };
+        let center_target = (pane == MousePane::CenterList)
+            .then(|| self.center_mouse_target_at(column, row))
+            .flatten();
+        if pane == MousePane::Chat {
+            self.center.clear_search_focus();
+            self.center.clear_overlay();
+        }
+        self.mouse.down = Some(MouseDownState {
+            pane,
+            column,
+            row,
+            center_thread_index: self.center_thread_index_at(column, row),
+            center_target,
+        });
+        self.mouse.hover_center_thread_index = self.center_thread_index_at(column, row);
+        self.mouse.hover_center_target = center_target;
+        self.mouse.drag = None;
+        self.mouse.selection = None;
+    }
+
+    fn handle_mouse_right_down(&mut self, column: u16, row: u16) {
+        self.mouse.selection = None;
+        if self.mouse_pane_at(column, row) == Some(MousePane::Chat) {
+            self.center.clear_overlay();
+            self.center.clear_search_focus();
+            self.paste_clipboard_into_chat();
+            return;
+        }
+        if !self.center.enabled {
+            return;
+        }
+        let Some(index) = self.center_thread_index_at(column, row) else {
+            self.center.clear_overlay();
+            self.center.clear_search_focus();
+            return;
+        };
+        let Some(thread_id) = self.center.rows.get(index).map(|row| row.thread_id) else {
+            return;
+        };
+        self.center.selected = index;
+        let visible_rows = self.center_visible_row_capacity();
+        self.center.ensure_selected_visible(visible_rows);
+        self.center.clear_search_focus();
+        self.center.overlay = CenterOverlayState::ContextMenu(CenterContextMenuState {
+            thread_id,
+            anchor_column: column,
+            anchor_row: row,
+            selected: 0,
+            area: None,
+        });
+    }
+
+    fn handle_mouse_move(&mut self, column: u16, row: u16) {
+        if self.mouse.drag.is_some() {
+            return;
+        }
+        self.mouse.hover_center_thread_index = self.center_thread_index_at(column, row);
+        self.mouse.hover_center_target = self.center_mouse_target_at(column, row);
+    }
+
+    fn handle_mouse_drag(&mut self, column: u16, row: u16) {
+        let Some(down) = self.mouse.down else {
+            return;
+        };
+        let Some(current_pane) = self.mouse_pane_at(column, row) else {
+            return;
+        };
+        if current_pane != down.pane {
+            return;
+        }
+        if down.column == column && down.row == row {
+            return;
+        }
+        self.mouse.drag = Some(MouseDragSelection {
+            pane: down.pane,
+            start_column: down.column,
+            start_row: down.row,
+            end_column: column,
+            end_row: row,
+        });
+    }
+
+    async fn handle_mouse_up(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        column: u16,
+        row: u16,
+    ) -> Result<Option<AppRunControl>> {
+        let Some(down) = self.mouse.down.take() else {
+            self.mouse.drag = None;
+            return Ok(None);
+        };
+        if let Some(mut selection) = self.mouse.drag.take() {
+            selection.end_column = column;
+            selection.end_row = row;
+            self.mouse.selection = Some(selection);
             return Ok(None);
         }
 
-        let Some(action) = self.chat_widget.active_cell_mouse_action(
-            tui.terminal.viewport_area,
-            mouse_event.column,
-            mouse_event.row,
-        ) else {
+        if down.pane == MousePane::CenterList {
+            return self
+                .handle_center_list_mouse_up(tui, app_gateway, down, column, row)
+                .await;
+        }
+
+        if self.center.enabled {
+            if down.pane == MousePane::Chat
+                && self.mouse_pane_at(column, row) == Some(MousePane::Chat)
+                && let Some(action) = self.chat_widget.center_chat_mouse_action(column, row)
+            {
+                self.center.clear_overlay();
+                self.center.clear_search_focus();
+                self.chat_widget.handle_center_chat_mouse_action(action);
+            }
+            return Ok(None);
+        }
+
+        let Some(action) =
+            self.chat_widget
+                .active_cell_mouse_action(tui.terminal.viewport_area, column, row)
+        else {
             return Ok(None);
         };
-
         match action {
             history_cell::HistoryCellMouseAction::ResumeRecentThread {
                 thread_id,
@@ -4147,16 +5465,1706 @@ impl App {
         }
     }
 
+    async fn handle_center_list_mouse_up(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        down: MouseDownState,
+        column: u16,
+        row: u16,
+    ) -> Result<Option<AppRunControl>> {
+        let up_target = self.center_mouse_target_at(column, row);
+        match (down.center_target, up_target) {
+            (Some(CenterMouseTarget::NewThread), Some(CenterMouseTarget::NewThread)) => {
+                self.center.clear_overlay();
+                self.center.clear_search_focus();
+                self.start_fresh_session_with_summary_hint(tui, app_gateway)
+                    .await;
+                self.refresh_center_threads(app_gateway, true);
+                Ok(None)
+            }
+            (Some(CenterMouseTarget::Search), Some(CenterMouseTarget::Search)) => {
+                self.center.clear_overlay();
+                self.center.search_focused = true;
+                Ok(None)
+            }
+            (Some(CenterMouseTarget::LoadMore), Some(CenterMouseTarget::LoadMore)) => {
+                self.center.clear_overlay();
+                self.center.clear_search_focus();
+                self.load_more_center_threads(app_gateway);
+                Ok(None)
+            }
+            (
+                Some(CenterMouseTarget::ContextMenu(action)),
+                Some(CenterMouseTarget::ContextMenu(up_action)),
+            ) if action == up_action => {
+                self.execute_center_menu_action(tui, app_gateway, action)
+                    .await
+            }
+            (Some(CenterMouseTarget::RenameSave), Some(CenterMouseTarget::RenameSave)) => {
+                self.commit_center_rename(app_gateway).await;
+                Ok(None)
+            }
+            (Some(CenterMouseTarget::RenameCancel), Some(CenterMouseTarget::RenameCancel)) => {
+                self.center.clear_overlay();
+                Ok(None)
+            }
+            (Some(CenterMouseTarget::ArchiveConfirm), Some(CenterMouseTarget::ArchiveConfirm)) => {
+                self.confirm_center_archive(tui, app_gateway).await;
+                Ok(None)
+            }
+            (Some(CenterMouseTarget::ArchiveCancel), Some(CenterMouseTarget::ArchiveCancel)) => {
+                self.center.clear_overlay();
+                Ok(None)
+            }
+            (Some(CenterMouseTarget::DeleteConfirm), Some(CenterMouseTarget::DeleteConfirm)) => {
+                self.confirm_center_delete(tui, app_gateway).await;
+                Ok(None)
+            }
+            (Some(CenterMouseTarget::DeleteCancel), Some(CenterMouseTarget::DeleteCancel)) => {
+                self.center.clear_overlay();
+                Ok(None)
+            }
+            _ if matches!(self.center.overlay, CenterOverlayState::ContextMenu(_))
+                && !matches!(up_target, Some(CenterMouseTarget::ContextMenu(_))) =>
+            {
+                self.center.clear_overlay();
+                Ok(None)
+            }
+            _ => {
+                self.open_center_thread_from_click(tui, app_gateway, down, column, row)
+                    .await
+            }
+        }
+    }
+
+    async fn open_center_thread_from_click(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        down: MouseDownState,
+        column: u16,
+        row: u16,
+    ) -> Result<Option<AppRunControl>> {
+        let Some(up_index) = self.center_thread_index_at(column, row) else {
+            return Ok(None);
+        };
+        if down.center_thread_index != Some(up_index) {
+            self.center.selected = up_index;
+            self.center
+                .ensure_selected_visible(self.center_visible_row_capacity());
+            return Ok(None);
+        }
+        self.center.selected = up_index;
+        self.center
+            .ensure_selected_visible(self.center_visible_row_capacity());
+        self.center.clear_search_focus();
+        self.center.clear_overlay();
+        let Some(row) = self.center.rows.get(up_index).cloned() else {
+            return Ok(None);
+        };
+        self.resume_session_target(
+            tui,
+            app_gateway,
+            SessionTarget {
+                path: row.path,
+                thread_id: row.thread_id,
+                thread_name: Some(row.name),
+            },
+        )
+        .await
+    }
+
+    async fn execute_center_menu_action(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        action: CenterMenuAction,
+    ) -> Result<Option<AppRunControl>> {
+        let thread_id = match self.center.overlay.clone() {
+            CenterOverlayState::ContextMenu(menu) => menu.thread_id,
+            _ => return Ok(None),
+        };
+        let locked = self
+            .center
+            .rows
+            .iter()
+            .find(|row| row.thread_id == thread_id)
+            .is_some_and(center_row_is_controlled);
+        if center_menu_action_disabled(action, locked) {
+            self.center.clear_overlay();
+            self.chat_widget.add_info_message(
+                "This thread is controlled by another agent.".to_string(),
+                Some("Open it and type /release-thread before changing it.".to_string()),
+            );
+            return Ok(None);
+        }
+        match action {
+            CenterMenuAction::Open => {
+                self.center.clear_overlay();
+                let Some(row) = self
+                    .center
+                    .rows
+                    .iter()
+                    .find(|row| row.thread_id == thread_id)
+                    .cloned()
+                else {
+                    return Ok(None);
+                };
+                self.resume_session_target(
+                    tui,
+                    app_gateway,
+                    SessionTarget {
+                        path: row.path.clone(),
+                        thread_id: row.thread_id,
+                        thread_name: Some(row.name.clone()),
+                    },
+                )
+                .await
+            }
+            CenterMenuAction::TogglePin => {
+                if !self.center.pinned_thread_ids.insert(thread_id) {
+                    self.center.pinned_thread_ids.remove(&thread_id);
+                }
+                self.center.clear_overlay();
+                let active_thread_id = self.center_active_thread_id();
+                sort_center_thread_rows(
+                    &mut self.center.rows,
+                    active_thread_id,
+                    &self.center.pinned_thread_ids,
+                );
+                self.center
+                    .ensure_selected_visible(self.center_visible_row_capacity());
+                Ok(None)
+            }
+            CenterMenuAction::Rename => {
+                let name = self
+                    .center
+                    .rows
+                    .iter()
+                    .find(|row| row.thread_id == thread_id)
+                    .map(|row| row.name.clone())
+                    .unwrap_or_default();
+                let cursor = name.len();
+                self.center.overlay = CenterOverlayState::Rename(CenterRenameState {
+                    thread_id,
+                    value: name,
+                    cursor,
+                    area: None,
+                });
+                Ok(None)
+            }
+            CenterMenuAction::Archive => {
+                self.center.overlay =
+                    CenterOverlayState::ConfirmArchive(CenterArchiveConfirmState {
+                        thread_id,
+                        area: None,
+                    });
+                Ok(None)
+            }
+            CenterMenuAction::Delete => {
+                self.center.overlay = CenterOverlayState::ConfirmDelete(CenterDeleteConfirmState {
+                    thread_id,
+                    area: None,
+                });
+                Ok(None)
+            }
+            CenterMenuAction::ForkLocal => {
+                self.center.clear_overlay();
+                self.fork_center_thread_to_local(tui, app_gateway, thread_id)
+                    .await;
+                Ok(None)
+            }
+            CenterMenuAction::CopyThreadId => {
+                self.center.clear_overlay();
+                let text = thread_id.to_string();
+                match crate::clipboard_text::copy_text_to_clipboard(&text) {
+                    Ok(()) => self
+                        .chat_widget
+                        .add_info_message("Copied thread id to clipboard.".to_string(), None),
+                    Err(err) => self
+                        .chat_widget
+                        .add_error_message(format!("Failed to copy thread id: {err}")),
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    async fn release_center_thread_control(
+        &mut self,
+        app_gateway: &mut AppGatewaySession,
+        thread_id: ThreadId,
+    ) {
+        let row_index = self.center.row_index(thread_id);
+        if row_index
+            .and_then(|index| self.center.rows.get(index))
+            .is_some_and(|row| !center_row_is_controlled(row))
+        {
+            self.chat_widget
+                .add_info_message("This thread is not locked.".to_string(), /*hint*/ None);
+            return;
+        }
+
+        match app_gateway.thread_control_release(thread_id).await {
+            Ok(Some(_previous_control_state)) => {
+                if self.chat_widget.thread_id() == Some(thread_id) {
+                    self.chat_widget.set_thread_control_state(None);
+                }
+                if let Some(index) = self.center.row_index(thread_id) {
+                    let row = &mut self.center.rows[index];
+                    row.control_state = None;
+                    row.status = center_status_without_control(&row.status);
+                    let active_thread_id = self.center_active_thread_id();
+                    let visible_rows = self.center_visible_row_capacity();
+                    sort_center_thread_rows(
+                        &mut self.center.rows,
+                        active_thread_id,
+                        &self.center.pinned_thread_ids,
+                    );
+                    self.center.clamp_selection(visible_rows);
+                }
+                self.refresh_center_threads(app_gateway, true);
+                self.chat_widget.add_info_message(
+                    "Released the thread lock.".to_string(),
+                    Some(
+                        "External or agent group controllers can acquire it again on their next action."
+                            .to_string(),
+                    ),
+                );
+            }
+            Ok(None) => {
+                self.chat_widget
+                    .add_info_message("This thread is not locked.".to_string(), /*hint*/ None);
+            }
+            Err(err) => {
+                self.chat_widget
+                    .add_error_message(format!("Failed to release thread lock: {err}"));
+            }
+        }
+    }
+
+    async fn commit_center_rename(&mut self, app_gateway: &mut AppGatewaySession) {
+        let (thread_id, name) = match self.center.overlay.clone() {
+            CenterOverlayState::Rename(rename) => {
+                (rename.thread_id, center_single_line(rename.value.trim()))
+            }
+            _ => return,
+        };
+        if name.is_empty() {
+            self.center.clear_overlay();
+            return;
+        }
+        match app_gateway.thread_set_name(thread_id, name.clone()).await {
+            Ok(()) => {
+                if let Some(index) = self.center.row_index(thread_id) {
+                    self.center.rows[index].name = name;
+                }
+                self.center.clear_overlay();
+            }
+            Err(err) => {
+                self.chat_widget
+                    .add_error_message(format!("Failed to rename thread: {err}"));
+            }
+        }
+        self.refresh_center_threads(app_gateway, true);
+    }
+
+    async fn confirm_center_archive(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+    ) {
+        let thread_id = match self.center.overlay.clone() {
+            CenterOverlayState::ConfirmArchive(confirm) => confirm.thread_id,
+            _ => return,
+        };
+        self.center.clear_overlay();
+        match app_gateway.thread_archive(thread_id).await {
+            Ok(()) => {
+                self.center.pinned_thread_ids.remove(&thread_id);
+                self.center.rows.retain(|row| row.thread_id != thread_id);
+                let visible_rows = self.center_visible_row_capacity();
+                self.center.clamp_selection(visible_rows);
+                if self.center_active_thread_id() == Some(thread_id) {
+                    self.start_fresh_session_with_summary_hint(tui, app_gateway)
+                        .await;
+                }
+            }
+            Err(err) => {
+                self.chat_widget
+                    .add_error_message(format!("Failed to archive thread: {err}"));
+            }
+        }
+        self.refresh_center_threads(app_gateway, true);
+    }
+
+    async fn confirm_center_delete(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+    ) {
+        let thread_id = match self.center.overlay.clone() {
+            CenterOverlayState::ConfirmDelete(confirm) => confirm.thread_id,
+            _ => return,
+        };
+        self.center.clear_overlay();
+        match app_gateway.thread_delete(thread_id).await {
+            Ok(()) => {
+                self.center.pinned_thread_ids.remove(&thread_id);
+                self.center.usage_by_thread.remove(&thread_id);
+                self.center_observed_thread_ids.remove(&thread_id);
+                self.center.rows.retain(|row| row.thread_id != thread_id);
+                let visible_rows = self.center_visible_row_capacity();
+                self.center.clamp_selection(visible_rows);
+                if self.center_active_thread_id() == Some(thread_id) {
+                    self.start_fresh_session_with_summary_hint(tui, app_gateway)
+                        .await;
+                }
+            }
+            Err(err) => {
+                self.chat_widget
+                    .add_error_message(format!("Failed to delete thread: {err}"));
+            }
+        }
+        self.refresh_center_threads(app_gateway, true);
+    }
+
+    async fn fork_center_thread_to_local(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        thread_id: ThreadId,
+    ) {
+        let Some(source) = self
+            .center
+            .rows
+            .iter()
+            .find(|row| row.thread_id == thread_id)
+            .cloned()
+        else {
+            return;
+        };
+        self.refresh_in_memory_config_from_disk_best_effort("forking a Praxis thread")
+            .await;
+        let summary = session_summary(
+            self.chat_widget.token_usage(),
+            self.chat_widget.thread_id(),
+            self.chat_widget.thread_name(),
+        );
+        match app_gateway
+            .fork_thread(self.config.clone(), thread_id, source.path.clone())
+            .await
+        {
+            Ok(mut forked) => {
+                if forked.session.thread_name.is_none() {
+                    match app_gateway
+                        .thread_set_name(forked.session.thread_id, source.name.clone())
+                        .await
+                    {
+                        Ok(()) => forked.session.thread_name = Some(source.name),
+                        Err(err) => {
+                            tracing::warn!(
+                                thread_id = %forked.session.thread_id,
+                                %err,
+                                "failed to preserve Praxis fork source name"
+                            );
+                        }
+                    }
+                }
+                self.shutdown_current_thread(app_gateway).await;
+                match self
+                    .replace_chat_widget_with_app_gateway_thread(tui, app_gateway, forked)
+                    .await
+                {
+                    Ok(()) => {
+                        if let Some(summary) = summary {
+                            let mut lines: Vec<Line<'static>> =
+                                vec![summary.usage_line.clone().into()];
+                            if let Some(command) = summary.resume_command {
+                                lines.push(
+                                    vec!["To continue this session, run ".into(), command.cyan()]
+                                        .into(),
+                                );
+                            }
+                            self.chat_widget.add_plain_history_lines(lines);
+                        }
+                    }
+                    Err(err) => {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to attach to forked app-gateway thread: {err}"
+                        ));
+                    }
+                }
+            }
+            Err(err) => {
+                self.chat_widget
+                    .add_error_message(format!("Failed to fork Praxis thread: {err}"));
+            }
+        }
+        self.refresh_center_threads(app_gateway, true);
+        tui.frame_requester().schedule_frame();
+    }
+
+    fn handle_center_mouse_scroll(&mut self, column: u16, row: u16, delta_rows: isize) {
+        if !self.center.enabled {
+            return;
+        }
+        if self
+            .center
+            .list_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            let visible_rows = self.center_visible_row_capacity();
+            let max_scroll = self.center.list_item_count().saturating_sub(visible_rows);
+            self.center.list_scroll =
+                offset_usize(self.center.list_scroll, delta_rows).min(max_scroll);
+            self.center.clamp_list_scroll(visible_rows);
+            self.mouse.hover_center_thread_index = self.center_thread_index_at(column, row);
+            self.mouse.hover_center_target = self.center_mouse_target_at(column, row);
+            return;
+        }
+        if self
+            .center
+            .chat_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            let amount = delta_rows.unsigned_abs();
+            if delta_rows < 0 {
+                self.center.chat_scroll_from_bottom =
+                    self.center.chat_scroll_from_bottom.saturating_add(amount);
+            } else {
+                self.center.chat_scroll_from_bottom =
+                    self.center.chat_scroll_from_bottom.saturating_sub(amount);
+            }
+        }
+    }
+
+    fn mouse_pane_at(&self, column: u16, row: u16) -> Option<MousePane> {
+        if self
+            .center
+            .list_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            return Some(MousePane::CenterList);
+        }
+        if self
+            .center
+            .chat_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            return Some(MousePane::Chat);
+        }
+        None
+    }
+
+    fn center_mouse_target_at(&self, column: u16, row: u16) -> Option<CenterMouseTarget> {
+        if !self.center.enabled {
+            return None;
+        }
+
+        match &self.center.overlay {
+            CenterOverlayState::ContextMenu(menu) => {
+                if let Some(action) = center_menu_action_at(menu.area, column, row) {
+                    return Some(CenterMouseTarget::ContextMenu(action));
+                }
+            }
+            CenterOverlayState::Rename(rename) => {
+                if let Some(target) = center_rename_target_at(rename.area, column, row) {
+                    return Some(target);
+                }
+            }
+            CenterOverlayState::ConfirmArchive(confirm) => {
+                if let Some(target) = center_archive_target_at(confirm.area, column, row) {
+                    return Some(target);
+                }
+            }
+            CenterOverlayState::ConfirmDelete(confirm) => {
+                if let Some(target) = center_delete_target_at(confirm.area, column, row) {
+                    return Some(target);
+                }
+            }
+            CenterOverlayState::None => {}
+        }
+
+        if self
+            .center
+            .toolbar_new_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            return Some(CenterMouseTarget::NewThread);
+        }
+        if self
+            .center
+            .toolbar_search_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            return Some(CenterMouseTarget::Search);
+        }
+        let Some(index) = self.center_list_item_index_at(column, row) else {
+            return None;
+        };
+        if index < self.center.rows.len() {
+            Some(CenterMouseTarget::Thread(index))
+        } else if self.center.is_load_more_index(index) {
+            Some(CenterMouseTarget::LoadMore)
+        } else {
+            None
+        }
+    }
+
+    fn center_thread_index_at(&self, column: u16, row: u16) -> Option<usize> {
+        self.center_list_item_index_at(column, row)
+            .filter(|index| *index < self.center.rows.len())
+    }
+
+    fn center_list_item_index_at(&self, column: u16, row: u16) -> Option<usize> {
+        if !self.center.enabled {
+            return None;
+        }
+        let area = self.center.list_area?;
+        if area.is_empty()
+            || column < area.x
+            || column >= area.right()
+            || row < area.y.saturating_add(CENTER_LIST_TOP_PADDING)
+            || row >= area.bottom()
+        {
+            return None;
+        }
+
+        let relative_row = row
+            .saturating_sub(area.y)
+            .saturating_sub(CENTER_LIST_TOP_PADDING);
+        if relative_row % CENTER_ROW_HEIGHT >= 2 {
+            return None;
+        }
+
+        let visible_index = usize::from(relative_row / CENTER_ROW_HEIGHT);
+        let index = self.center.list_scroll.saturating_add(visible_index);
+        (index < self.center.list_item_count()).then_some(index)
+    }
+
+    fn handle_mouse_selection_copy_shortcut(&mut self, key_event: KeyEvent) -> bool {
+        if key_event.kind != KeyEventKind::Press
+            || !matches!(key_event.code, KeyCode::Char('c') | KeyCode::Char('C'))
+            || !key_event.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            return false;
+        }
+        let Some(selection) = self.mouse.selection.or(self.mouse.drag) else {
+            return false;
+        };
+        self.copy_mouse_selection_to_clipboard(selection)
+    }
+
+    fn copy_mouse_selection_to_clipboard(&mut self, selection: MouseDragSelection) -> bool {
+        let snapshot = match selection.pane {
+            MousePane::CenterList => self.mouse.center_list_snapshot.as_ref(),
+            MousePane::Chat => self.mouse.chat_snapshot.as_ref(),
+        };
+        let Some(snapshot) = snapshot else {
+            return false;
+        };
+        let text = extract_pane_selection(snapshot, selection);
+        if text.trim().is_empty() {
+            return false;
+        }
+        match crate::clipboard_text::copy_text_to_clipboard(&text) {
+            Ok(()) => true,
+            Err(err) => {
+                self.chat_widget
+                    .add_error_message(format!("Failed to copy selection: {err}"));
+                true
+            }
+        }
+    }
+
+    fn paste_clipboard_into_chat(&mut self) {
+        match crate::clipboard_text::read_text_from_clipboard() {
+            Ok(text) if !text.is_empty() => {
+                let pasted = text.replace("\r", "\n");
+                self.chat_widget.handle_paste(pasted);
+            }
+            Ok(_) => {}
+            Err(err) => self
+                .chat_widget
+                .add_error_message(format!("Failed to paste from clipboard: {err}")),
+        }
+    }
+
+    fn update_mouse_pane_snapshot(
+        &mut self,
+        pane: MousePane,
+        area: Rect,
+        buf: &ratatui::buffer::Buffer,
+    ) {
+        let snapshot = PaneTextSnapshot {
+            area,
+            lines: capture_pane_text(buf, area),
+        };
+        match pane {
+            MousePane::CenterList => self.mouse.center_list_snapshot = Some(snapshot),
+            MousePane::Chat => self.mouse.chat_snapshot = Some(snapshot),
+        }
+    }
+
+    fn render_mouse_selection_overlay(&self, buf: &mut ratatui::buffer::Buffer) {
+        let Some(selection) = self.mouse.drag.or(self.mouse.selection) else {
+            return;
+        };
+        let area = match selection.pane {
+            MousePane::CenterList => self.center.list_area,
+            MousePane::Chat => self.center.chat_area,
+        };
+        let Some(area) = area else {
+            return;
+        };
+        for (x, y) in selected_cells(area, selection) {
+            let style = crate::style::selection_overlay(buf[(x, y)].style());
+            buf[(x, y)].set_style(style);
+        }
+    }
+
+    fn center_active_thread_id(&self) -> Option<ThreadId> {
+        self.chat_widget.thread_id().or(self.active_thread_id)
+    }
+
+    fn upsert_center_thread_row(&mut self, row: CenterThreadRow) {
+        if let Some(index) = self.center.row_index(row.thread_id) {
+            self.center.rows[index] = row;
+        } else {
+            self.center.rows.push(row);
+        }
+        let active_thread_id = self.center_active_thread_id();
+        let visible_rows = self.center_visible_row_capacity();
+        sort_center_thread_rows(
+            &mut self.center.rows,
+            active_thread_id,
+            &self.center.pinned_thread_ids,
+        );
+        self.center.clamp_selection(visible_rows);
+    }
+
+    pub(super) async fn observe_center_thread_if_needed(
+        &mut self,
+        app_gateway: &mut AppGatewaySession,
+        thread_id: ThreadId,
+    ) {
+        if !self.center.enabled {
+            return;
+        }
+        if self.primary_thread_id == Some(thread_id) {
+            self.center_observed_thread_ids.insert(thread_id);
+            return;
+        }
+        if !self.center_observed_thread_ids.insert(thread_id) {
+            return;
+        }
+
+        match app_gateway.watch_thread(&self.config, thread_id).await {
+            Ok(started) => self.apply_center_observed_thread(started).await,
+            Err(err) => {
+                self.center_observed_thread_ids.remove(&thread_id);
+                tracing::warn!(
+                    thread_id = %thread_id,
+                    error = %err,
+                    "failed to attach Praxis observer to externally started thread"
+                );
+            }
+        }
+    }
+
+    pub(super) fn center_thread_should_auto_observe(&self, thread_id: ThreadId) -> bool {
+        self.center
+            .row_index(thread_id)
+            .and_then(|index| self.center.rows.get(index))
+            .is_some_and(center_row_should_auto_observe)
+    }
+
+    async fn observe_existing_center_threads_if_needed(
+        &mut self,
+        app_gateway: &mut AppGatewaySession,
+    ) {
+        if !self.center.enabled {
+            return;
+        }
+        let thread_ids = self
+            .center
+            .rows
+            .iter()
+            .filter(|row| center_row_should_auto_observe(row))
+            .map(|row| row.thread_id)
+            .collect::<Vec<_>>();
+        for thread_id in thread_ids {
+            self.observe_center_thread_if_needed(app_gateway, thread_id)
+                .await;
+        }
+    }
+
+    async fn apply_center_observed_thread(&mut self, started: AppGatewayStartedThread) {
+        let AppGatewayStartedThread {
+            session,
+            turns,
+            status,
+            control_state,
+        } = started;
+        let thread_id = session.thread_id;
+        if let Some(index) = self.center.row_index(thread_id) {
+            self.center.rows[index].status = status;
+            self.center.rows[index].control_state = control_state.clone();
+            let active_thread_id = self.center_active_thread_id();
+            let visible_rows = self.center_visible_row_capacity();
+            sort_center_thread_rows(
+                &mut self.center.rows,
+                active_thread_id,
+                &self.center.pinned_thread_ids,
+            );
+            self.center.clamp_selection(visible_rows);
+        }
+
+        let store = {
+            let channel = self.ensure_thread_channel(thread_id);
+            Arc::clone(&channel.store)
+        };
+        {
+            let mut store = store.lock().await;
+            store.set_session(session, turns);
+            store.rebase_buffer_after_session_refresh();
+        }
+
+        if self.center_active_thread_id() == Some(thread_id) {
+            self.chat_widget
+                .set_thread_control_state(control_state.as_ref());
+        }
+    }
+
+    pub(super) fn apply_center_server_notification(
+        &mut self,
+        notification: &ServerNotification,
+    ) -> bool {
+        if !self.center.enabled {
+            return false;
+        }
+
+        match notification {
+            ServerNotification::ThreadStarted(notification) => {
+                let Some(row) = CenterThreadRow::from_thread(notification.thread.clone()) else {
+                    return true;
+                };
+                self.upsert_center_thread_row(row);
+                false
+            }
+            ServerNotification::ThreadStatusChanged(notification) => {
+                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                    return true;
+                };
+                let Some(index) = self.center.row_index(thread_id) else {
+                    return true;
+                };
+                self.center.rows[index].status = notification.status.clone();
+                let active_thread_id = self.center_active_thread_id();
+                let visible_rows = self.center_visible_row_capacity();
+                sort_center_thread_rows(
+                    &mut self.center.rows,
+                    active_thread_id,
+                    &self.center.pinned_thread_ids,
+                );
+                self.center.clamp_selection(visible_rows);
+                false
+            }
+            ServerNotification::ThreadControlChanged(notification) => {
+                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                    return true;
+                };
+                let Some(index) = self.center.row_index(thread_id) else {
+                    return true;
+                };
+                self.center.rows[index].control_state = notification.control_state.clone();
+                if self
+                    .center_active_thread_id()
+                    .is_some_and(|active_thread_id| active_thread_id == thread_id)
+                {
+                    self.chat_widget
+                        .set_thread_control_state(notification.control_state.as_ref());
+                }
+                let active_thread_id = self.center_active_thread_id();
+                let visible_rows = self.center_visible_row_capacity();
+                sort_center_thread_rows(
+                    &mut self.center.rows,
+                    active_thread_id,
+                    &self.center.pinned_thread_ids,
+                );
+                self.center.clamp_selection(visible_rows);
+                false
+            }
+            ServerNotification::ThreadNameUpdated(notification) => {
+                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                    return true;
+                };
+                let Some(index) = self.center.row_index(thread_id) else {
+                    return true;
+                };
+                if let Some(name) = notification.thread_name.as_deref() {
+                    self.center.rows[index].name = center_single_line(name);
+                    false
+                } else {
+                    true
+                }
+            }
+            ServerNotification::ThreadTokenUsageUpdated(notification) => {
+                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                    return true;
+                };
+                let info = token_usage_info_from_app_gateway(notification.token_usage.clone());
+                self.center.usage_by_thread.insert(thread_id, info.clone());
+                if let Some(index) = self.center.row_index(thread_id) {
+                    self.center.rows[index].token_usage = Some(info);
+                }
+                false
+            }
+            ServerNotification::ThreadArchived(notification) => {
+                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                    return true;
+                };
+                self.center.rows.retain(|row| row.thread_id != thread_id);
+                let visible_rows = self.center_visible_row_capacity();
+                self.center.clamp_selection(visible_rows);
+                false
+            }
+            ServerNotification::ThreadUnarchived(_) => true,
+            ServerNotification::ThreadClosed(notification) => {
+                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                    return true;
+                };
+                let Some(index) = self.center.row_index(thread_id) else {
+                    return true;
+                };
+                self.center.rows[index].status = ThreadStatus::NotLoaded;
+                self.center.rows[index].control_state = None;
+                let active_thread_id = self.center_active_thread_id();
+                let visible_rows = self.center_visible_row_capacity();
+                sort_center_thread_rows(
+                    &mut self.center.rows,
+                    active_thread_id,
+                    &self.center.pinned_thread_ids,
+                );
+                self.center.clamp_selection(visible_rows);
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn refresh_center_threads(&mut self, app_gateway: &AppGatewaySession, force: bool) {
+        self.request_center_threads(app_gateway, force, None);
+    }
+
+    fn fetch_token_usage_summary(&self, app_gateway: &AppGatewaySession, limit: usize) {
+        let app_event_tx = self.app_event_tx.clone();
+        let request_handle = app_gateway.request_handle();
+        tokio::spawn(async move {
+            let result = tokio::time::timeout(
+                CENTER_REFRESH_TIMEOUT,
+                request_handle.request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
+                    request_id: RequestId::String(format!("praxis-token-usage-{}", Uuid::new_v4())),
+                    params: token_usage_thread_list_params(limit),
+                }),
+            )
+            .await
+            .map_err(|_| "thread/list timed out while summarizing token usage".to_string())
+            .and_then(|result| result.map_err(|err| err.to_string()));
+            app_event_tx.send(AppEvent::TokenUsageSummaryLoaded { limit, result });
+        });
+    }
+
+    fn load_more_center_threads(&mut self, app_gateway: &AppGatewaySession) {
+        let Some(cursor) = self.center.next_cursor.clone() else {
+            return;
+        };
+        self.request_center_threads(app_gateway, true, Some(cursor));
+    }
+
+    fn request_center_threads(
+        &mut self,
+        app_gateway: &AppGatewaySession,
+        force: bool,
+        cursor: Option<String>,
+    ) {
+        if !self.center.enabled {
+            return;
+        }
+        if self.center.refresh_in_flight {
+            return;
+        }
+        let is_load_more = cursor.is_some();
+        if !force
+            && !is_load_more
+            && self
+                .center
+                .last_refresh_at
+                .is_some_and(|last| last.elapsed() < CENTER_REFRESH_INTERVAL)
+        {
+            return;
+        }
+        self.center.last_refresh_at = Some(Instant::now());
+        self.center.refresh_in_flight = true;
+        self.center.refresh_request_id = self.center.refresh_request_id.wrapping_add(1);
+        self.center.pending_refresh_cursor = cursor.clone();
+        if !is_load_more {
+            self.center.next_cursor = None;
+        }
+
+        let request_id = self.center.refresh_request_id;
+        let search_term = center_search_term(&self.center.search_query);
+        let app_event_tx = self.app_event_tx.clone();
+        let request_handle = app_gateway.request_handle();
+        tokio::spawn(async move {
+            let result = tokio::time::timeout(
+                CENTER_REFRESH_TIMEOUT,
+                request_handle.request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
+                    request_id: RequestId::String(format!(
+                        "praxis-center-thread-list-{request_id}"
+                    )),
+                    params: center_thread_list_params(search_term, cursor),
+                }),
+            )
+            .await
+            .map_err(|_| "thread/list timed out while refreshing Praxis workspace".to_string())
+            .and_then(|result| result.map_err(|err| err.to_string()));
+            app_event_tx.send(AppEvent::CenterThreadsLoaded { request_id, result });
+        });
+    }
+
+    fn handle_center_threads_loaded(
+        &mut self,
+        request_id: u64,
+        result: std::result::Result<ThreadListResponse, String>,
+    ) {
+        if request_id != self.center.refresh_request_id {
+            return;
+        }
+        let append = self.center.pending_refresh_cursor.is_some();
+        self.center.refresh_in_flight = false;
+        self.center.pending_refresh_cursor = None;
+        let response = match result {
+            Ok(response) => response,
+            Err(err) => {
+                tracing::warn!(%err, "failed to refresh Praxis thread list");
+                return;
+            }
+        };
+        self.apply_center_threads(response, append);
+    }
+
+    fn apply_center_threads(&mut self, response: ThreadListResponse, append: bool) {
+        let active_thread_id = self.center_active_thread_id();
+        let was_empty = self.center.rows.is_empty();
+        let previous_top_thread_id = self.center.top_visible_thread_id();
+        let old_len = self.center.rows.len();
+        let selected_was_load_more = append && self.center.is_load_more_index(self.center.selected);
+        let mut incoming_rows: Vec<CenterThreadRow> = response
+            .data
+            .into_iter()
+            .filter_map(CenterThreadRow::from_thread)
+            .collect();
+        let first_incoming_thread_id = incoming_rows.first().map(|row| row.thread_id);
+        let mut rows = if append {
+            std::mem::take(&mut self.center.rows)
+        } else {
+            Vec::new()
+        };
+        for row in incoming_rows.drain(..) {
+            if let Some(index) = rows
+                .iter()
+                .position(|existing| existing.thread_id == row.thread_id)
+            {
+                rows[index] = row;
+            } else {
+                rows.push(row);
+            }
+        }
+        sort_center_thread_rows(&mut rows, active_thread_id, &self.center.pinned_thread_ids);
+
+        let selected_thread_id = self
+            .center
+            .rows
+            .get(self.center.selected)
+            .map(|row| row.thread_id)
+            .or(active_thread_id);
+        self.center.rows = rows;
+        self.center.next_cursor = response.next_cursor;
+        self.center.selected = if selected_was_load_more && self.center.rows.len() > old_len {
+            first_incoming_thread_id
+                .and_then(|thread_id| {
+                    self.center
+                        .rows
+                        .iter()
+                        .position(|row| row.thread_id == thread_id)
+                })
+                .unwrap_or_else(|| old_len.min(self.center.list_item_count().saturating_sub(1)))
+        } else {
+            selected_thread_id
+                .and_then(|thread_id| {
+                    self.center
+                        .rows
+                        .iter()
+                        .position(|row| row.thread_id == thread_id)
+                })
+                .unwrap_or(0)
+        };
+        let visible_rows = self.center_visible_row_capacity();
+        if visible_rows > 0 {
+            if was_empty
+                || !self
+                    .center
+                    .keep_top_visible_thread(previous_top_thread_id, visible_rows)
+            {
+                self.center.ensure_selected_visible(visible_rows);
+            } else {
+                self.center.clamp_list_scroll(visible_rows);
+            }
+        }
+    }
+
+    fn center_visible_row_capacity(&self) -> usize {
+        self.center
+            .list_area
+            .map(|area| {
+                ((area.height.saturating_sub(CENTER_LIST_TOP_PADDING)) / CENTER_ROW_HEIGHT) as usize
+            })
+            .unwrap_or(0)
+    }
+
+    fn render_center_or_chat(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) -> Rect {
+        if !self.center.enabled {
+            self.center.list_area = None;
+            self.center.chat_area = Some(area);
+            self.center.toolbar_new_area = None;
+            self.center.toolbar_search_area = None;
+            self.mouse.hover_center_thread_index = None;
+            self.mouse.hover_center_target = None;
+            self.mouse.center_list_snapshot = None;
+            self.chat_widget.render(area, buf);
+            self.update_mouse_pane_snapshot(MousePane::Chat, area, buf);
+            self.render_mouse_selection_overlay(buf);
+            return area;
+        }
+
+        let list_width = center_list_width(area.width);
+        let gap_width = if list_width < area.width {
+            CENTER_SPLIT_GAP.min(area.width.saturating_sub(list_width))
+        } else {
+            0
+        };
+        let list_area = Rect::new(area.x, area.y, list_width, area.height);
+        let gap_x = area.x.saturating_add(list_width);
+        let chat_x = gap_x.saturating_add(gap_width);
+        let chat_area = Rect::new(
+            chat_x,
+            area.y,
+            area.right().saturating_sub(chat_x),
+            area.height,
+        );
+        let gap_area = Rect::new(gap_x, area.y, gap_width, area.height);
+        self.center.list_area = Some(list_area);
+        self.center.chat_area = (!chat_area.is_empty()).then_some(chat_area);
+        self.center
+            .clamp_list_scroll(self.center_visible_row_capacity());
+        let max_chat_scroll = if chat_area.is_empty() {
+            0
+        } else {
+            self.chat_widget.center_chat_scroll_limit(
+                chat_area,
+                &self.transcript_cells,
+                self.center.chat_scroll_from_bottom,
+            )
+        };
+        self.center.chat_scroll_from_bottom =
+            self.center.chat_scroll_from_bottom.min(max_chat_scroll);
+        self.render_center_list(list_area, buf);
+        if !gap_area.is_empty() {
+            buf.set_style(
+                gap_area,
+                Style::default()
+                    .bg(Color::Rgb(8, 10, 9))
+                    .fg(Color::Rgb(54, 66, 58)),
+            );
+        }
+        if !chat_area.is_empty() {
+            self.chat_widget.render_center_chat(
+                chat_area,
+                buf,
+                &self.transcript_cells,
+                self.center.chat_scroll_from_bottom,
+            );
+            self.update_mouse_pane_snapshot(MousePane::Chat, chat_area, buf);
+        } else {
+            self.mouse.chat_snapshot = None;
+        }
+        self.update_mouse_pane_snapshot(MousePane::CenterList, list_area, buf);
+        self.render_mouse_selection_overlay(buf);
+        chat_area
+    }
+
+    fn render_center_list(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+        let bg = CENTER_PANEL_BG;
+        let panel = Color::Rgb(18, 21, 20);
+        let text = Color::Rgb(198, 208, 200);
+        let muted = Color::Rgb(118, 128, 121);
+        let green = Color::Rgb(112, 190, 132);
+        let active_bg = Color::Rgb(26, 38, 31);
+        let selected_bg = Color::Rgb(33, 43, 37);
+        let hover_bg = Color::Rgb(38, 50, 42);
+        let controlled_bg = Color::Rgb(16, 41, 64);
+        let controlled_active_bg = Color::Rgb(18, 52, 78);
+        let controlled_selected_bg = Color::Rgb(22, 62, 92);
+        let controlled_hover_bg = Color::Rgb(26, 72, 104);
+        let controlled_accent = Color::Rgb(142, 194, 228);
+        let controlled_muted = Color::Rgb(166, 196, 214);
+        let language = self.chat_widget.ui_language();
+        buf.set_style(area, Style::default().bg(bg).fg(text));
+
+        let block = Block::new()
+            .style(Style::default().bg(panel).fg(text))
+            .title(Line::from(vec![
+                Span::styled(language.center_title(), Style::default().fg(green)),
+                Span::styled(
+                    language.center_thread_count(self.center.rows.len()),
+                    Style::default().fg(muted),
+                ),
+            ]));
+        block.render(area, buf);
+
+        if area.height < CENTER_LIST_TOP_PADDING + 1 {
+            self.center.toolbar_new_area = None;
+            self.center.toolbar_search_area = None;
+            return;
+        }
+
+        let (new_area, search_area) = center_toolbar_areas(area);
+        self.center.toolbar_new_area = (!new_area.is_empty()).then_some(new_area);
+        self.center.toolbar_search_area = (!search_area.is_empty()).then_some(search_area);
+        let new_hovered = self.mouse.hover_center_target == Some(CenterMouseTarget::NewThread);
+        let search_hovered = self.mouse.hover_center_target == Some(CenterMouseTarget::Search);
+        let new_style = if new_hovered {
+            Style::default().bg(Color::Rgb(40, 58, 47)).fg(green)
+        } else {
+            Style::default().bg(Color::Rgb(24, 30, 26)).fg(green)
+        };
+        let search_style = if self.center.search_focused {
+            Style::default().bg(Color::Rgb(28, 42, 34)).fg(Color::White)
+        } else if search_hovered {
+            Style::default().bg(Color::Rgb(34, 42, 37)).fg(text)
+        } else {
+            Style::default().bg(Color::Rgb(21, 25, 23)).fg(muted)
+        };
+        if !new_area.is_empty() {
+            Paragraph::new(language.center_new_thread())
+                .style(new_style)
+                .render(new_area, buf);
+        }
+        if !search_area.is_empty() {
+            let search_text = if self.center.search_query.is_empty() {
+                language.center_search_placeholder().to_string()
+            } else {
+                self.center.search_query.clone()
+            };
+            let prefix = if self.center.search_focused {
+                "> "
+            } else {
+                "/ "
+            };
+            Paragraph::new(center_truncate(
+                &format!("{prefix}{search_text}"),
+                search_area.width as usize,
+            ))
+            .style(search_style)
+            .render(search_area, buf);
+        }
+
+        let active_thread_id = self.chat_widget.thread_id().or(self.active_thread_id);
+        let max_rows = ((area.height - CENTER_LIST_TOP_PADDING) / CENTER_ROW_HEIGHT) as usize;
+        let item_count = self.center.list_item_count();
+        let first_visible_index = self.center.list_scroll.min(item_count);
+        let last_visible_index = first_visible_index.saturating_add(max_rows).min(item_count);
+        let text_width = area.width.saturating_sub(4) as usize;
+        for (visible_index, index) in (first_visible_index..last_visible_index).enumerate() {
+            let y = area.y + CENTER_LIST_TOP_PADDING + (visible_index as u16 * CENTER_ROW_HEIGHT);
+            let row_area = Rect::new(area.x + 1, y, area.width.saturating_sub(2), 2);
+            if self.center.is_load_more_index(index) {
+                let is_selected = index == self.center.selected;
+                let is_hovered =
+                    self.mouse.hover_center_target == Some(CenterMouseTarget::LoadMore);
+                let row_style = if is_hovered {
+                    Style::default().bg(hover_bg).fg(text)
+                } else if is_selected {
+                    Style::default().bg(selected_bg).fg(text)
+                } else {
+                    Style::default().bg(panel).fg(text)
+                };
+                buf.set_style(row_area, row_style);
+                let label = if self.center.is_loading_more() {
+                    language.center_loading_more_threads()
+                } else {
+                    language.center_load_more_threads()
+                };
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        "+ ",
+                        Style::default().fg(green).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(label, row_style.fg(green).add_modifier(Modifier::BOLD)),
+                ]))
+                .style(row_style)
+                .render(
+                    Rect::new(
+                        row_area.x + 2,
+                        row_area.y,
+                        row_area.width.saturating_sub(4),
+                        1,
+                    ),
+                    buf,
+                );
+                Paragraph::new(center_truncate(
+                    &language.center_loaded_threads(self.center.rows.len()),
+                    text_width.saturating_sub(2),
+                ))
+                .style(row_style.fg(muted))
+                .render(
+                    Rect::new(
+                        row_area.x + 2,
+                        row_area.y + 1,
+                        row_area.width.saturating_sub(4),
+                        1,
+                    ),
+                    buf,
+                );
+                continue;
+            }
+            let Some(row) = self.center.rows.get(index) else {
+                continue;
+            };
+            let is_active = Some(row.thread_id) == active_thread_id;
+            let is_selected = index == self.center.selected;
+            let is_hovered = self.mouse.hover_center_thread_index == Some(index)
+                || self.mouse.hover_center_target == Some(CenterMouseTarget::Thread(index));
+            let is_controlled = center_row_is_controlled(row);
+            let row_style = if is_controlled && is_active {
+                Style::default().bg(controlled_active_bg).fg(text)
+            } else if is_controlled && is_hovered {
+                Style::default().bg(controlled_hover_bg).fg(text)
+            } else if is_controlled && is_selected {
+                Style::default().bg(controlled_selected_bg).fg(text)
+            } else if is_controlled {
+                Style::default().bg(controlled_bg).fg(text)
+            } else if is_active {
+                Style::default().bg(active_bg).fg(text)
+            } else if is_hovered {
+                Style::default().bg(hover_bg).fg(text)
+            } else if is_selected {
+                Style::default().bg(selected_bg).fg(text)
+            } else {
+                Style::default().bg(panel).fg(text)
+            };
+            buf.set_style(row_area, row_style);
+            if is_controlled {
+                for line in 0..row_area.height {
+                    buf[(row_area.x, row_area.y + line)]
+                        .set_symbol("┃")
+                        .set_style(row_style.fg(controlled_accent).add_modifier(Modifier::BOLD));
+                }
+            }
+
+            let status_color = if is_controlled {
+                controlled_accent
+            } else {
+                match &row.status {
+                    ThreadStatus::Active { .. } => green,
+                    ThreadStatus::Idle => Color::Rgb(145, 151, 146),
+                    ThreadStatus::SystemError => Color::Rgb(190, 118, 96),
+                    ThreadStatus::NotLoaded => muted,
+                }
+            };
+            let title_width = text_width.saturating_sub(CENTER_STATUS_LABEL_WIDTH + 8);
+            let pinned = self.center.pinned_thread_ids.contains(&row.thread_id);
+            let pin = if pinned { "* " } else { "" };
+            let title = center_truncate(&format!("{pin}{}", row.name), title_width);
+            let first_line = Line::from(vec![
+                Span::styled(
+                    center_row_control_marker(row),
+                    Style::default()
+                        .fg(if is_controlled {
+                            controlled_accent
+                        } else {
+                            muted
+                        })
+                        .add_modifier(if is_controlled {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    format!(
+                        "{:<width$}",
+                        center_truncate(&center_row_status_label(row), CENTER_STATUS_LABEL_WIDTH,),
+                        width = CENTER_STATUS_LABEL_WIDTH
+                    ),
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                Span::styled(title, row_style),
+            ]);
+            Paragraph::new(first_line).style(row_style).render(
+                Rect::new(
+                    row_area.x + 1,
+                    row_area.y,
+                    row_area.width.saturating_sub(2),
+                    1,
+                ),
+                buf,
+            );
+
+            let cwd_name = row
+                .cwd
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| row.cwd.display().to_string());
+            let usage = self
+                .center
+                .usage_by_thread
+                .get(&row.thread_id)
+                .or(row.token_usage.as_ref());
+            let base_detail = match center_cache_label(usage, is_selected || is_hovered) {
+                Some(cache_label) => {
+                    format!(
+                        "{}  {}  {}  {}",
+                        cache_label,
+                        row.source,
+                        cwd_name,
+                        row.preview.trim()
+                    )
+                }
+                None => format!("{}  {}  {}", row.source, cwd_name, row.preview.trim()),
+            };
+            let detail = if let Some(control_state) = row.control_state.as_ref() {
+                let control_banner = if control_state.read_only {
+                    language.center_locked_view()
+                } else {
+                    language.center_controlled()
+                };
+                format!(
+                    "{control_banner}  {}  {}",
+                    center_control_detail(control_state, language),
+                    base_detail
+                )
+            } else if is_controlled {
+                format!("{}  {base_detail}", language.center_controlled())
+            } else {
+                base_detail
+            };
+            Paragraph::new(center_truncate(&detail, text_width.saturating_sub(2)))
+                .style(row_style.fg(if is_controlled {
+                    controlled_muted
+                } else {
+                    muted
+                }))
+                .render(
+                    Rect::new(
+                        row_area.x + 1,
+                        row_area.y + 1,
+                        row_area.width.saturating_sub(2),
+                        1,
+                    ),
+                    buf,
+                );
+        }
+
+        self.render_center_list_scrollbar(area, max_rows, buf);
+        self.render_center_overlay(area, buf);
+    }
+
+    fn render_center_list_scrollbar(
+        &self,
+        area: Rect,
+        visible_rows: usize,
+        buf: &mut ratatui::buffer::Buffer,
+    ) {
+        let total = self.center.list_item_count();
+        if visible_rows == 0 || total <= visible_rows || area.width == 0 {
+            return;
+        }
+
+        let track_height = area.height.saturating_sub(CENTER_LIST_TOP_PADDING);
+        if track_height == 0 {
+            return;
+        }
+
+        let x = area.right().saturating_sub(1);
+        let track_y = area.y.saturating_add(CENTER_LIST_TOP_PADDING);
+        let muted = Color::Rgb(76, 86, 80);
+        let thumb = Color::Rgb(112, 190, 132);
+        for offset in 0..track_height {
+            buf[(x, track_y + offset)]
+                .set_symbol("│")
+                .set_style(Style::default().fg(muted).bg(Color::Rgb(18, 21, 20)));
+        }
+
+        let thumb_height = ((visible_rows * track_height as usize) / total)
+            .max(1)
+            .min(track_height as usize) as u16;
+        let max_scroll = total.saturating_sub(visible_rows).max(1);
+        let thumb_offset = ((self.center.list_scroll
+            * track_height.saturating_sub(thumb_height) as usize)
+            / max_scroll) as u16;
+        for offset in 0..thumb_height {
+            buf[(x, track_y + thumb_offset + offset)]
+                .set_symbol("┃")
+                .set_style(Style::default().fg(thumb).bg(Color::Rgb(18, 21, 20)));
+        }
+    }
+
+    fn render_center_overlay(&mut self, list_area: Rect, buf: &mut ratatui::buffer::Buffer) {
+        let overlay = self.center.overlay.clone();
+        let language = self.chat_widget.ui_language();
+        match overlay {
+            CenterOverlayState::None => {}
+            CenterOverlayState::ContextMenu(menu) => {
+                let actions = center_menu_actions();
+                let area = center_popup_area(
+                    list_area,
+                    menu.anchor_column,
+                    menu.anchor_row,
+                    CENTER_CONTEXT_MENU_WIDTH,
+                    actions.len() as u16 + 2,
+                );
+                if let CenterOverlayState::ContextMenu(current) = &mut self.center.overlay {
+                    current.area = Some(area);
+                }
+                let panel = Color::Rgb(20, 24, 22);
+                let selected_bg = Color::Rgb(42, 58, 48);
+                let text = Color::Rgb(220, 228, 222);
+                let muted = Color::Rgb(130, 140, 133);
+                let green = Color::Rgb(112, 190, 132);
+                buf.set_style(area, Style::default().bg(panel).fg(text));
+                Block::new()
+                    .borders(Borders::ALL)
+                    .title(language.center_context_title())
+                    .style(Style::default().bg(panel).fg(muted))
+                    .render(area, buf);
+                let pinned = self.center.pinned_thread_ids.contains(&menu.thread_id);
+                let locked = self
+                    .center
+                    .rows
+                    .iter()
+                    .find(|row| row.thread_id == menu.thread_id)
+                    .is_some_and(center_row_is_controlled);
+                for (index, action) in actions.iter().copied().enumerate() {
+                    let y = area.y.saturating_add(1 + index as u16);
+                    let is_selected = index == menu.selected
+                        || self.mouse.hover_center_target
+                            == Some(CenterMouseTarget::ContextMenu(action));
+                    let disabled = center_menu_action_disabled(action, locked);
+                    let style = if is_selected && disabled {
+                        Style::default().bg(selected_bg).fg(muted)
+                    } else if is_selected {
+                        Style::default().bg(selected_bg).fg(Color::White)
+                    } else if disabled {
+                        Style::default().bg(panel).fg(muted)
+                    } else if matches!(action, CenterMenuAction::Archive | CenterMenuAction::Delete)
+                    {
+                        Style::default().bg(panel).fg(Color::Rgb(190, 118, 96))
+                    } else if matches!(action, CenterMenuAction::TogglePin) && pinned {
+                        Style::default().bg(panel).fg(green)
+                    } else {
+                        Style::default().bg(panel).fg(text)
+                    };
+                    Paragraph::new(center_menu_action_label(action, pinned, locked, language))
+                        .style(style)
+                        .render(
+                            Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(2), 1),
+                            buf,
+                        );
+                }
+            }
+            CenterOverlayState::Rename(rename) => {
+                let area = center_dialog_area(list_area, CENTER_RENAME_POPUP_WIDTH, 6);
+                if let CenterOverlayState::Rename(current) = &mut self.center.overlay {
+                    current.area = Some(area);
+                }
+                let panel = Color::Rgb(20, 24, 22);
+                let selected_bg = Color::Rgb(42, 58, 48);
+                let text = Color::Rgb(220, 228, 222);
+                let muted = Color::Rgb(130, 140, 133);
+                let green = Color::Rgb(112, 190, 132);
+                buf.set_style(area, Style::default().bg(panel).fg(text));
+                Block::new()
+                    .borders(Borders::ALL)
+                    .title(language.center_rename_title())
+                    .style(Style::default().bg(panel).fg(muted))
+                    .render(area, buf);
+                Paragraph::new(language.center_thread_name_label())
+                    .style(Style::default().bg(panel).fg(muted))
+                    .render(Rect::new(area.x + 2, area.y + 1, area.width - 4, 1), buf);
+                let mut value = rename.value.clone();
+                let cursor = rename.cursor.min(value.len());
+                value.insert(cursor, '|');
+                Paragraph::new(center_truncate(
+                    &value,
+                    area.width.saturating_sub(4) as usize,
+                ))
+                .style(Style::default().bg(Color::Rgb(28, 34, 30)).fg(Color::White))
+                .render(Rect::new(area.x + 2, area.y + 2, area.width - 4, 1), buf);
+                let save_hovered =
+                    self.mouse.hover_center_target == Some(CenterMouseTarget::RenameSave);
+                let cancel_hovered =
+                    self.mouse.hover_center_target == Some(CenterMouseTarget::RenameCancel);
+                Paragraph::new(language.center_save_label())
+                    .style(if save_hovered {
+                        Style::default().bg(selected_bg).fg(Color::White)
+                    } else {
+                        Style::default().bg(panel).fg(green)
+                    })
+                    .render(Rect::new(area.x + 2, area.y + 4, 8, 1), buf);
+                Paragraph::new(language.center_cancel_label())
+                    .style(if cancel_hovered {
+                        Style::default().bg(selected_bg).fg(Color::White)
+                    } else {
+                        Style::default().bg(panel).fg(text)
+                    })
+                    .render(Rect::new(area.x + 12, area.y + 4, 10, 1), buf);
+            }
+            CenterOverlayState::ConfirmArchive(confirm) => {
+                let area = center_dialog_area(list_area, CENTER_CONFIRM_POPUP_WIDTH, 5);
+                if let CenterOverlayState::ConfirmArchive(current) = &mut self.center.overlay {
+                    current.area = Some(area);
+                }
+                let panel = Color::Rgb(20, 24, 22);
+                let selected_bg = Color::Rgb(42, 58, 48);
+                let text = Color::Rgb(220, 228, 222);
+                let danger = Color::Rgb(190, 118, 96);
+                let muted = Color::Rgb(130, 140, 133);
+                buf.set_style(area, Style::default().bg(panel).fg(text));
+                Block::new()
+                    .borders(Borders::ALL)
+                    .title(language.center_archive_title())
+                    .style(Style::default().bg(panel).fg(muted))
+                    .render(area, buf);
+                let name = self
+                    .center
+                    .rows
+                    .iter()
+                    .find(|row| row.thread_id == confirm.thread_id)
+                    .map(|row| row.name.as_str())
+                    .unwrap_or(match language {
+                        UiLanguage::En => "this thread",
+                        UiLanguage::Cn => "此线程",
+                    });
+                Paragraph::new(center_truncate(
+                    &language.center_archive_prompt(name),
+                    area.width.saturating_sub(4) as usize,
+                ))
+                .style(Style::default().bg(panel).fg(text))
+                .render(Rect::new(area.x + 2, area.y + 1, area.width - 4, 1), buf);
+                let confirm_hovered =
+                    self.mouse.hover_center_target == Some(CenterMouseTarget::ArchiveConfirm);
+                let cancel_hovered =
+                    self.mouse.hover_center_target == Some(CenterMouseTarget::ArchiveCancel);
+                Paragraph::new(language.center_archive_title())
+                    .style(if confirm_hovered {
+                        Style::default().bg(selected_bg).fg(Color::White)
+                    } else {
+                        Style::default().bg(panel).fg(danger)
+                    })
+                    .render(Rect::new(area.x + 2, area.y + 3, 10, 1), buf);
+                Paragraph::new(language.center_cancel_label())
+                    .style(if cancel_hovered {
+                        Style::default().bg(selected_bg).fg(Color::White)
+                    } else {
+                        Style::default().bg(panel).fg(text)
+                    })
+                    .render(Rect::new(area.x + 14, area.y + 3, 10, 1), buf);
+            }
+            CenterOverlayState::ConfirmDelete(confirm) => {
+                let area = center_dialog_area(list_area, CENTER_CONFIRM_POPUP_WIDTH, 5);
+                if let CenterOverlayState::ConfirmDelete(current) = &mut self.center.overlay {
+                    current.area = Some(area);
+                }
+                let panel = Color::Rgb(20, 24, 22);
+                let selected_bg = Color::Rgb(42, 58, 48);
+                let text = Color::Rgb(220, 228, 222);
+                let danger = Color::Rgb(190, 118, 96);
+                let muted = Color::Rgb(130, 140, 133);
+                buf.set_style(area, Style::default().bg(panel).fg(text));
+                Block::new()
+                    .borders(Borders::ALL)
+                    .title(language.center_delete_title())
+                    .style(Style::default().bg(panel).fg(muted))
+                    .render(area, buf);
+                let name = self
+                    .center
+                    .rows
+                    .iter()
+                    .find(|row| row.thread_id == confirm.thread_id)
+                    .map(|row| row.name.as_str())
+                    .unwrap_or(match language {
+                        UiLanguage::En => "this thread",
+                        UiLanguage::Cn => "此线程",
+                    });
+                Paragraph::new(center_truncate(
+                    &language.center_delete_prompt(name),
+                    area.width.saturating_sub(4) as usize,
+                ))
+                .style(Style::default().bg(panel).fg(text))
+                .render(Rect::new(area.x + 2, area.y + 1, area.width - 4, 1), buf);
+                let confirm_hovered =
+                    self.mouse.hover_center_target == Some(CenterMouseTarget::DeleteConfirm);
+                let cancel_hovered =
+                    self.mouse.hover_center_target == Some(CenterMouseTarget::DeleteCancel);
+                Paragraph::new(language.center_delete_title())
+                    .style(if confirm_hovered {
+                        Style::default().bg(selected_bg).fg(Color::White)
+                    } else {
+                        Style::default().bg(panel).fg(danger)
+                    })
+                    .render(Rect::new(area.x + 2, area.y + 3, 10, 1), buf);
+                Paragraph::new(language.center_cancel_label())
+                    .style(if cancel_hovered {
+                        Style::default().bg(selected_bg).fg(Color::White)
+                    } else {
+                        Style::default().bg(panel).fg(text)
+                    })
+                    .render(Rect::new(area.x + 14, area.y + 3, 10, 1), buf);
+            }
+        }
+    }
+
     async fn resume_session_target(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
         target_session: SessionTarget,
     ) -> Result<Option<AppRunControl>> {
+        if self.center.enabled {
+            return self
+                .switch_center_thread(tui, app_gateway, target_session)
+                .await;
+        }
+
+        if Some(target_session.thread_id) == self.chat_widget.thread_id().or(self.active_thread_id)
+        {
+            tui.frame_requester().schedule_frame();
+            return Ok(None);
+        }
+
         let current_cwd = self.config.cwd.to_path_buf();
         let resume_cwd = if self.remote_app_gateway_url.is_some() {
             current_cwd.clone()
         } else {
+            let allow_cwd_prompt = !self.center.enabled;
             match crate::resolve_cwd_for_resume_or_fork(
                 tui,
                 &self.config,
@@ -4164,7 +7172,7 @@ impl App {
                 target_session.thread_id,
                 target_session.path.as_deref(),
                 CwdPromptAction::Resume,
-                /*allow_prompt*/ true,
+                allow_cwd_prompt,
             )
             .await?
             {
@@ -4235,6 +7243,135 @@ impl App {
             }
         }
 
+        self.refresh_center_threads(app_gateway, true);
+        tui.frame_requester().schedule_frame();
+        Ok(None)
+    }
+
+    async fn switch_center_thread(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        target_session: SessionTarget,
+    ) -> Result<Option<AppRunControl>> {
+        if Some(target_session.thread_id) == self.chat_widget.thread_id().or(self.active_thread_id)
+        {
+            tui.frame_requester().schedule_frame();
+            return Ok(None);
+        }
+
+        let current_cwd = self.config.cwd.to_path_buf();
+        let resume_cwd = if self.remote_app_gateway_url.is_some() {
+            current_cwd.clone()
+        } else {
+            match crate::resolve_cwd_for_resume_or_fork(
+                tui,
+                &self.config,
+                &current_cwd,
+                target_session.thread_id,
+                target_session.path.as_deref(),
+                CwdPromptAction::Resume,
+                /*allow_prompt*/ false,
+            )
+            .await?
+            {
+                crate::ResolveCwdOutcome::Continue(Some(cwd)) => cwd,
+                crate::ResolveCwdOutcome::Continue(None) => current_cwd.clone(),
+                crate::ResolveCwdOutcome::Exit => {
+                    return Ok(Some(AppRunControl::Exit(ExitReason::UserRequested)));
+                }
+            }
+        };
+
+        let (mut resume_config, resume_tui_config) = match self
+            .rebuild_config_for_resume_or_fallback(&current_cwd, resume_cwd)
+            .await
+        {
+            Ok(cfg) => cfg,
+            Err(err) => {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to rebuild configuration for Praxis thread switch: {err}"
+                ));
+                return Ok(None);
+            }
+        };
+        self.apply_runtime_policy_overrides(&mut resume_config);
+
+        let resumed = match app_gateway
+            .resume_thread(resume_config.clone(), target_session.thread_id)
+            .await
+        {
+            Ok(resumed) => resumed,
+            Err(err) => {
+                let path_display = target_session.display_label();
+                self.chat_widget.add_error_message(format!(
+                    "Failed to open Praxis thread from {path_display}: {err}"
+                ));
+                return Ok(None);
+            }
+        };
+
+        let AppGatewayStartedThread {
+            session,
+            turns,
+            status: _,
+            control_state,
+        } = resumed;
+        let thread_id = session.thread_id;
+        let previous_thread_id = self.active_thread_id;
+        self.store_active_thread_receiver().await;
+
+        self.config = resume_config;
+        self.tui_config = resume_tui_config;
+        tui.set_notification_method(self.tui_config.notification_method);
+        self.file_search
+            .update_search_dir(self.config.cwd.to_path_buf());
+
+        self.primary_thread_id = Some(thread_id);
+        self.primary_session_configured = Some(session.clone());
+        self.upsert_agent_picker_thread(
+            thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
+            /*is_closed*/ false,
+        );
+
+        let store = {
+            let channel = self.ensure_thread_channel(thread_id);
+            Arc::clone(&channel.store)
+        };
+        {
+            let mut store = store.lock().await;
+            store.set_session(session, turns);
+            store.rebase_buffer_after_session_refresh();
+        }
+
+        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id).await else {
+            if let Some(previous_thread_id) = previous_thread_id {
+                self.active_thread_id = None;
+                self.activate_thread_channel(previous_thread_id).await;
+            }
+            self.chat_widget.add_error_message(format!(
+                "Praxis thread {thread_id} is already attached but has no replay receiver."
+            ));
+            return Ok(None);
+        };
+        self.active_thread_id = Some(thread_id);
+        self.active_thread_rx = Some(receiver);
+
+        let init = self.chatwidget_init_for_forked_or_resumed_thread(
+            tui,
+            self.config.clone(),
+            self.tui_config.clone(),
+        );
+        self.replace_chat_widget(ChatWidget::new_with_app_event(init));
+        self.reset_for_thread_switch(tui)?;
+        self.center.chat_scroll_from_bottom = 0;
+        self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
+        self.chat_widget
+            .set_thread_control_state(control_state.as_ref());
+        self.backfill_loaded_subagent_threads(app_gateway).await;
+        self.drain_active_thread_events(tui).await?;
+        self.refresh_pending_thread_approvals().await;
+        self.refresh_center_threads(app_gateway, true);
         tui.frame_requester().schedule_frame();
         Ok(None)
     }
@@ -4518,6 +7655,36 @@ impl App {
 
                 tui.frame_requester().schedule_frame();
             }
+            AppEvent::ReleaseCurrentThreadControl => {
+                let Some(thread_id) = self.chat_widget.thread_id() else {
+                    self.chat_widget.add_info_message(
+                        "No active thread is selected.".to_string(),
+                        /*hint*/ None,
+                    );
+                    return Ok(AppRunControl::Continue);
+                };
+                self.release_center_thread_control(app_gateway, thread_id)
+                    .await;
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::RegenerateThreadName { thread_id } => {
+                match app_gateway.thread_regenerate_name(thread_id).await {
+                    Ok(thread_name) => {
+                        if let Some(index) = self.center.row_index(thread_id) {
+                            self.center.rows[index].name = center_single_line(&thread_name);
+                        }
+                        self.chat_widget.add_info_message(
+                            format!("Thread name regenerated: {thread_name}"),
+                            /*hint*/ None,
+                        );
+                    }
+                    Err(err) => {
+                        self.chat_widget
+                            .add_error_message(format!("Failed to regenerate thread name: {err}"));
+                    }
+                }
+                tui.frame_requester().schedule_frame();
+            }
             AppEvent::InsertHistoryCell(cell) => {
                 let cell: Arc<dyn HistoryCell> = cell.into();
                 if let Some(Overlay::Transcript(t)) = &mut self.overlay {
@@ -4525,6 +7692,10 @@ impl App {
                     tui.frame_requester().schedule_frame();
                 }
                 self.transcript_cells.push(cell.clone());
+                if self.center.enabled && self.overlay.is_none() {
+                    tui.frame_requester().schedule_frame();
+                    return Ok(AppRunControl::Continue);
+                }
                 let mut display =
                     cell.committed_display_lines(tui.terminal.last_known_screen_size.width);
                 if !display.is_empty() {
@@ -4540,6 +7711,8 @@ impl App {
                     }
                     if self.overlay.is_some() {
                         self.deferred_history_lines.extend(display);
+                    } else if self.center.enabled {
+                        tui.frame_requester().schedule_frame();
                     } else {
                         tui.insert_history_lines(display);
                     }
@@ -4760,6 +7933,28 @@ impl App {
                         .finish_status_rate_limit_refresh(request_id);
                 }
             },
+            AppEvent::CenterThreadsLoaded { request_id, result } => {
+                self.handle_center_threads_loaded(request_id, result);
+                self.observe_existing_center_threads_if_needed(app_gateway)
+                    .await;
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::FetchTokenUsageSummary { limit } => {
+                self.fetch_token_usage_summary(app_gateway, limit);
+            }
+            AppEvent::TokenUsageSummaryLoaded { limit, result } => {
+                let cell = match result {
+                    Ok(response) => {
+                        crate::token_usage_summary::token_usage_summary_cell(limit, response)
+                    }
+                    Err(err) => history_cell::new_error_event(format!(
+                        "Failed to summarize token usage: {err}"
+                    )),
+                };
+                self.app_event_tx
+                    .send(AppEvent::InsertHistoryCell(Box::new(cell)));
+                tui.frame_requester().schedule_frame();
+            }
             AppEvent::ConnectorsLoaded { result, is_final } => {
                 self.chat_widget.on_connectors_loaded(result, is_final);
             }
@@ -4767,7 +7962,13 @@ impl App {
                 self.on_update_reasoning_effort(effort);
             }
             AppEvent::UpdateModelSelection { model, provider_id } => {
-                self.chat_widget.set_model_selection(&model, &provider_id);
+                let provider = self.config.model_providers.get(&provider_id).cloned();
+                if let Some(provider) = provider.as_ref() {
+                    self.config.model_provider_id = provider_id.clone();
+                    self.config.model_provider = provider.clone();
+                }
+                self.chat_widget
+                    .set_model_selection(&model, &provider_id, provider.as_ref());
             }
             AppEvent::UpdateCollaborationMode(mask) => {
                 self.chat_widget.set_collaboration_mask(mask);
@@ -5173,83 +8374,44 @@ impl App {
                     let _ = (preset, mode);
                 }
             }
-            AppEvent::PersistModelSelection {
+            AppEvent::OpenProviderLoginPrompt { provider } => {
+                self.chat_widget.open_provider_login_prompt(provider);
+            }
+            AppEvent::ShowAnthropicLoginStatement => {
+                self.chat_widget.show_anthropic_login_statement();
+            }
+            AppEvent::ApplyProviderSetup {
                 model,
                 provider_id,
                 provider,
                 effort,
             } => {
-                let profile_name = self.active_profile.clone();
-                let profile = profile_name.as_deref();
-                let mut builder =
-                    ConfigEditsBuilder::new(&self.config.praxis_home).with_profile(profile);
-                if !self.config.model_providers.contains_key(&provider_id)
-                    && let Some(provider) = provider.as_ref()
-                {
-                    builder = builder.upsert_model_provider(provider_id.as_str(), provider);
-                }
-                match builder
-                    .set_model_provider(Some(provider_id.as_str()))
-                    .set_model(Some(model.as_str()), effort)
-                    .apply()
-                    .await
-                {
-                    Ok(()) => {
-                        if let Err(err) = self.refresh_in_memory_config_from_disk().await {
-                            tracing::warn!(
-                                error = %err,
-                                "failed to refresh in-memory config after model selection"
-                            );
-                        }
-                        self.chat_widget.submit_op(AppCommand::reload_user_config());
-                        self.chat_widget
-                            .submit_op(AppCommand::override_turn_context(
-                                /*cwd*/ None,
-                                /*approval_policy*/ None,
-                                /*approvals_reviewer*/ None,
-                                /*sandbox_policy*/ None,
-                                /*windows_sandbox_level*/ None,
-                                Some(provider_id.clone()),
-                                Some(model.clone()),
-                                Some(effort),
-                                /*summary*/ None,
-                                /*service_tier*/ None,
-                                /*collaboration_mode*/ None,
-                                /*personality*/ None,
-                            ));
-                        let effort_label = effort
-                            .map(|selected_effort| selected_effort.to_string())
-                            .unwrap_or_else(|| "default".to_string());
-                        tracing::info!(
-                            "Selected provider: {provider_id}, Selected model: {model}, Selected effort: {effort_label}"
-                        );
-                        let mut message = format!("Model changed to {model}");
-                        if let Some(label) = Self::reasoning_label_for(&model, effort) {
-                            message.push(' ');
-                            message.push_str(label);
-                        }
-                        if let Some(profile) = profile {
-                            message.push_str(" for ");
-                            message.push_str(profile);
-                            message.push_str(" profile");
-                        }
-                        self.chat_widget.add_info_message(message, /*hint*/ None);
-                    }
-                    Err(err) => {
-                        tracing::error!(
-                            error = %err,
-                            "failed to persist model selection"
-                        );
-                        if let Some(profile) = profile {
-                            self.chat_widget.add_error_message(format!(
-                                "Failed to save model for profile `{profile}`: {err}"
-                            ));
-                        } else {
-                            self.chat_widget
-                                .add_error_message(format!("Failed to save default model: {err}"));
-                        }
-                    }
-                }
+                let provider_label = provider.name.clone();
+                self.apply_model_provider_selection(
+                    model,
+                    provider_id,
+                    Some(provider),
+                    effort,
+                    ProviderConfigWriteMode::ForceUpsert,
+                    Some(provider_label),
+                )
+                .await;
+            }
+            AppEvent::ApplyModelSelection {
+                model,
+                provider_id,
+                provider,
+                effort,
+            } => {
+                self.apply_model_provider_selection(
+                    model,
+                    provider_id,
+                    provider,
+                    effort,
+                    ProviderConfigWriteMode::UpsertIfMissing,
+                    None,
+                )
+                .await;
             }
             AppEvent::PluginUninstallLoaded {
                 cwd,
@@ -5994,6 +9156,7 @@ impl App {
             ThreadBufferedEvent::Notification(ServerNotification::TurnStarted(_))
                 | ThreadBufferedEvent::Notification(ServerNotification::ThreadTokenUsageUpdated(_))
         );
+        self.remember_center_token_usage_from_event(&event);
         match event {
             ThreadBufferedEvent::Notification(notification) => {
                 self.chat_widget
@@ -6016,6 +9179,7 @@ impl App {
     }
 
     fn handle_thread_event_replay(&mut self, event: ThreadBufferedEvent) {
+        self.remember_center_token_usage_from_event(&event);
         match event {
             ThreadBufferedEvent::Notification(notification) => self
                 .chat_widget
@@ -6030,6 +9194,25 @@ impl App {
                 self.handle_feedback_thread_event(event);
             }
         }
+    }
+
+    fn remember_center_token_usage_from_event(&mut self, event: &ThreadBufferedEvent) {
+        if !self.center.enabled {
+            return;
+        }
+        let ThreadBufferedEvent::Notification(ServerNotification::ThreadTokenUsageUpdated(
+            notification,
+        )) = event
+        else {
+            return;
+        };
+        let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+            return;
+        };
+        self.center.usage_by_thread.insert(
+            thread_id,
+            token_usage_info_from_app_gateway(notification.token_usage.clone()),
+        );
     }
 
     /// Handles an event emitted by the currently active thread.
@@ -6235,6 +9418,14 @@ impl App {
         app_gateway: &mut AppGatewaySession,
         key_event: KeyEvent,
     ) {
+        if self.handle_mouse_selection_copy_shortcut(key_event) {
+            tui.frame_requester().schedule_frame();
+            return;
+        }
+        if key_event.kind == KeyEventKind::Press {
+            self.mouse.selection = None;
+        }
+
         // Some terminals, especially on macOS, encode Option+Left/Right as Option+b/f unless
         // enhanced keyboard reporting is available. We only treat those word-motion fallbacks as
         // agent-switch shortcuts when the composer is empty so we never steal the expected
@@ -6270,6 +9461,13 @@ impl App {
             {
                 let _ = self.select_agent_thread(tui, app_gateway, thread_id).await;
             }
+            return;
+        }
+
+        if self
+            .handle_center_key_event(tui, app_gateway, key_event)
+            .await
+        {
             return;
         }
 
@@ -6362,6 +9560,279 @@ impl App {
                 self.chat_widget.handle_key_event(key_event);
             }
         };
+    }
+
+    async fn handle_center_key_event(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        key_event: KeyEvent,
+    ) -> bool {
+        if !self.center.enabled
+            || self.overlay.is_some()
+            || !self.chat_widget.no_modal_or_popup_active()
+            || !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+        {
+            return false;
+        }
+
+        if self.center.search_focused {
+            let handled = self.handle_center_search_key(app_gateway, key_event);
+            tui.frame_requester().schedule_frame();
+            return handled;
+        }
+
+        if !matches!(self.center.overlay, CenterOverlayState::None) {
+            return self
+                .handle_center_overlay_key(tui, app_gateway, key_event)
+                .await;
+        }
+
+        if key_event.code == KeyCode::Char('n')
+            && key_event
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL)
+            && self.chat_widget.composer_text_with_pending().is_empty()
+        {
+            self.center.clear_overlay();
+            self.center.clear_search_focus();
+            self.start_fresh_session_with_summary_hint(tui, app_gateway)
+                .await;
+            self.refresh_center_threads(app_gateway, true);
+            tui.frame_requester().schedule_frame();
+            return true;
+        }
+
+        if !self.chat_widget.composer_text_with_pending().is_empty() {
+            return false;
+        }
+
+        let visible_rows = self.center_visible_row_capacity();
+        let item_count = self.center.list_item_count();
+        match key_event.code {
+            KeyCode::Up => {
+                self.center.selected = self.center.selected.saturating_sub(1);
+            }
+            KeyCode::Down => {
+                self.center.selected = self
+                    .center
+                    .selected
+                    .saturating_add(1)
+                    .min(item_count.saturating_sub(1));
+            }
+            KeyCode::PageUp => {
+                self.center.selected = self.center.selected.saturating_sub(visible_rows.max(1));
+            }
+            KeyCode::PageDown => {
+                self.center.selected = self
+                    .center
+                    .selected
+                    .saturating_add(visible_rows.max(1))
+                    .min(item_count.saturating_sub(1));
+            }
+            KeyCode::Home => self.center.selected = 0,
+            KeyCode::End => {
+                self.center.selected = item_count.saturating_sub(1);
+            }
+            KeyCode::Enter => {
+                if self.center.is_load_more_index(self.center.selected) {
+                    self.load_more_center_threads(app_gateway);
+                    tui.frame_requester().schedule_frame();
+                    return true;
+                }
+                let Some(row) = self.center.rows.get(self.center.selected).cloned() else {
+                    return true;
+                };
+                let _ = self
+                    .resume_session_target(
+                        tui,
+                        app_gateway,
+                        SessionTarget {
+                            path: row.path,
+                            thread_id: row.thread_id,
+                            thread_name: Some(row.name),
+                        },
+                    )
+                    .await;
+                return true;
+            }
+            KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete => {
+                tui.frame_requester().schedule_frame();
+                return false;
+            }
+            _ => return false,
+        }
+
+        self.center.ensure_selected_visible(visible_rows);
+        tui.frame_requester().schedule_frame();
+        true
+    }
+
+    fn handle_center_search_key(
+        &mut self,
+        app_gateway: &AppGatewaySession,
+        key_event: KeyEvent,
+    ) -> bool {
+        let mut changed = false;
+        match key_event.code {
+            KeyCode::Esc => {
+                if self.center.search_query.is_empty() {
+                    self.center.search_focused = false;
+                } else {
+                    self.center.search_query.clear();
+                    changed = true;
+                }
+            }
+            KeyCode::Enter => self.center.search_focused = false,
+            KeyCode::Backspace => {
+                changed = self.center.search_query.pop().is_some();
+            }
+            KeyCode::Delete => {
+                changed = !self.center.search_query.is_empty();
+                self.center.search_query.clear();
+            }
+            KeyCode::Char('u')
+                if key_event
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
+                changed = !self.center.search_query.is_empty();
+                self.center.search_query.clear();
+            }
+            KeyCode::Char(c)
+                if key_event.modifiers.is_empty()
+                    || key_event.modifiers == crossterm::event::KeyModifiers::SHIFT =>
+            {
+                self.center.search_query.push(c);
+                changed = true;
+            }
+            _ => {}
+        }
+
+        if changed {
+            self.center.selected = 0;
+            self.center.list_scroll = 0;
+            self.center.refresh_in_flight = false;
+            self.center.last_refresh_at = None;
+            self.refresh_center_threads(app_gateway, true);
+        }
+        true
+    }
+
+    async fn handle_center_overlay_key(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        key_event: KeyEvent,
+    ) -> bool {
+        match self.center.overlay.clone() {
+            CenterOverlayState::ContextMenu(menu) => match key_event.code {
+                KeyCode::Esc => {
+                    self.center.clear_overlay();
+                }
+                KeyCode::Up => {
+                    if let CenterOverlayState::ContextMenu(current) = &mut self.center.overlay {
+                        current.selected = current.selected.saturating_sub(1);
+                    }
+                }
+                KeyCode::Down => {
+                    if let CenterOverlayState::ContextMenu(current) = &mut self.center.overlay {
+                        current.selected = current
+                            .selected
+                            .saturating_add(1)
+                            .min(center_menu_actions().len().saturating_sub(1));
+                    }
+                }
+                KeyCode::Enter => {
+                    let action = center_menu_actions()
+                        .get(menu.selected)
+                        .copied()
+                        .unwrap_or(CenterMenuAction::Open);
+                    let _ = self
+                        .execute_center_menu_action(tui, app_gateway, action)
+                        .await;
+                }
+                _ => {}
+            },
+            CenterOverlayState::Rename(_) => match key_event.code {
+                KeyCode::Esc => self.center.clear_overlay(),
+                KeyCode::Enter => self.commit_center_rename(app_gateway).await,
+                KeyCode::Home => {
+                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                        rename.cursor = 0;
+                    }
+                }
+                KeyCode::End => {
+                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                        rename.cursor = rename.value.len();
+                    }
+                }
+                KeyCode::Left => {
+                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                        rename.cursor = previous_char_boundary(&rename.value, rename.cursor);
+                    }
+                }
+                KeyCode::Right => {
+                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                        rename.cursor = next_char_boundary(&rename.value, rename.cursor);
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay
+                        && rename.cursor > 0
+                    {
+                        let previous = previous_char_boundary(&rename.value, rename.cursor);
+                        rename.value.drain(previous..rename.cursor);
+                        rename.cursor = previous;
+                    }
+                }
+                KeyCode::Delete => {
+                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay
+                        && rename.cursor < rename.value.len()
+                    {
+                        let next = next_char_boundary(&rename.value, rename.cursor);
+                        rename.value.drain(rename.cursor..next);
+                    }
+                }
+                KeyCode::Char('u')
+                    if key_event
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
+                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                        rename.value.clear();
+                        rename.cursor = 0;
+                    }
+                }
+                KeyCode::Char(c)
+                    if key_event.modifiers.is_empty()
+                        || key_event.modifiers == crossterm::event::KeyModifiers::SHIFT =>
+                {
+                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                        rename.value.insert(rename.cursor, c);
+                        rename.cursor += c.len_utf8();
+                    }
+                }
+                _ => {}
+            },
+            CenterOverlayState::ConfirmArchive(_) => match key_event.code {
+                KeyCode::Esc | KeyCode::Char('n') => self.center.clear_overlay(),
+                KeyCode::Enter | KeyCode::Char('y') => {
+                    self.confirm_center_archive(tui, app_gateway).await;
+                }
+                _ => {}
+            },
+            CenterOverlayState::ConfirmDelete(_) => match key_event.code {
+                KeyCode::Esc | KeyCode::Char('n') => self.center.clear_overlay(),
+                KeyCode::Enter | KeyCode::Char('y') => {
+                    self.confirm_center_delete(tui, app_gateway).await;
+                }
+                _ => {}
+            },
+            CenterOverlayState::None => {}
+        }
+        tui.frame_requester().schedule_frame();
+        true
     }
 
     fn refresh_status_line(&mut self) {
@@ -9057,6 +12528,7 @@ guardian_approval = true
                     summary: None,
                     ephemeral: false,
                     model_provider: "agent-provider".to_string(),
+                    model: Some("gpt-agent".to_string()),
                     created_at: 1,
                     updated_at: 2,
                     status: praxis_app_gateway_protocol::ThreadStatus::Idle,
@@ -9070,6 +12542,8 @@ guardian_approval = true
                     name: Some("agent thread".to_string()),
                     total_cost_usd: None,
                     last_cost_usd: None,
+                    token_usage: None,
+                    control_state: None,
                     selfwork_plan_path: None,
                     turns: Vec::new(),
                 },
@@ -9141,6 +12615,7 @@ guardian_approval = true
                     summary: None,
                     ephemeral: false,
                     model_provider: "agent-provider".to_string(),
+                    model: Some("gpt-agent".to_string()),
                     created_at: 1,
                     updated_at: 2,
                     status: praxis_app_gateway_protocol::ThreadStatus::Idle,
@@ -9154,6 +12629,8 @@ guardian_approval = true
                     name: Some("agent thread".to_string()),
                     total_cost_usd: None,
                     last_cost_usd: None,
+                    token_usage: None,
+                    control_state: None,
                     selfwork_plan_path: None,
                     turns: Vec::new(),
                 },
@@ -9656,6 +13133,7 @@ guardian_approval = true
                     total_tokens: 10,
                     input_tokens: 4,
                     cached_input_tokens: 1,
+                    cache_reported_input_tokens: 4,
                     output_tokens: 5,
                     reasoning_output_tokens: 0,
                 },
@@ -9663,6 +13141,7 @@ guardian_approval = true
                     total_tokens: 10,
                     input_tokens: 4,
                     cached_input_tokens: 1,
+                    cache_reported_input_tokens: 4,
                     output_tokens: 5,
                     reasoning_output_tokens: 0,
                 },
@@ -10997,6 +14476,8 @@ guardian_approval = true
             AppGatewayStartedThread {
                 session: resumed_session.clone(),
                 turns: resumed_turns.clone(),
+                status: ThreadStatus::Idle,
+                control_state: None,
             },
             &mut snapshot,
         )
@@ -11098,6 +14579,7 @@ guardian_approval = true
                     summary: None,
                     ephemeral: false,
                     model_provider: "openai".to_string(),
+                    model: None,
                     created_at: 0,
                     updated_at: 0,
                     status: praxis_app_gateway_protocol::ThreadStatus::Idle,
@@ -11111,6 +14593,8 @@ guardian_approval = true
                     name: None,
                     total_cost_usd: None,
                     last_cost_usd: None,
+                    token_usage: None,
+                    control_state: None,
                     selfwork_plan_path: None,
                     turns: Vec::new(),
                 },

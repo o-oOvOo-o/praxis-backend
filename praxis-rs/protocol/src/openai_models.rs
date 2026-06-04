@@ -18,6 +18,7 @@ use ts_rs::TS;
 use crate::config_types::Personality;
 use crate::config_types::ReasoningSummary;
 use crate::config_types::Verbosity;
+use crate::models::BASE_INSTRUCTIONS_DEFAULT;
 
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 
@@ -332,6 +333,181 @@ impl ModelInfo {
         } else {
             self.base_instructions.clone()
         }
+    }
+}
+
+/// Provider-neutral thinking controls for OpenAI-compatible custom models.
+pub fn provider_neutral_reasoning_levels() -> (Option<ReasoningEffort>, Vec<ReasoningEffortPreset>)
+{
+    (
+        None,
+        vec![
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::Low,
+                description: "Enable model thinking.".to_string(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::High,
+                description: "Enable deeper model thinking.".to_string(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::XHigh,
+                description: "Use maximum model thinking depth.".to_string(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::None,
+                description: "Disable model thinking.".to_string(),
+            },
+        ],
+    )
+}
+
+/// Built-in metadata for known OpenAI-compatible models that do not come from the OpenAI catalog.
+pub fn known_openai_compatible_model_info(model_id: &str) -> Option<ModelInfo> {
+    let normalized = model_id.to_ascii_lowercase();
+    match normalized.as_str() {
+        "gpt-5.5" => Some(openai_codex_model_info(
+            model_id,
+            "GPT-5.5",
+            "Latest frontier agentic coding model.",
+            /*priority*/ 0,
+        )),
+        "gpt-5.5-pro" => Some(openai_codex_model_info(
+            model_id,
+            "GPT-5.5 Pro",
+            "Latest frontier agentic coding model for the hardest tasks.",
+            /*priority*/ 1,
+        )),
+        "deepseek-v4-pro" => Some(deepseek_model_info(
+            model_id,
+            "DeepSeek V4 Pro",
+            "DeepSeek V4 Pro model metadata from the official DeepSeek API catalog.",
+            Some(ReasoningEffort::High),
+            /*priority*/ 10,
+        )),
+        "deepseek-v4-flash" => Some(deepseek_model_info(
+            model_id,
+            "DeepSeek V4 Flash",
+            "DeepSeek V4 Flash model metadata from the official DeepSeek API catalog.",
+            Some(ReasoningEffort::High),
+            /*priority*/ 11,
+        )),
+        "deepseek-chat" => Some(deepseek_model_info(
+            model_id,
+            "DeepSeek Chat",
+            "Compatibility alias for the non-thinking mode of DeepSeek V4 Flash.",
+            Some(ReasoningEffort::None),
+            /*priority*/ 12,
+        )),
+        "deepseek-reasoner" => Some(deepseek_model_info(
+            model_id,
+            "DeepSeek Reasoner",
+            "Compatibility alias for the thinking mode of DeepSeek V4 Flash.",
+            Some(ReasoningEffort::High),
+            /*priority*/ 13,
+        )),
+        _ => None,
+    }
+}
+
+fn openai_codex_model_info(
+    model_id: &str,
+    display_name: &str,
+    description: &str,
+    priority: i32,
+) -> ModelInfo {
+    ModelInfo {
+        slug: model_id.to_string(),
+        display_name: display_name.to_string(),
+        description: Some(description.to_string()),
+        default_reasoning_level: Some(ReasoningEffort::Medium),
+        supported_reasoning_levels: codex_reasoning_levels(),
+        shell_type: ConfigShellToolType::ShellCommand,
+        visibility: ModelVisibility::List,
+        supported_in_api: true,
+        priority,
+        availability_nux: None,
+        upgrade: None,
+        base_instructions: BASE_INSTRUCTIONS_DEFAULT.to_string(),
+        model_messages: None,
+        supports_reasoning_summaries: true,
+        default_reasoning_summary: ReasoningSummary::None,
+        support_verbosity: true,
+        default_verbosity: Some(Verbosity::Low),
+        apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),
+        web_search_tool_type: WebSearchToolType::Text,
+        truncation_policy: TruncationPolicyConfig::tokens(/*limit*/ 10_000),
+        supports_parallel_tool_calls: true,
+        supports_image_detail_original: true,
+        context_window: Some(272_000),
+        auto_compact_token_limit: None,
+        effective_context_window_percent: 95,
+        experimental_supported_tools: Vec::new(),
+        input_modalities: default_input_modalities(),
+        used_fallback_model_metadata: false,
+        supports_search_tool: false,
+    }
+}
+
+fn codex_reasoning_levels() -> Vec<ReasoningEffortPreset> {
+    vec![
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Low,
+            description: "Fast responses with lighter reasoning".to_string(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Medium,
+            description: "Balances speed and reasoning depth for everyday tasks".to_string(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::High,
+            description: "Greater reasoning depth for complex problems".to_string(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::XHigh,
+            description: "Extra high reasoning depth for complex problems".to_string(),
+        },
+    ]
+}
+
+fn deepseek_model_info(
+    model_id: &str,
+    display_name: &str,
+    description: &str,
+    default_reasoning_level: Option<ReasoningEffort>,
+    priority: i32,
+) -> ModelInfo {
+    let (_, supported_reasoning_levels) = provider_neutral_reasoning_levels();
+    ModelInfo {
+        slug: model_id.to_string(),
+        display_name: display_name.to_string(),
+        description: Some(description.to_string()),
+        default_reasoning_level,
+        supported_reasoning_levels,
+        shell_type: ConfigShellToolType::Default,
+        visibility: ModelVisibility::List,
+        supported_in_api: true,
+        priority,
+        availability_nux: None,
+        upgrade: None,
+        base_instructions: BASE_INSTRUCTIONS_DEFAULT.to_string(),
+        model_messages: None,
+        supports_reasoning_summaries: false,
+        default_reasoning_summary: ReasoningSummary::Auto,
+        support_verbosity: false,
+        default_verbosity: None,
+        apply_patch_tool_type: None,
+        web_search_tool_type: WebSearchToolType::Text,
+        truncation_policy: TruncationPolicyConfig::bytes(/*limit*/ 10_000),
+        supports_parallel_tool_calls: false,
+        supports_image_detail_original: false,
+        context_window: Some(1_000_000),
+        auto_compact_token_limit: Some(900_000),
+        effective_context_window_percent: 95,
+        experimental_supported_tools: Vec::new(),
+        input_modalities: default_input_modalities(),
+        used_fallback_model_metadata: false,
+        supports_search_tool: false,
     }
 }
 

@@ -80,6 +80,7 @@ fn count_outcomes_sums_token_usage_across_all_jobs() {
             token_usage: Some(TokenUsage {
                 input_tokens: 10,
                 cached_input_tokens: 2,
+                cache_reported_input_tokens: 10,
                 output_tokens: 3,
                 reasoning_output_tokens: 1,
                 total_tokens: 13,
@@ -90,6 +91,7 @@ fn count_outcomes_sums_token_usage_across_all_jobs() {
             token_usage: Some(TokenUsage {
                 input_tokens: 7,
                 cached_input_tokens: 1,
+                cache_reported_input_tokens: 7,
                 output_tokens: 2,
                 reasoning_output_tokens: 0,
                 total_tokens: 9,
@@ -110,6 +112,7 @@ fn count_outcomes_sums_token_usage_across_all_jobs() {
         Some(TokenUsage {
             input_tokens: 17,
             cached_input_tokens: 3,
+            cache_reported_input_tokens: 17,
             output_tokens: 5,
             reasoning_output_tokens: 1,
             total_tokens: 22,

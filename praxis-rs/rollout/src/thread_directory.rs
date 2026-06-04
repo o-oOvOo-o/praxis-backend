@@ -8,6 +8,7 @@ use chrono::SecondsFormat;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
+use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_state::ThreadSourceKind;
 use serde_json::Value;
 use tracing::warn;
@@ -39,11 +40,13 @@ pub struct ThreadSummary {
     pub timestamp: Option<String>,
     pub updated_at: Option<String>,
     pub model_provider: String,
+    pub model: Option<String>,
     pub cwd: PathBuf,
     pub cli_version: String,
     pub source: SessionSource,
     pub total_cost_micros: Option<i64>,
     pub last_cost_micros: Option<i64>,
+    pub token_usage_info: Option<TokenUsageInfo>,
     pub selfwork_plan_path: Option<PathBuf>,
     pub git_info: Option<ThreadGitInfo>,
     pub thread_name: Option<String>,
@@ -622,11 +625,13 @@ fn summary_from_thread_item(
         model_provider: item
             .model_provider
             .unwrap_or_else(|| fallback_provider.to_string()),
+        model: None,
         cwd,
         cli_version: item.cli_version.unwrap_or_default(),
         source,
         total_cost_micros: None,
         last_cost_micros: None,
+        token_usage_info: None,
         selfwork_plan_path: None,
         git_info: thread_git_info(item.git_sha, item.git_branch, item.git_origin_url),
         thread_name: None,
@@ -650,6 +655,7 @@ fn summary_from_thread_metadata(metadata: &praxis_state::ThreadMetadata) -> Thre
                 .to_rfc3339_opts(SecondsFormat::Secs, true),
         ),
         model_provider: metadata.model_provider.clone(),
+        model: metadata.model.clone(),
         cwd: metadata.cwd.clone(),
         cli_version: metadata.cli_version.clone(),
         source: with_thread_spawn_agent_metadata(
@@ -659,6 +665,7 @@ fn summary_from_thread_metadata(metadata: &praxis_state::ThreadMetadata) -> Thre
         ),
         total_cost_micros: metadata.total_cost_micros,
         last_cost_micros: metadata.last_cost_micros,
+        token_usage_info: metadata.token_usage_info.clone(),
         selfwork_plan_path: metadata.selfwork_plan_path.clone(),
         git_info: thread_git_info(
             metadata.git_sha.clone(),

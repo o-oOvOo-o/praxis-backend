@@ -11,6 +11,30 @@ pub(crate) fn blend(fg: (u8, u8, u8), bg: (u8, u8, u8), alpha: f32) -> (u8, u8, 
     (r, g, b)
 }
 
+pub(crate) fn ratatui_to_crossterm_color(color: ratatui::style::Color) -> crossterm::style::Color {
+    match color {
+        ratatui::style::Color::Reset => crossterm::style::Color::Reset,
+        ratatui::style::Color::Black => crossterm::style::Color::Black,
+        ratatui::style::Color::Red => crossterm::style::Color::DarkRed,
+        ratatui::style::Color::Green => crossterm::style::Color::DarkGreen,
+        ratatui::style::Color::Yellow => crossterm::style::Color::DarkYellow,
+        ratatui::style::Color::Blue => crossterm::style::Color::DarkBlue,
+        ratatui::style::Color::Magenta => crossterm::style::Color::DarkMagenta,
+        ratatui::style::Color::Cyan => crossterm::style::Color::DarkCyan,
+        ratatui::style::Color::Gray => crossterm::style::Color::Grey,
+        ratatui::style::Color::DarkGray => crossterm::style::Color::DarkGrey,
+        ratatui::style::Color::LightRed => crossterm::style::Color::Red,
+        ratatui::style::Color::LightGreen => crossterm::style::Color::Green,
+        ratatui::style::Color::LightYellow => crossterm::style::Color::Yellow,
+        ratatui::style::Color::LightBlue => crossterm::style::Color::Blue,
+        ratatui::style::Color::LightMagenta => crossterm::style::Color::Magenta,
+        ratatui::style::Color::LightCyan => crossterm::style::Color::Cyan,
+        ratatui::style::Color::White => crossterm::style::Color::White,
+        ratatui::style::Color::Rgb(r, g, b) => crossterm::style::Color::Rgb { r, g, b },
+        ratatui::style::Color::Indexed(index) => crossterm::style::Color::AnsiValue(index),
+    }
+}
+
 /// Returns the perceptual color distance between two RGB colors.
 /// Uses the CIE76 formula (Euclidean distance in Lab space approximation).
 pub(crate) fn perceptual_distance(a: (u8, u8, u8), b: (u8, u8, u8)) -> f32 {

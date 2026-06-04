@@ -13,7 +13,6 @@ use async_trait::async_trait;
 use tokio::select;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
-use tokio_util::task::AbortOnDropHandle;
 use tracing::Instrument;
 use tracing::info_span;
 use tracing::trace;
@@ -21,6 +20,7 @@ use tracing::warn;
 
 use crate::contextual_user_message::TURN_ABORTED_CLOSE_TAG;
 use crate::contextual_user_message::TURN_ABORTED_OPEN_TAG;
+use crate::goals::GoalRuntimeEvent;
 use crate::hook_runtime::PendingInputHookDisposition;
 use crate::hook_runtime::inspect_pending_input;
 use crate::hook_runtime::record_additional_contexts;
@@ -188,6 +188,15 @@ impl Session {
             .mark_turn_started(started_at)
             .await;
         let token_usage_at_turn_start = self.total_token_usage().await.unwrap_or_default();
+        if let Err(err) = self
+            .goal_runtime_apply(GoalRuntimeEvent::TurnStarted {
+                turn_context: turn_context.as_ref(),
+                token_usage: token_usage_at_turn_start.clone(),
+            })
+            .await
+        {
+            warn!("failed to apply goal turn-start runtime event: {err}");
+        }
 
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
@@ -254,15 +263,15 @@ impl Session {
             .session_telemetry
             .start_timer(TURN_E2E_DURATION_METRIC, &[])
             .ok();
-        let running_task = RunningTask {
+        let running_task = RunningTask::new(
             done,
-            handle: Arc::new(AbortOnDropHandle::new(handle)),
-            kind: task_kind,
+            task_kind,
             task,
             cancellation_token,
-            turn_context: Arc::clone(&turn_context),
-            _timer: timer,
-        };
+            handle.abort_handle(),
+            Arc::clone(&turn_context),
+            timer,
+        );
         turn.add_task(running_task);
     }
 
@@ -419,6 +428,9 @@ impl Session {
                 cached_input_tokens: (total_token_usage.cached_input_tokens
                     - token_usage_at_turn_start.cached_input_tokens)
                     .max(0),
+                cache_reported_input_tokens: (total_token_usage.cache_reported_input_tokens
+                    - token_usage_at_turn_start.cache_reported_input_tokens)
+                    .max(0),
                 output_tokens: (total_token_usage.output_tokens
                     - token_usage_at_turn_start.output_tokens)
                     .max(0),
@@ -462,6 +474,15 @@ impl Session {
             turn_id: turn_context.sub_id.clone(),
             last_agent_message,
         });
+        if let Err(err) = self
+            .goal_runtime_apply(GoalRuntimeEvent::TurnFinished {
+                turn_context: turn_context.as_ref(),
+                turn_completed: true,
+            })
+            .await
+        {
+            warn!("failed to apply goal turn-finished runtime event: {err}");
+        }
         self.send_event(turn_context.as_ref(), event).await;
         if let Err(err) = self
             .services
@@ -491,6 +512,12 @@ impl Session {
             let _scheduler = tokio::task::spawn_blocking(move || {
                 tokio::runtime::Handle::current().block_on(async move {
                     session.maybe_start_turn_for_pending_work().await;
+                    if let Err(err) = session
+                        .goal_runtime_apply(GoalRuntimeEvent::MaybeContinueIfIdle)
+                        .await
+                    {
+                        warn!("failed to apply goal idle-continuation runtime event: {err}");
+                    }
                 });
             });
         }
@@ -527,7 +554,7 @@ impl Session {
         task.turn_context
             .turn_metadata_state
             .cancel_git_enrichment_task();
-        let session_task = task.task;
+        let session_task = Arc::clone(&task.task);
 
         select! {
             _ = task.done.notified() => {
@@ -543,6 +570,21 @@ impl Session {
         session_task
             .abort(session_ctx, Arc::clone(&task.turn_context))
             .await;
+        self.services
+            .agent_os
+            .cleanup_thread_resources_after_abort(
+                self.conversation_id,
+                format!("turn_aborted:{reason:?}"),
+            )
+            .await;
+        if let Err(err) = self
+            .goal_runtime_apply(GoalRuntimeEvent::TaskAborted {
+                turn_context: Some(task.turn_context.as_ref()),
+            })
+            .await
+        {
+            warn!("failed to apply goal task-aborted runtime event: {err}");
+        }
 
         if reason == TurnAbortReason::Interrupted {
             self.cleanup_after_interrupt(&task.turn_context).await;

@@ -21,7 +21,7 @@ use std::io::IsTerminal;
 use std::io::stdout;
 
 use crossterm::Command;
-use ratatui::crossterm::execute;
+use crossterm::execute;
 
 /// Practical upper bound on title length, measured in Rust `char`s.
 ///

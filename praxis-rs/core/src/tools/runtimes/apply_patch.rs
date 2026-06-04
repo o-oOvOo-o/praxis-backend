@@ -11,6 +11,7 @@ use crate::guardian::review_approval_request;
 use crate::guardian::routes_approval_to_guardian;
 use crate::sandboxing::ExecOptions;
 use crate::tools::runtimes::managed_execution_pipeline::RuntimeExecutionRoute;
+use crate::tools::runtimes::managed_execution_pipeline::preflight_command_intent;
 use crate::tools::runtimes::managed_execution_pipeline::run_prestarted_one_shot_with_known_dirty_files;
 use crate::tools::runtimes::managed_execution_pipeline::start_agent_os_span_for_route;
 use crate::tools::sandboxing::Approvable;
@@ -38,6 +39,7 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct ApplyPatchRequest {
     pub action: ApplyPatchAction,
+    pub agent_os_command: Vec<String>,
     pub file_paths: Vec<AbsolutePathBuf>,
     pub changes: std::collections::HashMap<PathBuf, FileChange>,
     pub exec_approval_requirement: ExecApprovalRequirement,
@@ -119,6 +121,10 @@ impl ApplyPatchRuntime {
             tx_event: ctx.session.get_tx_event(),
         })
     }
+}
+
+pub(crate) fn apply_patch_agent_os_command(action: &ApplyPatchAction) -> Vec<String> {
+    vec!["apply_patch".to_string(), action.patch.clone()]
 }
 
 impl Sandboxable for ApplyPatchRuntime {
@@ -209,6 +215,10 @@ impl Approvable<ApplyPatchRequest> for ApplyPatchRuntime {
 }
 
 impl ToolRuntime<ApplyPatchRequest, ExecToolCallOutput> for ApplyPatchRuntime {
+    async fn preflight(&mut self, req: &ApplyPatchRequest, ctx: &ToolCtx) -> Result<(), ToolError> {
+        preflight_command_intent(ctx, &req.agent_os_command, &req.action.cwd).await
+    }
+
     async fn run(
         &mut self,
         req: &ApplyPatchRequest,
@@ -226,10 +236,9 @@ impl ToolRuntime<ApplyPatchRequest, ExecToolCallOutput> for ApplyPatchRuntime {
         let env = attempt
             .env_for(command, options, /*network*/ None)
             .map_err(|err| ToolError::Praxis(err.into()))?;
-        let agent_os_command = vec!["apply_patch".to_string(), req.action.patch.clone()];
         let command_span = start_agent_os_span_for_route(
             ctx,
-            &agent_os_command,
+            &req.agent_os_command,
             &req.action.cwd,
             RuntimeExecutionRoute::apply_patch(),
         )

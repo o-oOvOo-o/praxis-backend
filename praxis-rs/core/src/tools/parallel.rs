@@ -125,7 +125,7 @@ impl ToolCallRuntime {
 
         async move {
             handle.await.map_err(|err| {
-                FunctionCallError::Fatal(format!("tool task failed to receive: {err:?}"))
+                FunctionCallError::RespondToModel(format!("tool task failed to receive: {err:?}"))
             })?
         }
         .in_current_span()

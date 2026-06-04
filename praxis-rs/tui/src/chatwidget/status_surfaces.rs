@@ -507,6 +507,7 @@ impl ChatWidget {
                 "{} in",
                 format_tokens_compact(self.status_line_total_usage().input_tokens)
             )),
+            StatusLineItem::CacheHitRate => self.status_line_cache_hit_message(),
             StatusLineItem::TotalOutputTokens => Some(format!(
                 "{} out",
                 format_tokens_compact(self.status_line_total_usage().output_tokens)

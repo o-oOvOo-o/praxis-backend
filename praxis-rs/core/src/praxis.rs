@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 
+use crate::WireApi;
 use crate::agent::AgentControl;
 use crate::agent::AgentStatus;
 use crate::agent::Mailbox;
@@ -14,6 +15,8 @@ use crate::agent::MailboxReceiver;
 use crate::agent::agent_status_from_event;
 use crate::agent::status::is_final;
 use crate::apps::render_apps_section;
+use crate::auto_title_profile::AutoTitleProfile;
+use crate::auto_title_profile::select_auto_title_model;
 use crate::commit_attribution::commit_message_trailer_instruction;
 use crate::compact;
 use crate::compact::InitialContextInjection;
@@ -197,6 +200,8 @@ mod rollout_reconstruction;
 #[cfg(test)]
 mod rollout_reconstruction_tests;
 
+const PENDING_INPUT_CHECK_TIMEOUT_MS: u64 = 2_000;
+
 #[derive(Debug, PartialEq)]
 pub enum SteerInputError {
     NoActiveTurn(Vec<UserInput>),
@@ -377,12 +382,14 @@ use praxis_protocol::protocol::SkillMetadata as ProtocolSkillMetadata;
 use praxis_protocol::protocol::SkillToolDependency as ProtocolSkillToolDependency;
 use praxis_protocol::protocol::StreamErrorEvent;
 use praxis_protocol::protocol::Submission;
+use praxis_protocol::protocol::ThreadNameUpdatedEvent;
 use praxis_protocol::protocol::TokenCountEvent;
 use praxis_protocol::protocol::TokenUsage;
 use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_protocol::protocol::TurnDiffEvent;
 use praxis_protocol::protocol::WarningEvent;
 use praxis_protocol::user_input::UserInput;
+use praxis_tools::ToolWireProfile;
 use praxis_tools::ToolsConfig;
 use praxis_tools::ToolsConfigParams;
 use praxis_utils_absolute_path::AbsolutePathBuf;
@@ -403,6 +410,14 @@ pub struct Praxis {
 }
 
 pub(crate) type SessionLoopTermination = Shared<BoxFuture<'static, ()>>;
+
+fn tool_wire_profile_for_wire_api(wire_api: WireApi) -> ToolWireProfile {
+    match wire_api {
+        WireApi::Responses => ToolWireProfile::Responses,
+        WireApi::Claude => ToolWireProfile::Claude,
+        WireApi::Common => ToolWireProfile::Common,
+    }
+}
 
 /// Wrapper returned by [`Praxis::spawn`] containing the spawned [`Praxis`],
 /// the submission id for the initial `ConfigureSession` request and the
@@ -578,13 +593,21 @@ impl Praxis {
         // Resolve base instructions for the session. Priority order:
         // 1. config.base_instructions override
         // 2. conversation history => session_meta.base_instructions
-        // 3. base_instructions for current model
+        // 3. prompt profile for current provider/model
+        // 4. base_instructions for current model
         let model_info = models_manager.get_model_info(model.as_str(), &config).await;
         let base_instructions = config
             .base_instructions
             .clone()
             .or_else(|| conversation_history.get_base_instructions().map(|s| s.text))
-            .unwrap_or_else(|| model_info.get_model_instructions(config.personality));
+            .unwrap_or_else(|| {
+                crate::prompt_profiles::resolve_model_instructions(
+                    &model_info,
+                    &config.model_provider_id,
+                    &config.model_provider,
+                    config.personality,
+                )
+            });
 
         // Respect thread-start tools. When missing (resumed/forked threads), read from the db
         // first, then fall back to rollout-file tools.
@@ -825,6 +848,7 @@ pub(crate) struct Session {
     idle_pending_input: Mutex<Vec<ResponseInputItem>>, // TODO (jif) merge with mailbox!
     pub(crate) guardian_review_session: GuardianReviewSessionManager,
     pub(crate) services: SessionServices,
+    pub(crate) goal_runtime: crate::goals::GoalRuntimeState,
     js_repl: Arc<JsReplHandle>,
     next_internal_sub_id: AtomicU64,
     /// Guards one-shot auto-title generation so it runs at most once per session.
@@ -896,6 +920,18 @@ pub(crate) struct TurnContext {
     pub(crate) turn_skills: TurnSkillsContext,
     pub(crate) turn_timing_state: Arc<TurnTimingState>,
 }
+
+pub(crate) struct AutoTitleModelContext {
+    pub(crate) provider_id: String,
+    pub(crate) provider: ModelProviderInfo,
+    pub(crate) model_info: ModelInfo,
+    pub(crate) session_telemetry: SessionTelemetry,
+    pub(crate) service_tier: Option<ServiceTier>,
+    pub(crate) personality: Option<Personality>,
+    pub(crate) profile: AutoTitleProfile,
+    pub(crate) reasoning_effort: Option<ReasoningEffortConfig>,
+}
+
 impl TurnContext {
     pub(crate) fn model_context_window(&self) -> Option<i64> {
         let effective_context_window_percent = self.model_info.effective_context_window_percent;
@@ -953,6 +989,7 @@ impl TurnContext {
             sandbox_policy: self.sandbox_policy.get(),
             windows_sandbox_level: self.windows_sandbox_level,
         })
+        .with_tool_wire_profile(tool_wire_profile_for_wire_api(self.provider.wire_api))
         .with_unified_exec_shell_mode(self.tools_config.unified_exec_shell_mode.clone())
         .with_web_search_config(self.tools_config.web_search_config.clone())
         .with_allow_login_shell(self.tools_config.allow_login_shell)
@@ -1444,6 +1481,9 @@ impl Session {
             sandbox_policy: session_configuration.sandbox_policy.get(),
             windows_sandbox_level: session_configuration.windows_sandbox_level,
         })
+        .with_tool_wire_profile(tool_wire_profile_for_wire_api(
+            provider_for_context.wire_api,
+        ))
         .with_unified_exec_shell_mode_for_session(
             crate::tools::spec::tool_user_shell_type(user_shell),
             shell_zsh_path,
@@ -2035,6 +2075,7 @@ impl Session {
             idle_pending_input: Mutex::new(Vec::new()),
             guardian_review_session: GuardianReviewSessionManager::default(),
             services,
+            goal_runtime: crate::goals::GoalRuntimeState::new(),
             js_repl,
             next_internal_sub_id: AtomicU64::new(0),
             auto_title_attempted: AtomicBool::new(false),
@@ -2184,6 +2225,11 @@ impl Session {
         self.services.state_db.clone()
     }
 
+    pub(crate) async fn original_config(&self) -> Arc<Config> {
+        let state = self.state.lock().await;
+        Arc::clone(&state.session_configuration.original_config_do_not_use)
+    }
+
     /// Ensure rollout file writes are durably flushed.
     pub(crate) async fn flush_rollout(&self) {
         let recorder = {
@@ -2225,7 +2271,7 @@ impl Session {
     /// Returns whether thread metadata can be persisted for this session.
     pub(crate) async fn thread_name_persistence_enabled(&self) -> bool {
         let rollout = self.services.rollout.lock().await;
-        rollout.is_some()
+        rollout.is_some() && self.services.state_db.is_some()
     }
 
     /// Returns the model provider base URL and model slug for secondary API calls.
@@ -2242,10 +2288,77 @@ impl Session {
         )
     }
 
+    /// Returns the current model runtime context for internal metadata requests.
+    pub(crate) async fn auto_title_model_context(&self) -> AutoTitleModelContext {
+        let session_configuration = {
+            let state = self.state.lock().await;
+            state.session_configuration.clone()
+        };
+        let per_turn_config = Self::build_per_turn_config(&session_configuration);
+        let current_model_slug = session_configuration.collaboration_mode.model().to_string();
+        let current_model_info = self
+            .services
+            .models_manager
+            .get_model_info(current_model_slug.as_str(), &per_turn_config)
+            .await;
+        let selection = select_auto_title_model(
+            &current_model_info,
+            per_turn_config.model_provider_id.as_str(),
+            &per_turn_config.model_provider,
+        );
+        let mut title_model_info = if selection.model_slug == current_model_info.slug {
+            current_model_info
+        } else {
+            self.services
+                .models_manager
+                .get_model_info(selection.model_slug.as_str(), &per_turn_config)
+                .await
+        };
+        if selection.suppress_model_default_reasoning {
+            title_model_info.default_reasoning_level = None;
+        }
+        AutoTitleModelContext {
+            provider_id: per_turn_config.model_provider_id.clone(),
+            provider: per_turn_config.model_provider.clone(),
+            model_info: title_model_info.clone(),
+            session_telemetry: self.services.session_telemetry.clone().with_model(
+                selection.model_slug.as_str(),
+                title_model_info.slug.as_str(),
+            ),
+            service_tier: session_configuration.service_tier,
+            personality: session_configuration.personality,
+            profile: selection.profile,
+            reasoning_effort: selection.reasoning_effort,
+        }
+    }
+
     /// Persists a thread name (delegates to the handler).
     pub(crate) async fn apply_thread_name(self: &Arc<Self>, name: String) {
-        let sub_id = self.next_internal_sub_id();
-        handlers::set_thread_name(self, sub_id, name).await;
+        let Some(name) = crate::util::normalize_thread_name(&name) else {
+            return;
+        };
+
+        if let Err(err) = praxis_rollout::ThreadNameWriter::new(self.services.state_db.as_deref())
+            .write_name(self.conversation_id, &name)
+            .await
+        {
+            warn!("failed to apply automatic thread name: {err}");
+            return;
+        }
+
+        {
+            let mut state = self.state.lock().await;
+            state.session_configuration.thread_name = Some(name.clone());
+        }
+
+        self.send_event_raw(Event {
+            id: self.next_internal_sub_id(),
+            msg: EventMsg::ThreadNameUpdated(ThreadNameUpdatedEvent {
+                thread_id: self.conversation_id,
+                thread_name: Some(name),
+            }),
+        })
+        .await;
     }
 
     pub(crate) async fn route_realtime_text_input(self: &Arc<Self>, text: String) {
@@ -3943,6 +4056,7 @@ impl Session {
             info.last_token_usage = TokenUsage {
                 input_tokens: 0,
                 cached_input_tokens: 0,
+                cache_reported_input_tokens: 0,
                 output_tokens: 0,
                 reasoning_output_tokens: 0,
                 total_tokens: estimated_total_tokens.max(0),
@@ -4272,7 +4386,6 @@ impl Session {
     }
 
     /// Queue response items to be injected into the next active turn created for this session.
-    #[cfg(test)]
     pub(crate) async fn queue_response_items_for_next_turn(&self, items: Vec<ResponseInputItem>) {
         if items.is_empty() {
             return;
@@ -4309,6 +4422,25 @@ impl Session {
                 ts.has_pending_input()
             }
             None => false,
+        }
+    }
+
+    pub(crate) async fn has_pending_input_bounded(&self, phase: &'static str) -> bool {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(PENDING_INPUT_CHECK_TIMEOUT_MS),
+            self.has_pending_input(),
+        )
+        .await
+        {
+            Ok(has_pending) => has_pending,
+            Err(_) => {
+                warn!(
+                    thread_id = %self.conversation_id,
+                    phase,
+                    "timed out checking pending input; assuming none"
+                );
+                false
+            }
         }
     }
 
@@ -4878,6 +5010,7 @@ mod handlers {
                 approvals_reviewer,
                 sandbox_policy,
                 model,
+                model_provider,
                 effort,
                 summary,
                 service_tier,
@@ -4904,7 +5037,7 @@ mod handlers {
                         approvals_reviewer,
                         sandbox_policy: Some(sandbox_policy),
                         windows_sandbox_level: None,
-                        model_provider: None,
+                        model_provider,
                         collaboration_mode,
                         reasoning_summary: summary,
                         service_tier,
@@ -5652,6 +5785,9 @@ async fn spawn_review_thread(
         sandbox_policy: parent_turn_context.sandbox_policy.get(),
         windows_sandbox_level: parent_turn_context.windows_sandbox_level,
     })
+    .with_tool_wire_profile(tool_wire_profile_for_wire_api(
+        parent_turn_context.provider.wire_api,
+    ))
     .with_unified_exec_shell_mode_for_session(
         crate::tools::spec::tool_user_shell_type(sess.services.user_shell.as_ref()),
         sess.services.shell_zsh_path.as_ref(),
@@ -5846,7 +5982,7 @@ pub(crate) async fn run_turn(
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
 ) -> Option<String> {
-    if input.is_empty() && !sess.has_pending_input().await {
+    if input.is_empty() && !sess.has_pending_input_bounded("run_turn_empty_input").await {
         return None;
     }
 
@@ -7129,6 +7265,7 @@ fn realtime_text_for_event(msg: &EventMsg) -> Option<String> {
         | EventMsg::ListSkillsResponse(_)
         | EventMsg::SkillsUpdateAvailable
         | EventMsg::PlanUpdate(_)
+        | EventMsg::ThreadGoalUpdated(_)
         | EventMsg::TurnAborted(_)
         | EventMsg::ShutdownComplete
         | EventMsg::EnteredReviewMode(_)
@@ -7660,7 +7797,7 @@ async fn try_run_sampling_request(
                     .await;
                 should_emit_turn_diff = true;
 
-                needs_follow_up |= sess.has_pending_input().await;
+                needs_follow_up |= sess.has_pending_input_bounded("sampling_completed").await;
 
                 break Ok(SamplingRequestResult {
                     needs_follow_up,

@@ -10,13 +10,18 @@ use std::time::Instant;
 
 use crossterm::event::KeyCode;
 use ratatui::buffer::Buffer;
+use ratatui::layout::Margin;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
+use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
-use ratatui::widgets::WidgetRef;
+use ratatui::widgets::Widget;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app_event_sender::AppEventSender;
@@ -32,6 +37,7 @@ use crate::status_runtime::StatusAlert;
 use crate::status_runtime::generic_status_verb;
 use crate::status_runtime::status_alert;
 use crate::text_formatting::capitalize_first;
+use crate::thinking_persona::ThinkingPersona;
 use crate::tui::FrameRequester;
 use crate::wrapping::RtOptions;
 use crate::wrapping::word_wrap_lines;
@@ -54,6 +60,7 @@ pub(crate) struct StatusIndicatorWidget {
     activity_message: Option<String>,
     footer_lines: Vec<String>,
     details_max_lines: usize,
+    thinking_persona: ThinkingPersona,
     /// Optional suffix rendered after the elapsed/interrupt segment.
     inline_message: Option<String>,
     show_interrupt_hint: bool,
@@ -96,6 +103,7 @@ impl StatusIndicatorWidget {
             activity_message: None,
             footer_lines: Vec::new(),
             details_max_lines: STATUS_DETAILS_DEFAULT_MAX_LINES,
+            thinking_persona: ThinkingPersona::None,
             inline_message: None,
             show_interrupt_hint: true,
             elapsed_running: Duration::ZERO,
@@ -135,6 +143,10 @@ impl StatusIndicatorWidget {
                     StatusDetailsCapitalization::Preserve => trimmed.to_string(),
                 }
             });
+    }
+
+    pub(crate) fn update_thinking_persona(&mut self, persona: ThinkingPersona) {
+        self.thinking_persona = persona;
     }
 
     /// Update the inline suffix text shown after the elapsed/interrupt segment.
@@ -328,11 +340,35 @@ impl StatusIndicatorWidget {
 
         out
     }
+
+    fn thinking_frame_visible(&self, width: u16) -> bool {
+        self.thinking_persona.is_visible() && width >= 4
+    }
+
+    fn content_width_for(&self, width: u16) -> u16 {
+        if self.thinking_frame_visible(width) {
+            width.saturating_sub(2)
+        } else {
+            width
+        }
+    }
 }
 
 impl Renderable for StatusIndicatorWidget {
     fn desired_height(&self, width: u16) -> u16 {
-        1 + u16::try_from(self.wrapped_details_lines(width).len()).unwrap_or(0)
+        let content_width = self.content_width_for(width);
+        let border_height = if self.thinking_frame_visible(width) {
+            2
+        } else {
+            0
+        };
+        self.thinking_persona
+            .desired_height(content_width)
+            .saturating_add(1)
+            .saturating_add(
+                u16::try_from(self.wrapped_details_lines(content_width).len()).unwrap_or(0),
+            )
+            .saturating_add(border_height)
     }
 
     fn render(&self, area: Rect, buf: &mut Buffer) {
@@ -392,19 +428,44 @@ impl Renderable for StatusIndicatorWidget {
             spans.push("taking a while".yellow().bold());
         }
 
-        let mut lines = Vec::new();
+        let persona_elapsed = if self.animations_enabled {
+            elapsed_duration
+        } else {
+            Duration::ZERO
+        };
+        let framed = self.thinking_frame_visible(area.width);
+        let content_area = if framed {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::White));
+            block.render(area, buf);
+            area.inner(Margin::new(1, 1))
+        } else {
+            area
+        };
+        if content_area.is_empty() {
+            return;
+        }
+
+        let mut lines = self
+            .thinking_persona
+            .live_lines(content_area.width, persona_elapsed);
+        let persona_line_count = lines.len();
         lines.push(truncate_line_with_ellipsis_if_overflow(
             Line::from(spans),
-            usize::from(area.width),
+            usize::from(content_area.width),
         ));
-        if area.height > 1 {
+        let used_lines = u16::try_from(persona_line_count)
+            .unwrap_or(u16::MAX)
+            .saturating_add(1);
+        if content_area.height > used_lines {
             // If there is enough space, add the details lines below the header.
-            let details = self.wrapped_details_lines(area.width);
-            let max_details = usize::from(area.height.saturating_sub(1));
+            let details = self.wrapped_details_lines(content_area.width);
+            let max_details = usize::from(content_area.height.saturating_sub(used_lines));
             lines.extend(details.into_iter().take(max_details));
         }
 
-        Paragraph::new(Text::from(lines)).render_ref(area, buf);
+        Paragraph::new(Text::from(lines)).render(content_area, buf);
     }
 }
 

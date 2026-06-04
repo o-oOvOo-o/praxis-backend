@@ -205,6 +205,27 @@ pub fn build_reqwest_client() -> reqwest::Client {
     })
 }
 
+/// Builds a Praxis reqwest client that bypasses system proxy discovery.
+///
+/// Custom OpenAI-compatible providers are often already explicit URLs, and Windows proxy
+/// auto-detection can break TLS handshakes for some of them. This keeps the same headers and
+/// custom-CA handling as the default client while making the transport policy explicit.
+pub fn build_direct_reqwest_client() -> reqwest::Client {
+    try_build_direct_reqwest_client().unwrap_or_else(|error| {
+        tracing::warn!(error = %error, "failed to build direct reqwest client");
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap_or_else(|fallback_error| {
+                tracing::warn!(
+                    error = %fallback_error,
+                    "failed to build fallback direct reqwest client"
+                );
+                reqwest::Client::new()
+            })
+    })
+}
+
 /// Tries to build the default reqwest client used for ordinary Praxis HTTP traffic.
 ///
 /// Callers that need a structured CA-loading failure instead of the legacy logged fallback can use
@@ -219,6 +240,18 @@ pub fn try_build_reqwest_client() -> Result<reqwest::Client, BuildCustomCaTransp
     if is_sandboxed() {
         builder = builder.no_proxy();
     }
+
+    build_reqwest_client_with_custom_ca(builder)
+}
+
+/// Tries to build a Praxis reqwest client that bypasses system proxy discovery.
+pub fn try_build_direct_reqwest_client() -> Result<reqwest::Client, BuildCustomCaTransportError> {
+    let ua = get_praxis_user_agent();
+
+    let builder = reqwest::Client::builder()
+        .user_agent(ua)
+        .default_headers(default_headers())
+        .no_proxy();
 
     build_reqwest_client_with_custom_ca(builder)
 }

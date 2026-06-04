@@ -45,3 +45,14 @@ fn create_apply_patch_json_tool_matches_expected_spec() {
         })
     );
 }
+
+#[test]
+fn apply_patch_args_accept_patch_alias_from_common_providers() {
+    let args: ApplyPatchToolArgs = serde_json::from_value(serde_json::json!({
+        "paths": ["D:\\ghost1.0\\Cunning3D_1.0\\example.rs"],
+        "patch": "*** Begin Patch\n*** End Patch\n"
+    }))
+    .expect("patch alias should deserialize");
+
+    assert_eq!(args.input, "*** Begin Patch\n*** End Patch\n");
+}

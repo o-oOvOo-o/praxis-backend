@@ -2,6 +2,7 @@ use std::fmt;
 use std::io;
 use std::io::Write;
 
+use crate::color::ratatui_to_crossterm_color;
 use crate::wrapping::RtOptions;
 use crate::wrapping::adaptive_wrap_line;
 use crate::wrapping::line_contains_url_like;
@@ -36,7 +37,7 @@ pub fn insert_history_lines<B>(
     lines: Vec<Line>,
 ) -> io::Result<()>
 where
-    B: Backend + Write,
+    B: Backend<Error = io::Error> + Write,
 {
     let screen_size = terminal.backend().size().unwrap_or(Size::new(0, 0));
 
@@ -143,11 +144,11 @@ where
             SetColors(Colors::new(
                 line.style
                     .fg
-                    .map(std::convert::Into::into)
+                    .map(ratatui_to_crossterm_color)
                     .unwrap_or(CColor::Reset),
                 line.style
                     .bg
-                    .map(std::convert::Into::into)
+                    .map(ratatui_to_crossterm_color)
                     .unwrap_or(CColor::Reset)
             ))
         )?;
@@ -312,7 +313,10 @@ where
         if next_fg != fg || next_bg != bg {
             queue!(
                 writer,
-                SetColors(Colors::new(next_fg.into(), next_bg.into()))
+                SetColors(Colors::new(
+                    ratatui_to_crossterm_color(next_fg),
+                    ratatui_to_crossterm_color(next_bg)
+                ))
             )?;
             fg = next_fg;
             bg = next_bg;

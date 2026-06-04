@@ -87,6 +87,9 @@ pub(crate) enum StatusLineItem {
     /// Total input tokens consumed.
     TotalInputTokens,
 
+    /// Prompt-cache hit percentage for the latest turn and current session.
+    CacheHitRate,
+
     /// Total output tokens generated.
     TotalOutputTokens,
 
@@ -124,6 +127,9 @@ impl StatusLineItem {
             }
             StatusLineItem::UsedTokens => "Total tokens used in session (omitted when zero)",
             StatusLineItem::TotalInputTokens => "Total input tokens used in session",
+            StatusLineItem::CacheHitRate => {
+                "Prompt-cache hit rate for the latest turn and current session"
+            }
             StatusLineItem::TotalOutputTokens => "Total output tokens used in session",
             StatusLineItem::SessionId => {
                 "Current session identifier (omitted until session starts)"

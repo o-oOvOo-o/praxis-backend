@@ -42,11 +42,27 @@ pub(crate) fn builtins_for_input(flags: BuiltinCommandFlags) -> Vec<(&'static st
 
 /// Find a single built-in command by exact name, after applying the gating rules.
 pub(crate) fn find_builtin_command(name: &str, flags: BuiltinCommandFlags) -> Option<SlashCommand> {
-    let cmd = SlashCommand::from_str(name).ok()?;
+    find_builtin_command_with_suffix(name, flags).map(|(cmd, _)| cmd)
+}
+
+pub(crate) fn find_builtin_command_with_suffix(
+    name: &str,
+    flags: BuiltinCommandFlags,
+) -> Option<(SlashCommand, Option<&str>)> {
+    let (lookup_name, inline_suffix) = inline_numeric_suffix_command(name).unwrap_or((name, None));
+    let cmd = SlashCommand::from_str(lookup_name).ok()?;
     builtins_for_input(flags)
         .into_iter()
         .any(|(_, visible_cmd)| visible_cmd == cmd)
-        .then_some(cmd)
+        .then_some((cmd, inline_suffix))
+}
+
+fn inline_numeric_suffix_command(name: &str) -> Option<(&'static str, Option<&str>)> {
+    let suffix = name.strip_prefix("token")?;
+    if suffix.is_empty() || !suffix.chars().all(|ch| ch.is_ascii_digit()) {
+        return None;
+    }
+    Some(("token", Some(suffix)))
 }
 
 /// Whether any visible built-in fuzzily matches the provided prefix.

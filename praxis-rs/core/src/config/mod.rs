@@ -20,6 +20,10 @@ use crate::model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use crate::model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use crate::model_provider_info::OPENAI_PROVIDER_ID;
 use crate::model_provider_info::built_in_model_providers;
+use crate::model_provider_info::is_deepseek_first_party_model;
+use crate::model_provider_info::is_deepseek_first_party_provider;
+use crate::model_provider_info::is_openai_first_party_model;
+use crate::model_provider_info::is_openai_first_party_provider;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use crate::project_doc::LOCAL_PROJECT_DOC_FILENAME;
@@ -1866,6 +1870,50 @@ fn validate_model_providers(
     Ok(())
 }
 
+fn normalize_provider_for_selected_model(
+    model_provider_id: String,
+    model_provider: ModelProviderInfo,
+    model: Option<&str>,
+    model_providers: &HashMap<String, ModelProviderInfo>,
+    startup_warnings: &mut Vec<String>,
+) -> (String, ModelProviderInfo) {
+    let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) else {
+        return (model_provider_id, model_provider);
+    };
+
+    if is_deepseek_first_party_provider(&model_provider_id, &model_provider)
+        && is_openai_first_party_model(model)
+        && let Some(openai_provider) = model_providers.get(OPENAI_PROVIDER_ID).cloned()
+    {
+        startup_warnings.push(format!(
+            "Model `{model}` belongs to OpenAI/Codex; switched provider from `{model_provider_id}` to `{OPENAI_PROVIDER_ID}` for this run."
+        ));
+        return (OPENAI_PROVIDER_ID.to_string(), openai_provider);
+    }
+
+    if is_openai_first_party_provider(&model_provider_id, &model_provider)
+        && is_deepseek_first_party_model(model)
+        && let Some((deepseek_provider_id, deepseek_provider)) =
+            find_deepseek_first_party_provider(model_providers)
+    {
+        startup_warnings.push(format!(
+            "Model `{model}` belongs to DeepSeek; switched provider from `{model_provider_id}` to `{deepseek_provider_id}` for this run."
+        ));
+        return (deepseek_provider_id, deepseek_provider);
+    }
+
+    (model_provider_id, model_provider)
+}
+
+fn find_deepseek_first_party_provider(
+    model_providers: &HashMap<String, ModelProviderInfo>,
+) -> Option<(String, ModelProviderInfo)> {
+    model_providers
+        .iter()
+        .find(|(provider_id, provider)| is_deepseek_first_party_provider(provider_id, provider))
+        .map(|(provider_id, provider)| (provider_id.clone(), provider.clone()))
+}
+
 fn deserialize_model_providers<'de, D>(
     deserializer: D,
 ) -> Result<HashMap<String, ModelProviderInfo>, D::Error>
@@ -2398,6 +2446,13 @@ impl Config {
         let forced_login_method = cfg.forced_login_method;
 
         let model = model.or(config_profile.model).or(cfg.model);
+        let (model_provider_id, model_provider) = normalize_provider_for_selected_model(
+            model_provider_id,
+            model_provider,
+            model.as_deref(),
+            &model_providers,
+            &mut startup_warnings,
+        );
         let service_tier = service_tier_override
             .unwrap_or_else(|| config_profile.service_tier.or(cfg.service_tier));
         let service_tier = match service_tier {

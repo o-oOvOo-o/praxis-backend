@@ -990,6 +990,50 @@ impl AgentOsRuntime {
         });
     }
 
+    fn claim_or_renew_active_coordinator_locked(
+        state: &mut AgentOsState,
+        thread: &ThreadRegistryEntry,
+        now: DateTime<Utc>,
+        active_action: Option<&str>,
+    ) -> PraxisResult<Option<ActiveCoordinatorLease>> {
+        if thread.rank != COORDINATOR_RANK {
+            if let Some(active_action) = active_action {
+                return Err(PraxisErr::UnsupportedOperation(format!(
+                    "only rank-0 coordinators can {active_action}"
+                )));
+            }
+            return Ok(None);
+        }
+
+        let scope = thread.coordination_scope.clone();
+        if let Some(active) = state.active_coordinators.get_mut(scope.as_str()) {
+            if active.owner_thread_id == thread.thread_id {
+                active.expires_at = now + AgentOsPolicy::get().lease_ttl();
+                return Ok(Some(active.clone()));
+            }
+            if active.expires_at > now {
+                if let Some(active_action) = active_action {
+                    return Err(PraxisErr::UnsupportedOperation(format!(
+                        "only the active rank-0 coordinator can {active_action}"
+                    )));
+                }
+                return Ok(None);
+            }
+        }
+
+        state.coordinator_epoch = state.coordinator_epoch.saturating_add(1);
+        state.fencing_counter = state.fencing_counter.saturating_add(1);
+        let active = ActiveCoordinatorLease {
+            coordination_scope: scope.clone(),
+            owner_thread_id: thread.thread_id,
+            epoch: state.coordinator_epoch,
+            fencing_token: state.fencing_counter,
+            expires_at: now + AgentOsPolicy::get().lease_ttl(),
+        };
+        state.active_coordinators.insert(scope, active.clone());
+        Ok(Some(active))
+    }
+
     pub(crate) async fn register_thread(
         &self,
         registration: ThreadRegistration,
@@ -1228,12 +1272,10 @@ impl AgentOsRuntime {
             thread.heartbeat_at = now;
             let snapshot = thread.clone();
             if snapshot.rank == COORDINATOR_RANK
-                && let Some(active) = state
-                    .active_coordinators
-                    .get_mut(snapshot.coordination_scope.as_str())
-                && active.owner_thread_id == thread_id
+                && let Err(err) =
+                    Self::claim_or_renew_active_coordinator_locked(&mut state, &snapshot, now, None)
             {
-                active.expires_at = now + AgentOsPolicy::get().lease_ttl();
+                tracing::debug!(%err, %thread_id, "rank-0 heartbeat did not renew coordinator lease");
             }
             snapshot
         };
@@ -1249,13 +1291,13 @@ impl AgentOsRuntime {
         to_thread_id: ThreadId,
         require_active_dispatcher: bool,
     ) -> PraxisResult<()> {
-        let state = self.state.read().await;
-        let sender = state.threads.get(&from_thread_id).ok_or_else(|| {
+        let mut state = self.state.write().await;
+        let sender = state.threads.get(&from_thread_id).cloned().ok_or_else(|| {
             PraxisErr::UnsupportedOperation(format!(
                 "unknown AgentOS sender thread `{from_thread_id}`"
             ))
         })?;
-        let _receiver = state.threads.get(&to_thread_id).ok_or_else(|| {
+        let receiver = state.threads.get(&to_thread_id).cloned().ok_or_else(|| {
             PraxisErr::UnsupportedOperation(format!(
                 "unknown AgentOS receiver thread `{to_thread_id}`"
             ))
@@ -1265,28 +1307,18 @@ impl AgentOsRuntime {
                 "worker-to-worker natural-language messaging is disabled by AgentOS; submit artifacts, status, or structured requests instead".to_string(),
             ));
         }
-        if _receiver.coordination_scope != sender.coordination_scope {
+        if receiver.coordination_scope != sender.coordination_scope {
             return Err(PraxisErr::UnsupportedOperation(
                 "inter-thread messaging cannot cross coordination scopes".to_string(),
             ));
         }
         if require_active_dispatcher {
-            let active = state
-                .active_coordinators
-                .get(sender.coordination_scope.as_str())
-                .ok_or_else(|| {
-                    PraxisErr::UnsupportedOperation("no active coordinator lease".to_string())
-                })?;
-            if active.expires_at <= Utc::now() {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "active coordinator lease has expired".to_string(),
-                ));
-            }
-            if active.owner_thread_id != from_thread_id {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "only the active rank-0 coordinator can dispatch tasks".to_string(),
-                ));
-            }
+            Self::claim_or_renew_active_coordinator_locked(
+                &mut state,
+                &sender,
+                Utc::now(),
+                Some("dispatch tasks"),
+            )?;
         }
         Ok(())
     }
@@ -1539,6 +1571,162 @@ impl AgentOsRuntime {
         Ok(Some(command))
     }
 
+    pub(crate) async fn cleanup_thread_resources_after_abort(
+        &self,
+        thread_id: ThreadId,
+        reason: impl Into<String>,
+    ) {
+        let reason = reason.into();
+        let live_commands = {
+            let state = self.state.read().await;
+            state
+                .commands
+                .values()
+                .filter(|command| command.thread_id == thread_id && command.ended_at.is_none())
+                .map(|command| {
+                    (
+                        command.command_id.clone(),
+                        command.task_id.clone(),
+                        command.process_id,
+                        command.runtime_owner_id.clone(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for (command_id, task_id, process_id, runtime_owner_id) in &live_commands {
+            if let Some(process_id) = process_id {
+                self.mark_process_status(
+                    *process_id,
+                    runtime_owner_id.as_deref(),
+                    ManagedProcessStatus::Cleaning,
+                )
+                .await;
+                let cleaned = self
+                    .cleanup_process(*process_id, runtime_owner_id.as_deref())
+                    .await;
+                if cleaned {
+                    self.mark_process_finished(*process_id, runtime_owner_id.as_deref())
+                        .await;
+                }
+                self.record_event(
+                    "command_process_cleanup_after_abort",
+                    Some(thread_id),
+                    Some(task_id.clone()),
+                    Some(command_id.clone()),
+                    json!({
+                        "reason": &reason,
+                        "process_id": process_id,
+                        "runtime_owner_id": runtime_owner_id,
+                        "cleaned": cleaned,
+                    }),
+                )
+                .await;
+            }
+        }
+
+        for (command_id, _, _, _) in &live_commands {
+            if let Err(err) = self
+                .finish_managed_command(
+                    command_id.as_str(),
+                    Some(-1),
+                    format!("command terminated because thread aborted: {reason}").as_bytes(),
+                    /*release_leases*/ true,
+                )
+                .await
+            {
+                tracing::warn!(%err, %command_id, %thread_id, "failed to finish AgentOS command after abort");
+            }
+        }
+
+        let (tickets, stray_lease_ids, thread_snapshot) = {
+            let mut state = self.state.write().await;
+            let now = Utc::now();
+            let command_ticket_ids = state
+                .commands
+                .values()
+                .filter(|command| command.thread_id == thread_id)
+                .map(|command| command.ticket_id.clone())
+                .collect::<HashSet<_>>();
+            let ticket_ids = state
+                .tickets
+                .iter()
+                .filter(|(_, ticket)| {
+                    ticket.thread_id == thread_id
+                        && !command_ticket_ids.contains(ticket.ticket_id.as_str())
+                })
+                .map(|(ticket_id, _)| ticket_id.clone())
+                .collect::<Vec<_>>();
+            let tickets = ticket_ids
+                .into_iter()
+                .filter_map(|ticket_id| state.tickets.remove(ticket_id.as_str()))
+                .collect::<Vec<_>>();
+            let stray_lease_ids = state
+                .leases
+                .iter()
+                .filter(|(_, lease)| lease.owner_thread_id == thread_id)
+                .map(|(lease_id, _)| lease_id.clone())
+                .collect::<Vec<_>>();
+            let thread_snapshot = state.threads.get_mut(&thread_id).map(|thread| {
+                thread.current_command_id = None;
+                if matches!(
+                    thread.state,
+                    ThreadRuntimeState::Running
+                        | ThreadRuntimeState::WaitingForLease
+                        | ThreadRuntimeState::Stopping
+                ) {
+                    thread.state = ThreadRuntimeState::Idle;
+                }
+                thread.heartbeat_at = now;
+                thread.clone()
+            });
+            (tickets, stray_lease_ids, thread_snapshot)
+        };
+
+        if !stray_lease_ids.is_empty() {
+            self.release_leases(&stray_lease_ids).await;
+        }
+        for ticket in &tickets {
+            self.persist_revoked_ticket_snapshot(ticket, reason.as_str())
+                .await;
+            self.record_event(
+                "ticket_revoked_after_abort",
+                Some(ticket.thread_id),
+                Some(ticket.task_id.clone()),
+                None,
+                json!({
+                    "ticket_id": &ticket.ticket_id,
+                    "reason": &reason,
+                }),
+            )
+            .await;
+        }
+        if let Some(thread) = thread_snapshot {
+            self.persist_thread_snapshot(&thread).await;
+        }
+        if !live_commands.is_empty() || !tickets.is_empty() || !stray_lease_ids.is_empty() {
+            self.record_event(
+                "thread_resources_cleaned_after_abort",
+                Some(thread_id),
+                None,
+                None,
+                json!({
+                    "reason": reason,
+                    "commands": live_commands
+                        .iter()
+                        .map(|(command_id, _, _, _)| command_id)
+                        .collect::<Vec<_>>(),
+                    "tickets": tickets
+                        .iter()
+                        .map(|ticket| &ticket.ticket_id)
+                        .collect::<Vec<_>>(),
+                    "stray_leases": stray_lease_ids,
+                }),
+            )
+            .await;
+        }
+    }
+
     pub(crate) async fn preflight_command_intent(
         &self,
         thread_id: ThreadId,
@@ -1744,9 +1932,6 @@ impl AgentOsRuntime {
         else {
             return false;
         };
-        if active.expires_at <= now {
-            return false;
-        }
         state.runtime_commands.values().any(|command| {
             command.to_thread_id == thread_id
                 && matches!(command.status, RuntimeCommandStatus::Pending)
@@ -1805,8 +1990,7 @@ impl AgentOsRuntime {
                     continue;
                 };
                 let active_matches = active.as_ref().is_some_and(|active| {
-                    active.expires_at > now
-                        && command_snapshot.coordinator_epoch == active.epoch
+                    command_snapshot.coordinator_epoch == active.epoch
                         && command_snapshot.fencing_token == active.fencing_token
                 });
                 let next_status = if command_snapshot.expires_at <= now {
@@ -1925,8 +2109,7 @@ impl AgentOsRuntime {
                     continue;
                 }
                 let active_matches = active.as_ref().is_some_and(|active| {
-                    active.expires_at > now
-                        && command.coordinator_epoch == active.epoch
+                    command.coordinator_epoch == active.epoch
                         && command.fencing_token == active.fencing_token
                 });
                 if !active_matches {
@@ -1989,11 +2172,6 @@ impl AgentOsRuntime {
                     "unknown AgentOS receiver thread `{to_thread_id}`"
                 ))
             })?;
-            if sender.rank != COORDINATOR_RANK {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "only rank-0 coordinators can issue runtime commands".to_string(),
-                ));
-            }
             if sender.coordination_scope != receiver.coordination_scope {
                 return Err(PraxisErr::UnsupportedOperation(
                     "runtime commands cannot cross coordination scopes".to_string(),
@@ -2016,23 +2194,17 @@ impl AgentOsRuntime {
                     ));
                 }
             }
-            let active = state
-                .active_coordinators
-                .get_mut(sender.coordination_scope.as_str())
-                .ok_or_else(|| {
-                    PraxisErr::UnsupportedOperation("no active coordinator lease".to_string())
-                })?;
-            if active.expires_at <= now {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "active coordinator lease has expired".to_string(),
-                ));
-            }
-            if active.owner_thread_id != from_thread_id {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "only the active rank-0 coordinator can issue runtime commands".to_string(),
-                ));
-            }
-            active.expires_at = now + AgentOsPolicy::get().lease_ttl();
+            let active = Self::claim_or_renew_active_coordinator_locked(
+                &mut state,
+                &sender,
+                now,
+                Some("issue runtime commands"),
+            )?
+            .ok_or_else(|| {
+                PraxisErr::UnsupportedOperation(
+                    "only rank-0 coordinators can issue runtime commands".to_string(),
+                )
+            })?;
             let coordinator_epoch = active.epoch;
             let fencing_token = active.fencing_token;
             let command = RuntimeCommandRecord {
@@ -2119,8 +2291,7 @@ impl AgentOsRuntime {
                 })
                 .cloned();
             let active_matches = active.as_ref().is_some_and(|active| {
-                active.expires_at > now
-                    && existing.coordinator_epoch == active.epoch
+                existing.coordinator_epoch == active.epoch
                     && existing.fencing_token == active.fencing_token
             });
             let receiver_terminal_report = actor_thread_id == existing.to_thread_id
@@ -2337,27 +2508,18 @@ impl AgentOsRuntime {
                             "unknown AgentOS actor thread `{actor_thread_id}`"
                         ))
                     })?;
-                if actor.rank != COORDINATOR_RANK
-                    || actor.coordination_scope != requester.coordination_scope
-                {
+                if actor.coordination_scope != requester.coordination_scope {
                     return Err(PraxisErr::UnsupportedOperation(
                         "worker request status can only be updated by owner or active coordinator"
                             .to_string(),
                     ));
                 }
-                let active = state
-                    .active_coordinators
-                    .get_mut(actor.coordination_scope.as_str())
-                    .ok_or_else(|| {
-                        PraxisErr::UnsupportedOperation("no active coordinator lease".to_string())
-                    })?;
-                if active.expires_at <= now || active.owner_thread_id != actor_thread_id {
-                    return Err(PraxisErr::UnsupportedOperation(
-                        "only the active rank-0 coordinator can resolve worker requests"
-                            .to_string(),
-                    ));
-                }
-                active.expires_at = now + AgentOsPolicy::get().lease_ttl();
+                Self::claim_or_renew_active_coordinator_locked(
+                    &mut state,
+                    &actor,
+                    now,
+                    Some("resolve worker requests"),
+                )?;
             }
             let request = state.worker_requests.get_mut(request_id).ok_or_else(|| {
                 PraxisErr::UnsupportedOperation(format!("unknown worker request `{request_id}`"))
@@ -2596,18 +2758,19 @@ impl AgentOsRuntime {
                         thread.profile_id
                     ))
                 })?;
-            let active = state
-                .active_coordinators
-                .get(thread.coordination_scope.as_str())
-                .cloned();
-            if active
-                .as_ref()
-                .is_some_and(|active| active.expires_at <= now)
-            {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "execution ticket rejected: active coordinator lease has expired".to_string(),
-                ));
-            }
+            let active = if thread.rank == COORDINATOR_RANK {
+                Self::claim_or_renew_active_coordinator_locked(
+                    &mut state,
+                    &thread,
+                    now,
+                    Some("run side-effectful actions"),
+                )?
+            } else {
+                state
+                    .active_coordinators
+                    .get(thread.coordination_scope.as_str())
+                    .cloned()
+            };
             let intent_plan_id = Self::find_matching_intent_plan_locked(
                 &state,
                 thread_id,
@@ -2805,18 +2968,19 @@ impl AgentOsRuntime {
                         thread.profile_id
                     ))
                 })?;
-            let active = state
-                .active_coordinators
-                .get(thread.coordination_scope.as_str())
-                .cloned();
-            if active
-                .as_ref()
-                .is_some_and(|active| active.expires_at <= now)
-            {
-                return Err(PraxisErr::UnsupportedOperation(
-                    "tool ticket rejected: active coordinator lease has expired".to_string(),
-                ));
-            }
+            let active = if thread.rank == COORDINATOR_RANK {
+                Self::claim_or_renew_active_coordinator_locked(
+                    &mut state,
+                    &thread,
+                    now,
+                    Some("run side-effectful tools"),
+                )?
+            } else {
+                state
+                    .active_coordinators
+                    .get(thread.coordination_scope.as_str())
+                    .cloned()
+            };
             let command_fingerprint =
                 action_fingerprint(&action, thread.cwd.as_path(), intent.kind);
             let intent_plan_id = Self::find_matching_intent_plan_locked(
@@ -4407,12 +4571,11 @@ impl AgentOsRuntime {
         if let Some(active) = state
             .active_coordinators
             .get(ticket.coordination_scope.as_str())
-            && (active.expires_at <= Utc::now()
-                || ticket.coordinator_epoch != active.epoch
+            && (ticket.coordinator_epoch != active.epoch
                 || ticket.fencing_token != active.fencing_token)
         {
             return Err(PraxisErr::UnsupportedOperation(
-                "execution ticket coordinator epoch is stale or expired".to_string(),
+                "execution ticket coordinator epoch is stale".to_string(),
             ));
         }
         for lease_id in &ticket.lease_ids {
@@ -5184,7 +5347,7 @@ pub(crate) fn classify_command(command: &[String], cwd: &Path) -> ActionIntent {
         });
         side_effects.push("uses network".to_string());
         (ActionIntentKind::Network, 0.86, "high")
-    } else if is_file_write_command(&rendered) {
+    } else if is_file_write_command(&rendered) || has_file_redirection(&rendered) {
         resources.push(ResourceRequirement::RepoWrite { scope: repo_scope });
         side_effects.push("may write files".to_string());
         (ActionIntentKind::FileWrite, 0.78, "medium")
@@ -5820,11 +5983,30 @@ fn is_file_write_command(command: &str) -> bool {
         "python -c",
         "node -e",
         "tee ",
-        ">",
-        ">>",
     ]
     .iter()
     .any(|needle| command.contains(needle))
+}
+
+fn has_file_redirection(command: &str) -> bool {
+    let bytes = command.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'>' {
+            index += 1;
+            continue;
+        }
+        let mut cursor = index + 1;
+        if cursor < bytes.len() && bytes[cursor] == b'>' {
+            cursor += 1;
+        }
+        if cursor < bytes.len() && bytes[cursor] == b'&' {
+            index = cursor + 1;
+            continue;
+        }
+        return true;
+    }
+    false
 }
 
 fn is_git_mutation(command: &str) -> bool {
@@ -5940,5 +6122,38 @@ mod tests {
                 scope: "external_tool".to_string()
             },
         ));
+    }
+
+    #[test]
+    fn classify_command_keeps_fd_merge_search_read_only() {
+        let command = vec![
+            "powershell.exe".to_string(),
+            "-Command".to_string(),
+            "rg -n \"Ridge\" crates/cunning_core/src/bin/main.rs 2>&1".to_string(),
+        ];
+
+        let intent = classify_command(&command, Path::new("D:/repo"));
+
+        assert_eq!(intent.kind, ActionIntentKind::ReadOnly);
+        assert!(intent.required_resources.is_empty());
+    }
+
+    #[test]
+    fn classify_command_treats_file_redirection_as_write() {
+        let command = vec![
+            "bash".to_string(),
+            "-lc".to_string(),
+            "printf 'export const x = 1' > src/index.ts".to_string(),
+        ];
+
+        let intent = classify_command(&command, Path::new("/repo"));
+
+        assert_eq!(intent.kind, ActionIntentKind::FileWrite);
+        assert!(
+            intent
+                .required_resources
+                .iter()
+                .any(|resource| matches!(resource, ResourceRequirement::RepoWrite { .. }))
+        );
     }
 }

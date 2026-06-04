@@ -79,6 +79,8 @@ use praxis_protocol::protocol::SkillMetadata as CoreSkillMetadata;
 use praxis_protocol::protocol::SkillScope as CoreSkillScope;
 use praxis_protocol::protocol::SkillToolDependency as CoreSkillToolDependency;
 use praxis_protocol::protocol::SubAgentSource as CoreSubAgentSource;
+use praxis_protocol::protocol::ThreadGoal as CoreThreadGoal;
+use praxis_protocol::protocol::ThreadGoalStatus as CoreThreadGoalStatus;
 use praxis_protocol::protocol::TokenUsage as CoreTokenUsage;
 use praxis_protocol::protocol::TokenUsageInfo as CoreTokenUsageInfo;
 use praxis_protocol::request_permissions::PermissionGrantScope as CorePermissionGrantScope;
@@ -459,6 +461,12 @@ api_enum_from_core!(
 api_enum_from_core!(
     pub enum HookOutputEntryKind from CoreHookOutputEntryKind {
         Warning, Stop, Feedback, Context, Error
+    }
+);
+
+api_enum_from_core!(
+    pub enum ThreadGoalStatus from CoreThreadGoalStatus {
+        Active, Paused, Blocked, UsageLimited, BudgetLimited, Complete
     }
 );
 
@@ -2457,6 +2465,12 @@ pub struct ThreadSetNameParams {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadRegenerateNameParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadUnarchiveParams {
     pub thread_id: String,
 }
@@ -2464,6 +2478,12 @@ pub struct ThreadUnarchiveParams {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadSetNameResponse {}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRegenerateNameResponse {
+    pub thread_name: String,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -2695,8 +2715,10 @@ pub enum ThreadStatus {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ThreadActiveFlag {
+    Running,
     WaitingOnApproval,
     WaitingOnUserInput,
+    Controlled,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -2712,286 +2734,6 @@ pub struct ThreadReadParams {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadReadResponse {
     pub thread: Thread,
-}
-
-fn team_read_default_true() -> bool {
-    true
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum TeamExecutionMode {
-    ProcessFirst,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum TeamResumeMode {
-    StrongResume,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum TeamTeammateStatus {
-    Pending,
-    Active,
-    Failed,
-    Closed,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum TeamTaskStatus {
-    Pending,
-    InProgress,
-    Blocked,
-    Completed,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "camelCase")]
-#[ts(tag = "type")]
-pub enum TeamMailboxParticipant {
-    Lead,
-    #[serde(rename_all = "camelCase")]
-    #[ts(rename_all = "camelCase")]
-    Teammate {
-        teammate_id: String,
-    },
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct Team {
-    pub id: String,
-    pub lead_thread_id: String,
-    pub name: String,
-    #[ts(optional = nullable)]
-    pub objective: Option<String>,
-    pub execution_mode: TeamExecutionMode,
-    pub resume_mode: TeamResumeMode,
-    #[ts(type = "number")]
-    pub created_at: i64,
-    #[ts(type = "number")]
-    pub updated_at: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTeammate {
-    pub team_id: String,
-    pub teammate_id: String,
-    pub name: String,
-    #[ts(optional = nullable)]
-    pub role: Option<String>,
-    pub status: TeamTeammateStatus,
-    #[ts(optional = nullable)]
-    pub thread_id: Option<String>,
-    #[ts(optional = nullable)]
-    pub last_error: Option<String>,
-    #[ts(type = "number")]
-    pub created_at: i64,
-    #[ts(type = "number")]
-    pub updated_at: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTask {
-    pub team_id: String,
-    pub task_id: String,
-    pub title: String,
-    #[ts(optional = nullable)]
-    pub description: Option<String>,
-    pub status: TeamTaskStatus,
-    #[ts(optional = nullable)]
-    pub assignee_teammate_id: Option<String>,
-    #[ts(type = "number")]
-    pub created_at: i64,
-    #[ts(type = "number")]
-    pub updated_at: i64,
-    #[ts(optional = nullable, type = "number | null")]
-    pub completed_at: Option<i64>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamMailboxMessage {
-    pub id: String,
-    pub team_id: String,
-    pub sender: TeamMailboxParticipant,
-    pub recipient: TeamMailboxParticipant,
-    pub body: String,
-    #[ts(type = "number")]
-    pub created_at: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamCreateParams {
-    #[ts(optional = nullable)]
-    pub team_id: Option<String>,
-    pub lead_thread_id: String,
-    pub name: String,
-    #[ts(optional = nullable)]
-    pub objective: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamCreateResponse {
-    pub team: Team,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamReadParams {
-    pub team_id: String,
-    #[serde(default = "team_read_default_true")]
-    pub include_teammates: bool,
-    #[serde(default = "team_read_default_true")]
-    pub include_tasks: bool,
-    #[serde(default = "team_read_default_true")]
-    pub include_messages: bool,
-    #[ts(optional = nullable)]
-    pub message_limit: Option<u32>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamReadResponse {
-    pub team: Team,
-    #[serde(default)]
-    pub teammates: Vec<TeamTeammate>,
-    #[serde(default)]
-    pub tasks: Vec<TeamTask>,
-    #[serde(default)]
-    pub messages: Vec<TeamMailboxMessage>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamDeleteParams {
-    pub team_id: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamDeleteResponse {}
-
-#[derive(
-    Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS, ExperimentalApi,
-)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTeammateCreateParams {
-    pub team_id: String,
-    #[ts(optional = nullable)]
-    pub teammate_id: Option<String>,
-    pub name: String,
-    #[ts(optional = nullable)]
-    pub role: Option<String>,
-    #[ts(optional = nullable)]
-    pub model: Option<String>,
-    #[ts(optional = nullable)]
-    pub model_provider: Option<String>,
-    #[ts(optional = nullable)]
-    pub cwd: Option<String>,
-    #[experimental(nested)]
-    #[ts(optional = nullable)]
-    pub approval_policy: Option<AskForApproval>,
-    #[ts(optional = nullable)]
-    pub approvals_reviewer: Option<ApprovalsReviewer>,
-    #[ts(optional = nullable)]
-    pub sandbox: Option<SandboxMode>,
-    #[ts(optional = nullable)]
-    pub base_instructions: Option<String>,
-    #[ts(optional = nullable)]
-    pub developer_instructions: Option<String>,
-    #[ts(optional = nullable)]
-    pub personality: Option<Personality>,
-    #[ts(optional = nullable)]
-    pub service_name: Option<String>,
-    #[ts(optional = nullable)]
-    pub ephemeral: Option<bool>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTeammateCreateResponse {
-    pub team: Team,
-    pub teammate: TeamTeammate,
-    pub thread: Thread,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTeammateMessageParams {
-    pub team_id: String,
-    #[ts(optional = nullable)]
-    pub message_id: Option<String>,
-    pub sender: TeamMailboxParticipant,
-    pub recipient: TeamMailboxParticipant,
-    pub body: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTeammateMessageResponse {
-    pub message: TeamMailboxMessage,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTaskCreateParams {
-    pub team_id: String,
-    #[ts(optional = nullable)]
-    pub task_id: Option<String>,
-    pub title: String,
-    #[ts(optional = nullable)]
-    pub description: Option<String>,
-    #[ts(optional = nullable)]
-    pub assignee_teammate_id: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTaskCreateResponse {
-    pub task: TeamTask,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTaskListParams {
-    pub team_id: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTaskListResponse {
-    pub data: Vec<TeamTask>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTaskUpdateParams {
-    pub team_id: String,
-    pub task_id: String,
-    #[ts(optional = nullable)]
-    pub title: Option<String>,
-    #[ts(optional = nullable)]
-    pub description: Option<String>,
-    #[ts(optional = nullable)]
-    pub status: Option<TeamTaskStatus>,
-    #[ts(optional = nullable)]
-    pub assignee_teammate_id: Option<String>,
-    #[serde(default)]
-    pub clear_assignee: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTaskUpdateResponse {
-    pub task: TeamTask,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -3394,6 +3136,10 @@ pub struct Thread {
     pub ephemeral: bool,
     /// Model provider used for this thread (for example, 'openai').
     pub model_provider: String,
+    /// Latest observed model used for this thread, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub model: Option<String>,
     /// Unix timestamp (in seconds) when the thread was created.
     #[ts(type = "number")]
     pub created_at: i64,
@@ -3422,6 +3168,14 @@ pub struct Thread {
     pub total_cost_usd: Option<f64>,
     /// Optional estimated last-turn cost in USD.
     pub last_cost_usd: Option<f64>,
+    /// Optional persisted token usage snapshot for list/detail surfaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub token_usage: Option<ThreadTokenUsage>,
+    /// Optional live controller lock for read-only observation surfaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub control_state: Option<ThreadControlState>,
     /// Optional persisted markdown plan path for idle-driven autonomous selfwork.
     pub selfwork_plan_path: Option<PathBuf>,
     /// Only populated on `thread/resume`, `thread/rollback`, `thread/fork`, and `thread/read`
@@ -3444,6 +3198,129 @@ pub struct ThreadTokenUsageUpdatedNotification {
     pub thread_id: String,
     pub turn_id: String,
     pub token_usage: ThreadTokenUsage,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadControllerKind {
+    Thread,
+    External,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadController {
+    pub kind: ThreadControllerKind,
+    /// Thread id for thread controllers or stable client id for external controllers.
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub label: Option<String>,
+    /// Agent group rank 0/1 controllers may acquire locks. External controllers are trusted by the gateway.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub rank: Option<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadControlState {
+    pub controller: ThreadController,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason: Option<String>,
+    /// True while local clients should keep the thread transcript read-only.
+    pub read_only: bool,
+    #[ts(type = "number")]
+    pub acquired_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadControlAcquireParams {
+    pub thread_id: String,
+    pub controller: ThreadController,
+    /// Optional target agent group rank, used when clients already know it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub target_rank: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadControlAcquireResponse {
+    pub control_state: ThreadControlState,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadControlReleaseParams {
+    pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub controller: Option<ThreadController>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadControlReleaseResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub previous_control_state: Option<ThreadControlState>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadControlChangedNotification {
+    pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub control_state: Option<ThreadControlState>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoal {
+    pub thread_id: String,
+    pub objective: String,
+    pub status: ThreadGoalStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub token_budget: Option<i64>,
+    pub tokens_used: i64,
+    pub time_used_seconds: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<CoreThreadGoal> for ThreadGoal {
+    fn from(value: CoreThreadGoal) -> Self {
+        Self {
+            thread_id: value.thread_id.to_string(),
+            objective: value.objective,
+            status: value.status.into(),
+            token_budget: value.token_budget,
+            tokens_used: value.tokens_used,
+            time_used_seconds: value.time_used_seconds,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalUpdatedNotification {
+    pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub turn_id: Option<String>,
+    pub goal: ThreadGoal,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -3469,14 +3346,22 @@ impl From<CoreTokenUsageInfo> for ThreadTokenUsage {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenUsageBreakdown {
+    #[serde(default)]
     #[ts(type = "number")]
     pub total_tokens: i64,
+    #[serde(default)]
     #[ts(type = "number")]
     pub input_tokens: i64,
+    #[serde(default)]
     #[ts(type = "number")]
     pub cached_input_tokens: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub cache_reported_input_tokens: i64,
+    #[serde(default)]
     #[ts(type = "number")]
     pub output_tokens: i64,
+    #[serde(default)]
     #[ts(type = "number")]
     pub reasoning_output_tokens: i64,
 }
@@ -3487,6 +3372,7 @@ impl From<CoreTokenUsage> for TokenUsageBreakdown {
             total_tokens: value.total_tokens,
             input_tokens: value.input_tokens,
             cached_input_tokens: value.cached_input_tokens,
+            cache_reported_input_tokens: value.cache_reported_input_tokens,
             output_tokens: value.output_tokens,
             reasoning_output_tokens: value.reasoning_output_tokens,
         }
@@ -4773,41 +4659,6 @@ pub struct ThreadUnarchivedNotification {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadClosedNotification {
     pub thread_id: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamUpdatedNotification {
-    pub team: Team,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamDeletedNotification {
-    pub team_id: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTeammateUpdatedNotification {
-    pub team_id: String,
-    pub teammate: TeamTeammate,
-    #[ts(optional = nullable)]
-    pub thread: Option<Thread>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamTaskUpdatedNotification {
-    pub team_id: String,
-    pub task: TeamTask,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TeamMailboxUpdatedNotification {
-    pub team_id: String,
-    pub message: TeamMailboxMessage,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

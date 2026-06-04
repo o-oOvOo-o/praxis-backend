@@ -12,6 +12,7 @@ pub use praxis_rollout::state_db::persist_dynamic_tools;
 pub use praxis_rollout::state_db::read_repair_rollout_path;
 pub use praxis_rollout::state_db::reconcile_rollout;
 pub use praxis_rollout::state_db::touch_thread_updated_at;
+pub use praxis_rollout::state_db::try_get_state_db;
 pub use praxis_state::LogEntry;
 
 use crate::config::Config;

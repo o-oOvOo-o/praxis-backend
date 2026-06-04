@@ -49,6 +49,9 @@ use unicode_width::UnicodeWidthChar;
 
 /// Display width of a tab character in columns.
 const TAB_WIDTH: usize = 4;
+const PATCH_HISTORY_PREVIEW_MAX_RENDER_LINES: usize = 96;
+const PATCH_HISTORY_PREVIEW_MAX_SOURCE_LINES_PER_FILE: usize = 48;
+const PATCH_HISTORY_PREVIEW_MAX_LINE_CHARS: usize = 220;
 
 // -- Diff background palette --------------------------------------------------
 //
@@ -342,6 +345,7 @@ impl From<DiffSummary> for Box<dyn Renderable> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn create_diff_summary(
     changes: &HashMap<PathBuf, FileChange>,
     cwd: &Path,
@@ -349,6 +353,23 @@ pub(crate) fn create_diff_summary(
 ) -> Vec<RtLine<'static>> {
     let rows = collect_rows(changes);
     render_changes_block(rows, wrap_cols, cwd)
+}
+
+pub(crate) fn create_patch_history_summary(
+    changes: &HashMap<PathBuf, FileChange>,
+    cwd: &Path,
+    wrap_cols: usize,
+) -> Vec<RtLine<'static>> {
+    let rows = collect_rows(changes);
+    render_patch_history_block(rows, wrap_cols, cwd)
+}
+
+pub(crate) fn create_diff_file_summary(
+    changes: &HashMap<PathBuf, FileChange>,
+    cwd: &Path,
+) -> Vec<RtLine<'static>> {
+    let rows = collect_rows(changes);
+    render_change_header(rows, cwd)
 }
 
 // Shared row for per-file presentation
@@ -399,41 +420,10 @@ fn render_line_count_summary(added: usize, removed: usize) -> Vec<RtSpan<'static
     spans
 }
 
+#[cfg(test)]
 fn render_changes_block(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<RtLine<'static>> {
-    let mut out: Vec<RtLine<'static>> = Vec::new();
-
-    let render_path = |row: &Row| -> Vec<RtSpan<'static>> {
-        let mut spans = Vec::new();
-        spans.push(display_path_for(&row.path, cwd).into());
-        if let Some(move_path) = &row.move_path {
-            spans.push(format!(" → {}", display_path_for(move_path, cwd)).into());
-        }
-        spans
-    };
-
-    // Header
-    let total_added: usize = rows.iter().map(|r| r.added).sum();
-    let total_removed: usize = rows.iter().map(|r| r.removed).sum();
     let file_count = rows.len();
-    let noun = if file_count == 1 { "file" } else { "files" };
-    let mut header_spans: Vec<RtSpan<'static>> = vec!["• ".dim()];
-    if let [row] = &rows[..] {
-        let verb = match &row.change {
-            FileChange::Add { .. } => "Added",
-            FileChange::Delete { .. } => "Deleted",
-            _ => "Edited",
-        };
-        header_spans.push(verb.bold());
-        header_spans.push(" ".into());
-        header_spans.extend(render_path(row));
-        header_spans.push(" ".into());
-        header_spans.extend(render_line_count_summary(row.added, row.removed));
-    } else {
-        header_spans.push("Edited".bold());
-        header_spans.push(format!(" {file_count} {noun} ").into());
-        header_spans.extend(render_line_count_summary(total_added, total_removed));
-    }
-    out.push(RtLine::from(header_spans));
+    let mut out = render_change_header(rows.clone(), cwd);
 
     for (idx, r) in rows.into_iter().enumerate() {
         // Insert a blank separator between file chunks (except before the first)
@@ -445,7 +435,7 @@ fn render_changes_block(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<RtL
         if !skip_file_header {
             let mut header: Vec<RtSpan<'static>> = Vec::new();
             header.push("  └ ".dim());
-            header.extend(render_path(&r));
+            header.extend(render_row_path(&r, cwd));
             header.push(" ".into());
             header.extend(render_line_count_summary(r.added, r.removed));
             out.push(RtLine::from(header));
@@ -463,9 +453,119 @@ fn render_changes_block(rows: Vec<Row>, wrap_cols: usize, cwd: &Path) -> Vec<RtL
     out
 }
 
+fn render_patch_history_block(
+    rows: Vec<Row>,
+    wrap_cols: usize,
+    cwd: &Path,
+) -> Vec<RtLine<'static>> {
+    let file_count = rows.len();
+    let mut out = render_change_header(rows.clone(), cwd);
+    if rows.is_empty() {
+        return out;
+    }
+
+    out.push(RtLine::from(vec![
+        "  └ ".dim(),
+        format!(
+            "preview limited to {PATCH_HISTORY_PREVIEW_MAX_RENDER_LINES} rendered lines; full diff omitted from chat history"
+        )
+        .dim(),
+    ]));
+
+    let mut remaining_render_lines = PATCH_HISTORY_PREVIEW_MAX_RENDER_LINES;
+    for (idx, r) in rows.into_iter().enumerate() {
+        if idx > 0 {
+            out.push("".into());
+        }
+
+        let mut header: Vec<RtSpan<'static>> = Vec::new();
+        header.push(if file_count == 1 {
+            "  └ ".dim()
+        } else {
+            "  • ".dim()
+        });
+        header.extend(render_row_path(&r, cwd));
+        header.push(" ".into());
+        header.extend(render_line_count_summary(r.added, r.removed));
+        out.push(RtLine::from(header));
+
+        if remaining_render_lines == 0 {
+            out.push(RtLine::from(vec![
+                "    ... ".dim(),
+                "more diff omitted".dim(),
+            ]));
+            continue;
+        }
+
+        let preview_width = wrap_cols.saturating_sub(4).max(20);
+        let mut preview = Vec::new();
+        let stats = render_change_preview(
+            &r.change,
+            &mut preview,
+            preview_width,
+            remaining_render_lines,
+            PATCH_HISTORY_PREVIEW_MAX_SOURCE_LINES_PER_FILE,
+        );
+        let used = preview.len();
+        remaining_render_lines = remaining_render_lines.saturating_sub(used);
+        out.extend(prefix_lines(preview, "    ".into(), "    ".into()));
+
+        if stats.truncated {
+            out.push(RtLine::from(vec![
+                "    ... ".dim(),
+                format!(
+                    "{} more source lines omitted",
+                    stats
+                        .total_source_lines
+                        .saturating_sub(stats.shown_source_lines)
+                )
+                .dim(),
+            ]));
+        }
+    }
+
+    out
+}
+
+fn render_change_header(rows: Vec<Row>, cwd: &Path) -> Vec<RtLine<'static>> {
+    let total_added: usize = rows.iter().map(|r| r.added).sum();
+    let total_removed: usize = rows.iter().map(|r| r.removed).sum();
+    let file_count = rows.len();
+    let noun = if file_count == 1 { "file" } else { "files" };
+    let mut header_spans: Vec<RtSpan<'static>> = vec!["• ".dim()];
+    if let [row] = &rows[..] {
+        let verb = match &row.change {
+            FileChange::Add { .. } => "Added",
+            FileChange::Delete { .. } => "Deleted",
+            _ => "Edited",
+        };
+        header_spans.push(verb.bold());
+        header_spans.push(" ".into());
+        header_spans.extend(render_row_path(row, cwd));
+        header_spans.push(" ".into());
+        header_spans.extend(render_line_count_summary(row.added, row.removed));
+    } else {
+        header_spans.push("Edited".bold());
+        header_spans.push(format!(" {file_count} {noun} ").into());
+        header_spans.extend(render_line_count_summary(total_added, total_removed));
+    }
+
+    vec![RtLine::from(header_spans)]
+}
+
+fn render_row_path(row: &Row, cwd: &Path) -> Vec<RtSpan<'static>> {
+    let mut spans = Vec::new();
+    spans.push(display_path_for(&row.path, cwd).into());
+    if let Some(move_path) = &row.move_path {
+        spans.push(format!(" → {}", display_path_for(move_path, cwd)).into());
+    }
+    spans
+}
+
 /// Detect the programming language for a file path by its extension.
 /// Returns the raw extension string for `normalize_lang` / `find_syntax`
 /// to resolve downstream.
+#[cfg(test)]
 fn detect_lang_for_path(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
     Some(ext.to_string())
@@ -733,6 +833,284 @@ fn render_change(
             }
         }
     }
+}
+
+#[derive(Default)]
+struct PreviewRenderStats {
+    shown_source_lines: usize,
+    total_source_lines: usize,
+    truncated: bool,
+}
+
+fn render_change_preview(
+    change: &FileChange,
+    out: &mut Vec<RtLine<'static>>,
+    width: usize,
+    max_render_lines: usize,
+    max_source_lines: usize,
+) -> PreviewRenderStats {
+    let style_context = current_diff_render_style_context();
+    match change {
+        FileChange::Add { content } => render_add_delete_preview(
+            content,
+            DiffLineType::Insert,
+            out,
+            width,
+            max_render_lines,
+            max_source_lines,
+            style_context,
+        ),
+        FileChange::Delete { content } => render_add_delete_preview(
+            content,
+            DiffLineType::Delete,
+            out,
+            width,
+            max_render_lines,
+            max_source_lines,
+            style_context,
+        ),
+        FileChange::Update { unified_diff, .. } => render_update_preview(
+            unified_diff,
+            out,
+            width,
+            max_render_lines,
+            max_source_lines,
+            style_context,
+        ),
+    }
+}
+
+fn render_add_delete_preview(
+    content: &str,
+    kind: DiffLineType,
+    out: &mut Vec<RtLine<'static>>,
+    width: usize,
+    max_render_lines: usize,
+    max_source_lines: usize,
+    style_context: DiffRenderStyleContext,
+) -> PreviewRenderStats {
+    let total_source_lines = content.lines().count();
+    let line_number_width = line_number_width(total_source_lines);
+    let mut stats = PreviewRenderStats {
+        total_source_lines,
+        ..Default::default()
+    };
+
+    for (idx, raw) in content.lines().enumerate() {
+        if out.len() >= max_render_lines || stats.shown_source_lines >= max_source_lines {
+            stats.truncated = true;
+            break;
+        }
+        stats.shown_source_lines += 1;
+        push_preview_line(
+            out,
+            idx + 1,
+            kind,
+            raw,
+            width,
+            line_number_width,
+            max_render_lines,
+            style_context,
+        );
+    }
+
+    if stats.shown_source_lines < stats.total_source_lines {
+        stats.truncated = true;
+    }
+    stats
+}
+
+fn render_update_preview(
+    unified_diff: &str,
+    out: &mut Vec<RtLine<'static>>,
+    width: usize,
+    max_render_lines: usize,
+    max_source_lines: usize,
+    style_context: DiffRenderStyleContext,
+) -> PreviewRenderStats {
+    let Ok(patch) = diffy::Patch::from_str(unified_diff) else {
+        return render_raw_unified_preview(
+            unified_diff,
+            out,
+            width,
+            max_render_lines,
+            max_source_lines,
+            style_context,
+        );
+    };
+
+    let mut stats = PreviewRenderStats {
+        total_source_lines: patch.hunks().iter().map(|hunk| hunk.lines().len()).sum(),
+        ..Default::default()
+    };
+    let mut max_line_number = 0;
+    for hunk in patch.hunks() {
+        max_line_number = max_line_number.max(hunk.old_range().end());
+        max_line_number = max_line_number.max(hunk.new_range().end());
+    }
+    let line_number_width = line_number_width(max_line_number);
+
+    let mut is_first_hunk = true;
+    'hunks: for hunk in patch.hunks() {
+        if !is_first_hunk {
+            out.push(RtLine::from(vec![
+                RtSpan::styled(
+                    format!("{:width$} ", "", width = line_number_width.max(1)),
+                    style_gutter_for(
+                        DiffLineType::Context,
+                        style_context.theme,
+                        style_context.color_level,
+                    ),
+                ),
+                "...".dim(),
+            ]));
+            if out.len() >= max_render_lines {
+                stats.truncated = true;
+                break;
+            }
+        }
+        is_first_hunk = false;
+
+        let mut old_ln = hunk.old_range().start();
+        let mut new_ln = hunk.new_range().start();
+        for line in hunk.lines() {
+            if out.len() >= max_render_lines || stats.shown_source_lines >= max_source_lines {
+                stats.truncated = true;
+                break 'hunks;
+            }
+            stats.shown_source_lines += 1;
+            match line {
+                diffy::Line::Insert(text) => {
+                    push_preview_line(
+                        out,
+                        new_ln,
+                        DiffLineType::Insert,
+                        text.trim_end_matches('\n'),
+                        width,
+                        line_number_width,
+                        max_render_lines,
+                        style_context,
+                    );
+                    new_ln += 1;
+                }
+                diffy::Line::Delete(text) => {
+                    push_preview_line(
+                        out,
+                        old_ln,
+                        DiffLineType::Delete,
+                        text.trim_end_matches('\n'),
+                        width,
+                        line_number_width,
+                        max_render_lines,
+                        style_context,
+                    );
+                    old_ln += 1;
+                }
+                diffy::Line::Context(text) => {
+                    push_preview_line(
+                        out,
+                        new_ln,
+                        DiffLineType::Context,
+                        text.trim_end_matches('\n'),
+                        width,
+                        line_number_width,
+                        max_render_lines,
+                        style_context,
+                    );
+                    old_ln += 1;
+                    new_ln += 1;
+                }
+            }
+        }
+    }
+
+    if stats.shown_source_lines < stats.total_source_lines {
+        stats.truncated = true;
+    }
+    stats
+}
+
+fn render_raw_unified_preview(
+    unified_diff: &str,
+    out: &mut Vec<RtLine<'static>>,
+    width: usize,
+    max_render_lines: usize,
+    max_source_lines: usize,
+    style_context: DiffRenderStyleContext,
+) -> PreviewRenderStats {
+    let total_source_lines = unified_diff.lines().count();
+    let mut stats = PreviewRenderStats {
+        total_source_lines,
+        ..Default::default()
+    };
+    let line_number_width = line_number_width(total_source_lines);
+    for (idx, raw) in unified_diff.lines().enumerate() {
+        if out.len() >= max_render_lines || stats.shown_source_lines >= max_source_lines {
+            stats.truncated = true;
+            break;
+        }
+        stats.shown_source_lines += 1;
+        let kind = if raw.starts_with('+') {
+            DiffLineType::Insert
+        } else if raw.starts_with('-') {
+            DiffLineType::Delete
+        } else {
+            DiffLineType::Context
+        };
+        push_preview_line(
+            out,
+            idx + 1,
+            kind,
+            raw,
+            width,
+            line_number_width,
+            max_render_lines,
+            style_context,
+        );
+    }
+    if stats.shown_source_lines < stats.total_source_lines {
+        stats.truncated = true;
+    }
+    stats
+}
+
+fn push_preview_line(
+    out: &mut Vec<RtLine<'static>>,
+    line_number: usize,
+    kind: DiffLineType,
+    raw: &str,
+    width: usize,
+    line_number_width: usize,
+    max_render_lines: usize,
+    style_context: DiffRenderStyleContext,
+) {
+    let text = truncate_preview_line(raw);
+    out.extend(push_wrapped_diff_line_inner_with_theme_and_color_level(
+        line_number,
+        kind,
+        text.as_str(),
+        width,
+        line_number_width,
+        /*syntax_spans*/ None,
+        style_context.theme,
+        style_context.color_level,
+        style_context.diff_backgrounds,
+    ));
+    if out.len() > max_render_lines {
+        out.truncate(max_render_lines);
+    }
+}
+
+fn truncate_preview_line(raw: &str) -> String {
+    let mut text = String::new();
+    for (idx, ch) in raw.chars().enumerate() {
+        if idx >= PATCH_HISTORY_PREVIEW_MAX_LINE_CHARS {
+            text.push_str("...");
+            return text;
+        }
+        text.push(ch);
+    }
+    text
 }
 
 /// Format a path for display relative to the current working directory when

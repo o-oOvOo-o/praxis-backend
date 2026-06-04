@@ -12,9 +12,9 @@ use praxis_app_gateway_protocol::CancelLoginAccountParams;
 use praxis_app_gateway_protocol::ClientRequest;
 use praxis_app_gateway_protocol::LoginAccountParams;
 use praxis_app_gateway_protocol::LoginAccountResponse;
+use praxis_core::config::edit::ConfigEditsBuilder;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_login::DeviceCode;
-use praxis_login::read_openai_api_key_from_env;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
@@ -41,6 +41,7 @@ use crate::LoginStatus;
 use crate::custom_terminal::mark_hyperlink_cells;
 use crate::onboarding::onboarding_screen::KeyboardHandler;
 use crate::onboarding::onboarding_screen::StepStateProvider;
+use crate::provider_setup::ProviderSetupKind;
 use crate::shimmer::shimmer_spans;
 use crate::tui::FrameRequester;
 
@@ -72,14 +73,19 @@ pub(crate) enum SignInState {
     ChatGptSuccessMessage,
     ChatGptSuccess,
     ApiKeyEntry(ApiKeyInputState),
-    ApiKeyConfigured,
+    ApiKeyConfigured {
+        provider_label: String,
+    },
+    ClaudeNotice,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SignInOption {
     ChatGpt,
     DeviceCode,
-    ApiKey,
+    DeepSeekApiKey,
+    CommonApiKey,
+    Anthropic,
 }
 
 const API_KEY_DISABLED_MESSAGE: &str = "API key login is disabled.";
@@ -87,10 +93,61 @@ fn onboarding_request_id() -> praxis_app_gateway_protocol::RequestId {
     praxis_app_gateway_protocol::RequestId::String(Uuid::new_v4().to_string())
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct ApiKeyInputState {
-    value: String,
+    provider: ProviderSetupKind,
+    active_field: ApiKeyInputField,
+    api_key: String,
+    base_url: String,
+    model: String,
     prepopulated_from_env: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ApiKeyInputField {
+    ApiKey,
+    BaseUrl,
+    Model,
+}
+
+impl ApiKeyInputField {
+    fn next(self) -> Self {
+        match self {
+            Self::ApiKey => Self::BaseUrl,
+            Self::BaseUrl => Self::Model,
+            Self::Model => Self::ApiKey,
+        }
+    }
+
+    fn previous(self) -> Self {
+        match self {
+            Self::ApiKey => Self::Model,
+            Self::BaseUrl => Self::ApiKey,
+            Self::Model => Self::BaseUrl,
+        }
+    }
+}
+
+impl ApiKeyInputState {
+    fn new(provider: ProviderSetupKind) -> Self {
+        let prefill_from_env = provider.prefilled_api_key();
+        Self {
+            provider,
+            active_field: ApiKeyInputField::ApiKey,
+            api_key: prefill_from_env.clone().unwrap_or_default(),
+            base_url: provider.default_base_url().to_string(),
+            model: provider.default_model().to_string(),
+            prepopulated_from_env: prefill_from_env.is_some(),
+        }
+    }
+
+    fn active_value_mut(&mut self) -> &mut String {
+        match self.active_field {
+            ApiKeyInputField::ApiKey => &mut self.api_key,
+            ApiKeyInputField::BaseUrl => &mut self.base_url,
+            ApiKeyInputField::Model => &mut self.model,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -108,7 +165,7 @@ pub(crate) struct ContinueWithDeviceCodeState {
 
 impl KeyboardHandler for AuthModeWidget {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        if self.handle_api_key_entry_key_event(&key_event) {
+        if self.handle_provider_key_flow_key_event(&key_event) {
             return;
         }
 
@@ -119,14 +176,14 @@ impl KeyboardHandler for AuthModeWidget {
             KeyCode::Down | KeyCode::Char('j') => {
                 self.move_highlight(/*delta*/ 1);
             }
-            KeyCode::Char('1') => {
-                self.select_option_by_index(/*index*/ 0);
-            }
-            KeyCode::Char('2') => {
-                self.select_option_by_index(/*index*/ 1);
-            }
-            KeyCode::Char('3') => {
-                self.select_option_by_index(/*index*/ 2);
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                if let Some(index) = c
+                    .to_digit(10)
+                    .and_then(|digit| usize::try_from(digit).ok())
+                    .and_then(|digit| digit.checked_sub(1))
+                {
+                    self.select_option_by_index(index);
+                }
             }
             KeyCode::Enter => {
                 let sign_in_state = { (*self.sign_in_state.read().unwrap()).clone() };
@@ -149,7 +206,7 @@ impl KeyboardHandler for AuthModeWidget {
     }
 
     fn handle_paste(&mut self, pasted: String) {
-        let _ = self.handle_api_key_entry_paste(pasted);
+        let _ = self.handle_provider_key_entry_paste(pasted);
     }
 }
 
@@ -222,8 +279,10 @@ impl AuthModeWidget {
             options.push(SignInOption::DeviceCode);
         }
         if self.is_api_login_allowed() {
-            options.push(SignInOption::ApiKey);
+            options.push(SignInOption::DeepSeekApiKey);
+            options.push(SignInOption::CommonApiKey);
         }
+        options.push(SignInOption::Anthropic);
         options
     }
 
@@ -234,8 +293,10 @@ impl AuthModeWidget {
             options.push(SignInOption::DeviceCode);
         }
         if self.is_api_login_allowed() {
-            options.push(SignInOption::ApiKey);
+            options.push(SignInOption::DeepSeekApiKey);
+            options.push(SignInOption::CommonApiKey);
         }
+        options.push(SignInOption::Anthropic);
         options
     }
 
@@ -273,12 +334,22 @@ impl AuthModeWidget {
                     self.start_device_code_login();
                 }
             }
-            SignInOption::ApiKey => {
+            SignInOption::DeepSeekApiKey => {
                 if self.is_api_login_allowed() {
-                    self.start_api_key_entry();
+                    self.start_provider_key_entry(ProviderSetupKind::DeepSeek);
                 } else {
                     self.disallow_api_login();
                 }
+            }
+            SignInOption::CommonApiKey => {
+                if self.is_api_login_allowed() {
+                    self.start_provider_key_entry(ProviderSetupKind::Common);
+                } else {
+                    self.disallow_api_login();
+                }
+            }
+            SignInOption::Anthropic => {
+                self.show_anthropic_notice();
             }
         }
     }
@@ -298,7 +369,7 @@ impl AuthModeWidget {
             ]),
             Line::from(vec![
                 "  ".into(),
-                "or connect an API key for usage-based billing".into(),
+                "or configure a Praxis provider key for specialized/common models".into(),
             ]),
             "".into(),
         ];
@@ -335,7 +406,7 @@ impl AuthModeWidget {
         let chatgpt_description = if !self.is_chatgpt_login_allowed() {
             "ChatGPT login is disabled"
         } else {
-            "Usage included with Plus, Pro, Business, and Enterprise plans"
+            "Uses inherited Codex login when available; otherwise starts Praxis login"
         };
         let device_code_description = "Sign in from another device with a one-time code";
 
@@ -357,12 +428,28 @@ impl AuthModeWidget {
                         device_code_description,
                     ));
                 }
-                SignInOption::ApiKey => {
+                SignInOption::DeepSeekApiKey => {
                     lines.extend(create_mode_item(
                         idx,
                         option,
-                        "Provide your own API key",
-                        "Pay for what you use",
+                        "Sign in with DeepSeek API key",
+                        "Use Praxis DeepSeek profile with deepseek-v4-pro",
+                    ));
+                }
+                SignInOption::CommonApiKey => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Sign in with Common API key",
+                        "Use a generic OpenAI-compatible endpoint",
+                    ));
+                }
+                SignInOption::Anthropic => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Sign in with Anthropic",
+                        "Connect your Anthropic account",
                     ));
                 }
             }
@@ -481,11 +568,18 @@ impl AuthModeWidget {
             .render(area, buf);
     }
 
-    fn render_api_key_configured(&self, area: Rect, buf: &mut Buffer) {
+    fn render_api_key_configured(&self, area: Rect, buf: &mut Buffer, provider_label: &str) {
         let lines = vec![
-            "✓ API key configured".fg(Color::Green).into(),
+            Line::from(vec![
+                "✓ ".fg(Color::Green),
+                provider_label.to_string().fg(Color::Green),
+                " provider configured".fg(Color::Green),
+            ]),
             "".into(),
-            "  Praxis will use usage-based billing with your API key.".into(),
+            "  Praxis saved this provider under model_providers.".into(),
+            "  Codex/OpenAI auth remains inherited from Codex when available."
+                .dim()
+                .into(),
         ];
 
         Paragraph::new(lines)
@@ -494,8 +588,16 @@ impl AuthModeWidget {
     }
 
     fn render_api_key_entry(&self, area: Rect, buf: &mut Buffer, state: &ApiKeyInputState) {
-        let [intro_area, input_area, footer_area] = Layout::vertical([
+        let [
+            intro_area,
+            api_key_area,
+            base_url_area,
+            model_area,
+            footer_area,
+        ] = Layout::vertical([
             Constraint::Min(4),
+            Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Min(2),
         ])
@@ -504,14 +606,18 @@ impl AuthModeWidget {
         let mut intro_lines: Vec<Line> = vec![
             Line::from(vec![
                 "> ".into(),
-                "Use your own OpenAI API key for usage-based billing".bold(),
+                format!("Configure {}", state.provider.label()).bold(),
             ]),
             "".into(),
-            "  Paste or type your API key below. It will be stored locally in auth.json.".into(),
+            "  This writes a Praxis model provider and switches the active model to it.".into(),
+            "  It does not write auth.json or replace inherited Codex/OpenAI credentials."
+                .dim()
+                .into(),
             "".into(),
         ];
         if state.prepopulated_from_env {
-            intro_lines.push("  Detected OPENAI_API_KEY environment variable.".into());
+            let env_key = state.provider.env_key().unwrap_or("provider API key");
+            intro_lines.push(format!("  Detected {env_key} environment variable.").into());
             intro_lines.push(
                 "  Paste a different key if you prefer to use another account."
                     .dim()
@@ -523,23 +629,33 @@ impl AuthModeWidget {
             .wrap(Wrap { trim: false })
             .render(intro_area, buf);
 
-        let content_line: Line = if state.value.is_empty() {
-            vec!["Paste or type your API key".dim()].into()
-        } else {
-            Line::from(state.value.clone())
-        };
-        Paragraph::new(content_line)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .title("API key")
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(Color::Cyan)),
-            )
-            .render(input_area, buf);
+        self.render_api_key_field(
+            api_key_area,
+            buf,
+            "API key",
+            &state.api_key,
+            "Paste or type the provider API key",
+            state.active_field == ApiKeyInputField::ApiKey,
+        );
+        self.render_api_key_field(
+            base_url_area,
+            buf,
+            "Base URL",
+            &state.base_url,
+            "https://api.example.com",
+            state.active_field == ApiKeyInputField::BaseUrl,
+        );
+        self.render_api_key_field(
+            model_area,
+            buf,
+            "Model",
+            &state.model,
+            "model-name",
+            state.active_field == ApiKeyInputField::Model,
+        );
 
         let mut footer_lines: Vec<Line> = vec![
+            "  Tab/Shift+Tab changes field".dim().into(),
             "  Press Enter to save".dim().into(),
             "  Press Esc to go back".dim().into(),
         ];
@@ -552,69 +668,144 @@ impl AuthModeWidget {
             .render(footer_area, buf);
     }
 
-    fn handle_api_key_entry_key_event(&mut self, key_event: &KeyEvent) -> bool {
-        let mut should_save: Option<String> = None;
+    fn render_api_key_field(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        title: &'static str,
+        value: &str,
+        placeholder: &'static str,
+        active: bool,
+    ) {
+        let border_style = if active {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let content_line: Line = if value.is_empty() {
+            vec![placeholder.dim()].into()
+        } else {
+            Line::from(value.to_string())
+        };
+        Paragraph::new(content_line)
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(border_style),
+            )
+            .render(area, buf);
+    }
+
+    fn render_claude_notice(&self, area: Rect, buf: &mut Buffer) {
+        let lines: Vec<Line> = vec![
+            Line::from(vec!["> ".into(), "Anthropic Statement".bold()]),
+            "".into(),
+            "  Praxis does not provide a Claude adapter.".into(),
+            "".into(),
+            "  Anthropic has built a public moral posture around opposition to distillation,"
+                .into(),
+            "  while benefiting from the same open research, shared engineering practice,".into(),
+            "  and industry-wide iteration that made modern agent systems possible.".into(),
+            "".into(),
+            "  Praxis will not treat that contradiction as a first-class integration target."
+                .into(),
+            "  Adapter work is reserved for model systems with clear interfaces, reliable".into(),
+            "  behavior, and product direction that materially strengthens users and agents."
+                .into(),
+            "".into(),
+            "  Press Esc to go back".dim().into(),
+        ];
+
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .render(area, buf);
+    }
+
+    fn handle_provider_key_flow_key_event(&mut self, key_event: &KeyEvent) -> bool {
+        let mut should_save: Option<ApiKeyInputState> = None;
         let mut should_request_frame = false;
 
         {
             let mut guard = self.sign_in_state.write().unwrap();
-            if let SignInState::ApiKeyEntry(state) = &mut *guard {
-                match key_event.code {
-                    KeyCode::Esc => {
+            match &mut *guard {
+                SignInState::ApiKeyEntry(state) => {
+                    match key_event.code {
+                        KeyCode::Esc => {
+                            *guard = SignInState::PickMode;
+                            self.set_error(/*message*/ None);
+                            should_request_frame = true;
+                        }
+                        KeyCode::Tab => {
+                            state.active_field = state.active_field.next();
+                            should_request_frame = true;
+                        }
+                        KeyCode::BackTab => {
+                            state.active_field = state.active_field.previous();
+                            should_request_frame = true;
+                        }
+                        KeyCode::Enter => {
+                            if let Some(message) = self.validate_provider_key_state(state) {
+                                self.set_error(Some(message));
+                                should_request_frame = true;
+                            } else {
+                                should_save = Some(state.clone());
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            if state.active_field == ApiKeyInputField::ApiKey
+                                && state.prepopulated_from_env
+                            {
+                                state.api_key.clear();
+                                state.prepopulated_from_env = false;
+                            } else {
+                                state.active_value_mut().pop();
+                            }
+                            self.set_error(/*message*/ None);
+                            should_request_frame = true;
+                        }
+                        KeyCode::Char(c)
+                            if key_event.kind == KeyEventKind::Press
+                                && !key_event.modifiers.contains(KeyModifiers::SUPER)
+                                && !key_event.modifiers.contains(KeyModifiers::CONTROL)
+                                && !key_event.modifiers.contains(KeyModifiers::ALT) =>
+                        {
+                            if state.active_field == ApiKeyInputField::ApiKey
+                                && state.prepopulated_from_env
+                            {
+                                state.api_key.clear();
+                                state.prepopulated_from_env = false;
+                            }
+                            state.active_value_mut().push(c);
+                            self.set_error(/*message*/ None);
+                            should_request_frame = true;
+                        }
+                        _ => {}
+                    }
+                }
+                SignInState::ClaudeNotice => match key_event.code {
+                    KeyCode::Esc | KeyCode::Enter => {
                         *guard = SignInState::PickMode;
                         self.set_error(/*message*/ None);
                         should_request_frame = true;
                     }
-                    KeyCode::Enter => {
-                        let trimmed = state.value.trim().to_string();
-                        if trimmed.is_empty() {
-                            self.set_error(Some("API key cannot be empty".to_string()));
-                            should_request_frame = true;
-                        } else {
-                            should_save = Some(trimmed);
-                        }
-                    }
-                    KeyCode::Backspace => {
-                        if state.prepopulated_from_env {
-                            state.value.clear();
-                            state.prepopulated_from_env = false;
-                        } else {
-                            state.value.pop();
-                        }
-                        self.set_error(/*message*/ None);
-                        should_request_frame = true;
-                    }
-                    KeyCode::Char(c)
-                        if key_event.kind == KeyEventKind::Press
-                            && !key_event.modifiers.contains(KeyModifiers::SUPER)
-                            && !key_event.modifiers.contains(KeyModifiers::CONTROL)
-                            && !key_event.modifiers.contains(KeyModifiers::ALT) =>
-                    {
-                        if state.prepopulated_from_env {
-                            state.value.clear();
-                            state.prepopulated_from_env = false;
-                        }
-                        state.value.push(c);
-                        self.set_error(/*message*/ None);
-                        should_request_frame = true;
-                    }
                     _ => {}
-                }
-                // handled; let guard drop before potential save
-            } else {
-                return false;
+                },
+                _ => return false,
             }
         }
 
-        if let Some(api_key) = should_save {
-            self.save_api_key(api_key);
+        if let Some(state) = should_save {
+            self.save_provider_key(state);
         } else if should_request_frame {
             self.request_frame.schedule_frame();
         }
         true
     }
 
-    fn handle_api_key_entry_paste(&mut self, pasted: String) -> bool {
+    fn handle_provider_key_entry_paste(&mut self, pasted: String) -> bool {
         let trimmed = pasted.trim();
         if trimmed.is_empty() {
             return false;
@@ -622,11 +813,11 @@ impl AuthModeWidget {
 
         let mut guard = self.sign_in_state.write().unwrap();
         if let SignInState::ApiKeyEntry(state) = &mut *guard {
-            if state.prepopulated_from_env {
-                state.value = trimmed.to_string();
+            if state.active_field == ApiKeyInputField::ApiKey && state.prepopulated_from_env {
+                state.api_key = trimmed.to_string();
                 state.prepopulated_from_env = false;
             } else {
-                state.value.push_str(trimmed);
+                state.active_value_mut().push_str(trimmed);
             }
             self.set_error(/*message*/ None);
         } else {
@@ -638,75 +829,77 @@ impl AuthModeWidget {
         true
     }
 
-    fn start_api_key_entry(&mut self) {
+    fn start_provider_key_entry(&mut self, provider: ProviderSetupKind) {
         if !self.is_api_login_allowed() {
             self.disallow_api_login();
             return;
         }
         self.set_error(/*message*/ None);
-        let prefill_from_env = read_openai_api_key_from_env();
-        let mut guard = self.sign_in_state.write().unwrap();
-        match &mut *guard {
-            SignInState::ApiKeyEntry(state) => {
-                if state.value.is_empty() {
-                    if let Some(prefill) = prefill_from_env {
-                        state.value = prefill;
-                        state.prepopulated_from_env = true;
-                    } else {
-                        state.prepopulated_from_env = false;
-                    }
-                }
-            }
-            _ => {
-                *guard = SignInState::ApiKeyEntry(ApiKeyInputState {
-                    value: prefill_from_env.clone().unwrap_or_default(),
-                    prepopulated_from_env: prefill_from_env.is_some(),
-                });
-            }
-        }
-        drop(guard);
+        *self.sign_in_state.write().unwrap() =
+            SignInState::ApiKeyEntry(ApiKeyInputState::new(provider));
         self.request_frame.schedule_frame();
     }
 
-    fn save_api_key(&mut self, api_key: String) {
+    fn show_anthropic_notice(&mut self) {
+        self.set_error(/*message*/ None);
+        *self.sign_in_state.write().unwrap() = SignInState::ClaudeNotice;
+        self.request_frame.schedule_frame();
+    }
+
+    fn validate_provider_key_state(&self, state: &ApiKeyInputState) -> Option<String> {
+        if state.api_key.trim().is_empty() {
+            return Some("API key cannot be empty".to_string());
+        }
+        if state.base_url.trim().is_empty() {
+            return Some("Base URL cannot be empty".to_string());
+        }
+        if state.model.trim().is_empty() {
+            return Some("Model cannot be empty".to_string());
+        }
+        None
+    }
+
+    fn normalize_common_base_url(&self, raw: &str) -> String {
+        raw.trim().trim_end_matches('/').to_string()
+    }
+
+    fn save_provider_key(&mut self, state: ApiKeyInputState) {
         if !self.is_api_login_allowed() {
             self.disallow_api_login();
             return;
         }
         self.set_error(/*message*/ None);
-        let request_handle = self.app_gateway_request_handle.clone();
+        let praxis_home = self.praxis_home.clone();
         let sign_in_state = self.sign_in_state.clone();
         let error = self.error.clone();
         let request_frame = self.request_frame.clone();
+        let api_key = state.api_key.trim().to_string();
+        let base_url = self.normalize_common_base_url(&state.base_url);
+        let model = state.model.trim().to_string();
+        let provider = state.provider.build_provider(api_key, base_url);
+        let provider_id = state.provider.provider_id().to_string();
+        let provider_label = state.provider.label().to_string();
+        let default_effort = state.provider.default_effort();
+        let retry_state = state.clone();
+
         tokio::spawn(async move {
-            match request_handle
-                .request_typed::<LoginAccountResponse>(ClientRequest::LoginAccount {
-                    request_id: onboarding_request_id(),
-                    params: LoginAccountParams::ApiKey {
-                        api_key: api_key.clone(),
-                    },
-                })
-                .await
-            {
-                Ok(LoginAccountResponse::ApiKey {}) => {
+            let result = ConfigEditsBuilder::new(&praxis_home)
+                .upsert_model_provider(provider_id.as_str(), &provider)
+                .set_model_provider(Some(provider_id.as_str()))
+                .set_model(Some(model.as_str()), default_effort)
+                .apply()
+                .await;
+
+            match result {
+                Ok(()) => {
                     *error.write().unwrap() = None;
-                    *sign_in_state.write().unwrap() = SignInState::ApiKeyConfigured;
-                }
-                Ok(other) => {
-                    *error.write().unwrap() = Some(format!(
-                        "Unexpected account/login/start response: {other:?}"
-                    ));
-                    *sign_in_state.write().unwrap() = SignInState::ApiKeyEntry(ApiKeyInputState {
-                        value: api_key,
-                        prepopulated_from_env: false,
-                    });
+                    *sign_in_state.write().unwrap() =
+                        SignInState::ApiKeyConfigured { provider_label };
                 }
                 Err(err) => {
-                    *error.write().unwrap() = Some(format!("Failed to save API key: {err}"));
-                    *sign_in_state.write().unwrap() = SignInState::ApiKeyEntry(ApiKeyInputState {
-                        value: api_key,
-                        prepopulated_from_env: false,
-                    });
+                    *error.write().unwrap() =
+                        Some(format!("Failed to save Praxis provider key: {err}"));
+                    *sign_in_state.write().unwrap() = SignInState::ApiKeyEntry(retry_state);
                 }
             }
             request_frame.schedule_frame();
@@ -823,10 +1016,13 @@ impl StepStateProvider for AuthModeWidget {
         match &*sign_in_state {
             SignInState::PickMode
             | SignInState::ApiKeyEntry(_)
+            | SignInState::ClaudeNotice
             | SignInState::ChatGptContinueInBrowser(_)
             | SignInState::ChatGptDeviceCode(_)
             | SignInState::ChatGptSuccessMessage => StepState::InProgress,
-            SignInState::ChatGptSuccess | SignInState::ApiKeyConfigured => StepState::Complete,
+            SignInState::ChatGptSuccess | SignInState::ApiKeyConfigured { .. } => {
+                StepState::Complete
+            }
         }
     }
 }
@@ -853,8 +1049,11 @@ impl WidgetRef for AuthModeWidget {
             SignInState::ApiKeyEntry(state) => {
                 self.render_api_key_entry(area, buf, state);
             }
-            SignInState::ApiKeyConfigured => {
-                self.render_api_key_configured(area, buf);
+            SignInState::ApiKeyConfigured { provider_label } => {
+                self.render_api_key_configured(area, buf, provider_label);
+            }
+            SignInState::ClaudeNotice => {
+                self.render_claude_notice(area, buf);
             }
         }
     }
@@ -937,7 +1136,7 @@ mod tests {
     async fn api_key_flow_disabled_when_chatgpt_forced() {
         let (mut widget, _tmp) = widget_forced_chatgpt().await;
 
-        widget.start_api_key_entry();
+        widget.start_provider_key_entry(ProviderSetupKind::DeepSeek);
 
         assert_eq!(
             widget.error_message().as_deref(),
@@ -953,7 +1152,9 @@ mod tests {
     async fn saving_api_key_is_blocked_when_chatgpt_forced() {
         let (mut widget, _tmp) = widget_forced_chatgpt().await;
 
-        widget.save_api_key("sk-test".to_string());
+        let mut state = ApiKeyInputState::new(ProviderSetupKind::DeepSeek);
+        state.api_key = "sk-test".to_string();
+        widget.save_provider_key(state);
 
         assert_eq!(
             widget.error_message().as_deref(),

@@ -62,6 +62,10 @@ impl PraxisMessageProcessor {
                 self.thread_set_name(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::ThreadRegenerateName { request_id, params } => {
+                self.thread_regenerate_name(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::ThreadMetadataUpdate { request_id, params } => {
                 self.thread_metadata_update(to_connection_request_id(request_id), params)
                     .await;
@@ -97,40 +101,16 @@ impl PraxisMessageProcessor {
                 self.thread_read(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::ThreadControlAcquire { request_id, params } => {
+                self.thread_control_acquire(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadControlRelease { request_id, params } => {
+                self.thread_control_release(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::ThreadShellCommand { request_id, params } => {
                 self.thread_shell_command(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::TeamCreate { request_id, params } => {
-                self.team_create(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::TeamRead { request_id, params } => {
-                self.team_read(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::TeamDelete { request_id, params } => {
-                self.team_delete(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::TeamTeammateCreate { request_id, params } => {
-                self.team_teammate_create(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::TeamTeammateMessage { request_id, params } => {
-                self.team_teammate_message(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::TeamTaskCreate { request_id, params } => {
-                self.team_task_create(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::TeamTaskList { request_id, params } => {
-                self.team_task_list(to_connection_request_id(request_id), params)
-                    .await;
-            }
-            ClientRequest::TeamTaskUpdate { request_id, params } => {
-                self.team_task_update(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::SkillsList { request_id, params } => {

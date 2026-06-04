@@ -115,7 +115,6 @@ pub fn default_legacy_codep_home() -> std::io::Result<PathBuf> {
 ///
 /// The bridge is enabled only when:
 /// - the current namespace resolves to `praxis`
-/// - `PRAXIS_HOME` is not explicitly set
 /// - the provided `praxis_home` is the default `~/.praxis` location
 ///
 /// This keeps custom/test homes isolated while allowing the default Praxis UX
@@ -207,11 +206,11 @@ fn find_praxis_home_from_env_and_namespace(
 }
 
 fn upstream_codex_read_through_home_with_namespace_hint(
-    praxis_home_env: Option<&HomeEnvOverride>,
+    _praxis_home_env: Option<&HomeEnvOverride>,
     namespace: PraxisHomeNamespace,
     praxis_home: &Path,
 ) -> std::io::Result<Option<PathBuf>> {
-    if praxis_home_env.is_some() || namespace != PraxisHomeNamespace::Praxis {
+    if namespace != PraxisHomeNamespace::Praxis {
         return Ok(None);
     }
 
@@ -623,15 +622,16 @@ mod tests {
     }
 
     #[test]
-    fn upstream_codex_read_through_home_is_disabled_for_explicit_code_home() {
+    fn upstream_codex_read_through_home_allows_explicit_default_praxis_home() {
         let praxis_home = default_home_for_test(PraxisHomeNamespace::Praxis).expect("praxis home");
         let shared = upstream_codex_read_through_home_for_test(
-            Some("C:\\custom-praxis-home"),
+            praxis_home.to_str(),
             PraxisHomeNamespace::Praxis,
             praxis_home.as_path(),
         )
         .expect("shared codex home");
-        assert_eq!(shared, None);
+        let expected = super::default_upstream_codex_home().expect("codex home");
+        assert_eq!(shared, Some(expected));
     }
 
     #[test]

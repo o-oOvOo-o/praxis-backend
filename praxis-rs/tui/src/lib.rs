@@ -13,7 +13,6 @@ use cwd_prompt::CwdPromptAction;
 use cwd_prompt::CwdPromptOutcome;
 use cwd_prompt::CwdSelection;
 use praxis_app_gateway_client::AppGatewayClient;
-use praxis_app_gateway_client::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
 use praxis_app_gateway_client::NativeAppGatewayClient;
 use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
 use praxis_app_gateway_client::RemoteAppGatewayClient;
@@ -25,12 +24,16 @@ use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadSortKey as AppGatewayThreadSortKey;
 use praxis_app_gateway_protocol::ThreadSourceKind;
 use praxis_cloud_requirements::cloud_requirements_loader_for_storage;
+use praxis_core::LMSTUDIO_OSS_PROVIDER_ID;
+use praxis_core::ModelProviderInfo;
+use praxis_core::OLLAMA_OSS_PROVIDER_ID;
 use praxis_core::check_execpolicy_for_warnings;
 use praxis_core::config::Config;
 use praxis_core::config::ConfigBuilder;
 use praxis_core::config::ConfigOverrides;
 use praxis_core::config::PraxisHomeNamespace;
 use praxis_core::config::current_praxis_home_namespace;
+use praxis_core::config::edit::ConfigEditsBuilder;
 use praxis_core::config::find_praxis_home;
 use praxis_core::config::load_config_as_toml_with_cli_overrides;
 use praxis_core::config::resolve_oss_provider;
@@ -49,6 +52,7 @@ use praxis_protocol::ThreadId;
 use praxis_protocol::config_types::AltScreenMode;
 use praxis_protocol::config_types::SandboxMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
+use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::RolloutItem;
 use praxis_protocol::protocol::RolloutLine;
@@ -62,11 +66,28 @@ use praxis_utils_oss::ensure_oss_provider_ready;
 use praxis_utils_oss::get_default_model_for_oss_provider;
 use std::fs::OpenOptions;
 use std::future::Future;
+use std::net::SocketAddr;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::TcpStream;
+use tokio::time::sleep;
+use tokio::time::timeout;
 use tracing::error;
 use tracing::warn;
+
+pub(crate) const TUI_APP_GATEWAY_CHANNEL_CAPACITY: usize = 8192;
+const DEFAULT_LOCAL_APP_GATEWAY_URL: &str = "ws://127.0.0.1:4222";
+const DEFAULT_LOCAL_APP_GATEWAY_ADDR: &str = "127.0.0.1:4222";
+const LOCAL_APP_GATEWAY_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
+const LOCAL_APP_GATEWAY_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
@@ -135,6 +156,7 @@ mod notifications;
 pub mod onboarding;
 mod oss_selection;
 mod pager_overlay;
+mod provider_setup;
 pub mod public_widgets;
 mod render;
 mod resume_picker;
@@ -148,17 +170,19 @@ mod status_indicator_widget;
 mod status_runtime;
 mod streaming;
 mod style;
-mod team_task_runtime;
 mod terminal_palette;
 mod terminal_title;
 mod text_formatting;
 mod theme_picker;
+mod thinking_persona;
 mod toast_queue;
+mod token_usage_summary;
 mod transcript_search;
 mod tui;
 mod tui_config;
 mod turn_runtime;
 mod ui_consts;
+mod ui_language;
 pub mod update_action;
 mod update_prompt;
 mod updates;
@@ -229,6 +253,8 @@ pub(crate) mod test_support;
 
 use crate::onboarding::onboarding_screen::OnboardingScreenArgs;
 use crate::onboarding::onboarding_screen::run_onboarding_app;
+use crate::provider_setup::DEEPSEEK_PROVIDER_ID;
+use crate::provider_setup::DEFAULT_DEEPSEEK_MODEL;
 use crate::tui::Tui;
 pub use cli::Cli;
 pub use cli::SessionLookupSource;
@@ -352,11 +378,108 @@ async fn connect_remote_app_gateway(
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
-        channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
+        channel_capacity: TUI_APP_GATEWAY_CHANNEL_CAPACITY,
     })
     .await
     .wrap_err("failed to connect to remote app gateway")?;
     Ok(AppGatewayClient::Remote(app_gateway))
+}
+
+async fn local_app_gateway_is_listening() -> bool {
+    let Ok(addr) = DEFAULT_LOCAL_APP_GATEWAY_ADDR.parse::<SocketAddr>() else {
+        return false;
+    };
+    matches!(
+        timeout(LOCAL_APP_GATEWAY_CONNECT_TIMEOUT, TcpStream::connect(addr)).await,
+        Ok(Ok(_))
+    )
+}
+
+async fn wait_for_local_app_gateway() -> bool {
+    let deadline = std::time::Instant::now() + LOCAL_APP_GATEWAY_STARTUP_TIMEOUT;
+    while std::time::Instant::now() < deadline {
+        if local_app_gateway_is_ready().await.is_ok() {
+            return true;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+    false
+}
+
+async fn local_app_gateway_is_ready() -> Result<(), String> {
+    if !local_app_gateway_is_listening().await {
+        return Err("local Praxis app-gateway is not listening".to_string());
+    }
+
+    let client = connect_remote_app_gateway(DEFAULT_LOCAL_APP_GATEWAY_URL.to_string(), None)
+        .await
+        .map_err(|err| err.to_string())?;
+    if let Err(err) = client.shutdown().await {
+        warn!(%err, "temporary local Praxis app-gateway health-check shutdown failed");
+    }
+    Ok(())
+}
+
+fn spawn_local_app_gateway_process(
+    arg0_paths: &Arg0DispatchPaths,
+    raw_overrides: &[String],
+) -> color_eyre::Result<()> {
+    let exe = arg0_paths
+        .praxis_self_exe
+        .clone()
+        .or_else(|| std::env::current_exe().ok())
+        .ok_or_else(|| color_eyre::eyre::eyre!("unable to locate praxis executable"))?;
+    let mut command = Command::new(exe);
+    for raw_override in raw_overrides {
+        command.arg("-c").arg(raw_override);
+    }
+    command
+        .arg("app-gateway")
+        .arg("--listen")
+        .arg(DEFAULT_LOCAL_APP_GATEWAY_URL)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+        .spawn()
+        .wrap_err("failed to spawn local Praxis app-gateway")?;
+    Ok(())
+}
+
+async fn ensure_local_app_gateway_for_center(
+    arg0_paths: &Arg0DispatchPaths,
+    raw_overrides: &[String],
+) -> Option<String> {
+    if local_app_gateway_is_listening().await {
+        match local_app_gateway_is_ready().await {
+            Ok(()) => return Some(DEFAULT_LOCAL_APP_GATEWAY_URL.to_string()),
+            Err(err) => {
+                warn!(
+                    %err,
+                    "local Praxis app-gateway is listening but not usable; falling back to embedded app-gateway"
+                );
+                return None;
+            }
+        }
+    }
+    match spawn_local_app_gateway_process(arg0_paths, raw_overrides) {
+        Ok(()) => {
+            if wait_for_local_app_gateway().await {
+                Some(DEFAULT_LOCAL_APP_GATEWAY_URL.to_string())
+            } else {
+                warn!(
+                    "local Praxis app-gateway did not become ready; falling back to embedded app-gateway"
+                );
+                None
+            }
+        }
+        Err(err) => {
+            warn!(%err, "failed to start local Praxis app-gateway; falling back to embedded app-gateway");
+            None
+        }
+    }
 }
 
 async fn start_app_gateway(
@@ -447,7 +570,7 @@ where
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
-        channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
+        channel_capacity: TUI_APP_GATEWAY_CHANNEL_CAPACITY,
     })
     .await
     .wrap_err("failed to start embedded app gateway")?;
@@ -682,17 +805,32 @@ pub async fn run_main(
     remote: Option<String>,
     remote_auth_token: Option<String>,
 ) -> std::io::Result<AppExitInfo> {
-    let remote_url = remote;
+    let mut remote_url = remote;
     if let (Some(websocket_url), Some(_)) = (remote_url.as_deref(), remote_auth_token.as_ref()) {
         validate_remote_auth_token_transport(websocket_url).map_err(std::io::Error::other)?;
     }
-    let app_gateway_target = remote_url
-        .clone()
-        .map(|websocket_url| AppGatewayTarget::Remote {
+    let launch_mode = cli.launch_mode();
+    let app_gateway_target = if let Some(websocket_url) = remote_url.clone() {
+        AppGatewayTarget::Remote {
             websocket_url,
             auth_token: remote_auth_token.clone(),
-        })
-        .unwrap_or(AppGatewayTarget::Embedded);
+        }
+    } else if launch_mode.is_workspace() {
+        match ensure_local_app_gateway_for_center(&arg0_paths, &cli.config_overrides.raw_overrides)
+            .await
+        {
+            Some(websocket_url) => {
+                remote_url = Some(websocket_url.clone());
+                AppGatewayTarget::Remote {
+                    websocket_url,
+                    auth_token: None,
+                }
+            }
+            None => AppGatewayTarget::Embedded,
+        }
+    } else {
+        AppGatewayTarget::Embedded
+    };
     let (sandbox_mode, approval_policy) = if cli.full_auto {
         (
             Some(SandboxMode::WorkspaceWrite),
@@ -1026,7 +1164,7 @@ async fn run_ratatui_app(
     remote_auth_token: Option<String>,
 ) -> color_eyre::Result<AppExitInfo> {
     let remote_mode = matches!(&app_gateway_target, AppGatewayTarget::Remote { .. });
-    color_eyre::install()?;
+    install_color_eyre()?;
 
     // Forward panic reports through tracing so they appear in the UI status
     // line, but do not swallow the default/color-eyre panic handler.
@@ -1070,8 +1208,10 @@ async fn run_ratatui_app(
 
     let should_show_trust_screen_flag = !remote_mode && should_show_trust_screen(&initial_config);
     let mut trust_decision_was_made = false;
-    let needs_onboarding_app_gateway =
-        should_show_trust_screen_flag || initial_config.model_provider.requires_openai_auth;
+    let has_usable_non_openai_provider = has_any_usable_non_openai_provider(&initial_config);
+    let needs_openai_login_status =
+        initial_config.model_provider.requires_openai_auth || !has_usable_non_openai_provider;
+    let needs_onboarding_app_gateway = should_show_trust_screen_flag || needs_openai_login_status;
     let mut onboarding_app_gateway = if needs_onboarding_app_gateway {
         Some(AppGatewaySession::new(
             start_app_gateway(
@@ -1088,7 +1228,7 @@ async fn run_ratatui_app(
     } else {
         None
     };
-    let login_status = if initial_config.model_provider.requires_openai_auth {
+    let login_status = if needs_openai_login_status {
         let Some(app_gateway) = onboarding_app_gateway.as_mut() else {
             unreachable!("onboarding app gateway should exist when auth is required");
         };
@@ -1096,11 +1236,10 @@ async fn run_ratatui_app(
     } else {
         LoginStatus::NotAuthenticated
     };
-    let should_show_onboarding =
-        should_show_onboarding(login_status, &initial_config, should_show_trust_screen_flag);
+    let show_login_screen = should_show_login_screen(login_status, &initial_config);
+    let should_show_onboarding = should_show_trust_screen_flag || show_login_screen;
 
     let (mut config, mut tui_config) = if should_show_onboarding {
-        let show_login_screen = should_show_login_screen(login_status, &initial_config);
         let onboarding_result = run_onboarding_app(
             OnboardingScreenArgs {
                 show_login_screen,
@@ -1165,6 +1304,23 @@ async fn run_ratatui_app(
         (initial_config, initial_tui_config)
     };
     shutdown_app_gateway_if_present(onboarding_app_gateway.take()).await;
+    if !show_login_screen
+        && let Some(selection) =
+            normalize_runtime_provider_model_selection(login_status, &mut config)
+        && let Err(err) = ConfigEditsBuilder::new(&config.praxis_home)
+            .with_profile(config.active_profile.as_deref())
+            .set_model_provider(Some(selection.provider_id.as_str()))
+            .set_model(Some(selection.model.as_str()), selection.effort)
+            .apply()
+            .await
+    {
+        warn!(
+            error = %err,
+            provider = %selection.provider_id,
+            model = %selection.model,
+            "failed to persist normalized provider/model selection"
+        );
+    }
 
     let mut missing_session_exit = |id_str: &str, action: &str, source: SessionLookupSource| {
         error!("Error finding conversation path: {id_str}");
@@ -1412,6 +1568,8 @@ async fn run_ratatui_app(
     };
     shutdown_app_gateway_if_present(session_lookup_context.take().map(|ctx| ctx.app_gateway)).await;
 
+    let center_mode = cli.launch_mode().is_workspace();
+
     let current_cwd = config.cwd.clone();
     let allow_prompt = !remote_mode && cli.cwd.is_none();
     let action_and_target_session_if_resume_or_fork = match &session_selection {
@@ -1500,8 +1658,10 @@ async fn run_ratatui_app(
         ..
     } = cli;
 
-    let use_alt_screen = determine_alt_screen_mode(no_alt_screen, tui_config.alternate_screen);
+    let use_alt_screen =
+        center_mode || determine_alt_screen_mode(no_alt_screen, tui_config.alternate_screen);
     tui.set_alt_screen_enabled(use_alt_screen);
+    tui.set_mouse_capture_enabled(center_mode)?;
     let app_gateway = match start_app_gateway(
         &app_gateway_target,
         arg0_paths,
@@ -1541,6 +1701,7 @@ async fn run_ratatui_app(
         should_prompt_windows_sandbox_nux_at_startup,
         remote_url,
         remote_auth_token,
+        center_mode,
     )
     .await;
 
@@ -1552,6 +1713,17 @@ async fn run_ratatui_app(
     session_log::log_session_end();
     // ignore error when collecting usage – report underlying error instead
     app_result
+}
+
+fn install_color_eyre() -> color_eyre::Result<()> {
+    match color_eyre::install() {
+        Ok(()) => Ok(()),
+        Err(err) if err.to_string().contains("hook has already been installed") => {
+            tracing::debug!(error = %err, "color-eyre hook was already installed");
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 pub(crate) async fn resolve_session_thread_id(
@@ -1767,7 +1939,11 @@ async fn get_login_status(
     app_gateway: &mut AppGatewaySession,
     config: &Config,
 ) -> color_eyre::Result<LoginStatus> {
-    if !config.model_provider.requires_openai_auth {
+    if !config
+        .model_providers
+        .values()
+        .any(|provider| provider.requires_openai_auth)
+    {
         return Ok(LoginStatus::NotAuthenticated);
     }
 
@@ -1829,26 +2005,180 @@ fn should_show_trust_screen(config: &Config) -> bool {
     config.active_project.trust_level.is_none()
 }
 
-fn should_show_onboarding(
-    login_status: LoginStatus,
-    config: &Config,
-    show_trust_screen: bool,
-) -> bool {
-    if show_trust_screen {
-        return true;
-    }
-
-    should_show_login_screen(login_status, config)
-}
-
 fn should_show_login_screen(login_status: LoginStatus, config: &Config) -> bool {
-    // Only show the login screen for providers that actually require OpenAI auth
-    // (OpenAI or equivalents). For OSS/other providers, skip login entirely.
-    if !config.model_provider.requires_openai_auth {
+    if active_provider_is_usable(login_status, config) {
         return false;
     }
 
-    login_status == LoginStatus::NotAuthenticated
+    !has_any_usable_provider(login_status, config)
+}
+
+fn active_provider_is_usable(login_status: LoginStatus, config: &Config) -> bool {
+    if config.model_provider.requires_openai_auth {
+        return login_status != LoginStatus::NotAuthenticated;
+    }
+    provider_has_configured_credentials(&config.model_provider)
+        || is_local_oss_provider(&config.model_provider_id, &config.model_provider)
+}
+
+fn has_any_usable_provider(login_status: LoginStatus, config: &Config) -> bool {
+    let has_openai_login = login_status != LoginStatus::NotAuthenticated;
+    if has_openai_login
+        && config
+            .model_providers
+            .values()
+            .any(|provider| provider.requires_openai_auth)
+    {
+        return true;
+    }
+    has_any_usable_non_openai_provider(config)
+}
+
+fn has_any_usable_non_openai_provider(config: &Config) -> bool {
+    config.model_providers.values().any(|provider| {
+        !provider.requires_openai_auth && provider_has_configured_credentials(provider)
+    })
+}
+
+fn first_usable_non_openai_provider(config: &Config) -> Option<(String, ModelProviderInfo)> {
+    config
+        .model_providers
+        .iter()
+        .find(|(_provider_id, provider)| {
+            !provider.requires_openai_auth && provider_has_configured_credentials(provider)
+        })
+        .map(|(provider_id, provider)| (provider_id.clone(), provider.clone()))
+}
+
+fn provider_has_configured_credentials(provider: &ModelProviderInfo) -> bool {
+    if provider.requires_openai_auth {
+        return false;
+    }
+    if provider.auth.is_some() {
+        return true;
+    }
+    if provider
+        .experimental_bearer_token
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return true;
+    }
+    if let Some(env_key) = provider.env_key.as_deref()
+        && std::env::var(env_key)
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+    {
+        return true;
+    }
+    false
+}
+
+fn is_local_oss_provider(provider_id: &str, provider: &ModelProviderInfo) -> bool {
+    if provider_id == OLLAMA_OSS_PROVIDER_ID || provider_id == LMSTUDIO_OSS_PROVIDER_ID {
+        return true;
+    }
+    provider
+        .base_url
+        .as_deref()
+        .is_some_and(is_loopback_base_url)
+}
+
+fn is_loopback_base_url(raw: &str) -> bool {
+    let Ok(url) = Url::parse(raw) else {
+        return false;
+    };
+    matches!(
+        url.host_str(),
+        Some("localhost") | Some("127.0.0.1") | Some("::1")
+    )
+}
+
+#[derive(Debug, Clone)]
+struct PersistedRuntimeModelSelection {
+    provider_id: String,
+    model: String,
+    effort: Option<ReasoningEffort>,
+}
+
+fn normalize_runtime_provider_model_selection(
+    login_status: LoginStatus,
+    config: &mut Config,
+) -> Option<PersistedRuntimeModelSelection> {
+    if active_provider_is_usable(login_status, config) {
+        return normalize_active_provider_model(config);
+    }
+    let Some((provider_id, provider)) = first_usable_non_openai_provider(config) else {
+        return None;
+    };
+    let Some(model) = startup_model_for_provider(config, provider_id.as_str(), &provider) else {
+        return None;
+    };
+    warn!(
+        active_provider = %config.model_provider_id,
+        fallback_provider = %provider_id,
+        fallback_model = %model,
+        "active provider is unavailable; using configured fallback provider for this run"
+    );
+    config.model_provider_id = provider_id;
+    config.model_provider = provider;
+    config.model = Some(model);
+    None
+}
+
+fn normalize_active_provider_model(config: &mut Config) -> Option<PersistedRuntimeModelSelection> {
+    if !is_deepseek_provider(&config.model_provider_id, &config.model_provider) {
+        return None;
+    }
+    if config
+        .model
+        .as_deref()
+        .is_some_and(is_supported_deepseek_model)
+    {
+        return None;
+    }
+
+    let previous_model = config.model.clone().unwrap_or_default();
+    let model = DEFAULT_DEEPSEEK_MODEL.to_string();
+    warn!(
+        provider = %config.model_provider_id,
+        previous_model = %previous_model,
+        normalized_model = %model,
+        "active provider does not support the configured model; normalizing selection"
+    );
+    config.model = Some(model.clone());
+    Some(PersistedRuntimeModelSelection {
+        provider_id: config.model_provider_id.clone(),
+        model,
+        effort: config.model_reasoning_effort,
+    })
+}
+
+fn startup_model_for_provider(
+    config: &Config,
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+) -> Option<String> {
+    if is_deepseek_provider(provider_id, provider) {
+        return Some(DEFAULT_DEEPSEEK_MODEL.to_string());
+    }
+    config.model.clone()
+}
+
+fn is_deepseek_provider(provider_id: &str, provider: &ModelProviderInfo) -> bool {
+    provider_id == DEEPSEEK_PROVIDER_ID
+        || provider.name.eq_ignore_ascii_case("deepseek")
+        || provider
+            .base_url
+            .as_deref()
+            .is_some_and(|base_url| base_url.contains("api.deepseek.com"))
+}
+
+fn is_supported_deepseek_model(model: &str) -> bool {
+    matches!(
+        model.trim().to_ascii_lowercase().as_str(),
+        "deepseek-v4-pro" | "deepseek-v4-flash"
+    )
 }
 
 #[cfg(test)]

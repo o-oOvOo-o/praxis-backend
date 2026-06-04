@@ -33,11 +33,14 @@ use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use crate::tools::runtimes::apply_patch::ApplyPatchRequest;
 use crate::tools::runtimes::apply_patch::ApplyPatchRuntime;
+use crate::tools::runtimes::apply_patch::apply_patch_agent_os_command;
 use crate::tools::runtimes::managed_execution_pipeline::RuntimeExecutionRoute;
 use crate::tools::runtimes::managed_execution_pipeline::finish_agent_os_span_success_bytes;
+use crate::tools::runtimes::managed_execution_pipeline::preflight_command_intent;
 use crate::tools::runtimes::managed_execution_pipeline::record_known_dirty_files_or_finish;
 use crate::tools::runtimes::managed_execution_pipeline::start_agent_os_span_for_route;
 use crate::tools::sandboxing::ToolCtx;
+use crate::tools::sandboxing::ToolError;
 
 pub struct ApplyPatchHandler;
 
@@ -211,7 +214,7 @@ impl ToolHandler for ApplyPatchHandler {
 
 #[allow(clippy::too_many_arguments)]
 async fn run_verified_apply_patch(
-    command: &[String],
+    _command: &[String],
     cwd: &Path,
     changes: ApplyPatchAction,
     timeout_ms: Option<u64>,
@@ -233,13 +236,6 @@ async fn run_verified_apply_patch(
             .await;
     }
 
-    session
-        .services
-        .agent_os
-        .preflight_command_intent(session.conversation_id, command, cwd)
-        .await
-        .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
-
     let (file_paths, effective_additional_permissions, file_system_sandbox_policy) =
         effective_patch_permissions(session.as_ref(), turn.as_ref(), &changes).await;
     let dirty_files: Vec<std::path::PathBuf> = file_paths
@@ -252,11 +248,15 @@ async fn run_verified_apply_patch(
         call_id: call_id.to_string(),
         tool_name: tool_name.to_string(),
     };
+    let agent_os_command = apply_patch_agent_os_command(&changes);
     match apply_patch::apply_patch(turn.as_ref(), &file_system_sandbox_policy, changes).await {
         InternalApplyPatchInvocation::Output(item) => {
+            preflight_command_intent(&tool_ctx, &agent_os_command, cwd)
+                .await
+                .map_err(tool_error_to_model_error)?;
             let command_span = start_agent_os_span_for_route(
                 &tool_ctx,
-                command,
+                &agent_os_command,
                 cwd,
                 RuntimeExecutionRoute::apply_patch(),
             )
@@ -290,6 +290,7 @@ async fn run_verified_apply_patch(
 
             let req = ApplyPatchRequest {
                 action: apply.action,
+                agent_os_command,
                 file_paths,
                 changes,
                 exec_approval_requirement: apply.exec_approval_requirement,
@@ -314,6 +315,14 @@ async fn run_verified_apply_patch(
             emitter.finish(event_ctx, out).await
         }
     }
+}
+
+fn tool_error_to_model_error(err: ToolError) -> FunctionCallError {
+    let message = match err {
+        ToolError::Rejected(message) => message,
+        ToolError::Praxis(err) => err.to_string(),
+    };
+    FunctionCallError::RespondToModel(message)
 }
 
 #[allow(clippy::too_many_arguments)]

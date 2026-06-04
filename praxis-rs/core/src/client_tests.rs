@@ -3,9 +3,14 @@ use super::ModelClient;
 use super::PendingUnauthorizedRetry;
 use super::UnauthorizedRecoveryExecution;
 use super::handle_unauthorized_unexpected_status;
+use super::sanitize_input_for_responses_api;
 use http::StatusCode;
 use praxis_otel::SessionTelemetry;
 use praxis_protocol::ThreadId;
+use praxis_protocol::models::ContentItem;
+use praxis_protocol::models::ReasoningItemContent;
+use praxis_protocol::models::ReasoningItemReasoningSummary;
+use praxis_protocol::models::ResponseItem;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
@@ -121,6 +126,60 @@ fn auth_request_telemetry_context_tracks_attached_auth_and_retry_phase() {
     assert!(auth_context.retry_after_unauthorized);
     assert_eq!(auth_context.recovery_mode, Some("managed"));
     assert_eq!(auth_context.recovery_phase, Some("refresh_token"));
+}
+
+#[test]
+fn responses_input_drops_common_reasoning_content() {
+    let input = vec![
+        ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "hello".to_string(),
+            }],
+            end_turn: None,
+            phase: None,
+        },
+        ResponseItem::Reasoning {
+            id: "common-reasoning-1".to_string(),
+            summary: Vec::new(),
+            content: Some(vec![ReasoningItemContent::ReasoningText {
+                text: "provider-local full thinking".to_string(),
+            }]),
+            encrypted_content: None,
+        },
+    ];
+
+    let sanitized = sanitize_input_for_responses_api(input);
+    assert_eq!(sanitized.len(), 1);
+    assert!(matches!(sanitized[0], ResponseItem::Message { .. }));
+}
+
+#[test]
+fn responses_input_keeps_encrypted_reasoning_without_content() {
+    let input = vec![ResponseItem::Reasoning {
+        id: "reasoning-openai".to_string(),
+        summary: vec![ReasoningItemReasoningSummary::SummaryText {
+            text: "summary".to_string(),
+        }],
+        content: Some(vec![ReasoningItemContent::Text {
+            text: "raw content must not be sent back".to_string(),
+        }]),
+        encrypted_content: Some("ciphertext".to_string()),
+    }];
+
+    let sanitized = sanitize_input_for_responses_api(input);
+    assert_eq!(
+        sanitized,
+        vec![ResponseItem::Reasoning {
+            id: "reasoning-openai".to_string(),
+            summary: vec![ReasoningItemReasoningSummary::SummaryText {
+                text: "summary".to_string(),
+            }],
+            content: Some(Vec::new()),
+            encrypted_content: Some("ciphertext".to_string()),
+        }]
+    );
 }
 
 #[tokio::test]

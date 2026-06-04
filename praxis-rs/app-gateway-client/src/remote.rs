@@ -567,6 +567,13 @@ impl RemoteAppGatewayClient {
         self.event_rx.recv().await
     }
 
+    pub fn try_next_event(&mut self) -> Option<AppGatewayEvent> {
+        if let Some(event) = self.pending_events.pop_front() {
+            return Some(event);
+        }
+        self.event_rx.try_recv().ok()
+    }
+
     pub async fn shutdown(self) -> IoResult<()> {
         let Self {
             command_tx,

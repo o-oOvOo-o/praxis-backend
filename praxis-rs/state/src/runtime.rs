@@ -53,12 +53,16 @@ use tracing::warn;
 mod agent_jobs;
 mod agent_os;
 mod backfill;
+mod goals;
 mod logs;
 mod memories;
-mod teams;
 #[cfg(test)]
 mod test_support;
 mod threads;
+
+pub use goals::GoalAccountingMode;
+pub use goals::GoalAccountingOutcome;
+pub use goals::GoalUpdate;
 
 // "Partition" is the retained-log-content bucket we cap at 10 MiB:
 // - one bucket per non-null thread_id

@@ -21,6 +21,7 @@ use praxis_api::ReqwestTransport;
 use praxis_api::TransportError;
 use praxis_login::AuthManager;
 use praxis_login::AuthMode;
+use praxis_login::default_client::build_direct_reqwest_client;
 use praxis_login::default_client::build_reqwest_client;
 use praxis_otel::TelemetryAuthMode;
 use praxis_protocol::config_types::CollaborationModeMask;
@@ -457,6 +458,16 @@ impl ModelsManager {
             return Ok(());
         }
 
+        if !self.provider.is_openai() && !self.provider.has_command_auth() {
+            if matches!(
+                refresh_strategy,
+                RefreshStrategy::Offline | RefreshStrategy::OnlineIfUncached
+            ) {
+                self.try_load_cache().await;
+                return Ok(());
+            }
+        }
+
         let auth_manager = self.auth_manager_for_provider(&self.provider);
         if auth_manager.auth_mode() != Some(AuthMode::Chatgpt) && !self.provider.has_command_auth()
         {
@@ -499,7 +510,7 @@ impl ModelsManager {
             .setup_provider(&self.provider, AuthRequestPurpose::ModelList)
             .await?;
         let auth_env = setup.auth_env_telemetry.clone();
-        let transport = ReqwestTransport::new(build_reqwest_client());
+        let transport = ReqwestTransport::new(self.build_models_reqwest_client());
         let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
             auth_mode: setup
                 .auth_mode
@@ -530,6 +541,14 @@ impl ModelsManager {
 
     async fn get_etag(&self) -> Option<String> {
         self.etag.read().await.clone()
+    }
+
+    fn build_models_reqwest_client(&self) -> reqwest::Client {
+        if self.provider.is_openai() || self.provider.has_command_auth() {
+            build_reqwest_client()
+        } else {
+            build_direct_reqwest_client()
+        }
     }
 
     /// Replace the cached remote models and rebuild the derived presets list.

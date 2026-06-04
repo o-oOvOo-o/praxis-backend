@@ -108,6 +108,14 @@ pub async fn get_state_db(config: &impl RolloutConfigView) -> Option<StateDbHand
     Some(runtime)
 }
 
+/// Get the process-cached state DB, returning initialization errors to callers that need them.
+pub async fn try_get_state_db(config: &impl RolloutConfigView) -> anyhow::Result<StateDbHandle> {
+    let config = RolloutConfig::from_view(config);
+    let runtime = try_get_or_init_runtime(&config).await?;
+    ensure_backfill_started(runtime.clone(), config).await;
+    Ok(runtime)
+}
+
 /// Return whether rollout metadata backfill is complete for this runtime.
 pub async fn is_backfill_complete(
     context: Option<&praxis_state::StateRuntime>,
@@ -142,6 +150,19 @@ pub async fn open_if_present(praxis_home: &Path, default_provider: &str) -> Opti
 }
 
 async fn get_or_init_runtime(config: &RolloutConfig) -> Option<StateDbHandle> {
+    match try_get_or_init_runtime(config).await {
+        Ok(runtime) => Some(runtime),
+        Err(err) => {
+            warn!(
+                "failed to initialize state runtime at {}: {err:#}",
+                config.sqlite_home.display()
+            );
+            None
+        }
+    }
+}
+
+async fn try_get_or_init_runtime(config: &RolloutConfig) -> anyhow::Result<StateDbHandle> {
     let key = StateDbKey {
         sqlite_home: config.sqlite_home.clone(),
         model_provider_id: config.model_provider_id.clone(),
@@ -149,33 +170,27 @@ async fn get_or_init_runtime(config: &RolloutConfig) -> Option<StateDbHandle> {
     let entry = runtime_cache_entry(key);
 
     if let Some(runtime) = entry.runtime.get() {
-        return Some(runtime.clone());
+        return Ok(runtime.clone());
     }
 
     let _init_guard = entry.init_lock.lock().await;
     if let Some(runtime) = entry.runtime.get() {
-        return Some(runtime.clone());
+        return Ok(runtime.clone());
     }
 
-    let runtime = match praxis_state::StateRuntime::init(
+    let runtime = praxis_state::StateRuntime::init(
         config.sqlite_home.clone(),
         config.model_provider_id.clone(),
     )
-    .await
-    {
-        Ok(runtime) => runtime,
-        Err(err) => {
-            warn!(
-                "failed to initialize state runtime at {}: {err}",
-                config.sqlite_home.display()
-            );
-            return None;
-        }
-    };
+    .await?;
     if entry.runtime.set(runtime.clone()).is_err() {
-        return entry.runtime.get().cloned();
+        return entry
+            .runtime
+            .get()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("state runtime cache was not populated"));
     }
-    Some(runtime)
+    Ok(runtime)
 }
 
 async fn ensure_backfill_started(runtime: StateDbHandle, config: RolloutConfig) {

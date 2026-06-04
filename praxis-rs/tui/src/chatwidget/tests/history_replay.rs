@@ -765,7 +765,7 @@ async fn thread_snapshot_replayed_turn_started_marks_task_running() {
 }
 
 #[tokio::test]
-async fn replayed_in_progress_turn_marks_task_running() {
+async fn resume_replayed_in_progress_turn_does_not_mark_task_running() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.replay_thread_turns(
@@ -779,12 +779,95 @@ async fn replayed_in_progress_turn_marks_task_running() {
     );
 
     assert!(drain_insert_history(&mut rx).is_empty());
+    assert!(!chat.bottom_pane.is_task_running());
+    assert!(chat.bottom_pane.status_widget().is_none());
+}
+
+#[tokio::test]
+async fn thread_snapshot_replayed_in_progress_turn_marks_task_running() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    chat.replay_thread_turns(
+        vec![AppGatewayTurn {
+            id: "turn-1".to_string(),
+            items: Vec::new(),
+            status: AppGatewayTurnStatus::InProgress,
+            error: None,
+        }],
+        ReplayKind::ThreadSnapshot,
+    );
+
+    assert!(drain_insert_history(&mut rx).is_empty());
     assert!(chat.bottom_pane.is_task_running());
     let status = chat
         .bottom_pane
         .status_widget()
         .expect("status indicator should be visible");
     assert_eq!(status.header(), "Working");
+}
+
+#[tokio::test]
+async fn replayed_interrupted_turn_status_does_not_render_live_interrupt_banner() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    chat.replay_thread_turns(
+        vec![AppGatewayTurn {
+            id: "turn-1".to_string(),
+            items: Vec::new(),
+            status: AppGatewayTurnStatus::Interrupted,
+            error: None,
+        }],
+        ReplayKind::ThreadSnapshot,
+    );
+
+    let cells = drain_insert_history(&mut rx);
+    let rendered = cells
+        .iter()
+        .map(lines_to_single_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !rendered.contains("Conversation interrupted"),
+        "expected replayed interrupted turn status to avoid live interruption banner, got {rendered:?}"
+    );
+    assert!(!chat.bottom_pane.is_task_running());
+    assert!(chat.bottom_pane.status_widget().is_none());
+}
+
+#[tokio::test]
+async fn replayed_turn_aborted_event_does_not_render_live_interrupt_banner() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    chat.handle_praxis_event_replay(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TurnStarted(TurnStartedEvent {
+            turn_id: "turn-1".to_string(),
+            model_context_window: None,
+            collaboration_mode_kind: ModeKind::Default,
+        }),
+    });
+    drain_insert_history(&mut rx);
+
+    chat.handle_praxis_event_replay(Event {
+        id: "turn-1".into(),
+        msg: EventMsg::TurnAborted(praxis_protocol::protocol::TurnAbortedEvent {
+            turn_id: Some("turn-1".to_string()),
+            reason: TurnAbortReason::Interrupted,
+        }),
+    });
+
+    let cells = drain_insert_history(&mut rx);
+    let rendered = cells
+        .iter()
+        .map(lines_to_single_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !rendered.contains("Conversation interrupted"),
+        "expected replayed TurnAborted to avoid live interruption banner, got {rendered:?}"
+    );
+    assert!(!chat.bottom_pane.is_task_running());
+    assert!(chat.bottom_pane.status_widget().is_none());
 }
 
 #[tokio::test]

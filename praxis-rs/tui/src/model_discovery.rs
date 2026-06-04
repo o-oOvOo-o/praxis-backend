@@ -9,12 +9,16 @@ use praxis_core::ModelProviderCompatInfo;
 use praxis_core::ModelProviderInfo;
 use praxis_core::ModelProviderMaxTokensField;
 use praxis_core::ModelProviderThinkingFormat;
+use praxis_core::OPENAI_PROVIDER_ID;
 use praxis_core::WireApi;
 use praxis_core::config::Config;
+use praxis_core::models_manager::model_presets::bundled_api_model_presets;
+use praxis_core::provider_accepts_known_first_party_model;
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::openai_models::ReasoningEffortPreset;
 use praxis_protocol::openai_models::default_input_modalities;
+use praxis_protocol::openai_models::known_openai_compatible_model_info;
 use serde::de::DeserializeOwned;
 use serde_json::Map;
 use serde_json::Value;
@@ -98,24 +102,37 @@ pub(crate) fn build_model_catalog(
     let mut metadata_by_preset_id = HashMap::new();
     let mut seen = BTreeSet::<(String, String)>::new();
 
-    for mut preset in server_models {
-        let provider_id = config.model_provider_id.clone();
-        let provider_name = config.model_provider.name.clone();
-        let key = (provider_id.clone(), preset.model.clone());
-        if !seen.insert(key) {
+    for preset in server_models {
+        if !provider_accepts_known_first_party_model(
+            config.model_provider_id.as_str(),
+            &config.model_provider,
+            preset.model.as_str(),
+        ) {
             continue;
         }
-        preset.id = provider_scoped_preset_id(provider_id.as_str(), preset.model.as_str());
-        preset.description =
-            merge_picker_description(provider_name.as_str(), preset.description.as_str(), None);
-        metadata_by_preset_id.insert(
-            preset.id.clone(),
-            ModelCatalogSelectionMetadata {
-                provider_id,
-                provider: config.model_provider.clone(),
-            },
+        push_provider_preset(
+            &mut models,
+            &mut metadata_by_preset_id,
+            &mut seen,
+            config.model_provider_id.as_str(),
+            &config.model_provider,
+            preset,
         );
-        models.push(preset);
+    }
+
+    if config.model_provider_id != OPENAI_PROVIDER_ID
+        && let Some(openai_provider) = config.model_providers.get(OPENAI_PROVIDER_ID)
+    {
+        for preset in bundled_api_model_presets() {
+            push_provider_preset(
+                &mut models,
+                &mut metadata_by_preset_id,
+                &mut seen,
+                OPENAI_PROVIDER_ID,
+                openai_provider,
+                preset,
+            );
+        }
     }
 
     for discovered in collect_discovered_models(config) {
@@ -140,6 +157,32 @@ pub(crate) fn build_model_catalog(
         models,
         metadata_by_preset_id,
     }
+}
+
+fn push_provider_preset(
+    models: &mut Vec<ModelPreset>,
+    metadata_by_preset_id: &mut HashMap<String, ModelCatalogSelectionMetadata>,
+    seen: &mut BTreeSet<(String, String)>,
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+    mut preset: ModelPreset,
+) {
+    let key = (provider_id.to_owned(), preset.model.clone());
+    if !seen.insert(key) {
+        return;
+    }
+
+    preset.id = provider_scoped_preset_id(provider_id, preset.model.as_str());
+    preset.description =
+        merge_picker_description(provider.name.as_str(), preset.description.as_str(), None);
+    metadata_by_preset_id.insert(
+        preset.id.clone(),
+        ModelCatalogSelectionMetadata {
+            provider_id: provider_id.to_owned(),
+            provider: provider.clone(),
+        },
+    );
+    models.push(preset);
 }
 
 fn collect_discovered_models(config: &Config) -> Vec<DiscoveredModel> {
@@ -187,11 +230,11 @@ fn build_praxis_config_models(
         insert_provider_model_candidate(&mut provider_models, &provider_id, model, true);
     }
 
-    if let Some(review_model) = praxis_config_string(praxis_config.review_model.as_deref())
-        && let Some(provider_id) = active_profile
+    if let Some(review_model) = praxis_config_string(praxis_config.review_model.as_deref()) {
+        let provider_id = active_profile
             .and_then(|profile| praxis_config_string(profile.model_provider.as_deref()))
             .or_else(|| praxis_config_string(praxis_config.model_provider.as_deref()))
-    {
+            .unwrap_or_else(|| OPENAI_PROVIDER_ID.to_string());
         insert_provider_model_candidate(&mut provider_models, &provider_id, review_model, false);
     }
 
@@ -203,7 +246,7 @@ fn build_praxis_config_models(
     }
 
     let subtitle = if normalize_path(path).ends_with("/.codex/config.toml") {
-        "Legacy Praxis config"
+        "Codex config"
     } else if normalize_path(path).ends_with("/.praxis/config.toml") {
         "Praxis config"
     } else {
@@ -249,6 +292,13 @@ fn build_praxis_config_models(
             .into_iter()
             .flatten()
         {
+            if !provider_accepts_known_first_party_model(
+                provider_id.as_str(),
+                &provider,
+                model.as_str(),
+            ) {
+                continue;
+            }
             models.push(DiscoveredModel {
                 provider_id: provider_id.clone(),
                 provider_name: provider_name.clone(),
@@ -322,7 +372,8 @@ fn praxis_effective_selection(
         .or_else(|| praxis_config_string(config.model.as_deref()))?;
     let provider_id = profile
         .and_then(|profile| praxis_config_string(profile.model_provider.as_deref()))
-        .or_else(|| praxis_config_string(config.model_provider.as_deref()))?;
+        .or_else(|| praxis_config_string(config.model_provider.as_deref()))
+        .unwrap_or_else(|| OPENAI_PROVIDER_ID.to_string());
     Some((provider_id, model))
 }
 
@@ -901,10 +952,15 @@ fn infer_common_provider_compat(
     let is_non_openai = !lower.contains("api.openai.com");
     if is_non_openai {
         compat.supports_developer_role = Some(false);
+        compat.supports_reasoning_effort = Some(true);
     }
 
     if key == "open_router" || lower.contains("openrouter.ai") {
         compat.thinking_format = Some(ModelProviderThinkingFormat::Openrouter);
+    }
+
+    if key == "deepseek" || lower.contains("deepseek.com") {
+        compat.thinking_format = Some(ModelProviderThinkingFormat::Deepseek);
     }
 
     if key == "x_ai" || lower.contains("api.x.ai") {
@@ -967,6 +1023,15 @@ fn push_discovered_model(
 }
 
 fn imported_model_preset(model: &DiscoveredModel, preset_id: &str) -> ModelPreset {
+    if let Some(model_info) = known_openai_compatible_model_info(model.model.as_str()) {
+        let mut preset = ModelPreset::from(model_info);
+        preset.id = preset_id.to_owned();
+        preset.description = model.description.clone();
+        preset.is_default = model.is_default;
+        preset.show_in_picker = true;
+        return preset;
+    }
+
     ModelPreset {
         id: preset_id.to_owned(),
         model: model.model.clone(),

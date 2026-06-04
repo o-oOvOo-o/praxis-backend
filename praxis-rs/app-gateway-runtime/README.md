@@ -312,7 +312,7 @@ When `nextCursor` is `null`, you’ve reached the final page.
 `thread/status/changed` is emitted whenever a loaded thread's status changes after it has already been introduced to the client:
 
 - Includes `threadId` and the new `status`.
-- Status can be `notLoaded`, `idle`, `systemError`, or `active` (with `activeFlags`; `active` implies running).
+- Status can be `notLoaded`, `idle`, `systemError`, or `active` (with `activeFlags`; `running` means a live turn is executing, while `controlled` can remain active after the live turn stops).
 - `thread/start`, `thread/fork`, and detached review threads do not emit a separate initial `thread/status/changed`; their `thread/started` notification already carries the current `thread.status`.
 
 ```json
@@ -320,7 +320,7 @@ When `nextCursor` is `null`, you’ve reached the final page.
   "method": "thread/status/changed",
   "params": {
     "threadId": "thr_123",
-    "status": { "type": "active", "activeFlags": [] }
+    "status": { "type": "active", "activeFlags": ["running"] }
   }
 }
 ```

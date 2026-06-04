@@ -25,6 +25,7 @@
 //! the final answer. During streaming we hide the status row to avoid duplicate
 //! progress indicators; once commentary completes and stream queues drain, we
 //! re-show it so users still see turn-in-progress state between output bursts.
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -49,6 +50,7 @@ use crate::app_command::AppCommand;
 use crate::app_event::RealtimeAudioDeviceKind;
 use crate::app_gateway_approval_conversions::network_approval_context_to_core;
 use crate::app_gateway_session::ThreadSessionState;
+use crate::app_gateway_session::token_usage_info_from_app_gateway;
 #[cfg(not(target_os = "linux"))]
 use crate::audio_device::list_realtime_audio_device_names;
 use crate::bottom_pane::StatusLineItem;
@@ -72,6 +74,7 @@ use crate::terminal_title::clear_terminal_title;
 use crate::terminal_title::set_terminal_title;
 use crate::text_formatting::proper_join;
 use crate::tui_config::TuiRuntimeConfig;
+use crate::ui_language::UiLanguage;
 use crate::version::PRAXIS_CLI_VERSION;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -93,8 +96,9 @@ use praxis_app_gateway_protocol::McpServerStartupState;
 use praxis_app_gateway_protocol::McpServerStatusUpdatedNotification;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
+use praxis_app_gateway_protocol::ThreadControlState;
+use praxis_app_gateway_protocol::ThreadControllerKind;
 use praxis_app_gateway_protocol::ThreadItem;
-use praxis_app_gateway_protocol::ThreadTokenUsage;
 use praxis_app_gateway_protocol::ToolRequestUserInputParams;
 use praxis_app_gateway_protocol::Turn;
 use praxis_app_gateway_protocol::TurnCompletedNotification;
@@ -232,6 +236,7 @@ use praxis_terminal_detection::terminal_info;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use praxis_utils_sleep_inhibitor::SleepInhibitor;
 use ratatui::buffer::Buffer;
+use ratatui::layout::Alignment;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use ratatui::style::Modifier;
@@ -241,6 +246,7 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
 use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use ratatui::widgets::Wrap;
@@ -270,6 +276,8 @@ const SELFWORK_PLAN_SCAN_LIMIT: usize = 200;
 const SELFWORK_PLAN_PREVIEW_LINE_LIMIT: usize = 6;
 const SELFWORK_PLAN_PREVIEW_WIDTH: usize = 88;
 const STATUS_ACTIVITY_TEXT_MAX_GRAPHEMES: usize = 48;
+const REASONING_SUMMARY_STATUS_PREVIEW_MAX_LINES: usize = 4;
+const REASONING_FULL_STATUS_PREVIEW_MAX_LINES: usize = 8;
 const IN_APP_TOAST_DURATION: Duration = Duration::from_secs(4);
 const IN_APP_TOAST_PRIORITY_DURATION: Duration = Duration::from_secs(6);
 const ACTIVE_CELL_ANIMATION_FRAME_DELAY_FOCUSED: Duration = Duration::from_millis(60);
@@ -281,8 +289,12 @@ const DEEPSEEK_HEADER_BG: Color = Color::Rgb(8, 14, 22);
 const DEEPSEEK_FOOTER_BG: Color = Color::Rgb(5, 10, 18);
 const DEEPSEEK_BLUE: Color = Color::Rgb(86, 156, 214);
 const DEEPSEEK_SKY: Color = Color::Rgb(125, 211, 252);
-const DEEPSEEK_MUTED: Color = Color::Rgb(148, 163, 184);
-const DEEPSEEK_TEXT: Color = Color::Rgb(226, 232, 240);
+const DEEPSEEK_MUTED: Color = Color::Rgb(170, 180, 174);
+const DEEPSEEK_TEXT: Color = Color::Rgb(238, 244, 240);
+const CENTER_ENTRY_MAX_WIDTH: u16 = 88;
+const CENTER_ENTRY_MIN_SIDE_PADDING: u16 = 4;
+const CENTER_ENTRY_INTRO_HEIGHT: u16 = 7;
+const CENTER_LAUNCH_RANK_MAX: u8 = 2;
 
 /// Choose the keybinding used to edit the most-recently queued message.
 ///
@@ -367,14 +379,15 @@ use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 #[cfg(test)]
 use crate::markdown::append_markdown;
+use crate::provider_setup::ProviderSetupKind;
 use crate::render::renderable::ColumnRenderable;
 use crate::render::renderable::Renderable;
 use crate::slash_command::SlashCommand;
 use crate::status::RateLimitSnapshotDisplay;
 use crate::status_indicator_widget::STATUS_DETAILS_DEFAULT_MAX_LINES;
 use crate::status_indicator_widget::StatusDetailsCapitalization;
-use crate::team_task_runtime::TeamTaskRuntime;
 use crate::text_formatting::truncate_text;
+use crate::thinking_persona::ThinkingPersona;
 use crate::toast_queue::ToastEntry;
 use crate::toast_queue::ToastQueue;
 use crate::toast_queue::ToastSeverity;
@@ -384,6 +397,7 @@ use crate::transcript_search::TranscriptSearchState;
 use crate::transcript_search::TranscriptSearchStatus;
 use crate::tui::FrameRequester;
 use crate::turn_runtime::ActivityTrail;
+use crate::turn_runtime::RuntimeTextCapitalization;
 use crate::turn_runtime::TurnRuntimeState;
 mod interrupts;
 use self::interrupts::InterruptManager;
@@ -400,7 +414,6 @@ use self::realtime::RealtimeConversationUiState;
 use self::realtime::RenderedUserMessageEvent;
 mod status_surfaces;
 mod surface_layout;
-mod team_tasks;
 use self::status_surfaces::CachedProjectRootName;
 use self::status_surfaces::TerminalTitleStatusKind;
 use self::surface_layout::CHAT_SECTION_GAP_ROWS;
@@ -688,6 +701,7 @@ struct StatusIndicatorState {
     header: String,
     details: Option<String>,
     details_max_lines: usize,
+    thinking_persona: ThinkingPersona,
 }
 
 impl StatusIndicatorState {
@@ -696,12 +710,19 @@ impl StatusIndicatorState {
             header: String::from("Working"),
             details: None,
             details_max_lines: STATUS_DETAILS_DEFAULT_MAX_LINES,
+            thinking_persona: ThinkingPersona::None,
         }
     }
 
     fn is_guardian_review(&self) -> bool {
         self.header == "Reviewing approval request" || self.header.starts_with("Reviewing ")
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReasoningBlockKind {
+    Summary,
+    Full,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -768,6 +789,7 @@ impl PendingGuardianReviewStatus {
             header,
             details: Some(details),
             details_max_lines,
+            thinking_persona: ThinkingPersona::None,
         })
     }
 }
@@ -808,6 +830,7 @@ pub(crate) struct ChatWidget {
     transcript_search_document_cache: Option<TranscriptSearchDocumentCache>,
     config: Config,
     tui_config: TuiRuntimeConfig,
+    ui_language: UiLanguage,
     /// The unmasked collaboration mode settings (always Default mode).
     ///
     /// Masks are applied on top of this base mode to derive the effective mode.
@@ -821,6 +844,7 @@ pub(crate) struct ChatWidget {
     initial_user_message: Option<UserMessage>,
     status_account_display: Option<StatusAccountDisplay>,
     token_info: Option<TokenUsageInfo>,
+    thread_control_state: Option<ThreadControlState>,
     rate_limit_snapshots_by_limit_id: BTreeMap<String, RateLimitSnapshotDisplay>,
     refreshing_status_outputs: Vec<(u64, StatusHistoryHandle)>,
     next_status_refresh_request_id: u64,
@@ -883,6 +907,7 @@ pub(crate) struct ChatWidget {
     reasoning_buffer: String,
     // Accumulates full reasoning content for transcript-only recording
     full_reasoning_buffer: String,
+    reasoning_block_kind: Option<ReasoningBlockKind>,
     // The currently rendered footer state. We keep the already-formatted
     // details here so transient stream interruptions can restore the footer
     // exactly as it was shown.
@@ -894,7 +919,6 @@ pub(crate) struct ChatWidget {
     // Guardian review keeps its own pending set so it can derive a single
     // footer summary from one or more in-flight review events.
     pending_guardian_review_status: PendingGuardianReviewStatus,
-    team_task_runtime: TeamTaskRuntime,
     // Semantic status used for terminal-title status rendering.
     terminal_title_status_kind: TerminalTitleStatusKind,
     // Previous status header to restore after a transient stream retry.
@@ -981,8 +1005,16 @@ pub(crate) struct ChatWidget {
     last_separator_elapsed_secs: Option<u64>,
     // Runtime metrics accumulated across delta snapshots for the active turn.
     turn_runtime_metrics: RuntimeMetricsSummary,
-    last_rendered_width: std::cell::Cell<Option<usize>>,
+    center_launch_rank: u8,
+    center_launch_dropdown: Option<CenterLaunchDropdown>,
+    center_launch_model_area: Cell<Option<Rect>>,
+    center_launch_rank_area: Cell<Option<Rect>>,
+    center_launch_permissions_area: Cell<Option<Rect>>,
+    center_launch_dropdown_targets: RefCell<Vec<CenterDropdownMouseTarget>>,
+    last_rendered_width: Cell<Option<usize>>,
+    last_visible_patch_cell_ids: RefCell<Vec<crate::history_presentation::PatchCellId>>,
     active_cell_render_cache: RefCell<Option<ActiveCellRenderCache>>,
+    center_active_tail_cache: RefCell<Option<CenterActiveTailCache>>,
     // Feedback sink for /feedback
     feedback: praxis_feedback::CodexFeedback,
     // Current session rollout path (if known)
@@ -1029,6 +1061,7 @@ pub(crate) struct ChatWidget {
     realtime_conversation: RealtimeConversationUiState,
     last_rendered_user_message_event: Option<RenderedUserMessageEvent>,
     last_non_retry_error: Option<(String, String)>,
+    pending_goal_completion_elapsed: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1045,6 +1078,78 @@ struct ActiveCellRenderCache {
     lines: Vec<Line<'static>>,
     desired_height: u16,
     mouse_targets: Vec<history_cell::HistoryCellMouseTarget>,
+}
+
+#[derive(Clone, Debug)]
+struct CenterActiveTailCache {
+    key: ActiveCellRenderCacheKey,
+    lines: Vec<Line<'static>>,
+}
+
+#[derive(Clone, Debug)]
+struct CenterTranscriptViewport {
+    content_area: Rect,
+    lines: Vec<Line<'static>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CenterChatMouseAction {
+    ToggleModelDropdown,
+    ToggleRankDropdown,
+    TogglePermissionsDropdown,
+    SelectModel(usize),
+    SelectRank(u8),
+    SelectPermission(usize),
+    DismissDropdown,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CenterLaunchDropdown {
+    Model,
+    Rank,
+    Permissions,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CenterDropdownMouseTarget {
+    area: Rect,
+    action: CenterChatMouseAction,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CenterDropdownItem {
+    name: String,
+    description: Option<String>,
+    is_current: bool,
+    is_disabled: bool,
+}
+
+struct PermissionsMenuModel {
+    items: Vec<SelectionItem>,
+    show_elevate_sandbox_hint: bool,
+}
+
+fn rect_contains_point(area: Rect, column: u16, row: u16) -> bool {
+    column >= area.x && column < area.right() && row >= area.y && row < area.bottom()
+}
+
+fn thread_control_display_label(control_state: &ThreadControlState) -> String {
+    let controller = match (control_state.controller.kind, control_state.controller.rank) {
+        (ThreadControllerKind::External, Some(rank)) => format!("external/R{rank}"),
+        (ThreadControllerKind::External, None) => "external".to_string(),
+        (ThreadControllerKind::Thread, Some(rank)) => format!("R{rank}"),
+        (ThreadControllerKind::Thread, None) => "thread".to_string(),
+    };
+    let label = control_state
+        .controller
+        .label
+        .as_deref()
+        .unwrap_or(control_state.controller.id.as_str());
+    if label.eq_ignore_ascii_case(&controller) {
+        controller
+    } else {
+        format!("{controller}:{label}")
+    }
 }
 
 /// Cached nickname and role for a collab agent thread, used to attach human-readable labels to
@@ -1378,6 +1483,12 @@ fn merge_user_messages(messages: Vec<UserMessage>) -> UserMessage {
 pub(crate) enum ReplayKind {
     ResumeInitialMessages,
     ThreadSnapshot,
+}
+
+impl ReplayKind {
+    fn preserves_live_running_state(self) -> bool {
+        matches!(self, Self::ThreadSnapshot)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1721,26 +1832,6 @@ fn request_user_input_from_params(params: ToolRequestUserInputParams) -> Request
     }
 }
 
-fn token_usage_info_from_app_gateway(token_usage: ThreadTokenUsage) -> TokenUsageInfo {
-    TokenUsageInfo {
-        total_token_usage: TokenUsage {
-            total_tokens: token_usage.total.total_tokens,
-            input_tokens: token_usage.total.input_tokens,
-            cached_input_tokens: token_usage.total.cached_input_tokens,
-            output_tokens: token_usage.total.output_tokens,
-            reasoning_output_tokens: token_usage.total.reasoning_output_tokens,
-        },
-        last_token_usage: TokenUsage {
-            total_tokens: token_usage.last.total_tokens,
-            input_tokens: token_usage.last.input_tokens,
-            cached_input_tokens: token_usage.last.cached_input_tokens,
-            output_tokens: token_usage.last.output_tokens,
-            reasoning_output_tokens: token_usage.last.reasoning_output_tokens,
-        },
-        model_context_window: token_usage.model_context_window,
-    }
-}
-
 fn web_search_action_to_core(
     action: praxis_app_gateway_protocol::WebSearchAction,
 ) -> praxis_protocol::models::WebSearchAction {
@@ -1805,9 +1896,8 @@ impl ChatWidget {
     /// both the agent turn lifecycle and MCP startup lifecycle.
     fn update_task_running_state(&mut self) {
         let was_running = self.bottom_pane.is_task_running();
-        let team_task_running = self.team_task_running();
         let is_interruptible = self.agent_turn_running || self.mcp_startup_status.is_some();
-        let is_running = is_interruptible || team_task_running;
+        let is_running = is_interruptible;
         if was_running != is_running {
             self.clear_status_activity_trail();
         }
@@ -1854,7 +1944,16 @@ impl ChatWidget {
     fn restore_reasoning_status_header(&mut self) {
         if let Some(header) = extract_first_bold(&self.reasoning_buffer) {
             self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
-            self.set_status_header(header);
+            let kind = self
+                .reasoning_block_kind
+                .unwrap_or(ReasoningBlockKind::Summary);
+            self.set_status_with_thinking_persona(
+                header,
+                /*details*/ None,
+                StatusDetailsCapitalization::CapitalizeFirst,
+                STATUS_DETAILS_DEFAULT_MAX_LINES,
+                self.thinking_persona_for_reasoning_kind(kind),
+            );
         } else if self.bottom_pane.is_task_running() {
             self.terminal_title_status_kind = TerminalTitleStatusKind::Working;
             self.set_status_header(String::from("Working"));
@@ -1922,6 +2021,23 @@ impl ChatWidget {
         details_capitalization: StatusDetailsCapitalization,
         details_max_lines: usize,
     ) {
+        self.set_status_with_thinking_persona(
+            header,
+            details,
+            details_capitalization,
+            details_max_lines,
+            ThinkingPersona::None,
+        );
+    }
+
+    fn set_status_with_thinking_persona(
+        &mut self,
+        header: String,
+        details: Option<String>,
+        details_capitalization: StatusDetailsCapitalization,
+        details_max_lines: usize,
+        thinking_persona: ThinkingPersona,
+    ) {
         let details = details
             .filter(|details| !details.is_empty())
             .map(|details| {
@@ -1937,6 +2053,7 @@ impl ChatWidget {
             header: header.clone(),
             details: details.clone(),
             details_max_lines,
+            thinking_persona,
         };
         self.refresh_rendered_status_state();
     }
@@ -1963,6 +2080,40 @@ impl ChatWidget {
     /// user actually looking at?" and the footer stack remains a pure renderer of that decision.
     pub(crate) fn set_active_agent_label(&mut self, active_agent_label: Option<String>) {
         self.bottom_pane.set_active_agent_label(active_agent_label);
+    }
+
+    fn refresh_rendered_status_state(&mut self) {
+        self.turn_status_snapshot.set_base_status(
+            self.current_status.header.clone(),
+            self.current_status.details.clone(),
+            RuntimeTextCapitalization::CapitalizeFirst,
+            self.current_status.details_max_lines,
+        );
+        let snapshot = self.turn_status_snapshot.status_snapshot();
+        self.bottom_pane.update_status(
+            snapshot.header,
+            snapshot.details,
+            match snapshot.details_capitalization {
+                RuntimeTextCapitalization::CapitalizeFirst => {
+                    StatusDetailsCapitalization::CapitalizeFirst
+                }
+                RuntimeTextCapitalization::Preserve => StatusDetailsCapitalization::Preserve,
+            },
+            snapshot.details_max_lines,
+        );
+        self.bottom_pane
+            .set_status_thinking_persona(self.current_status.thinking_persona);
+        self.bottom_pane
+            .set_status_activity_message(snapshot.activity_message);
+        self.bottom_pane
+            .set_status_footer_message((!snapshot.extra_lines.is_empty()).then(|| {
+                snapshot
+                    .extra_lines
+                    .into_iter()
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }));
+        self.refresh_status_surfaces();
     }
 
     /// Recomputes footer status-line content from config and current runtime state.
@@ -2398,10 +2549,10 @@ impl ChatWidget {
         }
     }
 
-    fn on_agent_reasoning_delta(&mut self, delta: String) {
-        // For reasoning deltas, do not stream to history. Accumulate the
-        // current reasoning block and extract the first bold element
-        // (between **/**) as the chunk header. Show this header as status.
+    fn on_agent_reasoning_delta(&mut self, delta: String, kind: ReasoningBlockKind) {
+        if self.reasoning_block_kind.is_none() || kind == ReasoningBlockKind::Full {
+            self.reasoning_block_kind = Some(kind);
+        }
         self.reasoning_buffer.push_str(&delta);
 
         if self.unified_exec_wait_streak.is_some() {
@@ -2410,28 +2561,80 @@ impl ChatWidget {
             return;
         }
 
-        if let Some(header) = extract_first_bold(&self.reasoning_buffer) {
-            // Update the shimmer header to the extracted reasoning chunk header.
-            self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
-            self.set_status_header(header);
+        self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
+        let header = extract_first_bold(&self.reasoning_buffer).unwrap_or_else(|| match kind {
+            ReasoningBlockKind::Summary => "Thinking summary".to_string(),
+            ReasoningBlockKind::Full => "Thinking".to_string(),
+        });
+        let thinking_persona = self.thinking_persona_for_reasoning_kind(kind);
+        let preview_max_lines = match kind {
+            ReasoningBlockKind::Summary => REASONING_SUMMARY_STATUS_PREVIEW_MAX_LINES,
+            ReasoningBlockKind::Full => REASONING_FULL_STATUS_PREVIEW_MAX_LINES,
+        };
+        if let Some(preview) = reasoning_status_preview(&self.reasoning_buffer, preview_max_lines) {
+            self.set_status_with_thinking_persona(
+                header,
+                Some(preview),
+                StatusDetailsCapitalization::Preserve,
+                preview_max_lines,
+                thinking_persona,
+            );
         } else {
-            // Fallback while we don't yet have a bold header: leave existing header as-is.
+            self.set_status_with_thinking_persona(
+                header,
+                /*details*/ None,
+                StatusDetailsCapitalization::CapitalizeFirst,
+                STATUS_DETAILS_DEFAULT_MAX_LINES,
+                thinking_persona,
+            );
         }
         self.request_redraw();
+    }
+
+    fn thinking_persona_for_reasoning_kind(&self, kind: ReasoningBlockKind) -> ThinkingPersona {
+        match kind {
+            ReasoningBlockKind::Summary => ThinkingPersona::CodexSummary,
+            ReasoningBlockKind::Full if self.is_deepseek_current_model() => {
+                ThinkingPersona::DeepSeekFull
+            }
+            ReasoningBlockKind::Full => ThinkingPersona::None,
+        }
+    }
+
+    fn is_deepseek_current_model(&self) -> bool {
+        self.current_model()
+            .to_ascii_lowercase()
+            .contains("deepseek")
+            || self
+                .current_model_provider_id()
+                .to_ascii_lowercase()
+                .contains("deepseek")
     }
 
     fn on_agent_reasoning_final(&mut self) {
         // At the end of a reasoning block, record transcript-only content.
         self.full_reasoning_buffer.push_str(&self.reasoning_buffer);
         if !self.full_reasoning_buffer.is_empty() {
-            let cell = history_cell::new_reasoning_summary_block(
-                self.full_reasoning_buffer.clone(),
-                &self.config.cwd,
-            );
+            let kind = self
+                .reasoning_block_kind
+                .take()
+                .unwrap_or(ReasoningBlockKind::Summary);
+            let cell = match kind {
+                ReasoningBlockKind::Summary => history_cell::new_reasoning_summary_block(
+                    self.full_reasoning_buffer.clone(),
+                    &self.config.cwd,
+                ),
+                ReasoningBlockKind::Full => history_cell::new_reasoning_full_block(
+                    self.full_reasoning_buffer.clone(),
+                    &self.config.cwd,
+                ),
+            };
             self.add_boxed_history(cell);
         }
         self.reasoning_buffer.clear();
         self.full_reasoning_buffer.clear();
+        self.reasoning_block_kind = None;
+        self.pending_goal_completion_elapsed = None;
         self.request_redraw();
     }
 
@@ -2470,6 +2673,7 @@ impl ChatWidget {
         self.set_status_header(String::from("Working"));
         self.full_reasoning_buffer.clear();
         self.reasoning_buffer.clear();
+        self.reasoning_block_kind = None;
         self.request_redraw();
     }
 
@@ -2516,6 +2720,7 @@ impl ChatWidget {
             self.had_work_activity = false;
             self.request_status_line_branch_refresh();
         }
+        self.flush_pending_goal_completion_notice();
         // Mark task stopped and request redraw now that all content is in history.
         self.pending_status_indicator_restore = false;
         self.agent_turn_running = false;
@@ -2553,6 +2758,44 @@ impl ChatWidget {
         });
 
         self.maybe_show_pending_rate_limit_prompt();
+    }
+
+    fn on_thread_goal_updated_notification(
+        &mut self,
+        notification: praxis_app_gateway_protocol::ThreadGoalUpdatedNotification,
+        replay_kind: Option<ReplayKind>,
+    ) {
+        if matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
+            return;
+        }
+        if notification.goal.status != praxis_app_gateway_protocol::ThreadGoalStatus::Complete {
+            return;
+        }
+        self.pending_goal_completion_elapsed =
+            Some(format_goal_elapsed(notification.goal.time_used_seconds));
+    }
+
+    #[cfg(test)]
+    fn on_core_thread_goal_updated(
+        &mut self,
+        event: praxis_protocol::protocol::ThreadGoalUpdatedEvent,
+        replay_kind: Option<ReplayKind>,
+    ) {
+        if matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
+            return;
+        }
+        if event.goal.status != praxis_protocol::protocol::ThreadGoalStatus::Complete {
+            return;
+        }
+        self.pending_goal_completion_elapsed =
+            Some(format_goal_elapsed(event.goal.time_used_seconds));
+    }
+
+    fn flush_pending_goal_completion_notice(&mut self) {
+        let Some(elapsed) = self.pending_goal_completion_elapsed.take() else {
+            return;
+        };
+        self.add_info_message(format!("Goal complete - 总计耗时 {elapsed}"), None);
     }
 
     fn maybe_prompt_plan_implementation(&mut self) {
@@ -2797,27 +3040,89 @@ impl ChatWidget {
     fn status_budget_message(&self) -> Option<String> {
         let info = self.token_info.as_ref()?;
         let used_tokens = info.total_token_usage.tokens_in_context_window().max(0);
+        let cache_message = self.status_cache_message();
         if used_tokens == 0 {
-            return None;
+            return cache_message;
         }
         let Some(limit) = self.status_budget_limit(info) else {
-            return Some(format!(
-                "Context: {} used",
-                format_tokens_compact(used_tokens)
+            return Some(Self::append_status_cache_message(
+                format!("Context: {} used", format_tokens_compact(used_tokens)),
+                cache_message,
             ));
         };
 
         let used_fmt = format_tokens_compact(used_tokens);
         let limit_fmt = format_tokens_compact(limit);
-        if used_tokens >= limit {
-            Some(format!("Context: {used_fmt} used ({limit_fmt} limit)"))
+        let context_message = if used_tokens >= limit {
+            format!("Context: {used_fmt} used ({limit_fmt} limit)")
         } else {
             let used_percent = ((used_tokens as f64 / limit as f64) * 100.0)
                 .round()
                 .clamp(0.0, 100.0) as i64;
-            Some(format!(
-                "Context: {used_fmt} / {limit_fmt} ({used_percent}%)"
-            ))
+            format!("Context: {used_fmt} / {limit_fmt} ({used_percent}%)")
+        };
+        Some(Self::append_status_cache_message(
+            context_message,
+            cache_message,
+        ))
+    }
+
+    fn status_cache_message(&self) -> Option<String> {
+        let info = self.token_info.as_ref()?;
+        let mut parts = Vec::new();
+        if let Some(segment) = Self::cache_hit_segment("last", &info.last_token_usage) {
+            parts.push(segment);
+        }
+        if let Some(segment) = Self::cache_hit_segment("total", &info.total_token_usage) {
+            parts.push(segment);
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(format!("Cache: {}", parts.join(", ")))
+        }
+    }
+
+    fn status_line_cache_hit_message(&self) -> Option<String> {
+        let info = self.token_info.as_ref()?;
+        let mut parts = Vec::new();
+        if let Some(segment) = Self::cache_hit_segment_short("L", &info.last_token_usage) {
+            parts.push(segment);
+        }
+        if let Some(segment) = Self::cache_hit_segment_short("T", &info.total_token_usage) {
+            parts.push(segment);
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(format!("cache {}", parts.join("/")))
+        }
+    }
+
+    fn cache_hit_segment(label: &str, usage: &TokenUsage) -> Option<String> {
+        let input_tokens = usage.cache_reported_input();
+        let percent = usage.cache_hit_percent()?;
+        let cached_input = usage.cached_input().min(input_tokens);
+        Some(format!(
+            "{label} {percent}% ({}/{})",
+            format_tokens_compact(cached_input),
+            format_tokens_compact(input_tokens),
+        ))
+    }
+
+    fn cache_hit_segment_short(label: &str, usage: &TokenUsage) -> Option<String> {
+        usage
+            .cache_hit_percent()
+            .map(|percent| format!("{label}{percent}%"))
+    }
+
+    fn append_status_cache_message(
+        context_message: String,
+        cache_message: Option<String>,
+    ) -> String {
+        match cache_message {
+            Some(cache_message) => format!("{context_message} · {cache_message}"),
+            None => context_message,
         }
     }
 
@@ -3293,6 +3598,14 @@ impl ChatWidget {
         }
         self.refresh_pending_input_preview();
 
+        self.request_redraw();
+    }
+
+    /// Finish a historically replayed aborted turn without showing a live interruption banner.
+    fn on_replayed_turn_aborted(&mut self) {
+        self.submit_pending_steers_after_interrupt = false;
+        self.finalize_turn();
+        self.refresh_pending_input_preview();
         self.request_redraw();
     }
 
@@ -4592,6 +4905,11 @@ impl ChatWidget {
         }
         // Mark that actual work was done (command executed)
         self.had_work_activity = true;
+        if self.running_commands.is_empty() && self.bottom_pane.is_task_running() {
+            self.push_status_activity("Waiting for model response");
+            self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
+            self.set_status_header("Waiting for model".to_string());
+        }
     }
 
     pub(crate) fn handle_patch_apply_end_now(
@@ -4924,6 +5242,7 @@ impl ChatWidget {
             transcript_search_document_cache: None,
             config,
             tui_config,
+            ui_language: UiLanguage::default(),
             skills_all: Vec::new(),
             skills_initial_state: None,
             current_collaboration_mode,
@@ -4935,6 +5254,7 @@ impl ChatWidget {
             initial_user_message,
             status_account_display,
             token_info: None,
+            thread_control_state: None,
             rate_limit_snapshots_by_limit_id: BTreeMap::new(),
             refreshing_status_outputs: Vec::new(),
             next_status_refresh_request_id: 0,
@@ -4973,11 +5293,11 @@ impl ChatWidget {
             interrupts: InterruptManager::new(),
             reasoning_buffer: String::new(),
             full_reasoning_buffer: String::new(),
+            reasoning_block_kind: None,
             current_status: StatusIndicatorState::working(),
             turn_status_snapshot: TurnRuntimeState::default(),
             status_activity_trail: ActivityTrail::default(),
             pending_guardian_review_status: PendingGuardianReviewStatus::default(),
-            team_task_runtime: TeamTaskRuntime::default(),
             terminal_title_status_kind: TerminalTitleStatusKind::Working,
             retry_status_header: None,
             pending_status_indicator_restore: false,
@@ -5010,8 +5330,16 @@ impl ChatWidget {
             plan_item_active: false,
             last_separator_elapsed_secs: None,
             turn_runtime_metrics: RuntimeMetricsSummary::default(),
-            last_rendered_width: std::cell::Cell::new(None),
+            center_launch_rank: 0,
+            center_launch_dropdown: None,
+            center_launch_model_area: Cell::new(None),
+            center_launch_rank_area: Cell::new(None),
+            center_launch_permissions_area: Cell::new(None),
+            center_launch_dropdown_targets: RefCell::new(Vec::new()),
+            last_rendered_width: Cell::new(None),
+            last_visible_patch_cell_ids: RefCell::new(Vec::new()),
             active_cell_render_cache: RefCell::new(None),
+            center_active_tail_cache: RefCell::new(None),
             feedback,
             current_rollout_path: None,
             current_cwd,
@@ -5034,6 +5362,7 @@ impl ChatWidget {
             realtime_conversation: RealtimeConversationUiState::default(),
             last_rendered_user_message_event: None,
             last_non_retry_error: None,
+            pending_goal_completion_elapsed: None,
         };
 
         widget
@@ -5070,6 +5399,43 @@ impl ChatWidget {
         widget.refresh_status_surfaces();
 
         widget
+    }
+
+    pub(crate) fn ui_language(&self) -> UiLanguage {
+        self.ui_language
+    }
+
+    pub(crate) fn set_ui_language(&mut self, language: UiLanguage) {
+        self.ui_language = language;
+        self.request_redraw();
+    }
+
+    fn handle_language_command(&mut self, args: &str) {
+        let trimmed = args.trim();
+        let next_language = if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("toggle") {
+            Some(self.ui_language.toggled())
+        } else if trimmed.eq_ignore_ascii_case("status") {
+            self.add_info_message(self.ui_language.language_status_message(), None);
+            self.bottom_pane.drain_pending_submission_state();
+            return;
+        } else {
+            UiLanguage::parse(trimmed)
+        };
+
+        match next_language {
+            Some(language) => {
+                self.set_ui_language(language);
+                self.add_info_message(language.language_changed_message(), None);
+                self.show_info_toast(format!("Language: {}", language.display_name()));
+            }
+            None if trimmed.is_empty() => {
+                self.add_info_message(self.ui_language.language_usage_message().to_string(), None);
+            }
+            None => {
+                self.add_error_message(self.ui_language.invalid_language_message(trimmed));
+            }
+        }
+        self.bottom_pane.drain_pending_submission_state();
     }
 
     pub(crate) fn handle_key_event(&mut self, key_event: KeyEvent) {
@@ -5172,6 +5538,9 @@ impl ChatWidget {
                     text,
                     text_elements,
                 } => {
+                    if self.reject_read_only_thread_submission(&text, &text_elements) {
+                        return;
+                    }
                     let local_images = self
                         .bottom_pane
                         .take_recent_submission_images_with_placeholders();
@@ -5203,6 +5572,7 @@ impl ChatWidget {
                         // Reset any reasoning header only when we are actually submitting a turn.
                         self.reasoning_buffer.clear();
                         self.full_reasoning_buffer.clear();
+                        self.reasoning_block_kind = None;
                         self.set_status_header(String::from("Working"));
                         self.submit_user_message(user_message);
                     } else {
@@ -5213,6 +5583,9 @@ impl ChatWidget {
                     text,
                     text_elements,
                 } => {
+                    if self.reject_read_only_thread_submission(&text, &text_elements) {
+                        return;
+                    }
                     let local_images = self
                         .bottom_pane
                         .take_recent_submission_images_with_placeholders();
@@ -6019,8 +6392,32 @@ impl ChatWidget {
                     .counter("codex.thread.rename", /*inc*/ 1, &[]);
                 self.show_rename_prompt();
             }
+            SlashCommand::Namegen => {
+                self.session_telemetry
+                    .counter("praxis.thread.namegen", /*inc*/ 1, &[]);
+                let Some(thread_id) = self.thread_id else {
+                    self.add_error_message(
+                        "Thread is not ready yet; cannot regenerate its name.".to_string(),
+                    );
+                    self.bottom_pane.drain_pending_submission_state();
+                    return;
+                };
+                self.app_event_tx
+                    .send(AppEvent::RegenerateThreadName { thread_id });
+                self.add_info_message(
+                    "Regenerating thread name.".to_string(),
+                    Some(
+                        "Praxis will rename this thread from the current conversation context."
+                            .to_string(),
+                    ),
+                );
+                self.bottom_pane.drain_pending_submission_state();
+            }
             SlashCommand::Model => {
                 self.open_model_popup();
+            }
+            SlashCommand::Login => {
+                self.open_login_popup();
             }
             SlashCommand::Fast => {
                 let next_tier = if matches!(self.config.service_tier, Some(ServiceTier::Fast)) {
@@ -6065,6 +6462,25 @@ impl ChatWidget {
                         /*hint*/ None,
                     );
                 }
+            }
+            SlashCommand::Goal => {
+                self.submit_user_message(Self::goal_status_prompt().into());
+            }
+            SlashCommand::ReleaseThread => {
+                if self.thread_control_state.is_some() {
+                    self.app_event_tx
+                        .send(AppEvent::ReleaseCurrentThreadControl);
+                    self.add_info_message(
+                        "Releasing the current thread lock.".to_string(),
+                        Some("External or rank controllers can acquire it again on their next action.".to_string()),
+                    );
+                } else {
+                    self.add_info_message(
+                        "This thread is not locked.".to_string(),
+                        Some("Use /release-thread only on threads controlled by an external or rank controller.".to_string()),
+                    );
+                }
+                self.bottom_pane.drain_pending_submission_state();
             }
             SlashCommand::Collab => {
                 if !self.collaboration_modes_enabled() {
@@ -6224,6 +6640,12 @@ impl ChatWidget {
                     );
                 }
             }
+            SlashCommand::Token => {
+                self.app_event_tx.send(AppEvent::FetchTokenUsageSummary {
+                    limit: crate::token_usage_summary::DEFAULT_TOKEN_USAGE_THREAD_LIMIT,
+                });
+                self.bottom_pane.drain_pending_submission_state();
+            }
             SlashCommand::DebugConfig => {
                 self.add_debug_config_output();
             }
@@ -6235,6 +6657,9 @@ impl ChatWidget {
             }
             SlashCommand::Theme => {
                 self.open_theme_picker();
+            }
+            SlashCommand::Language => {
+                self.handle_language_command("");
             }
             SlashCommand::Ps => {
                 self.add_ps_output();
@@ -6329,6 +6754,25 @@ impl ChatWidget {
 
         let trimmed = args.trim();
         match cmd {
+            SlashCommand::Language => {
+                self.handle_language_command(trimmed);
+            }
+            SlashCommand::Token => {
+                match crate::token_usage_summary::parse_token_usage_limit(trimmed) {
+                    Ok(limit) => {
+                        let _ = self
+                            .bottom_pane
+                            .prepare_inline_args_submission(/*record_history*/ false);
+                        self.app_event_tx
+                            .send(AppEvent::FetchTokenUsageSummary { limit });
+                        self.bottom_pane.drain_pending_submission_state();
+                    }
+                    Err(message) => self.add_error_message(message),
+                }
+            }
+            SlashCommand::Login => {
+                self.handle_login_command_args(trimmed);
+            }
             SlashCommand::Fast => {
                 if trimmed.is_empty() {
                     self.dispatch_command(cmd);
@@ -6398,11 +6842,32 @@ impl ChatWidget {
                 if self.is_session_configured() {
                     self.reasoning_buffer.clear();
                     self.full_reasoning_buffer.clear();
+                    self.reasoning_block_kind = None;
                     self.set_status_header(String::from("Working"));
                     self.submit_user_message(user_message);
                 } else {
                     self.queue_user_message(user_message);
                 }
+            }
+            SlashCommand::Goal => {
+                let Some((prepared_args, _prepared_elements)) = self
+                    .bottom_pane
+                    .prepare_inline_args_submission(/*record_history*/ true)
+                else {
+                    return;
+                };
+                let prepared_trimmed = prepared_args.trim();
+                let prompt = match prepared_trimmed.to_ascii_lowercase().as_str() {
+                    "" | "status" => Self::goal_status_prompt(),
+                    "complete" => {
+                        "Mark the current thread goal complete only if it is actually achieved. Use update_goal with status \"complete\" if no required work remains; otherwise explain what is still missing.".to_string()
+                    }
+                    "blocked" => {
+                        "Mark the current thread goal blocked only if the same blocking condition has repeated for at least three consecutive goal turns and progress is impossible without user input. Use update_goal with status \"blocked\" only if that threshold is met; otherwise keep working.".to_string()
+                    }
+                    objective => Self::goal_create_prompt(objective),
+                };
+                self.submit_user_message(prompt.into());
             }
             SlashCommand::Review if !trimmed.is_empty() => {
                 let Some((prepared_args, _prepared_elements)) = self
@@ -6470,6 +6935,16 @@ impl ChatWidget {
             }
             _ => self.dispatch_command(cmd),
         }
+    }
+
+    fn goal_status_prompt() -> String {
+        "Use get_goal to inspect the current persisted thread goal. If no goal exists, say that no goal is set and that /goal <objective> can create one.".to_string()
+    }
+
+    fn goal_create_prompt(objective: &str) -> String {
+        format!(
+            "Create a persistent thread goal with this exact objective. Use create_goal with the objective exactly as written, then continue working toward it.\n\n<objective>\n{objective}\n</objective>"
+        )
     }
 
     fn show_rename_prompt(&mut self) {
@@ -6564,10 +7039,19 @@ impl ChatWidget {
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
+        if let Some(label) = self.read_only_thread_control_label() {
+            self.restore_user_message_to_composer(user_message);
+            self.add_info_message(
+                format!("This thread is locked by {label}."),
+                Some("Type /release-thread to take over before sending a message.".to_string()),
+            );
+            return;
+        }
         if !self.is_session_configured() {
             tracing::warn!("cannot submit user message before session is configured; queueing");
             self.queued_user_messages.push_front(user_message);
             self.refresh_pending_input_preview();
+            self.app_event_tx.send(AppEvent::NewSession);
             return;
         }
         let UserMessage {
@@ -6772,6 +7256,7 @@ impl ChatWidget {
             self.config.cwd.to_path_buf(),
             self.config.permissions.approval_policy.value(),
             self.config.permissions.sandbox_policy.get().clone(),
+            self.current_model_provider_id().to_string(),
             effective_mode.model().to_string(),
             effective_mode.reasoning_effort(),
             /*summary*/ None,
@@ -6891,7 +7376,9 @@ impl ChatWidget {
                 status,
                 error,
             } = turn;
-            if matches!(status, TurnStatus::InProgress) {
+            if matches!(status, TurnStatus::InProgress)
+                && replay_kind.preserves_live_running_state()
+            {
                 self.last_non_retry_error = None;
                 self.on_task_started();
             }
@@ -7020,16 +7507,22 @@ impl ChatWidget {
                 summary, content, ..
             } => {
                 if from_replay {
-                    for delta in summary {
-                        self.on_agent_reasoning_delta(delta);
-                    }
-                    if self.config.show_raw_agent_reasoning {
-                        for delta in content {
-                            self.on_agent_reasoning_delta(delta);
+                    let has_summary = !summary.is_empty();
+                    if has_summary {
+                        for delta in summary {
+                            self.on_agent_reasoning_delta(delta, ReasoningBlockKind::Summary);
                         }
+                        self.on_agent_reasoning_final();
                     }
+                    if self.config.show_raw_agent_reasoning || !has_summary {
+                        for delta in content {
+                            self.on_agent_reasoning_delta(delta, ReasoningBlockKind::Full);
+                        }
+                        self.on_agent_reasoning_final();
+                    }
+                } else {
+                    self.on_agent_reasoning_final();
                 }
-                self.on_agent_reasoning_final();
             }
             ThreadItem::CommandExecution {
                 id,
@@ -7300,6 +7793,16 @@ impl ChatWidget {
                     notification.token_usage,
                 )));
             }
+            ServerNotification::ThreadGoalUpdated(notification) => {
+                self.on_thread_goal_updated_notification(notification, replay_kind);
+            }
+            ServerNotification::ThreadControlChanged(notification) => {
+                if self.thread_id().is_some_and(|thread_id| {
+                    thread_id.to_string() == notification.thread_id.as_str()
+                }) {
+                    self.set_thread_control_state(notification.control_state.as_ref());
+                }
+            }
             ServerNotification::ThreadNameUpdated(notification) => {
                 match ThreadId::from_string(&notification.thread_id) {
                     Ok(thread_id) => self.on_thread_name_updated(
@@ -7327,7 +7830,7 @@ impl ChatWidget {
                 self.handle_turn_completed_notification(notification, replay_kind);
             }
             ServerNotification::ItemStarted(notification) => {
-                self.handle_item_started_notification(notification, replay_kind.is_some());
+                self.handle_item_started_notification(notification, replay_kind);
             }
             ServerNotification::ItemCompleted(notification) => {
                 self.handle_item_completed_notification(notification, replay_kind);
@@ -7337,12 +7840,10 @@ impl ChatWidget {
             }
             ServerNotification::PlanDelta(notification) => self.on_plan_delta(notification.delta),
             ServerNotification::ReasoningSummaryTextDelta(notification) => {
-                self.on_agent_reasoning_delta(notification.delta);
+                self.on_agent_reasoning_delta(notification.delta, ReasoningBlockKind::Summary);
             }
             ServerNotification::ReasoningTextDelta(notification) => {
-                if self.config.show_raw_agent_reasoning {
-                    self.on_agent_reasoning_delta(notification.delta);
-                }
+                self.on_agent_reasoning_delta(notification.delta, ReasoningBlockKind::Full);
             }
             ServerNotification::ReasoningSummaryPartAdded(_) => self.on_reasoning_section_break(),
             ServerNotification::TerminalInteraction(notification) => {
@@ -7428,18 +7929,6 @@ impl ChatWidget {
             ),
             ServerNotification::McpServerStatusUpdated(notification) => {
                 self.on_mcp_server_status_updated(notification)
-            }
-            ServerNotification::TeamUpdated(notification) => {
-                self.on_team_updated_notification(notification)
-            }
-            ServerNotification::TeamDeleted(notification) => {
-                self.on_team_deleted_notification(notification)
-            }
-            ServerNotification::TeamTeammateUpdated(notification) => {
-                self.on_team_teammate_updated_notification(notification)
-            }
-            ServerNotification::TeamTaskUpdated(notification) => {
-                self.on_team_task_updated_notification(notification)
             }
             ServerNotification::ItemGuardianApprovalReviewStarted(notification) => {
                 self.on_guardian_review_notification(
@@ -7533,7 +8022,6 @@ impl ChatWidget {
             | ServerNotification::ThreadRealtimeTranscriptUpdated(_)
             | ServerNotification::WindowsWorldWritableWarning(_)
             | ServerNotification::WindowsSandboxSetupCompleted(_)
-            | ServerNotification::TeamMailboxUpdated(_)
             | ServerNotification::AccountLoginCompleted(_) => {}
         }
     }
@@ -7595,7 +8083,11 @@ impl ChatWidget {
             }
             TurnStatus::Interrupted => {
                 self.last_non_retry_error = None;
-                self.on_interrupted_turn(TurnAbortReason::Interrupted);
+                if replay_kind.is_some() {
+                    self.on_replayed_turn_aborted();
+                } else {
+                    self.on_interrupted_turn(TurnAbortReason::Interrupted);
+                }
             }
             TurnStatus::Failed => {
                 if let Some(error) = notification.turn.error {
@@ -7620,8 +8112,9 @@ impl ChatWidget {
     fn handle_item_started_notification(
         &mut self,
         notification: ItemStartedNotification,
-        from_replay: bool,
+        replay_kind: Option<ReplayKind>,
     ) {
+        let from_replay = replay_kind.is_some();
         match notification.item {
             ThreadItem::CommandExecution {
                 id,
@@ -7647,12 +8140,20 @@ impl ChatWidget {
                 });
             }
             ThreadItem::FileChange { id, changes, .. } => {
-                self.on_patch_apply_begin(PatchApplyBeginEvent {
-                    call_id: id,
-                    turn_id: notification.turn_id,
-                    auto_approved: false,
-                    changes: app_gateway_patch_changes_to_core(changes),
-                });
+                let changes = app_gateway_patch_changes_to_core(changes);
+                if matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
+                    self.add_to_history(history_cell::new_patch_resume_summary(
+                        changes,
+                        &self.config.cwd,
+                    ));
+                } else {
+                    self.on_patch_apply_begin(PatchApplyBeginEvent {
+                        call_id: id,
+                        turn_id: notification.turn_id,
+                        auto_approved: false,
+                        changes,
+                    });
+                }
             }
             ThreadItem::McpToolCall {
                 id,
@@ -7844,13 +8345,15 @@ impl ChatWidget {
                 self.on_agent_message_delta(delta)
             }
             EventMsg::PlanDelta(event) => self.on_plan_delta(event.delta),
-            EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta })
-            | EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
+            EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent { delta }) => {
+                self.on_agent_reasoning_delta(delta, ReasoningBlockKind::Summary)
+            }
+            EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
                 delta,
-            }) => self.on_agent_reasoning_delta(delta),
+            }) => self.on_agent_reasoning_delta(delta, ReasoningBlockKind::Full),
             EventMsg::AgentReasoning(AgentReasoningEvent { .. }) => self.on_agent_reasoning_final(),
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent { text }) => {
-                self.on_agent_reasoning_delta(text);
+                self.on_agent_reasoning_delta(text, ReasoningBlockKind::Full);
                 self.on_agent_reasoning_final();
             }
             EventMsg::AgentReasoningSectionBreak(_) => self.on_reasoning_section_break(),
@@ -7899,6 +8402,9 @@ impl ChatWidget {
             EventMsg::McpStartupUpdate(ev) => self.on_mcp_startup_update(ev),
             EventMsg::McpStartupComplete(ev) => self.on_mcp_startup_complete(ev),
             EventMsg::TurnAborted(ev) => match ev.reason {
+                _ if from_replay => {
+                    self.on_replayed_turn_aborted();
+                }
                 TurnAbortReason::Interrupted => {
                     self.on_interrupted_turn(ev.reason);
                 }
@@ -7913,6 +8419,9 @@ impl ChatWidget {
                 }
             },
             EventMsg::PlanUpdate(update) => self.on_plan_update(update),
+            EventMsg::ThreadGoalUpdated(event) => {
+                self.on_core_thread_goal_updated(event, replay_kind)
+            }
             EventMsg::ExecApprovalRequest(ev) => {
                 // For replayed events, synthesize an empty id (these should not occur).
                 self.on_exec_approval_request(id.unwrap_or_default(), ev)
@@ -7932,6 +8441,12 @@ impl ChatWidget {
             EventMsg::ExecCommandBegin(ev) => self.on_exec_command_begin(ev),
             EventMsg::TerminalInteraction(delta) => self.on_terminal_interaction(delta),
             EventMsg::ExecCommandOutputDelta(delta) => self.on_exec_command_output_delta(delta),
+            EventMsg::PatchApplyBegin(ev) if is_resume_initial_replay => {
+                self.add_to_history(history_cell::new_patch_resume_summary(
+                    ev.changes,
+                    &self.config.cwd,
+                ));
+            }
             EventMsg::PatchApplyBegin(ev) => self.on_patch_apply_begin(ev),
             EventMsg::PatchApplyEnd(ev) => self.on_patch_apply_end(ev),
             EventMsg::ExecCommandEnd(ev) => self.on_exec_command_end(ev),
@@ -8303,6 +8818,9 @@ impl ChatWidget {
             return;
         }
         if self.bottom_pane.is_task_running() {
+            return;
+        }
+        if self.read_only_thread_control_label().is_some() {
             return;
         }
         if let Some(user_message) = self.pop_next_queued_user_message() {
@@ -8746,6 +9264,185 @@ impl ChatWidget {
 
     /// Open a popup to choose a quick auto model. Selecting "All models"
     /// opens the full picker with every available preset.
+    pub(crate) fn open_login_popup(&mut self) {
+        let codex_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::InsertHistoryCell(Box::new(
+                history_cell::new_info_event(
+                    "Praxis inherits existing Codex/OpenAI login when it is available."
+                        .to_string(),
+                    Some(
+                        "If no provider works at startup, Praxis opens the full ChatGPT sign-in flow."
+                            .to_string(),
+                    ),
+                ),
+            )));
+        })];
+        let deepseek_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::OpenProviderLoginPrompt {
+                provider: ProviderSetupKind::DeepSeek,
+            });
+        })];
+        let common_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::OpenProviderLoginPrompt {
+                provider: ProviderSetupKind::Common,
+            });
+        })];
+        let anthropic_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::ShowAnthropicLoginStatement);
+        })];
+
+        let mut header = ColumnRenderable::new();
+        header.push(Line::from("AI provider login").bold());
+        header.push(Line::from(
+            "Manage credentials without blocking startup when another provider is usable.".dim(),
+        ));
+        header.push(Line::from(
+            "Tip: /login deepseek <api_key> or /login common api_key=... base_url=... model=..."
+                .dim(),
+        ));
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            header: Box::new(header),
+            footer_hint: Some(standard_popup_hint_line()),
+            items: vec![
+                SelectionItem {
+                    name: "ChatGPT / Codex account".to_string(),
+                    description: Some(
+                        "Inherited automatically from Codex when present.".to_string(),
+                    ),
+                    actions: codex_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "DeepSeek API key".to_string(),
+                    description: Some(
+                        "Configure DeepSeek with the Praxis DeepSeek profile.".to_string(),
+                    ),
+                    actions: deepseek_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Common API key".to_string(),
+                    description: Some(
+                        "Configure a generic OpenAI-compatible endpoint.".to_string(),
+                    ),
+                    actions: common_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Anthropic account".to_string(),
+                    description: Some("Show the Praxis integration statement.".to_string()),
+                    actions: anthropic_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+        self.request_redraw();
+    }
+
+    pub(crate) fn open_provider_login_prompt(&mut self, provider: ProviderSetupKind) {
+        let tx = self.app_event_tx.clone();
+        let view = CustomPromptView::new(
+            provider.input_title(),
+            provider.input_placeholder(),
+            provider.input_context_label(),
+            Box::new(move |raw: String| match provider.parse_selection(&raw) {
+                Ok(selection) => {
+                    tx.send(AppEvent::ApplyProviderSetup {
+                        model: selection.model,
+                        provider_id: selection.provider_id,
+                        provider: selection.provider,
+                        effort: selection.effort,
+                    });
+                }
+                Err(err) => {
+                    tx.send(AppEvent::InsertHistoryCell(Box::new(
+                        history_cell::new_error_event(err),
+                    )));
+                }
+            }),
+        );
+        self.bottom_pane.show_view(Box::new(view));
+        self.request_redraw();
+    }
+
+    pub(crate) fn show_anthropic_login_statement(&mut self) {
+        self.add_plain_history_lines(vec![
+            Line::from("Anthropic account integration").bold(),
+            Line::from(""),
+            Line::from(
+                "Praxis does not provide Anthropic account integration. The company publicly objects to model distillation while benefiting from the same industry-wide extraction dynamics it condemns.",
+            ),
+            Line::from(
+                "We will not spend the Praxis login surface normalizing that posture. Use ChatGPT/Codex, DeepSeek, or a common OpenAI-compatible endpoint instead.",
+            )
+            .dim(),
+        ]);
+    }
+
+    fn handle_login_command_args(&mut self, args: &str) {
+        let trimmed = args.trim();
+        if trimmed.is_empty() {
+            self.open_login_popup();
+            return;
+        }
+
+        let mut parts = trimmed.splitn(2, char::is_whitespace);
+        let target = parts.next().unwrap_or_default();
+        let rest = parts.next().unwrap_or_default().trim();
+        match Self::login_provider_target(target) {
+            Some(provider) if rest.is_empty() => self.open_provider_login_prompt(provider),
+            Some(provider) => self.submit_provider_setup_from_raw(provider, rest),
+            None if target.eq_ignore_ascii_case("anthropic")
+                || target.eq_ignore_ascii_case("claude") =>
+            {
+                self.show_anthropic_login_statement();
+            }
+            None if target.eq_ignore_ascii_case("chatgpt")
+                || target.eq_ignore_ascii_case("codex")
+                || target.eq_ignore_ascii_case("openai") =>
+            {
+                self.add_info_message(
+                    "Praxis inherits existing Codex/OpenAI login when available.".to_string(),
+                    Some(
+                        "Use /login deepseek or /login common to configure API providers."
+                            .to_string(),
+                    ),
+                );
+            }
+            None => self
+                .add_error_message("Usage: /login [deepseek|common|chatgpt|anthropic]".to_string()),
+        }
+        self.bottom_pane.drain_pending_submission_state();
+    }
+
+    fn login_provider_target(target: &str) -> Option<ProviderSetupKind> {
+        match target.to_ascii_lowercase().as_str() {
+            "deepseek" | "ds" => Some(ProviderSetupKind::DeepSeek),
+            "common" | "openai-compatible" | "compatible" => Some(ProviderSetupKind::Common),
+            _ => None,
+        }
+    }
+
+    fn submit_provider_setup_from_raw(&mut self, provider: ProviderSetupKind, raw: &str) {
+        match provider.parse_selection(raw) {
+            Ok(selection) => {
+                self.app_event_tx.send(AppEvent::ApplyProviderSetup {
+                    model: selection.model,
+                    provider_id: selection.provider_id,
+                    provider: selection.provider,
+                    effort: selection.effort,
+                });
+            }
+            Err(err) => self.add_error_message(err),
+        }
+    }
+
     pub(crate) fn open_model_popup(&mut self) {
         if !self.is_session_configured() {
             self.add_info_message(
@@ -9271,12 +9968,7 @@ impl ChatWidget {
                 return;
             }
 
-            tx.send(AppEvent::UpdateModelSelection {
-                model: model_for_action.clone(),
-                provider_id: provider_id_for_action.clone(),
-            });
-            tx.send(AppEvent::UpdateReasoningEffort(effort_for_action));
-            tx.send(AppEvent::PersistModelSelection {
+            tx.send(AppEvent::ApplyModelSelection {
                 model: model_for_action.clone(),
                 provider_id: provider_id_for_action.clone(),
                 provider: provider_for_action.clone(),
@@ -9362,14 +10054,9 @@ impl ChatWidget {
             }
         })];
         let all_modes_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-            tx.send(AppEvent::UpdateModelSelection {
-                model: model.clone(),
-                provider_id: provider_id.clone(),
-            });
-            tx.send(AppEvent::UpdateReasoningEffort(effort));
             tx.send(AppEvent::UpdatePlanModeReasoningEffort(effort));
             tx.send(AppEvent::PersistPlanModeReasoningEffort(effort));
-            tx.send(AppEvent::PersistModelSelection {
+            tx.send(AppEvent::ApplyModelSelection {
                 model: model.clone(),
                 provider_id: provider_id.clone(),
                 provider: provider.clone(),
@@ -9473,13 +10160,7 @@ impl ChatWidget {
                         effort: selected_effort,
                     });
             } else {
-                self.app_event_tx.send(AppEvent::UpdateModelSelection {
-                    model: selected_model.clone(),
-                    provider_id: provider_id.clone(),
-                });
-                self.app_event_tx
-                    .send(AppEvent::UpdateReasoningEffort(selected_effort));
-                self.app_event_tx.send(AppEvent::PersistModelSelection {
+                self.app_event_tx.send(AppEvent::ApplyModelSelection {
                     model: selected_model,
                     provider_id,
                     provider,
@@ -9566,12 +10247,7 @@ impl ChatWidget {
                         effort: choice_effort,
                     });
                 } else {
-                    tx.send(AppEvent::UpdateModelSelection {
-                        model: model_for_action.clone(),
-                        provider_id: provider_id_for_action.clone(),
-                    });
-                    tx.send(AppEvent::UpdateReasoningEffort(choice_effort));
-                    tx.send(AppEvent::PersistModelSelection {
+                    tx.send(AppEvent::ApplyModelSelection {
                         model: model_for_action.clone(),
                         provider_id: provider_id_for_action.clone(),
                         provider: provider_for_action.clone(),
@@ -9623,6 +10299,27 @@ impl ChatWidget {
 
     /// Open a popup to choose the permissions mode (approval policy + sandbox policy).
     pub(crate) fn open_permissions_popup(&mut self) {
+        let model = self.permissions_menu_model();
+        let footer_note = model.show_elevate_sandbox_hint.then(|| {
+            vec![
+                "The non-admin sandbox protects your files and prevents network access under most circumstances. However, it carries greater risk if prompt injected. To upgrade to the default sandbox, run ".dim(),
+                "/setup-default-sandbox".cyan(),
+                ".".dim(),
+            ]
+            .into()
+        });
+
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            title: Some("Update Model Permissions".to_string()),
+            footer_note,
+            footer_hint: Some(standard_popup_hint_line()),
+            items: model.items,
+            header: Box::new(()),
+            ..Default::default()
+        });
+    }
+
+    fn permissions_menu_model(&self) -> PermissionsMenuModel {
         let include_read_only = cfg!(target_os = "windows");
         let current_approval = self.config.permissions.approval_policy.value();
         let current_sandbox = self.config.permissions.sandbox_policy.get();
@@ -9807,23 +10504,10 @@ impl ChatWidget {
             }
         }
 
-        let footer_note = show_elevate_sandbox_hint.then(|| {
-            vec![
-                "The non-admin sandbox protects your files and prevents network access under most circumstances. However, it carries greater risk if prompt injected. To upgrade to the default sandbox, run ".dim(),
-                "/setup-default-sandbox".cyan(),
-                ".".dim(),
-            ]
-            .into()
-        });
-
-        self.bottom_pane.show_selection_view(SelectionViewParams {
-            title: Some("Update Model Permissions".to_string()),
-            footer_note,
-            footer_hint: Some(standard_popup_hint_line()),
+        PermissionsMenuModel {
             items,
-            header: Box::new(()),
-            ..Default::default()
-        });
+            show_elevate_sandbox_hint,
+        }
     }
 
     pub(crate) fn open_experimental_popup(&mut self) {
@@ -10661,9 +11345,21 @@ impl ChatWidget {
         self.refresh_model_dependent_surfaces();
     }
 
-    pub(crate) fn set_model_selection(&mut self, model: &str, provider_id: &str) {
+    pub(crate) fn set_model_selection(
+        &mut self,
+        model: &str,
+        provider_id: &str,
+        provider: Option<&praxis_core::ModelProviderInfo>,
+    ) {
         self.set_model(model);
         self.config.model_provider_id = provider_id.to_owned();
+        if let Some(provider) = provider {
+            self.config.model_provider = provider.clone();
+            self.config
+                .model_providers
+                .entry(provider_id.to_owned())
+                .or_insert_with(|| provider.clone());
+        }
     }
 
     fn set_service_tier_selection(&mut self, service_tier: Option<ServiceTier>) {
@@ -10967,7 +11663,7 @@ impl ChatWidget {
             message.push_str(" for ");
             message.push_str(next_mode.display_name());
             message.push_str(" mode.");
-            self.add_info_message(message, /*hint*/ None);
+            self.add_model_change_message(message);
         }
         self.request_redraw();
     }
@@ -11064,6 +11760,11 @@ impl ChatWidget {
 
     pub(crate) fn add_info_message(&mut self, message: String, hint: Option<String>) {
         self.add_to_history(history_cell::new_info_event(message, hint));
+        self.request_redraw();
+    }
+
+    pub(crate) fn add_model_change_message(&mut self, message: String) {
+        self.add_to_history(history_cell::new_model_change_divider(message));
         self.request_redraw();
     }
 
@@ -11899,6 +12600,48 @@ impl ChatWidget {
         self.thread_id
     }
 
+    pub(crate) fn set_thread_control_state(&mut self, control_state: Option<&ThreadControlState>) {
+        self.thread_control_state = control_state.cloned();
+        if let Some(control_state) = control_state
+            && control_state.read_only
+        {
+            let label = thread_control_display_label(control_state);
+            self.bottom_pane.set_composer_input_enabled(
+                /*enabled*/ true,
+                Some(format!(
+                    "Locked by {label}; type /release-thread to take over"
+                )),
+            );
+            return;
+        }
+        self.bottom_pane
+            .set_composer_input_enabled(/*enabled*/ true, /*placeholder*/ None);
+    }
+
+    fn reject_read_only_thread_submission(
+        &mut self,
+        text: &str,
+        text_elements: &[TextElement],
+    ) -> bool {
+        let Some(label) = self.read_only_thread_control_label() else {
+            return false;
+        };
+        self.bottom_pane
+            .set_composer_text(text.to_string(), text_elements.to_vec(), Vec::new());
+        self.add_info_message(
+            format!("This thread is locked by {label}."),
+            Some("Type /release-thread to take over before sending a message.".to_string()),
+        );
+        true
+    }
+
+    fn read_only_thread_control_label(&self) -> Option<String> {
+        self.thread_control_state
+            .as_ref()
+            .filter(|control_state| control_state.read_only)
+            .map(thread_control_display_label)
+    }
+
     pub(crate) fn thread_name(&self) -> Option<String> {
         self.thread_name.clone()
     }
@@ -12175,6 +12918,300 @@ impl ChatWidget {
             .map(|target| target.action.clone())
     }
 
+    pub(crate) fn center_chat_mouse_action(
+        &self,
+        column: u16,
+        row: u16,
+    ) -> Option<CenterChatMouseAction> {
+        if let Some(target) = self
+            .center_launch_dropdown_targets
+            .borrow()
+            .iter()
+            .find(|target| rect_contains_point(target.area, column, row))
+        {
+            return Some(target.action.clone());
+        }
+
+        if self
+            .center_launch_model_area
+            .get()
+            .is_some_and(|area| rect_contains_point(area, column, row))
+        {
+            return Some(CenterChatMouseAction::ToggleModelDropdown);
+        }
+
+        if self
+            .center_launch_rank_area
+            .get()
+            .is_some_and(|area| rect_contains_point(area, column, row))
+        {
+            return Some(CenterChatMouseAction::ToggleRankDropdown);
+        }
+
+        if self
+            .center_launch_permissions_area
+            .get()
+            .is_some_and(|area| rect_contains_point(area, column, row))
+        {
+            return Some(CenterChatMouseAction::TogglePermissionsDropdown);
+        }
+
+        self.center_launch_dropdown
+            .is_some()
+            .then_some(CenterChatMouseAction::DismissDropdown)
+    }
+
+    pub(crate) fn handle_center_chat_mouse_action(&mut self, action: CenterChatMouseAction) {
+        match action {
+            CenterChatMouseAction::ToggleModelDropdown => {
+                if self.center_model_presets().is_empty() {
+                    self.show_info_toast("Models are being updated; try again in a moment.");
+                    self.center_launch_dropdown = None;
+                } else {
+                    self.center_launch_dropdown = match self.center_launch_dropdown {
+                        Some(CenterLaunchDropdown::Model) => None,
+                        _ => Some(CenterLaunchDropdown::Model),
+                    };
+                }
+            }
+            CenterChatMouseAction::ToggleRankDropdown => {
+                self.center_launch_dropdown = match self.center_launch_dropdown {
+                    Some(CenterLaunchDropdown::Rank) => None,
+                    _ => Some(CenterLaunchDropdown::Rank),
+                };
+            }
+            CenterChatMouseAction::TogglePermissionsDropdown => {
+                self.center_launch_dropdown = match self.center_launch_dropdown {
+                    Some(CenterLaunchDropdown::Permissions) => None,
+                    _ => Some(CenterLaunchDropdown::Permissions),
+                };
+            }
+            CenterChatMouseAction::SelectModel(index) => {
+                self.apply_center_model_dropdown_selection(index);
+            }
+            CenterChatMouseAction::SelectRank(rank) => {
+                self.set_center_launch_rank(rank);
+                self.center_launch_dropdown = None;
+            }
+            CenterChatMouseAction::SelectPermission(index) => {
+                self.apply_center_permission_dropdown_selection(index);
+            }
+            CenterChatMouseAction::DismissDropdown => {
+                self.center_launch_dropdown = None;
+            }
+        }
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_center_launch_rank(&mut self, rank: u8) {
+        let next_rank = rank.min(CENTER_LAUNCH_RANK_MAX);
+        self.center_launch_rank = next_rank;
+        let message = match self.ui_language {
+            UiLanguage::En => format!(
+                "Launch rank: R{} {}",
+                next_rank,
+                Self::center_rank_name(next_rank)
+            ),
+            UiLanguage::Cn => format!(
+                "启动级别：R{} {}",
+                next_rank,
+                Self::center_rank_name(next_rank)
+            ),
+        };
+        self.show_info_toast(message);
+        self.request_redraw();
+    }
+
+    fn center_rank_name(rank: u8) -> &'static str {
+        match rank {
+            0 => "Coordinator",
+            1 => "Supervisor",
+            _ => "Worker",
+        }
+    }
+
+    fn center_rank_description(rank: u8) -> &'static str {
+        match rank {
+            0 => "Top-level coordinator; can spawn and control R1/R2 descendants.",
+            1 => "Supervisor; can coordinate direct R2 worker threads.",
+            _ => "Worker; no cross-agent coordination role.",
+        }
+    }
+
+    fn center_permissions_label(&self) -> String {
+        if self.config.approvals_reviewer == ApprovalsReviewer::GuardianSubagent {
+            return "Guardian Approvals".to_string();
+        }
+        let current_approval = self.config.permissions.approval_policy.value();
+        let current_sandbox = self.config.permissions.sandbox_policy.get();
+        builtin_approval_presets()
+            .into_iter()
+            .find(|preset| Self::preset_matches_current(current_approval, current_sandbox, preset))
+            .map(|preset| preset.label.to_string())
+            .unwrap_or_else(|| "Custom".to_string())
+    }
+
+    fn center_model_presets(&self) -> Vec<ModelPreset> {
+        let models = self.model_catalog.try_list_models().unwrap_or_default();
+        let mut indexed = models
+            .into_iter()
+            .enumerate()
+            .filter(|(_, preset)| preset.show_in_picker)
+            .collect::<Vec<_>>();
+        indexed.sort_by_key(|(index, preset)| {
+            let auto_group = if Self::is_auto_model(&preset.model) {
+                0
+            } else {
+                1
+            };
+            let auto_order = if auto_group == 0 {
+                Self::auto_model_order(&preset.model)
+            } else {
+                usize::MAX
+            };
+            (auto_group, auto_order, *index)
+        });
+        indexed.into_iter().map(|(_, preset)| preset).collect()
+    }
+
+    fn center_model_display_items(&self) -> Vec<CenterDropdownItem> {
+        self.center_model_presets()
+            .into_iter()
+            .map(|preset| {
+                let selection = self.selection_metadata_or_current(&preset);
+                let mut description = if preset.description.trim().is_empty() {
+                    selection.provider_id.clone()
+                } else {
+                    preset.description.replace(" (Identical to Agent mode)", "")
+                };
+                if !selection.provider_id.is_empty()
+                    && !description.contains(selection.provider_id.as_str())
+                {
+                    description.push_str("  ");
+                    description.push_str(selection.provider_id.as_str());
+                }
+                CenterDropdownItem {
+                    name: Self::model_picker_item_name(&preset),
+                    description: Some(description),
+                    is_current: self.is_current_model_selection(&preset),
+                    is_disabled: false,
+                }
+            })
+            .collect()
+    }
+
+    fn apply_center_model_dropdown_selection(&mut self, index: usize) {
+        let presets = self.center_model_presets();
+        let Some(preset) = presets.get(index).cloned() else {
+            self.center_launch_dropdown = None;
+            return;
+        };
+        let selection = self.selection_metadata_or_current(&preset);
+        let model = preset.model.clone();
+        let should_prompt_plan_mode_scope = self.should_prompt_plan_mode_reasoning_scope(
+            model.as_str(),
+            selection.provider_id.as_str(),
+            Some(preset.default_reasoning_effort),
+        );
+        let actions = Self::model_selection_actions(
+            model,
+            selection.provider_id.clone(),
+            Some(selection.provider.clone()),
+            Some(preset.default_reasoning_effort),
+            should_prompt_plan_mode_scope,
+        );
+        for action in actions {
+            action(&self.app_event_tx);
+        }
+        self.center_launch_dropdown = None;
+    }
+
+    fn center_permission_display_items(&self) -> Vec<CenterDropdownItem> {
+        let include_read_only = cfg!(target_os = "windows");
+        let current_approval = self.config.permissions.approval_policy.value();
+        let current_sandbox = self.config.permissions.sandbox_policy.get();
+        let current_review_policy = self.config.approvals_reviewer;
+        let guardian_approval_enabled = self.config.features.enabled(Feature::GuardianApproval);
+
+        #[cfg(target_os = "windows")]
+        let windows_sandbox_level = WindowsSandboxLevel::from_config(&self.config);
+        #[cfg(target_os = "windows")]
+        let windows_degraded_sandbox_enabled =
+            matches!(windows_sandbox_level, WindowsSandboxLevel::RestrictedToken);
+        #[cfg(not(target_os = "windows"))]
+        let windows_degraded_sandbox_enabled = false;
+
+        let mut items = Vec::new();
+        let guardian_disabled_reason = |enabled: bool| {
+            let mut next_features = self.config.features.get().clone();
+            next_features.set_enabled(Feature::GuardianApproval, enabled);
+            self.config.features.can_set(&next_features).err()
+        };
+
+        for preset in builtin_approval_presets() {
+            if !include_read_only && preset.id == "read-only" {
+                continue;
+            }
+            let name = if preset.id == "auto" && windows_degraded_sandbox_enabled {
+                "Default (non-admin sandbox)".to_string()
+            } else {
+                preset.label.to_string()
+            };
+            let description = Some(preset.description.replace(" (Identical to Agent mode)", ""));
+            let approval_disabled = self
+                .config
+                .permissions
+                .approval_policy
+                .can_set(&preset.approval)
+                .is_err();
+            let default_disabled = approval_disabled || guardian_disabled_reason(false).is_some();
+            let is_current = current_review_policy == ApprovalsReviewer::User
+                && Self::preset_matches_current(current_approval, current_sandbox, &preset);
+            items.push(CenterDropdownItem {
+                name: name.clone(),
+                description: description.clone(),
+                is_current,
+                is_disabled: default_disabled,
+            });
+
+            if preset.id == "auto" && guardian_approval_enabled {
+                items.push(CenterDropdownItem {
+                    name: "Guardian Approvals".to_string(),
+                    description: Some(
+                        "Same workspace-write permissions, approvals route through guardian."
+                            .to_string(),
+                    ),
+                    is_current: current_review_policy == ApprovalsReviewer::GuardianSubagent
+                        && Self::preset_matches_current(current_approval, current_sandbox, &preset),
+                    is_disabled: approval_disabled || guardian_disabled_reason(true).is_some(),
+                });
+            }
+        }
+
+        items
+    }
+
+    fn apply_center_permission_dropdown_selection(&mut self, index: usize) {
+        let mut model = self.permissions_menu_model();
+        let Some(mut item) = (index < model.items.len()).then(|| model.items.remove(index)) else {
+            self.center_launch_dropdown = None;
+            return;
+        };
+        if item.is_disabled || item.disabled_reason.is_some() {
+            let reason = item
+                .disabled_reason
+                .unwrap_or_else(|| "permission preset is not available".to_string());
+            self.show_error_toast(reason);
+            self.center_launch_dropdown = None;
+            return;
+        }
+
+        for action in item.actions.drain(..) {
+            action(&self.app_event_tx);
+        }
+        self.center_launch_dropdown = None;
+    }
+
     /// Return a reference to the widget's current config (includes any
     /// runtime overrides applied via TUI, e.g., model or approval policy).
     pub(crate) fn config_ref(&self) -> &Config {
@@ -12239,6 +13276,7 @@ impl Drop for ChatWidget {
 
 impl Renderable for ChatWidget {
     fn render(&self, area: Rect, buf: &mut Buffer) {
+        self.clear_center_launch_hit_areas();
         self.render_deepseek_background(area, buf);
         let header_area = self.deepseek_header_area(area);
         let footer_area = self.deepseek_footer_area(area);
@@ -12249,6 +13287,7 @@ impl Renderable for ChatWidget {
         }
 
         let layout = self.layout_for_area(body_area);
+        self.replace_visible_patch_cell_ids(self.visible_active_patch_cell_ids(layout));
         self.render_active_cell(layout, buf);
         self.render_work_panel(layout, buf);
         self.render_bottom_pane(layout, buf);
@@ -12276,6 +13315,219 @@ impl Renderable for ChatWidget {
 }
 
 impl ChatWidget {
+    pub(crate) fn render_center_chat(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        scroll_from_bottom: usize,
+    ) {
+        self.render_deepseek_background(area, buf);
+        let header_area = self.deepseek_header_area(area);
+        let footer_area = self.deepseek_footer_area(area);
+        let body_area = self.deepseek_body_area(area);
+
+        if let Some(header_area) = header_area {
+            self.render_deepseek_header(header_area, buf);
+        }
+
+        let use_entry_layout = self.center_entry_state_visible(transcript_cells)
+            && !self.bottom_pane.has_active_view();
+        let layout = if use_entry_layout {
+            self.center_entry_layout_for_area(body_area)
+        } else {
+            self.center_layout_for_area(body_area)
+        };
+        if use_entry_layout {
+            self.replace_visible_patch_cell_ids(Vec::new());
+            self.render_center_entry_intro(layout, buf);
+        } else {
+            self.replace_visible_patch_cell_ids(self.center_visible_patch_cell_ids(
+                layout,
+                transcript_cells,
+                scroll_from_bottom,
+            ));
+            self.render_center_transcript(layout, buf, transcript_cells, scroll_from_bottom);
+        }
+        self.render_work_panel(layout, buf);
+        self.render_bottom_pane(layout, buf);
+        self.render_center_launch_strip(layout, buf);
+        self.render_center_launch_dropdown(layout, buf);
+        self.render_in_app_toast_overlay(layout, buf);
+
+        if let Some(footer_area) = footer_area {
+            self.render_deepseek_footer(footer_area, buf);
+        }
+        self.last_rendered_width.set(Some(area.width as usize));
+    }
+
+    pub(crate) fn center_cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+        let body_area = self.deepseek_body_area(area);
+        let layout = if self.center_entry_state_active() && !self.bottom_pane.has_active_view() {
+            self.center_entry_layout_for_area(body_area)
+        } else {
+            self.center_layout_for_area(body_area)
+        };
+        if layout.bottom_content_area.is_empty() {
+            None
+        } else {
+            self.bottom_pane.cursor_pos(layout.bottom_content_area)
+        }
+    }
+
+    pub(crate) fn visible_patch_cell_ids(&self) -> Vec<crate::history_presentation::PatchCellId> {
+        self.last_visible_patch_cell_ids.borrow().clone()
+    }
+
+    fn replace_visible_patch_cell_ids(&self, ids: Vec<crate::history_presentation::PatchCellId>) {
+        *self.last_visible_patch_cell_ids.borrow_mut() = ids;
+    }
+
+    fn visible_active_patch_cell_ids(
+        &self,
+        layout: ChatWidgetLayout,
+    ) -> Vec<crate::history_presentation::PatchCellId> {
+        let Some(content_area) = layout.active_content_area else {
+            return Vec::new();
+        };
+        if content_area.is_empty() {
+            return Vec::new();
+        }
+        let Some(cell) = self.active_cell.as_ref() else {
+            return Vec::new();
+        };
+        let Some(id) = cell.patch_cell_id() else {
+            return Vec::new();
+        };
+        let Some(cache) = self.active_cell_render_cache(content_area.width) else {
+            return Vec::new();
+        };
+        if cache.desired_height == 0 {
+            Vec::new()
+        } else {
+            vec![id]
+        }
+    }
+
+    fn center_visible_patch_cell_ids(
+        &self,
+        layout: ChatWidgetLayout,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        scroll_from_bottom: usize,
+    ) -> Vec<crate::history_presentation::PatchCellId> {
+        let Some(content_area) = layout.active_content_area else {
+            return Vec::new();
+        };
+        if content_area.is_empty() {
+            return Vec::new();
+        }
+
+        let width = content_area.width;
+        let mut skip = scroll_from_bottom;
+        let mut needed = usize::from(content_area.height);
+        let mut ids = Vec::new();
+
+        let active_tail_len = self
+            .center_active_tail_cache(width)
+            .map_or(0, |cache| cache.lines.len());
+        let active_id = self
+            .active_cell
+            .as_ref()
+            .and_then(|cell| cell.patch_cell_id());
+        Self::collect_visible_patch_id(
+            active_id,
+            active_tail_len,
+            &mut skip,
+            &mut needed,
+            &mut ids,
+        );
+
+        if needed > 0 && active_tail_len > 0 && !transcript_cells.is_empty() {
+            Self::collect_visible_patch_id(None, 1, &mut skip, &mut needed, &mut ids);
+        }
+
+        for (index, cell) in transcript_cells.iter().enumerate().rev() {
+            if needed == 0 {
+                break;
+            }
+            let cell_len = Self::center_wrapped_committed_lines(cell.as_ref(), width).len();
+            if cell_len == 0 {
+                continue;
+            }
+            Self::collect_visible_patch_id(
+                cell.patch_cell_id(),
+                cell_len,
+                &mut skip,
+                &mut needed,
+                &mut ids,
+            );
+            if needed > 0 && index > 0 && !cell.is_stream_continuation() {
+                Self::collect_visible_patch_id(None, 1, &mut skip, &mut needed, &mut ids);
+            }
+        }
+
+        ids
+    }
+
+    fn collect_visible_patch_id(
+        id: Option<crate::history_presentation::PatchCellId>,
+        segment_len: usize,
+        skip: &mut usize,
+        needed: &mut usize,
+        output: &mut Vec<crate::history_presentation::PatchCellId>,
+    ) {
+        if segment_len == 0 || *needed == 0 {
+            return;
+        }
+        if *skip >= segment_len {
+            *skip -= segment_len;
+            return;
+        }
+
+        let end = segment_len - *skip;
+        *skip = 0;
+        let start = end.saturating_sub(*needed);
+        let visible_len = end.saturating_sub(start);
+        if visible_len > 0
+            && let Some(id) = id
+            && !output.contains(&id)
+        {
+            output.push(id);
+        }
+        *needed = (*needed).saturating_sub(visible_len);
+    }
+
+    pub(crate) fn center_chat_scroll_limit(
+        &self,
+        area: Rect,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        current_scroll_from_bottom: usize,
+    ) -> usize {
+        if self.center_entry_state_visible(transcript_cells) {
+            return 0;
+        }
+        let body_area = self.deepseek_body_area(area);
+        let layout = self.center_layout_for_area(body_area);
+        let Some(content_area) = layout.active_content_area else {
+            return 0;
+        };
+        if content_area.is_empty() {
+            return 0;
+        }
+
+        let visible_rows = usize::from(content_area.height);
+        let threshold = current_scroll_from_bottom
+            .saturating_add(visible_rows)
+            .saturating_add(1);
+        let counted_rows =
+            self.center_transcript_row_count_until(transcript_cells, content_area.width, threshold);
+        if counted_rows >= threshold {
+            current_scroll_from_bottom.saturating_add(visible_rows.max(1))
+        } else {
+            counted_rows.saturating_sub(visible_rows)
+        }
+    }
+
     fn deepseek_chrome_enabled(area: Rect) -> bool {
         area.height >= DEEPSEEK_CHROME_MIN_HEIGHT
     }
@@ -12324,6 +13576,10 @@ impl ChatWidget {
     }
 
     fn render_deepseek_header(&self, area: Rect, buf: &mut Buffer) {
+        self.render_deepseek_header_with_hover(area, buf, false);
+    }
+
+    fn render_deepseek_header_with_hover(&self, area: Rect, buf: &mut Buffer, model_hovered: bool) {
         if area.is_empty() {
             return;
         }
@@ -12346,6 +13602,19 @@ impl ChatWidget {
         let mode = self.collaboration_mode_label().unwrap_or("Default");
         let provider = self.current_model_provider_id();
         let budget = self.status_budget_message();
+        let model_style = if model_hovered {
+            Style::default()
+                .fg(DEEPSEEK_SKY)
+                .bg(Color::Rgb(28, 44, 37))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(DEEPSEEK_TEXT)
+        };
+        let provider_style = if model_hovered {
+            Style::default().fg(DEEPSEEK_SKY).bg(Color::Rgb(28, 44, 37))
+        } else {
+            Style::default().fg(DEEPSEEK_MUTED)
+        };
 
         let mut spans = vec![
             Span::styled(
@@ -12359,17 +13628,21 @@ impl ChatWidget {
             Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)),
             Span::styled(mode.to_string(), Style::default().fg(DEEPSEEK_BLUE)),
             Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)),
-            Span::styled(
-                self.model_display_name().to_string(),
-                Style::default().fg(DEEPSEEK_TEXT),
-            ),
-            Span::styled(
-                format!(" ({provider})"),
-                Style::default().fg(DEEPSEEK_MUTED),
-            ),
+            Span::styled(self.model_display_name().to_string(), model_style),
+            Span::styled(format!(" ({provider})"), provider_style),
             Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)),
             Span::styled(thread.to_string(), Style::default().fg(DEEPSEEK_MUTED)),
         ];
+        if let Some(control_state) = self.thread_control_state.as_ref() {
+            spans.push(Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)));
+            spans.push(Span::styled(
+                format!("Locked by {}", thread_control_display_label(control_state)),
+                Style::default()
+                    .fg(DEEPSEEK_SKY)
+                    .bg(DEEPSEEK_HEADER_BG)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
         if let Some(budget) = budget {
             spans.push(Span::styled(
                 format!("  {budget}"),
@@ -12395,11 +13668,15 @@ impl ChatWidget {
             .render(area, buf);
 
         let running = self.bottom_pane.is_task_running();
-        let state_label = if running {
+        let locked_label = self.thread_control_state.as_ref().map(|control_state| {
+            format!("Locked by {}", thread_control_display_label(control_state))
+        });
+        let state_is_locked = locked_label.is_some();
+        let state_label = locked_label.as_deref().unwrap_or(if running {
             self.current_status.header.as_str()
         } else {
             "Ready"
-        };
+        });
         let queued_count = self
             .queued_user_messages
             .len()
@@ -12409,13 +13686,13 @@ impl ChatWidget {
             Span::styled(
                 format!(" {state_label}"),
                 Style::default()
-                    .fg(if running {
+                    .fg(if state_is_locked || running {
                         DEEPSEEK_SKY
                     } else {
                         DEEPSEEK_MUTED
                     })
                     .bg(DEEPSEEK_FOOTER_BG)
-                    .add_modifier(if running {
+                    .add_modifier(if state_is_locked || running {
                         Modifier::BOLD
                     } else {
                         Modifier::empty()
@@ -12423,7 +13700,9 @@ impl ChatWidget {
             ),
             Span::styled("  ", Style::default().bg(DEEPSEEK_FOOTER_BG)),
             Span::styled(
-                if running {
+                if state_is_locked {
+                    "controlled live view | input locked"
+                } else if running {
                     "Esc interrupt | type to steer"
                 } else {
                     "Enter send | Shift+Enter newline"
@@ -12444,6 +13723,619 @@ impl ChatWidget {
         Paragraph::new(line)
             .style(Style::default().bg(DEEPSEEK_FOOTER_BG))
             .render(area, buf);
+    }
+
+    fn center_layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
+        let split = chat_surface_split_for_width(area.width, self.work_panel.has_content());
+        let work_panel_outer_height = split
+            .work_panel_width
+            .map(|panel_width| self.work_panel.desired_height(panel_width))
+            .unwrap_or(0);
+        let visible_toasts = u16::try_from(self.in_app_toasts.visible_entries().len())
+            .unwrap_or(u16::MAX)
+            .saturating_mul(IN_APP_TOAST_ROW_HEIGHT);
+        layout_chat_surface(ChatSurfaceLayoutInput {
+            area,
+            agent_outer_height: area.height,
+            bottom_outer_height: self.bottom_pane_total_height(area.width),
+            toast_height: visible_toasts,
+            work_panel_outer_height,
+            show_work_panel: self.work_panel.has_content(),
+            fill_available_top: true,
+        })
+    }
+
+    fn center_entry_layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
+        if area.is_empty() {
+            return ChatWidgetLayout::default();
+        }
+
+        let content_width = if area.width <= CENTER_ENTRY_MIN_SIDE_PADDING.saturating_mul(2) {
+            area.width
+        } else {
+            area.width
+                .saturating_sub(CENTER_ENTRY_MIN_SIDE_PADDING.saturating_mul(2))
+                .min(CENTER_ENTRY_MAX_WIDTH)
+                .max(1)
+        };
+        let x = area
+            .x
+            .saturating_add(area.width.saturating_sub(content_width) / 2);
+        let bottom_outer_height = self
+            .bottom_pane_total_height(content_width)
+            .min(area.height);
+        let intro_height =
+            CENTER_ENTRY_INTRO_HEIGHT.min(area.height.saturating_sub(bottom_outer_height));
+        let toast_height = u16::try_from(self.in_app_toasts.visible_entries().len())
+            .unwrap_or(u16::MAX)
+            .saturating_mul(IN_APP_TOAST_ROW_HEIGHT)
+            .min(
+                area.height
+                    .saturating_sub(bottom_outer_height)
+                    .saturating_sub(intro_height),
+            );
+        let total_height = intro_height
+            .saturating_add(toast_height)
+            .saturating_add(bottom_outer_height);
+        let y = area
+            .y
+            .saturating_add(area.height.saturating_sub(total_height) / 2);
+
+        let active_outer_area =
+            (intro_height > 0).then_some(Rect::new(x, y, content_width, intro_height));
+        let active_content_area = active_outer_area;
+        let toast_area = (toast_height > 0).then_some(Rect::new(
+            x,
+            y.saturating_add(intro_height),
+            content_width,
+            toast_height,
+        ));
+        let bottom_y = y.saturating_add(intro_height).saturating_add(toast_height);
+        let bottom_outer_available = area.bottom().saturating_sub(bottom_y);
+        let bottom_outer_area = Rect::new(
+            x,
+            bottom_y,
+            content_width,
+            bottom_outer_height.min(bottom_outer_available),
+        );
+        let bottom_gap = CHAT_SECTION_GAP_ROWS.min(bottom_outer_area.height);
+        let bottom_content_area = Rect::new(
+            bottom_outer_area.x,
+            bottom_outer_area.y.saturating_add(bottom_gap),
+            bottom_outer_area.width,
+            bottom_outer_area.height.saturating_sub(bottom_gap),
+        );
+
+        ChatWidgetLayout {
+            active_outer_area,
+            active_content_area,
+            work_panel_area: None,
+            toast_area,
+            bottom_outer_area,
+            bottom_content_area,
+        }
+    }
+
+    fn center_entry_state_visible(&self, transcript_cells: &[Arc<dyn HistoryCell>]) -> bool {
+        transcript_cells.is_empty() && self.center_entry_state_active()
+    }
+
+    fn center_entry_state_active(&self) -> bool {
+        self.thread_id.is_none()
+            && self
+                .active_cell
+                .as_ref()
+                .is_none_or(|cell| cell.as_any().is::<history_cell::SessionHeaderHistoryCell>())
+    }
+
+    fn render_center_entry_intro(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
+        let Some(area) = layout.active_content_area else {
+            return;
+        };
+        if area.is_empty() {
+            return;
+        }
+
+        let workspace = self
+            .config
+            .cwd
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .unwrap_or("workspace");
+        let title = match self.ui_language {
+            UiLanguage::En => format!("What should Praxis do in {workspace}?"),
+            UiLanguage::Cn => format!("在 {workspace} 中要做什么？"),
+        };
+        let subtitle = match self.ui_language {
+            UiLanguage::En => "New coordinator thread in this workspace.",
+            UiLanguage::Cn => "此工作区的新协调线程。",
+        };
+        let cat = self.center_cat_frame();
+        let lines = vec![
+            Line::from(Span::styled(cat[0], Style::default().fg(DEEPSEEK_SKY))),
+            Line::from(Span::styled(cat[1], Style::default().fg(DEEPSEEK_SKY))),
+            Line::from(Span::styled(cat[2], Style::default().fg(DEEPSEEK_SKY))),
+            Line::from(""),
+            Line::from(Span::styled(
+                title,
+                Style::default()
+                    .fg(DEEPSEEK_TEXT)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(subtitle, Style::default().fg(DEEPSEEK_MUTED))),
+        ];
+        Paragraph::new(Text::from(lines))
+            .alignment(Alignment::Center)
+            .render(area, buf);
+    }
+
+    fn center_cat_frame(&self) -> [&'static str; 3] {
+        if !self.tui_config.animations {
+            return [" /\\_/\\ ", "( o.o )", " > ^ < "];
+        }
+        let frame = Instant::now()
+            .duration_since(self.terminal_title_animation_origin)
+            .as_millis()
+            / 700
+            % 3;
+        match frame {
+            1 => [" /\\_/\\ ", "( -.- )", " > ^ < "],
+            2 => [" /\\_/\\ ", "( o.o )", "  / \\  "],
+            _ => [" /\\_/\\ ", "( o.o )", " > ^ < "],
+        }
+    }
+
+    fn render_center_launch_strip(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
+        self.clear_center_launch_hit_areas();
+        if self.bottom_pane.has_active_view() {
+            return;
+        }
+        let area = layout.bottom_outer_area;
+        if area.is_empty() || area.height == 0 {
+            return;
+        }
+
+        let row = Rect::new(area.x, area.y, area.width, 1);
+        let left_pad = 2.min(row.width.saturating_sub(1));
+        let mut cursor_x = row.x.saturating_add(left_pad);
+        let mut spans: Vec<Span<'static>> = vec![Span::raw(" ".repeat(left_pad as usize))];
+        let mut has_chip = false;
+        let mut push_chip = |chip: String, style: Style, target: &Cell<Option<Rect>>| {
+            if cursor_x >= row.right() {
+                return;
+            }
+            if has_chip {
+                let gap_width = 2;
+                if row.right().saturating_sub(cursor_x) <= gap_width {
+                    return;
+                }
+                spans.push(Span::styled("  ", Style::default()));
+                cursor_x = cursor_x.saturating_add(gap_width);
+            }
+
+            let chip_width = u16::try_from(chip.chars().count()).unwrap_or(u16::MAX);
+            if chip_width == 0 || cursor_x >= row.right() {
+                return;
+            }
+            let visible_width = chip_width.min(row.right().saturating_sub(cursor_x));
+            if visible_width == 0 {
+                return;
+            }
+            target.set(Some(Rect::new(cursor_x, row.y, visible_width, 1)));
+            spans.push(Span::styled(chip, style));
+            cursor_x = cursor_x.saturating_add(chip_width);
+            has_chip = true;
+        };
+
+        let model_label = truncate_text(self.model_display_name(), 24);
+        let model_chip = format!(" {model_label} ▾ ");
+        push_chip(
+            model_chip,
+            Style::default()
+                .fg(DEEPSEEK_TEXT)
+                .bg(Color::Rgb(28, 34, 46)),
+            &self.center_launch_model_area,
+        );
+
+        let rank_chip = format!(" R{} ▾ ", self.center_launch_rank);
+        push_chip(
+            rank_chip,
+            Style::default()
+                .fg(DEEPSEEK_SKY)
+                .bg(Color::Rgb(24, 42, 34))
+                .add_modifier(Modifier::BOLD),
+            &self.center_launch_rank_area,
+        );
+
+        let permission_label = self.center_permissions_label();
+        let permission_label = truncate_text(permission_label.as_str(), 18);
+        let permission_chip = format!(" {permission_label} ▾ ");
+        push_chip(
+            permission_chip,
+            Style::default()
+                .fg(DEEPSEEK_TEXT)
+                .bg(Color::Rgb(24, 34, 42)),
+            &self.center_launch_permissions_area,
+        );
+
+        let line = Line::from(spans);
+        let line = truncate_line_with_ellipsis_if_overflow(line, row.width as usize);
+        Paragraph::new(line).render(row, buf);
+    }
+
+    fn render_center_launch_dropdown(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
+        self.center_launch_dropdown_targets.borrow_mut().clear();
+        if self.bottom_pane.has_active_view() {
+            return;
+        }
+        let Some(dropdown) = self.center_launch_dropdown else {
+            return;
+        };
+
+        match dropdown {
+            CenterLaunchDropdown::Model => {
+                let Some(anchor) = self.center_launch_model_area.get() else {
+                    return;
+                };
+                self.render_center_dropdown_items(
+                    layout,
+                    buf,
+                    anchor,
+                    58,
+                    self.center_model_display_items(),
+                    CenterChatMouseAction::SelectModel,
+                );
+            }
+            CenterLaunchDropdown::Rank => {
+                let Some(anchor) = self.center_launch_rank_area.get() else {
+                    return;
+                };
+                let items = (0..=CENTER_LAUNCH_RANK_MAX)
+                    .map(|rank| CenterDropdownItem {
+                        name: format!("R{rank} {}", Self::center_rank_name(rank)),
+                        description: Some(Self::center_rank_description(rank).to_string()),
+                        is_current: self.center_launch_rank == rank,
+                        is_disabled: false,
+                    })
+                    .collect::<Vec<_>>();
+                self.render_center_dropdown_items(layout, buf, anchor, 34, items, |index| {
+                    CenterChatMouseAction::SelectRank(index as u8)
+                });
+            }
+            CenterLaunchDropdown::Permissions => {
+                let Some(anchor) = self.center_launch_permissions_area.get() else {
+                    return;
+                };
+                self.render_center_dropdown_items(
+                    layout,
+                    buf,
+                    anchor,
+                    46,
+                    self.center_permission_display_items(),
+                    CenterChatMouseAction::SelectPermission,
+                );
+            }
+        }
+    }
+
+    fn render_center_dropdown_items(
+        &self,
+        layout: ChatWidgetLayout,
+        buf: &mut Buffer,
+        anchor: Rect,
+        preferred_width: u16,
+        items: Vec<CenterDropdownItem>,
+        action_for_index: impl Fn(usize) -> CenterChatMouseAction,
+    ) {
+        if items.is_empty() {
+            return;
+        }
+
+        let max_width = layout.bottom_outer_area.width.max(anchor.width).max(1);
+        let width = preferred_width
+            .max(anchor.width.saturating_add(2))
+            .min(max_width);
+        let height = u16::try_from(items.len())
+            .unwrap_or(u16::MAX)
+            .saturating_add(2);
+        let x = anchor
+            .x
+            .min(layout.bottom_outer_area.right().saturating_sub(width));
+        let below_y = anchor.y.saturating_add(1);
+        let y = if below_y.saturating_add(height) <= layout.bottom_outer_area.bottom() {
+            below_y
+        } else {
+            anchor.y.saturating_sub(height)
+        };
+        let area = Rect::new(x, y, width, height);
+        if area.is_empty() {
+            return;
+        }
+
+        Block::default()
+            .borders(Borders::ALL)
+            .style(
+                Style::default()
+                    .fg(DEEPSEEK_TEXT)
+                    .bg(Color::Rgb(10, 17, 22)),
+            )
+            .render(area, buf);
+
+        let inner_width = area.width.saturating_sub(2);
+        for (index, item) in items.into_iter().enumerate() {
+            let Ok(offset) = u16::try_from(index) else {
+                break;
+            };
+            let row = Rect::new(
+                area.x.saturating_add(1),
+                area.y.saturating_add(1).saturating_add(offset),
+                inner_width,
+                1,
+            );
+            if row.y >= area.bottom().saturating_sub(1) {
+                break;
+            }
+            let bg = if item.is_current {
+                Color::Rgb(26, 48, 38)
+            } else {
+                Color::Rgb(10, 17, 22)
+            };
+            let fg = if item.is_disabled {
+                Color::Rgb(88, 96, 92)
+            } else if item.is_current {
+                DEEPSEEK_SKY
+            } else {
+                DEEPSEEK_TEXT
+            };
+            let marker = if item.is_current { "● " } else { "  " };
+            let mut line = Line::from(vec![
+                Span::styled(marker, Style::default().fg(DEEPSEEK_SKY).bg(bg)),
+                Span::styled(item.name, Style::default().fg(fg).bg(bg)),
+            ]);
+            if let Some(description) = item.description {
+                line.spans.push(Span::styled(
+                    format!("  {description}"),
+                    Style::default()
+                        .fg(if item.is_disabled {
+                            Color::Rgb(80, 86, 84)
+                        } else {
+                            DEEPSEEK_MUTED
+                        })
+                        .bg(bg),
+                ));
+            }
+            buf.set_style(row, Style::default().bg(bg));
+            truncate_line_with_ellipsis_if_overflow(line, row.width as usize).render(row, buf);
+
+            self.center_launch_dropdown_targets
+                .borrow_mut()
+                .push(CenterDropdownMouseTarget {
+                    area: row,
+                    action: action_for_index(index),
+                });
+        }
+    }
+
+    fn clear_center_launch_hit_areas(&self) {
+        self.center_launch_model_area.set(None);
+        self.center_launch_rank_area.set(None);
+        self.center_launch_permissions_area.set(None);
+        self.center_launch_dropdown_targets.borrow_mut().clear();
+    }
+
+    fn render_center_transcript(
+        &self,
+        layout: ChatWidgetLayout,
+        buf: &mut Buffer,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        scroll_from_bottom: usize,
+    ) {
+        let Some(viewport) =
+            self.center_transcript_viewport(layout, transcript_cells, scroll_from_bottom)
+        else {
+            return;
+        };
+        if viewport.lines.is_empty() {
+            return;
+        }
+
+        let visible_height = usize::from(viewport.content_area.height);
+        for visible_index in 0..visible_height.min(viewport.lines.len()) {
+            let Some(source_line) = viewport.lines.get(visible_index) else {
+                break;
+            };
+            source_line.clone().render(
+                Rect::new(
+                    viewport.content_area.x,
+                    viewport.content_area.y.saturating_add(visible_index as u16),
+                    viewport.content_area.width,
+                    1,
+                ),
+                buf,
+            );
+        }
+    }
+
+    fn center_transcript_viewport(
+        &self,
+        layout: ChatWidgetLayout,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        scroll_from_bottom: usize,
+    ) -> Option<CenterTranscriptViewport> {
+        let content_area = layout.active_content_area?;
+        if content_area.is_empty() {
+            return None;
+        }
+        Some(CenterTranscriptViewport {
+            content_area,
+            lines: self.center_transcript_visible_lines(
+                transcript_cells,
+                content_area.width,
+                usize::from(content_area.height),
+                scroll_from_bottom,
+            ),
+        })
+    }
+
+    fn center_transcript_visible_lines(
+        &self,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        width: u16,
+        visible_rows: usize,
+        scroll_from_bottom: usize,
+    ) -> Vec<Line<'static>> {
+        if visible_rows == 0 {
+            return Vec::new();
+        }
+        let mut skip = scroll_from_bottom;
+        let mut needed = visible_rows;
+        let mut lines = VecDeque::new();
+
+        let active_tail = self
+            .center_active_tail_cache(width)
+            .map(|cache| cache.lines.clone())
+            .unwrap_or_default();
+        Self::collect_center_lines_from_bottom(&active_tail, &mut skip, &mut needed, &mut lines);
+
+        if needed > 0 && !active_tail.is_empty() && !transcript_cells.is_empty() {
+            let separator = [Line::from("")];
+            Self::collect_center_lines_from_bottom(&separator, &mut skip, &mut needed, &mut lines);
+        }
+
+        for (index, cell) in transcript_cells.iter().enumerate().rev() {
+            if needed == 0 {
+                break;
+            }
+            let cell_lines = Self::center_wrapped_committed_lines(cell.as_ref(), width);
+            if cell_lines.is_empty() {
+                continue;
+            }
+            Self::collect_center_lines_from_bottom(&cell_lines, &mut skip, &mut needed, &mut lines);
+            if needed > 0 && index > 0 && !cell.is_stream_continuation() {
+                let separator = [Line::from("")];
+                Self::collect_center_lines_from_bottom(
+                    &separator,
+                    &mut skip,
+                    &mut needed,
+                    &mut lines,
+                );
+            }
+        }
+
+        lines.into_iter().collect()
+    }
+
+    fn collect_center_lines_from_bottom(
+        source: &[Line<'static>],
+        skip: &mut usize,
+        needed: &mut usize,
+        output: &mut VecDeque<Line<'static>>,
+    ) {
+        if source.is_empty() || *needed == 0 {
+            return;
+        }
+        if *skip >= source.len() {
+            *skip -= source.len();
+            return;
+        }
+
+        let end = source.len() - *skip;
+        *skip = 0;
+        let start = end.saturating_sub(*needed);
+        for line in source[start..end].iter().rev() {
+            output.push_front(line.clone());
+        }
+        *needed = (*needed).saturating_sub(end.saturating_sub(start));
+    }
+
+    fn center_transcript_row_count_until(
+        &self,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        width: u16,
+        limit: usize,
+    ) -> usize {
+        if limit == 0 {
+            return 0;
+        }
+
+        let mut rows = 0usize;
+        let active_len = self
+            .center_active_tail_cache(width)
+            .map_or(0, |cache| cache.lines.len());
+        rows = rows.saturating_add(active_len);
+        if rows >= limit {
+            return rows;
+        }
+        if active_len > 0 && !transcript_cells.is_empty() {
+            rows = rows.saturating_add(1);
+            if rows >= limit {
+                return rows;
+            }
+        }
+
+        for (index, cell) in transcript_cells.iter().enumerate().rev() {
+            let cell_len = Self::center_wrapped_committed_lines(cell.as_ref(), width).len();
+            if cell_len == 0 {
+                continue;
+            }
+            rows = rows.saturating_add(cell_len);
+            if rows >= limit {
+                return rows;
+            }
+            if index > 0 && !cell.is_stream_continuation() {
+                rows = rows.saturating_add(1);
+                if rows >= limit {
+                    return rows;
+                }
+            }
+        }
+
+        rows
+    }
+
+    fn center_wrapped_committed_lines(cell: &dyn HistoryCell, width: u16) -> Vec<Line<'static>> {
+        Self::center_wrap_lines(cell.committed_display_lines(width), width)
+    }
+
+    fn center_active_tail_cache(
+        &self,
+        width: u16,
+    ) -> Option<std::cell::Ref<'_, CenterActiveTailCache>> {
+        let Some(key) = self.active_cell_render_cache_key(width) else {
+            self.center_active_tail_cache.borrow_mut().take();
+            return None;
+        };
+        let needs_refresh = self
+            .center_active_tail_cache
+            .borrow()
+            .as_ref()
+            .is_none_or(|cache| cache.key != key);
+        if needs_refresh {
+            let lines = {
+                let cache = self.active_cell_render_cache(width)?;
+                Self::center_wrap_lines(cache.lines.clone(), width)
+            };
+            *self.center_active_tail_cache.borrow_mut() =
+                Some(CenterActiveTailCache { key, lines });
+        }
+
+        Some(std::cell::Ref::map(
+            self.center_active_tail_cache.borrow(),
+            |cache| {
+                cache
+                    .as_ref()
+                    .expect("center active tail cache should be populated")
+            },
+        ))
+    }
+
+    fn center_wrap_lines(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
+        if lines.is_empty() {
+            Vec::new()
+        } else {
+            crate::wrapping::word_wrap_lines(lines, usize::from(width.max(1)))
+        }
     }
 
     fn active_cell_render_cache_key(&self, width: u16) -> Option<ActiveCellRenderCacheKey> {
@@ -12493,7 +14385,6 @@ impl ChatWidget {
             .try_into()
             .unwrap_or(0);
         let mouse_targets = cell.mouse_targets(key.width);
-
         ActiveCellRenderCache {
             key,
             lines,
@@ -12806,6 +14697,50 @@ fn extract_first_bold(s: &str) -> Option<String> {
         i += 1;
     }
     None
+}
+
+fn reasoning_status_preview(text: &str, max_lines: usize) -> Option<String> {
+    let max_lines = max_lines.max(1);
+    let mut lines = text
+        .lines()
+        .rev()
+        .filter_map(normalize_reasoning_status_line)
+        .take(max_lines)
+        .collect::<Vec<_>>();
+    if lines.is_empty() {
+        return None;
+    }
+    lines.reverse();
+    Some(lines.join("\n"))
+}
+
+fn normalize_reasoning_status_line(line: &str) -> Option<String> {
+    let normalized = line.replace("**", "");
+    let normalized = normalized.trim();
+    if normalized.is_empty()
+        || normalized
+            .chars()
+            .all(|ch| matches!(ch, '*' | '-' | '_' | '#' | '=' | '`'))
+    {
+        None
+    } else {
+        Some(truncate_text(normalized, 220))
+    }
+}
+
+fn format_goal_elapsed(seconds: i64) -> String {
+    let seconds = seconds.max(0);
+    if seconds < 60 {
+        return "<1m".to_string();
+    }
+    let minutes = (seconds + 59) / 60;
+    let hours = minutes / 60;
+    let remaining_minutes = minutes % 60;
+    match (hours, remaining_minutes) {
+        (0, minutes) => format!("{minutes}m"),
+        (hours, 0) => format!("{hours}h"),
+        (hours, minutes) => format!("{hours}h{minutes}m"),
+    }
 }
 
 fn hook_event_label(event_name: praxis_protocol::protocol::HookEventName) -> &'static str {

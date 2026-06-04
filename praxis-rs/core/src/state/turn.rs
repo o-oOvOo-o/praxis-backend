@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
+use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
-use tokio_util::task::AbortOnDropHandle;
 
 use praxis_protocol::dynamic_tools::DynamicToolResponse;
 use praxis_protocol::models::ResponseInputItem;
@@ -50,10 +50,46 @@ pub(crate) struct RunningTask {
     pub(crate) kind: TaskKind,
     pub(crate) task: Arc<dyn SessionTask>,
     pub(crate) cancellation_token: CancellationToken,
-    pub(crate) handle: Arc<AbortOnDropHandle<()>>,
+    pub(crate) handle: AbortHandle,
     pub(crate) turn_context: Arc<TurnContext>,
+    abort_on_drop: bool,
     // Timer recorded when the task drops to capture the full turn duration.
     pub(crate) _timer: Option<praxis_otel::Timer>,
+}
+
+impl RunningTask {
+    pub(crate) fn new(
+        done: Arc<Notify>,
+        kind: TaskKind,
+        task: Arc<dyn SessionTask>,
+        cancellation_token: CancellationToken,
+        handle: AbortHandle,
+        turn_context: Arc<TurnContext>,
+        timer: Option<praxis_otel::Timer>,
+    ) -> Self {
+        Self {
+            done,
+            kind,
+            task,
+            cancellation_token,
+            handle,
+            turn_context,
+            abort_on_drop: true,
+            _timer: timer,
+        }
+    }
+
+    pub(crate) fn disarm_abort_on_drop(&mut self) {
+        self.abort_on_drop = false;
+    }
+}
+
+impl Drop for RunningTask {
+    fn drop(&mut self) {
+        if self.abort_on_drop {
+            self.handle.abort();
+        }
+    }
 }
 
 impl ActiveTurn {
@@ -63,7 +99,9 @@ impl ActiveTurn {
     }
 
     pub(crate) fn remove_task(&mut self, sub_id: &str) -> bool {
-        self.tasks.swap_remove(sub_id);
+        if let Some(mut task) = self.tasks.swap_remove(sub_id) {
+            task.disarm_abort_on_drop();
+        }
         self.tasks.is_empty()
     }
 

@@ -209,11 +209,7 @@ pub fn backoff(attempt: u64) -> Duration {
 }
 
 pub(crate) fn error_or_panic(message: impl std::string::ToString) {
-    if cfg!(debug_assertions) {
-        panic!("{}", message.to_string());
-    } else {
-        error!("{}", message.to_string());
-    }
+    error!("{}", message.to_string());
 }
 
 pub(crate) fn truncate_to_char_boundary(value: &mut String, max_len: usize) {

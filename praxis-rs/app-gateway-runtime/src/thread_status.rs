@@ -6,6 +6,9 @@ use crate::outgoing_message::OutgoingMessageSender;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::Thread;
 use praxis_app_gateway_protocol::ThreadActiveFlag;
+use praxis_app_gateway_protocol::ThreadControlChangedNotification;
+use praxis_app_gateway_protocol::ThreadControlState;
+use praxis_app_gateway_protocol::ThreadController;
 use praxis_app_gateway_protocol::ThreadStatus;
 use praxis_app_gateway_protocol::ThreadStatusChangedNotification;
 use std::collections::HashMap;
@@ -105,6 +108,7 @@ impl ThreadWatchManager {
     }
 
     pub(crate) async fn remove_thread(&self, thread_id: &str) {
+        self.release_thread_control(thread_id).await;
         let thread_id = thread_id.to_string();
         self.mutate_and_publish(move |state| state.remove_thread(&thread_id))
             .await;
@@ -112,6 +116,16 @@ impl ThreadWatchManager {
 
     pub(crate) async fn loaded_status_for_thread(&self, thread_id: &str) -> ThreadStatus {
         self.state.lock().await.loaded_status_for_thread(thread_id)
+    }
+
+    pub(crate) async fn loaded_control_state_for_thread(
+        &self,
+        thread_id: &str,
+    ) -> Option<ThreadControlState> {
+        self.state
+            .lock()
+            .await
+            .loaded_control_state_for_thread(thread_id)
     }
 
     pub(crate) async fn loaded_statuses_for_threads(
@@ -124,6 +138,21 @@ impl ThreadWatchManager {
             .map(|thread_id| {
                 let status = state.loaded_status_for_thread(&thread_id);
                 (thread_id, status)
+            })
+            .collect()
+    }
+
+    pub(crate) async fn loaded_control_states_for_threads(
+        &self,
+        thread_ids: Vec<String>,
+    ) -> HashMap<String, ThreadControlState> {
+        let state = self.state.lock().await;
+        thread_ids
+            .into_iter()
+            .filter_map(|thread_id| {
+                state
+                    .loaded_control_state_for_thread(&thread_id)
+                    .map(|control_state| (thread_id, control_state))
             })
             .collect()
     }
@@ -161,6 +190,7 @@ impl ThreadWatchManager {
     }
 
     pub(crate) async fn note_thread_shutdown(&self, thread_id: &str) {
+        self.release_thread_control(thread_id).await;
         self.update_runtime_for_thread(thread_id, |runtime| {
             runtime.running = false;
             runtime.pending_permission_requests = 0;
@@ -171,6 +201,7 @@ impl ThreadWatchManager {
     }
 
     pub(crate) async fn note_system_error(&self, thread_id: &str) {
+        self.release_thread_control(thread_id).await;
         self.update_runtime_for_thread(thread_id, |runtime| {
             runtime.running = false;
             runtime.pending_permission_requests = 0;
@@ -181,12 +212,119 @@ impl ThreadWatchManager {
     }
 
     async fn clear_active_state(&self, thread_id: &str) {
-        self.update_runtime_for_thread(thread_id, move |runtime| {
+        let thread_id = thread_id.to_string();
+        let (status_notification, running_turn_count) = {
+            let mut state = self.state.lock().await;
+            let previous_status = state.status_for(&thread_id);
+            let runtime = state
+                .runtime_by_thread_id
+                .entry(thread_id.clone())
+                .or_default();
+            runtime.is_loaded = true;
             runtime.running = false;
             runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
-        })
+            let status_notification =
+                state.status_changed_notification(thread_id.clone(), previous_status);
+            let running_turn_count = state.running_turn_count();
+            (status_notification, running_turn_count)
+        };
+        self.publish_runtime_notifications(status_notification, None, running_turn_count)
+            .await;
+    }
+
+    pub(crate) async fn acquire_thread_control(
+        &self,
+        thread_id: &str,
+        controller: ThreadController,
+        reason: Option<String>,
+    ) -> ThreadControlState {
+        let thread_id = thread_id.to_string();
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let (control_state, status_notification, control_notification, running_turn_count) =
+            {
+                let mut state = self.state.lock().await;
+                let previous_status = state.status_for(&thread_id);
+                let previous_control = state.loaded_control_state_for_thread(&thread_id);
+                let acquired_at = previous_control
+                    .as_ref()
+                    .filter(|control| control.controller == controller)
+                    .map(|control| control.acquired_at)
+                    .unwrap_or(now);
+                let control_state = ThreadControlState {
+                    controller,
+                    reason,
+                    read_only: true,
+                    acquired_at,
+                    updated_at: now,
+                };
+                let runtime = state
+                    .runtime_by_thread_id
+                    .entry(thread_id.clone())
+                    .or_default();
+                runtime.is_loaded = true;
+                runtime.control_state = Some(control_state.clone());
+
+                let status_notification =
+                    state.status_changed_notification(thread_id.clone(), previous_status);
+                let control_notification = (previous_control.as_ref() != Some(&control_state))
+                    .then(|| ThreadControlChangedNotification {
+                        thread_id: thread_id.clone(),
+                        control_state: Some(control_state.clone()),
+                    });
+                let running_turn_count = state.running_turn_count();
+                (
+                    control_state,
+                    status_notification,
+                    control_notification,
+                    running_turn_count,
+                )
+            };
+        self.publish_runtime_notifications(
+            status_notification,
+            control_notification,
+            running_turn_count,
+        )
         .await;
+        control_state
+    }
+
+    pub(crate) async fn release_thread_control(
+        &self,
+        thread_id: &str,
+    ) -> Option<ThreadControlState> {
+        let thread_id = thread_id.to_string();
+        let (previous_control, status_notification, control_notification, running_turn_count) = {
+            let mut state = self.state.lock().await;
+            let previous_status = state.status_for(&thread_id);
+            let previous_control = state
+                .runtime_by_thread_id
+                .get_mut(&thread_id)
+                .and_then(|runtime| runtime.control_state.take());
+            let status_notification =
+                state.status_changed_notification(thread_id.clone(), previous_status);
+            let control_notification =
+                previous_control
+                    .as_ref()
+                    .map(|_| ThreadControlChangedNotification {
+                        thread_id: thread_id.clone(),
+                        control_state: None,
+                    });
+            let running_turn_count = state.running_turn_count();
+            (
+                previous_control,
+                status_notification,
+                control_notification,
+                running_turn_count,
+            )
+        };
+        self.publish_runtime_notifications(
+            status_notification,
+            control_notification,
+            running_turn_count,
+        )
+        .await;
+        previous_control
     }
 
     pub(crate) async fn note_permission_requested(
@@ -226,21 +364,34 @@ impl ThreadWatchManager {
         let (notification, running_turn_count) = {
             let mut state = self.state.lock().await;
             let notification = mutate(&mut state);
-            let running_turn_count = state
-                .runtime_by_thread_id
-                .values()
-                .filter(|runtime| runtime.running)
-                .count();
+            let running_turn_count = state.running_turn_count();
             (notification, running_turn_count)
         };
+        self.publish_runtime_notifications(notification, None, running_turn_count)
+            .await;
+    }
+
+    async fn publish_runtime_notifications(
+        &self,
+        status_notification: Option<ThreadStatusChangedNotification>,
+        control_notification: Option<ThreadControlChangedNotification>,
+        running_turn_count: usize,
+    ) {
         let _ = self.running_turn_count_tx.send(running_turn_count);
 
-        if let Some(notification) = notification
-            && let Some(outgoing) = &self.outgoing
-        {
-            outgoing
-                .send_server_notification(ServerNotification::ThreadStatusChanged(notification))
-                .await;
+        if let Some(outgoing) = &self.outgoing {
+            if let Some(notification) = status_notification {
+                outgoing
+                    .send_server_notification(ServerNotification::ThreadStatusChanged(notification))
+                    .await;
+            }
+            if let Some(notification) = control_notification {
+                outgoing
+                    .send_server_notification(ServerNotification::ThreadControlChanged(
+                        notification,
+                    ))
+                    .await;
+            }
         }
     }
 
@@ -279,17 +430,49 @@ impl ThreadWatchManager {
 pub(crate) fn resolve_thread_status(
     status: ThreadStatus,
     has_in_progress_turn: bool,
+    control_state: Option<&ThreadControlState>,
 ) -> ThreadStatus {
-    // Running-turn events can arrive before the watch runtime state is observed by
-    // the listener loop. In that window we prefer to reflect a real active turn as
-    // `Active` instead of `Idle`/`NotLoaded`.
-    if has_in_progress_turn && matches!(status, ThreadStatus::Idle | ThreadStatus::NotLoaded) {
-        return ThreadStatus::Active {
-            active_flags: Vec::new(),
-        };
+    let is_controlled = control_state.is_some();
+    match status {
+        ThreadStatus::Active { mut active_flags } => {
+            push_unique_active_flag(
+                &mut active_flags,
+                has_in_progress_turn,
+                ThreadActiveFlag::Running,
+            );
+            push_unique_active_flag(
+                &mut active_flags,
+                is_controlled,
+                ThreadActiveFlag::Controlled,
+            );
+            ThreadStatus::Active { active_flags }
+        }
+        ThreadStatus::Idle | ThreadStatus::NotLoaded if has_in_progress_turn || is_controlled => {
+            let mut active_flags = Vec::new();
+            push_unique_active_flag(
+                &mut active_flags,
+                has_in_progress_turn,
+                ThreadActiveFlag::Running,
+            );
+            push_unique_active_flag(
+                &mut active_flags,
+                is_controlled,
+                ThreadActiveFlag::Controlled,
+            );
+            ThreadStatus::Active { active_flags }
+        }
+        status => status,
     }
+}
 
-    status
+fn push_unique_active_flag(
+    active_flags: &mut Vec<ThreadActiveFlag>,
+    should_insert: bool,
+    flag: ThreadActiveFlag,
+) {
+    if should_insert && !active_flags.contains(&flag) {
+        active_flags.push(flag);
+    }
 }
 
 #[derive(Default)]
@@ -358,6 +541,19 @@ impl ThreadWatchState {
             .unwrap_or(ThreadStatus::NotLoaded)
     }
 
+    fn loaded_control_state_for_thread(&self, thread_id: &str) -> Option<ThreadControlState> {
+        self.runtime_by_thread_id
+            .get(thread_id)
+            .and_then(|runtime| runtime.control_state.clone())
+    }
+
+    fn running_turn_count(&self) -> usize {
+        self.runtime_by_thread_id
+            .values()
+            .filter(|runtime| runtime.running)
+            .count()
+    }
+
     fn status_changed_notification(
         &self,
         thread_id: String,
@@ -380,6 +576,7 @@ struct RuntimeFacts {
     pending_permission_requests: u32,
     pending_user_input_requests: u32,
     has_system_error: bool,
+    control_state: Option<ThreadControlState>,
 }
 
 fn loaded_thread_status(runtime: &RuntimeFacts) -> ThreadStatus {
@@ -388,14 +585,20 @@ fn loaded_thread_status(runtime: &RuntimeFacts) -> ThreadStatus {
     }
 
     let mut active_flags = Vec::new();
+    if runtime.running {
+        active_flags.push(ThreadActiveFlag::Running);
+    }
     if runtime.pending_permission_requests > 0 {
         active_flags.push(ThreadActiveFlag::WaitingOnApproval);
     }
     if runtime.pending_user_input_requests > 0 {
         active_flags.push(ThreadActiveFlag::WaitingOnUserInput);
     }
+    if runtime.control_state.is_some() {
+        active_flags.push(ThreadActiveFlag::Controlled);
+    }
 
-    if runtime.running || !active_flags.is_empty() {
+    if !active_flags.is_empty() {
         return ThreadStatus::Active { active_flags };
     }
 
@@ -445,7 +648,7 @@ mod tests {
                 .loaded_status_for_thread(NON_INTERACTIVE_THREAD_ID)
                 .await,
             ThreadStatus::Active {
-                active_flags: vec![],
+                active_flags: vec![ThreadActiveFlag::Running],
             },
         );
     }
@@ -466,7 +669,7 @@ mod tests {
                 .loaded_status_for_thread(INTERACTIVE_THREAD_ID)
                 .await,
             ThreadStatus::Active {
-                active_flags: vec![],
+                active_flags: vec![ThreadActiveFlag::Running],
             },
         );
 
@@ -478,7 +681,10 @@ mod tests {
                 .loaded_status_for_thread(INTERACTIVE_THREAD_ID)
                 .await,
             ThreadStatus::Active {
-                active_flags: vec![ThreadActiveFlag::WaitingOnApproval],
+                active_flags: vec![
+                    ThreadActiveFlag::Running,
+                    ThreadActiveFlag::WaitingOnApproval,
+                ],
             },
         );
 
@@ -491,6 +697,7 @@ mod tests {
                 .await,
             ThreadStatus::Active {
                 active_flags: vec![
+                    ThreadActiveFlag::Running,
                     ThreadActiveFlag::WaitingOnApproval,
                     ThreadActiveFlag::WaitingOnUserInput,
                 ],
@@ -502,7 +709,10 @@ mod tests {
             &manager,
             INTERACTIVE_THREAD_ID,
             ThreadStatus::Active {
-                active_flags: vec![ThreadActiveFlag::WaitingOnUserInput],
+                active_flags: vec![
+                    ThreadActiveFlag::Running,
+                    ThreadActiveFlag::WaitingOnUserInput,
+                ],
             },
         )
         .await;
@@ -512,7 +722,7 @@ mod tests {
             &manager,
             INTERACTIVE_THREAD_ID,
             ThreadStatus::Active {
-                active_flags: vec![],
+                active_flags: vec![ThreadActiveFlag::Running],
             },
         )
         .await;
@@ -530,20 +740,52 @@ mod tests {
 
     #[test]
     fn resolves_in_progress_turn_to_active_status() {
-        let status = resolve_thread_status(ThreadStatus::Idle, /*has_in_progress_turn*/ true);
+        let status =
+            resolve_thread_status(ThreadStatus::Idle, /*has_in_progress_turn*/ true, None);
         assert_eq!(
             status,
             ThreadStatus::Active {
-                active_flags: Vec::new(),
+                active_flags: vec![ThreadActiveFlag::Running],
             }
         );
 
-        let status =
-            resolve_thread_status(ThreadStatus::NotLoaded, /*has_in_progress_turn*/ true);
+        let status = resolve_thread_status(
+            ThreadStatus::NotLoaded,
+            /*has_in_progress_turn*/ true,
+            None,
+        );
         assert_eq!(
             status,
             ThreadStatus::Active {
-                active_flags: Vec::new(),
+                active_flags: vec![ThreadActiveFlag::Running],
+            }
+        );
+    }
+
+    #[test]
+    fn resolves_controlled_in_progress_turn_to_running_controlled_status() {
+        let control_state = ThreadControlState {
+            controller: ThreadController {
+                kind: praxis_app_gateway_protocol::ThreadControllerKind::External,
+                id: "test-controller".to_string(),
+                label: Some("test controller".to_string()),
+                rank: Some(0),
+            },
+            reason: Some("test lock".to_string()),
+            read_only: true,
+            acquired_at: 1,
+            updated_at: 1,
+        };
+
+        let status = resolve_thread_status(
+            ThreadStatus::Idle,
+            /*has_in_progress_turn*/ true,
+            Some(&control_state),
+        );
+        assert_eq!(
+            status,
+            ThreadStatus::Active {
+                active_flags: vec![ThreadActiveFlag::Running, ThreadActiveFlag::Controlled],
             }
         );
     }
@@ -551,13 +793,18 @@ mod tests {
     #[test]
     fn keeps_status_when_no_in_progress_turn() {
         assert_eq!(
-            resolve_thread_status(ThreadStatus::Idle, /*has_in_progress_turn*/ false),
+            resolve_thread_status(
+                ThreadStatus::Idle,
+                /*has_in_progress_turn*/ false,
+                None
+            ),
             ThreadStatus::Idle
         );
         assert_eq!(
             resolve_thread_status(
                 ThreadStatus::SystemError,
-                /*has_in_progress_turn*/ false
+                /*has_in_progress_turn*/ false,
+                None
             ),
             ThreadStatus::SystemError
         );
@@ -589,7 +836,7 @@ mod tests {
                 .loaded_status_for_thread(INTERACTIVE_THREAD_ID)
                 .await,
             ThreadStatus::Active {
-                active_flags: vec![],
+                active_flags: vec![ThreadActiveFlag::Running],
             },
         );
     }
@@ -636,7 +883,7 @@ mod tests {
         assert_eq!(
             statuses.get(INTERACTIVE_THREAD_ID),
             Some(&ThreadStatus::Active {
-                active_flags: vec![],
+                active_flags: vec![ThreadActiveFlag::Running],
             }),
         );
         assert_eq!(
@@ -672,6 +919,61 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn control_lock_survives_turn_completion_until_explicit_release() {
+        let manager = ThreadWatchManager::new();
+        manager
+            .upsert_thread(test_thread(
+                INTERACTIVE_THREAD_ID,
+                praxis_app_gateway_protocol::SessionSource::Cli,
+            ))
+            .await;
+        let controller = ThreadController {
+            kind: praxis_app_gateway_protocol::ThreadControllerKind::External,
+            id: "test-controller".to_string(),
+            label: Some("test controller".to_string()),
+            rank: Some(0),
+        };
+
+        let control_state = manager
+            .acquire_thread_control(
+                INTERACTIVE_THREAD_ID,
+                controller,
+                Some("test lock".to_string()),
+            )
+            .await;
+        manager.note_turn_started(INTERACTIVE_THREAD_ID).await;
+        manager
+            .note_turn_completed(INTERACTIVE_THREAD_ID, false)
+            .await;
+
+        assert_eq!(
+            manager
+                .loaded_control_state_for_thread(INTERACTIVE_THREAD_ID)
+                .await,
+            Some(control_state.clone()),
+        );
+        assert_eq!(
+            manager
+                .loaded_status_for_thread(INTERACTIVE_THREAD_ID)
+                .await,
+            ThreadStatus::Active {
+                active_flags: vec![ThreadActiveFlag::Controlled],
+            },
+        );
+
+        assert_eq!(
+            manager.release_thread_control(INTERACTIVE_THREAD_ID).await,
+            Some(control_state),
+        );
+        assert_eq!(
+            manager
+                .loaded_status_for_thread(INTERACTIVE_THREAD_ID)
+                .await,
+            ThreadStatus::Idle,
+        );
+    }
+
+    #[tokio::test]
     async fn status_change_emits_notification() {
         let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
         let manager = ThreadWatchManager::new_with_outgoing(Arc::new(OutgoingMessageSender::new(
@@ -698,7 +1000,7 @@ mod tests {
             ThreadStatusChangedNotification {
                 thread_id: INTERACTIVE_THREAD_ID.to_string(),
                 status: ThreadStatus::Active {
-                    active_flags: vec![],
+                    active_flags: vec![ThreadActiveFlag::Running],
                 },
             },
         );
@@ -746,7 +1048,7 @@ mod tests {
             ThreadStatusChangedNotification {
                 thread_id: INTERACTIVE_THREAD_ID.to_string(),
                 status: ThreadStatus::Active {
-                    active_flags: vec![],
+                    active_flags: vec![ThreadActiveFlag::Running],
                 },
             },
         );
@@ -796,6 +1098,7 @@ mod tests {
             summary: None,
             ephemeral: false,
             model_provider: "mock-provider".to_string(),
+            model: None,
             created_at: 0,
             updated_at: 0,
             status: ThreadStatus::NotLoaded,
@@ -809,6 +1112,8 @@ mod tests {
             name: None,
             total_cost_usd: None,
             last_cost_usd: None,
+            token_usage: None,
+            control_state: None,
             selfwork_plan_path: None,
             turns: Vec::new(),
         }

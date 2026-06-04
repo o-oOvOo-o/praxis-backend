@@ -2020,6 +2020,8 @@ mod tests {
                 name: Some("thread".to_string()),
                 total_cost_usd: None,
                 last_cost_usd: None,
+                token_usage: None,
+                control_state: None,
                 turns: vec![],
             },
             model: "gpt-5.4".to_string(),

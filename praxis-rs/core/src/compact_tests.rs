@@ -185,6 +185,104 @@ fn build_token_limited_compacted_history_appends_summary_message() {
     assert_eq!(summary, summary_text);
 }
 
+fn user_message(text: impl Into<String>) -> ResponseItem {
+    ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText { text: text.into() }],
+        end_turn: None,
+        phase: None,
+    }
+}
+
+fn assistant_message(text: impl Into<String>) -> ResponseItem {
+    ResponseItem::Message {
+        id: None,
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText { text: text.into() }],
+        end_turn: None,
+        phase: None,
+    }
+}
+
+#[test]
+fn manual_local_compaction_summarizes_all_visible_items() {
+    let history = vec![user_message("first"), assistant_message("second")];
+
+    let plan = prepare_local_compaction(history, LocalCompactMode::Manual);
+
+    assert_eq!(plan.summary_items.len(), 2);
+    assert!(plan.retained_items.is_empty());
+}
+
+#[test]
+fn auto_local_compaction_keeps_recent_suffix_after_cut() {
+    let large = "x".repeat(90_000);
+    let history = vec![
+        user_message("old user"),
+        assistant_message("old assistant"),
+        user_message(format!("middle user {large}")),
+        assistant_message("middle assistant"),
+        user_message("recent user"),
+        assistant_message("recent assistant"),
+    ];
+
+    let plan = prepare_local_compaction(history, LocalCompactMode::Auto);
+
+    assert_eq!(plan.summary_items.len(), 2);
+    assert_eq!(plan.retained_items.len(), 4);
+    assert_eq!(
+        plan.retained_items.first(),
+        Some(&user_message(format!("middle user {large}")))
+    );
+}
+
+#[test]
+fn auto_local_compaction_does_not_orphan_tool_output_suffix() {
+    let call_id = "call-1".to_string();
+    let history = vec![
+        user_message("old user"),
+        user_message("x".repeat(90_000)),
+        ResponseItem::FunctionCall {
+            id: None,
+            name: "shell_command".to_string(),
+            namespace: None,
+            arguments: "{\"command\":\"pwd\"}".to_string(),
+            call_id: call_id.clone(),
+        },
+        ResponseItem::FunctionCallOutput {
+            call_id,
+            output: praxis_protocol::models::FunctionCallOutputPayload::from_text(
+                "output".repeat(30_000),
+            ),
+        },
+    ];
+
+    let plan = prepare_local_compaction(history, LocalCompactMode::Auto);
+
+    assert!(matches!(
+        plan.retained_items.first(),
+        Some(ResponseItem::FunctionCall { .. })
+    ));
+    assert!(matches!(
+        plan.retained_items.get(1),
+        Some(ResponseItem::FunctionCallOutput { .. })
+    ));
+}
+
+#[test]
+fn local_compaction_extracts_previous_summary_out_of_conversation() {
+    let prior_summary = user_message(format!("{SUMMARY_PREFIX}\nold summary"));
+    let history = vec![prior_summary, user_message("new work")];
+
+    let plan = prepare_local_compaction(history, LocalCompactMode::Manual);
+    let prompt = plan.to_prompt_text(UPDATE_SUMMARIZATION_PROMPT);
+
+    assert_eq!(plan.previous_summary.as_deref(), Some("old summary"));
+    assert!(!serialize_compaction_conversation(&plan.summary_items, 2000).contains("old summary"));
+    assert!(prompt.contains("<previous-summary>\nold summary\n</previous-summary>"));
+}
+
 #[tokio::test]
 async fn process_compacted_history_replaces_developer_messages() {
     let compacted_history = vec![

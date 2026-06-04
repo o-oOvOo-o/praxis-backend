@@ -115,6 +115,7 @@ mod tests {
             summary: None,
             ephemeral: false,
             model_provider: "openai".to_string(),
+            model: None,
             created_at: 0,
             updated_at: 0,
             status: ThreadStatus::Idle,
@@ -128,6 +129,8 @@ mod tests {
             name: None,
             total_cost_usd: None,
             last_cost_usd: None,
+            token_usage: None,
+            control_state: None,
             selfwork_plan_path: None,
             turns: Vec::new(),
         }

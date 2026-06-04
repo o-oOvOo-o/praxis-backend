@@ -1,4 +1,5 @@
 use super::*;
+use praxis_app_gateway_protocol::ThreadControlState;
 
 #[derive(Clone)]
 pub(crate) struct ListenerTaskContext {
@@ -326,11 +327,16 @@ async fn handle_pending_thread_resume_request(
         .loaded_status_for_thread(&thread.id)
         .await;
 
+    let control_state = thread_watch_manager
+        .loaded_control_state_for_thread(&thread.id)
+        .await;
     set_thread_status_and_interrupt_stale_turns(
         &mut thread,
         thread_status,
         has_live_in_progress_turn,
+        control_state.as_ref(),
     );
+    thread.control_state = control_state;
 
     let state_db = praxis_rollout::state_db::open_if_present(praxis_home, "").await;
     thread.name = praxis_rollout::ThreadNameResolver::new(state_db.as_deref())
@@ -434,8 +440,9 @@ pub(super) fn set_thread_status_and_interrupt_stale_turns(
     thread: &mut Thread,
     loaded_status: ThreadStatus,
     has_live_in_progress_turn: bool,
+    control_state: Option<&ThreadControlState>,
 ) {
-    let status = resolve_thread_status(loaded_status, has_live_in_progress_turn);
+    let status = resolve_thread_status(loaded_status, has_live_in_progress_turn, control_state);
     if !matches!(status, ThreadStatus::Active { .. }) {
         for turn in &mut thread.turns {
             if matches!(turn.status, TurnStatus::InProgress) {

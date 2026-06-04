@@ -101,7 +101,7 @@ impl OnboardingScreen {
         )));
         if show_login_screen {
             let highlighted_mode = match forced_login_method {
-                Some(ForcedLoginMethod::Api) => SignInOption::ApiKey,
+                Some(ForcedLoginMethod::Api) => SignInOption::DeepSeekApiKey,
                 _ => SignInOption::ChatGpt,
             };
             if let Some(app_gateway_request_handle) = app_gateway_request_handle {
@@ -477,19 +477,19 @@ pub(crate) async fn run_onboarding_app(
                                 })
                             {
                                 // Reset any lingering SGR (underline/color) before clearing
-                                let _ = ratatui::crossterm::execute!(
+                                let _ = crossterm::execute!(
                                     std::io::stdout(),
-                                    ratatui::crossterm::style::SetAttribute(
-                                        ratatui::crossterm::style::Attribute::Reset
+                                    crossterm::style::SetAttribute(
+                                        crossterm::style::Attribute::Reset
                                     ),
-                                    ratatui::crossterm::style::SetAttribute(
-                                        ratatui::crossterm::style::Attribute::NoUnderline
+                                    crossterm::style::SetAttribute(
+                                        crossterm::style::Attribute::NoUnderline
                                     ),
-                                    ratatui::crossterm::style::SetForegroundColor(
-                                        ratatui::crossterm::style::Color::Reset
+                                    crossterm::style::SetForegroundColor(
+                                        crossterm::style::Color::Reset
                                     ),
-                                    ratatui::crossterm::style::SetBackgroundColor(
-                                        ratatui::crossterm::style::Color::Reset
+                                    crossterm::style::SetBackgroundColor(
+                                        crossterm::style::Color::Reset
                                     )
                                 );
                                 let _ = tui.terminal.clear();

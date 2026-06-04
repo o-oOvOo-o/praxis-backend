@@ -39,7 +39,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::ApplyPatchHandler;
     use crate::tools::handlers::CodeModeExecuteHandler;
     use crate::tools::handlers::CodeModeWaitHandler;
+    use crate::tools::handlers::CreateGoalHandler;
     use crate::tools::handlers::DynamicToolHandler;
+    use crate::tools::handlers::GetGoalHandler;
     use crate::tools::handlers::JsReplHandler;
     use crate::tools::handlers::JsReplResetHandler;
     use crate::tools::handlers::ListDirHandler;
@@ -54,7 +56,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::ToolSearchHandler;
     use crate::tools::handlers::ToolSuggestHandler;
     use crate::tools::handlers::UnifiedExecHandler;
+    use crate::tools::handlers::UpdateGoalHandler;
     use crate::tools::handlers::ViewImageHandler;
+    use crate::tools::handlers::WebSearchHandler;
     use crate::tools::handlers::multi_agents::AssignTaskHandler;
     use crate::tools::handlers::multi_agents::CloseAgentHandler;
     use crate::tools::handlers::multi_agents::ListAgentsHandler;
@@ -66,11 +70,6 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::multi_agents::UpdateRuntimeCommandHandler;
     use crate::tools::handlers::multi_agents::UpdateWorkerRequestHandler;
     use crate::tools::handlers::multi_agents::WaitAgentHandler;
-    use crate::tools::handlers::team::TeamReadHandler;
-    use crate::tools::handlers::team::TeamSendMessageHandler;
-    use crate::tools::handlers::team::TeamTaskCreateHandler;
-    use crate::tools::handlers::team::TeamTaskListHandler;
-    use crate::tools::handlers::team::TeamTaskUpdateHandler;
 
     let mut builder = ToolRegistryBuilder::new();
     let app_tool_sources = app_tools.as_ref().map(|app_tools| {
@@ -106,6 +105,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
     let shell_handler = Arc::new(ShellHandler);
     let unified_exec_handler = Arc::new(UnifiedExecHandler);
     let plan_handler = Arc::new(PlanHandler);
+    let create_goal_handler = Arc::new(CreateGoalHandler);
+    let get_goal_handler = Arc::new(GetGoalHandler);
+    let update_goal_handler = Arc::new(UpdateGoalHandler);
     let apply_patch_handler = Arc::new(ApplyPatchHandler);
     let dynamic_tool_handler = Arc::new(DynamicToolHandler);
     let view_image_handler = Arc::new(ViewImageHandler);
@@ -122,6 +124,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
     let code_mode_wait_handler = Arc::new(CodeModeWaitHandler);
     let js_repl_handler = Arc::new(JsReplHandler);
     let js_repl_reset_handler = Arc::new(JsReplResetHandler);
+    let web_search_handler = Arc::new(WebSearchHandler);
 
     for spec in plan.specs {
         if spec.supports_parallel_tool_calls {
@@ -155,6 +158,15 @@ pub(crate) fn build_specs_with_discoverable_tools(
             }
             ToolHandlerKind::DynamicTool => {
                 builder.register_handler(handler.name, dynamic_tool_handler.clone());
+            }
+            ToolHandlerKind::CreateGoal => {
+                builder.register_handler(handler.name, create_goal_handler.clone());
+            }
+            ToolHandlerKind::GetGoal => {
+                builder.register_handler(handler.name, get_goal_handler.clone());
+            }
+            ToolHandlerKind::UpdateGoal => {
+                builder.register_handler(handler.name, update_goal_handler.clone());
             }
             ToolHandlerKind::JsRepl => {
                 builder.register_handler(handler.name, js_repl_handler.clone());
@@ -204,21 +216,6 @@ pub(crate) fn build_specs_with_discoverable_tools(
             ToolHandlerKind::SubmitWorkerRequest => {
                 builder.register_handler(handler.name, Arc::new(SubmitWorkerRequestHandler));
             }
-            ToolHandlerKind::TeamRead => {
-                builder.register_handler(handler.name, Arc::new(TeamReadHandler));
-            }
-            ToolHandlerKind::TeamSendMessage => {
-                builder.register_handler(handler.name, Arc::new(TeamSendMessageHandler));
-            }
-            ToolHandlerKind::TeamTaskCreate => {
-                builder.register_handler(handler.name, Arc::new(TeamTaskCreateHandler));
-            }
-            ToolHandlerKind::TeamTaskList => {
-                builder.register_handler(handler.name, Arc::new(TeamTaskListHandler));
-            }
-            ToolHandlerKind::TeamTaskUpdate => {
-                builder.register_handler(handler.name, Arc::new(TeamTaskUpdateHandler));
-            }
             ToolHandlerKind::TestSync => {
                 builder.register_handler(handler.name, Arc::new(TestSyncHandler));
             }
@@ -249,6 +246,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
             }
             ToolHandlerKind::WaitAgent => {
                 builder.register_handler(handler.name, Arc::new(WaitAgentHandler));
+            }
+            ToolHandlerKind::WebSearch => {
+                builder.register_handler(handler.name, web_search_handler.clone());
             }
         }
     }

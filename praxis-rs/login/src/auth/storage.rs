@@ -266,45 +266,6 @@ impl AuthStorageBackend for AutoAuthStorage {
     }
 }
 
-#[derive(Clone, Debug)]
-struct ReadThroughAuthStorage {
-    primary: Arc<dyn AuthStorageBackend>,
-    read_only_fallback: Arc<dyn AuthStorageBackend>,
-}
-
-impl ReadThroughAuthStorage {
-    fn new(
-        primary: Arc<dyn AuthStorageBackend>,
-        read_only_fallback: Arc<dyn AuthStorageBackend>,
-    ) -> Self {
-        Self {
-            primary,
-            read_only_fallback,
-        }
-    }
-}
-
-impl AuthStorageBackend for ReadThroughAuthStorage {
-    fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
-        match self.primary.load()? {
-            Some(auth) => Ok(Some(auth)),
-            None => self.read_only_fallback.load(),
-        }
-    }
-
-    fn save(&self, auth: &AuthDotJson) -> std::io::Result<()> {
-        // The Codex bridge is read-through only.  New Praxis login state must
-        // be persisted under PRAXIS_HOME / the Praxis keyring namespace so a
-        // Praxis login/logout can never mutate upstream ~/.codex/auth.json.
-        self.primary.save(auth)
-    }
-
-    fn delete(&self) -> std::io::Result<bool> {
-        // Do not delete read-through Codex credentials.
-        self.primary.delete()
-    }
-}
-
 // A global in-memory store for mapping praxis_home -> AuthDotJson.
 static EPHEMERAL_AUTH_STORE: Lazy<Mutex<HashMap<String, AuthDotJson>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
@@ -356,28 +317,75 @@ pub(super) fn create_auth_storage(
     create_auth_storage_with_keyring_store(praxis_home, mode, keyring_store)
 }
 
-fn create_auth_storage_with_keyring_store(
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LoadedAuthOrigin {
+    Praxis,
+    InheritedCodex,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct LoadedAuthDotJson {
+    pub(super) auth: AuthDotJson,
+    pub(super) origin: LoadedAuthOrigin,
+}
+
+pub(super) fn load_persistent_auth_with_origin(
     praxis_home: PathBuf,
     mode: AuthCredentialsStoreMode,
-    keyring_store: Arc<dyn KeyringStore>,
-) -> Arc<dyn AuthStorageBackend> {
+) -> std::io::Result<Option<LoadedAuthDotJson>> {
+    if mode == AuthCredentialsStoreMode::Ephemeral {
+        return Ok(None);
+    }
+
+    let keyring_store: Arc<dyn KeyringStore> = Arc::new(DefaultKeyringStore);
     let primary = create_auth_storage_with_resolved_home(
         praxis_home.clone(),
         mode,
         Arc::clone(&keyring_store),
     );
-
-    if mode == AuthCredentialsStoreMode::Ephemeral {
-        return primary;
-    }
-
-    match upstream_codex_read_through_home(&praxis_home) {
-        Ok(Some(shared_home)) => {
-            let fallback: Arc<dyn AuthStorageBackend> = Arc::new(FileAuthStorage::new(shared_home));
-            Arc::new(ReadThroughAuthStorage::new(primary, fallback))
+    if let Some(auth) = primary.load()? {
+        if let Some(inherited) = load_inherited_codex_auth(&praxis_home)?
+            && auth_has_credentials(&inherited)
+        {
+            return Ok(Some(LoadedAuthDotJson {
+                auth: inherited,
+                origin: LoadedAuthOrigin::InheritedCodex,
+            }));
         }
-        Ok(None) | Err(_) => primary,
+        return Ok(Some(LoadedAuthDotJson {
+            auth,
+            origin: LoadedAuthOrigin::Praxis,
+        }));
     }
+
+    load_inherited_codex_auth(&praxis_home).map(|auth| {
+        auth.map(|auth| LoadedAuthDotJson {
+            auth,
+            origin: LoadedAuthOrigin::InheritedCodex,
+        })
+    })
+}
+
+fn load_inherited_codex_auth(praxis_home: &Path) -> std::io::Result<Option<AuthDotJson>> {
+    let Some(shared_home) = upstream_codex_read_through_home(praxis_home)? else {
+        return Ok(None);
+    };
+    FileAuthStorage::new(shared_home).load()
+}
+
+fn auth_has_credentials(auth: &AuthDotJson) -> bool {
+    auth.openai_api_key
+        .as_deref()
+        .is_some_and(|key| !key.trim().is_empty())
+        || auth.tokens.is_some()
+}
+
+fn create_auth_storage_with_keyring_store(
+    praxis_home: PathBuf,
+    mode: AuthCredentialsStoreMode,
+    keyring_store: Arc<dyn KeyringStore>,
+) -> Arc<dyn AuthStorageBackend> {
+    create_auth_storage_with_resolved_home(praxis_home, mode, keyring_store)
 }
 
 fn create_auth_storage_with_resolved_home(

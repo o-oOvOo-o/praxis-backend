@@ -225,6 +225,8 @@ impl ToolRouter {
             call_id,
             payload,
         } = call;
+        let response_payload = payload.clone();
+        let payload = self.normalize_freeform_payload(&tool_name, payload)?;
 
         if source == ToolCallSource::Direct
             && turn.tools_config.js_repl_tools_only
@@ -246,7 +248,66 @@ impl ToolRouter {
             payload,
         };
 
-        self.registry.dispatch_any(invocation).await
+        let mut result = self.registry.dispatch_any(invocation).await?;
+        result.payload = response_payload;
+        Ok(result)
+    }
+
+    fn normalize_freeform_payload(
+        &self,
+        tool_name: &str,
+        payload: ToolPayload,
+    ) -> Result<ToolPayload, FunctionCallError> {
+        let arguments = match payload {
+            ToolPayload::Function { arguments } => arguments,
+            other => return Ok(other),
+        };
+
+        if !matches!(self.find_spec(tool_name), Some(ToolSpec::Freeform(_))) {
+            return Ok(ToolPayload::Function { arguments });
+        }
+
+        let input = freeform_input_from_function_arguments(tool_name, &arguments)?;
+        Ok(ToolPayload::Custom { input })
+    }
+}
+
+fn freeform_input_from_function_arguments(
+    tool_name: &str,
+    arguments: &str,
+) -> Result<String, FunctionCallError> {
+    let value: serde_json::Value = serde_json::from_str(arguments).map_err(|err| {
+        FunctionCallError::RespondToModel(format!(
+            "failed to parse {tool_name} freeform wrapper arguments: {err}"
+        ))
+    })?;
+
+    match value {
+        serde_json::Value::String(input) => Ok(input),
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(input)) = map.get("input") {
+                return Ok(input.clone());
+            }
+            if tool_name == "apply_patch"
+                && let Some(serde_json::Value::String(input)) = map.get("patch")
+            {
+                return Ok(input.clone());
+            }
+            if tool_name == "exec" {
+                if let Some(serde_json::Value::String(input)) = map.get("code") {
+                    return Ok(input.clone());
+                }
+                if let Some(serde_json::Value::String(input)) = map.get("source") {
+                    return Ok(input.clone());
+                }
+            }
+            Err(FunctionCallError::RespondToModel(format!(
+                "{tool_name} expects raw freeform input in an `input` string field"
+            )))
+        }
+        _ => Err(FunctionCallError::RespondToModel(format!(
+            "{tool_name} expects raw freeform input in an `input` string field"
+        ))),
     }
 }
 #[cfg(test)]

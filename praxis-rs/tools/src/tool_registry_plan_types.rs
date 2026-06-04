@@ -17,6 +17,9 @@ pub enum ToolHandlerKind {
     CodeModeExecute,
     CodeModeWait,
     DynamicTool,
+    CreateGoal,
+    GetGoal,
+    UpdateGoal,
     JsRepl,
     JsReplReset,
     ListAgents,
@@ -33,11 +36,6 @@ pub enum ToolHandlerKind {
     ShellCommand,
     SpawnAgent,
     SubmitWorkerRequest,
-    TeamRead,
-    TeamSendMessage,
-    TeamTaskCreate,
-    TeamTaskList,
-    TeamTaskUpdate,
     TestSync,
     ToolSearch,
     ToolSuggest,
@@ -46,6 +44,7 @@ pub enum ToolHandlerKind {
     UpdateWorkerRequest,
     ViewImage,
     WaitAgent,
+    WebSearch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

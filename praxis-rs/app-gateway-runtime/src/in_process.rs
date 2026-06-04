@@ -95,7 +95,20 @@ pub const DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY: usize = CHANNEL_CAPACITY;
 type PendingClientRequestResponse = std::result::Result<Result, JSONRPCErrorError>;
 
 fn server_notification_requires_delivery(notification: &ServerNotification) -> bool {
-    matches!(notification, ServerNotification::TurnCompleted(_))
+    matches!(
+        notification,
+        ServerNotification::TurnStarted(_)
+            | ServerNotification::TurnCompleted(_)
+            | ServerNotification::ItemStarted(_)
+            | ServerNotification::ItemCompleted(_)
+            | ServerNotification::ThreadControlChanged(_)
+            | ServerNotification::ThreadGoalUpdated(_)
+            | ServerNotification::AgentMessageDelta(_)
+            | ServerNotification::PlanDelta(_)
+            | ServerNotification::ReasoningSummaryTextDelta(_)
+            | ServerNotification::ReasoningSummaryPartAdded(_)
+            | ServerNotification::ReasoningTextDelta(_)
+    )
 }
 
 /// Input needed to start an in-process app-gateway runtime.

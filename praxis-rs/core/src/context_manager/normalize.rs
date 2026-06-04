@@ -20,12 +20,9 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
     for (idx, item) in items.iter().enumerate() {
         match item {
             ResponseItem::FunctionCall { call_id, .. } => {
-                let has_output = items.iter().any(|i| match i {
-                    ResponseItem::FunctionCallOutput {
-                        call_id: existing, ..
-                    } => existing == call_id,
-                    _ => false,
-                });
+                let has_output = items
+                    .iter()
+                    .any(|i| tool_output_call_id(i) == Some(call_id));
 
                 if !has_output {
                     info!("Function call output is missing for call id: {call_id}");
@@ -64,12 +61,9 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
                 }
             }
             ResponseItem::CustomToolCall { call_id, .. } => {
-                let has_output = items.iter().any(|i| match i {
-                    ResponseItem::CustomToolCallOutput {
-                        call_id: existing, ..
-                    } => existing == call_id,
-                    _ => false,
-                });
+                let has_output = items
+                    .iter()
+                    .any(|i| tool_output_call_id(i) == Some(call_id));
 
                 if !has_output {
                     error_or_panic(format!(
@@ -88,12 +82,9 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
             // LocalShellCall is represented in upstream streams by a FunctionCallOutput
             ResponseItem::LocalShellCall { call_id, .. } => {
                 if let Some(call_id) = call_id.as_ref() {
-                    let has_output = items.iter().any(|i| match i {
-                        ResponseItem::FunctionCallOutput {
-                            call_id: existing, ..
-                        } => existing == call_id,
-                        _ => false,
-                    });
+                    let has_output = items
+                        .iter()
+                        .any(|i| tool_output_call_id(i) == Some(call_id));
 
                     if !has_output {
                         error_or_panic(format!(
@@ -120,10 +111,15 @@ pub(crate) fn ensure_call_outputs_present(items: &mut Vec<ResponseItem>) {
 }
 
 pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
-    let function_call_ids: HashSet<String> = items
+    let tool_call_ids: HashSet<String> = items
         .iter()
         .filter_map(|i| match i {
-            ResponseItem::FunctionCall { call_id, .. } => Some(call_id.clone()),
+            ResponseItem::FunctionCall { call_id, .. }
+            | ResponseItem::CustomToolCall { call_id, .. } => Some(call_id.clone()),
+            ResponseItem::LocalShellCall {
+                call_id: Some(call_id),
+                ..
+            } => Some(call_id.clone()),
             _ => None,
         })
         .collect();
@@ -139,29 +135,9 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
         })
         .collect();
 
-    let local_shell_call_ids: HashSet<String> = items
-        .iter()
-        .filter_map(|i| match i {
-            ResponseItem::LocalShellCall {
-                call_id: Some(call_id),
-                ..
-            } => Some(call_id.clone()),
-            _ => None,
-        })
-        .collect();
-
-    let custom_tool_call_ids: HashSet<String> = items
-        .iter()
-        .filter_map(|i| match i {
-            ResponseItem::CustomToolCall { call_id, .. } => Some(call_id.clone()),
-            _ => None,
-        })
-        .collect();
-
     items.retain(|item| match item {
         ResponseItem::FunctionCallOutput { call_id, .. } => {
-            let has_match =
-                function_call_ids.contains(call_id) || local_shell_call_ids.contains(call_id);
+            let has_match = tool_call_ids.contains(call_id);
             if !has_match {
                 error_or_panic(format!(
                     "Orphan function call output for call id: {call_id}"
@@ -170,7 +146,7 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
             has_match
         }
         ResponseItem::CustomToolCallOutput { call_id, .. } => {
-            let has_match = custom_tool_call_ids.contains(call_id);
+            let has_match = tool_call_ids.contains(call_id);
             if !has_match {
                 error_or_panic(format!(
                     "Orphan custom tool call output for call id: {call_id}"
@@ -197,25 +173,10 @@ pub(crate) fn remove_orphan_outputs(items: &mut Vec<ResponseItem>) {
 pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItem>, item: &ResponseItem) {
     match item {
         ResponseItem::FunctionCall { call_id, .. } => {
-            remove_first_matching(items, |i| {
-                matches!(
-                    i,
-                    ResponseItem::FunctionCallOutput {
-                        call_id: existing, ..
-                    } if existing == call_id
-                )
-            });
+            remove_first_matching(items, |i| tool_output_call_id(i) == Some(call_id));
         }
         ResponseItem::FunctionCallOutput { call_id, .. } => {
-            if let Some(pos) = items.iter().position(|i| {
-                matches!(i, ResponseItem::FunctionCall { call_id: existing, .. } if existing == call_id)
-            }) {
-                items.remove(pos);
-            } else if let Some(pos) = items.iter().position(|i| {
-                matches!(i, ResponseItem::LocalShellCall { call_id: Some(existing), .. } if existing == call_id)
-            }) {
-                items.remove(pos);
-            }
+            remove_first_matching(items, |i| tool_call_id(i) == Some(call_id));
         }
         ResponseItem::ToolSearchCall {
             call_id: Some(call_id),
@@ -235,49 +196,49 @@ pub(crate) fn remove_corresponding_for(items: &mut Vec<ResponseItem>, item: &Res
             call_id: Some(call_id),
             ..
         } => {
-            remove_first_matching(
-                items,
-                |i| {
-                    matches!(
-                        i,
-                        ResponseItem::ToolSearchCall {
-                            call_id: Some(existing),
-                            ..
-                        } if existing == call_id
-                    )
-                },
-            );
-        }
-        ResponseItem::CustomToolCall { call_id, .. } => {
             remove_first_matching(items, |i| {
                 matches!(
                     i,
-                    ResponseItem::CustomToolCallOutput {
-                        call_id: existing, ..
+                    ResponseItem::ToolSearchCall {
+                        call_id: Some(existing),
+                        ..
                     } if existing == call_id
                 )
             });
         }
+        ResponseItem::CustomToolCall { call_id, .. } => {
+            remove_first_matching(items, |i| tool_output_call_id(i) == Some(call_id));
+        }
         ResponseItem::CustomToolCallOutput { call_id, .. } => {
-            remove_first_matching(
-                items,
-                |i| matches!(i, ResponseItem::CustomToolCall { call_id: existing, .. } if existing == call_id),
-            );
+            remove_first_matching(items, |i| tool_call_id(i) == Some(call_id));
         }
         ResponseItem::LocalShellCall {
             call_id: Some(call_id),
             ..
         } => {
-            remove_first_matching(items, |i| {
-                matches!(
-                    i,
-                    ResponseItem::FunctionCallOutput {
-                        call_id: existing, ..
-                    } if existing == call_id
-                )
-            });
+            remove_first_matching(items, |i| tool_output_call_id(i) == Some(call_id));
         }
         _ => {}
+    }
+}
+
+fn tool_call_id(item: &ResponseItem) -> Option<&String> {
+    match item {
+        ResponseItem::FunctionCall { call_id, .. }
+        | ResponseItem::CustomToolCall { call_id, .. } => Some(call_id),
+        ResponseItem::LocalShellCall {
+            call_id: Some(call_id),
+            ..
+        } => Some(call_id),
+        _ => None,
+    }
+}
+
+fn tool_output_call_id(item: &ResponseItem) -> Option<&String> {
+    match item {
+        ResponseItem::FunctionCallOutput { call_id, .. }
+        | ResponseItem::CustomToolCallOutput { call_id, .. } => Some(call_id),
+        _ => None,
     }
 }
 

@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::Args;
 use clap::ValueHint;
 use praxis_utils_cli::ApprovalModeCliArg;
 use praxis_utils_cli::CliConfigOverrides;
@@ -11,8 +11,20 @@ pub enum SessionLookupSource {
     Codex,
 }
 
-#[derive(Parser, Debug)]
-#[command(version)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum PraxisLaunchMode {
+    #[default]
+    Workspace,
+    DevSingleThread,
+}
+
+impl PraxisLaunchMode {
+    pub(crate) fn is_workspace(self) -> bool {
+        matches!(self, Self::Workspace)
+    }
+}
+
+#[derive(Args, Debug)]
 pub struct Cli {
     /// Optional user prompt to start the session.
     #[arg(value_name = "PROMPT", value_hint = clap::ValueHint::Other)]
@@ -21,6 +33,9 @@ pub struct Cli {
     /// Optional image(s) to attach to the initial prompt.
     #[arg(long = "image", short = 'i', value_name = "FILE", value_delimiter = ',', num_args = 1..)]
     pub images: Vec<PathBuf>,
+
+    #[clap(skip)]
+    launch_mode: PraxisLaunchMode,
 
     // Internal controls set by the top-level `codex resume` subcommand.
     // These are not exposed as user flags on the base `codex` command.
@@ -131,4 +146,18 @@ pub struct Cli {
 
     #[clap(skip)]
     pub config_overrides: CliConfigOverrides,
+}
+
+impl Cli {
+    pub(crate) fn launch_mode(&self) -> PraxisLaunchMode {
+        self.launch_mode
+    }
+
+    pub fn force_dev_single_thread(&mut self) {
+        self.launch_mode = PraxisLaunchMode::DevSingleThread;
+    }
+
+    pub fn is_dev_single_thread(&self) -> bool {
+        matches!(self.launch_mode, PraxisLaunchMode::DevSingleThread)
+    }
 }

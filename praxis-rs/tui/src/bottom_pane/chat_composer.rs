@@ -135,6 +135,7 @@ use ratatui::text::Span;
 use ratatui::widgets::Block;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::StatefulWidgetRef;
+use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 
 use super::chat_composer_history::ChatComposerHistory;
@@ -2272,17 +2273,33 @@ impl ChatComposer {
         if !self.slash_commands_enabled() {
             return None;
         }
-        let first_line = self.textarea.text().lines().next().unwrap_or("");
-        if let Some((name, rest, _rest_offset)) = parse_slash_name(first_line)
+        let first_line = self
+            .textarea
+            .text()
+            .lines()
+            .next()
+            .unwrap_or("")
+            .to_string();
+        if let Some((name, rest, _rest_offset)) = parse_slash_name(&first_line)
             && rest.is_empty()
-            && let Some(cmd) =
-                slash_commands::find_builtin_command(name, self.builtin_command_flags())
+            && let Some((cmd, inline_suffix)) =
+                slash_commands::find_builtin_command_with_suffix(name, self.builtin_command_flags())
         {
             if self.reject_slash_command_if_unavailable(cmd) {
                 return Some(InputResult::None);
             }
             self.textarea.set_text_clearing_elements("");
-            Some(InputResult::Command(cmd))
+            if let Some(suffix) = inline_suffix
+                && cmd.supports_inline_args()
+            {
+                Some(InputResult::CommandWithArgs(
+                    cmd,
+                    suffix.to_string(),
+                    Vec::new(),
+                ))
+            } else {
+                Some(InputResult::Command(cmd))
+            }
         } else {
             None
         }
@@ -2300,11 +2317,15 @@ impl ChatComposer {
         }
 
         let (name, rest, rest_offset) = parse_slash_name(&text)?;
-        if rest.is_empty() || name.contains('/') {
+        if name.contains('/') {
             return None;
         }
 
-        let cmd = slash_commands::find_builtin_command(name, self.builtin_command_flags())?;
+        let (cmd, inline_suffix) =
+            slash_commands::find_builtin_command_with_suffix(name, self.builtin_command_flags())?;
+        if rest.is_empty() && inline_suffix.is_none() {
+            return None;
+        }
 
         if !cmd.supports_inline_args() {
             return None;
@@ -2313,10 +2334,25 @@ impl ChatComposer {
             return Some(InputResult::None);
         }
 
-        let mut args_elements =
-            Self::slash_command_args_elements(rest, rest_offset, &self.textarea.text_elements());
-        let trimmed_rest = rest.trim();
-        args_elements = Self::trim_text_elements(rest, trimmed_rest, args_elements);
+        let (raw_args, mut args_elements) = if let Some(suffix) = inline_suffix {
+            let args = if rest.trim().is_empty() {
+                suffix.to_string()
+            } else {
+                format!("{suffix} {}", rest.trim())
+            };
+            (args, Vec::new())
+        } else {
+            (
+                rest.to_string(),
+                Self::slash_command_args_elements(
+                    rest,
+                    rest_offset,
+                    &self.textarea.text_elements(),
+                ),
+            )
+        };
+        let trimmed_rest = raw_args.trim();
+        args_elements = Self::trim_text_elements(raw_args.as_str(), trimmed_rest, args_elements);
         Some(InputResult::CommandWithArgs(
             cmd,
             trimmed_rest.to_string(),
@@ -3683,7 +3719,10 @@ impl ChatComposer {
                     }
                 } else if self.footer_flash_visible() {
                     if let Some(flash) = self.footer_flash.as_ref() {
-                        flash.line.render(inset_footer_hint_area(hint_rect), buf);
+                        flash
+                            .line
+                            .clone()
+                            .render(inset_footer_hint_area(hint_rect), buf);
                     }
                 } else if let Some(items) = self.footer_hint_override.as_ref() {
                     render_footer_hint_items(hint_rect, buf, items);
@@ -3705,7 +3744,7 @@ impl ChatComposer {
             }
         }
         let style = user_message_style();
-        Block::default().style(style).render_ref(composer_rect, buf);
+        Block::default().style(style).render(composer_rect, buf);
         if composer_rect.width > 0 {
             let separator = Span::styled(
                 "─".repeat(composer_rect.width as usize),
@@ -3725,11 +3764,11 @@ impl ChatComposer {
         if !remote_images_rect.is_empty() {
             Paragraph::new(self.remote_images_lines(remote_images_rect.width))
                 .style(style)
-                .render_ref(remote_images_rect, buf);
+                .render(remote_images_rect, buf);
         }
         if !textarea_rect.is_empty() {
             let prompt = if self.input_enabled {
-                "❯".bold()
+                "❯".white().bold()
             } else {
                 "❯".dim()
             };
@@ -3759,8 +3798,7 @@ impl ChatComposer {
             };
             if !textarea_rect.is_empty() && !text.is_empty() {
                 let placeholder = Span::from(text).dim();
-                Line::from(vec![placeholder])
-                    .render_ref(textarea_rect.inner(Margin::new(0, 0)), buf);
+                Line::from(vec![placeholder]).render(textarea_rect.inner(Margin::new(0, 0)), buf);
             }
         }
     }

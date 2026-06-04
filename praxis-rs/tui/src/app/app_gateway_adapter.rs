@@ -17,6 +17,8 @@ use crate::app_gateway_session::AppGatewaySession;
 use crate::app_gateway_session::app_gateway_rate_limit_snapshot_to_core;
 use crate::app_gateway_session::status_account_display_from_auth_mode;
 #[cfg(test)]
+use crate::app_gateway_session::token_usage_info_from_app_gateway;
+#[cfg(test)]
 use crate::exec_command::split_command_string;
 use praxis_app_gateway_client::AppGatewayEvent;
 use praxis_app_gateway_protocol::AuthMode;
@@ -93,10 +95,6 @@ use praxis_protocol::protocol::ThreadNameUpdatedEvent;
 #[cfg(test)]
 use praxis_protocol::protocol::TokenCountEvent;
 #[cfg(test)]
-use praxis_protocol::protocol::TokenUsage;
-#[cfg(test)]
-use praxis_protocol::protocol::TokenUsageInfo;
-#[cfg(test)]
 use praxis_protocol::protocol::TurnAbortReason;
 #[cfg(test)]
 use praxis_protocol::protocol::TurnAbortedEvent;
@@ -123,7 +121,7 @@ impl App {
 
     pub(super) async fn handle_app_gateway_event(
         &mut self,
-        app_gateway_client: &AppGatewaySession,
+        app_gateway_client: &mut AppGatewaySession,
         event: AppGatewayEvent,
     ) {
         match event {
@@ -134,6 +132,7 @@ impl App {
                 );
                 self.refresh_mcp_startup_expected_servers_from_config();
                 self.chat_widget.finish_mcp_startup_after_lag();
+                self.refresh_center_threads(app_gateway_client, /*force*/ true);
             }
             AppGatewayEvent::ServerNotification(notification) => {
                 self.handle_server_notification_event(app_gateway_client, notification)
@@ -153,7 +152,7 @@ impl App {
 
     async fn handle_server_notification_event(
         &mut self,
-        _app_gateway_client: &AppGatewaySession,
+        app_gateway_client: &mut AppGatewaySession,
         notification: ServerNotification,
     ) {
         match &notification {
@@ -185,6 +184,31 @@ impl App {
                 return;
             }
             _ => {}
+        }
+
+        if self.apply_center_server_notification(&notification) {
+            self.refresh_center_threads(app_gateway_client, /*force*/ true);
+        }
+
+        let thread_to_observe = match &notification {
+            ServerNotification::ThreadStarted(notification) => {
+                ThreadId::from_string(&notification.thread.id).ok()
+            }
+            ServerNotification::ThreadStatusChanged(notification) => {
+                ThreadId::from_string(&notification.thread_id)
+                    .ok()
+                    .filter(|thread_id| self.center_thread_should_auto_observe(*thread_id))
+            }
+            ServerNotification::ThreadControlChanged(notification) => {
+                ThreadId::from_string(&notification.thread_id)
+                    .ok()
+                    .filter(|thread_id| self.center_thread_should_auto_observe(*thread_id))
+            }
+            _ => None,
+        };
+        if let Some(thread_id) = thread_to_observe {
+            self.observe_center_thread_if_needed(app_gateway_client, thread_id)
+                .await;
         }
 
         match server_notification_thread_target(&notification) {
@@ -330,6 +354,12 @@ fn server_notification_thread_target(
         ServerNotification::ThreadTokenUsageUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::ThreadControlChanged(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::ThreadGoalUpdated(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::TurnStarted(notification) => Some(notification.thread_id.as_str()),
         ServerNotification::HookStarted(notification) => Some(notification.thread_id.as_str()),
         ServerNotification::TurnCompleted(notification) => Some(notification.thread_id.as_str()),
@@ -408,11 +438,6 @@ fn server_notification_thread_target(
         | ServerNotification::FsChanged(_)
         | ServerNotification::WindowsWorldWritableWarning(_)
         | ServerNotification::WindowsSandboxSetupCompleted(_)
-        | ServerNotification::TeamUpdated(_)
-        | ServerNotification::TeamDeleted(_)
-        | ServerNotification::TeamTeammateUpdated(_)
-        | ServerNotification::TeamTaskUpdated(_)
-        | ServerNotification::TeamMailboxUpdated(_)
         | ServerNotification::AccountLoginCompleted(_) => None,
     };
 
@@ -461,15 +486,7 @@ fn server_notification_thread_events(
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::TokenCount(TokenCountEvent {
-                    info: Some(TokenUsageInfo {
-                        total_token_usage: token_usage_from_app_gateway(
-                            notification.token_usage.total,
-                        ),
-                        last_token_usage: token_usage_from_app_gateway(
-                            notification.token_usage.last,
-                        ),
-                        model_context_window: notification.token_usage.model_context_window,
-                    }),
+                    info: Some(token_usage_info_from_app_gateway(notification.token_usage)),
                     rate_limits: None,
                 }),
             }],
@@ -645,19 +662,6 @@ fn server_notification_thread_events(
             }],
         )),
         _ => None,
-    }
-}
-
-#[cfg(test)]
-fn token_usage_from_app_gateway(
-    value: praxis_app_gateway_protocol::TokenUsageBreakdown,
-) -> TokenUsage {
-    TokenUsage {
-        input_tokens: value.input_tokens,
-        cached_input_tokens: value.cached_input_tokens,
-        output_tokens: value.output_tokens,
-        reasoning_output_tokens: value.reasoning_output_tokens,
-        total_tokens: value.total_tokens,
     }
 }
 
@@ -1259,6 +1263,7 @@ mod tests {
             summary: None,
             ephemeral: false,
             model_provider: "openai".to_string(),
+            model: None,
             created_at: 1,
             updated_at: 1,
             status: ThreadStatus::Idle,
@@ -1272,6 +1277,8 @@ mod tests {
             name: None,
             total_cost_usd: None,
             last_cost_usd: None,
+            token_usage: None,
+            control_state: None,
             selfwork_plan_path: None,
             turns: vec![Turn {
                 id: "turn-1".to_string(),
@@ -1429,6 +1436,7 @@ mod tests {
                 summary: None,
                 ephemeral: false,
                 model_provider: "openai".to_string(),
+                model: None,
                 created_at: 0,
                 updated_at: 0,
                 status: ThreadStatus::Idle,
@@ -1442,6 +1450,8 @@ mod tests {
                 name: Some("restore".to_string()),
                 total_cost_usd: None,
                 last_cost_usd: None,
+                token_usage: None,
+                control_state: None,
                 selfwork_plan_path: None,
                 turns: vec![
                     Turn {

@@ -314,7 +314,7 @@ async fn run_praxis_tool_session_inner(
                     EventMsg::SessionConfigured(_) => {
                         tracing::error!("unexpected SessionConfigured event");
                     }
-                    EventMsg::ThreadNameUpdated(_) => {
+                    EventMsg::ThreadNameUpdated(_) | EventMsg::ThreadGoalUpdated(_) => {
                         // Ignore session metadata updates in MCP tool runner.
                     }
                     EventMsg::AgentMessageDelta(_) => {

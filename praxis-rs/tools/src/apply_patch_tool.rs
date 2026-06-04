@@ -81,6 +81,7 @@ It is important to remember:
 /// TODO(dylan): deprecate once we get rid of json tool
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApplyPatchToolArgs {
+    #[serde(alias = "patch")]
     pub input: String,
 }
 

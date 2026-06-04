@@ -21,7 +21,9 @@ use crate::create_apply_patch_json_tool;
 use crate::create_assign_task_tool;
 use crate::create_close_agent_tool;
 use crate::create_code_mode_tool;
+use crate::create_create_goal_tool;
 use crate::create_exec_command_tool;
+use crate::create_get_goal_tool;
 use crate::create_image_generation_tool;
 use crate::create_js_repl_reset_tool;
 use crate::create_js_repl_tool;
@@ -42,14 +44,10 @@ use crate::create_shell_tool;
 use crate::create_spawn_agent_tool;
 use crate::create_spawn_agents_on_csv_tool;
 use crate::create_submit_worker_request_tool;
-use crate::create_team_read_tool;
-use crate::create_team_send_message_tool;
-use crate::create_team_task_create_tool;
-use crate::create_team_task_list_tool;
-use crate::create_team_task_update_tool;
 use crate::create_test_sync_tool;
 use crate::create_tool_search_tool;
 use crate::create_tool_suggest_tool;
+use crate::create_update_goal_tool;
 use crate::create_update_plan_tool;
 use crate::create_update_runtime_command_tool;
 use crate::create_update_worker_request_tool;
@@ -194,6 +192,25 @@ pub fn build_tool_registry_plan(
     );
     plan.register_handler("update_plan", ToolHandlerKind::Plan);
 
+    plan.push_spec(
+        create_get_goal_tool(),
+        /*supports_parallel_tool_calls*/ false,
+        config.code_mode_enabled,
+    );
+    plan.register_handler("get_goal", ToolHandlerKind::GetGoal);
+    plan.push_spec(
+        create_create_goal_tool(),
+        /*supports_parallel_tool_calls*/ false,
+        config.code_mode_enabled,
+    );
+    plan.register_handler("create_goal", ToolHandlerKind::CreateGoal);
+    plan.push_spec(
+        create_update_goal_tool(),
+        /*supports_parallel_tool_calls*/ false,
+        config.code_mode_enabled,
+    );
+    plan.register_handler("update_goal", ToolHandlerKind::UpdateGoal);
+
     if config.js_repl_enabled {
         plan.push_spec(
             create_js_repl_tool(),
@@ -326,6 +343,7 @@ pub fn build_tool_registry_plan(
             /*supports_parallel_tool_calls*/ false,
             config.code_mode_enabled,
         );
+        plan.register_handler("web_search", ToolHandlerKind::WebSearch);
     }
 
     if config.image_gen_tool {
@@ -429,37 +447,6 @@ pub fn build_tool_registry_plan(
             "update_runtime_command",
             ToolHandlerKind::UpdateRuntimeCommand,
         );
-
-        plan.push_spec(
-            create_team_read_tool(),
-            /*supports_parallel_tool_calls*/ false,
-            config.code_mode_enabled,
-        );
-        plan.push_spec(
-            create_team_send_message_tool(),
-            /*supports_parallel_tool_calls*/ false,
-            config.code_mode_enabled,
-        );
-        plan.push_spec(
-            create_team_task_create_tool(),
-            /*supports_parallel_tool_calls*/ false,
-            config.code_mode_enabled,
-        );
-        plan.push_spec(
-            create_team_task_list_tool(),
-            /*supports_parallel_tool_calls*/ false,
-            config.code_mode_enabled,
-        );
-        plan.push_spec(
-            create_team_task_update_tool(),
-            /*supports_parallel_tool_calls*/ false,
-            config.code_mode_enabled,
-        );
-        plan.register_handler("team_read", ToolHandlerKind::TeamRead);
-        plan.register_handler("team_send_message", ToolHandlerKind::TeamSendMessage);
-        plan.register_handler("team_task_create", ToolHandlerKind::TeamTaskCreate);
-        plan.register_handler("team_task_list", ToolHandlerKind::TeamTaskList);
-        plan.register_handler("team_task_update", ToolHandlerKind::TeamTaskUpdate);
     }
 
     if config.agent_jobs_tools {

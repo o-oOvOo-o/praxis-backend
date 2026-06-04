@@ -26,6 +26,7 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::color::ratatui_to_crossterm_color;
 use crate::markdown_render::hyperlink_target_for_local_link_text;
 use crate::markdown_render::is_explicit_local_link_target;
 use crate::wrapping::text_contains_url_like;
@@ -343,7 +344,7 @@ impl Frame<'_> {
 #[derive(Debug, Default, Clone, Eq, PartialEq, Hash)]
 pub struct Terminal<B>
 where
-    B: Backend + Write,
+    B: Backend<Error = io::Error> + Write,
 {
     /// The backend used to interface with the terminal
     backend: B,
@@ -367,7 +368,7 @@ where
 
 impl<B> Drop for Terminal<B>
 where
-    B: Backend,
+    B: Backend<Error = io::Error>,
     B: Write,
 {
     #[allow(clippy::print_stderr)]
@@ -383,7 +384,7 @@ where
 
 impl<B> Terminal<B>
 where
-    B: Backend,
+    B: Backend<Error = io::Error>,
     B: Write,
 {
     /// Creates a new [`Terminal`] with the given [`Backend`] and [`TerminalOptions`].
@@ -819,7 +820,10 @@ where
                 if cell.fg != fg || cell.bg != bg {
                     queue!(
                         writer,
-                        SetColors(Colors::new(cell.fg.into(), cell.bg.into()))
+                        SetColors(Colors::new(
+                            ratatui_to_crossterm_color(cell.fg),
+                            ratatui_to_crossterm_color(cell.bg)
+                        ))
                     )?;
                     fg = cell.fg;
                     bg = cell.bg;
@@ -835,7 +839,10 @@ where
             DrawCommand::ClearToEnd { bg: clear_bg, .. } => {
                 queue!(writer, SetAttribute(crossterm::style::Attribute::Reset))?;
                 modifier = Modifier::empty();
-                queue!(writer, SetBackgroundColor(clear_bg.into()))?;
+                queue!(
+                    writer,
+                    SetBackgroundColor(ratatui_to_crossterm_color(clear_bg))
+                )?;
                 bg = clear_bg;
                 queue!(writer, Clear(crossterm::terminal::ClearType::UntilNewLine))?;
             }

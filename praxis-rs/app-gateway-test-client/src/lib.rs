@@ -50,9 +50,16 @@ use praxis_app_gateway_protocol::ModelListParams;
 use praxis_app_gateway_protocol::ModelListResponse;
 use praxis_app_gateway_protocol::ReadOnlyAccess;
 use praxis_app_gateway_protocol::RequestId;
+use praxis_app_gateway_protocol::SandboxMode;
 use praxis_app_gateway_protocol::SandboxPolicy;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
+use praxis_app_gateway_protocol::ThreadControlAcquireParams;
+use praxis_app_gateway_protocol::ThreadControlAcquireResponse;
+use praxis_app_gateway_protocol::ThreadControlReleaseParams;
+use praxis_app_gateway_protocol::ThreadControlReleaseResponse;
+use praxis_app_gateway_protocol::ThreadController;
+use praxis_app_gateway_protocol::ThreadControllerKind;
 use praxis_app_gateway_protocol::ThreadDecrementElicitationParams;
 use praxis_app_gateway_protocol::ThreadDecrementElicitationResponse;
 use praxis_app_gateway_protocol::ThreadIncrementElicitationParams;
@@ -172,6 +179,19 @@ enum CliCommand {
         experimental_api: bool,
         /// User message to send to Praxis.
         user_message: String,
+    },
+    /// Acquire control of a new DeepSeek thread, then send a user message.
+    ControlMessageApi {
+        /// User message to send to the controlled DeepSeek thread.
+        user_message: String,
+        /// Keep the client alive after the turn completes so observers can inspect lock state.
+        #[arg(long, default_value_t = 300)]
+        hold_seconds: u64,
+    },
+    /// Release a Codex harness control lock on a thread.
+    ControlRelease {
+        /// Existing thread id to unlock.
+        thread_id: String,
     },
     /// Resume a thread by id, then send a user message.
     ResumeMessageApi {
@@ -310,6 +330,19 @@ pub async fn run() -> Result<()> {
                 &dynamic_tools,
             )
             .await
+        }
+        CliCommand::ControlMessageApi {
+            user_message,
+            hold_seconds,
+        } => {
+            ensure_dynamic_tools_unused(&dynamic_tools, "control-message-api")?;
+            let endpoint = resolve_endpoint(praxis_bin, url)?;
+            control_message_api(&endpoint, &config_overrides, user_message, hold_seconds).await
+        }
+        CliCommand::ControlRelease { thread_id } => {
+            ensure_dynamic_tools_unused(&dynamic_tools, "control-release")?;
+            let endpoint = resolve_endpoint(praxis_bin, url)?;
+            control_release(&endpoint, &config_overrides, thread_id).await
         }
         CliCommand::ResumeMessageApi {
             thread_id,
@@ -987,6 +1020,99 @@ async fn send_message_api_with_policies(
     .await
 }
 
+async fn control_message_api(
+    endpoint: &Endpoint,
+    config_overrides: &[String],
+    user_message: String,
+    hold_seconds: u64,
+) -> Result<()> {
+    with_client(
+        "control-message-api",
+        endpoint,
+        config_overrides,
+        |client| {
+            let initialize = client.initialize_with_experimental_api(true)?;
+            println!("< initialize response: {initialize:?}");
+
+            let thread_response = client.thread_start(ThreadStartParams {
+                model: Some("deepseek-v4-pro".to_string()),
+                model_provider: Some("deepseek".to_string()),
+                cwd: Some("D:\\ghost1.0".to_string()),
+                approval_policy: Some(AskForApproval::Never),
+                sandbox: Some(SandboxMode::ReadOnly),
+                ..Default::default()
+            })?;
+            println!("< thread/start response: {thread_response:?}");
+
+            let controller = codex_harness_controller();
+            let control_response = client.thread_control_acquire(ThreadControlAcquireParams {
+                thread_id: thread_response.thread.id.clone(),
+                controller: controller.clone(),
+                target_rank: Some(2),
+                reason: Some(
+                    "Codex is controlling this DeepSeek thread for Praxis Center observation"
+                        .to_string(),
+                ),
+            })?;
+            println!("< thread/control/acquire response: {control_response:?}");
+
+            let turn_response = client.turn_start(TurnStartParams {
+                thread_id: thread_response.thread.id.clone(),
+                input: vec![ApiUserInput::Text {
+                    text: user_message,
+                    text_elements: Vec::new(),
+                }],
+                model: Some("deepseek-v4-pro".to_string()),
+                model_provider: Some("deepseek".to_string()),
+                approval_policy: Some(AskForApproval::Never),
+                sandbox_policy: Some(SandboxPolicy::ReadOnly {
+                    access: ReadOnlyAccess::FullAccess,
+                    network_access: false,
+                }),
+                ..Default::default()
+            })?;
+            println!("< turn/start response: {turn_response:?}");
+
+            let stream_result =
+                client.stream_turn(&thread_response.thread.id, &turn_response.turn.id);
+            if hold_seconds > 0 {
+                println!("[holding control for {hold_seconds}s]");
+                thread::sleep(Duration::from_secs(hold_seconds));
+            }
+            let release_response = client.thread_control_release(ThreadControlReleaseParams {
+                thread_id: thread_response.thread.id.clone(),
+                controller: Some(controller),
+            })?;
+            println!("< thread/control/release response: {release_response:?}");
+
+            stream_result?;
+
+            Ok(())
+        },
+    )
+    .await
+}
+
+async fn control_release(
+    endpoint: &Endpoint,
+    config_overrides: &[String],
+    thread_id: String,
+) -> Result<()> {
+    with_client("control-release", endpoint, config_overrides, |client| {
+        let initialize = client.initialize_with_experimental_api(true)?;
+        println!("< initialize response: {initialize:?}");
+
+        let response = client.thread_control_release(ThreadControlReleaseParams {
+            thread_id,
+            controller: Some(codex_harness_controller()),
+        })?;
+        println!("< thread/control/release response: {response:?}");
+
+        Ok(())
+    })
+    .await
+}
+
 async fn send_follow_up_api(
     endpoint: &Endpoint,
     config_overrides: &[String],
@@ -1033,6 +1159,15 @@ async fn send_follow_up_api(
         Ok(())
     })
     .await
+}
+
+fn codex_harness_controller() -> ThreadController {
+    ThreadController {
+        kind: ThreadControllerKind::External,
+        id: "codex-harness".to_string(),
+        label: Some("Codex harness".to_string()),
+        rank: Some(0),
+    }
 }
 
 async fn test_login(
@@ -1607,6 +1742,32 @@ impl PraxisClient {
         };
 
         self.send_request(request, request_id, "turn/start")
+    }
+
+    fn thread_control_acquire(
+        &mut self,
+        params: ThreadControlAcquireParams,
+    ) -> Result<ThreadControlAcquireResponse> {
+        let request_id = self.request_id();
+        let request = ClientRequest::ThreadControlAcquire {
+            request_id: request_id.clone(),
+            params,
+        };
+
+        self.send_request(request, request_id, "thread/control/acquire")
+    }
+
+    fn thread_control_release(
+        &mut self,
+        params: ThreadControlReleaseParams,
+    ) -> Result<ThreadControlReleaseResponse> {
+        let request_id = self.request_id();
+        let request = ClientRequest::ThreadControlRelease {
+            request_id: request_id.clone(),
+            params,
+        };
+
+        self.send_request(request, request_id, "thread/control/release")
     }
 
     fn login_account_chatgpt(&mut self) -> Result<LoginAccountResponse> {

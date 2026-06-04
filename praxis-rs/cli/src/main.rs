@@ -58,7 +58,7 @@ use praxis_terminal_detection::TerminalName;
 
 /// Praxis CLI
 ///
-/// If no subcommand is specified, options will be forwarded to the interactive CLI.
+/// If no subcommand is specified, Praxis opens the workspace.
 #[derive(Debug, Parser)]
 #[clap(
     name = "praxis",
@@ -110,8 +110,13 @@ enum Subcommand {
     /// Start Praxis as an MCP server (stdio).
     McpServer,
 
-    /// [experimental] Run the app gateway or related tooling.
+    /// [internal] Run the app gateway or related tooling.
+    #[clap(hide = true)]
     AppGateway(AppGatewayCommand),
+
+    /// Developer-only legacy single-thread TUI.
+    #[clap(hide = true)]
+    Dev(DevCommand),
 
     /// Launch the Praxis desktop app (downloads the macOS installer if missing).
     #[cfg(target_os = "macos")]
@@ -174,9 +179,27 @@ enum DebugSubcommand {
     /// Tooling: helps debug the app gateway.
     AppGateway(DebugAppGatewayCommand),
 
+    /// Tooling: run Praxis web_search directly and print the structured result.
+    WebSearch(DebugWebSearchCommand),
+
     /// Internal: reset local memory state for a fresh start.
     #[clap(hide = true)]
     ClearMemories,
+}
+
+#[derive(Debug, Parser)]
+struct DebugWebSearchCommand {
+    #[arg(value_name = "QUERY", required = true)]
+    query: String,
+
+    #[arg(long, default_value_t = 10)]
+    max_results: usize,
+
+    #[arg(long = "domain", value_name = "DOMAIN")]
+    domains: Vec<String>,
+
+    #[arg(long)]
+    recency_days: Option<u32>,
 }
 
 #[derive(Debug, Parser)]
@@ -331,6 +354,12 @@ enum LoginSubcommand {
 struct LogoutCommand {
     #[clap(skip)]
     config_overrides: CliConfigOverrides,
+}
+
+#[derive(Debug, Parser)]
+struct DevCommand {
+    #[clap(flatten)]
+    interactive: TuiCli,
 }
 
 #[derive(Debug, Parser)]
@@ -529,7 +558,26 @@ async fn run_debug_app_gateway_command(cmd: DebugAppGatewayCommand) -> anyhow::R
     }
 }
 
-#[derive(Debug, Default, Parser, Clone)]
+async fn run_debug_web_search_command(cmd: DebugWebSearchCommand) -> anyhow::Result<()> {
+    let domains = if cmd.domains.is_empty() {
+        None
+    } else {
+        Some(cmd.domains)
+    };
+    let response =
+        praxis_core::web_search::rip_web_search(praxis_core::web_search::RipWebSearchArgs {
+            query: Some(cmd.query),
+            queries: None,
+            max_results: Some(cmd.max_results),
+            domains,
+            recency_days: cmd.recency_days,
+        })
+        .await;
+    println!("{}", serde_json::to_string_pretty(&response)?);
+    Ok(())
+}
+
+#[derive(Debug, Default, Args, Clone)]
 struct FeatureToggles {
     /// Enable a feature (repeatable). Equivalent to `-c features.<name>=true`.
     #[arg(long = "enable", value_name = "FEATURE", action = clap::ArgAction::Append, global = true)]
@@ -540,7 +588,7 @@ struct FeatureToggles {
     disable: Vec<String>,
 }
 
-#[derive(Debug, Default, Parser, Clone)]
+#[derive(Debug, Default, Args, Clone)]
 struct InteractiveRemoteOptions {
     /// Connect the TUI to a remote app gateway websocket endpoint.
     ///
@@ -828,6 +876,23 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 }
             }
         }
+        Some(Subcommand::Dev(DevCommand {
+            interactive: dev_interactive,
+        })) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "dev",
+            )?;
+            interactive = finalize_dev_interactive(
+                interactive,
+                root_config_overrides.clone(),
+                dev_interactive,
+            );
+            let exit_info =
+                run_interactive_tui(interactive, None, None, arg0_paths.clone()).await?;
+            handle_app_exit(exit_info)?;
+        }
         #[cfg(target_os = "macos")]
         Some(Subcommand::App(app_cli)) => {
             reject_remote_mode_for_subcommand(
@@ -1028,6 +1093,14 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                     "debug app-gateway",
                 )?;
                 run_debug_app_gateway_command(cmd).await?;
+            }
+            DebugSubcommand::WebSearch(cmd) => {
+                reject_remote_mode_for_subcommand(
+                    root_remote.as_deref(),
+                    root_remote_auth_token_env.as_deref(),
+                    "debug web-search",
+                )?;
+                run_debug_web_search_command(cmd).await?;
             }
             DebugSubcommand::ClearMemories => {
                 reject_remote_mode_for_subcommand(
@@ -1434,6 +1507,17 @@ fn finalize_fork_interactive(
     interactive
 }
 
+fn finalize_dev_interactive(
+    mut interactive: TuiCli,
+    root_config_overrides: CliConfigOverrides,
+    dev_cli: TuiCli,
+) -> TuiCli {
+    merge_interactive_cli_flags(&mut interactive, dev_cli);
+    prepend_config_flags(&mut interactive.config_overrides, root_config_overrides);
+    interactive.force_dev_single_thread();
+    interactive
+}
+
 /// Merge flags provided to `praxis resume`/`praxis fork` so they take precedence over any
 /// root-level flags. Only overrides fields explicitly set on the subcommand-scoped
 /// CLI. Also appends `-c key=value` overrides with highest precedence.
@@ -1568,6 +1652,61 @@ mod tests {
             all,
             fork_cli,
         )
+    }
+
+    fn finalize_dev_from_args(args: &[&str]) -> TuiCli {
+        let cli = MultitoolCli::try_parse_from(args).expect("parse");
+        let MultitoolCli {
+            interactive,
+            config_overrides: root_overrides,
+            subcommand,
+            feature_toggles: _,
+            remote: _,
+        } = cli;
+
+        let Subcommand::Dev(DevCommand {
+            interactive: dev_cli,
+        }) = subcommand.expect("dev present")
+        else {
+            unreachable!()
+        };
+
+        finalize_dev_interactive(interactive, root_overrides, dev_cli)
+    }
+
+    #[test]
+    fn root_command_defaults_to_workspace_launch() {
+        let cli = MultitoolCli::try_parse_from(["praxis"]).expect("parse");
+        assert!(!cli.interactive.is_dev_single_thread());
+    }
+
+    #[test]
+    fn dev_command_forces_single_thread_launch() {
+        let interactive = finalize_dev_from_args(["praxis", "dev"].as_ref());
+        assert!(interactive.is_dev_single_thread());
+    }
+
+    #[test]
+    fn dev_command_merges_scoped_interactive_flags() {
+        let interactive = finalize_dev_from_args(
+            [
+                "praxis",
+                "-c",
+                "model_provider=deepseek",
+                "dev",
+                "-m",
+                "deepseek-v4-pro",
+                "inspect this",
+            ]
+            .as_ref(),
+        );
+        assert!(interactive.is_dev_single_thread());
+        assert_eq!(interactive.model.as_deref(), Some("deepseek-v4-pro"));
+        assert_eq!(interactive.prompt.as_deref(), Some("inspect this"));
+        assert_eq!(
+            interactive.config_overrides.raw_overrides,
+            vec!["model_provider=deepseek".to_string()]
+        );
     }
 
     #[test]

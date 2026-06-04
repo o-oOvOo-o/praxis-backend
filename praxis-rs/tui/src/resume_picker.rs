@@ -378,7 +378,6 @@ async fn run_session_picker_with_loader(
                             return Ok(sel);
                         }
                     }
-                    TuiEvent::Mouse(_) => {}
                     TuiEvent::Draw => {
                         if let Ok(size) = alt.tui.terminal.size() {
                             let list_height = size.height.saturating_sub(4) as usize;
@@ -1386,10 +1385,11 @@ fn draw_picker(tui: &mut Tui, state: &PickerState) -> std::io::Result<()> {
 
         // Header
         let header_line = picker_header_line(state);
-        frame.render_widget_ref(header_line, header);
+        frame.render_widget_ref(&header_line, header);
 
         // Search line
-        frame.render_widget_ref(search_line(state), search);
+        let search_line = search_line(state);
+        frame.render_widget_ref(&search_line, search);
 
         let (start, end) = visible_row_range(
             state.filtered_rows.len(),
@@ -1405,7 +1405,7 @@ fn draw_picker(tui: &mut Tui, state: &PickerState) -> std::io::Result<()> {
 
         // Hint line
         let hint_line = picker_hint_line(state);
-        frame.render_widget_ref(hint_line, hint);
+        frame.render_widget_ref(&hint_line, hint);
     })
 }
 
@@ -1525,7 +1525,7 @@ fn render_list(
     let rows = &state.filtered_rows;
     if rows.is_empty() {
         let message = render_empty_state_line(state);
-        frame.render_widget_ref(message, area);
+        frame.render_widget_ref(&message, area);
         return;
     }
 
@@ -1634,14 +1634,14 @@ fn render_list(
 
         let line: Line = spans.into();
         let rect = Rect::new(area.x, y, area.width, 1);
-        frame.render_widget_ref(line, rect);
+        frame.render_widget_ref(&line, rect);
         y = y.saturating_add(1);
     }
 
     if state.pagination.loading.is_pending() && y < area.y.saturating_add(area.height) {
         let loading_line: Line = vec!["  ".into(), "Loading older sessions…".italic().dim()].into();
         let rect = Rect::new(area.x, y, area.width, 1);
-        frame.render_widget_ref(loading_line, rect);
+        frame.render_widget_ref(&loading_line, rect);
     }
 }
 
@@ -1780,7 +1780,8 @@ fn render_column_headers(
         spans.push("  ".into());
     }
     spans.push("Conversation".bold());
-    frame.render_widget_ref(Line::from(spans), area);
+    let line = Line::from(spans);
+    frame.render_widget_ref(&line, area);
 }
 
 /// Pre-computed column widths and formatted labels for all visible rows.
@@ -2382,7 +2383,7 @@ mod tests {
         {
             let mut frame = terminal.get_frame();
             let line = search_line(&state);
-            frame.render_widget_ref(line, frame.area());
+            frame.render_widget_ref(&line, frame.area());
         }
         terminal.flush().expect("flush");
 
@@ -3085,6 +3086,7 @@ mod tests {
             summary: None,
             ephemeral: false,
             model_provider: String::from("openai"),
+            model: None,
             created_at: 1,
             updated_at: 2,
             status: praxis_app_gateway_protocol::ThreadStatus::Idle,
@@ -3098,6 +3100,8 @@ mod tests {
             name: Some(String::from("Named thread")),
             total_cost_usd: None,
             last_cost_usd: None,
+            token_usage: None,
+            control_state: None,
             selfwork_plan_path: None,
             turns: Vec::new(),
         };

@@ -66,6 +66,7 @@ pathdiff = { workspace = true }
 pulldown-cmark = { workspace = true }
 rand = { workspace = true }
 ratatui = { workspace = true, features = [
+    "crossterm_0_28",
     "scrolling-regions",
     "unstable-backend-writer",
     "unstable-rendered-line-info",

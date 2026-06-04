@@ -553,7 +553,7 @@ fn strip_leading_iso_timestamp(text: &str) -> Option<&str> {
     if !date_shape {
         return None;
     }
-    parse_time_like_seconds(&text[11..19])?;
+    parse_time_like_seconds(text.get(11..19)?)?;
     let mut end = 19;
     while text
         .as_bytes()
@@ -562,14 +562,14 @@ fn strip_leading_iso_timestamp(text: &str) -> Option<&str> {
     {
         end += 1;
     }
-    Some(&text[end..])
+    text.get(end..)
 }
 
 fn strip_leading_clock_timestamp(text: &str) -> Option<&str> {
     if text.len() < 8 {
         return None;
     }
-    parse_time_like_seconds(&text[..8])?;
+    parse_time_like_seconds(text.get(..8)?)?;
     let mut end = 8;
     while text
         .as_bytes()
@@ -578,7 +578,7 @@ fn strip_leading_clock_timestamp(text: &str) -> Option<&str> {
     {
         end += 1;
     }
-    Some(&text[end..])
+    text.get(end..)
 }
 
 fn timestamp_seconds_from_line(line: &str) -> Option<f64> {
@@ -594,10 +594,10 @@ fn timestamp_seconds_from_line(line: &str) -> Option<f64> {
         && text.as_bytes().get(7) == Some(&b'-')
         && matches!(text.as_bytes().get(10), Some(b' ') | Some(b'T'))
     {
-        return parse_time_like_seconds(&text[11..19]);
+        return text.get(11..19).and_then(parse_time_like_seconds);
     }
     if text.len() >= 8 {
-        return parse_time_like_seconds(&text[..8]);
+        return text.get(..8).and_then(parse_time_like_seconds);
     }
     None
 }
@@ -748,5 +748,31 @@ mod tests {
         );
         apply_command_output_reduction("Unity.exe -batchmode", &mut output);
         assert!(output.model_output.is_none());
+    }
+
+    #[test]
+    fn repeated_log_reducer_accepts_non_ascii_prefixes() {
+        let mut output = output(
+            "惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n\
+惺惺妳好 Warning: shader variant missing\n",
+            0,
+        );
+        apply_command_output_reduction("python run_tool.py", &mut output);
+        let reduced = output.model_output.expect("reduced").text;
+        assert!(reduced.contains("[warning x16, lines 1-16]"));
     }
 }

@@ -517,6 +517,7 @@ async fn run_review_on_session(
                     approvals_reviewer: None,
                     sandbox_policy: SandboxPolicy::new_read_only_policy(),
                     model: params.model.clone(),
+                    model_provider: Some(params.spawn_config.model_provider_id.clone()),
                     effort: params.reasoning_effort,
                     summary: Some(params.reasoning_summary),
                     service_tier: None,

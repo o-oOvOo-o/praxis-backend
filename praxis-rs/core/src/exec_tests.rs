@@ -297,6 +297,7 @@ async fn exec_full_buffer_capture_ignores_expiration() -> Result<()> {
         &FileSystemSandboxPolicy::unrestricted(),
         /*windows_restricted_token_filesystem_overlay*/ None,
         NetworkSandboxPolicy::Enabled,
+        /*raw_output_spool*/ false,
         /*stdout_stream*/ None,
         /*after_spawn*/ None,
     )
@@ -337,6 +338,7 @@ async fn exec_full_buffer_capture_keeps_io_drain_timeout_when_descendant_holds_p
             &FileSystemSandboxPolicy::unrestricted(),
             /*windows_restricted_token_filesystem_overlay*/ None,
             NetworkSandboxPolicy::Enabled,
+            /*raw_output_spool*/ false,
             /*stdout_stream*/ None,
             /*after_spawn*/ None,
         ),

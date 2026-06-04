@@ -25,6 +25,7 @@ use crate::key_hint::KeyBinding;
 use crate::render::renderable::FlexRenderable;
 use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
+use crate::thinking_persona::ThinkingPersona;
 use crate::tui::FrameRequester;
 use bottom_pane_view::BottomPaneView;
 use crossterm::event::KeyCode;
@@ -653,6 +654,13 @@ impl BottomPane {
         }
     }
 
+    pub(crate) fn set_status_thinking_persona(&mut self, persona: ThinkingPersona) {
+        if let Some(status) = self.status.as_mut() {
+            status.update_thinking_persona(persona);
+            self.request_redraw();
+        }
+    }
+
     /// Show the transient "press again to quit" hint for `key`.
     ///
     /// `ChatWidget` owns the quit shortcut state machine (it decides when quit is
@@ -791,6 +799,10 @@ impl BottomPane {
         self.push_view(Box::new(view));
     }
 
+    pub(crate) fn has_active_view(&self) -> bool {
+        self.active_view().is_some()
+    }
+
     /// Replace the active selection view when it matches `view_id`.
     pub(crate) fn replace_selection_view_if_active(
         &mut self,
@@ -896,11 +908,6 @@ impl BottomPane {
 
     pub(crate) fn is_task_running(&self) -> bool {
         self.is_task_running
-    }
-
-    #[cfg(test)]
-    pub(crate) fn has_active_view(&self) -> bool {
-        !self.view_stack.is_empty()
     }
 
     /// Return true when the pane is in the regular composer state without any

@@ -1,4 +1,5 @@
 use super::*;
+use crate::model::serialize_token_usage_info;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
 
@@ -128,6 +129,7 @@ SELECT
     sandbox_policy,
     approval_mode,
     tokens_used,
+    token_usage_info_json,
     session_summary,
     total_cost_micros,
     last_cost_micros,
@@ -176,6 +178,7 @@ SELECT
     sandbox_policy,
     approval_mode,
     tokens_used,
+    token_usage_info_json,
     session_summary,
     total_cost_micros,
     last_cost_micros,
@@ -519,6 +522,7 @@ SELECT
     sandbox_policy,
     approval_mode,
     tokens_used,
+    token_usage_info_json,
     session_summary,
     total_cost_micros,
     last_cost_micros,
@@ -608,6 +612,7 @@ FROM threads
         &self,
         metadata: &crate::ThreadMetadata,
     ) -> anyhow::Result<bool> {
+        let token_usage_info_json = serialize_token_usage_info(metadata.token_usage_info.as_ref())?;
         let source_columns = thread_source_columns_from_source_str(
             &metadata.source,
             metadata.agent_nickname.as_deref(),
@@ -637,6 +642,7 @@ INSERT INTO threads (
     sandbox_policy,
     approval_mode,
     tokens_used,
+    token_usage_info_json,
     session_summary,
     total_cost_micros,
     last_cost_micros,
@@ -648,7 +654,7 @@ INSERT INTO threads (
     git_origin_url,
     memory_mode,
     selfwork_plan_path
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -679,6 +685,7 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.sandbox_policy.as_str())
         .bind(metadata.approval_mode.as_str())
         .bind(metadata.tokens_used)
+        .bind(token_usage_info_json.as_deref())
         .bind(metadata.session_summary.as_deref())
         .bind(metadata.total_cost_micros)
         .bind(metadata.last_cost_micros)
@@ -775,6 +782,7 @@ WHERE id = ?
         metadata: &crate::ThreadMetadata,
         creation_memory_mode: Option<&str>,
     ) -> anyhow::Result<()> {
+        let token_usage_info_json = serialize_token_usage_info(metadata.token_usage_info.as_ref())?;
         let source_columns = thread_source_columns_from_source_str(
             &metadata.source,
             metadata.agent_nickname.as_deref(),
@@ -804,6 +812,7 @@ INSERT INTO threads (
     sandbox_policy,
     approval_mode,
     tokens_used,
+    token_usage_info_json,
     session_summary,
     total_cost_micros,
     last_cost_micros,
@@ -815,7 +824,7 @@ INSERT INTO threads (
     git_origin_url,
     memory_mode,
     selfwork_plan_path
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     rollout_path = excluded.rollout_path,
     created_at = excluded.created_at,
@@ -838,6 +847,7 @@ ON CONFLICT(id) DO UPDATE SET
     sandbox_policy = excluded.sandbox_policy,
     approval_mode = excluded.approval_mode,
     tokens_used = excluded.tokens_used,
+    token_usage_info_json = excluded.token_usage_info_json,
     session_summary = excluded.session_summary,
     total_cost_micros = excluded.total_cost_micros,
     last_cost_micros = excluded.last_cost_micros,
@@ -877,6 +887,7 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(metadata.sandbox_policy.as_str())
         .bind(metadata.approval_mode.as_str())
         .bind(metadata.tokens_used)
+        .bind(token_usage_info_json.as_deref())
         .bind(metadata.session_summary.as_deref())
         .bind(metadata.total_cost_micros)
         .bind(metadata.last_cost_micros)
@@ -1914,6 +1925,7 @@ mod tests {
                     total_token_usage: praxis_protocol::protocol::TokenUsage {
                         input_tokens: 0,
                         cached_input_tokens: 0,
+                        cache_reported_input_tokens: 0,
                         output_tokens: 0,
                         reasoning_output_tokens: 0,
                         total_tokens: 321,
@@ -1943,6 +1955,13 @@ mod tests {
             .expect("thread should load")
             .expect("thread should exist");
         assert_eq!(persisted.tokens_used, 321);
+        assert_eq!(
+            persisted
+                .token_usage_info
+                .as_ref()
+                .map(|info| info.total_token_usage.total_tokens),
+            Some(321)
+        );
         assert_eq!(persisted.updated_at, override_updated_at);
     }
 

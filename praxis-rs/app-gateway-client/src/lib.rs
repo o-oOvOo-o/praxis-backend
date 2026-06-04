@@ -295,8 +295,8 @@ fn event_requires_delivery(event: &NativeGatewayEvent) -> bool {
 
 /// Returns `true` for notifications that must survive backpressure.
 ///
-/// Transcript events (`AgentMessageDelta`, `PlanDelta`, reasoning deltas) and
-/// the authoritative `ItemCompleted` / `TurnCompleted` form the lossless tier
+/// Turn boundaries, transcript events (`AgentMessageDelta`, `PlanDelta`,
+/// reasoning deltas), and authoritative item completions form the lossless tier
 /// of the event stream. Dropping any of these corrupts the visible assistant
 /// output or leaves surfaces waiting for a completion signal that already
 /// fired. Everything else (`CommandExecutionOutputDelta`, progress, etc.) is
@@ -307,11 +307,14 @@ fn event_requires_delivery(event: &NativeGatewayEvent) -> bool {
 pub(crate) fn server_notification_requires_delivery(notification: &ServerNotification) -> bool {
     matches!(
         notification,
-        ServerNotification::TurnCompleted(_)
+        ServerNotification::TurnStarted(_)
+            | ServerNotification::TurnCompleted(_)
+            | ServerNotification::ItemStarted(_)
             | ServerNotification::ItemCompleted(_)
             | ServerNotification::AgentMessageDelta(_)
             | ServerNotification::PlanDelta(_)
             | ServerNotification::ReasoningSummaryTextDelta(_)
+            | ServerNotification::ReasoningSummaryPartAdded(_)
             | ServerNotification::ReasoningTextDelta(_)
     )
 }
@@ -826,6 +829,10 @@ impl NativeAppGatewayClient {
         self.event_rx.recv().await
     }
 
+    pub fn try_next_event(&mut self) -> Option<NativeGatewayEvent> {
+        self.event_rx.try_recv().ok()
+    }
+
     /// Shuts down worker and in-process runtime with bounded wait.
     ///
     /// If graceful shutdown exceeds timeout, the worker task is aborted to
@@ -949,6 +956,13 @@ impl AppGatewayClient {
         match self {
             Self::Native(client) => client.next_event().await.map(Into::into),
             Self::Remote(client) => client.next_event().await,
+        }
+    }
+
+    pub fn try_next_event(&mut self) -> Option<AppGatewayEvent> {
+        match self {
+            Self::Native(client) => client.try_next_event().map(Into::into),
+            Self::Remote(client) => client.try_next_event(),
         }
     }
 

@@ -82,6 +82,7 @@ fn apply_event_msg(metadata: &mut ThreadMetadata, event: &EventMsg) {
         EventMsg::TokenCount(token_count) => {
             if let Some(info) = token_count.info.as_ref() {
                 metadata.tokens_used = info.total_token_usage.total_tokens.max(0);
+                metadata.token_usage_info = Some(info.clone());
             }
         }
         EventMsg::UserMessage(user) => {
@@ -120,7 +121,7 @@ fn strip_user_message_prefix(text: &str) -> &str {
 
 fn user_message_preview(user: &UserMessageEvent) -> Option<String> {
     let message = strip_user_message_prefix(user.message.as_str());
-    if !message.is_empty() {
+    if !message.is_empty() && !is_bootstrap_context_message(message) {
         return Some(message.to_string());
     }
     if user
@@ -145,10 +146,12 @@ fn response_item_user_message_preview(item: &ResponseItem) -> Option<String> {
     let text = content
         .iter()
         .filter_map(|item| match item {
-            ContentItem::InputText { text } => Some(text.trim()),
+            ContentItem::InputText { text } => {
+                let text = text.trim();
+                (!text.is_empty() && !is_bootstrap_context_message(text)).then_some(text)
+            }
             ContentItem::InputImage { .. } | ContentItem::OutputText { .. } => None,
         })
-        .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n");
     if !text.is_empty() {
@@ -161,6 +164,13 @@ fn response_item_user_message_preview(item: &ResponseItem) -> Option<String> {
         return Some(IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string());
     }
     None
+}
+
+fn is_bootstrap_context_message(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with("<environment_context>")
+        || trimmed.starts_with("<skills_instructions>")
+        || trimmed.starts_with("# AGENTS.md instructions for ")
 }
 
 pub(crate) fn enum_to_string<T: Serialize>(value: &T) -> String {
@@ -217,6 +227,110 @@ mod tests {
             Some("hello from response item")
         );
         assert_eq!(metadata.title, "hello from response item");
+    }
+
+    #[test]
+    fn split_bootstrap_context_user_messages_are_not_thread_preview() {
+        let mut metadata = metadata_for_test();
+        let agents = RolloutItem::ResponseItem(ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "# AGENTS.md instructions for D:\\ghost1.0\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
+                    .to_string(),
+            }],
+            end_turn: None,
+            phase: None,
+        });
+        let env = RolloutItem::ResponseItem(ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "<environment_context>\n  <cwd>D:\\ghost1.0</cwd>\n</environment_context>"
+                    .to_string(),
+            }],
+            end_turn: None,
+            phase: None,
+        });
+        let real_user = RolloutItem::ResponseItem(ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "修复 DeepSeek 标题生成".to_string(),
+            }],
+            end_turn: None,
+            phase: None,
+        });
+
+        apply_rollout_item(&mut metadata, &agents, "test-provider");
+        apply_rollout_item(&mut metadata, &env, "test-provider");
+        apply_rollout_item(&mut metadata, &real_user, "test-provider");
+
+        assert_eq!(
+            metadata.first_user_message.as_deref(),
+            Some("修复 DeepSeek 标题生成")
+        );
+        assert_eq!(metadata.title, "修复 DeepSeek 标题生成");
+    }
+
+    #[test]
+    fn mixed_bootstrap_context_message_uses_real_text_block() {
+        let mut metadata = metadata_for_test();
+        let item = RolloutItem::ResponseItem(ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![
+                ContentItem::InputText {
+                    text: "# AGENTS.md instructions for D:\\ghost1.0\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
+                        .to_string(),
+                },
+                ContentItem::InputText {
+                    text: "<environment_context>\n  <cwd>D:\\ghost1.0</cwd>\n</environment_context>"
+                        .to_string(),
+                },
+                ContentItem::InputText {
+                    text: "修复 DeepSeek 标题生成".to_string(),
+                },
+            ],
+            end_turn: None,
+            phase: None,
+        });
+
+        apply_rollout_item(&mut metadata, &item, "test-provider");
+
+        assert_eq!(
+            metadata.first_user_message.as_deref(),
+            Some("修复 DeepSeek 标题生成")
+        );
+        assert_eq!(metadata.title, "修复 DeepSeek 标题生成");
+    }
+
+    #[test]
+    fn bootstrap_event_user_message_is_not_thread_preview() {
+        let mut metadata = metadata_for_test();
+        let bootstrap = RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            message: format!(
+                "{USER_MESSAGE_BEGIN} # AGENTS.md instructions for D:\\ghost1.0\n\n<INSTRUCTIONS>\nbody\n</INSTRUCTIONS>"
+            ),
+            images: Some(vec![]),
+            local_images: vec![],
+            text_elements: vec![],
+        }));
+        let real_user = RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            message: format!("{USER_MESSAGE_BEGIN} actual user request"),
+            images: Some(vec![]),
+            local_images: vec![],
+            text_elements: vec![],
+        }));
+
+        apply_rollout_item(&mut metadata, &bootstrap, "test-provider");
+        apply_rollout_item(&mut metadata, &real_user, "test-provider");
+
+        assert_eq!(
+            metadata.first_user_message.as_deref(),
+            Some("actual user request")
+        );
+        assert_eq!(metadata.title, "actual user request");
     }
 
     #[test]
@@ -457,6 +571,7 @@ mod tests {
             sandbox_policy: "read-only".to_string(),
             approval_mode: "on-request".to_string(),
             tokens_used: 1,
+            token_usage_info: None,
             session_summary: None,
             total_cost_micros: None,
             last_cost_micros: None,
@@ -476,6 +591,7 @@ mod tests {
         base.title = "hello".to_string();
         let mut other = base.clone();
         other.tokens_used = 2;
+        other.token_usage_info = None;
         other.title = "world".to_string();
         let diffs = base.diff_fields(&other);
         assert_eq!(diffs, vec!["title", "tokens_used"]);

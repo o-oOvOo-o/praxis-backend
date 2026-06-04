@@ -7,6 +7,7 @@ use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionSource;
+use praxis_protocol::protocol::TokenUsageInfo;
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
 use std::path::PathBuf;
@@ -104,6 +105,8 @@ pub struct ThreadMetadata {
     pub approval_mode: String,
     /// The last observed token usage.
     pub tokens_used: i64,
+    /// The last observed full token usage snapshot.
+    pub token_usage_info: Option<TokenUsageInfo>,
     /// A short persisted session summary for resume/list surfaces.
     pub session_summary: Option<String>,
     /// The latest estimated total USD cost for the thread in microdollars.
@@ -226,6 +229,7 @@ impl ThreadMetadataBuilder {
             sandbox_policy,
             approval_mode,
             tokens_used: 0,
+            token_usage_info: None,
             session_summary: None,
             total_cost_micros: None,
             last_cost_micros: None,
@@ -307,6 +311,9 @@ impl ThreadMetadata {
         if self.tokens_used != other.tokens_used {
             diffs.push("tokens_used");
         }
+        if self.token_usage_info != other.token_usage_info {
+            diffs.push("token_usage_info");
+        }
         if self.session_summary != other.session_summary {
             diffs.push("session_summary");
         }
@@ -361,6 +368,7 @@ pub(crate) struct ThreadRow {
     sandbox_policy: String,
     approval_mode: String,
     tokens_used: i64,
+    token_usage_info_json: Option<String>,
     session_summary: Option<String>,
     total_cost_micros: Option<i64>,
     last_cost_micros: Option<i64>,
@@ -392,6 +400,7 @@ impl ThreadRow {
             sandbox_policy: row.try_get("sandbox_policy")?,
             approval_mode: row.try_get("approval_mode")?,
             tokens_used: row.try_get("tokens_used")?,
+            token_usage_info_json: row.try_get("token_usage_info_json")?,
             session_summary: row.try_get("session_summary")?,
             total_cost_micros: row.try_get("total_cost_micros")?,
             last_cost_micros: row.try_get("last_cost_micros")?,
@@ -427,6 +436,7 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             sandbox_policy,
             approval_mode,
             tokens_used,
+            token_usage_info_json,
             session_summary,
             total_cost_micros,
             last_cost_micros,
@@ -456,6 +466,7 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             sandbox_policy,
             approval_mode,
             tokens_used,
+            token_usage_info: parse_token_usage_info(token_usage_info_json)?,
             session_summary: session_summary.filter(|value| !value.is_empty()),
             total_cost_micros,
             last_cost_micros,
@@ -469,6 +480,20 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             git_origin_url,
         })
     }
+}
+
+pub(crate) fn serialize_token_usage_info(info: Option<&TokenUsageInfo>) -> Result<Option<String>> {
+    info.map(serde_json::to_string)
+        .transpose()
+        .map_err(Into::into)
+}
+
+fn parse_token_usage_info(value: Option<String>) -> Result<Option<TokenUsageInfo>> {
+    value
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| serde_json::from_str::<TokenUsageInfo>(&value))
+        .transpose()
+        .map_err(Into::into)
 }
 
 pub(crate) fn anchor_from_item(item: &ThreadMetadata, sort_key: SortKey) -> Option<Anchor> {
@@ -530,6 +555,7 @@ mod tests {
             sandbox_policy: "read-only".to_string(),
             approval_mode: "on-request".to_string(),
             tokens_used: 1,
+            token_usage_info_json: None,
             session_summary: None,
             total_cost_micros: None,
             last_cost_micros: None,
@@ -562,6 +588,7 @@ mod tests {
             sandbox_policy: "read-only".to_string(),
             approval_mode: "on-request".to_string(),
             tokens_used: 1,
+            token_usage_info: None,
             session_summary: None,
             total_cost_micros: None,
             last_cost_micros: None,

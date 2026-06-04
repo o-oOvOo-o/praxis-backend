@@ -56,6 +56,8 @@ struct StatusContextWindowData {
 pub(crate) struct StatusTokenUsageData {
     total: i64,
     input: i64,
+    cached_input: i64,
+    cache_reported_input: i64,
     output: i64,
     context_window: Option<StatusContextWindowData>,
 }
@@ -321,6 +323,10 @@ impl StatusHistoryCell {
         let token_usage = StatusTokenUsageData {
             total: total_usage.blended_total(),
             input: total_usage.non_cached_input(),
+            cached_input: total_usage
+                .cached_input()
+                .min(total_usage.cache_reported_input()),
+            cache_reported_input: total_usage.cache_reported_input(),
             output: total_usage.output_tokens,
             context_window,
         };
@@ -358,8 +364,19 @@ impl StatusHistoryCell {
         let total_fmt = format_tokens_compact(self.token_usage.total);
         let input_fmt = format_tokens_compact(self.token_usage.input);
         let output_fmt = format_tokens_compact(self.token_usage.output);
+        let cache_percent = if self.token_usage.cache_reported_input > 0 {
+            Some(
+                ((self.token_usage.cached_input as f64
+                    / self.token_usage.cache_reported_input as f64)
+                    * 100.0)
+                    .round()
+                    .clamp(0.0, 100.0) as i64,
+            )
+        } else {
+            None
+        };
 
-        vec![
+        let mut spans = vec![
             Span::from(total_fmt),
             Span::from(" total "),
             Span::from(" (").dim(),
@@ -369,7 +386,19 @@ impl StatusHistoryCell {
             Span::from(output_fmt).dim(),
             Span::from(" output").dim(),
             Span::from(")").dim(),
-        ]
+        ];
+
+        if let Some(cache_percent) = cache_percent {
+            spans.push(Span::from(" · ").dim());
+            spans.push(Span::from(format!("{cache_percent}% cache")).dim());
+            if self.token_usage.cached_input > 0 {
+                spans.push(Span::from(" (").dim());
+                spans.push(Span::from(format_tokens_compact(self.token_usage.cached_input)).dim());
+                spans.push(Span::from(" hit)").dim());
+            }
+        }
+
+        spans
     }
 
     fn context_window_spans(&self) -> Option<Vec<Span<'static>>> {

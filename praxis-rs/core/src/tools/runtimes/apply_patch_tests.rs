@@ -33,10 +33,12 @@ fn wants_no_sandbox_approval_granular_respects_sandbox_flag() {
 fn guardian_review_request_includes_patch_context() {
     let path = std::env::temp_dir().join("guardian-apply-patch-test.txt");
     let action = ApplyPatchAction::new_add_for_test(&path, "hello".to_string());
+    let agent_os_command = apply_patch_agent_os_command(&action);
     let expected_cwd = action.cwd.clone();
     let expected_patch = action.patch.clone();
     let request = ApplyPatchRequest {
         action,
+        agent_os_command,
         file_paths: vec![
             AbsolutePathBuf::from_absolute_path(&path).expect("temp path should be absolute"),
         ],
@@ -73,8 +75,10 @@ fn guardian_review_request_includes_patch_context() {
 fn build_sandbox_command_prefers_configured_praxis_self_exe_for_apply_patch() {
     let path = std::env::temp_dir().join("apply-patch-current-exe-test.txt");
     let action = ApplyPatchAction::new_add_for_test(&path, "hello".to_string());
+    let agent_os_command = apply_patch_agent_os_command(&action);
     let request = ApplyPatchRequest {
         action,
+        agent_os_command,
         file_paths: vec![
             AbsolutePathBuf::from_absolute_path(&path).expect("temp path should be absolute"),
         ],
@@ -105,8 +109,10 @@ fn build_sandbox_command_prefers_configured_praxis_self_exe_for_apply_patch() {
 fn build_sandbox_command_falls_back_to_current_exe_for_apply_patch() {
     let path = std::env::temp_dir().join("apply-patch-current-exe-test.txt");
     let action = ApplyPatchAction::new_add_for_test(&path, "hello".to_string());
+    let agent_os_command = apply_patch_agent_os_command(&action);
     let request = ApplyPatchRequest {
         action,
+        agent_os_command,
         file_paths: vec![
             AbsolutePathBuf::from_absolute_path(&path).expect("temp path should be absolute"),
         ],

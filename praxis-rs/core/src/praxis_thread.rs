@@ -197,6 +197,15 @@ impl PraxisThread {
         self.praxis.state_db()
     }
 
+    pub async fn regenerate_thread_name(&self) -> anyhow::Result<String> {
+        crate::auto_title::regenerate_thread_title(&self.praxis.session).await
+    }
+
+    pub async fn thread_title_preview(&self) -> Option<String> {
+        let history = self.praxis.session.clone_history().await;
+        crate::auto_title::title_preview_from_response_items(history.raw_items())
+    }
+
     pub async fn config_snapshot(&self) -> ThreadConfigSnapshot {
         self.praxis.thread_config_snapshot().await
     }

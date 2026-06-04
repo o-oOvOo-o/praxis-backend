@@ -156,6 +156,56 @@ fn subagents_disable_request_user_input_and_agent_jobs_workers_opt_in_by_label()
 }
 
 #[test]
+fn common_wire_profile_enables_freeform_apply_patch_without_model_metadata() {
+    let model_info = model_info();
+    let features = Features::with_defaults();
+    let available_models = Vec::new();
+
+    let responses_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features: &features,
+        web_search_mode: Some(WebSearchMode::Cached),
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    });
+    let common_config = responses_config
+        .clone()
+        .with_tool_wire_profile(ToolWireProfile::Common);
+
+    assert_eq!(responses_config.apply_patch_tool_type, None);
+    assert_eq!(
+        common_config.apply_patch_tool_type,
+        Some(ApplyPatchToolType::Freeform)
+    );
+}
+
+#[test]
+fn wire_profile_keeps_native_apply_patch_metadata() {
+    let mut model_info = model_info();
+    model_info.apply_patch_tool_type = Some(ApplyPatchToolType::Function);
+    let features = Features::with_defaults();
+    let available_models = Vec::new();
+
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features: &features,
+        web_search_mode: Some(WebSearchMode::Cached),
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    })
+    .with_tool_wire_profile(ToolWireProfile::Common);
+
+    assert_eq!(
+        tools_config.apply_patch_tool_type,
+        Some(ApplyPatchToolType::Function)
+    );
+}
+
+#[test]
 fn image_generation_requires_feature_and_supported_model() {
     let supported_model_info = model_info();
     let mut unsupported_model_info = supported_model_info.clone();

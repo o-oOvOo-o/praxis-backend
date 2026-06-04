@@ -5,6 +5,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use ratatui::widgets::WidgetRef;
 
 use crate::render::Insets;
@@ -101,7 +102,7 @@ impl Renderable for () {
 
 impl Renderable for &str {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.render_ref(area, buf);
+        WidgetRef::render_ref(self, area, buf);
     }
     fn desired_height(&self, _width: u16) -> u16 {
         1
@@ -110,7 +111,7 @@ impl Renderable for &str {
 
 impl Renderable for String {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.render_ref(area, buf);
+        WidgetRef::render_ref(self, area, buf);
     }
     fn desired_height(&self, _width: u16) -> u16 {
         1
@@ -119,7 +120,7 @@ impl Renderable for String {
 
 impl<'a> Renderable for Span<'a> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.render_ref(area, buf);
+        self.clone().render(area, buf);
     }
     fn desired_height(&self, _width: u16) -> u16 {
         1
@@ -128,7 +129,7 @@ impl<'a> Renderable for Span<'a> {
 
 impl<'a> Renderable for Line<'a> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        WidgetRef::render_ref(self, area, buf);
+        self.clone().render(area, buf);
     }
     fn desired_height(&self, _width: u16) -> u16 {
         1
@@ -137,7 +138,7 @@ impl<'a> Renderable for Line<'a> {
 
 impl<'a> Renderable for Paragraph<'a> {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.render_ref(area, buf);
+        self.clone().render(area, buf);
     }
     fn desired_height(&self, width: u16) -> u16 {
         self.line_count(width) as u16

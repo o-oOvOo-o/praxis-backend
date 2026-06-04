@@ -283,3 +283,77 @@ fn build_post_tool_use_payload_uses_tool_output_wire_value() {
         })
     );
 }
+
+#[test]
+fn source_overwrite_guard_blocks_powershell_set_content_to_rust_file() {
+    let command = vec![
+        "powershell.exe".to_string(),
+        "-Command".to_string(),
+        "Set-Content -NoNewline -Path crates/app/src/lib.rs -Value 'fn main() {}'".to_string(),
+    ];
+
+    let err = super::guard_shell_source_overwrite(&command, std::path::Path::new("D:/repo"))
+        .expect_err("shell source overwrite should be blocked");
+
+    assert!(
+        err.to_string().contains("Use the apply_patch tool"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn source_overwrite_guard_blocks_redirection_to_typescript_file() {
+    let command = vec![
+        "bash".to_string(),
+        "-lc".to_string(),
+        "printf 'export const x = 1' > src/index.ts".to_string(),
+    ];
+
+    assert!(super::guard_shell_source_overwrite(&command, std::path::Path::new("/repo")).is_err());
+}
+
+#[test]
+fn source_overwrite_guard_allows_fd_merge_on_source_search() {
+    let command = vec![
+        "powershell.exe".to_string(),
+        "-Command".to_string(),
+        "rg -n \"Ridge\" crates/cunning_core/src/bin/main.rs 2>&1".to_string(),
+    ];
+
+    super::guard_shell_source_overwrite(&command, std::path::Path::new("D:/repo"))
+        .expect("fd merge on a source search should not look like file overwrite");
+}
+
+#[test]
+fn source_overwrite_guard_blocks_python_write_to_markdown_file() {
+    let command = vec![
+        "python".to_string(),
+        "-c".to_string(),
+        "from pathlib import Path; Path('docs/plan.md').write_text('new plan')".to_string(),
+    ];
+
+    assert!(super::guard_shell_source_overwrite(&command, std::path::Path::new("/repo")).is_err());
+}
+
+#[test]
+fn source_overwrite_guard_blocks_node_write_file_sync_to_script_file() {
+    let command = vec![
+        "node".to_string(),
+        "-e".to_string(),
+        "require('fs').writeFileSync('scripts/run.sh', '#!/bin/sh\\necho hi')".to_string(),
+    ];
+
+    assert!(super::guard_shell_source_overwrite(&command, std::path::Path::new("/repo")).is_err());
+}
+
+#[test]
+fn source_overwrite_guard_allows_non_source_output() {
+    let command = vec![
+        "powershell.exe".to_string(),
+        "-Command".to_string(),
+        "Set-Content -Path reports/output.txt -Value 'ok'".to_string(),
+    ];
+
+    super::guard_shell_source_overwrite(&command, std::path::Path::new("D:/repo"))
+        .expect("non-source output should be allowed");
+}

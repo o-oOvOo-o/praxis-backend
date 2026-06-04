@@ -1063,6 +1063,7 @@ pub struct SearchToolCallParams {
 /// or `shell`, the `arguments` field should deserialize to this struct.
 #[derive(Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 pub struct ShellToolCallParams {
+    #[serde(deserialize_with = "deserialize_shell_command_argv")]
     pub command: Vec<String>,
     pub workdir: Option<String>,
 
@@ -1081,6 +1082,41 @@ pub struct ShellToolCallParams {
     pub additional_permissions: Option<PermissionProfile>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub justification: Option<String>,
+}
+
+fn deserialize_shell_command_argv<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match value {
+        serde_json::Value::Array(items) => items
+            .into_iter()
+            .map(|item| match item {
+                serde_json::Value::String(value) => Ok(value),
+                other => Err(serde::de::Error::custom(format!(
+                    "shell command argv items must be strings, got {other}"
+                ))),
+            })
+            .collect(),
+        serde_json::Value::String(value) => {
+            let trimmed = value.trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                serde_json::from_str::<Vec<String>>(trimmed).map_err(|err| {
+                    serde::de::Error::custom(format!(
+                        "shell command string looked like argv JSON but could not be parsed: {err}"
+                    ))
+                })
+            } else {
+                Err(serde::de::Error::custom(
+                    "shell command must be an argv array; a JSON-encoded argv array string is accepted for provider compatibility",
+                ))
+            }
+        }
+        other => Err(serde::de::Error::custom(format!(
+            "shell command must be an argv array, got {other}"
+        ))),
+    }
 }
 
 /// If the `name` of a `ResponseItem::FunctionCall` is `shell_command`, the
@@ -1469,6 +1505,35 @@ mod tests {
                 uses_additional_permissions
             );
         }
+    }
+
+    #[test]
+    fn shell_tool_params_accept_command_argv_array() {
+        let params: ShellToolCallParams =
+            serde_json::from_str(r#"{"command":["powershell.exe","-Command","pwd"]}"#)
+                .expect("argv array should parse");
+
+        assert_eq!(params.command, vec!["powershell.exe", "-Command", "pwd"]);
+    }
+
+    #[test]
+    fn shell_tool_params_accept_json_encoded_command_argv_string() {
+        let params: ShellToolCallParams =
+            serde_json::from_str(r#"{"command":"[\"powershell.exe\",\"-Command\",\"pwd\"]"}"#)
+                .expect("stringified argv should parse for provider compatibility");
+
+        assert_eq!(params.command, vec!["powershell.exe", "-Command", "pwd"]);
+    }
+
+    #[test]
+    fn shell_tool_params_reject_plain_command_string() {
+        let err = serde_json::from_str::<ShellToolCallParams>(r#"{"command":"powershell pwd"}"#)
+            .expect_err("plain shell strings belong to shell_command, not shell argv");
+
+        assert!(
+            err.to_string().contains("argv array"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

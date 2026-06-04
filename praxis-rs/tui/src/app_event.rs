@@ -16,6 +16,7 @@ use praxis_app_gateway_protocol::PluginListResponse;
 use praxis_app_gateway_protocol::PluginReadParams;
 use praxis_app_gateway_protocol::PluginReadResponse;
 use praxis_app_gateway_protocol::PluginUninstallResponse;
+use praxis_app_gateway_protocol::ThreadListResponse;
 use praxis_chatgpt::connectors::AppInfo;
 use praxis_core::ModelProviderInfo;
 use praxis_file_search::FileMatch;
@@ -31,6 +32,7 @@ use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
 use crate::history_cell::HistoryCell;
+use crate::provider_setup::ProviderSetupKind;
 
 use praxis_config::types::ApprovalsReviewer;
 use praxis_features::Feature;
@@ -109,6 +111,14 @@ pub(crate) enum AppEvent {
     /// Fork the current session into a new thread.
     ForkCurrentSession,
 
+    /// Release the read-only control lock on the current thread.
+    ReleaseCurrentThreadControl,
+
+    /// Ask the backend to regenerate the current thread name from conversation context.
+    RegenerateThreadName {
+        thread_id: ThreadId,
+    },
+
     /// Request to exit the application.
     ///
     /// Use `ShutdownFirst` for user-initiated quits so core cleanup runs and the
@@ -147,6 +157,23 @@ pub(crate) enum AppEvent {
     RateLimitsLoaded {
         request_id: u64,
         result: Result<Vec<RateLimitSnapshot>, String>,
+    },
+
+    /// Result of refreshing Praxis Center's thread list.
+    CenterThreadsLoaded {
+        request_id: u64,
+        result: Result<ThreadListResponse, String>,
+    },
+
+    /// Fetch and summarize token usage for the most recent Praxis threads.
+    FetchTokenUsageSummary {
+        limit: usize,
+    },
+
+    /// Result of fetching thread token usage for `/token`.
+    TokenUsageSummaryLoaded {
+        limit: usize,
+        result: Result<ThreadListResponse, String>,
     },
 
     /// Result of prefetching connectors.
@@ -289,19 +316,35 @@ pub(crate) enum AppEvent {
         provider_id: String,
     },
 
-    /// Update the active collaboration mask in the running app and widget.
-    UpdateCollaborationMode(CollaborationModeMask),
-
-    /// Update the current personality in the running app and widget.
-    UpdatePersonality(Personality),
-
-    /// Persist the selected model and reasoning effort to the appropriate config.
-    PersistModelSelection {
+    /// Atomically apply and persist a provider-scoped model selection.
+    ApplyModelSelection {
         model: String,
         provider_id: String,
         provider: Option<ModelProviderInfo>,
         effort: Option<ReasoningEffort>,
     },
+
+    /// Open the API-key prompt for a provider managed by `/login`.
+    OpenProviderLoginPrompt {
+        provider: ProviderSetupKind,
+    },
+
+    /// Show the policy statement behind the Anthropic sign-in entry.
+    ShowAnthropicLoginStatement,
+
+    /// Configure a provider definition and switch the active model to it.
+    ApplyProviderSetup {
+        model: String,
+        provider_id: String,
+        provider: ModelProviderInfo,
+        effort: Option<ReasoningEffort>,
+    },
+
+    /// Update the active collaboration mask in the running app and widget.
+    UpdateCollaborationMode(CollaborationModeMask),
+
+    /// Update the current personality in the running app and widget.
+    UpdatePersonality(Personality),
 
     /// Persist the selected personality to the appropriate config.
     PersistPersonalitySelection {

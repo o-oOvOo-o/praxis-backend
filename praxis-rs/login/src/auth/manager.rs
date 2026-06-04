@@ -24,7 +24,9 @@ use crate::auth::error::RefreshTokenFailedReason;
 pub use crate::auth::storage::AuthCredentialsStoreMode;
 pub use crate::auth::storage::AuthDotJson;
 use crate::auth::storage::AuthStorageBackend;
+use crate::auth::storage::LoadedAuthOrigin;
 use crate::auth::storage::create_auth_storage;
+use crate::auth::storage::load_persistent_auth_with_origin;
 use crate::auth::util::try_parse_error_message;
 use crate::default_client::create_client;
 use crate::token_data::KnownPlan as InternalKnownPlan;
@@ -623,15 +625,37 @@ fn load_auth(
         return Ok(None);
     }
 
-    // Fall back to the configured persistent store (file/keyring/auto) for managed auth.
-    let storage = create_auth_storage(praxis_home.to_path_buf(), auth_credentials_store_mode);
-    let auth_dot_json = match storage.load()? {
-        Some(auth) => auth,
+    // Fall back to managed Praxis auth first, then inherit upstream Codex auth as externally
+    // managed tokens so Praxis never rotates Codex's single-use refresh token independently.
+    let loaded = match load_persistent_auth_with_origin(
+        praxis_home.to_path_buf(),
+        auth_credentials_store_mode,
+    )? {
+        Some(loaded) => loaded,
         None => return Ok(None),
     };
 
-    let auth = build_auth(auth_dot_json, auth_credentials_store_mode)?;
+    let auth_dot_json = match loaded.origin {
+        LoadedAuthOrigin::Praxis => loaded.auth,
+        LoadedAuthOrigin::InheritedCodex => inherited_codex_auth_as_external_tokens(loaded.auth),
+    };
+    let storage_mode = match loaded.origin {
+        LoadedAuthOrigin::Praxis => auth_credentials_store_mode,
+        LoadedAuthOrigin::InheritedCodex => AuthCredentialsStoreMode::Ephemeral,
+    };
+
+    let auth = build_auth(auth_dot_json, storage_mode)?;
     Ok(Some(auth))
+}
+
+fn inherited_codex_auth_as_external_tokens(mut auth_dot_json: AuthDotJson) -> AuthDotJson {
+    if auth_dot_json.resolved_mode() == ApiAuthMode::Chatgpt {
+        auth_dot_json.auth_mode = Some(ApiAuthMode::ChatgptAuthTokens);
+        if let Some(tokens) = auth_dot_json.tokens.as_mut() {
+            tokens.refresh_token.clear();
+        }
+    }
+    auth_dot_json
 }
 
 // Persist refreshed tokens into auth storage and update last_refresh.
@@ -1511,10 +1535,11 @@ impl AuthManager {
 
         let attempted_auth = auth.clone();
         let result = match auth {
-            CodexAuth::ChatgptAuthTokens(_) => {
+            CodexAuth::ChatgptAuthTokens(_) if self.has_external_auth() => {
                 self.refresh_external_auth(ExternalAuthRefreshReason::Unauthorized)
                     .await
             }
+            CodexAuth::ChatgptAuthTokens(_) => Ok(()),
             CodexAuth::Chatgpt(chatgpt_auth) => {
                 let token_data = chatgpt_auth.current_token_data().ok_or_else(|| {
                     RefreshTokenError::Transient(std::io::Error::other(

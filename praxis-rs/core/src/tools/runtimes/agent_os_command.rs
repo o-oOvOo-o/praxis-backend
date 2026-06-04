@@ -1,4 +1,6 @@
 use std::fmt;
+use std::panic::AssertUnwindSafe;
+use std::panic::catch_unwind;
 use std::path::Path;
 
 use praxis_shell_command::parse_command::shlex_join;
@@ -97,7 +99,15 @@ pub(crate) async fn finish_agent_os_span_with_output(
         }
     }
     if let Some(raw_command) = span.raw_command().await {
-        apply_command_output_reduction(raw_command.as_str(), output);
+        if catch_unwind(AssertUnwindSafe(|| {
+            apply_command_output_reduction(raw_command.as_str(), output);
+        }))
+        .is_err()
+        {
+            tracing::warn!(
+                "AgentOS {runtime_label} command output reducer panicked; preserving raw output"
+            );
+        }
     }
 }
 

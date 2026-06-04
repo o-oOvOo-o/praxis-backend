@@ -1364,6 +1364,51 @@ fn normalize_removes_orphan_custom_tool_call_output() {
     assert_eq!(h.raw_items(), vec![]);
 }
 
+#[test]
+fn normalize_keeps_custom_output_for_function_call_with_same_call_id() {
+    let items = vec![
+        ResponseItem::FunctionCall {
+            id: None,
+            name: "apply_patch".to_string(),
+            namespace: None,
+            arguments: "{}".to_string(),
+            call_id: "call-x".to_string(),
+        },
+        ResponseItem::CustomToolCallOutput {
+            call_id: "call-x".to_string(),
+            name: Some("apply_patch".to_string()),
+            output: FunctionCallOutputPayload::from_text("patch ok".to_string()),
+        },
+    ];
+    let mut h = create_history_with_items(items.clone());
+
+    h.normalize_history(&default_input_modalities());
+
+    assert_eq!(h.raw_items(), items);
+}
+
+#[test]
+fn normalize_keeps_function_output_for_custom_tool_call_with_same_call_id() {
+    let items = vec![
+        ResponseItem::CustomToolCall {
+            id: None,
+            status: None,
+            call_id: "tool-x".to_string(),
+            name: "apply_patch".to_string(),
+            input: "*** Begin Patch\n*** End Patch\n".to_string(),
+        },
+        ResponseItem::FunctionCallOutput {
+            call_id: "tool-x".to_string(),
+            output: FunctionCallOutputPayload::from_text("patch ok".to_string()),
+        },
+    ];
+    let mut h = create_history_with_items(items.clone());
+
+    h.normalize_history(&default_input_modalities());
+
+    assert_eq!(h.raw_items(), items);
+}
+
 #[cfg(not(debug_assertions))]
 #[test]
 fn normalize_mixed_inserts_and_removals() {

@@ -36,8 +36,6 @@ use crate::tui;
 use crate::tui::TuiEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
-use crossterm::event::MouseEvent;
-use crossterm::event::MouseEventKind;
 use ratatui::buffer::Buffer;
 use ratatui::buffer::Cell;
 use ratatui::layout::Rect;
@@ -50,7 +48,6 @@ use ratatui::text::Text;
 use ratatui::widgets::Clear;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
-use ratatui::widgets::WidgetRef;
 use ratatui::widgets::Wrap;
 
 pub(crate) enum Overlay {
@@ -110,7 +107,6 @@ const KEY_ESC: KeyBinding = key_hint::plain(KeyCode::Esc);
 const KEY_ENTER: KeyBinding = key_hint::plain(KeyCode::Enter);
 const KEY_CTRL_T: KeyBinding = key_hint::ctrl(KeyCode::Char('t'));
 const KEY_CTRL_C: KeyBinding = key_hint::ctrl(KeyCode::Char('c'));
-const MOUSE_WHEEL_SCROLL_LINES: usize = 3;
 
 // Common pager navigation hints rendered on the first line
 const PAGER_KEY_HINTS: &[(&[KeyBinding], &str)] = &[
@@ -137,7 +133,7 @@ fn render_key_hints(area: Rect, buf: &mut Buffer, pairs: &[(&[KeyBinding], &str)
         spans.push(Span::from(desc.to_string()));
         first = false;
     }
-    Paragraph::new(vec![Line::from(spans).dim()]).render_ref(area, buf);
+    Paragraph::new(vec![Line::from(spans).dim()]).render(area, buf);
 }
 
 /// Generic widget for rendering a pager view.
@@ -242,9 +238,9 @@ impl PagerView {
     fn render_header(&self, area: Rect, buf: &mut Buffer) {
         Span::from("/ ".repeat(area.width as usize / 2))
             .dim()
-            .render_ref(area, buf);
+            .render(area, buf);
         let header = format!("/ {}", self.title);
-        header.dim().render_ref(area, buf);
+        header.dim().render(area, buf);
     }
 
     fn render_content(&self, area: Rect, buf: &mut Buffer) {
@@ -355,7 +351,7 @@ impl PagerView {
 
         Span::from("─".repeat(sep_rect.width as usize))
             .dim()
-            .render_ref(sep_rect, buf);
+            .render(sep_rect, buf);
         let percent = if total_len == 0 {
             100
         } else {
@@ -372,7 +368,7 @@ impl PagerView {
         let pct_x = sep_rect.x + sep_rect.width - pct_w - 1;
         Span::from(pct_text)
             .dim()
-            .render_ref(Rect::new(pct_x, sep_rect.y, pct_w, 1), buf);
+            .render(Rect::new(pct_x, sep_rect.y, pct_w, 1), buf);
     }
 
     fn handle_key_event(&mut self, tui: &mut tui::Tui, key_event: KeyEvent) -> Result<()> {
@@ -419,20 +415,6 @@ impl PagerView {
             tui.frame_requester().schedule_scroll_frame();
         }
         Ok(())
-    }
-
-    fn handle_mouse_event(&mut self, mouse_event: MouseEvent) -> bool {
-        let previous_scroll_offset = self.scroll_offset;
-        match mouse_event.kind {
-            MouseEventKind::ScrollUp => {
-                self.scroll_up(MOUSE_WHEEL_SCROLL_LINES);
-            }
-            MouseEventKind::ScrollDown => {
-                self.scroll_down(MOUSE_WHEEL_SCROLL_LINES);
-            }
-            _ => return false,
-        }
-        self.scroll_offset != previous_scroll_offset
     }
 
     /// Returns the height of one page in content rows.
@@ -1391,8 +1373,7 @@ impl TranscriptOverlay {
             pairs.push((&[KEY_ESC], "to edit prev"));
         }
         if let Some(search_status) = &self.search_status {
-            Paragraph::new(vec![Line::from(search_status.render_text()).dim()])
-                .render_ref(line2, buf);
+            Paragraph::new(vec![Line::from(search_status.render_text()).dim()]).render(line2, buf);
             render_key_hints(line3, buf, &pairs);
         } else {
             render_key_hints(line2, buf, &pairs);
@@ -1418,12 +1399,6 @@ impl TranscriptOverlay {
                 }
                 other => self.view.handle_key_event(tui, other),
             },
-            TuiEvent::Mouse(mouse_event) => {
-                if self.view.handle_mouse_event(mouse_event) {
-                    tui.frame_requester().schedule_scroll_frame();
-                }
-                Ok(())
-            }
             TuiEvent::Draw => {
                 tui.draw(u16::MAX, |frame| {
                     self.render(frame.area(), frame.buffer);
@@ -1488,12 +1463,6 @@ impl StaticOverlay {
                 }
                 other => self.view.handle_key_event(tui, other),
             },
-            TuiEvent::Mouse(mouse_event) => {
-                if self.view.handle_mouse_event(mouse_event) {
-                    tui.frame_requester().schedule_scroll_frame();
-                }
-                Ok(())
-            }
             TuiEvent::Draw => {
                 tui.draw(u16::MAX, |frame| {
                     self.render(frame.area(), frame.buffer);
@@ -2295,15 +2264,6 @@ mod tests {
         }
     }
 
-    fn mouse_event(kind: MouseEventKind) -> MouseEvent {
-        MouseEvent {
-            kind,
-            column: 0,
-            row: 0,
-            modifiers: crossterm::event::KeyModifiers::NONE,
-        }
-    }
-
     #[test]
     fn pager_view_ensure_chunk_visible_scrolls_down_when_needed() {
         let mut pv = PagerView::new(
@@ -2385,23 +2345,6 @@ mod tests {
     }
 
     #[test]
-    fn pager_view_mouse_wheel_scrolls_by_three_lines() {
-        let mut pv = PagerView::new(
-            (0..20)
-                .map(|i| paragraph_block(&format!("line-{i:02}-"), /*lines*/ 1))
-                .collect(),
-            "T".to_string(),
-            /*scroll_offset*/ 0,
-        );
-
-        assert!(pv.handle_mouse_event(mouse_event(MouseEventKind::ScrollDown)));
-        assert_eq!(pv.scroll_offset, 3);
-
-        assert!(pv.handle_mouse_event(mouse_event(MouseEventKind::ScrollUp)));
-        assert_eq!(pv.scroll_offset, 0);
-    }
-
-    #[test]
     fn pager_view_scroll_up_from_bottom_uses_concrete_bottom_offset() {
         let mut pv = PagerView::new(
             (0..20)
@@ -2419,7 +2362,7 @@ mod tests {
             .max_scroll_for_known_layout()
             .expect("render should populate layout heights");
         pv.scroll_offset = usize::MAX;
-        assert!(pv.handle_mouse_event(mouse_event(MouseEventKind::ScrollUp)));
+        pv.scroll_up(3);
 
         assert_eq!(pv.scroll_offset, max_scroll.saturating_sub(3));
     }
@@ -2442,24 +2385,12 @@ mod tests {
             "initial bottom render should use the fast path"
         );
 
-        assert!(pv.handle_mouse_event(mouse_event(MouseEventKind::ScrollUp)));
+        pv.scroll_up(3);
         pv.render(area, &mut buf);
 
         let max_scroll = pv
             .max_scroll_for_known_layout()
             .expect("scrolling up should materialize the full layout");
         assert_eq!(pv.scroll_offset, max_scroll.saturating_sub(3));
-    }
-
-    #[test]
-    fn pager_view_ignores_non_scroll_mouse_events() {
-        let mut pv = PagerView::new(
-            vec![paragraph_block("a", /*lines*/ 4)],
-            "T".to_string(),
-            /*scroll_offset*/ 2,
-        );
-
-        assert!(!pv.handle_mouse_event(mouse_event(MouseEventKind::Moved)));
-        assert_eq!(pv.scroll_offset, 2);
     }
 }

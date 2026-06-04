@@ -14,6 +14,7 @@ pub enum SlashCommand {
     // more frequently used commands should be listed first.
     #[strum(to_string = "model", serialize = "effort")]
     Model,
+    Login,
     Fast,
     Approvals,
     Permissions,
@@ -25,12 +26,16 @@ pub enum SlashCommand {
     Skills,
     Review,
     Rename,
+    Namegen,
     New,
     Resume,
     Fork,
     Init,
     Compact,
     Plan,
+    Goal,
+    #[strum(to_string = "release-thread", serialize = "release")]
+    ReleaseThread,
     Collab,
     Agent,
     // Undo,
@@ -38,10 +43,12 @@ pub enum SlashCommand {
     Copy,
     Mention,
     Status,
+    Token,
     DebugConfig,
     Title,
     Statusline,
     Theme,
+    Language,
     Mcp,
     Apps,
     Plugins,
@@ -80,6 +87,7 @@ impl SlashCommand {
             SlashCommand::Compact => "summarize conversation to prevent hitting the context limit",
             SlashCommand::Review => "review my current changes and find issues",
             SlashCommand::Rename => "rename the current thread",
+            SlashCommand::Namegen => "regenerate the current thread name",
             SlashCommand::Resume => "resume a saved chat",
             SlashCommand::Clear => "clear the terminal and start a new chat",
             SlashCommand::Fork => "fork the current chat",
@@ -90,20 +98,25 @@ impl SlashCommand {
             SlashCommand::Mention => "mention a file",
             SlashCommand::Skills => "use skills to improve how Praxis performs specific tasks",
             SlashCommand::Status => "show current session configuration and token usage",
+            SlashCommand::Token => "summarize Praxis token usage by provider and model",
             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
+            SlashCommand::Language => "switch TUI language: /language [en|cn]",
             SlashCommand::Ps => "list background terminals",
             SlashCommand::Stop => "stop all background terminals",
             SlashCommand::MemoryDrop => "DO NOT USE",
             SlashCommand::MemoryUpdate => "DO NOT USE",
             SlashCommand::Model => "choose what model and reasoning effort to use",
+            SlashCommand::Login => "manage AI provider login and API keys",
             SlashCommand::Fast => "toggle Fast mode to enable fastest inference at 2X plan usage",
             SlashCommand::Personality => "choose a communication style for Praxis",
             SlashCommand::Realtime => "toggle realtime voice mode (experimental)",
             SlashCommand::Settings => "configure realtime microphone/speaker",
             SlashCommand::Plan => "switch to Plan mode",
+            SlashCommand::Goal => "set or view the goal for a long-running task",
+            SlashCommand::ReleaseThread => "release the current external thread lock",
             SlashCommand::Collab => "change collaboration mode (experimental)",
             SlashCommand::Agent | SlashCommand::MultiAgents => "switch the active agent thread",
             SlashCommand::Approvals => "choose what Praxis is allowed to do",
@@ -135,7 +148,12 @@ impl SlashCommand {
             SlashCommand::Review
                 | SlashCommand::Rename
                 | SlashCommand::Plan
+                | SlashCommand::Goal
+                | SlashCommand::Login
+                | SlashCommand::ReleaseThread
                 | SlashCommand::Fast
+                | SlashCommand::Language
+                | SlashCommand::Token
                 | SlashCommand::SandboxReadRoot
                 | SlashCommand::Selfwork
         )
@@ -151,8 +169,10 @@ impl SlashCommand {
             | SlashCommand::Compact
             // | SlashCommand::Undo
             | SlashCommand::Model
+            | SlashCommand::Login
             | SlashCommand::Fast
             | SlashCommand::Personality
+            | SlashCommand::Namegen
             | SlashCommand::Approvals
             | SlashCommand::Permissions
             | SlashCommand::ElevateSandbox
@@ -170,6 +190,7 @@ impl SlashCommand {
             | SlashCommand::Mention
             | SlashCommand::Skills
             | SlashCommand::Status
+            | SlashCommand::Token
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
             | SlashCommand::Stop
@@ -180,6 +201,9 @@ impl SlashCommand {
             | SlashCommand::Quit
             | SlashCommand::Exit
             | SlashCommand::Selfwork => true,
+            SlashCommand::Goal => true,
+            SlashCommand::ReleaseThread => true,
+            SlashCommand::Language => true,
             SlashCommand::Rollout => true,
             SlashCommand::TestApproval => true,
             SlashCommand::Realtime => true,

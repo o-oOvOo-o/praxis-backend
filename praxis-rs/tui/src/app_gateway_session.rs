@@ -7,6 +7,8 @@ use color_eyre::eyre::WrapErr;
 use praxis_app_gateway_client::AppGatewayClient;
 use praxis_app_gateway_client::AppGatewayEvent;
 use praxis_app_gateway_client::AppGatewayRequestHandle;
+use praxis_app_gateway_client::RemoteAppGatewayClient;
+use praxis_app_gateway_client::RemoteAppGatewayConnectArgs;
 use praxis_app_gateway_client::TypedRequestError;
 use praxis_app_gateway_protocol::Account;
 use praxis_app_gateway_protocol::AuthMode;
@@ -27,10 +29,17 @@ use praxis_app_gateway_protocol::ReviewStartResponse;
 use praxis_app_gateway_protocol::SkillsListParams;
 use praxis_app_gateway_protocol::SkillsListResponse;
 use praxis_app_gateway_protocol::Thread;
+use praxis_app_gateway_protocol::ThreadArchiveParams;
+use praxis_app_gateway_protocol::ThreadArchiveResponse;
 use praxis_app_gateway_protocol::ThreadBackgroundTerminalsCleanParams;
 use praxis_app_gateway_protocol::ThreadBackgroundTerminalsCleanResponse;
 use praxis_app_gateway_protocol::ThreadCompactStartParams;
 use praxis_app_gateway_protocol::ThreadCompactStartResponse;
+use praxis_app_gateway_protocol::ThreadControlReleaseParams;
+use praxis_app_gateway_protocol::ThreadControlReleaseResponse;
+use praxis_app_gateway_protocol::ThreadControlState;
+use praxis_app_gateway_protocol::ThreadDeleteParams;
+use praxis_app_gateway_protocol::ThreadDeleteResponse;
 use praxis_app_gateway_protocol::ThreadForkParams;
 use praxis_app_gateway_protocol::ThreadForkResponse;
 use praxis_app_gateway_protocol::ThreadListParams;
@@ -49,6 +58,8 @@ use praxis_app_gateway_protocol::ThreadRealtimeStartParams;
 use praxis_app_gateway_protocol::ThreadRealtimeStartResponse;
 use praxis_app_gateway_protocol::ThreadRealtimeStopParams;
 use praxis_app_gateway_protocol::ThreadRealtimeStopResponse;
+use praxis_app_gateway_protocol::ThreadRegenerateNameParams;
+use praxis_app_gateway_protocol::ThreadRegenerateNameResponse;
 use praxis_app_gateway_protocol::ThreadResumeParams;
 use praxis_app_gateway_protocol::ThreadResumeResponse;
 use praxis_app_gateway_protocol::ThreadRollbackParams;
@@ -59,6 +70,8 @@ use praxis_app_gateway_protocol::ThreadShellCommandParams;
 use praxis_app_gateway_protocol::ThreadShellCommandResponse;
 use praxis_app_gateway_protocol::ThreadStartParams;
 use praxis_app_gateway_protocol::ThreadStartResponse;
+use praxis_app_gateway_protocol::ThreadStatus;
+use praxis_app_gateway_protocol::ThreadTokenUsage;
 use praxis_app_gateway_protocol::ThreadUnsubscribeParams;
 use praxis_app_gateway_protocol::ThreadUnsubscribeResponse;
 use praxis_app_gateway_protocol::Turn;
@@ -87,6 +100,8 @@ use praxis_protocol::protocol::ReviewRequest;
 use praxis_protocol::protocol::ReviewTarget as CoreReviewTarget;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionNetworkProxyRuntime;
+use praxis_protocol::protocol::TokenUsage;
+use praxis_protocol::protocol::TokenUsageInfo;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -106,6 +121,27 @@ pub(crate) struct AppGatewayBootstrap {
 pub(crate) struct AppGatewaySession {
     client: AppGatewayClient,
     next_request_id: i64,
+}
+
+pub(crate) fn token_usage_info_from_app_gateway(token_usage: ThreadTokenUsage) -> TokenUsageInfo {
+    TokenUsageInfo {
+        total_token_usage: token_usage_from_app_gateway(token_usage.total),
+        last_token_usage: token_usage_from_app_gateway(token_usage.last),
+        model_context_window: token_usage.model_context_window,
+    }
+}
+
+fn token_usage_from_app_gateway(
+    value: praxis_app_gateway_protocol::TokenUsageBreakdown,
+) -> TokenUsage {
+    TokenUsage {
+        total_tokens: value.total_tokens,
+        input_tokens: value.input_tokens,
+        cached_input_tokens: value.cached_input_tokens,
+        cache_reported_input_tokens: value.cache_reported_input_tokens,
+        output_tokens: value.output_tokens,
+        reasoning_output_tokens: value.reasoning_output_tokens,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -146,6 +182,8 @@ impl ThreadParamsMode {
 pub(crate) struct AppGatewayStartedThread {
     pub(crate) session: ThreadSessionState,
     pub(crate) turns: Vec<Turn>,
+    pub(crate) status: ThreadStatus,
+    pub(crate) control_state: Option<ThreadControlState>,
 }
 
 impl AppGatewaySession {
@@ -158,6 +196,30 @@ impl AppGatewaySession {
 
     pub(crate) fn is_remote(&self) -> bool {
         matches!(self.client, AppGatewayClient::Remote(_))
+    }
+
+    pub(crate) async fn reconnect_remote(
+        &mut self,
+        websocket_url: String,
+        auth_token: Option<String>,
+    ) -> Result<()> {
+        let next_client = RemoteAppGatewayClient::connect(RemoteAppGatewayConnectArgs {
+            websocket_url,
+            auth_token,
+            client_name: "praxis-tui".to_string(),
+            client_version: env!("CARGO_PKG_VERSION").to_string(),
+            experimental_api: true,
+            opt_out_notification_methods: Vec::new(),
+            channel_capacity: crate::TUI_APP_GATEWAY_CHANNEL_CAPACITY,
+        })
+        .await
+        .wrap_err("failed to reconnect to remote app gateway")?;
+        let previous = std::mem::replace(&mut self.client, AppGatewayClient::Remote(next_client));
+        self.next_request_id = 1;
+        if let Err(err) = previous.shutdown().await {
+            tracing::debug!("previous app-gateway client shutdown after reconnect failed: {err}");
+        }
+        Ok(())
     }
 
     pub(crate) async fn bootstrap(&mut self, config: &Config) -> Result<AppGatewayBootstrap> {
@@ -287,6 +349,10 @@ impl AppGatewaySession {
         self.client.next_event().await
     }
 
+    pub(crate) fn try_next_event(&mut self) -> Option<AppGatewayEvent> {
+        self.client.try_next_event()
+    }
+
     pub(crate) async fn start_thread(
         &mut self,
         config: &Config,
@@ -322,6 +388,27 @@ impl AppGatewaySession {
             .await
             .wrap_err("thread/resume failed during TUI bootstrap")?;
         started_thread_from_resume_response(response, &config).await
+    }
+
+    pub(crate) async fn watch_thread(
+        &mut self,
+        config: &Config,
+        thread_id: ThreadId,
+    ) -> Result<AppGatewayStartedThread> {
+        let request_id = self.next_request_id();
+        let response: ThreadResumeResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadResume {
+                request_id,
+                params: ThreadResumeParams {
+                    thread_id: thread_id.to_string(),
+                    persist_extended_history: true,
+                    ..ThreadResumeParams::default()
+                },
+            })
+            .await
+            .wrap_err("thread/resume watch failed in TUI")?;
+        started_thread_from_resume_response(response, config).await
     }
 
     pub(crate) async fn fork_thread(
@@ -410,6 +497,7 @@ impl AppGatewaySession {
         approval_policy: AskForApproval,
         approvals_reviewer: praxis_protocol::config_types::ApprovalsReviewer,
         sandbox_policy: SandboxPolicy,
+        model_provider: Option<String>,
         model: String,
         effort: Option<praxis_protocol::openai_models::ReasoningEffort>,
         summary: Option<praxis_protocol::config_types::ReasoningSummary>,
@@ -429,7 +517,7 @@ impl AppGatewaySession {
                     approval_policy: Some(approval_policy.into()),
                     approvals_reviewer: Some(approvals_reviewer.into()),
                     sandbox_policy: Some(sandbox_policy.into()),
-                    model_provider: None,
+                    model_provider,
                     model: Some(model),
                     service_tier,
                     effort,
@@ -500,6 +588,70 @@ impl AppGatewaySession {
             .await
             .wrap_err("thread/name/set failed in TUI")?;
         Ok(())
+    }
+
+    pub(crate) async fn thread_regenerate_name(&mut self, thread_id: ThreadId) -> Result<String> {
+        let request_id = self.next_request_id();
+        let response: ThreadRegenerateNameResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadRegenerateName {
+                request_id,
+                params: ThreadRegenerateNameParams {
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await
+            .wrap_err("thread/name/regenerate failed in TUI")?;
+        Ok(response.thread_name)
+    }
+
+    pub(crate) async fn thread_archive(&mut self, thread_id: ThreadId) -> Result<()> {
+        let request_id = self.next_request_id();
+        let _: ThreadArchiveResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadArchive {
+                request_id,
+                params: ThreadArchiveParams {
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await
+            .wrap_err("thread/archive failed in TUI")?;
+        Ok(())
+    }
+
+    pub(crate) async fn thread_delete(&mut self, thread_id: ThreadId) -> Result<()> {
+        let request_id = self.next_request_id();
+        let _: ThreadDeleteResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadDelete {
+                request_id,
+                params: ThreadDeleteParams {
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await
+            .wrap_err("thread/delete failed in TUI")?;
+        Ok(())
+    }
+
+    pub(crate) async fn thread_control_release(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> Result<Option<ThreadControlState>> {
+        let request_id = self.next_request_id();
+        let response: ThreadControlReleaseResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadControlRelease {
+                request_id,
+                params: ThreadControlReleaseParams {
+                    thread_id: thread_id.to_string(),
+                    controller: None,
+                },
+            })
+            .await
+            .wrap_err("thread/control/release failed in TUI")?;
+        Ok(response.previous_control_state)
     }
 
     pub(crate) async fn thread_set_selfwork_plan_path(
@@ -942,6 +1094,8 @@ async fn started_thread_from_start_response(
     Ok(AppGatewayStartedThread {
         session,
         turns: response.thread.turns,
+        status: response.thread.status,
+        control_state: response.thread.control_state,
     })
 }
 
@@ -955,6 +1109,8 @@ async fn started_thread_from_resume_response(
     Ok(AppGatewayStartedThread {
         session,
         turns: response.thread.turns,
+        status: response.thread.status,
+        control_state: response.thread.control_state,
     })
 }
 
@@ -968,6 +1124,8 @@ async fn started_thread_from_fork_response(
     Ok(AppGatewayStartedThread {
         session,
         turns: response.thread.turns,
+        status: response.thread.status,
+        control_state: response.thread.control_state,
     })
 }
 
@@ -1210,6 +1368,7 @@ mod tests {
                 summary: None,
                 ephemeral: false,
                 model_provider: "openai".to_string(),
+                model: Some("gpt-5.4".to_string()),
                 created_at: 1,
                 updated_at: 2,
                 status: ThreadStatus::Idle,
@@ -1223,6 +1382,8 @@ mod tests {
                 name: None,
                 total_cost_usd: None,
                 last_cost_usd: None,
+                token_usage: None,
+                control_state: None,
                 selfwork_plan_path: None,
                 turns: vec![Turn {
                     id: "turn-1".to_string(),

@@ -8,6 +8,8 @@ use praxis_protocol::openai_models::TruncationMode;
 use praxis_protocol::openai_models::TruncationPolicyConfig;
 use praxis_protocol::openai_models::WebSearchToolType;
 use praxis_protocol::openai_models::default_input_modalities;
+use praxis_protocol::openai_models::known_openai_compatible_model_info;
+use praxis_protocol::openai_models::provider_neutral_reasoning_levels;
 
 use crate::config::Config;
 use praxis_features::Feature;
@@ -59,13 +61,19 @@ pub(crate) fn with_config_overrides(mut model: ModelInfo, config: &Config) -> Mo
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub(crate) fn model_info_from_slug(slug: &str) -> ModelInfo {
+    if let Some(mut model) = known_openai_compatible_model_info(slug) {
+        model.model_messages = local_personality_messages_for_slug(slug);
+        return model;
+    }
+
     warn!("Unknown model {slug} is used. This will use fallback model metadata.");
+    let (default_reasoning_level, supported_reasoning_levels) = provider_neutral_reasoning_levels();
     ModelInfo {
         slug: slug.to_string(),
         display_name: slug.to_string(),
         description: None,
-        default_reasoning_level: None,
-        supported_reasoning_levels: Vec::new(),
+        default_reasoning_level,
+        supported_reasoning_levels,
         shell_type: ConfigShellToolType::Default,
         visibility: ModelVisibility::None,
         supported_in_api: true,

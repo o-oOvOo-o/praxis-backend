@@ -288,12 +288,11 @@ impl PraxisMessageProcessor {
 
         match result {
             Ok(mut thread) => {
-                thread.status = resolve_thread_status(
-                    self.thread_watch_manager
-                        .loaded_status_for_thread(&thread.id)
-                        .await,
-                    /*has_in_progress_turn*/ false,
-                );
+                self.apply_thread_runtime_state(
+                    &mut thread,
+                    /*has_live_in_progress_turn*/ false,
+                )
+                .await;
                 self.attach_thread_name(thread_id, &mut thread).await;
                 let thread_id = thread.id.clone();
                 let response = ThreadUnarchiveResponse { thread };
@@ -418,10 +417,6 @@ impl PraxisMessageProcessor {
             message: format!("failed to archive thread: {err}"),
             data: None,
         });
-        if result.is_ok() {
-            Self::sync_closed_team_teammate_for_thread(&self.config, &self.outgoing, thread_id)
-                .await;
-        }
         result
     }
 
@@ -526,7 +521,6 @@ impl PraxisMessageProcessor {
         if let Some(ctx) = state_db_ctx {
             let _ = ctx.delete_thread(thread_id).await;
         }
-        Self::sync_closed_team_teammate_for_thread(&self.config, &self.outgoing, thread_id).await;
         Ok(())
     }
 }

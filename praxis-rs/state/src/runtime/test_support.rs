@@ -60,6 +60,7 @@ pub(super) fn test_thread_metadata(
         sandbox_policy: crate::extract::enum_to_string(&SandboxPolicy::new_read_only_policy()),
         approval_mode: crate::extract::enum_to_string(&AskForApproval::OnRequest),
         tokens_used: 0,
+        token_usage_info: None,
         session_summary: None,
         total_cost_micros: None,
         last_cost_micros: None,

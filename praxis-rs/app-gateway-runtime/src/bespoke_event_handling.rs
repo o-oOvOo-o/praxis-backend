@@ -70,11 +70,11 @@ use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequestPayload;
 use praxis_app_gateway_protocol::SkillsChangedNotification;
-use praxis_app_gateway_protocol::TeamTeammate;
-use praxis_app_gateway_protocol::TeamTeammateStatus;
-use praxis_app_gateway_protocol::TeamTeammateUpdatedNotification;
 use praxis_app_gateway_protocol::TerminalInteractionNotification;
 use praxis_app_gateway_protocol::ThreadClosedNotification;
+use praxis_app_gateway_protocol::ThreadController;
+use praxis_app_gateway_protocol::ThreadControllerKind;
+use praxis_app_gateway_protocol::ThreadGoalUpdatedNotification;
 use praxis_app_gateway_protocol::ThreadItem;
 use praxis_app_gateway_protocol::ThreadNameUpdatedNotification;
 use praxis_app_gateway_protocol::ThreadRealtimeClosedNotification;
@@ -946,6 +946,31 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::CollabAgentInteractionBegin(begin_event) => {
+            if matches!(
+                begin_event.kind,
+                praxis_protocol::protocol::CollabAgentInteractionKind::AssignTask
+            ) {
+                thread_watch_manager
+                    .acquire_thread_control(
+                        &begin_event.receiver_thread_id.to_string(),
+                        ThreadController {
+                            kind: ThreadControllerKind::Thread,
+                            id: begin_event.sender_thread_id.to_string(),
+                            label: Some(format!(
+                                "thread {}",
+                                begin_event
+                                    .sender_thread_id
+                                    .to_string()
+                                    .chars()
+                                    .take(8)
+                                    .collect::<String>()
+                            )),
+                            rank: Some(0),
+                        },
+                        Some(begin_event.prompt.clone()),
+                    )
+                    .await;
+            }
             let receiver_thread_ids = vec![begin_event.receiver_thread_id.to_string()];
             let item = ThreadItem::CollabAgentToolCall {
                 id: begin_event.call_id,
@@ -975,6 +1000,11 @@ pub(crate) async fn apply_bespoke_event_handling(
                 }
                 _ => ApiCollabToolCallStatus::Completed,
             };
+            if matches!(&status, ApiCollabToolCallStatus::Failed) {
+                thread_watch_manager
+                    .release_thread_control(&end_event.receiver_thread_id.to_string())
+                    .await;
+            }
             let receiver_id = end_event.receiver_thread_id.to_string();
             let received_status = ApiCollabAgentStatus::from(end_event.status);
             let item = ThreadItem::CollabAgentToolCall {
@@ -1098,12 +1128,6 @@ pub(crate) async fn apply_bespoke_event_handling(
                         },
                     ))
                     .await;
-                maybe_send_closed_team_teammate_notification(
-                    &outgoing,
-                    &conversation,
-                    end_event.receiver_thread_id,
-                )
-                .await;
             }
             let status = match &end_event.status {
                 praxis_protocol::protocol::AgentStatus::Errored(_)
@@ -1319,6 +1343,38 @@ pub(crate) async fn apply_bespoke_event_handling(
             };
             outgoing
                 .send_server_notification(ServerNotification::ItemCompleted(completed))
+                .await;
+        }
+        EventMsg::WebSearchBegin(web_search_event) => {
+            let item = ThreadItem::WebSearch {
+                id: web_search_event.call_id,
+                query: String::new(),
+                action: None,
+            };
+            let notification = ItemStartedNotification {
+                thread_id: conversation_id.to_string(),
+                turn_id: event_turn_id.clone(),
+                item,
+            };
+            outgoing
+                .send_server_notification(ServerNotification::ItemStarted(notification))
+                .await;
+        }
+        EventMsg::WebSearchEnd(web_search_event) => {
+            let item = ThreadItem::WebSearch {
+                id: web_search_event.call_id,
+                query: web_search_event.query,
+                action: Some(praxis_app_gateway_protocol::WebSearchAction::from(
+                    web_search_event.action,
+                )),
+            };
+            let notification = ItemCompletedNotification {
+                thread_id: conversation_id.to_string(),
+                turn_id: event_turn_id.clone(),
+                item,
+            };
+            outgoing
+                .send_server_notification(ServerNotification::ItemCompleted(notification))
                 .await;
         }
         EventMsg::EnteredReviewMode(review_request) => {
@@ -1731,6 +1787,16 @@ pub(crate) async fn apply_bespoke_event_handling(
                 ))
                 .await;
         }
+        EventMsg::ThreadGoalUpdated(thread_goal_event) => {
+            let notification = ThreadGoalUpdatedNotification {
+                thread_id: thread_goal_event.thread_id.to_string(),
+                turn_id: thread_goal_event.turn_id,
+                goal: thread_goal_event.goal.into(),
+            };
+            outgoing
+                .send_server_notification(ServerNotification::ThreadGoalUpdated(notification))
+                .await;
+        }
         EventMsg::TurnDiff(turn_diff_event) => {
             handle_turn_diff(conversation_id, &event_turn_id, turn_diff_event, &outgoing).await;
         }
@@ -1751,62 +1817,6 @@ pub(crate) async fn apply_bespoke_event_handling(
 
         _ => {}
     }
-}
-
-async fn maybe_send_closed_team_teammate_notification(
-    outgoing: &ThreadScopedOutgoingMessageSender,
-    conversation: &Arc<PraxisThread>,
-    thread_id: ThreadId,
-) {
-    let Some(state_db_ctx) = conversation.state_db() else {
-        return;
-    };
-    let thread_id_text = thread_id.to_string();
-    let Ok(Some(teammate)) = state_db_ctx
-        .get_team_teammate_by_thread_id(thread_id_text.as_str())
-        .await
-    else {
-        return;
-    };
-    let _ = state_db_ctx
-        .set_team_teammate_status(
-            teammate.team_id.as_str(),
-            teammate.teammate_id.as_str(),
-            praxis_state::TeamTeammateStatus::Closed,
-            Some(thread_id_text.as_str()),
-            None,
-        )
-        .await;
-    let Ok(Some(updated_teammate)) = state_db_ctx
-        .get_team_teammate(teammate.team_id.as_str(), teammate.teammate_id.as_str())
-        .await
-    else {
-        return;
-    };
-    outgoing
-        .send_server_notification(ServerNotification::TeamTeammateUpdated(
-            TeamTeammateUpdatedNotification {
-                team_id: updated_teammate.team_id.clone(),
-                teammate: TeamTeammate {
-                    team_id: updated_teammate.team_id.clone(),
-                    teammate_id: updated_teammate.teammate_id.clone(),
-                    name: updated_teammate.name.clone(),
-                    role: updated_teammate.role.clone(),
-                    status: match updated_teammate.status {
-                        praxis_state::TeamTeammateStatus::Pending => TeamTeammateStatus::Pending,
-                        praxis_state::TeamTeammateStatus::Active => TeamTeammateStatus::Active,
-                        praxis_state::TeamTeammateStatus::Failed => TeamTeammateStatus::Failed,
-                        praxis_state::TeamTeammateStatus::Closed => TeamTeammateStatus::Closed,
-                    },
-                    thread_id: updated_teammate.thread_id.clone(),
-                    last_error: updated_teammate.last_error.clone(),
-                    created_at: updated_teammate.created_at.timestamp(),
-                    updated_at: updated_teammate.updated_at.timestamp(),
-                },
-                thread: None,
-            },
-        ))
-        .await;
 }
 
 async fn handle_turn_diff(
@@ -3238,6 +3248,7 @@ mod tests {
             total_token_usage: TokenUsage {
                 input_tokens: 100,
                 cached_input_tokens: 25,
+                cache_reported_input_tokens: 100,
                 output_tokens: 50,
                 reasoning_output_tokens: 9,
                 total_tokens: 200,
@@ -3245,6 +3256,7 @@ mod tests {
             last_token_usage: TokenUsage {
                 input_tokens: 10,
                 cached_input_tokens: 5,
+                cache_reported_input_tokens: 10,
                 output_tokens: 7,
                 reasoning_output_tokens: 1,
                 total_tokens: 23,
@@ -3289,6 +3301,7 @@ mod tests {
                 let usage = payload.token_usage;
                 assert_eq!(usage.total.total_tokens, 200);
                 assert_eq!(usage.total.cached_input_tokens, 25);
+                assert_eq!(usage.total.cache_reported_input_tokens, 100);
                 assert_eq!(usage.last.output_tokens, 7);
                 assert_eq!(usage.model_context_window, Some(4096));
             }

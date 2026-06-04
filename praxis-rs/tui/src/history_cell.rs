@@ -10,7 +10,8 @@
 //! bumps the active-cell revision tracked by `ChatWidget`, so the cache key changes whenever the
 //! rendered transcript output can change.
 
-use crate::diff_render::create_diff_summary;
+use crate::diff_render::create_diff_file_summary;
+use crate::diff_render::create_patch_history_summary;
 use crate::diff_render::display_path_for;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::OutputLinesParams;
@@ -19,7 +20,7 @@ use crate::exec_cell::output_lines;
 use crate::exec_cell::spinner;
 use crate::exec_command::relativize_to_home;
 use crate::exec_command::strip_bash_lc_and_escape;
-use crate::history_presentation::FoldCategory;
+use crate::history_presentation::PatchCellId;
 use crate::live_wrap::take_prefix_by_width;
 use crate::markdown::append_markdown;
 use crate::render::line_utils::line_to_static;
@@ -189,11 +190,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         None
     }
 
+    fn patch_cell_id(&self) -> Option<PatchCellId> {
+        None
+    }
+
     /// Returns clickable row targets for the cell, relative to the cell's rendered top row.
-    ///
-    /// Targets use viewport rows after any explicit line wrapping done by the cell itself.
-    /// Callers are responsible for accounting for external layout offsets such as parent
-    /// separators or insets.
     fn mouse_targets(&self, _width: u16) -> Vec<HistoryCellMouseTarget> {
         Vec::new()
     }
@@ -242,8 +243,8 @@ pub(crate) fn toggle_tool_output_expanded() -> bool {
     crate::history_presentation::toggle_tool_output_expanded()
 }
 
-pub(crate) fn toggle_diff_expanded() -> bool {
-    crate::history_presentation::toggle_diff_expanded()
+pub(crate) fn toggle_visible_diff_cells(ids: &[PatchCellId]) -> bool {
+    crate::history_presentation::toggle_diff_cells(ids)
 }
 
 impl Renderable for Box<dyn HistoryCell> {
@@ -452,7 +453,6 @@ impl HistoryCell for UserHistoryCell {
 
 #[derive(Debug)]
 pub(crate) struct ReasoningSummaryCell {
-    header: String,
     content: String,
     /// Session cwd used to render local file links inside the reasoning body.
     cwd: PathBuf,
@@ -462,12 +462,19 @@ pub(crate) struct ReasoningSummaryCell {
 impl ReasoningSummaryCell {
     /// Create a reasoning summary cell that will render local file links relative to the session
     /// cwd active when the summary was recorded.
-    pub(crate) fn new(header: String, content: String, cwd: &Path, transcript_only: bool) -> Self {
+    pub(crate) fn new(_header: String, content: String, cwd: &Path, transcript_only: bool) -> Self {
         Self {
-            header,
             content,
             cwd: cwd.to_path_buf(),
             transcript_only,
+        }
+    }
+
+    pub(crate) fn new_raw_trace(content: String, cwd: &Path) -> Self {
+        Self {
+            content,
+            cwd: cwd.to_path_buf(),
+            transcript_only: false,
         }
     }
 
@@ -500,50 +507,8 @@ impl ReasoningSummaryCell {
         )
     }
 
-    fn collapsed_summary(&self) -> String {
-        let summary = self
-            .header
-            .trim()
-            .trim_matches('*')
-            .trim()
-            .trim_end_matches(':')
-            .trim();
-        if summary.is_empty() {
-            "Thinking summary hidden".to_string()
-        } else {
-            summary.to_string()
-        }
-    }
-
-    fn collapsed_lines(&self, width: u16, hidden_lines: usize) -> Vec<Line<'static>> {
-        let hidden_suffix = if hidden_lines > 0 {
-            format!(" ({hidden_lines} lines hidden · {REASONING_TOGGLE_KEY_HINT} expand)")
-        } else {
-            format!(" ({REASONING_TOGGLE_KEY_HINT} expand)")
-        };
-        let collapsed_line = Line::from(vec![
-            Span::from(self.collapsed_summary()).dim().italic(),
-            Span::from(hidden_suffix).dim(),
-        ]);
-        let wrapped = adaptive_wrap_line(
-            &collapsed_line,
-            RtOptions::new(width.max(1) as usize)
-                .initial_indent("• ".dim().into())
-                .subsequent_indent("  ".into()),
-        );
-        let mut out = Vec::new();
-        push_owned_lines(&wrapped, &mut out);
-        out
-    }
-
     fn lines(&self, width: u16) -> Vec<Line<'static>> {
-        let expanded_lines = self.expanded_lines(width);
-        let expanded = crate::history_presentation::is_expanded(FoldCategory::Reasoning);
-        if expanded || expanded_lines.is_empty() {
-            expanded_lines
-        } else {
-            self.collapsed_lines(width, expanded_lines.len())
-        }
+        self.expanded_lines(width)
     }
 }
 
@@ -1093,14 +1058,15 @@ pub(crate) fn new_review_status_line(message: String) -> PlainHistoryCell {
 
 #[derive(Debug)]
 pub(crate) struct PatchHistoryCell {
+    id: PatchCellId,
     changes: HashMap<PathBuf, FileChange>,
     cwd: PathBuf,
 }
 
 impl HistoryCell for PatchHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let lines = create_diff_summary(&self.changes, &self.cwd, width as usize);
-        let expanded = crate::history_presentation::is_expanded(FoldCategory::Diff);
+        let lines = create_patch_history_summary(&self.changes, &self.cwd, width as usize);
+        let expanded = crate::history_presentation::is_diff_cell_expanded(self.id);
         if expanded || lines.len() <= 1 {
             return lines;
         }
@@ -1110,10 +1076,33 @@ impl HistoryCell for PatchHistoryCell {
             lines[0].clone(),
             Line::from(vec![
                 "  └ ".dim(),
-                format!("{hidden} more diff lines hidden").dim(),
-                format!(" · {DIFF_TOGGLE_KEY_HINT} expand").dim(),
+                format!("{hidden} preview lines hidden").dim(),
+                " · ".dim(),
+                DIFF_TOGGLE_KEY_HINT.blue().bold(),
+                " expand".dim(),
             ]),
         ]
+    }
+
+    fn patch_cell_id(&self) -> Option<PatchCellId> {
+        Some(self.id)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ResumePatchHistoryCell {
+    changes: HashMap<PathBuf, FileChange>,
+    cwd: PathBuf,
+}
+
+impl HistoryCell for ResumePatchHistoryCell {
+    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        let mut lines = create_diff_file_summary(&self.changes, &self.cwd);
+        lines.push(Line::from(vec![
+            "  └ ".dim(),
+            "diff omitted from resume history".dim(),
+        ]));
+        lines
     }
 }
 
@@ -1726,15 +1715,7 @@ impl SessionHeaderHistoryCell {
     }
 
     fn render_right_panel(&self, width: usize) -> Vec<Line<'static>> {
-        self.render_right_panel_with_targets(width).0
-    }
-
-    fn render_right_panel_with_targets(
-        &self,
-        width: usize,
-    ) -> (Vec<Line<'static>>, Vec<HistoryCellMouseTarget>) {
         let mut lines = Vec::new();
-        let mut targets = Vec::new();
         lines.push(Self::section_title_line("Tips for getting started", width));
         for line in self.tip_feed_lines() {
             lines.extend(Self::wrap_and_pad_line(line, width));
@@ -1766,7 +1747,7 @@ impl SessionHeaderHistoryCell {
                 )]),
                 width,
             ));
-            return (lines, targets);
+            return lines;
         }
 
         let timestamps = self
@@ -1787,7 +1768,6 @@ impl SessionHeaderHistoryCell {
                 .saturating_sub(timestamp_width + if has_timestamp_column { 2 } else { 0 })
                 .max(1);
             let title = truncate_text(&activity.title, text_width);
-            let row_start = u16::try_from(lines.len()).unwrap_or(u16::MAX);
             let mut spans = Vec::new();
             if has_timestamp_column {
                 let label = timestamp.as_deref().unwrap_or("");
@@ -1802,14 +1782,6 @@ impl SessionHeaderHistoryCell {
             }
             spans.push(Span::from(title));
             lines.push(Self::left_align_line(Line::from(spans), width));
-            targets.push(HistoryCellMouseTarget {
-                row_start,
-                row_end: row_start,
-                action: HistoryCellMouseAction::ResumeRecentThread {
-                    thread_id: activity.thread_id,
-                    thread_name: activity.title.clone(),
-                },
-            });
         }
 
         lines.push(Self::footer_line(
@@ -1817,7 +1789,7 @@ impl SessionHeaderHistoryCell {
             width,
         ));
 
-        (lines, targets)
+        lines
     }
 
     fn tip_feed_lines(&self) -> Vec<Line<'static>> {
@@ -2239,31 +2211,6 @@ impl HistoryCell for SessionHeaderHistoryCell {
     fn transcript_animation_tick(&self) -> Option<u64> {
         self.puppy_animation_tick()
     }
-
-    fn mouse_targets(&self, width: u16) -> Vec<HistoryCellMouseTarget> {
-        let Some((inner_width, horizontal_layout)) = self.resolved_layout(width) else {
-            return Vec::new();
-        };
-
-        if horizontal_layout {
-            let Some((_, right_width)) = self.horizontal_panel_widths(inner_width) else {
-                return Vec::new();
-            };
-            let (_, targets) = self.render_right_panel_with_targets(right_width);
-            return targets.into_iter().map(|target| target.offset(1)).collect();
-        }
-
-        let (_, targets) = self.render_right_panel_with_targets(inner_width);
-        let compact_prefix_rows = 2u16
-            .saturating_add(
-                u16::try_from(Self::puppy_logo_lines(9, RESTING_PUPPY_FRAME).len()).unwrap_or(0),
-            )
-            .saturating_add(4);
-        targets
-            .into_iter()
-            .map(|target| target.offset(1u16.saturating_add(compact_prefix_rows)))
-            .collect()
-    }
 }
 
 fn plan_type_display(plan: Option<PlanType>) -> String {
@@ -2331,33 +2278,6 @@ impl HistoryCell for CompositeHistoryCell {
             .iter()
             .filter_map(|part| part.transcript_animation_tick())
             .max()
-    }
-
-    fn mouse_targets(&self, width: u16) -> Vec<HistoryCellMouseTarget> {
-        let mut targets = Vec::new();
-        let mut row_offset = 0u16;
-        let mut first = true;
-
-        for part in &self.parts {
-            let lines = part.display_lines(width);
-            if lines.is_empty() {
-                continue;
-            }
-
-            if !first {
-                row_offset = row_offset.saturating_add(1);
-            }
-
-            targets.extend(
-                part.mouse_targets(width)
-                    .into_iter()
-                    .map(|target| target.offset(row_offset)),
-            );
-            row_offset = row_offset.saturating_add(u16::try_from(lines.len()).unwrap_or(u16::MAX));
-            first = false;
-        }
-
-        targets
     }
 }
 
@@ -2537,7 +2457,7 @@ impl HistoryCell for McpToolCallCell {
             lines.extend(prefix_lines(body_lines, "  └ ".dim(), "    ".into()));
         }
 
-        let expanded = crate::history_presentation::is_expanded(FoldCategory::ToolOutput);
+        let expanded = true;
         let detail_lines = self.detail_lines(width, expanded);
 
         if !detail_lines.is_empty() {
@@ -2547,19 +2467,6 @@ impl HistoryCell for McpToolCallCell {
                 "    ".into()
             };
             lines.extend(prefix_lines(detail_lines, initial_prefix, "    ".into()));
-        }
-
-        if !expanded && self.result.is_some() {
-            let collapsed_len = self.detail_lines(width, /*expanded*/ false).len();
-            let expanded_len = self.detail_lines(width, /*expanded*/ true).len();
-            let hidden = expanded_len.saturating_sub(collapsed_len);
-            if hidden > 0 {
-                lines.push(Line::from(vec![
-                    "    ".into(),
-                    format!("{hidden} more lines hidden").dim(),
-                    format!(" · {TOOL_OUTPUT_TOGGLE_KEY_HINT} expand").dim(),
-                ]));
-            }
         }
 
         lines
@@ -3146,6 +3053,31 @@ pub(crate) fn new_info_event(message: String, hint: Option<String>) -> PlainHist
     PlainHistoryCell { lines }
 }
 
+#[derive(Debug)]
+pub(crate) struct ModelChangeDivider {
+    message: String,
+}
+
+impl ModelChangeDivider {
+    pub(crate) fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl HistoryCell for ModelChangeDivider {
+    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        vec![centered_divider_line(
+            self.message.as_str(),
+            width,
+            Style::default().fg(Color::Green),
+        )]
+    }
+}
+
+pub(crate) fn new_model_change_divider(message: String) -> ModelChangeDivider {
+    ModelChangeDivider::new(message)
+}
+
 pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
     // Use a hair space (U+200A) to create a subtle, near-invisible separation
     // before the text. VS16 is intentionally omitted to keep spacing tighter
@@ -3486,6 +3418,17 @@ pub(crate) fn new_patch_event(
     cwd: &Path,
 ) -> PatchHistoryCell {
     PatchHistoryCell {
+        id: crate::history_presentation::next_patch_cell_id(),
+        changes,
+        cwd: cwd.to_path_buf(),
+    }
+}
+
+pub(crate) fn new_patch_resume_summary(
+    changes: HashMap<PathBuf, FileChange>,
+    cwd: &Path,
+) -> ResumePatchHistoryCell {
+    ResumePatchHistoryCell {
         changes,
         cwd: cwd.to_path_buf(),
     }
@@ -3576,11 +3519,19 @@ pub(crate) fn new_reasoning_summary_block(
             }
         }
     }
-    Box::new(ReasoningSummaryCell::new(
-        "".to_string(),
+    Box::new(ReasoningSummaryCell::new_raw_trace(
         full_reasoning_buffer.to_string(),
         &cwd,
-        /*transcript_only*/ true,
+    ))
+}
+
+pub(crate) fn new_reasoning_full_block(
+    full_reasoning_buffer: String,
+    cwd: &Path,
+) -> Box<dyn HistoryCell> {
+    Box::new(ReasoningSummaryCell::new_raw_trace(
+        full_reasoning_buffer.trim().to_string(),
+        cwd,
     ))
 }
 
@@ -3624,16 +3575,40 @@ impl HistoryCell for FinalMessageSeparator {
             return vec![Line::from_iter(["─".repeat(width as usize).dim()])];
         }
 
-        let label = format!("─ {} ─", label_parts.join(" • "));
-        let (label, _suffix, label_width) = take_prefix_by_width(&label, width as usize);
-        vec![
-            Line::from_iter([
-                label,
-                "─".repeat((width as usize).saturating_sub(label_width)),
-            ])
-            .dim(),
-        ]
+        vec![centered_divider_line(
+            label_parts.join(" • ").as_str(),
+            width,
+            Style::default().dim(),
+        )]
     }
+}
+
+fn centered_divider_line(label: &str, width: u16, label_style: Style) -> Line<'static> {
+    let width = width as usize;
+    if width == 0 {
+        return Line::default();
+    }
+
+    let label = label.trim();
+    if label.is_empty() {
+        return Line::from_iter(["─".repeat(width).dim()]);
+    }
+
+    let padded_label = format!(" {label} ");
+    let label_width = UnicodeWidthStr::width(padded_label.as_str());
+    if label_width >= width {
+        let (label, _suffix, _label_width) = take_prefix_by_width(label, width);
+        return Line::from(Span::styled(label, label_style));
+    }
+
+    let rule_width = width - label_width;
+    let left_width = rule_width / 2;
+    let right_width = rule_width - left_width;
+    Line::from(vec![
+        "─".repeat(left_width).dim(),
+        Span::styled(padded_label, label_style),
+        "─".repeat(right_width).dim(),
+    ])
 }
 
 pub(crate) fn runtime_metrics_label(summary: RuntimeMetricsSummary) -> Option<String> {
@@ -5843,6 +5818,9 @@ mod tests {
     fn reasoning_summary_block_returns_reasoning_cell_when_feature_disabled() {
         let cell =
             new_reasoning_summary_block("Detailed reasoning goes here.".to_string(), &test_cwd());
+
+        let rendered_display = render_lines(&cell.display_lines(/*width*/ 80));
+        assert_eq!(rendered_display, vec!["• Detailed reasoning goes here."]);
 
         let rendered = render_transcript(cell.as_ref());
         assert_eq!(rendered, vec!["• Detailed reasoning goes here."]);

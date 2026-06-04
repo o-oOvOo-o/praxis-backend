@@ -18,6 +18,7 @@ const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 const EXECVE_WRAPPER_ARG0: &str = "praxis-execve-wrapper";
 const LOCK_FILENAME: &str = ".lock";
 const TOKIO_WORKER_STACK_SIZE_BYTES: usize = 16 * 1024 * 1024;
+const PRAXIS_MAIN_STACK_SIZE_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Arg0DispatchPaths {
@@ -156,7 +157,7 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
 /// in this workspace that depends on these helper CLIs.
 pub fn arg0_dispatch_or_else<F, Fut>(main_fn: F) -> anyhow::Result<()>
 where
-    F: FnOnce(Arg0DispatchPaths) -> Fut,
+    F: FnOnce(Arg0DispatchPaths) -> Fut + Send + 'static,
     Fut: Future<Output = anyhow::Result<()>>,
 {
     // Retain the TempDir so it exists for the lifetime of the invocation of
@@ -164,25 +165,53 @@ where
     // would be nice to avoid leaving temporary directories behind, if possible.
     let path_entry_guard = arg0_dispatch();
 
-    // Regular invocation – create a Tokio runtime and execute the provided
-    // async entry-point.
-    let runtime = build_runtime()?;
-    runtime.block_on(async move {
-        let current_exe = std::env::current_exe().ok();
-        let paths = Arg0DispatchPaths {
-            praxis_self_exe: current_exe.clone(),
-            praxis_linux_sandbox_exe: if cfg!(target_os = "linux") {
-                linux_sandbox_exe_path(path_entry_guard.as_ref(), current_exe)
-            } else {
-                None
-            },
-            main_execve_wrapper_exe: path_entry_guard
-                .as_ref()
-                .and_then(|path_entry| path_entry.paths().main_execve_wrapper_exe.clone()),
-        };
+    // Regular invocation – move the async CLI entry-point to a deliberately
+    // large stack. Clap/TUI debug builds can otherwise overflow the platform
+    // main-thread stack before Tokio worker stack sizing matters.
+    let current_exe = std::env::current_exe().ok();
+    let handle = std::thread::Builder::new()
+        .name("praxis-main".to_string())
+        .stack_size(PRAXIS_MAIN_STACK_SIZE_BYTES)
+        .spawn(move || {
+            let runtime = build_runtime()?;
+            runtime.block_on(run_main_with_arg0_guard(
+                path_entry_guard,
+                current_exe,
+                main_fn,
+            ))
+        })
+        .map_err(|err| anyhow::anyhow!("failed to start Praxis main thread: {err}"))?;
 
-        main_fn(paths).await
-    })
+    match handle.join() {
+        Ok(result) => result,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+async fn run_main_with_arg0_guard<F, Fut>(
+    path_entry_guard: Option<Arg0PathEntryGuard>,
+    current_exe: Option<PathBuf>,
+    main_fn: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(Arg0DispatchPaths) -> Fut,
+    Fut: Future<Output = anyhow::Result<()>>,
+{
+    let paths = Arg0DispatchPaths {
+        praxis_self_exe: current_exe.clone(),
+        praxis_linux_sandbox_exe: if cfg!(target_os = "linux") {
+            linux_sandbox_exe_path(path_entry_guard.as_ref(), current_exe)
+        } else {
+            None
+        },
+        main_execve_wrapper_exe: path_entry_guard
+            .as_ref()
+            .and_then(|path_entry| path_entry.paths().main_execve_wrapper_exe.clone()),
+    };
+
+    let result = main_fn(paths).await;
+    drop(path_entry_guard);
+    result
 }
 
 fn linux_sandbox_exe_path(

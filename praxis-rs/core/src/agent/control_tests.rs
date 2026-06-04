@@ -158,7 +158,7 @@ async fn wait_for_subagent_notification(parent_thread: &Arc<PraxisThread>) -> bo
     let wait = async {
         loop {
             let history_items = parent_thread
-                .codex
+                .praxis
                 .session
                 .clone_history()
                 .await
@@ -458,7 +458,7 @@ async fn send_inter_agent_communication_without_turn_queues_message_without_trig
     .expect("inter-agent communication should stay pending");
 
     let history_items = thread
-        .codex
+        .praxis
         .session
         .clone_history()
         .await
@@ -498,7 +498,7 @@ async fn append_message_records_assistant_message() {
     timeout(Duration::from_secs(5), async {
         loop {
             let history_items = thread
-                .codex
+                .praxis
                 .session
                 .clone_history()
                 .await
@@ -577,12 +577,12 @@ async fn spawn_agent_can_fork_parent_thread_history() {
         call_id: parent_spawn_call_id.clone(),
     };
     parent_thread
-        .codex
+        .praxis
         .session
         .record_conversation_items(turn_context.as_ref(), &[parent_spawn_call])
         .await;
     parent_thread
-        .codex
+        .praxis
         .session
         .ensure_rollout_materialized()
         .await;
@@ -663,12 +663,12 @@ async fn spawn_agent_fork_injects_output_for_parent_spawn_call() {
         call_id: parent_spawn_call_id.clone(),
     };
     parent_thread
-        .codex
+        .praxis
         .session
         .record_conversation_items(turn_context.as_ref(), &[parent_spawn_call])
         .await;
     parent_thread
-        .codex
+        .praxis
         .session
         .ensure_rollout_materialized()
         .await;
@@ -742,7 +742,7 @@ async fn spawn_agent_fork_flushes_parent_rollout_before_loading_history() {
         call_id: parent_spawn_call_id.clone(),
     };
     parent_thread
-        .codex
+        .praxis
         .session
         .record_conversation_items(turn_context.as_ref(), &[parent_spawn_call])
         .await;
@@ -825,7 +825,7 @@ async fn spawn_agent_fork_last_n_turns_keeps_only_recent_turns() {
     );
     let queued_turn_context = parent_thread.praxis.session.new_default_turn().await;
     parent_thread
-        .codex
+        .praxis
         .session
         .record_conversation_items(
             queued_turn_context.as_ref(),
@@ -842,7 +842,7 @@ async fn spawn_agent_fork_last_n_turns_keeps_only_recent_turns() {
     );
     let triggered_turn_context = parent_thread.praxis.session.new_default_turn().await;
     parent_thread
-        .codex
+        .praxis
         .session
         .record_conversation_items(
             triggered_turn_context.as_ref(),
@@ -863,12 +863,12 @@ async fn spawn_agent_fork_last_n_turns_keeps_only_recent_turns() {
         call_id: parent_spawn_call_id.clone(),
     };
     parent_thread
-        .codex
+        .praxis
         .session
         .record_conversation_items(spawn_turn_context.as_ref(), &[parent_spawn_call])
         .await;
     parent_thread
-        .codex
+        .praxis
         .session
         .ensure_rollout_materialized()
         .await;
@@ -1252,7 +1252,7 @@ async fn multi_agent_completion_ignores_dead_direct_parent() {
         .expect("tester thread should exist");
     let tester_turn = tester_thread.praxis.session.new_default_turn().await;
     tester_thread
-        .codex
+        .praxis
         .session
         .send_event(
             tester_turn.as_ref(),
@@ -1283,7 +1283,7 @@ async fn multi_agent_completion_ignores_dead_direct_parent() {
     );
 
     let root_history_items = root_thread
-        .codex
+        .praxis
         .session
         .clone_history()
         .await
@@ -1336,7 +1336,7 @@ async fn multi_agent_completion_queues_message_for_direct_parent() {
     );
     let tester_turn = tester_thread.praxis.session.new_default_turn().await;
     tester_thread
-        .codex
+        .praxis
         .session
         .send_event(
             tester_turn.as_ref(),
@@ -1381,7 +1381,7 @@ async fn multi_agent_completion_queues_message_for_direct_parent() {
     .expect("completion watcher should queue a direct-parent message");
 
     let root_history_items = root_thread
-        .codex
+        .praxis
         .session
         .clone_history()
         .await
@@ -1421,7 +1421,7 @@ async fn completion_watcher_notifies_parent_when_child_is_missing() {
     assert_eq!(wait_for_subagent_notification(&parent_thread).await, true);
 
     let history_items = parent_thread
-        .codex
+        .praxis
         .session
         .clone_history()
         .await

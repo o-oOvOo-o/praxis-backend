@@ -169,6 +169,17 @@ pub(crate) fn log_inbound_app_event(event: &AppEvent) {
             });
             LOGGER.write_json_line(value);
         }
+        AppEvent::CenterThreadsLoaded { request_id, result } => {
+            let value = json!({
+                "ts": now_ts(),
+                "dir": "to_tui",
+                "kind": "center_threads_loaded",
+                "request_id": request_id,
+                "ok": result.is_ok(),
+                "rows": result.as_ref().map(|response| response.data.len()).unwrap_or(0),
+            });
+            LOGGER.write_json_line(value);
+        }
         // Noise or control flow – record variant only
         other => {
             let value = json!({

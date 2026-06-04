@@ -240,17 +240,28 @@ impl PraxisMessageProcessor {
                     ))
                     .await;
 
+                let loaded_status = listener_task_context
+                    .thread_watch_manager
+                    .loaded_status_for_thread(&thread.id)
+                    .instrument(tracing::info_span!(
+                        "app_gateway.thread_start.resolve_status",
+                        otel.name = "app_gateway.thread_start.resolve_status",
+                    ))
+                    .await;
+                let control_state = listener_task_context
+                    .thread_watch_manager
+                    .loaded_control_state_for_thread(&thread.id)
+                    .instrument(tracing::info_span!(
+                        "app_gateway.thread_start.resolve_status",
+                        otel.name = "app_gateway.thread_start.resolve_status",
+                    ))
+                    .await;
                 thread.status = resolve_thread_status(
-                    listener_task_context
-                        .thread_watch_manager
-                        .loaded_status_for_thread(&thread.id)
-                        .instrument(tracing::info_span!(
-                            "app_gateway.thread_start.resolve_status",
-                            otel.name = "app_gateway.thread_start.resolve_status",
-                        ))
-                        .await,
+                    loaded_status,
                     /*has_in_progress_turn*/ false,
+                    control_state.as_ref(),
                 );
+                thread.control_state = control_state;
 
                 let response = ThreadStartResponse {
                     thread: thread.clone(),
@@ -622,15 +633,25 @@ impl PraxisMessageProcessor {
 
         let statuses = self
             .thread_watch_manager
-            .loaded_statuses_for_threads(status_ids)
+            .loaded_statuses_for_threads(status_ids.clone())
+            .await;
+        let control_states = self
+            .thread_watch_manager
+            .loaded_control_states_for_threads(status_ids)
             .await;
 
         let data = threads
             .into_iter()
             .map(|mut thread| {
+                let control_state = control_states.get(&thread.id).cloned();
                 if let Some(status) = statuses.get(&thread.id) {
-                    thread.status = status.clone();
+                    thread.status = resolve_thread_status(
+                        status.clone(),
+                        /*has_in_progress_turn*/ false,
+                        control_state.as_ref(),
+                    );
                 }
+                thread.control_state = control_state;
                 thread
             })
             .collect();
@@ -804,15 +825,15 @@ impl PraxisMessageProcessor {
             false
         };
 
-        let thread_status = self
-            .thread_watch_manager
-            .loaded_status_for_thread(&thread.id)
+        self.apply_thread_runtime_state(&mut thread, has_live_in_progress_turn)
             .await;
-
+        let thread_status = thread.status.clone();
+        let control_state = thread.control_state.clone();
         set_thread_status_and_interrupt_stale_turns(
             &mut thread,
             thread_status,
             has_live_in_progress_turn,
+            control_state.as_ref(),
         );
         let response = ThreadReadResponse { thread };
         self.outgoing.send_response(request_id, response).await;
@@ -1041,15 +1062,18 @@ impl PraxisMessageProcessor {
                     .upsert_thread(thread.clone())
                     .await;
 
-                let thread_status = self
-                    .thread_watch_manager
-                    .loaded_status_for_thread(&thread.id)
-                    .await;
-
+                self.apply_thread_runtime_state(
+                    &mut thread,
+                    /*has_live_in_progress_turn*/ false,
+                )
+                .await;
+                let thread_status = thread.status.clone();
+                let control_state = thread.control_state.clone();
                 set_thread_status_and_interrupt_stale_turns(
                     &mut thread,
                     thread_status,
                     /*has_live_in_progress_turn*/ false,
+                    control_state.as_ref(),
                 );
 
                 let response = ThreadResumeResponse {
@@ -1639,12 +1663,8 @@ impl PraxisMessageProcessor {
             .upsert_thread_silently(thread.clone())
             .await;
 
-        thread.status = resolve_thread_status(
-            self.thread_watch_manager
-                .loaded_status_for_thread(&thread.id)
-                .await,
-            /*has_in_progress_turn*/ false,
-        );
+        self.apply_thread_runtime_state(&mut thread, /*has_live_in_progress_turn*/ false)
+            .await;
 
         let response = ThreadForkResponse {
             thread: thread.clone(),
@@ -1773,8 +1793,6 @@ impl PraxisMessageProcessor {
             // removed from the core manager. This keeps loaded-status/subscription state
             // consistent with the source of truth before reporting NotLoaded.
             self.finalize_thread_teardown(thread_id).await;
-            Self::sync_closed_team_teammate_for_thread(&self.config, &self.outgoing, thread_id)
-                .await;
             self.outgoing
                 .send_response(
                     request_id,
@@ -1830,10 +1848,6 @@ impl PraxisMessageProcessor {
                             thread_watch_manager
                                 .remove_thread(&thread_id.to_string())
                                 .await;
-                            Self::sync_closed_team_teammate_for_thread(
-                                &config, &outgoing, thread_id,
-                            )
-                            .await;
                             pending_thread_unloads.lock().await.remove(&thread_id);
                             return;
                         }
@@ -1847,8 +1861,6 @@ impl PraxisMessageProcessor {
                             .send_server_notification(ServerNotification::ThreadClosed(
                                 notification,
                             ))
-                            .await;
-                        Self::sync_closed_team_teammate_for_thread(&config, &outgoing, thread_id)
                             .await;
                         pending_thread_unloads.lock().await.remove(&thread_id);
                     }

@@ -65,9 +65,10 @@ pub fn proposed_plan_style() -> Style {
 
 /// Returns the style for a user-authored message using the provided terminal background.
 pub fn user_message_style_for(terminal_bg: Option<(u8, u8, u8)>) -> Style {
+    let style = Style::default().fg(user_message_fg(terminal_bg));
     match terminal_bg.map(user_message_bg) {
-        Some(bg) => Style::default().bg(bg),
-        None => Style::default(),
+        Some(bg) => style.bg(bg),
+        None => style,
     }
 }
 
@@ -133,6 +134,13 @@ fn user_message_bg_rgb(terminal_bg: (u8, u8, u8)) -> (u8, u8, u8) {
         ((255, 255, 255), DARK_USER_MESSAGE_BG_ALPHA)
     };
     blend(top, terminal_bg, alpha)
+}
+
+fn user_message_fg(terminal_bg: Option<(u8, u8, u8)>) -> Color {
+    match terminal_bg {
+        Some(bg) if is_light(bg) => Color::Black,
+        _ => Color::White,
+    }
 }
 
 fn interactive_surface_bg_rgb(

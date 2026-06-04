@@ -81,6 +81,50 @@ impl PraxisMessageProcessor {
             .await;
     }
 
+    pub(crate) async fn thread_regenerate_name(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadRegenerateNameParams,
+    ) {
+        let ThreadRegenerateNameParams { thread_id } = params;
+        let thread_id = match ThreadId::from_string(&thread_id) {
+            Ok(id) => id,
+            Err(err) => {
+                self.send_invalid_request_error(request_id, format!("invalid thread id: {err}"))
+                    .await;
+                return;
+            }
+        };
+
+        let thread = match self.thread_manager.get_thread(thread_id).await {
+            Ok(thread) => thread,
+            Err(_) => {
+                self.send_invalid_request_error(
+                    request_id,
+                    format!("thread must be loaded to regenerate its name: {thread_id}"),
+                )
+                .await;
+                return;
+            }
+        };
+
+        let thread_name = match thread.regenerate_thread_name().await {
+            Ok(thread_name) => thread_name,
+            Err(err) => {
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to regenerate thread name: {err}"),
+                )
+                .await;
+                return;
+            }
+        };
+
+        self.outgoing
+            .send_response(request_id, ThreadRegenerateNameResponse { thread_name })
+            .await;
+    }
+
     pub(crate) async fn thread_metadata_update(
         &self,
         request_id: ConnectionRequestId,
@@ -282,12 +326,8 @@ impl PraxisMessageProcessor {
 
         let mut thread = summary_to_thread(summary);
         self.attach_thread_name(thread_uuid, &mut thread).await;
-        thread.status = resolve_thread_status(
-            self.thread_watch_manager
-                .loaded_status_for_thread(&thread.id)
-                .await,
-            /*has_in_progress_turn*/ false,
-        );
+        self.apply_thread_runtime_state(&mut thread, /*has_live_in_progress_turn*/ false)
+            .await;
 
         self.outgoing
             .send_response(request_id, ThreadMetadataUpdateResponse { thread })

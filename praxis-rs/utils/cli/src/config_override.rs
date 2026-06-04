@@ -8,14 +8,14 @@
 //! `serde_json::Value` representing the configuration tree.
 
 use clap::ArgAction;
-use clap::Parser;
+use clap::Args;
 use serde::de::Error as SerdeError;
 use toml::Value;
 
 /// CLI option that captures arbitrary configuration overrides specified as
 /// `-c key=value`. It intentionally keeps both halves **unparsed** so that the
 /// calling code can decide how to interpret the right-hand side.
-#[derive(Parser, Debug, Default, Clone)]
+#[derive(Args, Debug, Default, Clone)]
 pub struct CliConfigOverrides {
     /// Override a configuration value that would otherwise be loaded from
     /// `~/.praxis/config.toml`. Use a dotted path (`foo.bar.baz`) to override

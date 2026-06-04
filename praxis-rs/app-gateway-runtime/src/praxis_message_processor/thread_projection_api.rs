@@ -9,11 +9,13 @@ pub(crate) struct RolloutSummary {
     pub(crate) timestamp: Option<String>,
     pub(crate) updated_at: Option<String>,
     pub(crate) model_provider: String,
+    pub(crate) model: Option<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) cli_version: String,
     pub(crate) source: SessionSource,
     pub(crate) total_cost_usd: Option<f64>,
     pub(crate) last_cost_usd: Option<f64>,
+    pub(crate) token_usage: Option<ThreadTokenUsage>,
     pub(crate) selfwork_plan_path: Option<PathBuf>,
     pub(crate) git_info: Option<RolloutGitInfo>,
 }
@@ -72,11 +74,13 @@ pub(crate) fn summary_from_state_db_metadata(
     timestamp: String,
     updated_at: String,
     model_provider: String,
+    model: Option<String>,
     cwd: PathBuf,
     cli_version: String,
     source: String,
     total_cost_micros: Option<i64>,
     last_cost_micros: Option<i64>,
+    token_usage_info: Option<praxis_protocol::protocol::TokenUsageInfo>,
     selfwork_plan_path: Option<PathBuf>,
     agent_nickname: Option<String>,
     agent_role: Option<String>,
@@ -106,11 +110,13 @@ pub(crate) fn summary_from_state_db_metadata(
         timestamp: Some(timestamp),
         updated_at: Some(updated_at),
         model_provider,
+        model,
         cwd,
         cli_version,
         source,
         total_cost_usd: cost_micros_to_usd(total_cost_micros),
         last_cost_usd: cost_micros_to_usd(last_cost_micros),
+        token_usage: token_usage_info.map(ThreadTokenUsage::from),
         selfwork_plan_path,
         git_info,
     }
@@ -129,11 +135,13 @@ fn summary_from_thread_metadata(metadata: &ThreadMetadata) -> RolloutSummary {
             .updated_at
             .to_rfc3339_opts(SecondsFormat::Secs, true),
         metadata.model_provider.clone(),
+        metadata.model.clone(),
         metadata.cwd.clone(),
         metadata.cli_version.clone(),
         metadata.source.clone(),
         metadata.total_cost_micros,
         metadata.last_cost_micros,
+        metadata.token_usage_info.clone(),
         metadata.selfwork_plan_path.clone(),
         metadata.agent_nickname.clone(),
         metadata.agent_role.clone(),
@@ -154,11 +162,13 @@ pub(crate) fn thread_summary_to_rollout_summary(
         timestamp: summary.timestamp,
         updated_at: summary.updated_at,
         model_provider: summary.model_provider,
+        model: summary.model,
         cwd: summary.cwd,
         cli_version: summary.cli_version,
         source: summary.source,
         total_cost_usd: cost_micros_to_usd(summary.total_cost_micros),
         last_cost_usd: cost_micros_to_usd(summary.last_cost_micros),
+        token_usage: summary.token_usage_info.map(ThreadTokenUsage::from),
         selfwork_plan_path: summary.selfwork_plan_path,
         git_info: summary.git_info.map(|git| RolloutGitInfo {
             sha: git.sha,
@@ -173,6 +183,7 @@ fn merge_mutable_summary_metadata(summary: &mut RolloutSummary, persisted_summar
     summary.summary = persisted_summary.summary;
     summary.total_cost_usd = persisted_summary.total_cost_usd;
     summary.last_cost_usd = persisted_summary.last_cost_usd;
+    summary.token_usage = persisted_summary.token_usage;
     summary.selfwork_plan_path = persisted_summary.selfwork_plan_path;
 }
 
@@ -244,11 +255,13 @@ pub(crate) async fn read_summary_from_rollout(
         preview: String::new(),
         summary: None,
         model_provider,
+        model: None,
         cwd: session_meta.cwd,
         cli_version: session_meta.cli_version,
         source: session_meta.source,
         total_cost_usd: None,
         last_cost_usd: None,
+        token_usage: None,
         selfwork_plan_path: None,
         git_info,
     })
@@ -308,11 +321,13 @@ pub(crate) fn extract_rollout_summary(
         preview: preview.to_string(),
         summary: None,
         model_provider,
+        model: None,
         cwd: session_meta.cwd.clone(),
         cli_version: session_meta.cli_version.clone(),
         source: session_meta.source.clone(),
         total_cost_usd: None,
         last_cost_usd: None,
+        token_usage: None,
         selfwork_plan_path: None,
         git_info,
     })
@@ -360,6 +375,7 @@ fn merge_mutable_thread_metadata(thread: &mut Thread, persisted_thread: Thread) 
     thread.summary = persisted_thread.summary;
     thread.total_cost_usd = persisted_thread.total_cost_usd;
     thread.last_cost_usd = persisted_thread.last_cost_usd;
+    thread.token_usage = persisted_thread.token_usage;
     thread.selfwork_plan_path = persisted_thread.selfwork_plan_path;
 }
 
@@ -443,6 +459,7 @@ pub(crate) fn build_thread_from_snapshot(
         summary: None,
         ephemeral: config_snapshot.ephemeral,
         model_provider: config_snapshot.model_provider_id.clone(),
+        model: Some(config_snapshot.model.clone()),
         created_at: now,
         updated_at: now,
         status: ThreadStatus::NotLoaded,
@@ -456,6 +473,8 @@ pub(crate) fn build_thread_from_snapshot(
         name: None,
         total_cost_usd: None,
         last_cost_usd: None,
+        token_usage: None,
+        control_state: None,
         selfwork_plan_path: None,
         turns: Vec::new(),
     }
@@ -470,11 +489,13 @@ pub(crate) fn summary_to_thread(summary: RolloutSummary) -> Thread {
         timestamp,
         updated_at,
         model_provider,
+        model,
         cwd,
         cli_version,
         source,
         total_cost_usd,
         last_cost_usd,
+        token_usage,
         selfwork_plan_path,
         git_info,
     } = summary;
@@ -493,6 +514,7 @@ pub(crate) fn summary_to_thread(summary: RolloutSummary) -> Thread {
         summary,
         ephemeral: false,
         model_provider,
+        model,
         created_at: created_at.map(|dt| dt.timestamp()).unwrap_or(0),
         updated_at: updated_at.map(|dt| dt.timestamp()).unwrap_or(0),
         status: ThreadStatus::NotLoaded,
@@ -506,6 +528,8 @@ pub(crate) fn summary_to_thread(summary: RolloutSummary) -> Thread {
         name: None,
         total_cost_usd,
         last_cost_usd,
+        token_usage,
+        control_state: None,
         selfwork_plan_path,
         turns: Vec::new(),
     }

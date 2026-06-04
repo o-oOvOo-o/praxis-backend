@@ -183,6 +183,25 @@ high = "deep"
 }
 
 #[test]
+fn test_deserialize_common_thinking_format() {
+    let provider_toml = r#"
+name = "Common Provider"
+base_url = "https://example.com/v1"
+wire_api = "common"
+
+[compat]
+thinking_format = "openai"
+"#;
+
+    let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
+    let compat = provider.compat.expect("compat should deserialize");
+    assert_eq!(
+        compat.thinking_format,
+        Some(ModelProviderThinkingFormat::Openai)
+    );
+}
+
+#[test]
 fn test_deserialize_websocket_connect_timeout() {
     let provider_toml = r#"
 name = "OpenAI"

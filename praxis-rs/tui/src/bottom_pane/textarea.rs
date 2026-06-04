@@ -31,6 +31,8 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 const WORD_SEPARATORS: &str = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?";
+const INPUT_TEXT_STYLE: Style = Style::new().fg(Color::White);
+const INPUT_ELEMENT_STYLE: Style = Style::new().fg(Color::LightCyan);
 
 fn is_word_separator(ch: char) -> bool {
     WORD_SEPARATORS.contains(ch)
@@ -1368,8 +1370,7 @@ impl TextArea {
             let r = &lines[idx];
             let y = area.y + row as u16;
             let line_range = r.start..r.end - 1;
-            // Draw base line with default style.
-            buf.set_string(area.x, y, &self.text[line_range.clone()], Style::default());
+            buf.set_string(area.x, y, &self.text[line_range.clone()], INPUT_TEXT_STYLE);
 
             // Overlay styled segments for elements that intersect this line.
             for elem in &self.elements {
@@ -1381,8 +1382,7 @@ impl TextArea {
                 }
                 let styled = &self.text[overlap_start..overlap_end];
                 let x_off = self.text[line_range.start..overlap_start].width() as u16;
-                let style = Style::default().fg(Color::Cyan);
-                buf.set_string(area.x + x_off, y, styled, style);
+                buf.set_string(area.x + x_off, y, styled, INPUT_ELEMENT_STYLE);
             }
         }
     }
@@ -1403,7 +1403,7 @@ impl TextArea {
                 .chars()
                 .map(|_| mask_char)
                 .collect::<String>();
-            buf.set_string(area.x, y, &masked, Style::default());
+            buf.set_string(area.x, y, &masked, INPUT_TEXT_STYLE);
         }
     }
 }

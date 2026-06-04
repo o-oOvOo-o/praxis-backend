@@ -269,6 +269,13 @@ pub enum Op {
         /// associated with this conversation.
         model: String,
 
+        /// Provider that owns `model`.
+        ///
+        /// When omitted, the session keeps the current provider for backward
+        /// compatibility with older clients.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model_provider: Option<String>,
+
         /// Will only be honored if the model is configured to use reasoning.
         #[serde(skip_serializing_if = "Option::is_none")]
         effort: Option<ReasoningEffortConfig>,
@@ -1265,6 +1272,8 @@ pub enum EventMsg {
 
     PlanUpdate(UpdatePlanArgs),
 
+    ThreadGoalUpdated(ThreadGoalUpdatedEvent),
+
     TurnAborted(TurnAbortedEvent),
 
     /// Notification that the agent is shutting down.
@@ -1767,14 +1776,22 @@ pub struct TurnStartedEvent {
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq, JsonSchema, TS)]
 pub struct TokenUsage {
+    #[serde(default)]
     #[ts(type = "number")]
     pub input_tokens: i64,
+    #[serde(default)]
     #[ts(type = "number")]
     pub cached_input_tokens: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub cache_reported_input_tokens: i64,
+    #[serde(default)]
     #[ts(type = "number")]
     pub output_tokens: i64,
+    #[serde(default)]
     #[ts(type = "number")]
     pub reasoning_output_tokens: i64,
+    #[serde(default)]
     #[ts(type = "number")]
     pub total_tokens: i64,
 }
@@ -1893,8 +1910,34 @@ impl TokenUsage {
         self.cached_input_tokens.max(0)
     }
 
+    pub fn cache_reported_input(&self) -> i64 {
+        let input_tokens = self.input_tokens.max(0);
+        let reported_input_tokens = self.cache_reported_input_tokens.max(0);
+        if input_tokens == 0 {
+            reported_input_tokens
+        } else if reported_input_tokens == 0 {
+            0
+        } else {
+            reported_input_tokens.min(input_tokens)
+        }
+    }
+
     pub fn non_cached_input(&self) -> i64 {
         (self.input_tokens - self.cached_input()).max(0)
+    }
+
+    pub fn cache_hit_percent(&self) -> Option<i64> {
+        let cache_reported_input = self.cache_reported_input();
+        if cache_reported_input == 0 {
+            return None;
+        }
+
+        let cached_input = self.cached_input().min(cache_reported_input);
+        Some(
+            ((cached_input as f64 / cache_reported_input as f64) * 100.0)
+                .round()
+                .clamp(0.0, 100.0) as i64,
+        )
     }
 
     /// Primary count for display as a single absolute value: non-cached input + output.
@@ -1933,6 +1976,7 @@ impl TokenUsage {
     pub fn add_assign(&mut self, other: &TokenUsage) {
         self.input_tokens += other.input_tokens;
         self.cached_input_tokens += other.cached_input_tokens;
+        self.cache_reported_input_tokens += other.cache_reported_input_tokens;
         self.output_tokens += other.output_tokens;
         self.reasoning_output_tokens += other.reasoning_output_tokens;
         self.total_tokens += other.total_tokens;
@@ -3187,6 +3231,59 @@ pub struct ThreadNameUpdatedEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub thread_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "protocol/")]
+pub enum ThreadGoalStatus {
+    Active,
+    Paused,
+    Blocked,
+    UsageLimited,
+    BudgetLimited,
+    Complete,
+}
+
+pub const MAX_THREAD_GOAL_OBJECTIVE_CHARS: usize = 4_000;
+
+pub fn validate_thread_goal_objective(value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err("goal objective must not be empty".to_string());
+    }
+    if value.chars().count() > MAX_THREAD_GOAL_OBJECTIVE_CHARS {
+        return Err(format!(
+            "goal objective must be at most {MAX_THREAD_GOAL_OBJECTIVE_CHARS} characters"
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "protocol/")]
+pub struct ThreadGoal {
+    pub thread_id: ThreadId,
+    pub objective: String,
+    pub status: ThreadGoalStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub token_budget: Option<i64>,
+    pub tokens_used: i64,
+    pub time_used_seconds: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "protocol/")]
+pub struct ThreadGoalUpdatedEvent {
+    pub thread_id: ThreadId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub turn_id: Option<String>,
+    pub goal: ThreadGoal,
 }
 
 /// User's decision in response to an ExecApprovalRequest.
@@ -4645,6 +4742,7 @@ mod tests {
         let last = Some(TokenUsage {
             input_tokens: 10,
             cached_input_tokens: 0,
+            cache_reported_input_tokens: 0,
             output_tokens: 0,
             reasoning_output_tokens: 0,
             total_tokens: 10,
@@ -4666,6 +4764,7 @@ mod tests {
         let last = Some(TokenUsage {
             input_tokens: 10,
             cached_input_tokens: 0,
+            cache_reported_input_tokens: 0,
             output_tokens: 0,
             reasoning_output_tokens: 0,
             total_tokens: 10,

@@ -1,4 +1,4 @@
-//! Clipboard text copy support for `/copy` in the TUI.
+//! Clipboard text support for `/copy` and explicit paste actions in the TUI.
 //!
 //! This module owns the policy for getting plain text from the running Praxis
 //! process into the user's system clipboard. It prefers the direct native
@@ -70,6 +70,38 @@ pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
     let error = if is_probably_wsl() {
         match copy_via_wsl_clipboard(text) {
             Ok(()) => return Ok(()),
+            Err(wsl_err) => format!("{error}; WSL fallback failed: {wsl_err}"),
+        }
+    } else {
+        error
+    };
+
+    Err(error)
+}
+
+/// Reads plain text from the host clipboard for explicit UI paste actions.
+///
+/// Terminal paste events remain the preferred path when the terminal sends
+/// them. This function is for mouse/context-menu paste affordances where the
+/// TUI must actively read the host clipboard.
+#[cfg(not(target_os = "android"))]
+pub fn read_text_from_clipboard() -> Result<String, String> {
+    if std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some() {
+        return Err("clipboard unavailable: reading clipboard over SSH is unsupported".to_string());
+    }
+
+    let error = match arboard::Clipboard::new() {
+        Ok(mut clipboard) => match clipboard.get_text() {
+            Ok(text) => return Ok(text),
+            Err(err) => format!("clipboard unavailable: {err}"),
+        },
+        Err(err) => format!("clipboard unavailable: {err}"),
+    };
+
+    #[cfg(target_os = "linux")]
+    let error = if is_probably_wsl() {
+        match read_via_wsl_clipboard() {
+            Ok(text) => return Ok(text),
             Err(wsl_err) => format!("{error}; WSL fallback failed: {wsl_err}"),
         }
     } else {
@@ -172,6 +204,37 @@ fn copy_via_wsl_clipboard(text: &str) -> Result<(), String> {
     }
 }
 
+/// Reads text from the Windows clipboard from a WSL process.
+#[cfg(all(not(target_os = "android"), target_os = "linux"))]
+fn read_via_wsl_clipboard() -> Result<String, String> {
+    let output = std::process::Command::new("powershell.exe")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .args([
+            "-NoProfile",
+            "-Command",
+            "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; Get-Clipboard -Raw",
+        ])
+        .output()
+        .map_err(|e| format!("clipboard unavailable: failed to spawn powershell.exe: {e}"))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            let status = output.status;
+            Err(format!(
+                "clipboard unavailable: powershell.exe exited with status {status}"
+            ))
+        } else {
+            Err(format!(
+                "clipboard unavailable: powershell.exe failed: {stderr}"
+            ))
+        }
+    }
+}
+
 /// Encodes text as an OSC 52 clipboard sequence.
 ///
 /// When `tmux` is true the sequence is wrapped in the tmux passthrough form so
@@ -193,6 +256,12 @@ fn osc52_sequence(text: &str, tmux: bool) -> String {
 #[cfg(target_os = "android")]
 pub fn copy_text_to_clipboard(_text: &str) -> Result<(), String> {
     Err("clipboard text copy is unsupported on Android".into())
+}
+
+/// Reports that clipboard text paste is unavailable on Android builds.
+#[cfg(target_os = "android")]
+pub fn read_text_from_clipboard() -> Result<String, String> {
+    Err("clipboard text paste is unsupported on Android".into())
 }
 
 #[cfg(all(test, not(target_os = "android")))]

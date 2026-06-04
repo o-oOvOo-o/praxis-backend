@@ -25,14 +25,14 @@ use crossterm::event::KeyboardEnhancementFlags;
 use crossterm::event::MouseEvent;
 use crossterm::event::PopKeyboardEnhancementFlags;
 use crossterm::event::PushKeyboardEnhancementFlags;
+use crossterm::execute;
 use crossterm::terminal::EnterAlternateScreen;
 use crossterm::terminal::LeaveAlternateScreen;
+use crossterm::terminal::disable_raw_mode;
+use crossterm::terminal::enable_raw_mode;
 use crossterm::terminal::supports_keyboard_enhancement;
 use ratatui::backend::Backend;
 use ratatui::backend::CrosstermBackend;
-use ratatui::crossterm::execute;
-use ratatui::crossterm::terminal::disable_raw_mode;
-use ratatui::crossterm::terminal::enable_raw_mode;
 use ratatui::layout::Offset;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
@@ -64,7 +64,6 @@ pub type Terminal = CustomTerminal<CrosstermBackend<Stdout>>;
 
 pub fn set_modes() -> Result<()> {
     execute!(stdout(), EnableBracketedPaste)?;
-    execute!(stdout(), EnableMouseCapture)?;
 
     enable_raw_mode()?;
     // Enable keyboard enhancement flags so modifiers for keys like Enter are disambiguated.
@@ -84,6 +83,14 @@ pub fn set_modes() -> Result<()> {
 
     let _ = execute!(stdout(), EnableFocusChange);
     Ok(())
+}
+
+fn set_mouse_capture(enabled: bool) -> Result<()> {
+    if enabled {
+        execute!(stdout(), EnableMouseCapture)
+    } else {
+        execute!(stdout(), DisableMouseCapture)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,6 +269,7 @@ pub struct Tui {
     // When false, enter_alt_screen() becomes a no-op (for Zellij scrollback support)
     alt_screen_enabled: bool,
     alt_screen_depth: u16,
+    mouse_capture_enabled: bool,
 }
 
 impl Tui {
@@ -291,12 +299,18 @@ impl Tui {
             notification_backend: Some(detect_backend(NotificationMethod::default())),
             alt_screen_enabled: true,
             alt_screen_depth: 0,
+            mouse_capture_enabled: false,
         }
     }
 
     /// Set whether alternate screen is enabled. When false, enter_alt_screen() becomes a no-op.
     pub fn set_alt_screen_enabled(&mut self, enabled: bool) {
         self.alt_screen_enabled = enabled;
+    }
+
+    pub fn set_mouse_capture_enabled(&mut self, enabled: bool) -> Result<()> {
+        self.mouse_capture_enabled = enabled;
+        set_mouse_capture(enabled)
     }
 
     pub fn set_notification_method(&mut self, method: NotificationMethod) {
@@ -357,6 +371,9 @@ impl Tui {
 
         if let Err(err) = set_modes() {
             tracing::warn!("failed to re-enable terminal modes after external program: {err}");
+        }
+        if let Err(err) = set_mouse_capture(self.mouse_capture_enabled) {
+            tracing::warn!("failed to restore mouse capture after external program: {err}");
         }
         // After the external program `f` finishes, reset terminal state and flush any buffered keypresses.
         flush_terminal_input_buffer();
@@ -490,8 +507,16 @@ impl Tui {
             .prepare_resume_action(&mut self.terminal, &mut self.alt_saved_viewport);
 
         // Precompute any viewport updates that need a cursor-position query before entering
-        // the synchronized update, to avoid racing with the event reader.
-        let mut pending_viewport_area = self.pending_viewport_area()?;
+        // the synchronized update, to avoid racing with the event reader. Alt-screen UIs must
+        // stay pinned to the full terminal; the inline cursor-offset heuristic corrupts their
+        // viewport after maximize/minimize resize sequences.
+        let mut pending_viewport_area = if self.is_alt_screen_active() {
+            let size = self.terminal.size()?;
+            let full_area = Rect::new(0, 0, size.width, size.height);
+            (self.terminal.viewport_area != full_area).then_some(full_area)
+        } else {
+            self.pending_viewport_area()?
+        };
 
         stdout().sync_update(|_| {
             #[cfg(unix)]
@@ -510,6 +535,11 @@ impl Tui {
             let mut area = terminal.viewport_area;
             area.height = height.min(size.height);
             area.width = size.width;
+            if self.alt_screen_active.load(Ordering::Relaxed) {
+                area.x = 0;
+                area.y = 0;
+                area.height = size.height;
+            }
             // If the viewport has expanded, scroll everything else up to make room.
             if area.bottom() > size.height {
                 terminal

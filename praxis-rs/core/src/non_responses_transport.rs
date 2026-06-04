@@ -19,10 +19,12 @@ use praxis_api::AuthProvider as ApiAuthProvider;
 use praxis_api::Provider;
 use praxis_api::TransportError;
 use praxis_api::error::ApiError;
+use praxis_login::default_client::build_direct_reqwest_client;
 use praxis_login::default_client::build_reqwest_client;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::FunctionCallOutputPayload;
 use praxis_protocol::models::LocalShellAction;
+use praxis_protocol::models::ReasoningItemContent;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
@@ -33,6 +35,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use uuid::Uuid;
@@ -40,6 +43,8 @@ use uuid::Uuid;
 const CLAUDE_API_VERSION: &str = "2023-06-01";
 const DEFAULT_CLAUDE_MAX_TOKENS: i64 = 4096;
 const COMMON_TOOL_RESULT_BRIDGE_MESSAGE: &str = "I have processed the tool results.";
+const COMMON_POST_FINISH_GRACE_MS: u64 = 1_500;
+const COMMON_DEEPSEEK_MESSAGE_IDLE_GRACE_MS: u64 = 15_000;
 
 pub(crate) async fn stream_claude_unary(
     api_provider: Provider,
@@ -54,6 +59,7 @@ pub(crate) async fn stream_claude_unary(
         build_claude_endpoint_path(&api_provider),
         &request_body,
         RequestFamily::Claude,
+        ProviderTransportPolicy::SystemProxy,
     )
     .await?;
 
@@ -76,6 +82,8 @@ pub(crate) async fn stream_common_unary(
     model_info: &ModelInfo,
     effort: Option<ReasoningEffortConfig>,
 ) -> Result<ResponseStream> {
+    let common_compat = CommonRequestCompat::from_provider(provider_info);
+    let thinking_policy = CommonThinkingPolicy::from_format(common_compat.thinking_format);
     let request_body = build_common_request(prompt, model_info, provider_info, effort, true)?;
     let response = send_request(
         &api_provider,
@@ -83,6 +91,7 @@ pub(crate) async fn stream_common_unary(
         build_common_endpoint_path(&api_provider),
         &request_body,
         RequestFamily::Common,
+        ProviderTransportPolicy::from_model_provider(provider_info),
     )
     .await?;
 
@@ -90,17 +99,34 @@ pub(crate) async fn stream_common_unary(
         return Ok(spawn_common_sse_stream(
             response,
             api_provider.stream_idle_timeout,
+            thinking_policy,
         ));
     }
 
     let response_json = read_json_response(response).await?;
-    build_response_stream(parse_common_response(response_json)?)
+    build_response_stream(parse_common_response(response_json, thinking_policy)?)
 }
 
 #[derive(Clone, Copy)]
 enum RequestFamily {
     Claude,
     Common,
+}
+
+#[derive(Clone, Copy)]
+enum ProviderTransportPolicy {
+    SystemProxy,
+    Direct,
+}
+
+impl ProviderTransportPolicy {
+    fn from_model_provider(provider_info: &ModelProviderInfo) -> Self {
+        if provider_info.is_openai() || provider_info.has_command_auth() {
+            Self::SystemProxy
+        } else {
+            Self::Direct
+        }
+    }
 }
 
 struct ParsedProviderResponse {
@@ -115,8 +141,12 @@ async fn send_request(
     endpoint_path: &str,
     request_body: &Value,
     family: RequestFamily,
+    transport_policy: ProviderTransportPolicy,
 ) -> Result<reqwest::Response> {
-    let client = build_reqwest_client();
+    let client = match transport_policy {
+        ProviderTransportPolicy::SystemProxy => build_reqwest_client(),
+        ProviderTransportPolicy::Direct => build_direct_reqwest_client(),
+    };
     let url = api_provider.url_for_path(endpoint_path);
     let headers = build_request_headers(api_provider, api_auth, family)?;
 
@@ -343,6 +373,65 @@ struct CommonRequestCompat {
     emit_parallel_tool_calls: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommonThinkingRequestStyle {
+    ReasoningEffortField,
+    OpenRouterReasoningObject,
+    EnableThinkingBool,
+    QwenChatTemplateKwargs,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CommonThinkingPolicy {
+    request_style: CommonThinkingRequestStyle,
+    replay_field: Option<&'static str>,
+    response_fields: &'static [&'static str],
+    complete_on_message_idle: bool,
+    complete_on_finish_reason: bool,
+}
+
+impl CommonThinkingPolicy {
+    fn from_format(format: ModelProviderThinkingFormat) -> Self {
+        match format {
+            ModelProviderThinkingFormat::Openai => Self {
+                request_style: CommonThinkingRequestStyle::ReasoningEffortField,
+                replay_field: Some("reasoning_content"),
+                response_fields: &["reasoning_content", "reasoning"],
+                complete_on_message_idle: false,
+                complete_on_finish_reason: false,
+            },
+            ModelProviderThinkingFormat::Openrouter => Self {
+                request_style: CommonThinkingRequestStyle::OpenRouterReasoningObject,
+                replay_field: None,
+                response_fields: &["reasoning", "reasoning_content"],
+                complete_on_message_idle: false,
+                complete_on_finish_reason: false,
+            },
+            ModelProviderThinkingFormat::Deepseek => Self {
+                request_style: CommonThinkingRequestStyle::ReasoningEffortField,
+                replay_field: None,
+                response_fields: &["reasoning_content", "reasoning"],
+                complete_on_message_idle: true,
+                complete_on_finish_reason: true,
+            },
+            ModelProviderThinkingFormat::Zai | ModelProviderThinkingFormat::Qwen => Self {
+                request_style: CommonThinkingRequestStyle::EnableThinkingBool,
+                replay_field: Some("reasoning_content"),
+                response_fields: &["reasoning_content", "reasoning"],
+                complete_on_message_idle: false,
+                complete_on_finish_reason: false,
+            },
+            ModelProviderThinkingFormat::QwenChatTemplate => Self {
+                request_style: CommonThinkingRequestStyle::QwenChatTemplateKwargs,
+                replay_field: Some("reasoning_content"),
+                response_fields: &["reasoning_content", "reasoning"],
+                complete_on_message_idle: false,
+                complete_on_finish_reason: false,
+            },
+        }
+    }
+}
+
 impl Default for CommonRequestCompat {
     fn default() -> Self {
         Self {
@@ -360,7 +449,12 @@ impl Default for CommonRequestCompat {
 
 impl CommonRequestCompat {
     fn from_provider(provider_info: &ModelProviderInfo) -> Self {
-        let compat = provider_info.compat.as_ref();
+        let inferred_compat = infer_common_request_compat(provider_info.base_url.as_deref());
+        let compat = Some(merge_common_request_compat(
+            inferred_compat,
+            provider_info.compat.clone(),
+        ));
+        let compat = compat.as_ref();
         Self {
             supports_developer_role: compat
                 .and_then(|compat| compat.supports_developer_role)
@@ -384,6 +478,66 @@ impl CommonRequestCompat {
                 .unwrap_or(true),
         }
     }
+}
+
+fn infer_common_request_compat(
+    base_url: Option<&str>,
+) -> crate::model_provider_info::ModelProviderCompatInfo {
+    let mut compat = crate::model_provider_info::ModelProviderCompatInfo::default();
+    let Some(base_url) = base_url else {
+        return compat;
+    };
+    let lower = base_url.to_ascii_lowercase();
+    let is_non_openai = !lower.contains("api.openai.com");
+    if is_non_openai {
+        compat.supports_developer_role = Some(false);
+        compat.supports_reasoning_effort = Some(true);
+    }
+    if lower.contains("openrouter.ai") {
+        compat.thinking_format = Some(ModelProviderThinkingFormat::Openrouter);
+    }
+    if lower.contains("deepseek.com") {
+        compat.thinking_format = Some(ModelProviderThinkingFormat::Deepseek);
+    }
+    if lower.contains("api.x.ai") {
+        compat.supports_reasoning_effort = Some(false);
+    }
+    if lower.contains("bigmodel.cn") || lower.contains("z.ai") {
+        compat.supports_reasoning_effort = Some(false);
+        compat.max_tokens_field = Some(ModelProviderMaxTokensField::MaxTokens);
+        compat.thinking_format = Some(ModelProviderThinkingFormat::Zai);
+    }
+    compat
+}
+
+fn merge_common_request_compat(
+    mut inferred: crate::model_provider_info::ModelProviderCompatInfo,
+    explicit: Option<crate::model_provider_info::ModelProviderCompatInfo>,
+) -> crate::model_provider_info::ModelProviderCompatInfo {
+    let Some(explicit) = explicit else {
+        return inferred;
+    };
+    inferred.supports_developer_role = explicit
+        .supports_developer_role
+        .or(inferred.supports_developer_role);
+    inferred.supports_reasoning_effort = explicit
+        .supports_reasoning_effort
+        .or(inferred.supports_reasoning_effort);
+    inferred.reasoning_effort_map = explicit
+        .reasoning_effort_map
+        .or(inferred.reasoning_effort_map);
+    inferred.supports_parallel_tool_calls = explicit
+        .supports_parallel_tool_calls
+        .or(inferred.supports_parallel_tool_calls);
+    inferred.max_tokens_field = explicit.max_tokens_field.or(inferred.max_tokens_field);
+    inferred.requires_tool_result_name = explicit
+        .requires_tool_result_name
+        .or(inferred.requires_tool_result_name);
+    inferred.requires_assistant_after_tool_result = explicit
+        .requires_assistant_after_tool_result
+        .or(inferred.requires_assistant_after_tool_result);
+    inferred.thinking_format = explicit.thinking_format.or(inferred.thinking_format);
+    inferred
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -411,12 +565,39 @@ fn build_common_messages(
     }
 
     let mut tool_names_by_call_id = BTreeMap::<String, String>::new();
+    let mut pending_assistant_message = None::<Value>;
+    let mut pending_reasoning_content = String::new();
     for (index, item) in formatted_input.iter().enumerate() {
-        let Some((message, role)) =
+        if let Some(reasoning_content) = common_reasoning_content(item) {
+            append_common_reasoning_content(&mut pending_reasoning_content, &reasoning_content);
+            continue;
+        }
+
+        if let Some(tool_call) = response_item_to_common_tool_call(item, &mut tool_names_by_call_id)
+        {
+            let message = ensure_common_assistant_message(&mut pending_assistant_message);
+            attach_common_reasoning_content(message, &mut pending_reasoning_content, compat);
+            append_common_tool_call(message, tool_call);
+            continue;
+        }
+
+        let Some((mut message, role)) =
             response_item_to_common_message(item, compat, &mut tool_names_by_call_id)
         else {
             continue;
         };
+
+        if role == Some(CommonHistoryRole::Assistant) {
+            flush_common_assistant_message(&mut messages, &mut pending_assistant_message);
+            attach_common_reasoning_content(&mut message, &mut pending_reasoning_content, compat);
+            pending_assistant_message = Some(message);
+            if !next_common_item_is_tool_call(&formatted_input[index + 1..]) {
+                flush_common_assistant_message(&mut messages, &mut pending_assistant_message);
+            }
+            continue;
+        }
+
+        flush_common_assistant_message(&mut messages, &mut pending_assistant_message);
         messages.push(message);
 
         if compat.requires_assistant_after_tool_result
@@ -430,6 +611,7 @@ fn build_common_messages(
             }));
         }
     }
+    flush_common_assistant_message(&mut messages, &mut pending_assistant_message);
 
     messages
 }
@@ -448,6 +630,102 @@ fn push_common_text_message(messages: &mut Vec<Value>, role: &str, content: &str
 
 fn next_common_history_role(items: &[ResponseItem]) -> Option<CommonHistoryRole> {
     items.iter().find_map(common_history_role)
+}
+
+fn next_common_item_is_tool_call(items: &[ResponseItem]) -> bool {
+    items
+        .iter()
+        .find_map(|item| {
+            if common_reasoning_content(item).is_some() {
+                None
+            } else {
+                Some(response_item_is_common_tool_call(item))
+            }
+        })
+        .unwrap_or(false)
+}
+
+fn common_reasoning_content(item: &ResponseItem) -> Option<String> {
+    let ResponseItem::Reasoning { content, .. } = item else {
+        return None;
+    };
+    let text = content
+        .as_ref()?
+        .iter()
+        .map(|part| match part {
+            ReasoningItemContent::ReasoningText { text } | ReasoningItemContent::Text { text } => {
+                text.as_str()
+            }
+        })
+        .collect::<String>();
+    (!text.trim().is_empty()).then_some(text)
+}
+
+fn append_common_reasoning_content(target: &mut String, content: &str) {
+    if content.trim().is_empty() {
+        return;
+    }
+    if !target.is_empty() {
+        target.push('\n');
+    }
+    target.push_str(content);
+}
+
+fn attach_common_reasoning_content(
+    message: &mut Value,
+    pending_reasoning_content: &mut String,
+    compat: &CommonRequestCompat,
+) {
+    if pending_reasoning_content.trim().is_empty() {
+        pending_reasoning_content.clear();
+        return;
+    }
+    let Some(replay_field) = CommonThinkingPolicy::from_format(compat.thinking_format).replay_field
+    else {
+        pending_reasoning_content.clear();
+        return;
+    };
+    if let Value::Object(map) = message {
+        map.insert(
+            replay_field.to_string(),
+            Value::String(std::mem::take(pending_reasoning_content)),
+        );
+    } else {
+        pending_reasoning_content.clear();
+    }
+}
+
+fn ensure_common_assistant_message(pending_assistant_message: &mut Option<Value>) -> &mut Value {
+    if pending_assistant_message.is_none() {
+        *pending_assistant_message = Some(json!({
+            "role": "assistant",
+            "content": "",
+        }));
+    }
+    pending_assistant_message
+        .as_mut()
+        .expect("pending assistant message should be initialized")
+}
+
+fn append_common_tool_call(message: &mut Value, tool_call: Value) {
+    let Value::Object(map) = message else {
+        return;
+    };
+    match map.get_mut("tool_calls") {
+        Some(Value::Array(tool_calls)) => tool_calls.push(tool_call),
+        _ => {
+            map.insert("tool_calls".to_string(), Value::Array(vec![tool_call]));
+        }
+    }
+}
+
+fn flush_common_assistant_message(
+    messages: &mut Vec<Value>,
+    pending_assistant_message: &mut Option<Value>,
+) {
+    if let Some(message) = pending_assistant_message.take() {
+        messages.push(message);
+    }
 }
 
 fn collect_system_prompt(prompt: &Prompt, items: &[ResponseItem]) -> String {
@@ -752,6 +1030,97 @@ fn response_item_to_common_message(
     }
 }
 
+fn response_item_is_common_tool_call(item: &ResponseItem) -> bool {
+    match item {
+        ResponseItem::FunctionCall { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::LocalShellCall { .. } => true,
+        ResponseItem::ToolSearchCall {
+            execution,
+            call_id: Some(_),
+            ..
+        } => execution == "client",
+        _ => false,
+    }
+}
+
+fn response_item_to_common_tool_call(
+    item: &ResponseItem,
+    tool_names_by_call_id: &mut BTreeMap<String, String>,
+) -> Option<Value> {
+    match item {
+        ResponseItem::FunctionCall {
+            name,
+            arguments,
+            call_id,
+            ..
+        } => {
+            tool_names_by_call_id.insert(call_id.clone(), name.clone());
+            Some(json!({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": normalize_function_arguments_string(arguments),
+                }
+            }))
+        }
+        ResponseItem::CustomToolCall {
+            name,
+            input,
+            call_id,
+            ..
+        } => {
+            tool_names_by_call_id.insert(call_id.clone(), name.clone());
+            Some(json!({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": serde_json::to_string(&json!({ "input": input })).unwrap_or_default(),
+                }
+            }))
+        }
+        ResponseItem::LocalShellCall {
+            call_id,
+            id,
+            action: LocalShellAction::Exec(exec),
+            ..
+        } => {
+            let tool_call_id = call_id
+                .clone()
+                .or_else(|| id.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            tool_names_by_call_id.insert(tool_call_id.clone(), "local_shell".to_string());
+            Some(json!({
+                "id": tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": "local_shell",
+                    "arguments": serde_json::to_string(&local_shell_exec_json(exec)).unwrap_or_default(),
+                }
+            }))
+        }
+        ResponseItem::ToolSearchCall {
+            call_id: Some(call_id),
+            execution,
+            arguments,
+            ..
+        } if execution == "client" => {
+            tool_names_by_call_id.insert(call_id.clone(), "tool_search".to_string());
+            Some(json!({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": "tool_search",
+                    "arguments": serde_json::to_string(arguments).unwrap_or_default(),
+                }
+            }))
+        }
+        _ => None,
+    }
+}
+
 fn common_history_role(item: &ResponseItem) -> Option<CommonHistoryRole> {
     match item {
         ResponseItem::Message { role, .. } if role == "user" => Some(CommonHistoryRole::User),
@@ -807,8 +1176,9 @@ fn apply_common_reasoning_config(
     compat: &CommonRequestCompat,
     effort: Option<ReasoningEffortConfig>,
 ) {
-    match compat.thinking_format {
-        ModelProviderThinkingFormat::Openai => {
+    let policy = CommonThinkingPolicy::from_format(compat.thinking_format);
+    match policy.request_style {
+        CommonThinkingRequestStyle::ReasoningEffortField => {
             if compat.supports_reasoning_effort
                 && let Some(effort) = effort
             {
@@ -821,7 +1191,7 @@ fn apply_common_reasoning_config(
                 );
             }
         }
-        ModelProviderThinkingFormat::Openrouter => {
+        CommonThinkingRequestStyle::OpenRouterReasoningObject => {
             if let Some(effort) = effort {
                 request.insert(
                     "reasoning".to_string(),
@@ -834,13 +1204,13 @@ fn apply_common_reasoning_config(
                 );
             }
         }
-        ModelProviderThinkingFormat::Zai | ModelProviderThinkingFormat::Qwen => {
+        CommonThinkingRequestStyle::EnableThinkingBool => {
             request.insert(
                 "enable_thinking".to_string(),
                 Value::Bool(reasoning_effort_enables_thinking(effort)),
             );
         }
-        ModelProviderThinkingFormat::QwenChatTemplate => {
+        CommonThinkingRequestStyle::QwenChatTemplateKwargs => {
             request.insert(
                 "chat_template_kwargs".to_string(),
                 json!({
@@ -1049,7 +1419,12 @@ fn tool_spec_to_function_definition(tool: &ToolSpec) -> Option<ProviderFunctionT
             ),
             parameters: serde_json::to_value(freeform_tool_schema()).ok()?,
         }),
-        ToolSpec::WebSearch { .. } | ToolSpec::ImageGeneration { .. } => None,
+        ToolSpec::WebSearch { .. } => Some(ProviderFunctionTool {
+            name: "web_search".to_string(),
+            description: "Search the public web with Praxis zero-config parallel web search. Praxis fans out to every no-key provider it can reach, including Google, Bing, DuckDuckGo HTML, Startpage, Baidu, GitHub, docs.rs, crates.io, and local YaCy, then deduplicates and ranks all successful provider results while reporting failures.".to_string(),
+            parameters: serde_json::to_value(web_search_schema()).ok()?,
+        }),
+        ToolSpec::ImageGeneration { .. } => None,
     }
 }
 
@@ -1100,6 +1475,60 @@ fn freeform_tool_schema() -> JsonSchema {
     }
 }
 
+fn web_search_schema() -> JsonSchema {
+    use std::collections::BTreeMap;
+
+    JsonSchema::Object {
+        properties: BTreeMap::from([
+            (
+                "query".to_string(),
+                JsonSchema::String {
+                    description: Some("Primary web search query.".to_string()),
+                },
+            ),
+            (
+                "queries".to_string(),
+                JsonSchema::Array {
+                    items: Box::new(JsonSchema::String {
+                        description: Some("Additional search query.".to_string()),
+                    }),
+                    description: Some(
+                        "Optional alternate queries; Praxis searches every query in parallel."
+                            .to_string(),
+                    ),
+                },
+            ),
+            (
+                "max_results".to_string(),
+                JsonSchema::Number {
+                    description: Some(
+                        "Maximum merged results to return, capped by Praxis.".to_string(),
+                    ),
+                },
+            ),
+            (
+                "domains".to_string(),
+                JsonSchema::Array {
+                    items: Box::new(JsonSchema::String {
+                        description: Some("Allowed result domain such as github.com.".to_string()),
+                    }),
+                    description: Some("Optional domain allow-list for returned results.".to_string()),
+                },
+            ),
+            (
+                "recency_days".to_string(),
+                JsonSchema::Number {
+                    description: Some(
+                        "Optional freshness preference in days. Zero-config HTML providers may not all support strict freshness filtering.".to_string(),
+                    ),
+                },
+            ),
+        ]),
+        required: Some(vec!["query".to_string()]),
+        additional_properties: Some(false.into()),
+    }
+}
+
 fn local_shell_exec_json(exec: &praxis_protocol::models::LocalShellExecAction) -> Value {
     let mut object = serde_json::Map::from_iter([(
         "command".to_string(),
@@ -1146,9 +1575,18 @@ fn spawn_claude_sse_stream(response: reqwest::Response, idle_timeout: Duration) 
     ResponseStream { rx_event }
 }
 
-fn spawn_common_sse_stream(response: reqwest::Response, idle_timeout: Duration) -> ResponseStream {
+fn spawn_common_sse_stream(
+    response: reqwest::Response,
+    idle_timeout: Duration,
+    thinking_policy: CommonThinkingPolicy,
+) -> ResponseStream {
     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(256);
-    tokio::spawn(process_common_sse(response, tx_event, idle_timeout));
+    tokio::spawn(process_common_sse(
+        response,
+        tx_event,
+        idle_timeout,
+        thinking_policy,
+    ));
     ResponseStream { rx_event }
 }
 
@@ -1157,6 +1595,8 @@ struct ClaudeStreamState {
     response_id: Option<String>,
     input_tokens: i64,
     cached_input_tokens: i64,
+    cache_reported_input_tokens: i64,
+    cache_accounting_reported: bool,
     output_tokens: i64,
     message_text: String,
     message_open: bool,
@@ -1174,12 +1614,17 @@ struct ClaudeToolBlockState {
 #[derive(Default)]
 struct CommonStreamState {
     response_id: Option<String>,
+    reasoning_text: String,
+    reasoning_open: bool,
+    reasoning_id: Option<String>,
     message_text: String,
     message_open: bool,
     tool_calls: BTreeMap<usize, CommonToolCallState>,
     tool_calls_emitted: bool,
     token_usage: Option<TokenUsage>,
     saw_finish_reason: bool,
+    finish_reason_at: Option<Instant>,
+    last_content_delta_at: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -1265,6 +1710,7 @@ async fn process_common_sse(
     response: reqwest::Response,
     tx_event: mpsc::Sender<Result<ResponseEvent>>,
     idle_timeout: Duration,
+    thinking_policy: CommonThinkingPolicy,
 ) {
     if tx_event.send(Ok(ResponseEvent::Created)).await.is_err() {
         return;
@@ -1274,7 +1720,18 @@ async fn process_common_sse(
     let mut state = CommonStreamState::default();
 
     loop {
-        let next = timeout(idle_timeout, stream.next()).await;
+        if common_should_complete_now(&state, thinking_policy) {
+            match emit_common_completion(&mut state, &tx_event).await {
+                Ok(()) => return,
+                Err(err) => {
+                    let _ = tx_event.send(Err(err)).await;
+                    return;
+                }
+            }
+        }
+
+        let wait_timeout = common_next_wait_timeout(&state, thinking_policy, idle_timeout);
+        let next = timeout(wait_timeout, stream.next()).await;
         let sse = match next {
             Ok(Some(Ok(sse))) => sse,
             Ok(Some(Err(err))) => {
@@ -1287,7 +1744,7 @@ async fn process_common_sse(
                 return;
             }
             Ok(None) => {
-                if state.saw_finish_reason {
+                if common_can_complete_on_stream_close(&state, thinking_policy) {
                     match emit_common_completion(&mut state, &tx_event).await {
                         Ok(()) => return,
                         Err(err) => {
@@ -1305,6 +1762,15 @@ async fn process_common_sse(
                 return;
             }
             Err(_) => {
+                if common_can_complete_on_timeout(&state, thinking_policy) {
+                    match emit_common_completion(&mut state, &tx_event).await {
+                        Ok(()) => return,
+                        Err(err) => {
+                            let _ = tx_event.send(Err(err)).await;
+                            return;
+                        }
+                    }
+                }
                 let _ = tx_event
                     .send(Err(PraxisErr::Stream(
                         "idle timeout waiting for common stream".to_string(),
@@ -1315,7 +1781,7 @@ async fn process_common_sse(
             }
         };
 
-        match process_common_stream_event(&mut state, &tx_event, &sse.data).await {
+        match process_common_stream_event(&mut state, &tx_event, &sse.data, thinking_policy).await {
             Ok(done) => {
                 if done {
                     return;
@@ -1429,6 +1895,7 @@ async fn process_claude_stream_event(
             let token_usage = Some(TokenUsage {
                 input_tokens: state.input_tokens,
                 cached_input_tokens: state.cached_input_tokens,
+                cache_reported_input_tokens: state.cache_reported_input_tokens,
                 output_tokens: state.output_tokens,
                 reasoning_output_tokens: 0,
                 total_tokens: state.input_tokens + state.output_tokens,
@@ -1462,6 +1929,7 @@ async fn process_common_stream_event(
     state: &mut CommonStreamState,
     tx_event: &mpsc::Sender<Result<ResponseEvent>>,
     payload: &str,
+    thinking_policy: CommonThinkingPolicy,
 ) -> Result<bool> {
     if payload.trim() == "[DONE]" {
         emit_common_completion(state, tx_event).await?;
@@ -1480,10 +1948,18 @@ async fn process_common_stream_event(
         return Ok(false);
     };
 
+    let mut should_complete_after_finish = false;
     for choice in choices {
         let finish_reason = choice.get("finish_reason").and_then(Value::as_str);
         if let Some(delta) = choice.get("delta") {
+            if let Some(reasoning) = extract_common_reasoning_delta(delta, thinking_policy)
+                && !reasoning.is_empty()
+            {
+                emit_common_reasoning_delta(state, tx_event, &reasoning).await?;
+            }
+
             if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
+                emit_common_reasoning_done(state, tx_event).await?;
                 if state.message_open {
                     emit_common_message_done(state, tx_event).await?;
                 }
@@ -1517,12 +1993,14 @@ async fn process_common_stream_event(
             if let Some(text) = extract_common_stream_delta_text(delta.get("content"))
                 && !text.is_empty()
             {
+                emit_common_reasoning_done(state, tx_event).await?;
                 emit_common_text_delta(state, tx_event, &text).await?;
             }
         }
 
         if let Some(reason) = finish_reason {
             state.saw_finish_reason = true;
+            state.finish_reason_at.get_or_insert_with(Instant::now);
             match reason {
                 "tool_calls" => {
                     emit_common_message_done(state, tx_event).await?;
@@ -1533,7 +2011,13 @@ async fn process_common_stream_event(
                 }
                 _ => {}
             }
+            should_complete_after_finish |= thinking_policy.complete_on_finish_reason;
         }
+    }
+
+    if should_complete_after_finish {
+        emit_common_completion(state, tx_event).await?;
+        return Ok(true);
     }
 
     Ok(false)
@@ -1637,6 +2121,15 @@ fn update_claude_usage(state: &mut ClaudeStreamState, usage: Option<&Value>) {
     {
         state.cached_input_tokens = cached_input_tokens;
     }
+    if usage.get("cache_read_input_tokens").is_some()
+        || usage.get("cache_creation_input_tokens").is_some()
+    {
+        state.cache_accounting_reported = true;
+        state.cache_reported_input_tokens = state.input_tokens.max(0);
+    }
+    if state.cache_accounting_reported {
+        state.cache_reported_input_tokens = state.input_tokens.max(0);
+    }
     if let Some(output_tokens) = usage.get("output_tokens").and_then(Value::as_i64) {
         state.output_tokens = output_tokens;
     }
@@ -1667,7 +2160,129 @@ async fn emit_common_text_delta(
         state.message_open = true;
     }
     state.message_text.push_str(delta);
+    state.last_content_delta_at = Some(Instant::now());
     send_stream_event(tx_event, ResponseEvent::OutputTextDelta(delta.to_string())).await
+}
+
+async fn emit_common_reasoning_delta(
+    state: &mut CommonStreamState,
+    tx_event: &mpsc::Sender<Result<ResponseEvent>>,
+    delta: &str,
+) -> Result<()> {
+    if delta.is_empty() {
+        return Ok(());
+    }
+    if !state.reasoning_open {
+        let id = state
+            .reasoning_id
+            .get_or_insert_with(|| format!("common-reasoning-{}", Uuid::new_v4()))
+            .clone();
+        send_stream_event(
+            tx_event,
+            ResponseEvent::OutputItemAdded(common_reasoning_item_with_id(id, String::new())),
+        )
+        .await?;
+        state.reasoning_open = true;
+    }
+    state.reasoning_text.push_str(delta);
+    state.last_content_delta_at = Some(Instant::now());
+    send_stream_event(
+        tx_event,
+        ResponseEvent::ReasoningContentDelta {
+            delta: delta.to_string(),
+            content_index: 0,
+        },
+    )
+    .await
+}
+
+fn common_next_wait_timeout(
+    state: &CommonStreamState,
+    thinking_policy: CommonThinkingPolicy,
+    idle_timeout: Duration,
+) -> Duration {
+    let Some(deadline) = common_completion_deadline(state, thinking_policy) else {
+        return idle_timeout;
+    };
+    deadline
+        .saturating_duration_since(Instant::now())
+        .min(idle_timeout)
+}
+
+fn common_should_complete_now(
+    state: &CommonStreamState,
+    thinking_policy: CommonThinkingPolicy,
+) -> bool {
+    common_completion_deadline(state, thinking_policy)
+        .is_some_and(|deadline| Instant::now() >= deadline)
+}
+
+fn common_can_complete_on_timeout(
+    state: &CommonStreamState,
+    thinking_policy: CommonThinkingPolicy,
+) -> bool {
+    state.saw_finish_reason || common_can_complete_on_message_idle(state, thinking_policy)
+}
+
+fn common_can_complete_on_stream_close(
+    state: &CommonStreamState,
+    thinking_policy: CommonThinkingPolicy,
+) -> bool {
+    state.saw_finish_reason || common_can_complete_on_message_idle(state, thinking_policy)
+}
+
+fn common_completion_deadline(
+    state: &CommonStreamState,
+    thinking_policy: CommonThinkingPolicy,
+) -> Option<Instant> {
+    let finish_deadline = state
+        .finish_reason_at
+        .map(|at| at + Duration::from_millis(COMMON_POST_FINISH_GRACE_MS));
+    let message_idle_deadline = if common_can_complete_on_message_idle(state, thinking_policy) {
+        state
+            .last_content_delta_at
+            .map(|at| at + Duration::from_millis(COMMON_DEEPSEEK_MESSAGE_IDLE_GRACE_MS))
+    } else {
+        None
+    };
+
+    match (finish_deadline, message_idle_deadline) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+        (None, None) => None,
+    }
+}
+
+fn common_can_complete_on_message_idle(
+    state: &CommonStreamState,
+    thinking_policy: CommonThinkingPolicy,
+) -> bool {
+    thinking_policy.complete_on_message_idle
+        && state.message_open
+        && !state.message_text.is_empty()
+        && state.tool_calls.is_empty()
+}
+
+async fn emit_common_reasoning_done(
+    state: &mut CommonStreamState,
+    tx_event: &mpsc::Sender<Result<ResponseEvent>>,
+) -> Result<()> {
+    let text = std::mem::take(&mut state.reasoning_text);
+    if text.trim().is_empty() {
+        state.reasoning_open = false;
+        state.reasoning_id = None;
+        return Ok(());
+    }
+    let id = state
+        .reasoning_id
+        .take()
+        .unwrap_or_else(|| format!("common-reasoning-{}", Uuid::new_v4()));
+    state.reasoning_open = false;
+    send_stream_event(
+        tx_event,
+        ResponseEvent::OutputItemDone(common_reasoning_item_with_id(id, text)),
+    )
+    .await
 }
 
 async fn emit_common_message_done(
@@ -1730,6 +2345,7 @@ async fn emit_common_completion(
     state: &mut CommonStreamState,
     tx_event: &mpsc::Sender<Result<ResponseEvent>>,
 ) -> Result<()> {
+    emit_common_reasoning_done(state, tx_event).await?;
     emit_common_message_done(state, tx_event).await?;
     emit_common_tool_calls(state, tx_event).await?;
     let response_id = state
@@ -1859,7 +2475,10 @@ fn parse_claude_response(response_json: Value) -> Result<ParsedProviderResponse>
     })
 }
 
-fn parse_common_response(response_json: Value) -> Result<ParsedProviderResponse> {
+fn parse_common_response(
+    response_json: Value,
+    thinking_policy: CommonThinkingPolicy,
+) -> Result<ParsedProviderResponse> {
     let response_id = response_json
         .get("id")
         .and_then(Value::as_str)
@@ -1879,6 +2498,10 @@ fn parse_common_response(response_json: Value) -> Result<ParsedProviderResponse>
         })?;
 
     let mut items = Vec::new();
+
+    if let Some(reasoning_content) = extract_common_reasoning_content(message, thinking_policy) {
+        items.push(common_reasoning_item(reasoning_content));
+    }
 
     if let Some(text) = extract_common_response_text(message.get("content"))
         && !text.is_empty()
@@ -1936,6 +2559,41 @@ fn parse_common_response(response_json: Value) -> Result<ParsedProviderResponse>
     })
 }
 
+fn extract_common_reasoning_content(
+    message: &Value,
+    thinking_policy: CommonThinkingPolicy,
+) -> Option<String> {
+    thinking_policy
+        .response_fields
+        .iter()
+        .find_map(|key| message.get(key).and_then(Value::as_str))
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn extract_common_reasoning_delta(
+    delta: &Value,
+    thinking_policy: CommonThinkingPolicy,
+) -> Option<String> {
+    thinking_policy
+        .response_fields
+        .iter()
+        .find_map(|key| extract_common_stream_delta_text(delta.get(key)))
+}
+
+fn common_reasoning_item(text: String) -> ResponseItem {
+    common_reasoning_item_with_id(format!("common-reasoning-{}", Uuid::new_v4()), text)
+}
+
+fn common_reasoning_item_with_id(id: String, text: String) -> ResponseItem {
+    ResponseItem::Reasoning {
+        id,
+        summary: Vec::new(),
+        content: Some(vec![ReasoningItemContent::ReasoningText { text }]),
+        encrypted_content: None,
+    }
+}
+
 fn extract_common_response_text(content: Option<&Value>) -> Option<String> {
     let content = content?;
     match content {
@@ -1970,6 +2628,13 @@ fn parse_claude_usage(usage: Option<&Value>) -> Option<TokenUsage> {
         .get("cache_read_input_tokens")
         .and_then(Value::as_i64)
         .unwrap_or(0);
+    let cache_reported_input_tokens = if usage.get("cache_read_input_tokens").is_some()
+        || usage.get("cache_creation_input_tokens").is_some()
+    {
+        input_tokens.max(0)
+    } else {
+        0
+    };
     let total_tokens = usage
         .get("total_tokens")
         .and_then(Value::as_i64)
@@ -1978,6 +2643,7 @@ fn parse_claude_usage(usage: Option<&Value>) -> Option<TokenUsage> {
     Some(TokenUsage {
         input_tokens,
         cached_input_tokens,
+        cache_reported_input_tokens,
         output_tokens,
         reasoning_output_tokens: 0,
         total_tokens,
@@ -1986,32 +2652,68 @@ fn parse_claude_usage(usage: Option<&Value>) -> Option<TokenUsage> {
 
 fn parse_common_usage(usage: Option<&Value>) -> Option<TokenUsage> {
     let usage = usage?;
+    let prompt_cache_hit_tokens = usage
+        .get("prompt_cache_hit_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0);
+    let prompt_cache_miss_tokens = usage
+        .get("prompt_cache_miss_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0);
+    let cache_split_input_tokens = prompt_cache_hit_tokens + prompt_cache_miss_tokens;
+    let has_deepseek_cache_split = usage.get("prompt_cache_hit_tokens").is_some()
+        || usage.get("prompt_cache_miss_tokens").is_some();
+    let has_openai_cache_details = usage
+        .get("prompt_tokens_details")
+        .and_then(|details| details.get("cached_tokens"))
+        .is_some();
     let input_tokens = usage
         .get("prompt_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or(0);
+        .or_else(|| usage.get("input_tokens").and_then(Value::as_i64))
+        .unwrap_or(cache_split_input_tokens)
+        .max(0)
+        .max(cache_split_input_tokens);
     let output_tokens = usage
         .get("completion_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or(0);
-    let cached_input_tokens = usage
+        .or_else(|| usage.get("output_tokens").and_then(Value::as_i64))
+        .unwrap_or(0)
+        .max(0);
+    let openai_cached_input_tokens = usage
         .get("prompt_tokens_details")
         .and_then(|details| details.get("cached_tokens"))
         .and_then(Value::as_i64)
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(0);
+    let cached_input_tokens = openai_cached_input_tokens
+        .max(prompt_cache_hit_tokens)
+        .min(input_tokens);
+    let cache_reported_input_tokens = if has_deepseek_cache_split {
+        cache_split_input_tokens.max(input_tokens)
+    } else if has_openai_cache_details {
+        input_tokens
+    } else {
+        0
+    };
     let reasoning_output_tokens = usage
         .get("completion_tokens_details")
         .and_then(|details| details.get("reasoning_tokens"))
         .and_then(Value::as_i64)
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(0);
     let total_tokens = usage
         .get("total_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or(input_tokens + output_tokens);
+        .unwrap_or(input_tokens + output_tokens)
+        .max(0);
 
     Some(TokenUsage {
         input_tokens,
         cached_input_tokens,
+        cache_reported_input_tokens,
         output_tokens,
         reasoning_output_tokens,
         total_tokens,
@@ -2219,6 +2921,191 @@ mod tests {
     }
 
     #[test]
+    fn common_request_groups_parallel_tool_calls_and_replays_reasoning_content() {
+        let prompt = Prompt {
+            input: vec![
+                ResponseItem::Reasoning {
+                    id: "reasoning_1".to_string(),
+                    summary: Vec::new(),
+                    content: Some(vec![ReasoningItemContent::ReasoningText {
+                        text: "choose tools".to_string(),
+                    }]),
+                    encrypted_content: None,
+                },
+                ResponseItem::FunctionCall {
+                    id: None,
+                    name: "apply_patch".to_string(),
+                    namespace: None,
+                    arguments: "{\"patch\":\"*** Begin Patch\\n*** End Patch\\n\"}".to_string(),
+                    call_id: "call_1".to_string(),
+                },
+                ResponseItem::FunctionCall {
+                    id: None,
+                    name: "shell".to_string(),
+                    namespace: None,
+                    arguments: "{\"command\":\"pwd\"}".to_string(),
+                    call_id: "call_2".to_string(),
+                },
+                ResponseItem::FunctionCallOutput {
+                    call_id: "call_1".to_string(),
+                    output: FunctionCallOutputPayload::from_text("patch ok".to_string()),
+                },
+                ResponseItem::FunctionCallOutput {
+                    call_id: "call_2".to_string(),
+                    output: FunctionCallOutputPayload::from_text("shell ok".to_string()),
+                },
+                ResponseItem::Message {
+                    id: None,
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: "continue".to_string(),
+                    }],
+                    end_turn: None,
+                    phase: None,
+                },
+            ],
+            ..Prompt::default()
+        };
+
+        let request = build_common_request(
+            &prompt,
+            &model_info(),
+            &common_provider_info(None),
+            None,
+            true,
+        )
+        .expect("common request should build");
+
+        let messages = request["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 5);
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["reasoning_content"], "choose tools");
+        let tool_calls = messages[1]["tool_calls"].as_array().expect("tool calls");
+        assert_eq!(tool_calls.len(), 2);
+        assert_eq!(tool_calls[0]["id"], "call_1");
+        assert_eq!(tool_calls[1]["id"], "call_2");
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "call_1");
+        assert_eq!(messages[3]["role"], "tool");
+        assert_eq!(messages[3]["tool_call_id"], "call_2");
+        assert_eq!(messages[4]["role"], "user");
+    }
+
+    #[test]
+    fn common_request_does_not_replay_deepseek_reasoning_content() {
+        let prompt = Prompt {
+            input: vec![
+                ResponseItem::Reasoning {
+                    id: "reasoning_1".to_string(),
+                    summary: Vec::new(),
+                    content: Some(vec![ReasoningItemContent::ReasoningText {
+                        text: "choose tools".to_string(),
+                    }]),
+                    encrypted_content: None,
+                },
+                ResponseItem::FunctionCall {
+                    id: None,
+                    name: "apply_patch".to_string(),
+                    namespace: None,
+                    arguments: "{\"patch\":\"*** Begin Patch\\n*** End Patch\\n\"}".to_string(),
+                    call_id: "call_1".to_string(),
+                },
+                ResponseItem::FunctionCallOutput {
+                    call_id: "call_1".to_string(),
+                    output: FunctionCallOutputPayload::from_text("patch ok".to_string()),
+                },
+                ResponseItem::Message {
+                    id: None,
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: "continue".to_string(),
+                    }],
+                    end_turn: None,
+                    phase: None,
+                },
+            ],
+            ..Prompt::default()
+        };
+        let mut provider = common_provider_info(None);
+        provider.base_url = Some("https://api.deepseek.com".to_string());
+
+        let request = build_common_request(&prompt, &model_info(), &provider, None, true)
+            .expect("common request should build");
+
+        let messages = request["messages"].as_array().expect("messages array");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert!(messages[1].get("reasoning_content").is_none());
+        assert!(messages[1]["tool_calls"].as_array().is_some());
+    }
+
+    #[test]
+    fn common_request_merges_assistant_text_reasoning_and_tool_calls() {
+        let prompt = Prompt {
+            input: vec![
+                ResponseItem::Reasoning {
+                    id: "reasoning_1".to_string(),
+                    summary: Vec::new(),
+                    content: Some(vec![ReasoningItemContent::ReasoningText {
+                        text: "need shell".to_string(),
+                    }]),
+                    encrypted_content: None,
+                },
+                ResponseItem::Message {
+                    id: None,
+                    role: "assistant".to_string(),
+                    content: vec![ContentItem::OutputText {
+                        text: "I will inspect the workspace.".to_string(),
+                    }],
+                    end_turn: None,
+                    phase: None,
+                },
+                ResponseItem::FunctionCall {
+                    id: None,
+                    name: "local_shell".to_string(),
+                    namespace: None,
+                    arguments: "{\"command\":[\"pwd\"]}".to_string(),
+                    call_id: "call_1".to_string(),
+                },
+                ResponseItem::FunctionCallOutput {
+                    call_id: "call_1".to_string(),
+                    output: FunctionCallOutputPayload::from_text("D:\\ghost1.0".to_string()),
+                },
+                ResponseItem::Message {
+                    id: None,
+                    role: "user".to_string(),
+                    content: vec![ContentItem::InputText {
+                        text: "continue".to_string(),
+                    }],
+                    end_turn: None,
+                    phase: None,
+                },
+            ],
+            ..Prompt::default()
+        };
+
+        let request = build_common_request(
+            &prompt,
+            &model_info(),
+            &common_provider_info(None),
+            None,
+            true,
+        )
+        .expect("common request should build");
+
+        let messages = request["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"], "I will inspect the workspace.");
+        assert_eq!(messages[1]["reasoning_content"], "need shell");
+        let tool_calls = messages[1]["tool_calls"].as_array().expect("tool calls");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0]["id"], "call_1");
+        assert_eq!(messages[2]["role"], "tool");
+        assert_eq!(messages[2]["tool_call_id"], "call_1");
+        assert_eq!(messages[3]["role"], "user");
+    }
+
+    #[test]
     fn common_request_can_omit_parallel_tool_calls_via_provider_compat() {
         let prompt = Prompt {
             tools: vec![ToolSpec::Function(praxis_tools::ResponsesApiTool {
@@ -2342,6 +3229,72 @@ mod tests {
         assert_eq!(request["reasoning_effort"], "max");
         assert_eq!(request["max_completion_tokens"], 4096);
         assert!(request.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn common_request_does_not_emit_provider_specific_thinking_object() {
+        let provider =
+            common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
+                supports_reasoning_effort: Some(true),
+                reasoning_effort_map: Some(
+                    crate::model_provider_info::ModelProviderReasoningEffortMap {
+                        xhigh: Some("max".to_string()),
+                        ..Default::default()
+                    },
+                ),
+                ..Default::default()
+            }));
+
+        let request = build_common_request(
+            &Prompt::default(),
+            &model_info(),
+            &provider,
+            Some(ReasoningEffortConfig::XHigh),
+            true,
+        )
+        .expect("common request should build");
+
+        assert!(request.get("thinking").is_none());
+        assert_eq!(request["reasoning_effort"], "max");
+    }
+
+    #[test]
+    fn common_request_uses_generic_reasoning_effort_for_non_openai_base_url() {
+        let mut provider = common_provider_info(None);
+        provider.base_url = Some("https://api.deepseek.com".to_string());
+
+        let request = build_common_request(
+            &Prompt::default(),
+            &model_info(),
+            &provider,
+            Some(ReasoningEffortConfig::High),
+            true,
+        )
+        .expect("common request should build");
+
+        assert!(request.get("thinking").is_none());
+        assert_eq!(request["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn common_request_can_disable_generic_reasoning_effort() {
+        let provider =
+            common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
+                supports_reasoning_effort: Some(true),
+                ..Default::default()
+            }));
+
+        let request = build_common_request(
+            &Prompt::default(),
+            &model_info(),
+            &provider,
+            Some(ReasoningEffortConfig::None),
+            true,
+        )
+        .expect("common request should build");
+
+        assert!(request.get("thinking").is_none());
+        assert_eq!(request["reasoning_effort"], "none");
     }
 
     #[test]
@@ -2512,7 +3465,118 @@ mod tests {
             matches!(events[2], ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { ref name, ref call_id, ref arguments, .. }) if name == "local_shell" && call_id == "call_1" && arguments == "{\"command\":[\"pwd\"]}")
         );
         assert!(
-            matches!(events[3], ResponseEvent::Completed { ref response_id, token_usage: Some(TokenUsage { input_tokens: 21, cached_input_tokens: 4, output_tokens: 9, reasoning_output_tokens: 2, total_tokens: 30 }) } if response_id == "chatcmpl_1")
+            matches!(events[3], ResponseEvent::Completed { ref response_id, token_usage: Some(TokenUsage { input_tokens: 21, cached_input_tokens: 4, cache_reported_input_tokens: 21, output_tokens: 9, reasoning_output_tokens: 2, total_tokens: 30 }) } if response_id == "chatcmpl_1")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn common_unary_maps_deepseek_prompt_cache_usage() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(header("authorization", "Bearer common-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "chatcmpl_deepseek_cache",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "done"
+                    }
+                }],
+                "usage": {
+                    "completion_tokens": 5,
+                    "total_tokens": 25,
+                    "prompt_cache_hit_tokens": 12,
+                    "prompt_cache_miss_tokens": 8
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let stream = stream_common_unary(
+            provider(server.uri()),
+            CoreAuthProvider::for_test(Some("common-key"), None),
+            &common_provider_info(None),
+            &Prompt::default(),
+            &model_info(),
+            None,
+        )
+        .await
+        .expect("common stream");
+
+        let events = drain_stream(stream).await;
+        assert!(matches!(events.last(), Some(ResponseEvent::Completed {
+                response_id,
+                token_usage: Some(TokenUsage {
+                    input_tokens: 20,
+                    cached_input_tokens: 12,
+                    cache_reported_input_tokens: 20,
+                    output_tokens: 5,
+                    total_tokens: 25,
+                    ..
+                })
+            }) if response_id == "chatcmpl_deepseek_cache"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn common_unary_preserves_reasoning_content() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(header("authorization", "Bearer common-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "chatcmpl_reasoning",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "reasoning_content": "need a tool",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": "call_reasoning",
+                            "type": "function",
+                            "function": {
+                                "name": "local_shell",
+                                "arguments": "{\"command\":[\"pwd\"]}"
+                            }
+                        }]
+                    }
+                }],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let stream = stream_common_unary(
+            provider(server.uri()),
+            CoreAuthProvider::for_test(Some("common-key"), None),
+            &common_provider_info(None),
+            &Prompt::default(),
+            &model_info(),
+            None,
+        )
+        .await
+        .expect("common stream");
+
+        let events = drain_stream(stream).await;
+        assert_eq!(events.len(), 4);
+        assert!(matches!(events[0], ResponseEvent::Created));
+        assert!(matches!(
+            events[1],
+            ResponseEvent::OutputItemDone(ResponseItem::Reasoning { ref content, .. })
+                if matches!(
+                    content.as_deref(),
+                    Some([ReasoningItemContent::ReasoningText { text }]) if text == "need a tool"
+                )
+        ));
+        assert!(
+            matches!(events[2], ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { ref name, ref call_id, .. }) if name == "local_shell" && call_id == "call_reasoning")
+        );
+        assert!(
+            matches!(events[3], ResponseEvent::Completed { ref response_id, .. } if response_id == "chatcmpl_reasoning")
         );
     }
 
@@ -2657,6 +3721,16 @@ mod tests {
                             "choices": [{
                                 "delta": {
                                     "role": "assistant",
+                                    "reasoning_content": "stream thought"
+                                },
+                                "finish_reason": null
+                            }]
+                        })),
+                        sse_data(json!({
+                            "id": "chat_stream_1",
+                            "choices": [{
+                                "delta": {
+                                    "role": "assistant",
                                     "content": "hel"
                                 },
                                 "finish_reason": null
@@ -2741,28 +3815,40 @@ mod tests {
         .expect("common sse stream");
 
         let events = drain_stream(stream).await;
-        assert_eq!(events.len(), 7);
+        assert_eq!(events.len(), 10);
         assert!(matches!(events[0], ResponseEvent::Created));
         assert!(matches!(
             events[1],
-            ResponseEvent::OutputItemAdded(ResponseItem::Message { .. })
+            ResponseEvent::OutputItemAdded(ResponseItem::Reasoning { .. })
         ));
-        assert!(matches!(events[2], ResponseEvent::OutputTextDelta(ref delta) if delta == "hel"));
-        assert!(matches!(events[3], ResponseEvent::OutputTextDelta(ref delta) if delta == "lo"));
+        assert!(matches!(
+            events[2],
+            ResponseEvent::ReasoningContentDelta { ref delta, .. } if delta == "stream thought"
+        ));
+        assert!(matches!(
+            events[3],
+            ResponseEvent::OutputItemDone(ResponseItem::Reasoning { .. })
+        ));
         assert!(matches!(
             events[4],
+            ResponseEvent::OutputItemAdded(ResponseItem::Message { .. })
+        ));
+        assert!(matches!(events[5], ResponseEvent::OutputTextDelta(ref delta) if delta == "hel"));
+        assert!(matches!(events[6], ResponseEvent::OutputTextDelta(ref delta) if delta == "lo"));
+        assert!(matches!(
+            events[7],
             ResponseEvent::OutputItemDone(ResponseItem::Message { ref content, .. })
                 if matches!(content.as_slice(), [ContentItem::OutputText { text }] if text == "hello")
         ));
         assert!(matches!(
-            events[5],
+            events[8],
             ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { ref name, ref call_id, ref arguments, .. })
                 if name == "local_shell"
                     && call_id == "call_stream"
                     && arguments == "{\"command\":[\"pwd\"]}"
         ));
         assert!(matches!(
-            events[6],
+            events[9],
             ResponseEvent::Completed { ref response_id, token_usage: Some(TokenUsage { input_tokens: 12, cached_input_tokens: 1, output_tokens: 4, total_tokens: 16, .. }) }
                 if response_id == "chat_stream_1"
         ));

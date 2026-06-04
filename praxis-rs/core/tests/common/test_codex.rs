@@ -733,6 +733,7 @@ impl TestCodex {
                 approvals_reviewer: None,
                 sandbox_policy,
                 model: session_model,
+                model_provider: Some(self.config.model_provider_id.clone()),
                 effort: None,
                 summary: None,
                 service_tier,

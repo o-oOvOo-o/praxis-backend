@@ -4,8 +4,11 @@ use crate::ModelProviderInfo;
 use crate::Prompt;
 use crate::client::ModelClientSession;
 use crate::client_common::ResponseEvent;
+use crate::context_manager::estimate_response_item_model_visible_bytes;
+use crate::context_manager::is_user_turn_boundary;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
+use crate::event_mapping::is_contextual_user_message_content;
 #[cfg(test)]
 use crate::praxis::PreviousTurnSettings;
 use crate::praxis::Session;
@@ -15,8 +18,9 @@ use crate::util::backoff;
 use futures::prelude::*;
 use praxis_protocol::items::ContextCompactionItem;
 use praxis_protocol::items::TurnItem;
+use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::ContentItem;
-use praxis_protocol::models::ResponseInputItem;
+use praxis_protocol::models::FunctionCallOutputBody;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::protocol::CompactedItem;
 use praxis_protocol::protocol::EventMsg;
@@ -26,11 +30,16 @@ use praxis_protocol::user_input::UserInput;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::approx_token_count;
 use praxis_utils_output_truncation::truncate_text;
+use serde_json::Value;
 use tracing::error;
 
 pub const SUMMARIZATION_PROMPT: &str = include_str!("../templates/compact/prompt.md");
+pub const UPDATE_SUMMARIZATION_PROMPT: &str = include_str!("../templates/compact/update.md");
+const SUMMARIZATION_SYSTEM_PROMPT: &str = include_str!("../templates/compact/system.md");
 pub const SUMMARY_PREFIX: &str = include_str!("../templates/compact/summary_prefix.md");
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
+const LOCAL_COMPACT_KEEP_RECENT_TOKENS: i64 = 20_000;
+const LOCAL_COMPACT_TOOL_RESULT_MAX_CHARS: usize = 2_000;
 
 /// Controls whether compaction replacement history must include initial context.
 ///
@@ -56,14 +65,13 @@ pub(crate) async fn run_inline_auto_compact_task(
     turn_context: Arc<TurnContext>,
     initial_context_injection: InitialContextInjection,
 ) -> PraxisResult<()> {
-    let prompt = turn_context.compact_prompt().to_string();
-    let input = vec![UserInput::Text {
-        text: prompt,
-        // Compaction prompt is synthesized; no UI element ranges to preserve.
-        text_elements: Vec::new(),
-    }];
-
-    run_compact_task_inner(sess, turn_context, input, initial_context_injection).await?;
+    run_compact_task_inner(
+        sess,
+        turn_context,
+        LocalCompactMode::Auto,
+        initial_context_injection,
+    )
+    .await?;
     Ok(())
 }
 
@@ -81,27 +89,33 @@ pub(crate) async fn run_compact_task(
     run_compact_task_inner(
         sess.clone(),
         turn_context,
-        input,
+        local_compact_mode_for_input(&input),
         InitialContextInjection::DoNotInject,
     )
     .await
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LocalCompactMode {
+    Auto,
+    Manual,
+}
+
 async fn run_compact_task_inner(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
-    input: Vec<UserInput>,
+    mode: LocalCompactMode,
     initial_context_injection: InitialContextInjection,
 ) -> PraxisResult<()> {
     let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
         .await;
-    let initial_input_for_turn: ResponseInputItem = ResponseInputItem::from(input);
 
-    let mut history = sess.clone_history().await;
-    history.record_items(
-        &[initial_input_for_turn.into()],
-        turn_context.truncation_policy,
+    let history_snapshot = sess.clone_history().await;
+    let raw_history_items = history_snapshot.raw_items().to_vec();
+    let mut compact_plan = prepare_local_compaction(
+        history_snapshot.for_prompt(&turn_context.model_info.input_modalities),
+        mode,
     );
 
     let mut truncated_count = 0usize;
@@ -117,20 +131,27 @@ async fn run_compact_task_inner(
     // survives retries within this compact turn.
 
     loop {
-        // Clone is required because of the loop
-        let turn_input = history
-            .clone()
-            .for_prompt(&turn_context.model_info.input_modalities);
-        let turn_input_len = turn_input.len();
+        let summary_prompt = compact_plan.to_prompt_text(local_compact_instruction(
+            turn_context.as_ref(),
+            compact_plan.previous_summary.is_some(),
+        ));
         let prompt = Prompt {
-            input: turn_input,
-            base_instructions: sess.get_base_instructions().await,
-            personality: turn_context.personality,
+            input: vec![ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: summary_prompt,
+                }],
+                end_turn: None,
+                phase: None,
+            }],
+            base_instructions: BaseInstructions {
+                text: SUMMARIZATION_SYSTEM_PROMPT.to_string(),
+            },
             ..Default::default()
         };
         let turn_metadata_header = turn_context.turn_metadata_state.current_header_value();
         let attempt_result = drain_to_completed(
-            &sess,
             turn_context.as_ref(),
             &mut client_session,
             turn_metadata_header.as_deref(),
@@ -139,7 +160,9 @@ async fn run_compact_task_inner(
         .await;
 
         match attempt_result {
-            Ok(()) => {
+            Ok(output_items) => {
+                compact_plan.summary_output = get_last_assistant_message_from_turn(&output_items)
+                    .map(|text| text.trim().to_string());
                 if truncated_count > 0 {
                     sess.notify_background_event(
                         turn_context.as_ref(),
@@ -155,12 +178,10 @@ async fn run_compact_task_inner(
                 return Err(PraxisErr::Interrupted);
             }
             Err(e @ PraxisErr::ContextWindowExceeded) => {
-                if turn_input_len > 1 {
-                    // Trim from the beginning to preserve cache (prefix-based) and keep recent messages intact.
+                if compact_plan.remove_oldest_summary_item() {
                     error!(
-                        "Context window exceeded while compacting; removing oldest history item. Error: {e}"
+                        "Context window exceeded while compacting; removing oldest summary item. Error: {e}"
                     );
-                    history.remove_first_item();
                     truncated_count += 1;
                     retries = 0;
                     continue;
@@ -191,13 +212,11 @@ async fn run_compact_task_inner(
         }
     }
 
-    let history_snapshot = sess.clone_history().await;
-    let history_items = history_snapshot.raw_items();
-    let summary_suffix = get_last_assistant_message_from_turn(history_items).unwrap_or_default();
-    let summary_text = format!("{SUMMARY_PREFIX}\n{summary_suffix}");
-    let user_messages = collect_user_messages(history_items);
+    let summary_suffix = compact_plan.take_summary_fallback();
+    let summary_text = format!("{SUMMARY_PREFIX}\n{}", summary_suffix.trim());
 
-    let mut new_history = build_compacted_history(Vec::new(), &user_messages, &summary_text);
+    let mut new_history =
+        build_local_replacement_history(summary_text.clone(), compact_plan.retained_items);
 
     if matches!(
         initial_context_injection,
@@ -207,7 +226,7 @@ async fn run_compact_task_inner(
         new_history =
             insert_initial_context_before_last_real_user_or_summary(new_history, initial_context);
     }
-    let ghost_snapshots: Vec<ResponseItem> = history_items
+    let ghost_snapshots: Vec<ResponseItem> = raw_history_items
         .iter()
         .filter(|item| matches!(item, ResponseItem::GhostSnapshot { .. }))
         .cloned()
@@ -392,13 +411,442 @@ fn build_compacted_history_with_limit(
     history
 }
 
+fn local_compact_mode_for_input(_input: &[UserInput]) -> LocalCompactMode {
+    LocalCompactMode::Manual
+}
+
+fn local_compact_instruction(turn_context: &TurnContext, has_previous_summary: bool) -> &str {
+    turn_context
+        .compact_prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .unwrap_or(if has_previous_summary {
+            UPDATE_SUMMARIZATION_PROMPT
+        } else {
+            SUMMARIZATION_PROMPT
+        })
+}
+
+#[derive(Debug)]
+struct LocalCompactionPlan {
+    summary_items: Vec<ResponseItem>,
+    retained_items: Vec<ResponseItem>,
+    previous_summary: Option<String>,
+    summary_output: Option<String>,
+}
+
+impl LocalCompactionPlan {
+    fn to_prompt_text(&self, final_instruction: &str) -> String {
+        let conversation = serialize_compaction_conversation(
+            &self.summary_items,
+            LOCAL_COMPACT_TOOL_RESULT_MAX_CHARS,
+        );
+        let mut prompt = format!("<conversation>\n{conversation}\n</conversation>");
+        if let Some(previous_summary) = &self.previous_summary {
+            prompt.push_str("\n\n<previous-summary>\n");
+            prompt.push_str(previous_summary.trim());
+            prompt.push_str("\n</previous-summary>");
+        }
+        prompt.push_str("\n\n");
+        prompt.push_str(final_instruction.trim());
+        prompt
+    }
+
+    fn remove_oldest_summary_item(&mut self) -> bool {
+        if self.summary_items.is_empty() {
+            false
+        } else {
+            self.summary_items.remove(0);
+            true
+        }
+    }
+
+    fn take_summary_fallback(&mut self) -> String {
+        self.summary_output
+            .take()
+            .or_else(|| self.previous_summary.clone())
+            .filter(|summary| !summary.trim().is_empty())
+            .unwrap_or_else(|| "(no summary available)".to_string())
+    }
+}
+
+fn prepare_local_compaction(
+    prompt_history: Vec<ResponseItem>,
+    mode: LocalCompactMode,
+) -> LocalCompactionPlan {
+    let mut compactable_items = Vec::new();
+    let mut previous_summary = None;
+    for item in prompt_history {
+        if let Some(summary) = summary_from_item(&item) {
+            previous_summary = Some(summary);
+            continue;
+        }
+        if should_include_in_local_compaction(&item) {
+            compactable_items.push(item);
+        }
+    }
+
+    let cut_index = choose_local_compaction_cut_index(&compactable_items, mode);
+    let retained_items = compactable_items[cut_index..].to_vec();
+    let summary_items = compactable_items[..cut_index].to_vec();
+
+    LocalCompactionPlan {
+        summary_items,
+        retained_items,
+        previous_summary,
+        summary_output: None,
+    }
+}
+
+fn choose_local_compaction_cut_index(items: &[ResponseItem], mode: LocalCompactMode) -> usize {
+    if items.is_empty() {
+        return 0;
+    }
+    if mode == LocalCompactMode::Manual {
+        return items.len();
+    }
+
+    let mut accumulated_tokens = 0i64;
+    let mut tentative = None;
+    for (index, item) in items.iter().enumerate().rev() {
+        accumulated_tokens =
+            accumulated_tokens.saturating_add(estimate_item_tokens_for_local_compaction(item));
+        if accumulated_tokens >= LOCAL_COMPACT_KEEP_RECENT_TOKENS {
+            tentative = Some(index);
+            break;
+        }
+    }
+
+    let Some(tentative) = tentative else {
+        return items.len();
+    };
+
+    if let Some(user_boundary) = (tentative..items.len())
+        .find(|index| is_user_turn_boundary(&items[*index]) && !is_summary_item(&items[*index]))
+    {
+        return user_boundary;
+    }
+
+    if let Some(valid_start) =
+        (tentative..items.len()).find(|index| is_valid_retained_suffix_start(&items[*index]))
+    {
+        return valid_start;
+    }
+
+    if is_tool_output(&items[tentative])
+        && let Some(call_index) = matching_tool_call_index_before(items, tentative)
+    {
+        return call_index;
+    }
+
+    0
+}
+
+fn estimate_item_tokens_for_local_compaction(item: &ResponseItem) -> i64 {
+    let bytes = estimate_response_item_model_visible_bytes(item);
+    bytes.saturating_add(3) / 4
+}
+
+fn should_include_in_local_compaction(item: &ResponseItem) -> bool {
+    match item {
+        ResponseItem::Message { role, content, .. } if role == "developer" => false,
+        ResponseItem::Message { role, content, .. } if role == "system" => false,
+        ResponseItem::Message { role, content, .. } if role == "user" => {
+            !is_contextual_user_message_content(content) && !is_summary_item(item)
+        }
+        ResponseItem::GhostSnapshot { .. } | ResponseItem::Other => false,
+        ResponseItem::Compaction { .. } => false,
+        ResponseItem::Message { .. }
+        | ResponseItem::Reasoning { .. }
+        | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::FunctionCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::ToolSearchOutput { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::CustomToolCallOutput { .. }
+        | ResponseItem::FunctionCallOutput { .. }
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. } => true,
+    }
+}
+
+fn is_valid_retained_suffix_start(item: &ResponseItem) -> bool {
+    match item {
+        ResponseItem::Message { role, content, .. } if role == "user" => {
+            !is_contextual_user_message_content(content) && !is_summary_item(item)
+        }
+        ResponseItem::Message { role, .. } if role == "assistant" => true,
+        ResponseItem::FunctionCall { .. }
+        | ResponseItem::CustomToolCall { .. }
+        | ResponseItem::ToolSearchCall { .. }
+        | ResponseItem::LocalShellCall { .. }
+        | ResponseItem::WebSearchCall { .. }
+        | ResponseItem::ImageGenerationCall { .. } => true,
+        _ => false,
+    }
+}
+
+fn matching_tool_call_index_before(items: &[ResponseItem], output_index: usize) -> Option<usize> {
+    let output_call_id = output_call_id(&items[output_index])?;
+    items[..output_index]
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, item)| (tool_call_id(item) == Some(output_call_id)).then_some(index))
+}
+
+fn output_call_id(item: &ResponseItem) -> Option<&str> {
+    match item {
+        ResponseItem::FunctionCallOutput { call_id, .. }
+        | ResponseItem::CustomToolCallOutput { call_id, .. } => Some(call_id),
+        ResponseItem::ToolSearchOutput {
+            call_id: Some(call_id),
+            ..
+        } => Some(call_id),
+        _ => None,
+    }
+}
+
+fn tool_call_id(item: &ResponseItem) -> Option<&str> {
+    match item {
+        ResponseItem::FunctionCall { call_id, .. }
+        | ResponseItem::CustomToolCall { call_id, .. } => Some(call_id),
+        ResponseItem::ToolSearchCall {
+            call_id: Some(call_id),
+            ..
+        } => Some(call_id),
+        ResponseItem::LocalShellCall {
+            call_id: Some(call_id),
+            ..
+        } => Some(call_id),
+        _ => None,
+    }
+}
+
+fn is_tool_output(item: &ResponseItem) -> bool {
+    matches!(
+        item,
+        ResponseItem::FunctionCallOutput { .. }
+            | ResponseItem::CustomToolCallOutput { .. }
+            | ResponseItem::ToolSearchOutput { .. }
+    )
+}
+
+fn summary_from_item(item: &ResponseItem) -> Option<String> {
+    let ResponseItem::Message { role, content, .. } = item else {
+        return None;
+    };
+    if role != "user" {
+        return None;
+    }
+    let text = content_items_to_text(content)?;
+    strip_summary_prefix(&text)
+        .map(str::trim)
+        .map(str::to_string)
+}
+
+fn is_summary_item(item: &ResponseItem) -> bool {
+    summary_from_item(item).is_some()
+}
+
+fn strip_summary_prefix(message: &str) -> Option<&str> {
+    message.strip_prefix(format!("{SUMMARY_PREFIX}\n").as_str())
+}
+
+fn build_local_replacement_history(
+    summary_text: String,
+    retained_items: Vec<ResponseItem>,
+) -> Vec<ResponseItem> {
+    let mut history = Vec::with_capacity(retained_items.len().saturating_add(1));
+    history.push(ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText { text: summary_text }],
+        end_turn: None,
+        phase: None,
+    });
+    history.extend(retained_items);
+    history
+}
+
+fn serialize_compaction_conversation(
+    items: &[ResponseItem],
+    tool_result_max_chars: usize,
+) -> String {
+    let mut parts = Vec::new();
+    for item in items {
+        match item {
+            ResponseItem::Message { role, content, .. } if role == "user" => {
+                if let Some(text) = content_items_to_text(content) {
+                    parts.push(format!("[User]: {text}"));
+                }
+            }
+            ResponseItem::Message { role, content, .. } if role == "assistant" => {
+                if let Some(text) = content_items_to_text(content) {
+                    parts.push(format!("[Assistant]: {text}"));
+                }
+            }
+            ResponseItem::Reasoning {
+                summary, content, ..
+            } => {
+                let raw_content = content
+                    .as_ref()
+                    .map(|content| {
+                        content
+                            .iter()
+                            .map(|entry| match entry {
+                                praxis_protocol::models::ReasoningItemContent::ReasoningText {
+                                    text,
+                                }
+                                | praxis_protocol::models::ReasoningItemContent::Text { text } => {
+                                    text.as_str()
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .filter(|text| !text.trim().is_empty());
+                if let Some(text) = raw_content {
+                    parts.push(format!("[Assistant thinking]: {text}"));
+                } else if !summary.is_empty() {
+                    let summary = summary
+                        .iter()
+                        .map(|entry| {
+                            match entry {
+                            praxis_protocol::models::ReasoningItemReasoningSummary::SummaryText {
+                                text,
+                            } => text.as_str(),
+                        }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    parts.push(format!("[Assistant thinking summary]: {summary}"));
+                }
+            }
+            ResponseItem::FunctionCall {
+                name, arguments, ..
+            } => {
+                parts.push(format!("[Assistant tool call]: {name}({arguments})"));
+            }
+            ResponseItem::CustomToolCall { name, input, .. } => {
+                parts.push(format!("[Assistant tool call]: {name}({input})"));
+            }
+            ResponseItem::ToolSearchCall {
+                execution,
+                arguments,
+                ..
+            } => {
+                parts.push(format!(
+                    "[Assistant tool search]: {execution}({})",
+                    json_to_compact_string(arguments)
+                ));
+            }
+            ResponseItem::LocalShellCall { action, .. } => {
+                parts.push(format!(
+                    "[Assistant local shell]: {}",
+                    serde_json::to_string(action)
+                        .unwrap_or_else(|_| "<unserializable>".to_string())
+                ));
+            }
+            ResponseItem::FunctionCallOutput { output, .. }
+            | ResponseItem::CustomToolCallOutput { output, .. } => {
+                if let Some(text) = function_output_to_text(output) {
+                    parts.push(format!(
+                        "[Tool result]: {}",
+                        truncate_for_compaction(&text, tool_result_max_chars)
+                    ));
+                }
+            }
+            ResponseItem::ToolSearchOutput { tools, .. } => {
+                parts.push(format!(
+                    "[Tool search result]: {}",
+                    truncate_for_compaction(
+                        &json_to_compact_string(&Value::Array(tools.clone())),
+                        tool_result_max_chars
+                    )
+                ));
+            }
+            ResponseItem::WebSearchCall { action, .. } => {
+                parts.push(format!(
+                    "[Web search]: {}",
+                    serde_json::to_string(action)
+                        .unwrap_or_else(|_| "<unserializable>".to_string())
+                ));
+            }
+            ResponseItem::ImageGenerationCall {
+                revised_prompt,
+                result,
+                ..
+            } => {
+                parts.push(format!(
+                    "[Image generation]: prompt={}; result={}",
+                    revised_prompt.as_deref().unwrap_or(""),
+                    result
+                ));
+            }
+            ResponseItem::Message { .. }
+            | ResponseItem::Compaction { .. }
+            | ResponseItem::GhostSnapshot { .. }
+            | ResponseItem::Other => {}
+        }
+    }
+
+    if parts.is_empty() {
+        "(no prior conversation content)".to_string()
+    } else {
+        parts.join("\n\n")
+    }
+}
+
+fn function_output_to_text(
+    output: &praxis_protocol::models::FunctionCallOutputPayload,
+) -> Option<String> {
+    match &output.body {
+        FunctionCallOutputBody::Text(text) => Some(text.clone()),
+        FunctionCallOutputBody::ContentItems(items) => {
+            let text = items
+                .iter()
+                .filter_map(|item| match item {
+                    praxis_protocol::models::FunctionCallOutputContentItem::InputText { text } => {
+                        Some(text.as_str())
+                    }
+                    praxis_protocol::models::FunctionCallOutputContentItem::InputImage {
+                        ..
+                    } => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!text.is_empty()).then_some(text)
+        }
+    }
+}
+
+fn json_to_compact_string(value: &Value) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "<unserializable>".to_string())
+}
+
+fn truncate_for_compaction(text: &str, max_chars: usize) -> String {
+    if text.len() <= max_chars {
+        return text.to_string();
+    }
+    let mut end = 0usize;
+    for (index, _) in text.char_indices() {
+        if index > max_chars {
+            break;
+        }
+        end = index;
+    }
+    let omitted = text.len().saturating_sub(end);
+    format!("{}\n\n[... {omitted} more bytes truncated]", &text[..end])
+}
+
 async fn drain_to_completed(
-    sess: &Session,
     turn_context: &TurnContext,
     client_session: &mut ModelClientSession,
     turn_metadata_header: Option<&str>,
     prompt: &Prompt,
-) -> PraxisResult<()> {
+) -> PraxisResult<Vec<ResponseItem>> {
     let mut stream = client_session
         .stream(
             prompt,
@@ -410,6 +858,7 @@ async fn drain_to_completed(
             turn_metadata_header,
         )
         .await?;
+    let mut output_items = Vec::new();
     loop {
         let maybe_event = stream.next().await;
         let Some(event) = maybe_event else {
@@ -420,19 +869,17 @@ async fn drain_to_completed(
         };
         match event {
             Ok(ResponseEvent::OutputItemDone(item)) => {
-                sess.record_into_history(std::slice::from_ref(&item), turn_context)
-                    .await;
+                output_items.push(item);
             }
             Ok(ResponseEvent::ServerReasoningIncluded(included)) => {
-                sess.set_server_reasoning_included(included).await;
+                let _ = included;
             }
             Ok(ResponseEvent::RateLimits(snapshot)) => {
-                sess.update_rate_limits(turn_context, snapshot).await;
+                let _ = snapshot;
             }
             Ok(ResponseEvent::Completed { token_usage, .. }) => {
-                sess.update_token_usage_info(turn_context, token_usage.as_ref())
-                    .await;
-                return Ok(());
+                let _ = token_usage;
+                return Ok(output_items);
             }
             Ok(_) => continue,
             Err(e) => return Err(e),
