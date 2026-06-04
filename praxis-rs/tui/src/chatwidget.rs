@@ -1021,6 +1021,7 @@ pub(crate) struct ChatWidget {
     center_launch_rank: u8,
     center_launch_dropdown: Option<CenterLaunchDropdown>,
     center_launch_model_area: Cell<Option<Rect>>,
+    center_launch_reasoning_area: Cell<Option<Rect>>,
     center_launch_rank_area: Cell<Option<Rect>>,
     center_launch_permissions_area: Cell<Option<Rect>>,
     center_launch_dropdown_targets: RefCell<Vec<CenterDropdownMouseTarget>>,
@@ -1109,9 +1110,11 @@ struct CenterTranscriptViewport {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CenterChatMouseAction {
     ToggleModelDropdown,
+    ToggleReasoningDropdown,
     ToggleRankDropdown,
     TogglePermissionsDropdown,
     SelectModel(usize),
+    SelectReasoning(usize),
     SelectRank(u8),
     SelectPermission(usize),
     DismissDropdown,
@@ -1120,6 +1123,7 @@ pub(crate) enum CenterChatMouseAction {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CenterLaunchDropdown {
     Model,
+    Reasoning,
     Rank,
     Permissions,
 }
@@ -1136,6 +1140,14 @@ struct CenterDropdownItem {
     description: Option<String>,
     is_current: bool,
     is_disabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CenterReasoningChoice {
+    effort: Option<ReasoningEffortConfig>,
+    name: String,
+    description: Option<String>,
+    is_current: bool,
 }
 
 struct PermissionsMenuModel {
@@ -5460,6 +5472,7 @@ impl ChatWidget {
             center_launch_rank: 0,
             center_launch_dropdown: None,
             center_launch_model_area: Cell::new(None),
+            center_launch_reasoning_area: Cell::new(None),
             center_launch_rank_area: Cell::new(None),
             center_launch_permissions_area: Cell::new(None),
             center_launch_dropdown_targets: RefCell::new(Vec::new()),
@@ -13072,6 +13085,14 @@ impl ChatWidget {
         }
 
         if self
+            .center_launch_reasoning_area
+            .get()
+            .is_some_and(|area| rect_contains_point(area, column, row))
+        {
+            return Some(CenterChatMouseAction::ToggleReasoningDropdown);
+        }
+
+        if self
             .center_launch_rank_area
             .get()
             .is_some_and(|area| rect_contains_point(area, column, row))
@@ -13105,6 +13126,19 @@ impl ChatWidget {
                     };
                 }
             }
+            CenterChatMouseAction::ToggleReasoningDropdown => {
+                if self.center_reasoning_choices().is_empty() {
+                    self.show_info_toast(
+                        "Reasoning options are being updated; try again in a moment.",
+                    );
+                    self.center_launch_dropdown = None;
+                } else {
+                    self.center_launch_dropdown = match self.center_launch_dropdown {
+                        Some(CenterLaunchDropdown::Reasoning) => None,
+                        _ => Some(CenterLaunchDropdown::Reasoning),
+                    };
+                }
+            }
             CenterChatMouseAction::ToggleRankDropdown => {
                 self.center_launch_dropdown = match self.center_launch_dropdown {
                     Some(CenterLaunchDropdown::Rank) => None,
@@ -13119,6 +13153,9 @@ impl ChatWidget {
             }
             CenterChatMouseAction::SelectModel(index) => {
                 self.apply_center_model_dropdown_selection(index);
+            }
+            CenterChatMouseAction::SelectReasoning(index) => {
+                self.apply_center_reasoning_dropdown_selection(index);
             }
             CenterChatMouseAction::SelectRank(rank) => {
                 self.set_center_launch_rank(rank);
@@ -13254,6 +13291,148 @@ impl ChatWidget {
         for action in actions {
             action(&self.app_event_tx);
         }
+        self.center_launch_dropdown = None;
+    }
+
+    fn center_current_model_preset(&self) -> Option<ModelPreset> {
+        let models = self.model_catalog.try_list_models().ok()?;
+        let current_model = self.current_model().to_string();
+        let current_provider_id = self.current_model_provider_id().to_string();
+
+        if let Some(index) = models.iter().position(|preset| {
+            let selection = self.selection_metadata_or_current(preset);
+            preset.model == current_model && selection.provider_id == current_provider_id
+        }) {
+            return models.get(index).cloned();
+        }
+
+        models
+            .into_iter()
+            .find(|preset| preset.model == current_model)
+    }
+
+    fn center_reasoning_explicit_effort(&self) -> Option<ReasoningEffortConfig> {
+        if self.collaboration_modes_enabled() && self.active_mode_kind() == ModeKind::Plan {
+            return self.config.plan_mode_reasoning_effort;
+        }
+        self.current_collaboration_mode.reasoning_effort()
+    }
+
+    fn center_reasoning_display_label(&self) -> String {
+        self.effective_reasoning_effort()
+            .map(Self::reasoning_effort_label)
+            .unwrap_or("Default")
+            .to_string()
+    }
+
+    fn center_reasoning_effort_description(effort: ReasoningEffortConfig) -> &'static str {
+        match effort {
+            ReasoningEffortConfig::None => "Disable explicit model thinking.",
+            ReasoningEffortConfig::Minimal => "Use the smallest advertised thinking budget.",
+            ReasoningEffortConfig::Low => "Use lightweight model thinking.",
+            ReasoningEffortConfig::Medium => "Use balanced model thinking.",
+            ReasoningEffortConfig::High => "Use deeper model thinking.",
+            ReasoningEffortConfig::XHigh => "Use maximum model thinking depth.",
+        }
+    }
+
+    fn center_reasoning_choices(&self) -> Vec<CenterReasoningChoice> {
+        let explicit_effort = self.center_reasoning_explicit_effort();
+        let effective_effort = self.effective_reasoning_effort();
+        let current_preset = self.center_current_model_preset();
+        let default_display = effective_effort.or_else(|| {
+            current_preset
+                .as_ref()
+                .map(|preset| preset.default_reasoning_effort)
+        });
+        let default_name = default_display.map_or_else(
+            || "Default".to_string(),
+            |effort| format!("Default ({})", Self::reasoning_effort_label(effort)),
+        );
+        let mut choices = vec![CenterReasoningChoice {
+            effort: None,
+            name: default_name,
+            description: Some("Use the current mode or model default reasoning level.".to_string()),
+            is_current: explicit_effort.is_none(),
+        }];
+
+        if let Some(preset) = current_preset.as_ref() {
+            for option in preset.supported_reasoning_efforts.iter() {
+                let effort = option.effort;
+                if choices.iter().any(|choice| choice.effort == Some(effort)) {
+                    continue;
+                }
+                choices.push(CenterReasoningChoice {
+                    effort: Some(effort),
+                    name: Self::reasoning_effort_label(effort).to_string(),
+                    description: Some(option.description.clone())
+                        .filter(|description| !description.trim().is_empty()),
+                    is_current: explicit_effort == Some(effort),
+                });
+            }
+        }
+
+        if choices.len() == 1 {
+            for effort in ReasoningEffortConfig::iter() {
+                choices.push(CenterReasoningChoice {
+                    effort: Some(effort),
+                    name: Self::reasoning_effort_label(effort).to_string(),
+                    description: Some(
+                        Self::center_reasoning_effort_description(effort).to_string(),
+                    ),
+                    is_current: explicit_effort == Some(effort),
+                });
+            }
+        } else if let Some(effort) = explicit_effort
+            && !choices.iter().any(|choice| choice.effort == Some(effort))
+        {
+            choices.push(CenterReasoningChoice {
+                effort: Some(effort),
+                name: format!("{} (current)", Self::reasoning_effort_label(effort)),
+                description: Some(
+                    "Current reasoning level is not advertised by the selected model.".to_string(),
+                ),
+                is_current: true,
+            });
+        }
+
+        choices
+    }
+
+    fn center_reasoning_display_items(&self) -> Vec<CenterDropdownItem> {
+        self.center_reasoning_choices()
+            .into_iter()
+            .map(|choice| CenterDropdownItem {
+                name: choice.name,
+                description: choice.description,
+                is_current: choice.is_current,
+                is_disabled: false,
+            })
+            .collect()
+    }
+
+    fn apply_center_reasoning_dropdown_selection(&mut self, index: usize) {
+        let choices = self.center_reasoning_choices();
+        let Some(choice) = choices.get(index).cloned() else {
+            self.center_launch_dropdown = None;
+            return;
+        };
+        let effort = choice.effort;
+
+        if self.collaboration_modes_enabled() && self.active_mode_kind() == ModeKind::Plan {
+            self.app_event_tx
+                .send(AppEvent::UpdatePlanModeReasoningEffort(effort));
+            self.app_event_tx
+                .send(AppEvent::PersistPlanModeReasoningEffort(effort));
+        } else {
+            self.app_event_tx.send(AppEvent::ApplyModelSelection {
+                model: self.current_model().to_string(),
+                provider_id: self.current_model_provider_id().to_string(),
+                provider: Some(self.config.model_provider.clone()),
+                effort,
+            });
+        }
+
         self.center_launch_dropdown = None;
     }
 
@@ -14086,6 +14265,16 @@ impl ChatWidget {
             &self.center_launch_model_area,
         );
 
+        let reasoning_label = truncate_text(self.center_reasoning_display_label().as_str(), 12);
+        let reasoning_chip = format!(" Reason {reasoning_label} ▾ ");
+        push_chip(
+            reasoning_chip,
+            Style::default()
+                .fg(DEEPSEEK_TEXT)
+                .bg(Color::Rgb(35, 31, 43)),
+            &self.center_launch_reasoning_area,
+        );
+
         let rank_chip = format!(" R{} ▾ ", self.center_launch_rank);
         push_chip(
             rank_chip,
@@ -14133,6 +14322,19 @@ impl ChatWidget {
                     58,
                     self.center_model_display_items(),
                     CenterChatMouseAction::SelectModel,
+                );
+            }
+            CenterLaunchDropdown::Reasoning => {
+                let Some(anchor) = self.center_launch_reasoning_area.get() else {
+                    return;
+                };
+                self.render_center_dropdown_items(
+                    layout,
+                    buf,
+                    anchor,
+                    42,
+                    self.center_reasoning_display_items(),
+                    CenterChatMouseAction::SelectReasoning,
                 );
             }
             CenterLaunchDropdown::Rank => {
@@ -14267,6 +14469,7 @@ impl ChatWidget {
 
     fn clear_center_launch_hit_areas(&self) {
         self.center_launch_model_area.set(None);
+        self.center_launch_reasoning_area.set(None);
         self.center_launch_rank_area.set(None);
         self.center_launch_permissions_area.set(None);
         self.center_launch_dropdown_targets.borrow_mut().clear();
