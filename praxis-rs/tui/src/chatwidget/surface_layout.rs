@@ -7,7 +7,7 @@ pub(super) const CHAT_SECTION_GAP_ROWS: u16 = 1;
 pub(super) const IN_APP_TOAST_ROW_HEIGHT: u16 = 1;
 
 const WORK_PANEL_GAP_COLS: u16 = 1;
-const WORK_PANEL_MIN_TERMINAL_WIDTH: u16 = 104;
+const WORK_PANEL_MIN_TERMINAL_WIDTH: u16 = 88;
 const WORK_PANEL_MIN_WIDTH: u16 = 30;
 const WORK_PANEL_MAX_WIDTH: u16 = 44;
 const WORK_PANEL_WIDTH_PERCENT: u16 = 30;
@@ -163,16 +163,16 @@ mod tests {
 
     #[test]
     fn split_hides_work_panel_on_narrow_terminals() {
-        let split = chat_surface_split_for_width(90, /*show_work_panel*/ true);
-        assert_eq!(split.agent_width, 90);
+        let split = chat_surface_split_for_width(78, /*show_work_panel*/ true);
+        assert_eq!(split.agent_width, 78);
         assert_eq!(split.work_panel_width, None);
     }
 
     #[test]
     fn split_reserves_a_right_panel_without_starving_chat() {
-        let split = chat_surface_split_for_width(140, /*show_work_panel*/ true);
-        assert_eq!(split.work_panel_width, Some(42));
-        assert_eq!(split.agent_width, 97);
+        let split = chat_surface_split_for_width(96, /*show_work_panel*/ true);
+        assert_eq!(split.work_panel_width, Some(30));
+        assert_eq!(split.agent_width, 65);
     }
 
     #[test]

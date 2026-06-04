@@ -214,8 +214,12 @@ impl WorkPanelState {
             || !self.plan.items.is_empty()
     }
 
+    pub(super) fn should_show(&self) -> bool {
+        true
+    }
+
     pub(super) fn desired_height(&self, width: u16) -> u16 {
-        if !self.has_content() || width < 8 {
+        if width < 8 {
             return 0;
         }
 
@@ -227,7 +231,7 @@ impl WorkPanelState {
     }
 
     pub(super) fn render(&self, area: Rect, buf: &mut Buffer) {
-        if area.is_empty() || !self.has_content() {
+        if area.is_empty() {
             return;
         }
 
@@ -258,6 +262,10 @@ impl WorkPanelState {
 
     fn lines(&self, content_width: usize, max_rows: usize) -> Vec<Line<'static>> {
         let mut lines = Vec::with_capacity(max_rows.min(12).max(1));
+        if !self.has_content() {
+            self.push_idle_lines(max_rows, &mut lines);
+            return lines;
+        }
         self.push_goal_lines(content_width, max_rows, &mut lines);
         self.push_live_lines(content_width, max_rows, &mut lines);
         self.push_control_lines(content_width, max_rows, &mut lines);
@@ -266,6 +274,27 @@ impl WorkPanelState {
         self.push_selfwork_lines(content_width, max_rows, &mut lines);
         self.push_plan_lines(content_width, max_rows, &mut lines);
         lines
+    }
+
+    fn push_idle_lines(&self, max_rows: usize, lines: &mut Vec<Line<'static>>) {
+        if lines.len() < max_rows {
+            lines.push(Line::from(vec![
+                Span::styled("Goal ", label_style()),
+                Span::styled("none", muted_style()),
+            ]));
+        }
+        if lines.len() < max_rows {
+            lines.push(Line::from(vec![
+                Span::styled("Now  ", label_style()),
+                Span::styled("Ready", strong_style()),
+            ]));
+        }
+        if lines.len() < max_rows {
+            lines.push(Line::from(vec![
+                Span::styled("Queue ", label_style()),
+                Span::styled("clear", muted_style()),
+            ]));
+        }
     }
 
     fn push_goal_lines(
@@ -656,10 +685,15 @@ mod tests {
     }
 
     #[test]
-    fn empty_panel_has_no_render_height() {
+    fn empty_panel_renders_idle_dashboard() {
         let panel = WorkPanelState::default();
         assert!(!panel.has_content());
-        assert_eq!(panel.desired_height(36), 0);
+        assert_eq!(panel.desired_height(36), PANEL_MIN_HEIGHT);
+
+        let texts = line_texts(&panel.lines(36, 8));
+        assert!(texts.iter().any(|line| line == "Goal none"));
+        assert!(texts.iter().any(|line| line == "Now  Ready"));
+        assert!(texts.iter().any(|line| line == "Queue clear"));
     }
 
     #[test]

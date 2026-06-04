@@ -13826,7 +13826,7 @@ impl ChatWidget {
     }
 
     fn center_layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
-        let split = chat_surface_split_for_width(area.width, self.work_panel.has_content());
+        let split = chat_surface_split_for_width(area.width, self.work_panel.should_show());
         let content_width = Self::chat_surface_column_width(split.agent_width);
         let work_panel_outer_height = split
             .work_panel_width
@@ -13841,7 +13841,7 @@ impl ChatWidget {
             bottom_outer_height: self.bottom_pane_total_height(content_width),
             toast_height: visible_toasts,
             work_panel_outer_height,
-            show_work_panel: self.work_panel.has_content(),
+            show_work_panel: self.work_panel.should_show(),
             fill_available_top: true,
         });
         Self::center_bottom_pane_layout(layout)
@@ -14682,7 +14682,7 @@ impl ChatWidget {
     }
 
     fn desired_total_height(&self, width: u16) -> u16 {
-        let split = chat_surface_split_for_width(width, self.work_panel.has_content());
+        let split = chat_surface_split_for_width(width, self.work_panel.should_show());
         let content_width = Self::chat_surface_column_width(split.agent_width);
         let work_panel_height = split
             .work_panel_width
@@ -14698,7 +14698,7 @@ impl ChatWidget {
     }
 
     fn layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
-        let split = chat_surface_split_for_width(area.width, self.work_panel.has_content());
+        let split = chat_surface_split_for_width(area.width, self.work_panel.should_show());
         let content_width = Self::chat_surface_column_width(split.agent_width);
         let work_panel_outer_height = split
             .work_panel_width
@@ -14713,7 +14713,7 @@ impl ChatWidget {
             bottom_outer_height: self.bottom_pane_total_height(content_width),
             toast_height: visible_toasts,
             work_panel_outer_height,
-            show_work_panel: self.work_panel.has_content(),
+            show_work_panel: self.work_panel.should_show(),
             fill_available_top: false,
         });
         Self::center_bottom_pane_layout(layout)
