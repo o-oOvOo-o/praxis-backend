@@ -429,6 +429,11 @@ use self::surface_layout::IN_APP_TOAST_ROW_HEIGHT;
 use self::surface_layout::chat_surface_split_for_width;
 use self::surface_layout::layout_chat_surface;
 mod work_panel;
+use self::work_panel::WorkPanelContextState;
+use self::work_panel::WorkPanelControlState;
+use self::work_panel::WorkPanelGoalState;
+use self::work_panel::WorkPanelGoalStatus;
+use self::work_panel::WorkPanelQueueState;
 use self::work_panel::WorkPanelState;
 use crate::streaming::chunking::AdaptiveChunkingPolicy;
 use crate::streaming::commit_tick::CommitTickScope;
@@ -959,6 +964,8 @@ pub(crate) struct ChatWidget {
     // When set, the next interrupt should resubmit all pending steers as one
     // fresh user turn instead of restoring them into the composer.
     submit_pending_steers_after_interrupt: bool,
+    // Pending cross-thread approvals mirrored for the TUI work dashboard.
+    pending_thread_approvals_count: usize,
     /// Terminal-appropriate keybinding for popping the most-recently queued
     /// message back into the composer.  Determined once at construction time via
     /// [`queued_message_edit_binding_for_terminal`] and propagated to
@@ -1964,6 +1971,33 @@ impl ChatWidget {
         }
     }
 
+    fn sync_work_panel_context(&mut self) {
+        self.work_panel.set_context(
+            self.status_budget_message()
+                .map(|message| WorkPanelContextState { message }),
+        );
+    }
+
+    fn sync_work_panel_queue(&mut self) {
+        self.work_panel.set_queue(WorkPanelQueueState {
+            queued_messages: self.queued_user_messages.len(),
+            pending_steers: self.pending_steers.len(),
+            rejected_steers: self.rejected_steers_queue.len(),
+            pending_approvals: self.pending_thread_approvals_count,
+        });
+    }
+
+    fn sync_work_panel_control(&mut self) {
+        let control =
+            self.thread_control_state
+                .as_ref()
+                .map(|control_state| WorkPanelControlState {
+                    label: thread_control_display_label(control_state),
+                    read_only: control_state.read_only,
+                });
+        self.work_panel.set_control(control);
+    }
+
     fn restore_reasoning_status_header(&mut self) {
         if let Some(header) = extract_first_bold(&self.reasoning_buffer) {
             self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
@@ -2265,7 +2299,7 @@ impl ChatWidget {
             .thread_id
             .is_some_and(|thread_id| thread_id != event.session_id)
         {
-            self.work_panel.clear_plan();
+            self.work_panel.clear_thread_projection();
         }
         self.bottom_pane
             .set_history_metadata(event.history_log_id, event.history_entry_count);
@@ -2792,6 +2826,8 @@ impl ChatWidget {
         if matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
             return;
         }
+        self.work_panel
+            .set_goal(Self::work_panel_goal_from_app_gateway(&notification.goal));
         if notification.goal.status != praxis_app_gateway_protocol::ThreadGoalStatus::Complete {
             return;
         }
@@ -2808,11 +2844,74 @@ impl ChatWidget {
         if matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
             return;
         }
+        self.work_panel
+            .set_goal(Self::work_panel_goal_from_core(&event.goal));
         if event.goal.status != praxis_protocol::protocol::ThreadGoalStatus::Complete {
             return;
         }
         self.pending_goal_completion_elapsed =
             Some(format_goal_elapsed(event.goal.time_used_seconds));
+    }
+
+    fn work_panel_goal_from_app_gateway(
+        goal: &praxis_app_gateway_protocol::ThreadGoal,
+    ) -> WorkPanelGoalState {
+        WorkPanelGoalState {
+            status: match goal.status {
+                praxis_app_gateway_protocol::ThreadGoalStatus::Active => {
+                    WorkPanelGoalStatus::Active
+                }
+                praxis_app_gateway_protocol::ThreadGoalStatus::Paused => {
+                    WorkPanelGoalStatus::Paused
+                }
+                praxis_app_gateway_protocol::ThreadGoalStatus::Blocked => {
+                    WorkPanelGoalStatus::Blocked
+                }
+                praxis_app_gateway_protocol::ThreadGoalStatus::UsageLimited => {
+                    WorkPanelGoalStatus::UsageLimited
+                }
+                praxis_app_gateway_protocol::ThreadGoalStatus::BudgetLimited => {
+                    WorkPanelGoalStatus::BudgetLimited
+                }
+                praxis_app_gateway_protocol::ThreadGoalStatus::Complete => {
+                    WorkPanelGoalStatus::Complete
+                }
+            },
+            objective: goal.objective.clone(),
+            elapsed: (goal.time_used_seconds > 0)
+                .then(|| format_goal_elapsed(goal.time_used_seconds)),
+            token_budget: goal.token_budget,
+            tokens_used: goal.tokens_used,
+        }
+    }
+
+    #[cfg(test)]
+    fn work_panel_goal_from_core(
+        goal: &praxis_protocol::protocol::ThreadGoal,
+    ) -> WorkPanelGoalState {
+        WorkPanelGoalState {
+            status: match goal.status {
+                praxis_protocol::protocol::ThreadGoalStatus::Active => WorkPanelGoalStatus::Active,
+                praxis_protocol::protocol::ThreadGoalStatus::Paused => WorkPanelGoalStatus::Paused,
+                praxis_protocol::protocol::ThreadGoalStatus::Blocked => {
+                    WorkPanelGoalStatus::Blocked
+                }
+                praxis_protocol::protocol::ThreadGoalStatus::UsageLimited => {
+                    WorkPanelGoalStatus::UsageLimited
+                }
+                praxis_protocol::protocol::ThreadGoalStatus::BudgetLimited => {
+                    WorkPanelGoalStatus::BudgetLimited
+                }
+                praxis_protocol::protocol::ThreadGoalStatus::Complete => {
+                    WorkPanelGoalStatus::Complete
+                }
+            },
+            objective: goal.objective.clone(),
+            elapsed: (goal.time_used_seconds > 0)
+                .then(|| format_goal_elapsed(goal.time_used_seconds)),
+            token_budget: goal.token_budget,
+            tokens_used: goal.tokens_used,
+        }
     }
 
     fn flush_pending_goal_completion_notice(&mut self) {
@@ -2992,6 +3091,7 @@ impl ChatWidget {
                     .set_context_window(/*percent*/ None, /*used_tokens*/ None);
                 self.token_info = None;
                 self.sync_status_budget_message();
+                self.sync_work_panel_context();
             }
         }
     }
@@ -3024,6 +3124,7 @@ impl ChatWidget {
         self.bottom_pane.set_context_window(percent, used_tokens);
         self.token_info = Some(info);
         self.sync_status_budget_message();
+        self.sync_work_panel_context();
     }
 
     fn context_remaining_percent(&self, info: &TokenUsageInfo) -> Option<i64> {
@@ -3164,6 +3265,7 @@ impl ChatWidget {
                     self.bottom_pane
                         .set_context_window(/*percent*/ None, /*used_tokens*/ None);
                     self.token_info = None;
+                    self.sync_work_panel_context();
                 }
             }
         }
@@ -5333,6 +5435,7 @@ impl ChatWidget {
             rejected_steers_queue: VecDeque::new(),
             pending_steers: VecDeque::new(),
             submit_pending_steers_after_interrupt: false,
+            pending_thread_approvals_count: 0,
             queued_message_edit_binding,
             show_welcome_banner: is_first_run,
             startup_tooltip_override,
@@ -8876,10 +8979,13 @@ impl ChatWidget {
             pending_steers,
             rejected_steers,
         );
+        self.sync_work_panel_queue();
     }
 
     pub(crate) fn set_pending_thread_approvals(&mut self, threads: Vec<String>) {
+        self.pending_thread_approvals_count = threads.len();
         self.bottom_pane.set_pending_thread_approvals(threads);
+        self.sync_work_panel_queue();
     }
 
     pub(crate) fn add_diff_in_progress(&mut self) {
@@ -12626,6 +12732,7 @@ impl ChatWidget {
 
     pub(crate) fn set_thread_control_state(&mut self, control_state: Option<&ThreadControlState>) {
         self.thread_control_state = control_state.cloned();
+        self.sync_work_panel_control();
         if let Some(control_state) = control_state
             && control_state.read_only
         {

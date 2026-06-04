@@ -265,6 +265,7 @@ pub(super) async fn make_chatwidget_manual(
         rejected_steers_queue: VecDeque::new(),
         pending_steers: VecDeque::new(),
         submit_pending_steers_after_interrupt: false,
+        pending_thread_approvals_count: 0,
         queued_message_edit_binding: crate::key_hint::alt(KeyCode::Up),
         suppress_session_configured_redraw: false,
         suppress_initial_user_message_submit: false,

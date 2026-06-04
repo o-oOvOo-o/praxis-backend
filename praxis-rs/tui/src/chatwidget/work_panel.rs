@@ -27,9 +27,56 @@ const PANEL_HORIZONTAL_PADDING: usize = 2;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct WorkPanelState {
+    goal: Option<WorkPanelGoalState>,
     live: WorkPanelLiveState,
+    control: Option<WorkPanelControlState>,
+    context: Option<WorkPanelContextState>,
+    queue: WorkPanelQueueState,
     plan: WorkPanelPlanState,
     selfwork: WorkPanelSelfworkState,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct WorkPanelGoalState {
+    pub(super) status: WorkPanelGoalStatus,
+    pub(super) objective: String,
+    pub(super) elapsed: Option<String>,
+    pub(super) token_budget: Option<i64>,
+    pub(super) tokens_used: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum WorkPanelGoalStatus {
+    Active,
+    Paused,
+    Blocked,
+    UsageLimited,
+    BudgetLimited,
+    Complete,
+}
+
+impl WorkPanelGoalStatus {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Paused => "paused",
+            Self::Blocked => "blocked",
+            Self::UsageLimited => "usage limited",
+            Self::BudgetLimited => "budget limited",
+            Self::Complete => "complete",
+        }
+    }
+
+    fn style(self) -> Style {
+        let color = match self {
+            Self::Active => Color::Green,
+            Self::Paused => Color::Yellow,
+            Self::Blocked => Color::Red,
+            Self::UsageLimited | Self::BudgetLimited => Color::Magenta,
+            Self::Complete => Color::Cyan,
+        };
+        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -37,6 +84,34 @@ struct WorkPanelLiveState {
     header: Option<String>,
     details: Option<String>,
     activity: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct WorkPanelControlState {
+    pub(super) label: String,
+    pub(super) read_only: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct WorkPanelContextState {
+    pub(super) message: String,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct WorkPanelQueueState {
+    pub(super) queued_messages: usize,
+    pub(super) pending_steers: usize,
+    pub(super) rejected_steers: usize,
+    pub(super) pending_approvals: usize,
+}
+
+impl WorkPanelQueueState {
+    fn has_content(&self) -> bool {
+        self.queued_messages > 0
+            || self.pending_steers > 0
+            || self.rejected_steers > 0
+            || self.pending_approvals > 0
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -54,6 +129,19 @@ struct WorkPanelSelfworkState {
 }
 
 impl WorkPanelState {
+    pub(super) fn set_goal(&mut self, goal: WorkPanelGoalState) {
+        self.goal = Some(goal);
+    }
+
+    pub(super) fn clear_thread_projection(&mut self) {
+        self.goal = None;
+        self.live = WorkPanelLiveState::default();
+        self.control = None;
+        self.context = None;
+        self.queue = WorkPanelQueueState::default();
+        self.clear_plan();
+    }
+
     pub(super) fn clear_live_status(&mut self) {
         self.live = WorkPanelLiveState::default();
     }
@@ -71,6 +159,18 @@ impl WorkPanelState {
         self.live.activity = activity
             .map(|activity| activity.trim().to_string())
             .filter(|activity| !activity.is_empty());
+    }
+
+    pub(super) fn set_control(&mut self, control: Option<WorkPanelControlState>) {
+        self.control = control.filter(|control| !control.label.trim().is_empty());
+    }
+
+    pub(super) fn set_context(&mut self, context: Option<WorkPanelContextState>) {
+        self.context = context.filter(|context| !context.message.trim().is_empty());
+    }
+
+    pub(super) fn set_queue(&mut self, queue: WorkPanelQueueState) {
+        self.queue = queue;
     }
 
     pub(super) fn clear_plan(&mut self) {
@@ -102,9 +202,13 @@ impl WorkPanelState {
     }
 
     pub(super) fn has_content(&self) -> bool {
-        self.live.header.is_some()
+        self.goal.is_some()
+            || self.live.header.is_some()
             || self.live.details.is_some()
             || self.live.activity.is_some()
+            || self.control.is_some()
+            || self.context.is_some()
+            || self.queue.has_content()
             || self.selfwork.plan_path.is_some()
             || self.plan.explanation.is_some()
             || !self.plan.items.is_empty()
@@ -154,10 +258,68 @@ impl WorkPanelState {
 
     fn lines(&self, content_width: usize, max_rows: usize) -> Vec<Line<'static>> {
         let mut lines = Vec::with_capacity(max_rows.min(12).max(1));
+        self.push_goal_lines(content_width, max_rows, &mut lines);
         self.push_live_lines(content_width, max_rows, &mut lines);
+        self.push_control_lines(content_width, max_rows, &mut lines);
+        self.push_context_lines(content_width, max_rows, &mut lines);
+        self.push_queue_lines(max_rows, &mut lines);
         self.push_selfwork_lines(content_width, max_rows, &mut lines);
         self.push_plan_lines(content_width, max_rows, &mut lines);
         lines
+    }
+
+    fn push_goal_lines(
+        &self,
+        content_width: usize,
+        max_rows: usize,
+        lines: &mut Vec<Line<'static>>,
+    ) {
+        let Some(goal) = self.goal.as_ref() else {
+            return;
+        };
+        if lines.len() >= max_rows {
+            return;
+        }
+
+        lines.push(Line::from(vec![
+            Span::styled("Goal ", label_style()),
+            Span::styled(goal.status.label(), goal.status.style()),
+        ]));
+
+        if lines.len() < max_rows {
+            lines.push(Line::from(vec![
+                Span::styled("Obj  ", label_style()),
+                Span::styled(
+                    truncate_text(goal.objective.as_str(), content_width.saturating_sub(5)),
+                    strong_style(),
+                ),
+            ]));
+        }
+
+        let mut meta = Vec::new();
+        if let Some(elapsed) = goal.elapsed.as_deref() {
+            meta.push(format!("time {elapsed}"));
+        }
+        if let Some(token_budget) = goal.token_budget.filter(|budget| *budget > 0) {
+            meta.push(format!(
+                "{} / {}",
+                format_compact_i64(goal.tokens_used.max(0)),
+                format_compact_i64(token_budget)
+            ));
+        } else if goal.tokens_used > 0 {
+            meta.push(format!("{} tokens", format_compact_i64(goal.tokens_used)));
+        }
+        if !meta.is_empty() && lines.len() < max_rows {
+            lines.push(Line::from(vec![
+                Span::styled("Use  ", label_style()),
+                Span::styled(
+                    truncate_text(meta.join("  ").as_str(), content_width.saturating_sub(5)),
+                    muted_style(),
+                ),
+            ]));
+        }
+
+        push_blank_if_room(lines, max_rows);
     }
 
     fn push_live_lines(
@@ -218,6 +380,87 @@ impl WorkPanelState {
                 ]));
             }
         }
+
+        push_blank_if_room(lines, max_rows);
+    }
+
+    fn push_control_lines(
+        &self,
+        content_width: usize,
+        max_rows: usize,
+        lines: &mut Vec<Line<'static>>,
+    ) {
+        let Some(control) = self.control.as_ref() else {
+            return;
+        };
+        if lines.len() >= max_rows {
+            return;
+        }
+
+        let state = if control.read_only {
+            "locked"
+        } else {
+            "controlled"
+        };
+        let value = format!("{state} by {}", control.label);
+        lines.push(Line::from(vec![
+            Span::styled("Ctrl ", label_style()),
+            Span::styled(
+                truncate_text(value.as_str(), content_width.saturating_sub(5)),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        push_blank_if_room(lines, max_rows);
+    }
+
+    fn push_context_lines(
+        &self,
+        content_width: usize,
+        max_rows: usize,
+        lines: &mut Vec<Line<'static>>,
+    ) {
+        let Some(context) = self.context.as_ref() else {
+            return;
+        };
+        if lines.len() >= max_rows {
+            return;
+        }
+
+        lines.push(Line::from(vec![
+            Span::styled("Ctx  ", label_style()),
+            Span::styled(
+                truncate_text(context.message.as_str(), content_width.saturating_sub(5)),
+                muted_style(),
+            ),
+        ]));
+    }
+
+    fn push_queue_lines(&self, max_rows: usize, lines: &mut Vec<Line<'static>>) {
+        if !self.queue.has_content() || lines.len() >= max_rows {
+            return;
+        }
+
+        let mut parts = Vec::new();
+        if self.queue.queued_messages > 0 {
+            parts.push(format!("{} queued", self.queue.queued_messages));
+        }
+        if self.queue.pending_steers > 0 {
+            parts.push(format!("{} steer", self.queue.pending_steers));
+        }
+        if self.queue.rejected_steers > 0 {
+            parts.push(format!("{} retry", self.queue.rejected_steers));
+        }
+        if self.queue.pending_approvals > 0 {
+            parts.push(format!("{} approval", self.queue.pending_approvals));
+        }
+
+        lines.push(Line::from(vec![
+            Span::styled("Queue ", label_style()),
+            Span::styled(parts.join("  "), strong_style()),
+        ]));
 
         push_blank_if_room(lines, max_rows);
     }
@@ -367,6 +610,17 @@ fn display_plan_path(path: &Path, width: usize) -> String {
     truncate_text(&display, width)
 }
 
+fn format_compact_i64(value: i64) -> String {
+    let value = value.max(0);
+    if value >= 1_000_000 {
+        format!("{:.1}M", value as f64 / 1_000_000.0)
+    } else if value >= 1_000 {
+        format!("{:.1}K", value as f64 / 1_000.0)
+    } else {
+        value.to_string()
+    }
+}
+
 fn push_blank_if_room(lines: &mut Vec<Line<'static>>, max_rows: usize) {
     if lines.len() < max_rows {
         lines.push(Line::from(""));
@@ -460,6 +714,104 @@ mod tests {
         assert!(texts.iter().any(|line| line.contains("unchanged 2/3")));
         assert!(texts.iter().any(|line| line == "Plan Keep moving"));
         assert!(texts.iter().any(|line| line == "[~] Run the next item"));
+    }
+
+    #[test]
+    fn goal_context_control_and_queue_render_as_dashboard_sections() {
+        let mut panel = WorkPanelState::default();
+        panel.set_goal(WorkPanelGoalState {
+            status: WorkPanelGoalStatus::Active,
+            objective: "Rewrite Praxis chat surface".to_string(),
+            elapsed: Some("2m".to_string()),
+            token_budget: Some(5_000),
+            tokens_used: 3_000,
+        });
+        panel.set_live_status(
+            "Thinking".to_string(),
+            Some("Choosing the next edit".to_string()),
+            Some("rg chatwidget".to_string()),
+        );
+        panel.set_control(Some(WorkPanelControlState {
+            label: "external/R0:gui".to_string(),
+            read_only: true,
+        }));
+        panel.set_context(Some(WorkPanelContextState {
+            message: "Context: 2K / 16K (12%)".to_string(),
+        }));
+        panel.set_queue(WorkPanelQueueState {
+            queued_messages: 1,
+            pending_steers: 2,
+            rejected_steers: 1,
+            pending_approvals: 3,
+        });
+
+        let texts = line_texts(&panel.lines(64, 18));
+        assert!(texts.iter().any(|line| line == "Goal active"));
+        assert!(
+            texts
+                .iter()
+                .any(|line| line == "Obj  Rewrite Praxis chat surface")
+        );
+        assert!(texts.iter().any(|line| line == "Use  time 2m  3.0K / 5.0K"));
+        assert!(texts.iter().any(|line| line == "Now Thinking"));
+        assert!(texts.iter().any(|line| line == "Doing rg chatwidget"));
+        assert!(
+            texts
+                .iter()
+                .any(|line| line == "Ctrl locked by external/R0:gui")
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|line| line == "Ctx  Context: 2K / 16K (12%)")
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|line| line == "Queue 1 queued  2 steer  1 retry  3 approval")
+        );
+    }
+
+    #[test]
+    fn clear_thread_projection_drops_thread_scoped_dashboard_state() {
+        let mut panel = WorkPanelState::default();
+        panel.set_goal(WorkPanelGoalState {
+            status: WorkPanelGoalStatus::Active,
+            objective: "Ship current thread".to_string(),
+            elapsed: None,
+            token_budget: None,
+            tokens_used: 12,
+        });
+        panel.set_live_status(
+            "Working".to_string(),
+            Some("Editing".to_string()),
+            Some("apply patch".to_string()),
+        );
+        panel.set_control(Some(WorkPanelControlState {
+            label: "external/R0:gui".to_string(),
+            read_only: false,
+        }));
+        panel.set_context(Some(WorkPanelContextState {
+            message: "Context: 1K / 8K (12%)".to_string(),
+        }));
+        panel.set_queue(WorkPanelQueueState {
+            queued_messages: 1,
+            pending_steers: 1,
+            rejected_steers: 1,
+            pending_approvals: 1,
+        });
+        panel.update_plan(&UpdatePlanArgs {
+            explanation: Some("Temporary".to_string()),
+            plan: vec![PlanItemArg {
+                step: "Temporary step".to_string(),
+                status: StepStatus::Pending,
+            }],
+        });
+
+        panel.clear_thread_projection();
+
+        assert!(!panel.has_content());
+        assert!(panel.lines(40, 12).is_empty());
     }
 
     #[test]
