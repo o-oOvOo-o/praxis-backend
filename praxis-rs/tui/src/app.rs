@@ -46,7 +46,6 @@ use crate::multi_agents::previous_agent_shortcut_matches;
 use crate::pager_overlay::Overlay;
 use crate::read_session_model;
 use crate::render::highlight::highlight_bash_to_lines;
-use crate::render::renderable::Renderable;
 use crate::resume_picker::SessionSelection;
 use crate::resume_picker::SessionTarget;
 use crate::status::format_tokens_compact;
@@ -5202,20 +5201,10 @@ impl App {
                     // Allow widgets to process any pending timers before rendering.
                     self.chat_widget.pre_draw_tick(tui.is_terminal_focused());
                     let terminal_size = tui.terminal.size()?;
-                    let draw_height = if tui.is_alt_screen_active() {
-                        terminal_size.height
-                    } else if self.center.enabled {
-                        terminal_size.height
-                    } else {
-                        self.chat_widget.desired_height(terminal_size.width)
-                    };
+                    let draw_height = terminal_size.height;
                     tui.draw(draw_height, |frame| {
                         let chat_area = self.render_center_or_chat(frame.area(), frame.buffer);
-                        let cursor_pos = if self.center.enabled {
-                            self.chat_widget.center_cursor_pos(chat_area)
-                        } else {
-                            self.chat_widget.cursor_pos(chat_area)
-                        };
+                        let cursor_pos = self.chat_widget.center_cursor_pos(chat_area);
                         if let Some((x, y)) = cursor_pos {
                             frame.set_cursor_position((x, y));
                         }
@@ -5908,6 +5897,20 @@ impl App {
 
     fn handle_center_mouse_scroll(&mut self, column: u16, row: u16, delta_rows: isize) {
         if !self.center.enabled {
+            if self
+                .center
+                .chat_area
+                .is_some_and(|area| rect_contains(area, column, row))
+            {
+                let amount = delta_rows.unsigned_abs();
+                if delta_rows < 0 {
+                    self.center.chat_scroll_from_bottom =
+                        self.center.chat_scroll_from_bottom.saturating_add(amount);
+                } else {
+                    self.center.chat_scroll_from_bottom =
+                        self.center.chat_scroll_from_bottom.saturating_sub(amount);
+                }
+            }
             return;
         }
         if self
@@ -6544,7 +6547,12 @@ impl App {
             self.mouse.hover_center_thread_index = None;
             self.mouse.hover_center_target = None;
             self.mouse.center_list_snapshot = None;
-            self.chat_widget.render(area, buf);
+            self.chat_widget.render_standalone_chat(
+                area,
+                buf,
+                &self.transcript_cells,
+                self.center.chat_scroll_from_bottom,
+            );
             self.update_mouse_pane_snapshot(MousePane::Chat, area, buf);
             self.render_mouse_selection_overlay(buf);
             return area;
@@ -7691,32 +7699,8 @@ impl App {
                     t.insert_cell(cell.clone());
                     tui.frame_requester().schedule_frame();
                 }
-                self.transcript_cells.push(cell.clone());
-                if self.center.enabled && self.overlay.is_none() {
-                    tui.frame_requester().schedule_frame();
-                    return Ok(AppRunControl::Continue);
-                }
-                let mut display =
-                    cell.committed_display_lines(tui.terminal.last_known_screen_size.width);
-                if !display.is_empty() {
-                    // Only insert a separating blank line for new cells that are not
-                    // part of an ongoing stream. Streaming continuations should not
-                    // accrue extra blank lines between chunks.
-                    if !cell.is_stream_continuation() {
-                        if self.has_emitted_history_lines {
-                            display.insert(0, Line::from(""));
-                        } else {
-                            self.has_emitted_history_lines = true;
-                        }
-                    }
-                    if self.overlay.is_some() {
-                        self.deferred_history_lines.extend(display);
-                    } else if self.center.enabled {
-                        tui.frame_requester().schedule_frame();
-                    } else {
-                        tui.insert_history_lines(display);
-                    }
-                }
+                self.transcript_cells.push(cell);
+                tui.frame_requester().schedule_frame();
             }
             AppEvent::ApplyThreadRollback { num_turns } => {
                 if self.apply_non_pending_thread_rollback(num_turns) {

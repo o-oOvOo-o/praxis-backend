@@ -295,6 +295,10 @@ const CENTER_ENTRY_MAX_WIDTH: u16 = 88;
 const CENTER_ENTRY_MIN_SIDE_PADDING: u16 = 4;
 const CENTER_ENTRY_INTRO_HEIGHT: u16 = 7;
 const CENTER_LAUNCH_RANK_MAX: u8 = 2;
+const CHAT_TIMELINE_SIDE_PADDING: u16 = 2;
+const CHAT_TIMELINE_USER_MAX_WIDTH: u16 = 56;
+const CHAT_TIMELINE_ASSISTANT_MAX_WIDTH: u16 = 96;
+const CHAT_TIMELINE_USER_WIDTH_PERCENT: u16 = 62;
 
 /// Choose the keybinding used to edit the most-recently queued message.
 ///
@@ -369,6 +373,7 @@ use crate::get_git_diff::get_git_diff;
 use crate::history_cell;
 #[cfg(test)]
 use crate::history_cell::AgentMessageCell;
+use crate::history_cell::ChatLane;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::McpToolCallCell;
 use crate::history_cell::PlainHistoryCell;
@@ -1083,6 +1088,7 @@ struct ActiveCellRenderCache {
 #[derive(Clone, Debug)]
 struct CenterActiveTailCache {
     key: ActiveCellRenderCacheKey,
+    lane: ChatLane,
     lines: Vec<Line<'static>>,
 }
 
@@ -13276,27 +13282,7 @@ impl Drop for ChatWidget {
 
 impl Renderable for ChatWidget {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.clear_center_launch_hit_areas();
-        self.render_deepseek_background(area, buf);
-        let header_area = self.deepseek_header_area(area);
-        let footer_area = self.deepseek_footer_area(area);
-        let body_area = self.deepseek_body_area(area);
-
-        if let Some(header_area) = header_area {
-            self.render_deepseek_header(header_area, buf);
-        }
-
-        let layout = self.layout_for_area(body_area);
-        self.replace_visible_patch_cell_ids(self.visible_active_patch_cell_ids(layout));
-        self.render_active_cell(layout, buf);
-        self.render_work_panel(layout, buf);
-        self.render_bottom_pane(layout, buf);
-        self.render_in_app_toast_overlay(layout, buf);
-
-        if let Some(footer_area) = footer_area {
-            self.render_deepseek_footer(footer_area, buf);
-        }
-        self.last_rendered_width.set(Some(area.width as usize));
+        self.render_chat_surface(area, buf, &[], 0);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
@@ -13305,17 +13291,32 @@ impl Renderable for ChatWidget {
     }
 
     fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        let layout = self.layout_for_area(self.deepseek_body_area(area));
-        if layout.bottom_content_area.is_empty() {
-            None
-        } else {
-            self.bottom_pane.cursor_pos(layout.bottom_content_area)
-        }
+        self.center_cursor_pos(area)
     }
 }
 
 impl ChatWidget {
+    pub(crate) fn render_standalone_chat(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        scroll_from_bottom: usize,
+    ) {
+        self.render_chat_surface(area, buf, transcript_cells, scroll_from_bottom);
+    }
+
     pub(crate) fn render_center_chat(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        scroll_from_bottom: usize,
+    ) {
+        self.render_chat_surface(area, buf, transcript_cells, scroll_from_bottom);
+    }
+
+    fn render_chat_surface(
         &self,
         area: Rect,
         buf: &mut Buffer,
@@ -13383,32 +13384,6 @@ impl ChatWidget {
         *self.last_visible_patch_cell_ids.borrow_mut() = ids;
     }
 
-    fn visible_active_patch_cell_ids(
-        &self,
-        layout: ChatWidgetLayout,
-    ) -> Vec<crate::history_presentation::PatchCellId> {
-        let Some(content_area) = layout.active_content_area else {
-            return Vec::new();
-        };
-        if content_area.is_empty() {
-            return Vec::new();
-        }
-        let Some(cell) = self.active_cell.as_ref() else {
-            return Vec::new();
-        };
-        let Some(id) = cell.patch_cell_id() else {
-            return Vec::new();
-        };
-        let Some(cache) = self.active_cell_render_cache(content_area.width) else {
-            return Vec::new();
-        };
-        if cache.desired_height == 0 {
-            Vec::new()
-        } else {
-            vec![id]
-        }
-    }
-
     fn center_visible_patch_cell_ids(
         &self,
         layout: ChatWidgetLayout,
@@ -13427,9 +13402,9 @@ impl ChatWidget {
         let mut needed = usize::from(content_area.height);
         let mut ids = Vec::new();
 
-        let active_tail_len = self
-            .center_active_tail_cache(width)
-            .map_or(0, |cache| cache.lines.len());
+        let active_tail_len = self.center_active_tail_cache(width).map_or(0, |cache| {
+            Self::chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone()).len()
+        });
         let active_id = self
             .active_cell
             .as_ref()
@@ -13450,7 +13425,7 @@ impl ChatWidget {
             if needed == 0 {
                 break;
             }
-            let cell_len = Self::center_wrapped_committed_lines(cell.as_ref(), width).len();
+            let cell_len = Self::chat_timeline_lines_for_cell(cell.as_ref(), width).len();
             if cell_len == 0 {
                 continue;
             }
@@ -13774,23 +13749,25 @@ impl ChatWidget {
                     .saturating_sub(bottom_outer_height)
                     .saturating_sub(intro_height),
             );
-        let total_height = intro_height
-            .saturating_add(toast_height)
-            .saturating_add(bottom_outer_height);
-        let y = area
-            .y
-            .saturating_add(area.height.saturating_sub(total_height) / 2);
+        let bottom_margin = 1.min(area.height.saturating_sub(bottom_outer_height));
+        let bottom_y = area
+            .bottom()
+            .saturating_sub(bottom_margin)
+            .saturating_sub(bottom_outer_height);
+        let intro_gap = 2.min(bottom_y.saturating_sub(area.y));
+        let intro_y = bottom_y
+            .saturating_sub(intro_gap)
+            .saturating_sub(intro_height);
 
         let active_outer_area =
-            (intro_height > 0).then_some(Rect::new(x, y, content_width, intro_height));
+            (intro_height > 0).then_some(Rect::new(x, intro_y, content_width, intro_height));
         let active_content_area = active_outer_area;
         let toast_area = (toast_height > 0).then_some(Rect::new(
             x,
-            y.saturating_add(intro_height),
+            bottom_y.saturating_sub(toast_height),
             content_width,
             toast_height,
         ));
-        let bottom_y = y.saturating_add(intro_height).saturating_add(toast_height);
         let bottom_outer_available = area.bottom().saturating_sub(bottom_y);
         let bottom_outer_area = Rect::new(
             x,
@@ -14141,14 +14118,20 @@ impl ChatWidget {
         }
 
         let visible_height = usize::from(viewport.content_area.height);
-        for visible_index in 0..visible_height.min(viewport.lines.len()) {
+        let rendered_len = visible_height.min(viewport.lines.len());
+        let top_offset = visible_height.saturating_sub(rendered_len);
+        for visible_index in 0..rendered_len {
             let Some(source_line) = viewport.lines.get(visible_index) else {
                 break;
             };
+            let y_offset = top_offset.saturating_add(visible_index);
             source_line.clone().render(
                 Rect::new(
                     viewport.content_area.x,
-                    viewport.content_area.y.saturating_add(visible_index as u16),
+                    viewport
+                        .content_area
+                        .y
+                        .saturating_add(u16::try_from(y_offset).unwrap_or(u16::MAX)),
                     viewport.content_area.width,
                     1,
                 ),
@@ -14194,7 +14177,7 @@ impl ChatWidget {
 
         let active_tail = self
             .center_active_tail_cache(width)
-            .map(|cache| cache.lines.clone())
+            .map(|cache| Self::chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone()))
             .unwrap_or_default();
         Self::collect_center_lines_from_bottom(&active_tail, &mut skip, &mut needed, &mut lines);
 
@@ -14207,7 +14190,7 @@ impl ChatWidget {
             if needed == 0 {
                 break;
             }
-            let cell_lines = Self::center_wrapped_committed_lines(cell.as_ref(), width);
+            let cell_lines = Self::chat_timeline_lines_for_cell(cell.as_ref(), width);
             if cell_lines.is_empty() {
                 continue;
             }
@@ -14260,9 +14243,9 @@ impl ChatWidget {
         }
 
         let mut rows = 0usize;
-        let active_len = self
-            .center_active_tail_cache(width)
-            .map_or(0, |cache| cache.lines.len());
+        let active_len = self.center_active_tail_cache(width).map_or(0, |cache| {
+            Self::chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone()).len()
+        });
         rows = rows.saturating_add(active_len);
         if rows >= limit {
             return rows;
@@ -14275,7 +14258,7 @@ impl ChatWidget {
         }
 
         for (index, cell) in transcript_cells.iter().enumerate().rev() {
-            let cell_len = Self::center_wrapped_committed_lines(cell.as_ref(), width).len();
+            let cell_len = Self::chat_timeline_lines_for_cell(cell.as_ref(), width).len();
             if cell_len == 0 {
                 continue;
             }
@@ -14294,8 +14277,100 @@ impl ChatWidget {
         rows
     }
 
-    fn center_wrapped_committed_lines(cell: &dyn HistoryCell, width: u16) -> Vec<Line<'static>> {
-        Self::center_wrap_lines(cell.committed_display_lines(width), width)
+    fn chat_timeline_lines_for_cell(cell: &dyn HistoryCell, width: u16) -> Vec<Line<'static>> {
+        let lane = cell.chat_lane();
+        let lane_width = Self::chat_timeline_lane_width(width, lane);
+        let lines = Self::center_wrap_lines(cell.committed_display_lines(lane_width), lane_width);
+        Self::chat_timeline_lines_for_raw(width, lane, lines)
+    }
+
+    fn chat_timeline_lines_for_raw(
+        width: u16,
+        lane: ChatLane,
+        lines: Vec<Line<'static>>,
+    ) -> Vec<Line<'static>> {
+        let lane_width = Self::chat_timeline_lane_width(width, lane);
+        let wrapped = Self::center_wrap_lines(lines, lane_width);
+        match lane {
+            ChatLane::Assistant => wrapped
+                .into_iter()
+                .map(|line| Self::assistant_timeline_row(width, lane_width, line))
+                .collect(),
+            ChatLane::User => wrapped
+                .into_iter()
+                .map(|line| Self::user_timeline_row(width, lane_width, line))
+                .collect(),
+        }
+    }
+
+    fn chat_timeline_lane_width(width: u16, lane: ChatLane) -> u16 {
+        let available = width
+            .saturating_sub(CHAT_TIMELINE_SIDE_PADDING.saturating_mul(2))
+            .max(1);
+        match lane {
+            ChatLane::Assistant => available.min(CHAT_TIMELINE_ASSISTANT_MAX_WIDTH).max(1),
+            ChatLane::User => {
+                let proportional = width.saturating_mul(CHAT_TIMELINE_USER_WIDTH_PERCENT) / 100;
+                proportional
+                    .min(CHAT_TIMELINE_USER_MAX_WIDTH)
+                    .min(available)
+                    .max(1)
+            }
+        }
+    }
+
+    fn assistant_timeline_row(width: u16, lane_width: u16, line: Line<'static>) -> Line<'static> {
+        if width == 0 {
+            return Line::from("");
+        }
+        let left_pad = CHAT_TIMELINE_SIDE_PADDING.min(width.saturating_sub(1));
+        let mut spans = Vec::new();
+        if left_pad > 0 {
+            spans.push(Span::raw(" ".repeat(left_pad as usize)));
+        }
+        let line = truncate_line_with_ellipsis_if_overflow(line, usize::from(lane_width));
+        spans.extend(line.spans);
+        Line::from(spans)
+    }
+
+    fn user_timeline_row(width: u16, lane_width: u16, line: Line<'static>) -> Line<'static> {
+        if width == 0 {
+            return Line::from("");
+        }
+
+        let bubble_bg = Color::Rgb(34, 38, 42);
+        let bubble_fg = DEEPSEEK_TEXT;
+        let inner_width = lane_width.max(1);
+        let bubble_width = inner_width.saturating_add(2).min(width);
+        let right_pad = CHAT_TIMELINE_SIDE_PADDING.min(width.saturating_sub(bubble_width));
+        let left_pad = width.saturating_sub(bubble_width).saturating_sub(right_pad);
+        let mut line = truncate_line_with_ellipsis_if_overflow(line, usize::from(inner_width));
+        let used_width = u16::try_from(line_width(&line)).unwrap_or(u16::MAX);
+        let fill_width = inner_width.saturating_sub(used_width);
+        for span in &mut line.spans {
+            span.style = span.style.fg(bubble_fg).bg(bubble_bg);
+        }
+
+        let mut spans = Vec::new();
+        if left_pad > 0 {
+            spans.push(Span::raw(" ".repeat(left_pad as usize)));
+        }
+        spans.push(Span::styled(
+            " ",
+            Style::default().fg(bubble_fg).bg(bubble_bg),
+        ));
+        spans.extend(line.spans);
+        if fill_width > 0 {
+            spans.push(Span::styled(
+                " ".repeat(fill_width as usize),
+                Style::default().fg(bubble_fg).bg(bubble_bg),
+            ));
+        }
+        spans.push(Span::styled(
+            " ",
+            Style::default().fg(bubble_fg).bg(bubble_bg),
+        ));
+        Line::from(spans)
     }
 
     fn center_active_tail_cache(
@@ -14312,12 +14387,18 @@ impl ChatWidget {
             .as_ref()
             .is_none_or(|cache| cache.key != key);
         if needs_refresh {
+            let lane = self
+                .active_cell
+                .as_ref()
+                .map(|cell| cell.chat_lane())
+                .unwrap_or(ChatLane::Assistant);
+            let lane_width = Self::chat_timeline_lane_width(width, lane);
             let lines = {
-                let cache = self.active_cell_render_cache(width)?;
-                Self::center_wrap_lines(cache.lines.clone(), width)
+                let cache = self.active_cell_render_cache(lane_width)?;
+                Self::center_wrap_lines(cache.lines.clone(), lane_width)
             };
             *self.center_active_tail_cache.borrow_mut() =
-                Some(CenterActiveTailCache { key, lines });
+                Some(CenterActiveTailCache { key, lane, lines });
         }
 
         Some(std::cell::Ref::map(
@@ -14438,24 +14519,6 @@ impl ChatWidget {
             show_work_panel: self.work_panel.has_content(),
             fill_available_top: false,
         })
-    }
-
-    fn render_active_cell(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
-        let Some(content_area) = layout.active_content_area else {
-            return;
-        };
-        if content_area.is_empty() {
-            return;
-        }
-        let Some(cache) = self.active_cell_render_cache(content_area.width) else {
-            return;
-        };
-
-        let scroll_offset = cache.desired_height.saturating_sub(content_area.height);
-        Paragraph::new(Text::from(cache.lines.clone()))
-            .wrap(Wrap { trim: false })
-            .scroll((scroll_offset, 0))
-            .render(content_area, buf);
     }
 
     fn render_work_panel(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {

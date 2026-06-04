@@ -35,7 +35,6 @@ use crate::text_formatting::format_and_truncate_tool_result;
 use crate::text_formatting::format_json_compact;
 use crate::text_formatting::truncate_text;
 use crate::tui_config::TuiRuntimeConfig;
-use crate::ui_consts::LIVE_PREFIX_COLS;
 use crate::update_action::UpdateAction;
 use crate::version::PRAXIS_CLI_VERSION;
 use crate::wrapping::RtOptions;
@@ -98,6 +97,12 @@ use tracing::error;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChatLane {
+    Assistant,
+    User,
+}
+
 /// Represents an event to display in the conversation history. Returns its
 /// `Vec<Line<'static>>` representation to make it easier to display in a
 /// scrollable list.
@@ -111,6 +116,10 @@ use unicode_width::UnicodeWidthStr;
 /// heights when they apply additional layout logic beyond what
 /// `Paragraph::line_count` captures.
 pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
+    fn chat_lane(&self) -> ChatLane {
+        ChatLane::Assistant
+    }
+
     /// Returns the logical lines for the main chat viewport.
     fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
 
@@ -366,12 +375,12 @@ fn trim_trailing_blank_lines(mut lines: Vec<Line<'static>>) -> Vec<Line<'static>
 }
 
 impl HistoryCell for UserHistoryCell {
+    fn chat_lane(&self) -> ChatLane {
+        ChatLane::User
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let wrap_width = width
-            .saturating_sub(
-                LIVE_PREFIX_COLS + 1, /* keep a one-column right margin for wrapping */
-            )
-            .max(1);
+        let wrap_width = width.max(1);
 
         let style = user_message_style();
         let element_style = style.fg(Color::Cyan);
@@ -425,28 +434,19 @@ impl HistoryCell for UserHistoryCell {
             return Vec::new();
         }
 
-        let mut lines: Vec<Line<'static>> = vec![Line::from("").style(style)];
+        let mut lines: Vec<Line<'static>> = Vec::new();
 
         if let Some(wrapped_remote_images) = wrapped_remote_images {
-            lines.extend(prefix_lines(
-                wrapped_remote_images,
-                "  ".into(),
-                "  ".into(),
-            ));
+            lines.extend(wrapped_remote_images);
             if wrapped_message.is_some() {
                 lines.push(Line::from("").style(style));
             }
         }
 
         if let Some(wrapped_message) = wrapped_message {
-            lines.extend(prefix_lines(
-                wrapped_message,
-                "› ".bold().dim(),
-                "  ".into(),
-            ));
+            lines.extend(wrapped_message);
         }
 
-        lines.push(Line::from("").style(style));
         lines
     }
 }
@@ -543,16 +543,7 @@ impl AgentMessageCell {
 
 impl HistoryCell for AgentMessageCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        adaptive_wrap_lines(
-            &self.lines,
-            RtOptions::new(width as usize)
-                .initial_indent(if self.is_first_line {
-                    "• ".dim().into()
-                } else {
-                    "  ".into()
-                })
-                .subsequent_indent("  ".into()),
-        )
+        adaptive_wrap_lines(&self.lines, RtOptions::new(width as usize))
     }
 
     fn is_stream_continuation(&self) -> bool {
