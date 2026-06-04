@@ -27,8 +27,16 @@ const PANEL_HORIZONTAL_PADDING: usize = 2;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct WorkPanelState {
+    live: WorkPanelLiveState,
     plan: WorkPanelPlanState,
     selfwork: WorkPanelSelfworkState,
+}
+
+#[derive(Clone, Debug, Default)]
+struct WorkPanelLiveState {
+    header: Option<String>,
+    details: Option<String>,
+    activity: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -46,6 +54,25 @@ struct WorkPanelSelfworkState {
 }
 
 impl WorkPanelState {
+    pub(super) fn clear_live_status(&mut self) {
+        self.live = WorkPanelLiveState::default();
+    }
+
+    pub(super) fn set_live_status(
+        &mut self,
+        header: String,
+        details: Option<String>,
+        activity: Option<String>,
+    ) {
+        self.live.header = Some(header.trim().to_string()).filter(|header| !header.is_empty());
+        self.live.details = details
+            .map(|details| details.trim().to_string())
+            .filter(|details| !details.is_empty());
+        self.live.activity = activity
+            .map(|activity| activity.trim().to_string())
+            .filter(|activity| !activity.is_empty());
+    }
+
     pub(super) fn clear_plan(&mut self) {
         self.plan = WorkPanelPlanState::default();
     }
@@ -75,7 +102,10 @@ impl WorkPanelState {
     }
 
     pub(super) fn has_content(&self) -> bool {
-        self.selfwork.plan_path.is_some()
+        self.live.header.is_some()
+            || self.live.details.is_some()
+            || self.live.activity.is_some()
+            || self.selfwork.plan_path.is_some()
             || self.plan.explanation.is_some()
             || !self.plan.items.is_empty()
     }
@@ -124,9 +154,72 @@ impl WorkPanelState {
 
     fn lines(&self, content_width: usize, max_rows: usize) -> Vec<Line<'static>> {
         let mut lines = Vec::with_capacity(max_rows.min(12).max(1));
+        self.push_live_lines(content_width, max_rows, &mut lines);
         self.push_selfwork_lines(content_width, max_rows, &mut lines);
         self.push_plan_lines(content_width, max_rows, &mut lines);
         lines
+    }
+
+    fn push_live_lines(
+        &self,
+        content_width: usize,
+        max_rows: usize,
+        lines: &mut Vec<Line<'static>>,
+    ) {
+        let has_live = self.live.header.is_some()
+            || self.live.details.is_some()
+            || self.live.activity.is_some();
+        if !has_live || lines.len() >= max_rows {
+            return;
+        }
+
+        if let Some(header) = self.live.header.as_deref()
+            && lines.len() < max_rows
+        {
+            lines.push(Line::from(vec![
+                Span::styled("Now ", label_style()),
+                Span::styled(
+                    truncate_text(header, content_width.saturating_sub(4)),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        }
+
+        if let Some(activity) = self.live.activity.as_deref()
+            && lines.len() < max_rows
+        {
+            lines.push(Line::from(vec![
+                Span::styled("Doing ", label_style()),
+                Span::styled(
+                    truncate_text(activity, content_width.saturating_sub(6)),
+                    strong_style(),
+                ),
+            ]));
+        }
+
+        if let Some(details) = self.live.details.as_deref() {
+            for detail in details
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .take(2)
+            {
+                if lines.len() >= max_rows {
+                    break;
+                }
+                lines.push(Line::from(vec![
+                    Span::styled("Info ", label_style()),
+                    Span::styled(
+                        truncate_text(detail, content_width.saturating_sub(5)),
+                        muted_style(),
+                    ),
+                ]));
+            }
+        }
+
+        push_blank_if_room(lines, max_rows);
     }
 
     fn push_selfwork_lines(

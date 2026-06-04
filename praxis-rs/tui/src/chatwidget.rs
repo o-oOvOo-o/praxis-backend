@@ -296,6 +296,7 @@ const CENTER_ENTRY_MIN_SIDE_PADDING: u16 = 4;
 const CENTER_ENTRY_INTRO_HEIGHT: u16 = 7;
 const CENTER_LAUNCH_RANK_MAX: u8 = 2;
 const CHAT_TIMELINE_SIDE_PADDING: u16 = 2;
+const CHAT_SURFACE_CONTENT_MAX_WIDTH: u16 = 96;
 const CHAT_TIMELINE_USER_MAX_WIDTH: u16 = 56;
 const CHAT_TIMELINE_ASSISTANT_MAX_WIDTH: u16 = 96;
 const CHAT_TIMELINE_USER_WIDTH_PERCENT: u16 = 62;
@@ -1912,17 +1913,20 @@ impl ChatWidget {
             self.bottom_pane
                 .set_interrupt_hint_visible(is_interruptible);
         }
+        self.sync_work_panel_live_status();
         self.refresh_terminal_title();
     }
 
     fn clear_status_activity_trail(&mut self) {
         if self.status_activity_trail.is_empty() {
             self.bottom_pane.set_status_activity_message(None);
+            self.sync_work_panel_live_status();
             return;
         }
         self.status_activity_trail.clear();
         self.turn_status_snapshot.clear_activity();
         self.bottom_pane.set_status_activity_message(None);
+        self.sync_work_panel_live_status();
     }
 
     fn push_status_activity(&mut self, summary: impl Into<String>) {
@@ -1945,6 +1949,19 @@ impl ChatWidget {
     fn sync_status_activity_message(&mut self) {
         self.bottom_pane
             .set_status_activity_message(self.status_activity_trail.summary());
+        self.sync_work_panel_live_status();
+    }
+
+    fn sync_work_panel_live_status(&mut self) {
+        if self.bottom_pane.is_task_running() {
+            self.work_panel.set_live_status(
+                self.current_status.header.clone(),
+                self.current_status.details.clone(),
+                self.status_activity_trail.summary(),
+            );
+        } else {
+            self.work_panel.clear_live_status();
+        }
     }
 
     fn restore_reasoning_status_header(&mut self) {
@@ -2119,6 +2136,7 @@ impl ChatWidget {
                     .collect::<Vec<_>>()
                     .join("\n")
             }));
+        self.sync_work_panel_live_status();
         self.refresh_status_surfaces();
     }
 
@@ -13702,6 +13720,7 @@ impl ChatWidget {
 
     fn center_layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
         let split = chat_surface_split_for_width(area.width, self.work_panel.has_content());
+        let content_width = Self::chat_surface_column_width(split.agent_width);
         let work_panel_outer_height = split
             .work_panel_width
             .map(|panel_width| self.work_panel.desired_height(panel_width))
@@ -13709,15 +13728,60 @@ impl ChatWidget {
         let visible_toasts = u16::try_from(self.in_app_toasts.visible_entries().len())
             .unwrap_or(u16::MAX)
             .saturating_mul(IN_APP_TOAST_ROW_HEIGHT);
-        layout_chat_surface(ChatSurfaceLayoutInput {
+        let layout = layout_chat_surface(ChatSurfaceLayoutInput {
             area,
             agent_outer_height: area.height,
-            bottom_outer_height: self.bottom_pane_total_height(area.width),
+            bottom_outer_height: self.bottom_pane_total_height(content_width),
             toast_height: visible_toasts,
             work_panel_outer_height,
             show_work_panel: self.work_panel.has_content(),
             fill_available_top: true,
-        })
+        });
+        Self::center_bottom_pane_layout(layout)
+    }
+
+    fn chat_surface_column_width(width: u16) -> u16 {
+        if width == 0 {
+            0
+        } else {
+            width.min(CHAT_SURFACE_CONTENT_MAX_WIDTH).max(1)
+        }
+    }
+
+    fn center_chat_column_rect(area: Rect) -> Rect {
+        if area.is_empty() {
+            return area;
+        }
+        let width = Self::chat_surface_column_width(area.width);
+        Rect::new(
+            area.x.saturating_add(area.width.saturating_sub(width) / 2),
+            area.y,
+            width,
+            area.height,
+        )
+    }
+
+    fn center_bottom_pane_layout(mut layout: ChatWidgetLayout) -> ChatWidgetLayout {
+        if layout.bottom_outer_area.is_empty() {
+            return layout;
+        }
+
+        let bottom_area = layout.bottom_outer_area;
+        let bottom_base_area = layout
+            .active_outer_area
+            .map(|active| Rect::new(active.x, bottom_area.y, active.width, bottom_area.height))
+            .unwrap_or(bottom_area);
+        let bottom_outer_area = Self::center_chat_column_rect(bottom_base_area);
+        let bottom_gap = CHAT_SECTION_GAP_ROWS.min(bottom_outer_area.height);
+        let bottom_content_area = Rect::new(
+            bottom_outer_area.x,
+            bottom_outer_area.y.saturating_add(bottom_gap),
+            bottom_outer_area.width,
+            bottom_outer_area.height.saturating_sub(bottom_gap),
+        );
+        layout.bottom_outer_area = bottom_outer_area;
+        layout.bottom_content_area = bottom_content_area;
+        layout
     }
 
     fn center_entry_layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
@@ -14304,13 +14368,15 @@ impl ChatWidget {
     }
 
     fn chat_timeline_lane_width(width: u16, lane: ChatLane) -> u16 {
-        let available = width
+        let (_, frame_width) = Self::chat_timeline_frame(width);
+        let available = frame_width
             .saturating_sub(CHAT_TIMELINE_SIDE_PADDING.saturating_mul(2))
             .max(1);
         match lane {
             ChatLane::Assistant => available.min(CHAT_TIMELINE_ASSISTANT_MAX_WIDTH).max(1),
             ChatLane::User => {
-                let proportional = width.saturating_mul(CHAT_TIMELINE_USER_WIDTH_PERCENT) / 100;
+                let proportional =
+                    frame_width.saturating_mul(CHAT_TIMELINE_USER_WIDTH_PERCENT) / 100;
                 proportional
                     .min(CHAT_TIMELINE_USER_MAX_WIDTH)
                     .min(available)
@@ -14319,11 +14385,19 @@ impl ChatWidget {
         }
     }
 
+    fn chat_timeline_frame(width: u16) -> (u16, u16) {
+        let frame_width = Self::chat_surface_column_width(width);
+        let left_offset = width.saturating_sub(frame_width) / 2;
+        (left_offset, frame_width)
+    }
+
     fn assistant_timeline_row(width: u16, lane_width: u16, line: Line<'static>) -> Line<'static> {
         if width == 0 {
             return Line::from("");
         }
-        let left_pad = CHAT_TIMELINE_SIDE_PADDING.min(width.saturating_sub(1));
+        let (frame_left, frame_width) = Self::chat_timeline_frame(width);
+        let left_pad = frame_left
+            .saturating_add(CHAT_TIMELINE_SIDE_PADDING.min(frame_width.saturating_sub(1)));
         let mut spans = Vec::new();
         if left_pad > 0 {
             spans.push(Span::raw(" ".repeat(left_pad as usize)));
@@ -14340,10 +14414,20 @@ impl ChatWidget {
 
         let bubble_bg = Color::Rgb(34, 38, 42);
         let bubble_fg = DEEPSEEK_TEXT;
-        let inner_width = lane_width.max(1);
-        let bubble_width = inner_width.saturating_add(2).min(width);
-        let right_pad = CHAT_TIMELINE_SIDE_PADDING.min(width.saturating_sub(bubble_width));
-        let left_pad = width.saturating_sub(bubble_width).saturating_sub(right_pad);
+        let (frame_left, frame_width) = Self::chat_timeline_frame(width);
+        let padded_bubble = frame_width > 2;
+        let inner_width = if padded_bubble {
+            lane_width.max(1).min(frame_width.saturating_sub(2))
+        } else {
+            lane_width.max(1).min(frame_width.max(1))
+        };
+        let bubble_width = inner_width
+            .saturating_add(if padded_bubble { 2 } else { 0 })
+            .min(frame_width.max(1));
+        let right_pad = CHAT_TIMELINE_SIDE_PADDING.min(frame_width.saturating_sub(bubble_width));
+        let left_pad = frame_left
+            .saturating_add(frame_width.saturating_sub(bubble_width))
+            .saturating_sub(right_pad);
         let mut line = truncate_line_with_ellipsis_if_overflow(line, usize::from(inner_width));
         let used_width = u16::try_from(line_width(&line)).unwrap_or(u16::MAX);
         let fill_width = inner_width.saturating_sub(used_width);
@@ -14355,10 +14439,12 @@ impl ChatWidget {
         if left_pad > 0 {
             spans.push(Span::raw(" ".repeat(left_pad as usize)));
         }
-        spans.push(Span::styled(
-            " ",
-            Style::default().fg(bubble_fg).bg(bubble_bg),
-        ));
+        if padded_bubble {
+            spans.push(Span::styled(
+                " ",
+                Style::default().fg(bubble_fg).bg(bubble_bg),
+            ));
+        }
         spans.extend(line.spans);
         if fill_width > 0 {
             spans.push(Span::styled(
@@ -14366,10 +14452,12 @@ impl ChatWidget {
                 Style::default().fg(bubble_fg).bg(bubble_bg),
             ));
         }
-        spans.push(Span::styled(
-            " ",
-            Style::default().fg(bubble_fg).bg(bubble_bg),
-        ));
+        if padded_bubble {
+            spans.push(Span::styled(
+                " ",
+                Style::default().fg(bubble_fg).bg(bubble_bg),
+            ));
+        }
         Line::from(spans)
     }
 
@@ -14488,6 +14576,7 @@ impl ChatWidget {
 
     fn desired_total_height(&self, width: u16) -> u16 {
         let split = chat_surface_split_for_width(width, self.work_panel.has_content());
+        let content_width = Self::chat_surface_column_width(split.agent_width);
         let work_panel_height = split
             .work_panel_width
             .map(|panel_width| self.work_panel.desired_height(panel_width))
@@ -14498,11 +14587,12 @@ impl ChatWidget {
         self.active_cell_total_height(split.agent_width)
             .max(work_panel_height)
             .saturating_add(toast_height)
-            .saturating_add(self.bottom_pane_total_height(width))
+            .saturating_add(self.bottom_pane_total_height(content_width))
     }
 
     fn layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
         let split = chat_surface_split_for_width(area.width, self.work_panel.has_content());
+        let content_width = Self::chat_surface_column_width(split.agent_width);
         let work_panel_outer_height = split
             .work_panel_width
             .map(|panel_width| self.work_panel.desired_height(panel_width))
@@ -14510,15 +14600,16 @@ impl ChatWidget {
         let visible_toasts = u16::try_from(self.in_app_toasts.visible_entries().len())
             .unwrap_or(u16::MAX)
             .saturating_mul(IN_APP_TOAST_ROW_HEIGHT);
-        layout_chat_surface(ChatSurfaceLayoutInput {
+        let layout = layout_chat_surface(ChatSurfaceLayoutInput {
             area,
             agent_outer_height: self.active_cell_total_height(split.agent_width),
-            bottom_outer_height: self.bottom_pane_total_height(area.width),
+            bottom_outer_height: self.bottom_pane_total_height(content_width),
             toast_height: visible_toasts,
             work_panel_outer_height,
             show_work_panel: self.work_panel.has_content(),
             fill_available_top: false,
-        })
+        });
+        Self::center_bottom_pane_layout(layout)
     }
 
     fn render_work_panel(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
