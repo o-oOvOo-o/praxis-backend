@@ -300,6 +300,9 @@ const CHAT_SURFACE_CONTENT_MAX_WIDTH: u16 = 96;
 const CHAT_TIMELINE_USER_MAX_WIDTH: u16 = 56;
 const CHAT_TIMELINE_ASSISTANT_MAX_WIDTH: u16 = 96;
 const CHAT_TIMELINE_USER_WIDTH_PERCENT: u16 = 62;
+const CENTER_INPUT_BORDER_ROWS: u16 = 2;
+const CENTER_INPUT_BORDER_COLS: u16 = 2;
+const CENTER_INPUT_STRIP_ROWS: u16 = 1;
 
 /// Choose the keybinding used to edit the most-recently queued message.
 ///
@@ -14047,6 +14050,39 @@ impl ChatWidget {
         )
     }
 
+    fn center_input_inner_area(area: Rect) -> Rect {
+        if area.width <= CENTER_INPUT_BORDER_COLS || area.height <= CENTER_INPUT_BORDER_ROWS {
+            return Rect::new(area.x, area.y, 0, 0);
+        }
+        Rect::new(
+            area.x.saturating_add(1),
+            area.y.saturating_add(1),
+            area.width.saturating_sub(CENTER_INPUT_BORDER_COLS),
+            area.height.saturating_sub(CENTER_INPUT_BORDER_ROWS),
+        )
+    }
+
+    fn center_input_strip_area(area: Rect) -> Rect {
+        let inner = Self::center_input_inner_area(area);
+        Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            CENTER_INPUT_STRIP_ROWS.min(inner.height),
+        )
+    }
+
+    fn center_input_composer_area(area: Rect) -> Rect {
+        let inner = Self::center_input_inner_area(area);
+        let strip_height = CENTER_INPUT_STRIP_ROWS.min(inner.height);
+        Rect::new(
+            inner.x,
+            inner.y.saturating_add(strip_height),
+            inner.width,
+            inner.height.saturating_sub(strip_height),
+        )
+    }
+
     fn center_bottom_pane_layout(mut layout: ChatWidgetLayout) -> ChatWidgetLayout {
         if layout.bottom_outer_area.is_empty() {
             return layout;
@@ -14058,13 +14094,7 @@ impl ChatWidget {
             .map(|active| Rect::new(active.x, bottom_area.y, active.width, bottom_area.height))
             .unwrap_or(bottom_area);
         let bottom_outer_area = Self::center_chat_column_rect(bottom_base_area);
-        let bottom_gap = CHAT_SECTION_GAP_ROWS.min(bottom_outer_area.height);
-        let bottom_content_area = Rect::new(
-            bottom_outer_area.x,
-            bottom_outer_area.y.saturating_add(bottom_gap),
-            bottom_outer_area.width,
-            bottom_outer_area.height.saturating_sub(bottom_gap),
-        );
+        let bottom_content_area = Self::center_input_composer_area(bottom_outer_area);
         layout.bottom_outer_area = bottom_outer_area;
         layout.bottom_content_area = bottom_content_area;
         layout
@@ -14125,13 +14155,7 @@ impl ChatWidget {
             content_width,
             bottom_outer_height.min(bottom_outer_available),
         );
-        let bottom_gap = CHAT_SECTION_GAP_ROWS.min(bottom_outer_area.height);
-        let bottom_content_area = Rect::new(
-            bottom_outer_area.x,
-            bottom_outer_area.y.saturating_add(bottom_gap),
-            bottom_outer_area.width,
-            bottom_outer_area.height.saturating_sub(bottom_gap),
-        );
+        let bottom_content_area = Self::center_input_composer_area(bottom_outer_area);
 
         ChatWidgetLayout {
             active_outer_area,
@@ -14218,7 +14242,7 @@ impl ChatWidget {
         if self.bottom_pane.has_active_view() {
             return;
         }
-        let area = layout.bottom_outer_area;
+        let area = Self::center_input_strip_area(layout.bottom_outer_area);
         if area.is_empty() || area.height == 0 {
             return;
         }
@@ -14879,9 +14903,11 @@ impl ChatWidget {
     }
 
     fn bottom_pane_total_height(&self, width: u16) -> u16 {
+        let composer_width = width.saturating_sub(CENTER_INPUT_BORDER_COLS);
         self.bottom_pane
-            .desired_height(width)
-            .saturating_add(CHAT_SECTION_GAP_ROWS)
+            .desired_height(composer_width)
+            .saturating_add(CENTER_INPUT_STRIP_ROWS)
+            .saturating_add(CENTER_INPUT_BORDER_ROWS)
     }
 
     fn desired_total_height(&self, width: u16) -> u16 {
@@ -14930,10 +14956,25 @@ impl ChatWidget {
     }
 
     fn render_bottom_pane(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
+        if layout.bottom_outer_area.is_empty() {
+            return;
+        }
+        self.render_center_input_frame(layout.bottom_outer_area, buf);
         if layout.bottom_content_area.is_empty() {
             return;
         }
         self.bottom_pane.render(layout.bottom_content_area, buf);
+    }
+
+    fn render_center_input_frame(&self, area: Rect, buf: &mut Buffer) {
+        if area.is_empty() {
+            return;
+        }
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(46, 63, 66)))
+            .style(Style::default().bg(Color::Rgb(7, 12, 18)))
+            .render(area, buf);
     }
 
     fn render_in_app_toast_overlay(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
