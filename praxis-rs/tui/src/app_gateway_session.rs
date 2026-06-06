@@ -42,6 +42,16 @@ use praxis_app_gateway_protocol::ThreadDeleteParams;
 use praxis_app_gateway_protocol::ThreadDeleteResponse;
 use praxis_app_gateway_protocol::ThreadForkParams;
 use praxis_app_gateway_protocol::ThreadForkResponse;
+use praxis_app_gateway_protocol::ThreadGoal;
+use praxis_app_gateway_protocol::ThreadGoalClearParams;
+use praxis_app_gateway_protocol::ThreadGoalClearResponse;
+use praxis_app_gateway_protocol::ThreadGoalGetParams;
+use praxis_app_gateway_protocol::ThreadGoalGetResponse;
+use praxis_app_gateway_protocol::ThreadGoalSetParams;
+use praxis_app_gateway_protocol::ThreadGoalSetResponse;
+use praxis_app_gateway_protocol::ThreadGoalStatus;
+use praxis_app_gateway_protocol::ThreadGoalUpdateParams;
+use praxis_app_gateway_protocol::ThreadGoalUpdateResponse;
 use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadListResponse;
 use praxis_app_gateway_protocol::ThreadLoadedListParams;
@@ -128,6 +138,7 @@ pub(crate) fn token_usage_info_from_app_gateway(token_usage: ThreadTokenUsage) -
         total_token_usage: token_usage_from_app_gateway(token_usage.total),
         last_token_usage: token_usage_from_app_gateway(token_usage.last),
         model_context_window: token_usage.model_context_window,
+        model_auto_compact_token_limit: token_usage.model_auto_compact_token_limit,
     }
 }
 
@@ -486,6 +497,87 @@ impl AppGatewaySession {
             .await
             .wrap_err("thread/read failed during TUI session lookup")?;
         Ok(response.thread)
+    }
+
+    pub(crate) async fn thread_goal_get(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> Result<Option<ThreadGoal>> {
+        let request_id = self.next_request_id();
+        let response: ThreadGoalGetResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadGoalGet {
+                request_id,
+                params: ThreadGoalGetParams {
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await
+            .wrap_err("thread/goal/get failed in TUI")?;
+        Ok(response.goal)
+    }
+
+    pub(crate) async fn thread_goal_set(
+        &mut self,
+        thread_id: ThreadId,
+        objective: String,
+    ) -> Result<ThreadGoal> {
+        let request_id = self.next_request_id();
+        let response: ThreadGoalSetResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadGoalSet {
+                request_id,
+                params: ThreadGoalSetParams {
+                    thread_id: thread_id.to_string(),
+                    objective,
+                    token_budget: None,
+                    clear_token_budget: false,
+                },
+            })
+            .await
+            .wrap_err("thread/goal/set failed in TUI")?;
+        Ok(response.goal)
+    }
+
+    pub(crate) async fn thread_goal_update(
+        &mut self,
+        thread_id: ThreadId,
+        objective: Option<String>,
+        status: Option<ThreadGoalStatus>,
+        token_budget: Option<i64>,
+        clear_token_budget: bool,
+    ) -> Result<ThreadGoal> {
+        let request_id = self.next_request_id();
+        let response: ThreadGoalUpdateResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadGoalUpdate {
+                request_id,
+                params: ThreadGoalUpdateParams {
+                    thread_id: thread_id.to_string(),
+                    objective,
+                    status,
+                    token_budget,
+                    clear_token_budget,
+                },
+            })
+            .await
+            .wrap_err("thread/goal/update failed in TUI")?;
+        Ok(response.goal)
+    }
+
+    pub(crate) async fn thread_goal_clear(&mut self, thread_id: ThreadId) -> Result<bool> {
+        let request_id = self.next_request_id();
+        let response: ThreadGoalClearResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadGoalClear {
+                request_id,
+                params: ThreadGoalClearParams {
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await
+            .wrap_err("thread/goal/clear failed in TUI")?;
+        Ok(response.cleared)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1376,7 +1468,7 @@ mod tests {
                 cwd: PathBuf::from("/tmp/project"),
                 cli_version: "0.0.0".to_string(),
                 source: praxis_protocol::protocol::SessionSource::Cli.into(),
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: None,
                 git_info: None,
                 name: None,

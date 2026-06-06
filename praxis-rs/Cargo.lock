@@ -7134,6 +7134,7 @@ dependencies = [
 name = "praxis-plugin"
 version = "0.0.0"
 dependencies = [
+ "praxis-protocol",
  "praxis-utils-absolute-path",
  "praxis-utils-plugins",
  "thiserror 2.0.18",

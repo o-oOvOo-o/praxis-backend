@@ -171,6 +171,7 @@ fn load_plugins_loads_default_skills_and_mcp_servers() {
                 },
             )]),
             apps: vec![AppConnectorId("connector_example".to_string())],
+            llm: None,
             error: None,
         }]
     );
@@ -181,6 +182,7 @@ fn load_plugins_loads_default_skills_and_mcp_servers() {
             display_name: "sample".to_string(),
             description: Some("Plugin that includes the sample MCP server and Skills".to_string(),),
             has_skills: true,
+            has_llm: false,
             mcp_server_names: vec!["sample".to_string()],
             app_connector_ids: vec![AppConnectorId("connector_example".to_string())],
         }]
@@ -273,10 +275,40 @@ enabled = true
             display_name: "sample".to_string(),
             description: None,
             has_skills: true,
+            has_llm: false,
             mcp_server_names: Vec::new(),
             app_connector_ids: Vec::new(),
         }]
     );
+}
+
+#[test]
+fn llm_only_plugin_contributes_effective_llm_manifest_without_prompt_capability_summary() {
+    let praxis_home = TempDir::new().unwrap();
+    let plugin_root = praxis_home.path().join("plugins/cache/test/model/local");
+    let llm = crate::plugins::PluginManifestLlm {
+        profiles: Vec::new(),
+        products: Vec::new(),
+        tool_policies: Vec::new(),
+        model_catalogs: Vec::new(),
+    };
+    let outcome = PluginLoadOutcome::from_plugins(vec![LoadedPlugin {
+        config_name: "model@test".to_string(),
+        manifest_name: Some("model".to_string()),
+        manifest_description: Some("OpenAI-compatible model pack".to_string()),
+        root: AbsolutePathBuf::try_from(plugin_root).unwrap(),
+        enabled: true,
+        skill_roots: Vec::new(),
+        disabled_skill_paths: HashSet::new(),
+        has_enabled_skills: false,
+        mcp_servers: HashMap::new(),
+        apps: Vec::new(),
+        llm: Some(llm.clone()),
+        error: None,
+    }]);
+
+    assert!(outcome.capability_summaries().is_empty());
+    assert_eq!(outcome.effective_llm_manifests(), vec![llm]);
 }
 
 #[test]
@@ -317,6 +349,7 @@ fn plugin_telemetry_metadata_uses_default_mcp_config_path() {
             display_name: "sample".to_string(),
             description: None,
             has_skills: false,
+            has_llm: false,
             mcp_server_names: vec!["sample".to_string()],
             app_connector_ids: Vec::new(),
         })
@@ -657,6 +690,7 @@ fn load_plugins_preserves_disabled_plugins_without_effective_contributions() {
             has_enabled_skills: false,
             mcp_servers: HashMap::new(),
             apps: Vec::new(),
+            llm: None,
             error: None,
         }]
     );
@@ -771,6 +805,7 @@ fn capability_index_filters_inactive_and_zero_capability_plugins() {
         has_enabled_skills: false,
         mcp_servers: HashMap::new(),
         apps: Vec::new(),
+        llm: None,
         error: None,
     };
     let summary = |config_name: &str, display_name: &str| PluginCapabilitySummary {
@@ -1084,6 +1119,7 @@ enabled = false
                         products: None,
                     },
                     interface: None,
+                    llm: None,
                     installed: true,
                     enabled: true,
                 },
@@ -1100,6 +1136,7 @@ enabled = false
                         products: None,
                     },
                     interface: None,
+                    llm: None,
                     installed: true,
                     enabled: false,
                 },
@@ -1218,6 +1255,7 @@ plugins = true
                 products: None,
             },
             interface: None,
+            llm: None,
             installed: false,
             enabled: false,
         }]
@@ -1426,6 +1464,7 @@ plugins = true
                     products: None,
                 },
                 interface: None,
+                llm: None,
                 installed: false,
                 enabled: false,
             }],
@@ -1530,6 +1569,7 @@ enabled = false
                 products: None,
             },
             interface: None,
+            llm: None,
             installed: false,
             enabled: true,
         }]
@@ -1559,6 +1599,7 @@ enabled = false
                 products: None,
             },
             interface: None,
+            llm: None,
             installed: false,
             enabled: false,
         }]
@@ -1642,6 +1683,7 @@ enabled = true
                     products: None,
                 },
                 interface: None,
+                llm: None,
                 installed: false,
                 enabled: true,
             }],

@@ -1,4 +1,5 @@
 use crate::function_tool::FunctionCallError;
+use crate::llm::runtime::LlmToolVisibilityPolicy;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::sandboxing::SandboxPermissions;
@@ -44,6 +45,7 @@ pub(crate) struct ToolRouterParams<'a> {
     pub(crate) app_tools: Option<HashMap<String, ToolInfo>>,
     pub(crate) discoverable_tools: Option<Vec<DiscoverableTool>>,
     pub(crate) dynamic_tools: &'a [DynamicToolSpec],
+    pub(crate) tool_visibility_policy: Option<&'a LlmToolVisibilityPolicy>,
 }
 
 impl ToolRouter {
@@ -53,6 +55,7 @@ impl ToolRouter {
             app_tools,
             discoverable_tools,
             dynamic_tools,
+            tool_visibility_policy,
         } = params;
         let builder = build_specs_with_discoverable_tools(
             config,
@@ -79,6 +82,8 @@ impl ToolRouter {
                 .map(|configured_tool| configured_tool.spec.clone())
                 .collect()
         };
+        let model_visible_specs =
+            apply_tool_visibility_policy(model_visible_specs, tool_visibility_policy);
 
         Self {
             registry,
@@ -270,6 +275,19 @@ impl ToolRouter {
         let input = freeform_input_from_function_arguments(tool_name, &arguments)?;
         Ok(ToolPayload::Custom { input })
     }
+}
+
+fn apply_tool_visibility_policy(
+    specs: Vec<ToolSpec>,
+    policy: Option<&LlmToolVisibilityPolicy>,
+) -> Vec<ToolSpec> {
+    let Some(policy) = policy else {
+        return specs;
+    };
+    specs
+        .into_iter()
+        .filter(|spec| policy.allows(spec.name()))
+        .collect()
 }
 
 fn freeform_input_from_function_arguments(

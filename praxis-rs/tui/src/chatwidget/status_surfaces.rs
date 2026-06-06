@@ -463,7 +463,7 @@ impl ChatWidget {
             StatusLineItem::ProjectRoot => self.status_line_project_root_name(),
             StatusLineItem::GitBranch => self.status_line_branch.clone(),
             StatusLineItem::UsedTokens => {
-                let usage = self.status_line_total_usage();
+                let usage = self.status_line_context_usage();
                 let total = usage.tokens_in_context_window();
                 if total <= 0 {
                     None

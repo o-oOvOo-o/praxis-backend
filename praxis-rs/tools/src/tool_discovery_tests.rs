@@ -85,6 +85,7 @@ fn create_tool_suggest_tool_uses_plugin_summary_fallback() {
                 description: None,
                 tool_type: DiscoverableToolType::Connector,
                 has_skills: false,
+                has_llm: false,
                 mcp_server_names: Vec::new(),
                 app_connector_ids: Vec::new(),
             },
@@ -94,6 +95,7 @@ fn create_tool_suggest_tool_uses_plugin_summary_fallback() {
                 description: None,
                 tool_type: DiscoverableToolType::Plugin,
                 has_skills: true,
+                has_llm: false,
                 mcp_server_names: vec!["github-mcp".to_string()],
                 app_connector_ids: vec!["github-app".to_string()],
             },
@@ -153,6 +155,22 @@ fn create_tool_suggest_tool_uses_plugin_summary_fallback() {
             output_schema: None,
         })
     );
+}
+
+#[test]
+fn plugin_summary_includes_llm_model_profiles() {
+    let plugin = ToolSuggestEntry {
+        id: "openai-compatible@local".to_string(),
+        name: "OpenAI-compatible".to_string(),
+        description: None,
+        tool_type: DiscoverableToolType::Plugin,
+        has_skills: false,
+        has_llm: true,
+        mcp_server_names: Vec::new(),
+        app_connector_ids: Vec::new(),
+    };
+
+    assert_eq!(plugin_summary(&plugin), "LLM model profiles");
 }
 
 #[test]
@@ -310,6 +328,7 @@ fn filter_tool_suggest_discoverable_tools_for_praxis_tui_omits_plugins() {
             name: "Slack".to_string(),
             description: Some("Search Slack messages".to_string()),
             has_skills: true,
+            has_llm: false,
             mcp_server_names: vec!["slack".to_string()],
             app_connector_ids: vec!["connector_slack".to_string()],
         })),

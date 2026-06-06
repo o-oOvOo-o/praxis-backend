@@ -1,0 +1,32 @@
+Game is built, verified, and running. Here's the summary:
+
+---
+
+**Voxel Sky Raider** — a Minecraft-style aircraft shooter is ready to play.
+
+**Created files:**
+
+- [index.html](/E:/qwentest/index.html) — Complete game (22.7 KB, Three.js from CDN, no build step)
+- [README.md](/E:/qwentest/README.md) — Design notes, controls, and run instructions
+
+**Verification results:**
+- File exists: 22,721 bytes
+- JS syntax check: **OK**
+- Local server: **running on `http://localhost:8080`**
+
+**Controls:**
+- **WASD / Arrow keys** — Move aircraft (left/right/up/down)
+- **Space** — Shoot forward
+- **Enter** — Start game / Restart after game over
+
+**What's in the game:**
+- Third-person blocky aircraft flying over procedurally generated voxel terrain (grass, dirt, stone, water chunks using instanced meshes for performance)
+- Billboard/canvas-drawn tanks on the ground that aim and fire red bullets at you
+- Yellow player bullets with collision detection against tanks
+- Voxel particle explosions on hits
+- HUD with health bar, score, distance meter, and heart-based lives display
+- Start screen with orbiting camera, game over screen with final score
+- Difficulty ramps over time: more tanks, faster fire, increased speed
+- Object pooling caps (80 player bullets, 60 enemy bullets, 120 particles, 24 tanks) to keep frame rate stable
+
+Open **http://localhost:8080** in your browser, press Enter, and start shooting tanks.

@@ -437,7 +437,7 @@ async fn read_summary_from_rollout_returns_empty_preview_when_no_user_message() 
 }
 
 #[tokio::test]
-async fn read_summary_from_rollout_preserves_agent_nickname() -> Result<()> {
+async fn read_summary_from_rollout_preserves_agent_display_name() -> Result<()> {
     use praxis_protocol::protocol::RolloutItem;
     use praxis_protocol::protocol::RolloutLine;
     use praxis_protocol::protocol::SessionMetaLine;
@@ -457,10 +457,14 @@ async fn read_summary_from_rollout_preserves_agent_nickname() -> Result<()> {
             parent_thread_id,
             depth: 1,
             agent_path: None,
-            agent_nickname: None,
+            agent_base_name: Some("墨子".to_string()),
+            agent_title: Some("巡检仓库".to_string()),
+            agent_display_name: None,
             agent_role: None,
         }),
-        agent_nickname: Some("atlas".to_string()),
+        agent_base_name: Some("墨子".to_string()),
+        agent_title: Some("巡检仓库".to_string()),
+        agent_display_name: Some("atlas".to_string()),
         agent_role: Some("explorer".to_string()),
         model_provider: Some("test-provider".to_string()),
         ..SessionMeta::default()
@@ -478,7 +482,9 @@ async fn read_summary_from_rollout_preserves_agent_nickname() -> Result<()> {
     let summary = read_summary_from_rollout(path.as_path(), "fallback").await?;
     let thread = summary_to_thread(summary);
 
-    assert_eq!(thread.agent_nickname, Some("atlas".to_string()));
+    assert_eq!(thread.agent_display_name, Some("atlas".to_string()));
+    assert_eq!(thread.agent_base_name, Some("墨子".to_string()));
+    assert_eq!(thread.agent_title, Some("巡检仓库".to_string()));
     assert_eq!(thread.agent_role, Some("explorer".to_string()));
     Ok(())
 }
@@ -541,13 +547,13 @@ async fn aborting_pending_request_clears_pending_state() -> Result<()> {
 }
 
 #[test]
-fn summary_from_state_db_metadata_preserves_agent_nickname() -> Result<()> {
+fn summary_from_state_db_metadata_preserves_agent_display_name() -> Result<()> {
     let conversation_id = ThreadId::from_string("bfd12a78-5900-467b-9bc5-d3d35df08191")?;
     let source = serde_json::to_string(&SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
         parent_thread_id: ThreadId::from_string("ad7f0408-99b8-4f6e-a46f-bd0eec433370")?,
         depth: 1,
         agent_path: None,
-        agent_nickname: None,
+        agent_display_name: None,
         agent_role: None,
     }))?;
 
@@ -574,7 +580,7 @@ fn summary_from_state_db_metadata_preserves_agent_nickname() -> Result<()> {
 
     let thread = summary_to_thread(summary);
 
-    assert_eq!(thread.agent_nickname, Some("atlas".to_string()));
+    assert_eq!(thread.agent_display_name, Some("atlas".to_string()));
     assert_eq!(thread.agent_role, Some("explorer".to_string()));
     Ok(())
 }

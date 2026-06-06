@@ -57,6 +57,9 @@ use tracing::warn;
 pub use crate::remote::RemoteAppGatewayClient;
 pub use crate::remote::RemoteAppGatewayConnectArgs;
 
+pub const DEFAULT_LOCAL_APP_GATEWAY_URL: &str = "ws://127.0.0.1:4222";
+pub const DEFAULT_LOCAL_APP_GATEWAY_ADDR: &str = "127.0.0.1:4222";
+
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Raw app-gateway request result for typed in-process requests.
@@ -311,6 +314,8 @@ pub(crate) fn server_notification_requires_delivery(notification: &ServerNotific
             | ServerNotification::TurnCompleted(_)
             | ServerNotification::ItemStarted(_)
             | ServerNotification::ItemCompleted(_)
+            | ServerNotification::ThreadGoalUpdated(_)
+            | ServerNotification::ThreadGoalCleared(_)
             | ServerNotification::AgentMessageDelta(_)
             | ServerNotification::PlanDelta(_)
             | ServerNotification::ReasoningSummaryTextDelta(_)

@@ -612,7 +612,9 @@ fn summary_from_thread_item(
     let cwd = item.cwd?;
     let source = with_thread_spawn_agent_metadata(
         item.source.unwrap_or(SessionSource::Unknown),
-        item.agent_nickname,
+        item.agent_base_name,
+        item.agent_title,
+        item.agent_display_name,
         item.agent_role,
     );
     Some(ThreadSummary {
@@ -660,7 +662,9 @@ fn summary_from_thread_metadata(metadata: &praxis_state::ThreadMetadata) -> Thre
         cli_version: metadata.cli_version.clone(),
         source: with_thread_spawn_agent_metadata(
             parse_session_source(metadata.source.as_str()),
-            metadata.agent_nickname.clone(),
+            metadata.agent_base_name.clone(),
+            metadata.agent_title.clone(),
+            metadata.agent_display_name.clone(),
             metadata.agent_role.clone(),
         ),
         total_cost_micros: metadata.total_cost_micros,
@@ -684,10 +688,16 @@ fn parse_session_source(source: &str) -> SessionSource {
 
 fn with_thread_spawn_agent_metadata(
     source: SessionSource,
-    agent_nickname: Option<String>,
+    agent_base_name: Option<String>,
+    agent_title: Option<String>,
+    agent_display_name: Option<String>,
     agent_role: Option<String>,
 ) -> SessionSource {
-    if agent_nickname.is_none() && agent_role.is_none() {
+    if agent_base_name.is_none()
+        && agent_title.is_none()
+        && agent_display_name.is_none()
+        && agent_role.is_none()
+    {
         return source;
     }
 
@@ -696,13 +706,17 @@ fn with_thread_spawn_agent_metadata(
             parent_thread_id,
             depth,
             agent_path,
-            agent_nickname: existing_agent_nickname,
+            agent_base_name: existing_agent_base_name,
+            agent_title: existing_agent_title,
+            agent_display_name: existing_agent_display_name,
             agent_role: existing_agent_role,
         }) => SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
             parent_thread_id,
             depth,
             agent_path,
-            agent_nickname: agent_nickname.or(existing_agent_nickname),
+            agent_base_name: agent_base_name.or(existing_agent_base_name),
+            agent_title: agent_title.or(existing_agent_title),
+            agent_display_name: agent_display_name.or(existing_agent_display_name),
             agent_role: agent_role.or(existing_agent_role),
         }),
         _ => source,
@@ -809,7 +823,7 @@ mod tests {
             parent_thread_id,
             depth: 1,
             agent_path: None,
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: None,
         });
 

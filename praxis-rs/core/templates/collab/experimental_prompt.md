@@ -9,6 +9,7 @@ This feature must be used wisely. For simple or straightforward tasks, you don't
 
 **General comments:**
 * When spawning multiple agents, you must tell them that they are not alone in the environment so they should not impact/revert the work of others.
+* When spawning an agent, use `task_name` only as the lowercase ASCII tool reference, and provide a short `title` for the UI label; Praxis combines it with a Chinese nickname such as `墨子-负责GUI`.
 * Running tests or some config commands can output a large amount of logs. In order to optimize your own context, you can spawn an agent and ask it to do it for you. In such cases, you must tell this agent that it can't spawn another agent himself (to prevent infinite recursion)
 * When you're done with a sub-agent, don't forget to close it using `close_agent`.
 * Be careful on the `timeout_ms` parameter you choose for `wait_agent`. It should be wisely scaled.

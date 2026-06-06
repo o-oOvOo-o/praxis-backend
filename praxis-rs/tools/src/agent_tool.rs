@@ -21,13 +21,22 @@ pub struct WaitAgentTimeoutOptions {
 
 pub fn create_spawn_agent_tool(options: SpawnAgentToolOptions<'_>) -> ToolSpec {
     let available_models_description = spawn_agent_models_description(options.available_models);
-    let return_value_description = "Returns the canonical task name for the spawned agent, plus the user-facing nickname when available.";
+    let return_value_description = "Returns the canonical task name plus Praxis agent identity fields: base name, title, and display name.";
     let mut properties = spawn_agent_common_properties(&options.agent_type_description);
     properties.insert(
         "task_name".to_string(),
         JsonSchema::String {
             description: Some(
-                "Task name for the new agent. Use lowercase letters, digits, and underscores."
+                "Canonical task name for the new agent. Use lowercase letters, digits, and underscores; this is the stable tool reference, not the UI label."
+                    .to_string(),
+            ),
+        },
+    );
+    properties.insert(
+        "title".to_string(),
+        JsonSchema::String {
+            description: Some(
+                "Short human-facing responsibility label for the new agent, such as `负责GUI` or `碰撞系统`. Praxis combines it with a Chinese base name, for example `墨子-负责GUI`."
                     .to_string(),
             ),
         },
@@ -43,7 +52,11 @@ pub fn create_spawn_agent_tool(options: SpawnAgentToolOptions<'_>) -> ToolSpec {
         defer_loading: None,
         parameters: JsonSchema::Object {
             properties,
-            required: Some(vec!["task_name".to_string(), "message".to_string()]),
+            required: Some(vec![
+                "task_name".to_string(),
+                "title".to_string(),
+                "message".to_string(),
+            ]),
             additional_properties: Some(false.into()),
         },
         output_schema: Some(spawn_agent_output_schema()),
@@ -56,7 +69,7 @@ pub fn create_send_message_tool() -> ToolSpec {
             "target".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Agent id or canonical task name to message (from spawn_agent).".to_string(),
+                    "Agent id, canonical task name, or user-facing Chinese short name to message (from spawn_agent).".to_string(),
                 ),
             },
         ),
@@ -89,7 +102,7 @@ pub fn create_assign_task_tool() -> ToolSpec {
             "target".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Agent id or canonical task name to assign (from spawn_agent).".to_string(),
+                    "Agent id, canonical task name, or user-facing Chinese short name to assign (from spawn_agent).".to_string(),
                 ),
             },
         ),
@@ -210,7 +223,7 @@ pub fn create_list_agents_tool() -> ToolSpec {
         "path_prefix".to_string(),
         JsonSchema::String {
             description: Some(
-                "Optional task-path prefix. Accepts the same relative or absolute task-path syntax as other agent targets."
+                "Optional task-path prefix. Accepts the same relative or absolute task-path syntax as canonical agent targets."
                     .to_string(),
             ),
         },
@@ -423,7 +436,7 @@ pub fn create_close_agent_tool() -> ToolSpec {
         "target".to_string(),
         JsonSchema::String {
             description: Some(
-                "Agent id or canonical task name to close (from spawn_agent).".to_string(),
+                "Agent id, canonical task name, or user-facing Chinese short name to close (from spawn_agent).".to_string(),
             ),
         },
     )]);
@@ -485,12 +498,20 @@ fn spawn_agent_output_schema() -> Value {
                 "type": "string",
                 "description": "Canonical task name for the spawned agent."
             },
-            "nickname": {
+            "agent_base_name": {
                 "type": ["string", "null"],
-                "description": "User-facing nickname for the spawned agent when available."
+                "description": "Chinese base name assigned by Praxis, for example `墨子`."
+            },
+            "agent_title": {
+                "type": ["string", "null"],
+                "description": "Short responsibility title supplied at spawn time, for example `负责GUI`."
+            },
+            "agent_display_name": {
+                "type": ["string", "null"],
+                "description": "User-facing display name combining base name and title, for example `墨子-负责GUI`."
             }
         },
-        "required": ["agent_id", "task_name", "nickname"],
+        "required": ["agent_id", "task_name", "agent_base_name", "agent_title", "agent_display_name"],
         "additionalProperties": false
     })
 }
@@ -526,6 +547,22 @@ fn list_agents_output_schema() -> Value {
                             "type": "string",
                             "description": "Canonical task name for the agent when available, otherwise the agent id."
                         },
+                        "agent_base_name": {
+                            "type": ["string", "null"],
+                            "description": "Chinese base name assigned by Praxis, for example `墨子`."
+                        },
+                        "agent_title": {
+                            "type": ["string", "null"],
+                            "description": "Short responsibility title assigned to the agent, for example `负责GUI`."
+                        },
+                        "agent_display_name": {
+                            "type": ["string", "null"],
+                            "description": "User-facing display name, for example `墨子-负责GUI`, when available."
+                        },
+                        "agent_role": {
+                            "type": ["string", "null"],
+                            "description": "Configured agent role when available."
+                        },
                         "agent_status": {
                             "description": "Last known status of the agent.",
                             "allOf": [agent_status_output_schema()]
@@ -535,7 +572,7 @@ fn list_agents_output_schema() -> Value {
                             "description": "Most recent user or inter-agent instruction received by the agent, when available."
                         }
                     },
-                    "required": ["agent_name", "agent_status", "last_task_message"],
+                    "required": ["agent_name", "agent_base_name", "agent_title", "agent_display_name", "agent_role", "agent_status", "last_task_message"],
                     "additionalProperties": false
                 },
                 "description": "Live agents visible in the current root thread tree."
@@ -959,10 +996,19 @@ fn spawn_agent_common_properties(agent_type_description: &str) -> BTreeMap<Strin
             },
         ),
         (
+            "model_provider".to_string(),
+            JsonSchema::String {
+                description: Some(
+                    "Optional model provider override for the new agent. Use provider ids such as `openai`, `deepseek`, `qwen`, `glm`, or `common`. `codex` and `responses` are accepted aliases for OpenAI/Codex workers. When omitted, the provider is inferred from a known first-party model when possible, otherwise inherited."
+                        .to_string(),
+                ),
+            },
+        ),
+        (
             "model".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Optional model override for the new agent. Replaces the inherited model."
+                    "Optional model override for the new agent. Replaces the inherited model; known first-party model ids can also switch the provider automatically. For the strongest Codex coding worker, use `gpt-5.5`; natural aliases like `5.5`, `gpt5.5`, and `codex5.5` are accepted."
                         .to_string(),
                 ),
             },
@@ -971,7 +1017,7 @@ fn spawn_agent_common_properties(agent_type_description: &str) -> BTreeMap<Strin
             "reasoning_effort".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort."
+                    "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort. Use `xhigh` for maximum reasoning; aliases like `x-high`, `extra high`, and `maximum` are accepted."
                         .to_string(),
                 ),
             },
@@ -1000,6 +1046,7 @@ fn spawn_agent_tool_description(
 ### Designing delegated subtasks
 - Subtasks must be concrete, well-defined, and self-contained.
 - Delegated subtasks must materially advance the main task.
+- Always provide both `task_name` and `title`: `task_name` is the lowercase ASCII canonical tool reference, while `title` is a short human-facing responsibility label that Praxis renders as a Chinese display name such as `墨子-负责GUI`.
 - Do not duplicate work between the main rollout and delegated subtasks.
 - Avoid issuing multiple delegate calls on the same unresolved thread unless the new delegated task is genuinely different and necessary.
 - Narrow the delegated ask to the concrete output you need next.

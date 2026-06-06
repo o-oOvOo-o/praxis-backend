@@ -71,6 +71,63 @@ fn resolve_marketplace_plugin_reports_missing_plugin() {
 }
 
 #[test]
+fn list_marketplaces_exposes_plugin_llm_manifest() {
+    let tmp = tempdir().unwrap();
+    let repo_root = tmp.path().join("repo");
+    let plugin_root = repo_root.join("plugin");
+    fs::create_dir_all(repo_root.join(".git")).unwrap();
+    fs::create_dir_all(repo_root.join(".agents/plugins")).unwrap();
+    fs::create_dir_all(plugin_root.join(".codex-plugin")).unwrap();
+    fs::write(
+        repo_root.join(".agents/plugins/marketplace.json"),
+        r#"{
+  "name": "praxis-curated",
+  "plugins": [
+    {
+      "name": "local-plugin",
+      "source": {
+        "source": "local",
+        "path": "./plugin"
+      }
+    }
+  ]
+}"#,
+    )
+    .unwrap();
+    fs::write(
+        plugin_root.join(".codex-plugin/plugin.json"),
+        r#"{
+  "name": "local-plugin",
+  "llm": {
+    "profiles": [
+      {
+        "id": "deepseek",
+        "prompts": {
+          "base": "./llm/deepseek/base.md"
+        }
+      }
+    ]
+  }
+}"#,
+    )
+    .unwrap();
+
+    let marketplaces = list_marketplaces_with_home(
+        &[AbsolutePathBuf::try_from(repo_root.clone()).unwrap()],
+        /*home_dir*/ None,
+    )
+    .unwrap()
+    .marketplaces;
+
+    let llm = marketplaces[0].plugins[0]
+        .llm
+        .as_ref()
+        .expect("plugin llm metadata");
+    assert_eq!(llm.profiles[0].id, "deepseek");
+    assert_eq!(llm.profiles[0].prompts[0].slot, "base");
+}
+
+#[test]
 fn list_marketplaces_returns_home_and_repo_marketplaces() {
     let tmp = tempdir().unwrap();
     let home_root = tmp.path().join("home");
@@ -154,6 +211,7 @@ fn list_marketplaces_returns_home_and_repo_marketplaces() {
                             products: None,
                         },
                         interface: None,
+                        llm: None,
                     },
                     MarketplacePlugin {
                         name: "home-only".to_string(),
@@ -166,6 +224,7 @@ fn list_marketplaces_returns_home_and_repo_marketplaces() {
                             products: None,
                         },
                         interface: None,
+                        llm: None,
                     },
                 ],
             },
@@ -187,6 +246,7 @@ fn list_marketplaces_returns_home_and_repo_marketplaces() {
                             products: None,
                         },
                         interface: None,
+                        llm: None,
                     },
                     MarketplacePlugin {
                         name: "repo-only".to_string(),
@@ -199,6 +259,7 @@ fn list_marketplaces_returns_home_and_repo_marketplaces() {
                             products: None,
                         },
                         interface: None,
+                        llm: None,
                     },
                 ],
             },
@@ -276,6 +337,7 @@ fn list_marketplaces_keeps_distinct_entries_for_same_name() {
                         products: None,
                     },
                     interface: None,
+                    llm: None,
                 }],
             },
             Marketplace {
@@ -293,6 +355,7 @@ fn list_marketplaces_keeps_distinct_entries_for_same_name() {
                         products: None,
                     },
                     interface: None,
+                    llm: None,
                 }],
             },
         ]
@@ -365,6 +428,7 @@ fn list_marketplaces_dedupes_multiple_roots_in_same_repo() {
                     products: None,
                 },
                 interface: None,
+                llm: None,
             }],
         }]
     );

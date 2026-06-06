@@ -24,7 +24,6 @@ use praxis_protocol::protocol::CollabCloseBeginEvent;
 use praxis_protocol::protocol::CollabCloseEndEvent;
 use praxis_protocol::protocol::CollabWaitingBeginEvent;
 use praxis_protocol::protocol::CollabWaitingEndEvent;
-use praxis_protocol::user_input::UserInput;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;

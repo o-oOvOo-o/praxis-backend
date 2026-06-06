@@ -126,6 +126,7 @@ pub(crate) struct PraxisPluginMetadata {
     pub(crate) plugin_name: Option<String>,
     pub(crate) marketplace_name: Option<String>,
     pub(crate) has_skills: Option<bool>,
+    pub(crate) has_llm: Option<bool>,
     pub(crate) mcp_server_count: Option<usize>,
     pub(crate) connector_ids: Option<Vec<String>>,
     pub(crate) product_client_id: Option<String>,
@@ -185,6 +186,7 @@ pub(crate) fn praxis_plugin_metadata(plugin: PluginTelemetryMetadata) -> PraxisP
         has_skills: capability_summary
             .as_ref()
             .map(|summary| summary.has_skills),
+        has_llm: capability_summary.as_ref().map(|summary| summary.has_llm),
         mcp_server_count: capability_summary
             .as_ref()
             .map(|summary| summary.mcp_server_names.len()),

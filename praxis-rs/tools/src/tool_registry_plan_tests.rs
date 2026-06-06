@@ -81,6 +81,9 @@ fn test_full_toolset_specs_for_gpt5_praxis_unified_exec_web_search() {
         }),
         create_write_stdin_tool(),
         create_update_plan_tool(),
+        create_get_goal_tool(),
+        create_create_goal_tool(),
+        create_update_goal_tool(),
         request_user_input_tool_spec(/*default_mode_request_user_input*/ false),
         create_apply_patch_freeform_tool(),
         ToolSpec::WebSearch {
@@ -241,13 +244,18 @@ fn test_build_specs_multi_agent_uses_task_names_and_hides_resume() {
         panic!("spawn_agent should use object params");
     };
     assert!(properties.contains_key("task_name"));
+    assert!(properties.contains_key("title"));
     assert!(properties.contains_key("message"));
     assert!(properties.contains_key("fork_turns"));
     assert!(!properties.contains_key("items"));
     assert!(!properties.contains_key("fork_context"));
     assert_eq!(
         required.as_ref(),
-        Some(&vec!["task_name".to_string(), "message".to_string()])
+        Some(&vec![
+            "task_name".to_string(),
+            "title".to_string(),
+            "message".to_string()
+        ])
     );
     let output_schema = output_schema
         .as_ref()
@@ -364,7 +372,13 @@ fn test_build_specs_multi_agent_uses_task_names_and_hides_resume() {
         .expect("list_agents should define output schema");
     assert_eq!(
         output_schema["properties"]["agents"]["items"]["required"],
-        json!(["agent_name", "agent_status", "last_task_message"])
+        json!([
+            "agent_name",
+            "agent_display_name",
+            "agent_role",
+            "agent_status",
+            "last_task_message"
+        ])
     );
 }
 
@@ -1458,6 +1472,7 @@ fn tool_suggest_description_lists_discoverable_tools() {
             name: "Sample Plugin".to_string(),
             description: None,
             has_skills: true,
+            has_llm: false,
             mcp_server_names: vec!["sample-docs".to_string()],
             app_connector_ids: vec!["connector_sample".to_string()],
         })),

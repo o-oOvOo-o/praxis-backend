@@ -4,7 +4,6 @@ use praxis_protocol::AgentPath;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
-use rand::prelude::IndexedRandom;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
@@ -28,22 +27,28 @@ pub(crate) struct AgentRegistry {
 #[derive(Default)]
 struct ActiveAgents {
     agent_tree: HashMap<String, AgentMetadata>,
-    used_agent_nicknames: HashSet<String>,
-    nickname_reset_count: usize,
+    used_agent_base_names: HashSet<String>,
+    base_name_reset_count: usize,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct AgentMetadata {
     pub(crate) agent_id: Option<ThreadId>,
     pub(crate) agent_path: Option<AgentPath>,
-    pub(crate) agent_nickname: Option<String>,
+    pub(crate) agent_base_name: Option<String>,
+    pub(crate) agent_title: Option<String>,
+    pub(crate) agent_display_name: Option<String>,
     pub(crate) agent_role: Option<String>,
     pub(crate) last_task_message: Option<String>,
 }
 
-fn format_agent_nickname(name: &str, nickname_reset_count: usize) -> String {
-    match nickname_reset_count {
+fn format_agent_base_name(name: &str, base_name_reset_count: usize) -> String {
+    match base_name_reset_count {
         0 => name.to_string(),
+        reset_count if !name.is_ascii() => {
+            let value = reset_count + 1;
+            format!("{name}{value}")
+        }
         reset_count => {
             let value = reset_count + 1;
             let suffix = match value % 100 {
@@ -91,7 +96,7 @@ impl AgentRegistry {
         Ok(SpawnReservation {
             state: Arc::clone(self),
             active: true,
-            reserved_agent_nickname: None,
+            reserved_agent_base_name: None,
             reserved_agent_path: None,
         })
     }
@@ -152,6 +157,43 @@ impl AgentRegistry {
             .cloned()
     }
 
+    pub(crate) fn agent_id_for_display_name(
+        &self,
+        agent_display_name: &str,
+    ) -> Result<Option<ThreadId>> {
+        let needle = agent_display_name.trim();
+        if needle.is_empty() {
+            return Ok(None);
+        }
+
+        let active_agents = self
+            .active_agents
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut matches = active_agents
+            .agent_tree
+            .values()
+            .filter(|metadata| {
+                !metadata.agent_path.as_ref().is_some_and(AgentPath::is_root)
+                    && metadata
+                        .agent_display_name
+                        .as_deref()
+                        .map(str::trim)
+                        .is_some_and(|display_name| display_name == needle)
+            })
+            .filter_map(|metadata| metadata.agent_id);
+
+        let Some(thread_id) = matches.next() else {
+            return Ok(None);
+        };
+        if matches.next().is_some() {
+            return Err(PraxisErr::UnsupportedOperation(format!(
+                "agent display name `{needle}` is ambiguous; use the agent path instead"
+            )));
+        }
+        Ok(Some(thread_id))
+    }
+
     pub(crate) fn live_agents(&self) -> Vec<AgentMetadata> {
         self.active_agents
             .lock()
@@ -193,50 +235,49 @@ impl AgentRegistry {
             .as_ref()
             .map(ToString::to_string)
             .unwrap_or_else(|| format!("thread:{thread_id}"));
-        if let Some(agent_nickname) = agent_metadata.agent_nickname.clone() {
-            active_agents.used_agent_nicknames.insert(agent_nickname);
+        if let Some(agent_base_name) = agent_metadata.agent_base_name.clone() {
+            active_agents.used_agent_base_names.insert(agent_base_name);
         }
         active_agents.agent_tree.insert(key, agent_metadata);
     }
 
-    fn reserve_agent_nickname(&self, names: &[&str], preferred: Option<&str>) -> Option<String> {
+    fn reserve_agent_base_name(&self, names: &[&str], preferred: Option<&str>) -> Option<String> {
         let mut active_agents = self
             .active_agents
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let agent_nickname = if let Some(preferred) = preferred {
+        let agent_base_name = if let Some(preferred) = preferred {
             preferred.to_string()
         } else {
             if names.is_empty() {
                 return None;
             }
-            let available_names: Vec<String> = names
+            let available_name = names
                 .iter()
-                .map(|name| format_agent_nickname(name, active_agents.nickname_reset_count))
-                .filter(|name| !active_agents.used_agent_nicknames.contains(name))
-                .collect();
-            if let Some(name) = available_names.choose(&mut rand::rng()) {
-                name.clone()
+                .map(|name| format_agent_base_name(name, active_agents.base_name_reset_count))
+                .find(|name| !active_agents.used_agent_base_names.contains(name));
+            if let Some(name) = available_name {
+                name
             } else {
-                active_agents.used_agent_nicknames.clear();
-                active_agents.nickname_reset_count += 1;
+                active_agents.used_agent_base_names.clear();
+                active_agents.base_name_reset_count += 1;
                 if let Some(metrics) = praxis_otel::metrics::global() {
                     let _ = metrics.counter(
-                        "codex.multi_agent.nickname_pool_reset",
+                        "codex.multi_agent.base_name_pool_reset",
                         /*inc*/ 1,
                         &[],
                     );
                 }
-                format_agent_nickname(
-                    names.choose(&mut rand::rng())?,
-                    active_agents.nickname_reset_count,
+                format_agent_base_name(
+                    names.first().copied()?,
+                    active_agents.base_name_reset_count,
                 )
             }
         };
         active_agents
-            .used_agent_nicknames
-            .insert(agent_nickname.clone());
-        Some(agent_nickname)
+            .used_agent_base_names
+            .insert(agent_base_name.clone());
+        Some(agent_base_name)
     }
 
     fn reserve_agent_path(&self, agent_path: &AgentPath) -> Result<()> {
@@ -294,24 +335,24 @@ impl AgentRegistry {
 pub(crate) struct SpawnReservation {
     state: Arc<AgentRegistry>,
     active: bool,
-    reserved_agent_nickname: Option<String>,
+    reserved_agent_base_name: Option<String>,
     reserved_agent_path: Option<AgentPath>,
 }
 
 impl SpawnReservation {
-    pub(crate) fn reserve_agent_nickname_with_preference(
+    pub(crate) fn reserve_agent_base_name_with_preference(
         &mut self,
         names: &[&str],
         preferred: Option<&str>,
     ) -> Result<String> {
-        let agent_nickname = self
+        let agent_base_name = self
             .state
-            .reserve_agent_nickname(names, preferred)
+            .reserve_agent_base_name(names, preferred)
             .ok_or_else(|| {
-                PraxisErr::UnsupportedOperation("no available agent nicknames".to_string())
+                PraxisErr::UnsupportedOperation("no available agent base names".to_string())
             })?;
-        self.reserved_agent_nickname = Some(agent_nickname.clone());
-        Ok(agent_nickname)
+        self.reserved_agent_base_name = Some(agent_base_name.clone());
+        Ok(agent_base_name)
     }
 
     pub(crate) fn reserve_agent_path(&mut self, agent_path: &AgentPath) -> Result<()> {
@@ -321,7 +362,7 @@ impl SpawnReservation {
     }
 
     pub(crate) fn commit(mut self, agent_metadata: AgentMetadata) {
-        self.reserved_agent_nickname = None;
+        self.reserved_agent_base_name = None;
         self.reserved_agent_path = None;
         self.state.register_spawned_thread(agent_metadata);
         self.active = false;

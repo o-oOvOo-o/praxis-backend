@@ -167,7 +167,7 @@ SELECT
     updated_at,
     source,
     agent_path,
-    agent_nickname,
+    agent_display_name,
     agent_role,
     model_provider,
     model,

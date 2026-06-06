@@ -1206,58 +1206,25 @@ impl HistoryCell for SessionInfoCell {
 }
 
 pub(crate) fn new_session_info(
-    config: &Config,
-    tui_config: &TuiRuntimeConfig,
+    _config: &Config,
+    _tui_config: &TuiRuntimeConfig,
     requested_model: &str,
     event: SessionConfiguredEvent,
     is_first_event: bool,
-    tooltip_override: Option<String>,
-    auth_plan: Option<PlanType>,
-    show_fast_status: bool,
+    _tooltip_override: Option<String>,
+    _auth_plan: Option<PlanType>,
+    _show_fast_status: bool,
 ) -> SessionInfoCell {
-    let SessionConfiguredEvent {
-        session_id,
-        model,
-        reasoning_effort,
-        ..
-    } = event;
-    // Header box rendered as history (so it appears at the very top)
-    let mut header = if tui_config.animations {
-        SessionHeaderHistoryCell::new_animated(
-            model.clone(),
-            reasoning_effort,
-            show_fast_status,
-            config.cwd.to_path_buf(),
-            PRAXIS_CLI_VERSION,
-        )
-    } else {
-        SessionHeaderHistoryCell::new(
-            model.clone(),
-            reasoning_effort,
-            show_fast_status,
-            config.cwd.to_path_buf(),
-            PRAXIS_CLI_VERSION,
-        )
-    };
-    header.set_startup_notice(if !is_first_event && tui_config.show_tooltips {
-        tooltip_override.clone()
-    } else {
-        None
-    });
-    header.apply_startup_context(&config.praxis_home, Some(session_id), auth_plan, 3);
-    let mut parts: Vec<Box<dyn HistoryCell>> = vec![Box::new(header)];
+    let SessionConfiguredEvent { model, .. } = event;
 
-    if is_first_event {
-        // Startup guidance is now rendered inside the welcome card itself.
-    } else {
-        if requested_model != model {
-            let lines = vec![
-                "model changed:".magenta().bold().into(),
-                format!("requested: {requested_model}").into(),
-                format!("used: {model}").into(),
-            ];
-            parts.push(Box::new(PlainHistoryCell { lines }));
-        }
+    let mut parts: Vec<Box<dyn HistoryCell>> = Vec::new();
+    if !is_first_event && requested_model != model {
+        let lines = vec![
+            "model changed:".magenta().bold().into(),
+            format!("requested: {requested_model}").into(),
+            format!("used: {model}").into(),
+        ];
+        parts.push(Box::new(PlainHistoryCell { lines }));
     }
 
     SessionInfoCell(CompositeHistoryCell { parts })
@@ -4042,7 +4009,7 @@ mod tests {
         );
 
         let rendered = render_transcript(&cell).join("\n");
-        assert!(rendered.contains("Model just became available"));
+        assert!(rendered.trim().is_empty());
     }
 
     #[tokio::test]
@@ -4062,13 +4029,7 @@ mod tests {
         );
 
         let rendered = render_transcript(&cell).join("\n");
-        assert!(rendered.contains("Praxis CLI"));
-        assert!(rendered.contains("Welcome back!"));
-        assert!(rendered.contains("Tips for getting started"));
-        assert!(rendered.contains("Recent activity"));
-        assert!(rendered.contains("gpt-5"));
-        assert!(rendered.contains("Free"));
-        assert!(rendered.contains("Model just became available"));
+        assert!(rendered.trim().is_empty());
     }
 
     #[tokio::test]
@@ -4088,7 +4049,7 @@ mod tests {
 
         let rendered = render_transcript(&cell).join("\n");
         assert!(!rendered.contains("Model just became available"));
-        assert!(rendered.contains("Tips for getting started"));
+        assert!(rendered.trim().is_empty());
     }
 
     #[tokio::test]

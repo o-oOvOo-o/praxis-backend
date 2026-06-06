@@ -54,6 +54,7 @@ pub(crate) enum SpawnAgentForkMode {
 pub(crate) struct SpawnAgentOptions {
     pub(crate) fork_parent_spawn_call_id: Option<String>,
     pub(crate) fork_mode: Option<SpawnAgentForkMode>,
+    pub(crate) agent_title: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -66,11 +67,15 @@ pub(crate) struct LiveAgent {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub(crate) struct ListedAgent {
     pub(crate) agent_name: String,
+    pub(crate) agent_base_name: Option<String>,
+    pub(crate) agent_title: Option<String>,
+    pub(crate) agent_display_name: Option<String>,
+    pub(crate) agent_role: Option<String>,
     pub(crate) agent_status: AgentStatus,
     pub(crate) last_task_message: Option<String>,
 }
 
-fn default_agent_nickname_list() -> Vec<&'static str> {
+fn default_agent_base_name_list() -> Vec<&'static str> {
     AGENT_NAMES
         .lines()
         .map(str::trim)
@@ -78,21 +83,95 @@ fn default_agent_nickname_list() -> Vec<&'static str> {
         .collect()
 }
 
-fn agent_nickname_candidates(
+fn agent_base_name_candidates(
     config: &crate::config::Config,
     role_name: Option<&str>,
 ) -> Vec<String> {
     let role_name = role_name.unwrap_or(DEFAULT_ROLE_NAME);
     if let Some(candidates) =
-        resolve_role_config(config, role_name).and_then(|role| role.nickname_candidates.clone())
+        resolve_role_config(config, role_name).and_then(|role| role.base_name_candidates.clone())
     {
         return candidates;
     }
 
-    default_agent_nickname_list()
+    default_agent_base_name_list()
         .into_iter()
         .map(ToOwned::to_owned)
         .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AgentDisplayIdentity {
+    base_name: String,
+    title: Option<String>,
+    display_name: String,
+}
+
+fn build_agent_display_identity(base_name: String, agent_title: Option<&str>) -> AgentDisplayIdentity {
+    let title = agent_title
+        .and_then(normalize_agent_title)
+        .map(|title| strip_redundant_agent_prefix(base_name.as_str(), title.as_str()).to_string())
+        .filter(|title| !title.is_empty());
+    let display_name = title
+        .as_deref()
+        .map(|title| format!("{base_name}-{title}"))
+        .unwrap_or_else(|| base_name.clone());
+    AgentDisplayIdentity {
+        base_name,
+        title,
+        display_name,
+    }
+}
+
+fn normalize_agent_title(value: &str) -> Option<String> {
+    let collapsed = value
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let trimmed = collapsed
+        .trim()
+        .trim_matches(|ch| matches!(ch, '-' | '_' | ':' | '：' | '|' | '、' | '，' | ',' | '。'));
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let mut truncated = String::new();
+    for (index, ch) in trimmed.chars().enumerate() {
+        if index >= 18 {
+            break;
+        }
+        truncated.push(ch);
+    }
+    Some(truncated)
+}
+
+fn strip_redundant_agent_prefix<'a>(base_name: &str, title: &'a str) -> &'a str {
+    for separator in ["-", "－", "—", ":", "："] {
+        if let Some(stripped) = title
+            .strip_prefix(base_name)
+            .and_then(|rest| rest.strip_prefix(separator))
+            .map(str::trim)
+            .filter(|rest| !rest.is_empty())
+        {
+            return stripped;
+        }
+    }
+
+    for separator in ["-", "－", "—", ":", "："] {
+        let Some((prefix, rest)) = title.split_once(separator) else {
+            continue;
+        };
+        if !rest.trim().is_empty()
+            && prefix.chars().count() <= 4
+            && prefix.chars().any(|ch| !ch.is_ascii())
+        {
+            return rest.trim();
+        }
+    }
+    title
 }
 
 /// Control-plane handle for multi-agent operations.
@@ -169,8 +248,10 @@ impl AgentControl {
                 parent_thread_id,
                 depth,
                 agent_path,
+                agent_base_name,
+                agent_title,
+                agent_display_name,
                 agent_role,
-                ..
             })) => {
                 let (session_source, agent_metadata) = self.prepare_thread_spawn(
                     &mut reservation,
@@ -179,7 +260,10 @@ impl AgentControl {
                     depth,
                     agent_path,
                     agent_role,
-                    /*preferred_agent_nickname*/ None,
+                    agent_base_name,
+                    agent_title,
+                    agent_display_name,
+                    options.agent_title.as_deref(),
                 )?;
                 (Some(session_source), agent_metadata)
             }
@@ -373,7 +457,9 @@ impl AgentControl {
                             parent_thread_id,
                             depth: child_depth,
                             agent_path: None,
-                            agent_nickname: None,
+                            agent_base_name: None,
+                            agent_title: None,
+                            agent_display_name: None,
                             agent_role: None,
                         });
                     match self
@@ -419,10 +505,18 @@ impl AgentControl {
                 parent_thread_id,
                 depth,
                 agent_path,
+                agent_base_name,
+                agent_title,
                 agent_role: _,
-                agent_nickname: _,
+                agent_display_name: _,
             }) => {
-                let (resumed_agent_path, resumed_agent_nickname, resumed_agent_role) =
+                let (
+                    resumed_agent_path,
+                    resumed_agent_base_name,
+                    resumed_agent_title,
+                    resumed_agent_display_name,
+                    resumed_agent_role,
+                ) =
                     if let Some(state_db_ctx) = state_db::get_state_db(&config).await {
                         match state_db_ctx.get_thread(thread_id).await {
                             Ok(Some(metadata)) => (
@@ -430,13 +524,15 @@ impl AgentControl {
                                     .agent_path
                                     .as_deref()
                                     .and_then(|agent_path| AgentPath::try_from(agent_path).ok()),
-                                metadata.agent_nickname,
+                                metadata.agent_base_name,
+                                metadata.agent_title,
+                                metadata.agent_display_name,
                                 metadata.agent_role,
                             ),
-                            Ok(None) | Err(_) => (None, None, None),
+                            Ok(None) | Err(_) => (None, None, None, None, None),
                         }
                     } else {
-                        (None, None, None)
+                        (None, None, None, None, None)
                     };
                 self.prepare_thread_spawn(
                     &mut reservation,
@@ -445,7 +541,10 @@ impl AgentControl {
                     depth,
                     agent_path.or(resumed_agent_path),
                     resumed_agent_role,
-                    resumed_agent_nickname,
+                    agent_base_name.or(resumed_agent_base_name),
+                    agent_title.or(resumed_agent_title),
+                    resumed_agent_display_name,
+                    /*agent_title*/ None,
                 )?
             }
             other => (other, AgentMetadata::default()),
@@ -734,29 +833,38 @@ impl AgentControl {
         let current_agent_path = current_session_source
             .get_agent_path()
             .unwrap_or_else(AgentPath::root);
-        let agent_path = current_agent_path
-            .resolve(agent_reference)
-            .map_err(PraxisErr::UnsupportedOperation)?;
-        if let Some(thread_id) = self.state.agent_id_for_path(&agent_path) {
-            return Ok(thread_id);
-        }
-        let root_thread_id = self
-            .resolve_tree_root_thread_id(&state, current_thread_id, current_session_source)
-            .await;
-        if agent_path.is_root() {
-            if state.get_thread(root_thread_id).await.is_ok() {
-                return Ok(root_thread_id);
+        let agent_path = current_agent_path.resolve(agent_reference);
+        if let Ok(agent_path) = &agent_path {
+            if let Some(thread_id) = self.state.agent_id_for_path(agent_path) {
+                return Ok(thread_id);
             }
-        } else if let Some(thread_id) = self
-            .find_live_agent_by_path(root_thread_id, &agent_path)
-            .await?
-        {
+            let root_thread_id = self
+                .resolve_tree_root_thread_id(&state, current_thread_id, current_session_source)
+                .await;
+            if agent_path.is_root() {
+                if state.get_thread(root_thread_id).await.is_ok() {
+                    return Ok(root_thread_id);
+                }
+            } else if let Some(thread_id) = self
+                .find_live_agent_by_path(root_thread_id, agent_path)
+                .await?
+            {
+                return Ok(thread_id);
+            }
+        }
+
+        if let Some(thread_id) = self.state.agent_id_for_display_name(agent_reference)? {
             return Ok(thread_id);
         }
-        Err(PraxisErr::UnsupportedOperation(format!(
-            "live agent path `{}` not found",
-            agent_path.as_str()
-        )))
+
+        match agent_path {
+            Ok(agent_path) => Err(PraxisErr::UnsupportedOperation(format!(
+                "live agent path `{}` or display name `{}` not found",
+                agent_path.as_str(),
+                agent_reference.trim()
+            ))),
+            Err(err) => Err(PraxisErr::UnsupportedOperation(err)),
+        }
     }
 
     /// Subscribe to status updates for `agent_id`, yielding the latest value and changes.
@@ -795,7 +903,7 @@ impl AgentControl {
                     .as_ref()
                     .map(|agent_path| agent_path.name().to_string())
                     .unwrap_or_else(|| thread_id.to_string());
-                format_subagent_context_line(reference.as_str(), metadata.agent_nickname.as_deref())
+                format_subagent_context_line(reference.as_str(), metadata.agent_display_name.as_deref())
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -831,6 +939,10 @@ impl AgentControl {
         {
             agents.push(ListedAgent {
                 agent_name: root_path.to_string(),
+                agent_base_name: None,
+                agent_title: None,
+                agent_display_name: None,
+                agent_role: None,
                 agent_status: root_thread.agent_status().await,
                 last_task_message: Some(ROOT_LAST_TASK_MESSAGE.to_string()),
             });
@@ -858,6 +970,10 @@ impl AgentControl {
             let last_task_message = metadata.last_task_message.clone();
             agents.push(ListedAgent {
                 agent_name,
+                agent_base_name: metadata.agent_base_name.clone(),
+                agent_title: metadata.agent_title.clone(),
+                agent_display_name: metadata.agent_display_name.clone(),
+                agent_role: metadata.agent_role.clone(),
                 agent_status: thread.agent_status().await,
                 last_task_message,
             });
@@ -971,7 +1087,10 @@ impl AgentControl {
         depth: i32,
         agent_path: Option<AgentPath>,
         agent_role: Option<String>,
-        preferred_agent_nickname: Option<String>,
+        preferred_agent_base_name: Option<String>,
+        preferred_agent_title: Option<String>,
+        preferred_agent_display_name: Option<String>,
+        agent_title: Option<&str>,
     ) -> PraxisResult<(SessionSource, AgentMetadata)> {
         if depth == 1 {
             self.state.register_root_thread(parent_thread_id);
@@ -979,23 +1098,41 @@ impl AgentControl {
         if let Some(agent_path) = agent_path.as_ref() {
             reservation.reserve_agent_path(agent_path)?;
         }
-        let candidate_names = agent_nickname_candidates(config, agent_role.as_deref());
+        let candidate_names = agent_base_name_candidates(config, agent_role.as_deref());
         let candidate_name_refs: Vec<&str> = candidate_names.iter().map(String::as_str).collect();
-        let agent_nickname = Some(reservation.reserve_agent_nickname_with_preference(
-            &candidate_name_refs,
-            preferred_agent_nickname.as_deref(),
-        )?);
+        let preferred_agent_base_name = preferred_agent_base_name
+            .as_deref()
+            .or_else(|| preferred_agent_display_name.as_deref())
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        let base_name = reservation
+            .reserve_agent_base_name_with_preference(&candidate_name_refs, preferred_agent_base_name)?;
+        let requested_title = preferred_agent_title.as_deref().or(agent_title);
+        let mut identity = build_agent_display_identity(base_name, requested_title);
+        if identity.title.is_none()
+            && let Some(display_name) = preferred_agent_display_name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            && display_name != identity.base_name
+        {
+            identity.display_name = display_name.to_string();
+        }
         let session_source = SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
             parent_thread_id,
             depth,
             agent_path: agent_path.clone(),
-            agent_nickname: agent_nickname.clone(),
+            agent_base_name: Some(identity.base_name.clone()),
+            agent_title: identity.title.clone(),
+            agent_display_name: Some(identity.display_name.clone()),
             agent_role: agent_role.clone(),
         });
         let agent_metadata = AgentMetadata {
             agent_id: None,
             agent_path,
-            agent_nickname,
+            agent_base_name: Some(identity.base_name),
+            agent_title: identity.title,
+            agent_display_name: Some(identity.display_name),
             agent_role,
             last_task_message: None,
         };
@@ -1170,8 +1307,14 @@ fn merge_live_agent_metadata(
                 .then(AgentPath::root)
         });
     }
-    if metadata.agent_nickname.is_none() {
-        metadata.agent_nickname = snapshot.session_source.get_nickname();
+    if metadata.agent_base_name.is_none() {
+        metadata.agent_base_name = snapshot.session_source.get_agent_base_name();
+    }
+    if metadata.agent_title.is_none() {
+        metadata.agent_title = snapshot.session_source.get_agent_title();
+    }
+    if metadata.agent_display_name.is_none() {
+        metadata.agent_display_name = snapshot.session_source.get_agent_display_name();
     }
     if metadata.agent_role.is_none() {
         metadata.agent_role = snapshot.session_source.get_agent_role();

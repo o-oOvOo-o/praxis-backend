@@ -5,6 +5,7 @@ use crate::app_event::AppEvent;
 use crate::app_event::ExitMode;
 use crate::app_event::FeedbackCategory;
 use crate::app_event::RealtimeAudioDeviceKind;
+use crate::app_event::ThreadGoalSetMode;
 #[cfg(target_os = "windows")]
 use crate::app_event::WindowsSandboxEnableMode;
 use crate::app_event_sender::AppEventSender;
@@ -40,9 +41,10 @@ use crate::model_migration::ModelMigrationOutcome;
 use crate::model_migration::migration_copy_for_models;
 use crate::model_migration::run_model_migration_prompt;
 use crate::multi_agents::agent_picker_status_dot_spans;
-use crate::multi_agents::format_agent_picker_item_name;
+use crate::multi_agents::format_agent_picker_item_name_for_thread;
 use crate::multi_agents::next_agent_shortcut_matches;
 use crate::multi_agents::previous_agent_shortcut_matches;
+use crate::multi_agents::subagent_display_name;
 use crate::pager_overlay::Overlay;
 use crate::read_session_model;
 use crate::render::highlight::highlight_bash_to_lines;
@@ -89,11 +91,13 @@ use praxis_app_gateway_protocol::PluginUninstallResponse;
 use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
+use praxis_app_gateway_protocol::SessionSource as AppGatewaySessionSource;
 use praxis_app_gateway_protocol::SkillsListResponse;
 use praxis_app_gateway_protocol::Thread;
 use praxis_app_gateway_protocol::ThreadActiveFlag;
 use praxis_app_gateway_protocol::ThreadControlState;
 use praxis_app_gateway_protocol::ThreadControllerKind;
+use praxis_app_gateway_protocol::ThreadGoalStatus;
 use praxis_app_gateway_protocol::ThreadItem;
 use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadListResponse;
@@ -143,12 +147,12 @@ use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SkillErrorInfo;
+use praxis_protocol::protocol::SubAgentSource;
 use praxis_protocol::protocol::TokenUsage;
 use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_terminal_detection::user_agent;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use ratatui::layout::Rect;
-use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
@@ -1048,7 +1052,6 @@ pub(crate) struct App {
 
 pub(crate) const TRANSCRIPT_SCROLLBACK_BACKFILL_CELL_BUDGET: usize = 64;
 pub(crate) const TRANSCRIPT_SCROLLBACK_BACKFILL_LINE_BUDGET: usize = 512;
-const CENTER_PANEL_BG: Color = Color::Rgb(12, 14, 13);
 const APP_GATEWAY_RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
@@ -1071,6 +1074,8 @@ struct CenterState {
     rows: Vec<CenterThreadRow>,
     usage_by_thread: HashMap<ThreadId, TokenUsageInfo>,
     pinned_thread_ids: HashSet<ThreadId>,
+    expanded_subagent_parent_ids: HashSet<ThreadId>,
+    expanded_closed_subagent_parent_ids: HashSet<ThreadId>,
     search_query: String,
     search_focused: bool,
     selected: usize,
@@ -1098,8 +1103,44 @@ struct CenterThreadRow {
     status: ThreadStatus,
     control_state: Option<ThreadControlState>,
     source: String,
+    source_kind: AppGatewaySessionSource,
+    agent_base_name: Option<String>,
+    agent_title: Option<String>,
+    agent_display_name: Option<String>,
+    subagent_parent_thread_id: Option<ThreadId>,
+    subagent_depth: Option<i32>,
+    subagents: CenterSubagentSummary,
     updated_at: i64,
     token_usage: Option<TokenUsageInfo>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CenterSubagentSummary {
+    total: usize,
+    open: usize,
+    closed: usize,
+    running: usize,
+    labels: Vec<String>,
+}
+
+impl CenterSubagentSummary {
+    fn is_empty(&self) -> bool {
+        self.total == 0
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CenterSubagentChildSummary {
+    parent_thread_id: ThreadId,
+    label: String,
+    is_open: bool,
+    is_running: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CenterVisibleItem {
+    Thread(usize),
+    ClosedSubagents { parent_index: usize },
 }
 
 #[derive(Debug, Default)]
@@ -1124,6 +1165,8 @@ enum CenterMouseTarget {
     NewThread,
     Search,
     Thread(usize),
+    SubagentsToggle(usize),
+    ClosedSubagentsToggle(usize),
     LoadMore,
     ContextMenu(CenterMenuAction),
     RenameSave,
@@ -1211,10 +1254,24 @@ struct PaneTextSnapshot {
 impl CenterThreadRow {
     fn from_thread(thread: Thread) -> Option<Self> {
         let thread_id = ThreadId::from_string(&thread.id).ok()?;
+        let (subagent_parent_thread_id, subagent_depth) =
+            center_subagent_parent(&thread.source).unwrap_or((None, None));
+        let agent_display_name = thread
+            .agent_display_name
+            .clone()
+            .or_else(|| center_subagent_display_name(&thread.source));
+        let agent_base_name = thread
+            .agent_base_name
+            .clone()
+            .or_else(|| center_subagent_base_name(&thread.source));
+        let agent_title = thread
+            .agent_title
+            .clone()
+            .or_else(|| center_subagent_title(&thread.source));
         let mut name = thread
             .name
             .clone()
-            .or_else(|| thread.agent_nickname.clone())
+            .or_else(|| agent_display_name.clone())
             .or_else(|| thread.summary.clone())
             .or_else(|| {
                 let preview = thread.preview.trim();
@@ -1222,7 +1279,13 @@ impl CenterThreadRow {
             })
             .unwrap_or_else(|| center_fallback_thread_name(&thread.id));
         name = center_single_line(&name);
-        let preview = if thread.preview.trim().is_empty() {
+        let preview = if let Some(title) = agent_title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+        {
+            title.to_string()
+        } else if thread.preview.trim().is_empty() {
             thread
                 .agent_role
                 .clone()
@@ -1239,11 +1302,138 @@ impl CenterThreadRow {
             cwd: thread.cwd,
             status: thread.status,
             control_state: thread.control_state,
-            source: format!("{:?}", thread.source),
+            source: center_source_label(&thread.source),
+            source_kind: thread.source,
+            agent_base_name,
+            agent_title,
+            agent_display_name,
+            subagent_parent_thread_id,
+            subagent_depth,
+            subagents: CenterSubagentSummary::default(),
             updated_at: thread.updated_at,
             token_usage: thread.token_usage.map(token_usage_info_from_app_gateway),
         })
     }
+}
+
+fn center_subagent_display_name(source: &AppGatewaySessionSource) -> Option<String> {
+    match source {
+        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            agent_display_name, ..
+        }) => agent_display_name.clone(),
+        _ => None,
+    }
+}
+
+fn center_subagent_base_name(source: &AppGatewaySessionSource) -> Option<String> {
+    match source {
+        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            agent_base_name, ..
+        }) => agent_base_name.clone(),
+        _ => None,
+    }
+}
+
+fn center_subagent_title(source: &AppGatewaySessionSource) -> Option<String> {
+    match source {
+        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            agent_title, ..
+        }) => agent_title.clone(),
+        _ => None,
+    }
+}
+
+fn center_subagent_parent(
+    source: &AppGatewaySessionSource,
+) -> Option<(Option<ThreadId>, Option<i32>)> {
+    match source {
+        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id,
+            depth,
+            ..
+        }) => Some((Some(*parent_thread_id), Some(*depth))),
+        AppGatewaySessionSource::SubAgent(_) => Some((None, None)),
+        _ => None,
+    }
+}
+
+fn center_source_label(source: &AppGatewaySessionSource) -> String {
+    match source {
+        AppGatewaySessionSource::Cli => "cli".to_string(),
+        AppGatewaySessionSource::VsCode => "vscode".to_string(),
+        AppGatewaySessionSource::Exec => "exec".to_string(),
+        AppGatewaySessionSource::AppGateway => "gateway".to_string(),
+        AppGatewaySessionSource::Custom(value) => center_single_line(value),
+        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. }) => {
+            "subagent".to_string()
+        }
+        AppGatewaySessionSource::SubAgent(source) => format!("subagent {source}"),
+        AppGatewaySessionSource::Unknown => "unknown".to_string(),
+    }
+}
+
+fn refresh_center_subagent_summaries(rows: &mut [CenterThreadRow]) {
+    let children: Vec<CenterSubagentChildSummary> = rows
+        .iter()
+        .filter_map(center_subagent_child_summary)
+        .collect();
+    for row in rows.iter_mut() {
+        row.subagents = CenterSubagentSummary::default();
+    }
+    for child in children {
+        let Some(parent) = rows
+            .iter_mut()
+            .find(|row| row.thread_id == child.parent_thread_id)
+        else {
+            continue;
+        };
+        parent.subagents.total = parent.subagents.total.saturating_add(1);
+        if child.is_open {
+            parent.subagents.open = parent.subagents.open.saturating_add(1);
+            if parent.subagents.labels.len() < 4 {
+                parent.subagents.labels.push(child.label);
+            }
+        } else {
+            parent.subagents.closed = parent.subagents.closed.saturating_add(1);
+        }
+        if child.is_running {
+            parent.subagents.running = parent.subagents.running.saturating_add(1);
+        }
+    }
+}
+
+fn center_subagent_child_summary(row: &CenterThreadRow) -> Option<CenterSubagentChildSummary> {
+    let parent_thread_id = row.subagent_parent_thread_id?;
+    let status = center_subagent_status_label(row);
+    let label = format!("{}  {status}", center_thread_display_name(row));
+    Some(CenterSubagentChildSummary {
+        parent_thread_id,
+        label: center_single_line(&label),
+        is_open: !matches!(row.status, ThreadStatus::NotLoaded),
+        is_running: center_status_has_running_flag(&row.status),
+    })
+}
+
+fn center_subagent_status_label(row: &CenterThreadRow) -> &'static str {
+    match &row.status {
+        ThreadStatus::Active { .. } if center_status_has_running_flag(&row.status) => "运行",
+        ThreadStatus::Active { .. } => "活动",
+        ThreadStatus::Idle => "空闲",
+        ThreadStatus::SystemError => "错误",
+        ThreadStatus::NotLoaded => "关闭",
+    }
+}
+
+fn center_thread_display_name(row: &CenterThreadRow) -> String {
+    if matches!(row.source_kind, AppGatewaySessionSource::SubAgent(_)) {
+        return subagent_display_name(
+            row.thread_id,
+            row.agent_base_name.as_deref(),
+            row.agent_title.as_deref(),
+            row.agent_display_name.as_deref(),
+        );
+    }
+    row.name.clone()
 }
 
 fn sort_center_thread_rows(
@@ -1394,11 +1584,47 @@ impl CenterState {
     }
 
     fn top_visible_thread_id(&self) -> Option<ThreadId> {
-        self.rows.get(self.list_scroll).map(|row| row.thread_id)
+        self.actual_row_index_for_visible(self.list_scroll)
+            .and_then(|index| self.rows.get(index))
+            .map(|row| row.thread_id)
     }
 
     fn row_index(&self, thread_id: ThreadId) -> Option<usize> {
         self.rows.iter().position(|row| row.thread_id == thread_id)
+    }
+
+    fn actual_row_index_for_visible(&self, visible_index: usize) -> Option<usize> {
+        match self.visible_items().get(visible_index).copied()? {
+            CenterVisibleItem::Thread(index) => Some(index),
+            CenterVisibleItem::ClosedSubagents { .. } => None,
+        }
+    }
+
+    fn visible_item_at(&self, visible_index: usize) -> Option<CenterVisibleItem> {
+        self.visible_items().get(visible_index).copied()
+    }
+
+    fn visible_index_for_row(&self, row_index: usize) -> Option<usize> {
+        self.visible_items()
+            .into_iter()
+            .position(|item| item == CenterVisibleItem::Thread(row_index))
+    }
+
+    fn visible_index_for_closed_subagents(&self, parent_index: usize) -> Option<usize> {
+        self.visible_items()
+            .into_iter()
+            .position(|item| item == CenterVisibleItem::ClosedSubagents { parent_index })
+    }
+
+    fn visible_index_for_thread(&self, thread_id: ThreadId) -> Option<usize> {
+        self.visible_items().into_iter().position(|item| {
+            let CenterVisibleItem::Thread(index) = item else {
+                return false;
+            };
+            self.rows
+                .get(index)
+                .is_some_and(|row| row.thread_id == thread_id)
+        })
     }
 
     fn clamp_selection(&mut self, visible_rows: usize) {
@@ -1415,7 +1641,7 @@ impl CenterState {
         let Some(thread_id) = thread_id else {
             return false;
         };
-        let Some(index) = self.rows.iter().position(|row| row.thread_id == thread_id) else {
+        let Some(index) = self.visible_index_for_thread(thread_id) else {
             return false;
         };
         self.list_scroll = index;
@@ -1448,15 +1674,127 @@ impl CenterState {
     }
 
     fn list_item_count(&self) -> usize {
-        self.rows.len() + usize::from(self.has_load_more_row())
+        self.visible_row_count() + usize::from(self.has_load_more_row())
     }
 
     fn is_load_more_index(&self, index: usize) -> bool {
-        self.has_load_more_row() && index == self.rows.len()
+        self.has_load_more_row() && index == self.visible_row_count()
     }
 
     fn is_loading_more(&self) -> bool {
         self.refresh_in_flight && self.pending_refresh_cursor.is_some()
+    }
+
+    fn visible_row_count(&self) -> usize {
+        self.visible_items().len()
+    }
+
+    fn visible_items(&self) -> Vec<CenterVisibleItem> {
+        if !self.search_query.trim().is_empty() {
+            return (0..self.rows.len())
+                .map(CenterVisibleItem::Thread)
+                .collect();
+        }
+
+        let mut items = Vec::with_capacity(self.rows.len());
+        let mut emitted = HashSet::new();
+        for (index, row) in self.rows.iter().enumerate() {
+            if row.subagent_parent_thread_id.is_none()
+                || row
+                    .subagent_parent_thread_id
+                    .is_some_and(|parent_id| self.row_index(parent_id).is_none())
+            {
+                self.push_visible_row_tree(index, &mut emitted, &mut items);
+            }
+        }
+        items
+    }
+
+    fn push_visible_row_tree(
+        &self,
+        index: usize,
+        emitted: &mut HashSet<usize>,
+        items: &mut Vec<CenterVisibleItem>,
+    ) {
+        if !emitted.insert(index) {
+            return;
+        }
+        items.push(CenterVisibleItem::Thread(index));
+        let Some(parent_id) = self.rows.get(index).map(|row| row.thread_id) else {
+            return;
+        };
+        if !self.expanded_subagent_parent_ids.contains(&parent_id) {
+            return;
+        }
+        let child_indices = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(child_index, child)| {
+                (child.subagent_parent_thread_id == Some(parent_id)).then_some(child_index)
+            })
+            .collect::<Vec<_>>();
+
+        for child_index in child_indices.iter().copied() {
+            if self
+                .rows
+                .get(child_index)
+                .is_some_and(|child| !center_row_is_closed(child))
+            {
+                self.push_visible_row_tree(child_index, emitted, items);
+            }
+        }
+
+        let has_closed_children = child_indices.iter().any(|child_index| {
+            self.rows
+                .get(*child_index)
+                .is_some_and(center_row_is_closed)
+        });
+        if !has_closed_children {
+            return;
+        }
+        items.push(CenterVisibleItem::ClosedSubagents {
+            parent_index: index,
+        });
+        if !self
+            .expanded_closed_subagent_parent_ids
+            .contains(&parent_id)
+        {
+            return;
+        }
+        for child_index in child_indices {
+            if self.rows.get(child_index).is_some_and(center_row_is_closed) {
+                self.push_visible_row_tree(child_index, emitted, items);
+            }
+        }
+    }
+
+    fn toggle_subagents(&mut self, row_index: usize) {
+        let Some(row) = self.rows.get(row_index) else {
+            return;
+        };
+        if row.subagents.is_empty() {
+            return;
+        }
+        if !self.expanded_subagent_parent_ids.insert(row.thread_id) {
+            self.expanded_subagent_parent_ids.remove(&row.thread_id);
+        }
+    }
+
+    fn toggle_closed_subagents(&mut self, parent_row_index: usize) {
+        let Some(row) = self.rows.get(parent_row_index) else {
+            return;
+        };
+        if row.subagents.closed == 0 {
+            return;
+        }
+        if !self
+            .expanded_closed_subagent_parent_ids
+            .insert(row.thread_id)
+        {
+            self.expanded_closed_subagent_parent_ids
+                .remove(&row.thread_id);
+        }
     }
 }
 
@@ -1465,11 +1803,13 @@ const CENTER_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
 const CENTER_REPLAY_TURN_LIMIT: usize = 64;
 const CENTER_LIST_TOP_PADDING: u16 = 4;
 const CENTER_ROW_HEIGHT: u16 = 3;
+const CENTER_SUBAGENT_INDENT_STEP: u16 = 3;
+const CENTER_SUBAGENT_INDENT_MAX: u16 = 9;
 const CENTER_SPLIT_GAP: u16 = 1;
 const CENTER_LIST_MIN_WIDTH: u16 = 32;
 const CENTER_LIST_MAX_WIDTH: u16 = 52;
 const CENTER_CHAT_MIN_WIDTH: u16 = 48;
-const CENTER_CONTEXT_MENU_WIDTH: u16 = 22;
+const CENTER_CONTEXT_MENU_WIDTH: u16 = 36;
 const CENTER_RENAME_POPUP_WIDTH: u16 = 34;
 const CENTER_CONFIRM_POPUP_WIDTH: u16 = 30;
 const CENTER_STATUS_LABEL_WIDTH: usize = 10;
@@ -1761,6 +2101,10 @@ fn center_row_is_controlled(row: &CenterThreadRow) -> bool {
     row.control_state.is_some() || center_status_has_controlled_flag(&row.status)
 }
 
+fn center_row_is_closed(row: &CenterThreadRow) -> bool {
+    matches!(row.status, ThreadStatus::NotLoaded)
+}
+
 fn center_status_has_controlled_flag(status: &ThreadStatus) -> bool {
     matches!(
         status,
@@ -1820,6 +2164,113 @@ fn center_row_status_label(row: &CenterThreadRow) -> String {
         return activity.to_string();
     };
     format!("{activity} {control_label}")
+}
+
+fn center_row_subagent_marker(row: &CenterThreadRow) -> Option<String> {
+    if row.subagents.is_empty() {
+        return None;
+    }
+    if row.subagents.closed > 0 {
+        return Some(format!(
+            "子代理 {} · 关闭 {}",
+            row.subagents.open, row.subagents.closed
+        ));
+    }
+    Some(format!("子代理 {}", row.subagents.open))
+}
+
+fn center_closed_subagents_label(count: usize, language: UiLanguage) -> String {
+    match language {
+        UiLanguage::En => format!("Closed subagents {count}"),
+        UiLanguage::Cn => format!("已关闭子代理 {count}"),
+    }
+}
+
+fn center_closed_subagents_detail(count: usize, language: UiLanguage) -> String {
+    match language {
+        UiLanguage::En => format!("{count} inactive subagent thread(s)"),
+        UiLanguage::Cn => format!("{count} 条已关闭子代理线程"),
+    }
+}
+
+fn center_row_tree_prefix(row: &CenterThreadRow, expanded: bool) -> &'static str {
+    if row.subagent_parent_thread_id.is_some() {
+        return "└";
+    }
+    if row.subagents.is_empty() {
+        " "
+    } else if expanded {
+        "▾"
+    } else {
+        "▸"
+    }
+}
+
+fn center_row_tree_depth(row: &CenterThreadRow) -> u16 {
+    match row.subagent_depth {
+        Some(depth) if depth > 0 => depth as u16,
+        _ if row.subagent_parent_thread_id.is_some() => 1,
+        _ => 0,
+    }
+}
+
+fn center_row_tree_indent(row: &CenterThreadRow) -> u16 {
+    center_row_tree_depth(row)
+        .saturating_mul(CENTER_SUBAGENT_INDENT_STEP)
+        .min(CENTER_SUBAGENT_INDENT_MAX)
+}
+
+fn center_context_subagent_lines(
+    row: Option<&CenterThreadRow>,
+    language: UiLanguage,
+) -> Vec<String> {
+    let Some(row) = row else {
+        return Vec::new();
+    };
+    let mut lines = Vec::new();
+    if !row.subagents.is_empty() {
+        let closed = row.subagents.closed;
+        let header = match language {
+            UiLanguage::En => format!(
+                "Subagents {}  open {}  running {}",
+                row.subagents.total, row.subagents.open, row.subagents.running
+            ),
+            UiLanguage::Cn => format!(
+                "子代理 {}  打开 {}  运行 {}",
+                row.subagents.total, row.subagents.open, row.subagents.running
+            ),
+        };
+        lines.push(if closed > 0 {
+            match language {
+                UiLanguage::En => format!("{header}  closed {closed}"),
+                UiLanguage::Cn => format!("{header}  关闭 {closed}"),
+            }
+        } else {
+            header
+        });
+        for label in &row.subagents.labels {
+            lines.push(format!("  - {label}"));
+        }
+        if row.subagents.open > row.subagents.labels.len() {
+            let remaining = row.subagents.open - row.subagents.labels.len();
+            lines.push(match language {
+                UiLanguage::En => format!("  + {remaining} more"),
+                UiLanguage::Cn => format!("  + 还有 {remaining} 个"),
+            });
+        }
+    }
+    if let Some(depth) = row.subagent_depth {
+        let parent = row
+            .subagent_parent_thread_id
+            .map(|thread_id| thread_id.to_string())
+            .map(|thread_id| thread_id.chars().take(8).collect::<String>())
+            .unwrap_or_else(|| "unknown".to_string());
+        lines.push(match language {
+            UiLanguage::En => format!("Subagent  depth {depth}  parent {parent}"),
+            UiLanguage::Cn => format!("子代理  深度 {depth}  父线程 {parent}"),
+        });
+    }
+    lines
 }
 
 fn center_row_control_label(row: &CenterThreadRow) -> Option<String> {
@@ -1943,6 +2394,27 @@ fn center_truncate(text: &str, max_chars: usize) -> String {
 
 fn center_single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate_for_goal_notice(text: &str) -> String {
+    let normalized = center_single_line(text);
+    if normalized.chars().count() <= 96 {
+        return normalized;
+    }
+    let mut out = normalized.chars().take(95).collect::<String>();
+    out.push('~');
+    out
+}
+
+fn goal_status_label(status: ThreadGoalStatus) -> &'static str {
+    match status {
+        ThreadGoalStatus::Active => "active",
+        ThreadGoalStatus::Paused => "paused",
+        ThreadGoalStatus::Blocked => "blocked",
+        ThreadGoalStatus::UsageLimited => "usage limited",
+        ThreadGoalStatus::BudgetLimited => "budget limited",
+        ThreadGoalStatus::Complete => "complete",
+    }
 }
 
 fn normalize_harness_overrides_for_cwd(
@@ -2508,26 +2980,10 @@ impl App {
 
     fn clear_ui_header_lines_with_version(
         &self,
-        width: u16,
-        version: &'static str,
+        _width: u16,
+        _version: &'static str,
     ) -> Vec<Line<'static>> {
-        let mut header = history_cell::SessionHeaderHistoryCell::new(
-            self.chat_widget.current_model().to_string(),
-            self.chat_widget.current_reasoning_effort(),
-            self.chat_widget.should_show_fast_status(
-                self.chat_widget.current_model(),
-                self.chat_widget.current_service_tier(),
-            ),
-            self.config.cwd.to_path_buf(),
-            version,
-        );
-        header.apply_startup_context(
-            &self.config.praxis_home,
-            self.active_thread_id,
-            self.chat_widget.current_plan_type(),
-            5,
-        );
-        header.display_lines(width)
+        Vec::new()
     }
 
     fn clear_ui_header_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -2706,13 +3162,24 @@ impl App {
         let fallback_label = if is_primary {
             "Main [default]".to_string()
         } else {
-            let thread_id = thread_id.to_string();
-            let short_id: String = thread_id.chars().take(8).collect();
-            format!("Agent ({short_id})")
+            let thread_id_label = thread_id.to_string();
+            let short_id: String = thread_id_label.chars().take(8).collect();
+            format!(
+                "{} ({short_id})",
+                subagent_display_name(
+                    thread_id,
+                    /*agent_base_name*/ None,
+                    /*agent_title*/ None,
+                    /*agent_display_name*/ None,
+                )
+            )
         };
         if let Some(entry) = self.agent_navigation.get(&thread_id) {
-            let label = format_agent_picker_item_name(
-                entry.agent_nickname.as_deref(),
+            let label = format_agent_picker_item_name_for_thread(
+                thread_id,
+                entry.agent_base_name.as_deref(),
+                entry.agent_title.as_deref(),
+                entry.agent_display_name.as_deref(),
                 entry.agent_role.as_deref(),
                 is_primary,
             );
@@ -3550,7 +4017,12 @@ impl App {
             if self
                 .agent_navigation
                 .get(&thread_id)
-                .is_some_and(|entry| entry.agent_nickname.is_some() || entry.agent_role.is_some())
+                .is_some_and(|entry| {
+                    entry.agent_base_name.is_some()
+                        || entry.agent_title.is_some()
+                        || entry.agent_display_name.is_some()
+                        || entry.agent_role.is_some()
+                })
             {
                 continue;
             }
@@ -3562,7 +4034,9 @@ impl App {
                 Ok(thread) => {
                     self.upsert_agent_picker_thread(
                         thread_id,
-                        thread.agent_nickname,
+                        thread.agent_base_name,
+                        thread.agent_title,
+                        thread.agent_display_name,
                         thread.agent_role,
                         /*is_closed*/ false,
                     );
@@ -3605,7 +4079,9 @@ impl App {
         session.selfwork_plan_path = notification.thread.selfwork_plan_path.clone();
         self.upsert_agent_picker_thread(
             thread_id,
-            notification.thread.agent_nickname.clone(),
+            notification.thread.agent_base_name.clone(),
+            notification.thread.agent_title.clone(),
+            notification.thread.agent_display_name.clone(),
             notification.thread.agent_role.clone(),
             /*is_closed*/ false,
         );
@@ -3716,7 +4192,8 @@ impl App {
         self.primary_thread_id = Some(thread_id);
         self.primary_session_configured = Some(session.clone());
         self.upsert_agent_picker_thread(
-            thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
+            thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
+            /*agent_display_name*/ None, /*agent_role*/ None,
             /*is_closed*/ false,
         );
         let channel = self.ensure_thread_channel(thread_id);
@@ -3885,8 +4362,11 @@ impl App {
                 }
                 let id = *thread_id;
                 let is_primary = self.primary_thread_id == Some(*thread_id);
-                let name = format_agent_picker_item_name(
-                    entry.agent_nickname.as_deref(),
+                let name = format_agent_picker_item_name_for_thread(
+                    *thread_id,
+                    entry.agent_base_name.as_deref(),
+                    entry.agent_title.as_deref(),
+                    entry.agent_display_name.as_deref(),
                     entry.agent_role.as_deref(),
                     is_primary,
                 );
@@ -3943,17 +4423,28 @@ impl App {
     fn upsert_agent_picker_thread(
         &mut self,
         thread_id: ThreadId,
-        agent_nickname: Option<String>,
+        agent_base_name: Option<String>,
+        agent_title: Option<String>,
+        agent_display_name: Option<String>,
         agent_role: Option<String>,
         is_closed: bool,
     ) {
         self.chat_widget.set_collab_agent_metadata(
             thread_id,
-            agent_nickname.clone(),
+            agent_base_name.clone(),
+            agent_title.clone(),
+            agent_display_name.clone(),
             agent_role.clone(),
         );
         self.agent_navigation
-            .upsert(thread_id, agent_nickname, agent_role, is_closed);
+            .upsert(
+                thread_id,
+                agent_base_name,
+                agent_title,
+                agent_display_name,
+                agent_role,
+                is_closed,
+            );
         self.sync_active_agent_label();
     }
 
@@ -3980,10 +4471,20 @@ impl App {
             Ok(thread) => {
                 self.upsert_agent_picker_thread(
                     thread_id,
-                    thread.agent_nickname.or_else(|| {
+                    thread.agent_base_name.or_else(|| {
                         existing_entry
                             .as_ref()
-                            .and_then(|entry| entry.agent_nickname.clone())
+                            .and_then(|entry| entry.agent_base_name.clone())
+                    }),
+                    thread.agent_title.or_else(|| {
+                        existing_entry
+                            .as_ref()
+                            .and_then(|entry| entry.agent_title.clone())
+                    }),
+                    thread.agent_display_name.or_else(|| {
+                        existing_entry
+                            .as_ref()
+                            .and_then(|entry| entry.agent_display_name.clone())
                     }),
                     thread.agent_role.or_else(|| {
                         existing_entry
@@ -4009,13 +4510,16 @@ impl App {
                 if let Some(entry) = existing_entry {
                     self.upsert_agent_picker_thread(
                         thread_id,
-                        entry.agent_nickname,
+                        entry.agent_base_name,
+                        entry.agent_title,
+                        entry.agent_display_name,
                         entry.agent_role,
                         is_closed,
                     );
                 } else {
                     self.upsert_agent_picker_thread(
-                        thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
+                        thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
+                        /*agent_display_name*/ None, /*agent_role*/ None,
                         is_closed,
                     );
                 }
@@ -4171,7 +4675,9 @@ impl App {
         for (thread_id, entry) in self.agent_navigation.ordered_threads() {
             chat_widget.set_collab_agent_metadata(
                 thread_id,
-                entry.agent_nickname.clone(),
+                entry.agent_base_name.clone(),
+                entry.agent_title.clone(),
+                entry.agent_display_name.clone(),
                 entry.agent_role.clone(),
             );
         }
@@ -4464,7 +4970,9 @@ impl App {
         for thread in find_loaded_subagent_threads_for_primary(threads, primary_thread_id) {
             self.upsert_agent_picker_thread(
                 thread.thread_id,
-                thread.agent_nickname,
+                thread.agent_base_name,
+                thread.agent_title,
+                thread.agent_display_name,
                 thread.agent_role,
                 /*is_closed*/ false,
             );
@@ -5347,10 +5855,13 @@ impl App {
             self.center.clear_search_focus();
             return;
         };
+        let Some(visible_index) = self.center_visible_index_at(column, row) else {
+            return;
+        };
         let Some(thread_id) = self.center.rows.get(index).map(|row| row.thread_id) else {
             return;
         };
-        self.center.selected = index;
+        self.center.selected = visible_index;
         let visible_rows = self.center_visible_row_capacity();
         self.center.ensure_selected_visible(visible_rows);
         self.center.clear_search_focus();
@@ -5484,6 +5995,35 @@ impl App {
                 Ok(None)
             }
             (
+                Some(CenterMouseTarget::SubagentsToggle(index)),
+                Some(CenterMouseTarget::SubagentsToggle(up_index)),
+            ) if index == up_index => {
+                self.center.clear_overlay();
+                self.center.clear_search_focus();
+                let visible_index = self.center.visible_index_for_row(index).unwrap_or(0);
+                self.center.toggle_subagents(index);
+                self.center.selected = visible_index;
+                self.center
+                    .ensure_selected_visible(self.center_visible_row_capacity());
+                Ok(None)
+            }
+            (
+                Some(CenterMouseTarget::ClosedSubagentsToggle(index)),
+                Some(CenterMouseTarget::ClosedSubagentsToggle(up_index)),
+            ) if index == up_index => {
+                self.center.clear_overlay();
+                self.center.clear_search_focus();
+                let visible_index = self
+                    .center
+                    .visible_index_for_closed_subagents(index)
+                    .unwrap_or(0);
+                self.center.toggle_closed_subagents(index);
+                self.center.selected = visible_index;
+                self.center
+                    .ensure_selected_visible(self.center_visible_row_capacity());
+                Ok(None)
+            }
+            (
                 Some(CenterMouseTarget::ContextMenu(action)),
                 Some(CenterMouseTarget::ContextMenu(up_action)),
             ) if action == up_action => {
@@ -5539,12 +6079,12 @@ impl App {
             return Ok(None);
         };
         if down.center_thread_index != Some(up_index) {
-            self.center.selected = up_index;
+            self.center.selected = self.center_visible_index_at(column, row).unwrap_or(0);
             self.center
                 .ensure_selected_visible(self.center_visible_row_capacity());
             return Ok(None);
         }
-        self.center.selected = up_index;
+        self.center.selected = self.center_visible_index_at(column, row).unwrap_or(0);
         self.center
             .ensure_selected_visible(self.center_visible_row_capacity());
         self.center.clear_search_focus();
@@ -6007,18 +6547,58 @@ impl App {
         let Some(index) = self.center_list_item_index_at(column, row) else {
             return None;
         };
-        if index < self.center.rows.len() {
-            Some(CenterMouseTarget::Thread(index))
-        } else if self.center.is_load_more_index(index) {
-            Some(CenterMouseTarget::LoadMore)
-        } else {
-            None
+        match self.center.visible_item_at(index) {
+            Some(CenterVisibleItem::Thread(row_index)) => {
+                if self.center_subagent_toggle_hit(index, row_index, column, row) {
+                    Some(CenterMouseTarget::SubagentsToggle(row_index))
+                } else {
+                    Some(CenterMouseTarget::Thread(row_index))
+                }
+            }
+            Some(CenterVisibleItem::ClosedSubagents { parent_index }) => {
+                Some(CenterMouseTarget::ClosedSubagentsToggle(parent_index))
+            }
+            None if self.center.is_load_more_index(index) => Some(CenterMouseTarget::LoadMore),
+            None => None,
         }
     }
 
     fn center_thread_index_at(&self, column: u16, row: u16) -> Option<usize> {
         self.center_list_item_index_at(column, row)
-            .filter(|index| *index < self.center.rows.len())
+            .and_then(|index| self.center.actual_row_index_for_visible(index))
+    }
+
+    fn center_visible_index_at(&self, column: u16, row: u16) -> Option<usize> {
+        self.center_list_item_index_at(column, row)
+            .filter(|index| self.center.actual_row_index_for_visible(*index).is_some())
+    }
+
+    fn center_subagent_toggle_hit(
+        &self,
+        visible_index: usize,
+        row_index: usize,
+        column: u16,
+        row: u16,
+    ) -> bool {
+        let Some(area) = self.center.list_area else {
+            return false;
+        };
+        let Some(thread_row) = self.center.rows.get(row_index) else {
+            return false;
+        };
+        if thread_row.subagents.is_empty() {
+            return false;
+        }
+        let relative_index = visible_index.saturating_sub(self.center.list_scroll);
+        let row_y = area
+            .y
+            .saturating_add(CENTER_LIST_TOP_PADDING)
+            .saturating_add((relative_index as u16).saturating_mul(CENTER_ROW_HEIGHT));
+        let toggle_x = area
+            .x
+            .saturating_add(1)
+            .saturating_add(center_row_tree_indent(thread_row));
+        row == row_y && column >= toggle_x && column <= toggle_x.saturating_add(3)
     }
 
     fn center_list_item_index_at(&self, column: u16, row: u16) -> Option<usize> {
@@ -6464,6 +7044,7 @@ impl App {
         let was_empty = self.center.rows.is_empty();
         let previous_top_thread_id = self.center.top_visible_thread_id();
         let old_len = self.center.rows.len();
+        let old_visible_len = self.center.visible_row_count();
         let selected_was_load_more = append && self.center.is_load_more_index(self.center.selected);
         let mut incoming_rows: Vec<CenterThreadRow> = response
             .data
@@ -6490,29 +7071,33 @@ impl App {
 
         let selected_thread_id = self
             .center
-            .rows
-            .get(self.center.selected)
+            .actual_row_index_for_visible(self.center.selected)
+            .and_then(|index| self.center.rows.get(index))
             .map(|row| row.thread_id)
             .or(active_thread_id);
         self.center.rows = rows;
         self.center.next_cursor = response.next_cursor;
+        let loaded_thread_ids = self
+            .center
+            .rows
+            .iter()
+            .map(|row| row.thread_id)
+            .collect::<HashSet<_>>();
+        self.center
+            .expanded_subagent_parent_ids
+            .retain(|thread_id| loaded_thread_ids.contains(thread_id));
+        self.center
+            .expanded_closed_subagent_parent_ids
+            .retain(|thread_id| loaded_thread_ids.contains(thread_id));
         self.center.selected = if selected_was_load_more && self.center.rows.len() > old_len {
             first_incoming_thread_id
-                .and_then(|thread_id| {
-                    self.center
-                        .rows
-                        .iter()
-                        .position(|row| row.thread_id == thread_id)
+                .and_then(|thread_id| self.center.visible_index_for_thread(thread_id))
+                .unwrap_or_else(|| {
+                    old_visible_len.min(self.center.list_item_count().saturating_sub(1))
                 })
-                .unwrap_or_else(|| old_len.min(self.center.list_item_count().saturating_sub(1)))
         } else {
             selected_thread_id
-                .and_then(|thread_id| {
-                    self.center
-                        .rows
-                        .iter()
-                        .position(|row| row.thread_id == thread_id)
-                })
+                .and_then(|thread_id| self.center.visible_index_for_thread(thread_id))
                 .unwrap_or(0)
         };
         let visible_rows = self.center_visible_row_capacity();
@@ -6590,13 +7175,9 @@ impl App {
         self.center.chat_scroll_from_bottom =
             self.center.chat_scroll_from_bottom.min(max_chat_scroll);
         self.render_center_list(list_area, buf);
+        let theme = self.chat_widget.center_theme();
         if !gap_area.is_empty() {
-            buf.set_style(
-                gap_area,
-                Style::default()
-                    .bg(Color::Rgb(8, 10, 9))
-                    .fg(Color::Rgb(54, 66, 58)),
-            );
+            buf.set_style(gap_area, Style::default().bg(theme.gap_bg).fg(theme.gap_fg));
         }
         if !chat_area.is_empty() {
             self.chat_widget.render_center_chat(
@@ -6615,20 +7196,22 @@ impl App {
     }
 
     fn render_center_list(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
-        let bg = CENTER_PANEL_BG;
-        let panel = Color::Rgb(18, 21, 20);
-        let text = Color::Rgb(198, 208, 200);
-        let muted = Color::Rgb(118, 128, 121);
-        let green = Color::Rgb(112, 190, 132);
-        let active_bg = Color::Rgb(26, 38, 31);
-        let selected_bg = Color::Rgb(33, 43, 37);
-        let hover_bg = Color::Rgb(38, 50, 42);
-        let controlled_bg = Color::Rgb(16, 41, 64);
-        let controlled_active_bg = Color::Rgb(18, 52, 78);
-        let controlled_selected_bg = Color::Rgb(22, 62, 92);
-        let controlled_hover_bg = Color::Rgb(26, 72, 104);
-        let controlled_accent = Color::Rgb(142, 194, 228);
-        let controlled_muted = Color::Rgb(166, 196, 214);
+        refresh_center_subagent_summaries(&mut self.center.rows);
+        let theme = self.chat_widget.center_theme();
+        let bg = theme.base_bg;
+        let panel = theme.panel_bg;
+        let text = theme.text;
+        let muted = theme.muted;
+        let green = theme.accent;
+        let active_bg = theme.active_bg;
+        let selected_bg = theme.selected_bg;
+        let hover_bg = theme.hover_bg;
+        let controlled_bg = theme.control_bg;
+        let controlled_active_bg = theme.control_active_bg;
+        let controlled_selected_bg = theme.control_selected_bg;
+        let controlled_hover_bg = theme.control_hover_bg;
+        let controlled_accent = theme.control_accent;
+        let controlled_muted = theme.control_muted;
         let language = self.chat_widget.ui_language();
         buf.set_style(area, Style::default().bg(bg).fg(text));
 
@@ -6655,16 +7238,16 @@ impl App {
         let new_hovered = self.mouse.hover_center_target == Some(CenterMouseTarget::NewThread);
         let search_hovered = self.mouse.hover_center_target == Some(CenterMouseTarget::Search);
         let new_style = if new_hovered {
-            Style::default().bg(Color::Rgb(40, 58, 47)).fg(green)
+            Style::default().bg(hover_bg).fg(green)
         } else {
-            Style::default().bg(Color::Rgb(24, 30, 26)).fg(green)
+            Style::default().bg(theme.panel_raised_bg).fg(green)
         };
         let search_style = if self.center.search_focused {
-            Style::default().bg(Color::Rgb(28, 42, 34)).fg(Color::White)
+            Style::default().bg(active_bg).fg(theme.text_strong)
         } else if search_hovered {
-            Style::default().bg(Color::Rgb(34, 42, 37)).fg(text)
+            Style::default().bg(hover_bg).fg(text)
         } else {
-            Style::default().bg(Color::Rgb(21, 25, 23)).fg(muted)
+            Style::default().bg(theme.panel_raised_bg).fg(muted)
         };
         if !new_area.is_empty() {
             Paragraph::new(language.center_new_thread())
@@ -6692,15 +7275,18 @@ impl App {
 
         let active_thread_id = self.chat_widget.thread_id().or(self.active_thread_id);
         let max_rows = ((area.height - CENTER_LIST_TOP_PADDING) / CENTER_ROW_HEIGHT) as usize;
-        let item_count = self.center.list_item_count();
+        let visible_items = self.center.visible_items();
+        let item_count = visible_items.len() + usize::from(self.center.has_load_more_row());
         let first_visible_index = self.center.list_scroll.min(item_count);
         let last_visible_index = first_visible_index.saturating_add(max_rows).min(item_count);
         let text_width = area.width.saturating_sub(4) as usize;
-        for (visible_index, index) in (first_visible_index..last_visible_index).enumerate() {
-            let y = area.y + CENTER_LIST_TOP_PADDING + (visible_index as u16 * CENTER_ROW_HEIGHT);
+        for (screen_index, visible_item_index) in
+            (first_visible_index..last_visible_index).enumerate()
+        {
+            let y = area.y + CENTER_LIST_TOP_PADDING + (screen_index as u16 * CENTER_ROW_HEIGHT);
             let row_area = Rect::new(area.x + 1, y, area.width.saturating_sub(2), 2);
-            if self.center.is_load_more_index(index) {
-                let is_selected = index == self.center.selected;
+            if self.center.is_load_more_index(visible_item_index) {
+                let is_selected = visible_item_index == self.center.selected;
                 let is_hovered =
                     self.mouse.hover_center_target == Some(CenterMouseTarget::LoadMore);
                 let row_style = if is_hovered {
@@ -6749,13 +7335,92 @@ impl App {
                 );
                 continue;
             }
+            let Some(visible_item) = visible_items.get(visible_item_index).copied() else {
+                continue;
+            };
+            if let CenterVisibleItem::ClosedSubagents { parent_index } = visible_item {
+                let Some(parent_row) = self.center.rows.get(parent_index) else {
+                    continue;
+                };
+                let is_selected = visible_item_index == self.center.selected;
+                let is_hovered = matches!(
+                    self.mouse.hover_center_target,
+                    Some(CenterMouseTarget::ClosedSubagentsToggle(target))
+                        if target == parent_index
+                );
+                let row_style = if is_hovered {
+                    Style::default().bg(hover_bg).fg(text)
+                } else if is_selected {
+                    Style::default().bg(selected_bg).fg(text)
+                } else {
+                    Style::default().bg(panel).fg(text)
+                };
+                buf.set_style(row_area, row_style);
+                let expanded = self
+                    .center
+                    .expanded_closed_subagent_parent_ids
+                    .contains(&parent_row.thread_id);
+                let tree_prefix = if expanded { "▾" } else { "▸" };
+                let row_indent = center_row_tree_indent(parent_row)
+                    .saturating_add(CENTER_SUBAGENT_INDENT_STEP)
+                    .min(row_area.width.saturating_sub(2));
+                let row_content_x = row_area.x.saturating_add(1).saturating_add(row_indent);
+                let row_content_width = row_area.width.saturating_sub(2).saturating_sub(row_indent);
+                let row_text_width = row_content_width as usize;
+                let title_width = row_text_width.saturating_sub(CENTER_STATUS_LABEL_WIDTH + 8);
+                let title = center_truncate(
+                    &center_closed_subagents_label(parent_row.subagents.closed, language),
+                    title_width,
+                );
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        tree_prefix,
+                        Style::default().fg(muted).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(" ", Style::default().fg(muted)),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!(
+                            "{:<width$}",
+                            center_truncate("CLOSED", CENTER_STATUS_LABEL_WIDTH),
+                            width = CENTER_STATUS_LABEL_WIDTH
+                        ),
+                        Style::default().fg(muted).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(title, row_style.fg(muted).add_modifier(Modifier::BOLD)),
+                ]))
+                .style(row_style)
+                .render(
+                    Rect::new(row_content_x, row_area.y, row_content_width, 1),
+                    buf,
+                );
+                Paragraph::new(center_truncate(
+                    &center_closed_subagents_detail(parent_row.subagents.closed, language),
+                    row_text_width,
+                ))
+                .style(row_style.fg(muted))
+                .render(
+                    Rect::new(row_content_x, row_area.y + 1, row_content_width, 1),
+                    buf,
+                );
+                continue;
+            }
+            let CenterVisibleItem::Thread(index) = visible_item else {
+                continue;
+            };
             let Some(row) = self.center.rows.get(index) else {
                 continue;
             };
             let is_active = Some(row.thread_id) == active_thread_id;
-            let is_selected = index == self.center.selected;
+            let is_selected = visible_item_index == self.center.selected;
             let is_hovered = self.mouse.hover_center_thread_index == Some(index)
-                || self.mouse.hover_center_target == Some(CenterMouseTarget::Thread(index));
+                || matches!(
+                    self.mouse.hover_center_target,
+                    Some(CenterMouseTarget::Thread(target)
+                        | CenterMouseTarget::SubagentsToggle(target)) if target == index
+                );
             let is_controlled = center_row_is_controlled(row);
             let row_style = if is_controlled && is_active {
                 Style::default().bg(controlled_active_bg).fg(text)
@@ -6788,16 +7453,51 @@ impl App {
             } else {
                 match &row.status {
                     ThreadStatus::Active { .. } => green,
-                    ThreadStatus::Idle => Color::Rgb(145, 151, 146),
-                    ThreadStatus::SystemError => Color::Rgb(190, 118, 96),
+                    ThreadStatus::Idle => muted,
+                    ThreadStatus::SystemError => theme.danger,
                     ThreadStatus::NotLoaded => muted,
                 }
             };
-            let title_width = text_width.saturating_sub(CENTER_STATUS_LABEL_WIDTH + 8);
+            let subagents_expanded = self
+                .center
+                .expanded_subagent_parent_ids
+                .contains(&row.thread_id);
+            let tree_prefix = center_row_tree_prefix(row, subagents_expanded);
+            let subagent_marker = center_row_subagent_marker(row);
+            let row_indent = center_row_tree_indent(row).min(row_area.width.saturating_sub(2));
+            let row_content_x = row_area.x.saturating_add(1).saturating_add(row_indent);
+            let row_content_width = row_area.width.saturating_sub(2).saturating_sub(row_indent);
+            let row_text_width = row_content_width as usize;
+            let subagent_marker_width = subagent_marker
+                .as_ref()
+                .map(|label| label.width().saturating_add(1))
+                .unwrap_or(0);
+            let tree_prefix_width = tree_prefix.width().saturating_add(1);
+            let title_width = row_text_width.saturating_sub(
+                CENTER_STATUS_LABEL_WIDTH + 8 + tree_prefix_width + subagent_marker_width,
+            );
             let pinned = self.center.pinned_thread_ids.contains(&row.thread_id);
             let pin = if pinned { "* " } else { "" };
-            let title = center_truncate(&format!("{pin}{}", row.name), title_width);
-            let first_line = Line::from(vec![
+            let title = center_truncate(
+                &format!("{pin}{}", center_thread_display_name(row)),
+                title_width,
+            );
+            let mut first_line_spans = vec![
+                Span::styled(
+                    tree_prefix,
+                    Style::default()
+                        .fg(if row.subagents.is_empty() {
+                            muted
+                        } else {
+                            green
+                        })
+                        .add_modifier(if row.subagents.is_empty() {
+                            Modifier::empty()
+                        } else {
+                            Modifier::BOLD
+                        }),
+                ),
+                Span::raw(" "),
                 Span::styled(
                     center_row_control_marker(row),
                     Style::default()
@@ -6825,14 +7525,23 @@ impl App {
                 ),
                 Span::raw(" "),
                 Span::styled(title, row_style),
-            ]);
+            ];
+            if let Some(subagent_marker) = subagent_marker {
+                first_line_spans.push(Span::raw(" "));
+                first_line_spans.push(Span::styled(
+                    subagent_marker,
+                    Style::default()
+                        .fg(if is_controlled {
+                            controlled_accent
+                        } else {
+                            green
+                        })
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
+            let first_line = Line::from(first_line_spans);
             Paragraph::new(first_line).style(row_style).render(
-                Rect::new(
-                    row_area.x + 1,
-                    row_area.y,
-                    row_area.width.saturating_sub(2),
-                    1,
-                ),
+                Rect::new(row_content_x, row_area.y, row_content_width, 1),
                 buf,
             );
 
@@ -6874,19 +7583,14 @@ impl App {
             } else {
                 base_detail
             };
-            Paragraph::new(center_truncate(&detail, text_width.saturating_sub(2)))
+            Paragraph::new(center_truncate(&detail, row_text_width))
                 .style(row_style.fg(if is_controlled {
                     controlled_muted
                 } else {
                     muted
                 }))
                 .render(
-                    Rect::new(
-                        row_area.x + 1,
-                        row_area.y + 1,
-                        row_area.width.saturating_sub(2),
-                        1,
-                    ),
+                    Rect::new(row_content_x, row_area.y + 1, row_content_width, 1),
                     buf,
                 );
         }
@@ -6911,14 +7615,15 @@ impl App {
             return;
         }
 
+        let theme = self.chat_widget.center_theme();
         let x = area.right().saturating_sub(1);
         let track_y = area.y.saturating_add(CENTER_LIST_TOP_PADDING);
-        let muted = Color::Rgb(76, 86, 80);
-        let thumb = Color::Rgb(112, 190, 132);
+        let muted = theme.dim;
+        let thumb = theme.accent;
         for offset in 0..track_height {
             buf[(x, track_y + offset)]
                 .set_symbol("│")
-                .set_style(Style::default().fg(muted).bg(Color::Rgb(18, 21, 20)));
+                .set_style(Style::default().fg(muted).bg(theme.panel_bg));
         }
 
         let thumb_height = ((visible_rows * track_height as usize) / total)
@@ -6931,32 +7636,39 @@ impl App {
         for offset in 0..thumb_height {
             buf[(x, track_y + thumb_offset + offset)]
                 .set_symbol("┃")
-                .set_style(Style::default().fg(thumb).bg(Color::Rgb(18, 21, 20)));
+                .set_style(Style::default().fg(thumb).bg(theme.panel_bg));
         }
     }
 
     fn render_center_overlay(&mut self, list_area: Rect, buf: &mut ratatui::buffer::Buffer) {
         let overlay = self.center.overlay.clone();
         let language = self.chat_widget.ui_language();
+        let theme = self.chat_widget.center_theme();
         match overlay {
             CenterOverlayState::None => {}
             CenterOverlayState::ContextMenu(menu) => {
                 let actions = center_menu_actions();
+                let row = self
+                    .center
+                    .rows
+                    .iter()
+                    .find(|row| row.thread_id == menu.thread_id);
+                let subagent_lines = center_context_subagent_lines(row, language);
                 let area = center_popup_area(
                     list_area,
                     menu.anchor_column,
                     menu.anchor_row,
                     CENTER_CONTEXT_MENU_WIDTH,
-                    actions.len() as u16 + 2,
+                    actions.len() as u16 + subagent_lines.len() as u16 + 2,
                 );
                 if let CenterOverlayState::ContextMenu(current) = &mut self.center.overlay {
                     current.area = Some(area);
                 }
-                let panel = Color::Rgb(20, 24, 22);
-                let selected_bg = Color::Rgb(42, 58, 48);
-                let text = Color::Rgb(220, 228, 222);
-                let muted = Color::Rgb(130, 140, 133);
-                let green = Color::Rgb(112, 190, 132);
+                let panel = theme.dropdown_bg;
+                let selected_bg = theme.selected_bg;
+                let text = theme.text;
+                let muted = theme.muted;
+                let green = theme.accent;
                 buf.set_style(area, Style::default().bg(panel).fg(text));
                 Block::new()
                     .borders(Borders::ALL)
@@ -6979,12 +7691,12 @@ impl App {
                     let style = if is_selected && disabled {
                         Style::default().bg(selected_bg).fg(muted)
                     } else if is_selected {
-                        Style::default().bg(selected_bg).fg(Color::White)
+                        Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else if disabled {
                         Style::default().bg(panel).fg(muted)
                     } else if matches!(action, CenterMenuAction::Archive | CenterMenuAction::Delete)
                     {
-                        Style::default().bg(panel).fg(Color::Rgb(190, 118, 96))
+                        Style::default().bg(panel).fg(theme.danger)
                     } else if matches!(action, CenterMenuAction::TogglePin) && pinned {
                         Style::default().bg(panel).fg(green)
                     } else {
@@ -6997,17 +7709,35 @@ impl App {
                             buf,
                         );
                 }
+                let details_y = area.y.saturating_add(1 + actions.len() as u16);
+                for (line_index, line) in subagent_lines.iter().enumerate() {
+                    let y = details_y.saturating_add(line_index as u16);
+                    if y >= area.bottom().saturating_sub(1) {
+                        break;
+                    }
+                    let style = if line_index == 0 {
+                        Style::default().bg(panel).fg(green)
+                    } else {
+                        Style::default().bg(panel).fg(muted)
+                    };
+                    Paragraph::new(center_truncate(line, area.width.saturating_sub(2) as usize))
+                        .style(style)
+                        .render(
+                            Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(2), 1),
+                            buf,
+                        );
+                }
             }
             CenterOverlayState::Rename(rename) => {
                 let area = center_dialog_area(list_area, CENTER_RENAME_POPUP_WIDTH, 6);
                 if let CenterOverlayState::Rename(current) = &mut self.center.overlay {
                     current.area = Some(area);
                 }
-                let panel = Color::Rgb(20, 24, 22);
-                let selected_bg = Color::Rgb(42, 58, 48);
-                let text = Color::Rgb(220, 228, 222);
-                let muted = Color::Rgb(130, 140, 133);
-                let green = Color::Rgb(112, 190, 132);
+                let panel = theme.dropdown_bg;
+                let selected_bg = theme.selected_bg;
+                let text = theme.text;
+                let muted = theme.muted;
+                let green = theme.accent;
                 buf.set_style(area, Style::default().bg(panel).fg(text));
                 Block::new()
                     .borders(Borders::ALL)
@@ -7024,7 +7754,7 @@ impl App {
                     &value,
                     area.width.saturating_sub(4) as usize,
                 ))
-                .style(Style::default().bg(Color::Rgb(28, 34, 30)).fg(Color::White))
+                .style(Style::default().bg(theme.input_bg).fg(theme.text_strong))
                 .render(Rect::new(area.x + 2, area.y + 2, area.width - 4, 1), buf);
                 let save_hovered =
                     self.mouse.hover_center_target == Some(CenterMouseTarget::RenameSave);
@@ -7032,14 +7762,14 @@ impl App {
                     self.mouse.hover_center_target == Some(CenterMouseTarget::RenameCancel);
                 Paragraph::new(language.center_save_label())
                     .style(if save_hovered {
-                        Style::default().bg(selected_bg).fg(Color::White)
+                        Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
                         Style::default().bg(panel).fg(green)
                     })
                     .render(Rect::new(area.x + 2, area.y + 4, 8, 1), buf);
                 Paragraph::new(language.center_cancel_label())
                     .style(if cancel_hovered {
-                        Style::default().bg(selected_bg).fg(Color::White)
+                        Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
                         Style::default().bg(panel).fg(text)
                     })
@@ -7050,11 +7780,11 @@ impl App {
                 if let CenterOverlayState::ConfirmArchive(current) = &mut self.center.overlay {
                     current.area = Some(area);
                 }
-                let panel = Color::Rgb(20, 24, 22);
-                let selected_bg = Color::Rgb(42, 58, 48);
-                let text = Color::Rgb(220, 228, 222);
-                let danger = Color::Rgb(190, 118, 96);
-                let muted = Color::Rgb(130, 140, 133);
+                let panel = theme.dropdown_bg;
+                let selected_bg = theme.selected_bg;
+                let text = theme.text;
+                let danger = theme.danger;
+                let muted = theme.muted;
                 buf.set_style(area, Style::default().bg(panel).fg(text));
                 Block::new()
                     .borders(Borders::ALL)
@@ -7083,14 +7813,14 @@ impl App {
                     self.mouse.hover_center_target == Some(CenterMouseTarget::ArchiveCancel);
                 Paragraph::new(language.center_archive_title())
                     .style(if confirm_hovered {
-                        Style::default().bg(selected_bg).fg(Color::White)
+                        Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
                         Style::default().bg(panel).fg(danger)
                     })
                     .render(Rect::new(area.x + 2, area.y + 3, 10, 1), buf);
                 Paragraph::new(language.center_cancel_label())
                     .style(if cancel_hovered {
-                        Style::default().bg(selected_bg).fg(Color::White)
+                        Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
                         Style::default().bg(panel).fg(text)
                     })
@@ -7101,11 +7831,11 @@ impl App {
                 if let CenterOverlayState::ConfirmDelete(current) = &mut self.center.overlay {
                     current.area = Some(area);
                 }
-                let panel = Color::Rgb(20, 24, 22);
-                let selected_bg = Color::Rgb(42, 58, 48);
-                let text = Color::Rgb(220, 228, 222);
-                let danger = Color::Rgb(190, 118, 96);
-                let muted = Color::Rgb(130, 140, 133);
+                let panel = theme.dropdown_bg;
+                let selected_bg = theme.selected_bg;
+                let text = theme.text;
+                let danger = theme.danger;
+                let muted = theme.muted;
                 buf.set_style(area, Style::default().bg(panel).fg(text));
                 Block::new()
                     .borders(Borders::ALL)
@@ -7134,14 +7864,14 @@ impl App {
                     self.mouse.hover_center_target == Some(CenterMouseTarget::DeleteCancel);
                 Paragraph::new(language.center_delete_title())
                     .style(if confirm_hovered {
-                        Style::default().bg(selected_bg).fg(Color::White)
+                        Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
                         Style::default().bg(panel).fg(danger)
                     })
                     .render(Rect::new(area.x + 2, area.y + 3, 10, 1), buf);
                 Paragraph::new(language.center_cancel_label())
                     .style(if cancel_hovered {
-                        Style::default().bg(selected_bg).fg(Color::White)
+                        Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
                         Style::default().bg(panel).fg(text)
                     })
@@ -7338,7 +8068,8 @@ impl App {
         self.primary_thread_id = Some(thread_id);
         self.primary_session_configured = Some(session.clone());
         self.upsert_agent_picker_thread(
-            thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
+            thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
+            /*agent_display_name*/ None, /*agent_role*/ None,
             /*is_closed*/ false,
         );
 
@@ -7382,6 +8113,133 @@ impl App {
         self.refresh_center_threads(app_gateway, true);
         tui.frame_requester().schedule_frame();
         Ok(None)
+    }
+
+    async fn open_thread_goal_menu(
+        &mut self,
+        app_gateway: &mut AppGatewaySession,
+        thread_id: ThreadId,
+    ) {
+        match app_gateway.thread_goal_get(thread_id).await {
+            Ok(Some(goal)) => self.chat_widget.show_goal_summary(&goal),
+            Ok(None) => self.chat_widget.add_info_message(
+                "No goal is set.".to_string(),
+                Some("Use /goal <objective> to set this thread goal.".to_string()),
+            ),
+            Err(err) => self
+                .chat_widget
+                .add_error_message(format!("Failed to read thread goal: {err}")),
+        }
+    }
+
+    async fn open_thread_goal_editor(
+        &mut self,
+        app_gateway: &mut AppGatewaySession,
+        thread_id: Option<ThreadId>,
+    ) {
+        let Some(thread_id) = thread_id else {
+            self.chat_widget
+                .add_error_message("No active thread is available.".to_string());
+            return;
+        };
+        match app_gateway.thread_goal_get(thread_id).await {
+            Ok(Some(goal)) => self.chat_widget.show_goal_edit_prompt(thread_id, goal),
+            Ok(None) => self.chat_widget.add_info_message(
+                "No goal is set.".to_string(),
+                Some("Use /goal <objective> to set this thread goal first.".to_string()),
+            ),
+            Err(err) => self
+                .chat_widget
+                .add_error_message(format!("Failed to load thread goal: {err}")),
+        }
+    }
+
+    async fn set_thread_goal_objective(
+        &mut self,
+        app_gateway: &mut AppGatewaySession,
+        thread_id: ThreadId,
+        objective: String,
+        mode: ThreadGoalSetMode,
+    ) {
+        let objective = objective.trim().to_string();
+        if let Err(err) = praxis_protocol::protocol::validate_thread_goal_objective(&objective) {
+            self.chat_widget.add_error_message(err);
+            return;
+        }
+
+        let result = match mode {
+            ThreadGoalSetMode::ReplaceExisting => {
+                app_gateway.thread_goal_set(thread_id, objective).await
+            }
+            ThreadGoalSetMode::UpdateExisting {
+                status,
+                token_budget,
+            } => {
+                app_gateway
+                    .thread_goal_update(
+                        thread_id,
+                        Some(objective),
+                        Some(status),
+                        token_budget,
+                        false,
+                    )
+                    .await
+            }
+        };
+
+        match result {
+            Ok(goal) => self.chat_widget.add_info_message(
+                format!(
+                    "Goal set: {}",
+                    truncate_for_goal_notice(goal.objective.as_str())
+                ),
+                Some("Use /goal to inspect it, /goal pause to pause it, or /goal edit to edit it.".to_string()),
+            ),
+            Err(err) => self
+                .chat_widget
+                .add_error_message(format!("Failed to set thread goal: {err}")),
+        }
+    }
+
+    async fn set_thread_goal_status(
+        &mut self,
+        app_gateway: &mut AppGatewaySession,
+        thread_id: ThreadId,
+        status: ThreadGoalStatus,
+    ) {
+        match app_gateway
+            .thread_goal_update(thread_id, None, Some(status), None, false)
+            .await
+        {
+            Ok(goal) => self.chat_widget.add_info_message(
+                format!("Goal status: {}", goal_status_label(goal.status)),
+                /*hint*/ None,
+            ),
+            Err(err) => self
+                .chat_widget
+                .add_error_message(format!("Failed to update thread goal: {err}")),
+        }
+    }
+
+    async fn clear_thread_goal(
+        &mut self,
+        app_gateway: &mut AppGatewaySession,
+        thread_id: ThreadId,
+    ) {
+        match app_gateway.thread_goal_clear(thread_id).await {
+            Ok(true) => {
+                self.chat_widget.on_thread_goal_cleared(thread_id);
+                self.chat_widget
+                    .add_info_message("Goal cleared.".to_string(), /*hint*/ None);
+            }
+            Ok(false) => self.chat_widget.add_info_message(
+                "No goal is set.".to_string(),
+                Some("Use /goal <objective> to set this thread goal.".to_string()),
+            ),
+            Err(err) => self
+                .chat_widget
+                .add_error_message(format!("Failed to clear thread goal: {err}")),
+        }
     }
 
     async fn handle_event(
@@ -7691,6 +8549,32 @@ impl App {
                             .add_error_message(format!("Failed to regenerate thread name: {err}"));
                     }
                 }
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::OpenThreadGoalMenu { thread_id } => {
+                self.open_thread_goal_menu(app_gateway, thread_id).await;
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::OpenThreadGoalEditor { thread_id } => {
+                self.open_thread_goal_editor(app_gateway, thread_id).await;
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::SetThreadGoalObjective {
+                thread_id,
+                objective,
+                mode,
+            } => {
+                self.set_thread_goal_objective(app_gateway, thread_id, objective, mode)
+                    .await;
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::SetThreadGoalStatus { thread_id, status } => {
+                self.set_thread_goal_status(app_gateway, thread_id, status)
+                    .await;
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::ClearThreadGoal { thread_id } => {
+                self.clear_thread_goal(app_gateway, thread_id).await;
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::InsertHistoryCell(cell) => {
@@ -9624,7 +10508,22 @@ impl App {
                     tui.frame_requester().schedule_frame();
                     return true;
                 }
-                let Some(row) = self.center.rows.get(self.center.selected).cloned() else {
+                if let Some(CenterVisibleItem::ClosedSubagents { parent_index }) =
+                    self.center.visible_item_at(self.center.selected)
+                {
+                    self.center.toggle_closed_subagents(parent_index);
+                    self.center
+                        .ensure_selected_visible(self.center_visible_row_capacity());
+                    tui.frame_requester().schedule_frame();
+                    return true;
+                }
+                let Some(row_index) = self
+                    .center
+                    .actual_row_index_for_visible(self.center.selected)
+                else {
+                    return true;
+                };
+                let Some(row) = self.center.rows.get(row_index).cloned() else {
                     return true;
                 };
                 let _ = self
@@ -11254,7 +12153,9 @@ mod tests {
         assert_eq!(
             app.agent_navigation.get(&thread_id),
             Some(&AgentPickerThreadEntry {
-                agent_nickname: None,
+                agent_base_name: None,
+                agent_title: None,
+                agent_display_name: None,
                 agent_role: None,
                 is_closed: true,
             })
@@ -11275,6 +12176,8 @@ mod tests {
             .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
         app.agent_navigation.upsert(
             thread_id,
+            Some("墨子".to_string()),
+            Some("巡检仓库".to_string()),
             Some("Robie".to_string()),
             Some("explorer".to_string()),
             /*is_closed*/ true,
@@ -11286,7 +12189,9 @@ mod tests {
         assert_eq!(
             app.agent_navigation.get(&thread_id),
             Some(&AgentPickerThreadEntry {
-                agent_nickname: Some("Robie".to_string()),
+                agent_base_name: Some("墨子".to_string()),
+                agent_title: Some("巡检仓库".to_string()),
+                agent_display_name: Some("Robie".to_string()),
                 agent_role: Some("explorer".to_string()),
                 is_closed: true,
             })
@@ -11304,6 +12209,8 @@ mod tests {
         let thread_id = ThreadId::new();
         app.agent_navigation.upsert(
             thread_id,
+            /*agent_base_name*/ None,
+            /*agent_title*/ None,
             Some("Ghost".to_string()),
             Some("worker".to_string()),
             /*is_closed*/ false,
@@ -11328,6 +12235,8 @@ mod tests {
             .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
         app.agent_navigation.upsert(
             thread_id,
+            Some("墨子".to_string()),
+            Some("巡检仓库".to_string()),
             Some("Robie".to_string()),
             Some("explorer".to_string()),
             /*is_closed*/ false,
@@ -11338,7 +12247,9 @@ mod tests {
         assert_eq!(
             app.agent_navigation.get(&thread_id),
             Some(&AgentPickerThreadEntry {
-                agent_nickname: Some("Robie".to_string()),
+                agent_base_name: Some("墨子".to_string()),
+                agent_title: Some("巡检仓库".to_string()),
+                agent_display_name: Some("Robie".to_string()),
                 agent_role: Some("explorer".to_string()),
                 is_closed: true,
             })
@@ -11418,7 +12329,9 @@ mod tests {
         assert_eq!(
             app.agent_navigation.get(&thread_id),
             Some(&AgentPickerThreadEntry {
-                agent_nickname: None,
+                agent_base_name: None,
+                agent_title: None,
+                agent_display_name: None,
                 agent_role: None,
                 is_closed: false,
             })
@@ -11440,6 +12353,8 @@ mod tests {
         let thread_id = started.session.thread_id;
         app.agent_navigation.upsert(
             thread_id,
+            Some("墨子".to_string()),
+            Some("接管空线程".to_string()),
             Some("Scout".to_string()),
             Some("worker".to_string()),
             /*is_closed*/ false,
@@ -11472,6 +12387,8 @@ mod tests {
         let thread_id = started.session.thread_id;
         app.agent_navigation.upsert(
             thread_id,
+            Some("墨子".to_string()),
+            Some("接管临时线程".to_string()),
             Some("Scout".to_string()),
             Some("worker".to_string()),
             /*is_closed*/ false,
@@ -11496,6 +12413,8 @@ mod tests {
         let thread_id = ThreadId::new();
         app.agent_navigation.upsert(
             thread_id,
+            /*agent_base_name*/ None,
+            /*agent_title*/ None,
             Some("Ghost".to_string()),
             Some("worker".to_string()),
             /*is_closed*/ true,
@@ -11505,6 +12424,8 @@ mod tests {
 
         app.agent_navigation.upsert(
             thread_id,
+            /*agent_base_name*/ None,
+            /*agent_title*/ None,
             Some("Ghost".to_string()),
             Some("worker".to_string()),
             /*is_closed*/ false,
@@ -11527,6 +12448,8 @@ mod tests {
         let thread_id = ThreadId::new();
         app.agent_navigation.upsert(
             thread_id,
+            /*agent_base_name*/ None,
+            /*agent_title*/ None,
             Some("Ghost".to_string()),
             Some("worker".to_string()),
             /*is_closed*/ false,
@@ -12158,6 +13081,8 @@ guardian_approval = true
             .insert(agent_thread_id, agent_channel);
         app.agent_navigation.upsert(
             agent_thread_id,
+            Some("墨子".to_string()),
+            Some("审批工具".to_string()),
             Some("Robie".to_string()),
             Some("explorer".to_string()),
             /*is_closed*/ false,
@@ -12166,7 +13091,7 @@ guardian_approval = true
         app.refresh_pending_thread_approvals().await;
         assert_eq!(
             app.chat_widget.pending_thread_approvals(),
-            &["Robie [explorer]".to_string()]
+            &["墨子 - 审批工具 [explorer]".to_string()]
         );
 
         app.active_thread_id = Some(agent_thread_id);
@@ -12201,6 +13126,8 @@ guardian_approval = true
         );
         app.agent_navigation.upsert(
             agent_thread_id,
+            Some("墨子".to_string()),
+            Some("审批工具".to_string()),
             Some("Robie".to_string()),
             Some("explorer".to_string()),
             /*is_closed*/ false,
@@ -12220,7 +13147,7 @@ guardian_approval = true
         assert_eq!(app.chat_widget.has_active_view(), true);
         assert_eq!(
             app.chat_widget.pending_thread_approvals(),
-            &["Robie [explorer]".to_string()]
+            &["墨子 - 审批工具 [explorer]".to_string()]
         );
 
         Ok(())
@@ -12414,6 +13341,8 @@ guardian_approval = true
         );
         app.agent_navigation.upsert(
             agent_thread_id,
+            Some("墨子".to_string()),
+            Some("审批工具".to_string()),
             Some("Robie".to_string()),
             Some("explorer".to_string()),
             /*is_closed*/ false,
@@ -12520,7 +13449,9 @@ guardian_approval = true
                     cwd: PathBuf::from("/tmp/agent"),
                     cli_version: "0.0.0".to_string(),
                     source: praxis_app_gateway_protocol::SessionSource::Unknown,
-                    agent_nickname: Some("Robie".to_string()),
+                    agent_base_name: Some("墨子".to_string()),
+                    agent_title: Some("巡检仓库".to_string()),
+                    agent_display_name: Some("Robie".to_string()),
                     agent_role: Some("explorer".to_string()),
                     git_info: None,
                     name: Some("agent thread".to_string()),
@@ -12555,7 +13486,9 @@ guardian_approval = true
         assert_eq!(
             app.agent_navigation.get(&agent_thread_id),
             Some(&AgentPickerThreadEntry {
-                agent_nickname: Some("Robie".to_string()),
+                agent_base_name: Some("墨子".to_string()),
+                agent_title: Some("巡检仓库".to_string()),
+                agent_display_name: Some("Robie".to_string()),
                 agent_role: Some("explorer".to_string()),
                 is_closed: false,
             })
@@ -12607,7 +13540,9 @@ guardian_approval = true
                     cwd: PathBuf::from("/tmp/agent"),
                     cli_version: "0.0.0".to_string(),
                     source: praxis_app_gateway_protocol::SessionSource::Unknown,
-                    agent_nickname: Some("Robie".to_string()),
+                    agent_base_name: Some("墨子".to_string()),
+                    agent_title: Some("巡检仓库".to_string()),
+                    agent_display_name: Some("Robie".to_string()),
                     agent_role: Some("explorer".to_string()),
                     git_info: None,
                     name: Some("agent thread".to_string()),
@@ -12638,12 +13573,16 @@ guardian_approval = true
 
     #[test]
     fn agent_picker_item_name_snapshot() {
+        use crate::multi_agents::format_agent_picker_item_name;
+
         let thread_id =
             ThreadId::from_string("00000000-0000-0000-0000-000000000123").expect("valid thread id");
         let snapshot = [
             format!(
                 "{} | {}",
                 format_agent_picker_item_name(
+                    Some("墨子"),
+                    Some("修复碰撞"),
                     Some("Robie"),
                     Some("explorer"),
                     /*is_primary*/ true
@@ -12653,6 +13592,8 @@ guardian_approval = true
             format!(
                 "{} | {}",
                 format_agent_picker_item_name(
+                    Some("墨子"),
+                    Some("修复碰撞"),
                     Some("Robie"),
                     Some("explorer"),
                     /*is_primary*/ false
@@ -12662,6 +13603,8 @@ guardian_approval = true
             format!(
                 "{} | {}",
                 format_agent_picker_item_name(
+                    Some("墨子"),
+                    /*agent_title*/ None,
                     Some("Robie"),
                     /*agent_role*/ None,
                     /*is_primary*/ false
@@ -12671,7 +13614,9 @@ guardian_approval = true
             format!(
                 "{} | {}",
                 format_agent_picker_item_name(
-                    /*agent_nickname*/ None,
+                    /*agent_base_name*/ None,
+                    /*agent_title*/ None,
+                    /*agent_display_name*/ None,
                     Some("explorer"),
                     /*is_primary*/ false
                 ),
@@ -12680,7 +13625,9 @@ guardian_approval = true
             format!(
                 "{} | {}",
                 format_agent_picker_item_name(
-                    /*agent_nickname*/ None, /*agent_role*/ None,
+                    /*agent_base_name*/ None,
+                    /*agent_title*/ None,
+                    /*agent_display_name*/ None, /*agent_role*/ None,
                     /*is_primary*/ false
                 ),
                 thread_id
@@ -12884,30 +13831,20 @@ guardian_approval = true
         rendered
     }
 
-    fn assert_startup_header_card(rendered: &str) {
-        assert!(rendered.contains("Praxis CLI"));
-        assert!(rendered.contains("Welcome back!"));
-        assert!(rendered.contains("Tips for getting started"));
-        assert!(rendered.contains("Recent activity"));
-        assert!(rendered.contains("/init"));
-        assert!(rendered.contains("/resume"));
-        assert!(rendered.contains("/model"));
-        assert!(rendered.contains("No recent activity"));
+    fn assert_no_startup_header_card(rendered: &str) {
+        assert!(rendered.trim().is_empty());
     }
 
     #[tokio::test]
     async fn clear_ui_after_long_transcript_snapshots_fresh_header_only() {
         let rendered = render_clear_ui_header_after_long_transcript_for_snapshot().await;
-        assert_startup_header_card(&rendered);
-        assert!(rendered.contains("gpt-test high"));
-        assert!(rendered.contains("project"));
+        assert_no_startup_header_card(&rendered);
     }
 
     #[tokio::test]
     async fn ctrl_l_clear_ui_after_long_transcript_reuses_clear_header_snapshot() {
         let rendered = render_clear_ui_header_after_long_transcript_for_snapshot().await;
-        assert_startup_header_card(&rendered);
-        assert!(rendered.contains("gpt-test high"));
+        assert_no_startup_header_card(&rendered);
     }
 
     #[tokio::test]
@@ -12933,9 +13870,7 @@ guardian_approval = true
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert_startup_header_card(&rendered);
-        assert!(rendered.contains("gpt-5.4 xhigh"));
-        assert!(rendered.contains("fast"));
+        assert_no_startup_header_card(&rendered);
     }
 
     async fn make_test_app() -> App {
@@ -13130,6 +14065,7 @@ guardian_approval = true
                     reasoning_output_tokens: 0,
                 },
                 model_context_window,
+                model_auto_compact_token_limit: None,
             },
         })
     }
@@ -14353,6 +15289,8 @@ guardian_approval = true
             ThreadId::from_string("019cff70-2599-75e2-af72-b958ce5dc1cc").expect("valid thread");
         app.agent_navigation.upsert(
             receiver_thread_id,
+            Some("墨子".to_string()),
+            Some("重播元数据".to_string()),
             Some("Robie".to_string()),
             Some("explorer".to_string()),
             /*is_closed*/ false,
@@ -14571,7 +15509,9 @@ guardian_approval = true
                     cwd: PathBuf::from("/tmp/project"),
                     cli_version: "0.0.0".to_string(),
                     source: SessionSource::Cli.into(),
-                    agent_nickname: None,
+                    agent_base_name: None,
+                    agent_title: None,
+                    agent_display_name: None,
                     agent_role: None,
                     git_info: None,
                     name: None,

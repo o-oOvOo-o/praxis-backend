@@ -2979,7 +2979,9 @@ mod tests {
             call_id: "call-1".to_string(),
             sender_thread_id: ThreadId::new(),
             receiver_thread_id: ThreadId::new(),
-            receiver_agent_nickname: None,
+            receiver_agent_base_name: None,
+            receiver_agent_title: None,
+            receiver_agent_display_name: None,
             receiver_agent_role: None,
         };
 
@@ -3004,7 +3006,9 @@ mod tests {
             call_id: "call-2".to_string(),
             sender_thread_id: ThreadId::new(),
             receiver_thread_id: ThreadId::new(),
-            receiver_agent_nickname: None,
+            receiver_agent_base_name: None,
+            receiver_agent_title: None,
+            receiver_agent_display_name: None,
             receiver_agent_role: None,
             status: praxis_protocol::protocol::AgentStatus::NotFound,
         };
@@ -3262,6 +3266,7 @@ mod tests {
                 total_tokens: 23,
             },
             model_context_window: Some(4096),
+            model_auto_compact_token_limit: Some(3600),
         };
         let rate_limits = RateLimitSnapshot {
             limit_id: Some("codex".to_string()),

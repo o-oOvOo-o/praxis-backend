@@ -29,6 +29,7 @@ async fn list_tool_suggest_discoverable_plugins_returns_uninstalled_curated_plug
                 "Plugin that includes skills, MCP servers, and app connectors".to_string(),
             ),
             has_skills: true,
+            has_llm: false,
             mcp_server_names: vec!["sample-docs".to_string()],
             app_connector_ids: vec!["connector_calendar".to_string()],
         }]
@@ -77,6 +78,7 @@ async fn list_tool_suggest_discoverable_plugins_normalizes_description() {
             name: "slack".to_string(),
             description: Some("Plugin with extra spacing".to_string()),
             has_skills: true,
+            has_llm: false,
             mcp_server_names: vec!["sample-docs".to_string()],
             app_connector_ids: vec!["connector_calendar".to_string()],
         }]
@@ -135,6 +137,7 @@ discoverables = [{ type = "plugin", id = "sample@openai-curated" }]
                 "Plugin that includes skills, MCP servers, and app connectors".to_string(),
             ),
             has_skills: true,
+            has_llm: false,
             mcp_server_names: vec!["sample-docs".to_string()],
             app_connector_ids: vec!["connector_calendar".to_string()],
         }]

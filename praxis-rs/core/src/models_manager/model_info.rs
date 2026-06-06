@@ -4,6 +4,7 @@ use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelInstructionsVariables;
 use praxis_protocol::openai_models::ModelMessages;
 use praxis_protocol::openai_models::ModelVisibility;
+use praxis_protocol::openai_models::ReasoningEffortPreset;
 use praxis_protocol::openai_models::TruncationMode;
 use praxis_protocol::openai_models::TruncationPolicyConfig;
 use praxis_protocol::openai_models::WebSearchToolType;
@@ -57,6 +58,41 @@ pub(crate) fn with_config_overrides(mut model: ModelInfo, config: &Config) -> Mo
     }
 
     model
+}
+
+pub(crate) fn with_known_model_capability_overrides(mut model: ModelInfo) -> ModelInfo {
+    let Some(known_model) = known_openai_compatible_model_info(model.slug.as_str()) else {
+        return model;
+    };
+
+    merge_reasoning_levels(
+        &mut model.supported_reasoning_levels,
+        &known_model.supported_reasoning_levels,
+    );
+
+    model.supports_reasoning_summaries |= known_model.supports_reasoning_summaries;
+    model.supports_parallel_tool_calls |= known_model.supports_parallel_tool_calls;
+    model.supports_image_detail_original |= known_model.supports_image_detail_original;
+    model.supports_search_tool |= known_model.supports_search_tool;
+    model.support_verbosity |= known_model.support_verbosity;
+    if model.apply_patch_tool_type.is_none() {
+        model.apply_patch_tool_type = known_model.apply_patch_tool_type;
+    }
+    model
+}
+
+fn merge_reasoning_levels(
+    target: &mut Vec<ReasoningEffortPreset>,
+    overlay: &[ReasoningEffortPreset],
+) {
+    for preset in overlay {
+        if !target
+            .iter()
+            .any(|existing| existing.effort == preset.effort)
+        {
+            target.push(preset.clone());
+        }
+    }
 }
 
 /// Build a minimal fallback model descriptor for missing/unknown slugs.

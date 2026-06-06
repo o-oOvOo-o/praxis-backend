@@ -54,6 +54,19 @@ impl CustomPromptView {
             complete: false,
         }
     }
+
+    pub(crate) fn new_with_initial_text(
+        title: String,
+        placeholder: String,
+        context_label: Option<String>,
+        initial_text: String,
+        on_submit: PromptSubmitted,
+    ) -> Self {
+        let mut view = Self::new(title, placeholder, context_label, on_submit);
+        view.textarea.set_text_clearing_elements(&initial_text);
+        view.textarea.set_cursor(initial_text.len());
+        view
+    }
 }
 
 impl BottomPaneView for CustomPromptView {

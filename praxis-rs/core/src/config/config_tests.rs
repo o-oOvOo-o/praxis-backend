@@ -3147,7 +3147,7 @@ fn load_config_rejects_missing_agent_role_config_file() -> std::io::Result<()> {
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: Some(missing_path.abs()),
-                    nickname_candidates: None,
+                    base_name_candidates: None,
                 },
             )]),
         }),
@@ -3188,7 +3188,7 @@ async fn agent_role_relative_config_file_resolves_against_config_toml() -> std::
         r#"[agents.researcher]
 description = "Research role"
 config_file = "./agents/researcher.toml"
-nickname_candidates = ["Hypatia", "Noether"]
+base_name_candidates = ["Hypatia", "Noether"]
 "#,
     )
     .await?;
@@ -3209,7 +3209,7 @@ nickname_candidates = ["Hypatia", "Noether"]
         config
             .agent_roles
             .get("researcher")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Hypatia", "Noether"])
     );
@@ -3231,7 +3231,7 @@ async fn agent_role_file_metadata_overrides_config_toml_metadata() -> std::io::R
         &role_config_path,
         r#"
 description = "Role metadata from file"
-nickname_candidates = ["Hypatia"]
+base_name_candidates = ["Hypatia"]
 developer_instructions = "Research carefully"
 model = "gpt-5"
 "#,
@@ -3242,7 +3242,7 @@ model = "gpt-5"
         r#"[agents.researcher]
 description = "Research role from config"
 config_file = "./agents/researcher.toml"
-nickname_candidates = ["Noether"]
+base_name_candidates = ["Noether"]
 "#,
     )
     .await?;
@@ -3259,7 +3259,7 @@ nickname_candidates = ["Noether"]
     assert_eq!(role.description.as_deref(), Some("Role metadata from file"));
     assert_eq!(role.config_file.as_ref(), Some(&role_config_path));
     assert_eq!(
-        role.nickname_candidates
+        role.base_name_candidates
             .as_ref()
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Hypatia"])
@@ -3576,12 +3576,12 @@ async fn loads_legacy_split_agent_roles_from_config_toml() -> std::io::Result<()
         r#"[agents.researcher]
 description = "Research role"
 config_file = "./agents/researcher.toml"
-nickname_candidates = ["Hypatia", "Noether"]
+base_name_candidates = ["Hypatia", "Noether"]
 
 [agents.reviewer]
 description = "Review role"
 config_file = "./agents/reviewer.toml"
-nickname_candidates = ["Atlas"]
+base_name_candidates = ["Atlas"]
 "#,
     )
     .await?;
@@ -3610,7 +3610,7 @@ nickname_candidates = ["Atlas"]
         config
             .agent_roles
             .get("researcher")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Hypatia", "Noether"])
     );
@@ -3632,7 +3632,7 @@ nickname_candidates = ["Atlas"]
         config
             .agent_roles
             .get("reviewer")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Atlas"])
     );
@@ -3694,7 +3694,7 @@ developer_instructions = "Research carefully"
         r#"
 name = "reviewer"
 description = "from nested"
-nickname_candidates = ["Atlas"]
+base_name_candidates = ["Atlas"]
 developer_instructions = "Review carefully"
 "#,
     )?;
@@ -3715,7 +3715,7 @@ developer_instructions = "Review carefully"
         r#"
 name = "writer"
 description = "from sibling"
-nickname_candidates = ["Sagan"]
+base_name_candidates = ["Sagan"]
 developer_instructions = "Write carefully"
 "#,
     )?;
@@ -3747,7 +3747,7 @@ developer_instructions = "Write carefully"
         config
             .agent_roles
             .get("reviewer")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Atlas"])
     );
@@ -3762,7 +3762,7 @@ developer_instructions = "Write carefully"
         config
             .agent_roles
             .get("writer")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Sagan"])
     );
@@ -3789,12 +3789,12 @@ trust_level = "trusted"
 [agents.researcher]
 description = "Research role from config"
 config_file = "./agents/researcher.toml"
-nickname_candidates = ["Noether"]
+base_name_candidates = ["Noether"]
 
 [agents.critic]
 description = "Critic role from config"
 config_file = "./agents/critic.toml"
-nickname_candidates = ["Ada"]
+base_name_candidates = ["Ada"]
 "#
         ),
     )
@@ -3826,7 +3826,7 @@ model = "gpt-4.1"
         r#"
 name = "researcher"
 description = "Research role from file"
-nickname_candidates = ["Hypatia"]
+base_name_candidates = ["Hypatia"]
 developer_instructions = "Research from file"
 model = "gpt-5-mini"
 "#,
@@ -3837,7 +3837,7 @@ model = "gpt-5-mini"
         r#"
 name = "writer"
 description = "Writer role from file"
-nickname_candidates = ["Sagan"]
+base_name_candidates = ["Sagan"]
 developer_instructions = "Write carefully"
 model = "gpt-5"
 "#,
@@ -3871,7 +3871,7 @@ model = "gpt-5"
         config
             .agent_roles
             .get("researcher")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Hypatia"])
     );
@@ -3893,7 +3893,7 @@ model = "gpt-5"
         config
             .agent_roles
             .get("critic")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Ada"])
     );
@@ -3908,7 +3908,7 @@ model = "gpt-5"
         config
             .agent_roles
             .get("writer")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Sagan"])
     );
@@ -3957,7 +3957,7 @@ model = "gpt-5"
         standalone_agents_dir.join("researcher.toml"),
         r#"
 name = "researcher"
-nickname_candidates = ["Hypatia"]
+base_name_candidates = ["Hypatia"]
 developer_instructions = "Research from file"
 model = "gpt-5-mini"
 "#,
@@ -3991,7 +3991,7 @@ model = "gpt-5-mini"
         config
             .agent_roles
             .get("researcher")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Hypatia"])
     );
@@ -4000,7 +4000,7 @@ model = "gpt-5-mini"
 }
 
 #[test]
-fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Result<()> {
+fn load_config_normalizes_agent_role_base_name_candidates() -> std::io::Result<()> {
     let praxis_home = TempDir::new()?;
     let cfg = ConfigToml {
         agents: Some(AgentsToml {
@@ -4012,7 +4012,7 @@ fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Result<()
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
-                    nickname_candidates: Some(vec![
+                    base_name_candidates: Some(vec![
                         "  Hypatia  ".to_string(),
                         "Noether".to_string(),
                     ]),
@@ -4032,7 +4032,7 @@ fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Result<()
         config
             .agent_roles
             .get("researcher")
-            .and_then(|role| role.nickname_candidates.as_ref())
+            .and_then(|role| role.base_name_candidates.as_ref())
             .map(|candidates| candidates.iter().map(String::as_str).collect::<Vec<_>>()),
         Some(vec!["Hypatia", "Noether"])
     );
@@ -4041,7 +4041,7 @@ fn load_config_normalizes_agent_role_nickname_candidates() -> std::io::Result<()
 }
 
 #[test]
-fn load_config_rejects_empty_agent_role_nickname_candidates() -> std::io::Result<()> {
+fn load_config_rejects_empty_agent_role_base_name_candidates() -> std::io::Result<()> {
     let praxis_home = TempDir::new()?;
     let cfg = ConfigToml {
         agents: Some(AgentsToml {
@@ -4053,7 +4053,7 @@ fn load_config_rejects_empty_agent_role_nickname_candidates() -> std::io::Result
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
-                    nickname_candidates: Some(Vec::new()),
+                    base_name_candidates: Some(Vec::new()),
                 },
             )]),
         }),
@@ -4065,18 +4065,18 @@ fn load_config_rejects_empty_agent_role_nickname_candidates() -> std::io::Result
         ConfigOverrides::default(),
         praxis_home.path().to_path_buf(),
     );
-    let err = result.expect_err("empty nickname candidates should be rejected");
+    let err = result.expect_err("empty base name candidates should be rejected");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(
         err.to_string()
-            .contains("agents.researcher.nickname_candidates")
+            .contains("agents.researcher.base_name_candidates")
     );
 
     Ok(())
 }
 
 #[test]
-fn load_config_rejects_duplicate_agent_role_nickname_candidates() -> std::io::Result<()> {
+fn load_config_rejects_duplicate_agent_role_base_name_candidates() -> std::io::Result<()> {
     let praxis_home = TempDir::new()?;
     let cfg = ConfigToml {
         agents: Some(AgentsToml {
@@ -4088,7 +4088,7 @@ fn load_config_rejects_duplicate_agent_role_nickname_candidates() -> std::io::Re
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
-                    nickname_candidates: Some(vec!["Hypatia".to_string(), " Hypatia ".to_string()]),
+                    base_name_candidates: Some(vec!["Hypatia".to_string(), " Hypatia ".to_string()]),
                 },
             )]),
         }),
@@ -4100,18 +4100,18 @@ fn load_config_rejects_duplicate_agent_role_nickname_candidates() -> std::io::Re
         ConfigOverrides::default(),
         praxis_home.path().to_path_buf(),
     );
-    let err = result.expect_err("duplicate nickname candidates should be rejected");
+    let err = result.expect_err("duplicate base name candidates should be rejected");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(
         err.to_string()
-            .contains("agents.researcher.nickname_candidates cannot contain duplicates")
+            .contains("agents.researcher.base_name_candidates cannot contain duplicates")
     );
 
     Ok(())
 }
 
 #[test]
-fn load_config_rejects_unsafe_agent_role_nickname_candidates() -> std::io::Result<()> {
+fn load_config_rejects_unsafe_agent_role_base_name_candidates() -> std::io::Result<()> {
     let praxis_home = TempDir::new()?;
     let cfg = ConfigToml {
         agents: Some(AgentsToml {
@@ -4123,7 +4123,7 @@ fn load_config_rejects_unsafe_agent_role_nickname_candidates() -> std::io::Resul
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
-                    nickname_candidates: Some(vec!["Agent <One>".to_string()]),
+                    base_name_candidates: Some(vec!["Agent <One>".to_string()]),
                 },
             )]),
         }),
@@ -4135,10 +4135,10 @@ fn load_config_rejects_unsafe_agent_role_nickname_candidates() -> std::io::Resul
         ConfigOverrides::default(),
         praxis_home.path().to_path_buf(),
     );
-    let err = result.expect_err("unsafe nickname candidates should be rejected");
+    let err = result.expect_err("unsafe base name candidates should be rejected");
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     assert!(err.to_string().contains(
-            "agents.researcher.nickname_candidates may only contain ASCII letters, digits, spaces, hyphens, and underscores"
+            "agents.researcher.base_name_candidates may only contain ASCII letters, digits, spaces, hyphens, and underscores"
         ));
 
     Ok(())

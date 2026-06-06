@@ -1,4 +1,5 @@
 use super::PluginManifestInterface;
+use super::PluginManifestLlm;
 use super::load_plugin_manifest;
 use dirs::home_dir;
 use praxis_git_utils::get_git_repo_root;
@@ -54,6 +55,7 @@ pub struct MarketplacePlugin {
     pub source: MarketplacePluginSource,
     pub policy: MarketplacePluginPolicy,
     pub interface: Option<PluginManifestInterface>,
+    pub llm: Option<PluginManifestLlm>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,8 +207,11 @@ pub(crate) fn load_marketplace(path: &AbsolutePathBuf) -> Result<Marketplace, Ma
         let source = MarketplacePluginSource::Local {
             path: source_path.clone(),
         };
-        let mut interface =
-            load_plugin_manifest(source_path.as_path()).and_then(|manifest| manifest.interface);
+        let manifest = load_plugin_manifest(source_path.as_path());
+        let mut interface = manifest
+            .as_ref()
+            .and_then(|manifest| manifest.interface.clone());
+        let llm = manifest.and_then(|manifest| manifest.llm);
         if let Some(category) = category {
             // Marketplace taxonomy wins when both sources provide a category.
             interface
@@ -223,6 +228,7 @@ pub(crate) fn load_marketplace(path: &AbsolutePathBuf) -> Result<Marketplace, Ma
                 products: policy.products,
             },
             interface,
+            llm,
         });
     }
 

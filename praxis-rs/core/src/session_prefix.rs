@@ -19,10 +19,10 @@ pub(crate) fn format_subagent_notification_message(
 
 pub(crate) fn format_subagent_context_line(
     agent_reference: &str,
-    agent_nickname: Option<&str>,
+    agent_display_name: Option<&str>,
 ) -> String {
-    match agent_nickname.filter(|nickname| !nickname.is_empty()) {
-        Some(agent_nickname) => format!("- {agent_reference}: {agent_nickname}"),
+    match agent_display_name.filter(|nickname| !nickname.is_empty()) {
+        Some(agent_display_name) => format!("- {agent_reference}: {agent_display_name}"),
         None => format!("- {agent_reference}"),
     }
 }

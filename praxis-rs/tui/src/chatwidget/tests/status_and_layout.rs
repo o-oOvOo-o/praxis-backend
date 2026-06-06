@@ -50,6 +50,7 @@ async fn context_indicator_shows_used_tokens_when_window_unknown() {
         total_token_usage: token_usage.clone(),
         last_token_usage: token_usage,
         model_context_window: None,
+        model_auto_compact_token_limit: Some(auto_compact_limit),
     };
 
     chat.handle_praxis_event(Event {

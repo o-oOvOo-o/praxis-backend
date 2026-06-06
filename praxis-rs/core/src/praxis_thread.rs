@@ -19,6 +19,8 @@ use praxis_protocol::protocol::Op;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::Submission;
+use praxis_protocol::protocol::ThreadGoal;
+use praxis_protocol::protocol::ThreadGoalStatus;
 use praxis_protocol::protocol::TokenUsage;
 use praxis_protocol::protocol::W3cTraceContext;
 use praxis_protocol::user_input::UserInput;
@@ -195,6 +197,41 @@ impl PraxisThread {
 
     pub fn state_db(&self) -> Option<StateDbHandle> {
         self.praxis.state_db()
+    }
+
+    pub async fn get_thread_goal(&self) -> anyhow::Result<Option<ThreadGoal>> {
+        self.praxis.session.get_thread_goal().await
+    }
+
+    pub async fn set_thread_goal_from_user(
+        &self,
+        objective: String,
+        token_budget: Option<Option<i64>>,
+    ) -> anyhow::Result<ThreadGoal> {
+        self.praxis
+            .session
+            .user_set_thread_goal(objective, token_budget)
+            .await
+    }
+
+    pub async fn update_thread_goal_from_user(
+        &self,
+        objective: Option<String>,
+        status: Option<ThreadGoalStatus>,
+        token_budget: Option<Option<i64>>,
+    ) -> anyhow::Result<ThreadGoal> {
+        self.praxis
+            .session
+            .user_update_thread_goal(crate::goals::SetGoalRequest {
+                objective,
+                status,
+                token_budget,
+            })
+            .await
+    }
+
+    pub async fn clear_thread_goal_from_user(&self) -> anyhow::Result<bool> {
+        self.praxis.session.user_clear_thread_goal().await
     }
 
     pub async fn regenerate_thread_name(&self) -> anyhow::Result<String> {

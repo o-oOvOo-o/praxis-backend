@@ -106,8 +106,6 @@ use crate::error::UnexpectedResponseError;
 use crate::flags::CODEX_RS_SSE_FIXTURE;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
-use crate::non_responses_transport::stream_claude_unary;
-use crate::non_responses_transport::stream_common_unary;
 use crate::response_debug_context::ResponseDebugContext;
 use crate::response_debug_context::extract_response_debug_context;
 use crate::response_debug_context::extract_response_debug_context_from_api_error;
@@ -1527,9 +1525,9 @@ impl ModelClientSession {
                 )
                 .await
             }
-            WireApi::Common => {
+            WireApi::OpenAiCompat => {
                 self.stream_non_responses_with_auth_recovery(
-                    WireApi::Common,
+                    WireApi::OpenAiCompat,
                     prompt,
                     model_info,
                     effort,
@@ -1557,7 +1555,7 @@ impl ModelClientSession {
             let client_setup = self.client.current_client_setup().await?;
             let result = match wire_api {
                 WireApi::Claude => {
-                    stream_claude_unary(
+                    crate::llm::wire::claude_messages::stream_unary(
                         client_setup.api_provider,
                         client_setup.api_auth,
                         prompt,
@@ -1565,8 +1563,8 @@ impl ModelClientSession {
                     )
                     .await
                 }
-                WireApi::Common => {
-                    stream_common_unary(
+                WireApi::OpenAiCompat => {
+                    crate::llm::wire::openai_compat::stream_unary(
                         client_setup.api_provider,
                         client_setup.api_auth,
                         &self.client.state.provider,

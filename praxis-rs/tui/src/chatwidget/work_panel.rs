@@ -133,6 +133,10 @@ impl WorkPanelState {
         self.goal = Some(goal);
     }
 
+    pub(super) fn clear_goal(&mut self) {
+        self.goal = None;
+    }
+
     pub(super) fn clear_thread_projection(&mut self) {
         self.goal = None;
         self.live = WorkPanelLiveState::default();

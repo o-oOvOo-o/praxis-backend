@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::function_tool::FunctionCallError;
+use crate::llm::runtime::LlmToolVisibilityPolicy;
 use crate::praxis::make_session_and_context;
 use crate::tools::context::ToolPayload;
 use crate::turn_diff_tracker::TurnDiffTracker;
@@ -12,6 +13,51 @@ use super::ToolCallSource;
 use super::ToolRouter;
 use super::ToolRouterParams;
 use super::freeform_input_from_function_arguments;
+
+#[tokio::test]
+async fn tool_visibility_policy_filters_model_visible_specs_only() -> anyhow::Result<()> {
+    let (_session, turn) = make_session_and_context().await;
+    let unfiltered = ToolRouter::from_config(
+        &turn.tools_config,
+        ToolRouterParams {
+            mcp_tools: None,
+            app_tools: None,
+            discoverable_tools: None,
+            dynamic_tools: turn.dynamic_tools.as_slice(),
+            tool_visibility_policy: None,
+        },
+    );
+    let unfiltered_specs = unfiltered.model_visible_specs();
+    let visible_name = unfiltered_specs
+        .first()
+        .expect("test config should expose tools")
+        .name()
+        .to_string();
+    let retained_internal_name = unfiltered_specs.get(1).map(|spec| spec.name().to_string());
+    let policy = LlmToolVisibilityPolicy::from_tool_names(Some(&[visible_name.as_str()]), &[]);
+
+    let filtered = ToolRouter::from_config(
+        &turn.tools_config,
+        ToolRouterParams {
+            mcp_tools: None,
+            app_tools: None,
+            discoverable_tools: None,
+            dynamic_tools: turn.dynamic_tools.as_slice(),
+            tool_visibility_policy: Some(&policy),
+        },
+    );
+    let visible_tools = filtered
+        .model_visible_specs()
+        .iter()
+        .map(|spec| spec.name().to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(visible_tools, vec![visible_name]);
+    if let Some(retained_internal_name) = retained_internal_name {
+        assert!(filtered.find_spec(&retained_internal_name).is_some());
+    }
+    Ok(())
+}
 
 #[tokio::test]
 async fn js_repl_tools_only_blocks_direct_tool_calls() -> anyhow::Result<()> {
@@ -40,6 +86,7 @@ async fn js_repl_tools_only_blocks_direct_tool_calls() -> anyhow::Result<()> {
             app_tools,
             discoverable_tools: None,
             dynamic_tools: turn.dynamic_tools.as_slice(),
+            tool_visibility_policy: None,
         },
     );
 
@@ -98,6 +145,7 @@ async fn js_repl_tools_only_allows_js_repl_source_calls() -> anyhow::Result<()> 
             app_tools,
             discoverable_tools: None,
             dynamic_tools: turn.dynamic_tools.as_slice(),
+            tool_visibility_policy: None,
         },
     );
 
@@ -181,6 +229,7 @@ async fn function_wrapped_freeform_keeps_function_output_type() -> anyhow::Resul
             app_tools: None,
             discoverable_tools: None,
             dynamic_tools: turn.dynamic_tools.as_slice(),
+            tool_visibility_policy: None,
         },
     );
     let patch = "*** Begin Patch\n*** Add File: done.txt\n+ok\n*** End Patch\n";

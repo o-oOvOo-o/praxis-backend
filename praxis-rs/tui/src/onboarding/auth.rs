@@ -701,9 +701,13 @@ impl AuthModeWidget {
 
     fn render_claude_notice(&self, area: Rect, buf: &mut Buffer) {
         let lines: Vec<Line> = vec![
-            Line::from(vec!["> ".into(), "Anthropic Statement".bold()]),
+            Line::from(vec![
+                "> ".into(),
+                "Claude Placeholder / Anthropic Statement".bold(),
+            ]),
             "".into(),
-            "  Praxis does not provide a Claude adapter.".into(),
+            "  This is a placeholder, not a Claude adapter.".into(),
+            "  Praxis is not rewarding Anthropic with a first-class route here.".into(),
             "".into(),
             "  Anthropic has built a public moral posture around opposition to distillation,"
                 .into(),

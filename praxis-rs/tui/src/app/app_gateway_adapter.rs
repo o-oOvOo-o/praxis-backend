@@ -360,6 +360,9 @@ fn server_notification_thread_target(
         ServerNotification::ThreadGoalUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::ThreadGoalCleared(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::TurnStarted(notification) => Some(notification.thread_id.as_str()),
         ServerNotification::HookStarted(notification) => Some(notification.thread_id.as_str()),
         ServerNotification::TurnCompleted(notification) => Some(notification.thread_id.as_str()),
@@ -1271,7 +1274,9 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             cli_version: "test".to_string(),
             source: SessionSource::Cli.into(),
-            agent_nickname: None,
+            agent_base_name: None,
+            agent_title: None,
+            agent_display_name: None,
             agent_role: None,
             git_info: None,
             name: None,
@@ -1444,7 +1449,9 @@ mod tests {
                 cwd: PathBuf::from("/tmp/project"),
                 cli_version: "test".to_string(),
                 source: SessionSource::Cli.into(),
-                agent_nickname: None,
+                agent_base_name: None,
+                agent_title: None,
+                agent_display_name: None,
                 agent_role: None,
                 git_info: None,
                 name: Some("restore".to_string()),

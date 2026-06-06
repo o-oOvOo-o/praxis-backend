@@ -23,7 +23,9 @@ async fn collab_spawn_end_shows_requested_model_and_effort() {
             call_id: "call-spawn".to_string(),
             sender_thread_id,
             new_thread_id: Some(spawned_thread_id),
-            new_agent_nickname: Some("Robie".to_string()),
+            new_agent_base_name: Some("墨子".to_string()),
+            new_agent_title: Some("巡检仓库".to_string()),
+            new_agent_display_name: Some("Robie".to_string()),
             new_agent_role: Some("explorer".to_string()),
             prompt: "Explore the repo".to_string(),
             model: "gpt-5".to_string(),
@@ -40,7 +42,7 @@ async fn collab_spawn_end_shows_requested_model_and_effort() {
         .join("\n");
 
     assert!(
-        rendered.contains("Spawned Robie [explorer] (gpt-5 high)"),
+        rendered.contains("Spawned 墨子 - 巡检仓库 [explorer] (gpt-5 high)"),
         "expected spawn line to include agent metadata and requested model, got {rendered:?}"
     );
 }
@@ -264,11 +266,15 @@ async fn live_app_gateway_collab_wait_items_render_history() {
         ThreadId::from_string("019cff70-2599-75e2-af72-b96db334332d").expect("valid thread id");
     chat.set_collab_agent_metadata(
         receiver_thread_id,
+        Some("墨子".to_string()),
+        Some("巡检仓库".to_string()),
         Some("Robie".to_string()),
         Some("explorer".to_string()),
     );
     chat.set_collab_agent_metadata(
         other_receiver_thread_id,
+        Some("荀子".to_string()),
+        Some("复核变更".to_string()),
         Some("Ada".to_string()),
         Some("reviewer".to_string()),
     );

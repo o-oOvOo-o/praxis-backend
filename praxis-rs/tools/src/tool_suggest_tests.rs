@@ -82,6 +82,7 @@ fn build_tool_suggestion_elicitation_request_for_plugin_omits_install_url() {
         name: "Sample Plugin".to_string(),
         description: Some("Includes skills, MCP servers, and apps.".to_string()),
         has_skills: true,
+        has_llm: false,
         mcp_server_names: vec!["sample-docs".to_string()],
         app_connector_ids: vec!["connector_calendar".to_string()],
     }));

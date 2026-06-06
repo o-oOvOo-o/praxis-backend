@@ -15,26 +15,38 @@ fn agent_metadata(thread_id: ThreadId) -> AgentMetadata {
 }
 
 #[test]
-fn format_agent_nickname_adds_ordinals_after_reset() {
+fn format_agent_base_name_adds_ordinals_after_reset() {
     assert_eq!(
-        format_agent_nickname("Plato", /*nickname_reset_count*/ 0),
+        format_agent_base_name("Plato", /*base_name_reset_count*/ 0),
         "Plato"
     );
     assert_eq!(
-        format_agent_nickname("Plato", /*nickname_reset_count*/ 1),
+        format_agent_base_name("Plato", /*base_name_reset_count*/ 1),
         "Plato the 2nd"
     );
     assert_eq!(
-        format_agent_nickname("Plato", /*nickname_reset_count*/ 2),
+        format_agent_base_name("Plato", /*base_name_reset_count*/ 2),
         "Plato the 3rd"
     );
     assert_eq!(
-        format_agent_nickname("Plato", /*nickname_reset_count*/ 10),
+        format_agent_base_name("Plato", /*base_name_reset_count*/ 10),
         "Plato the 11th"
     );
     assert_eq!(
-        format_agent_nickname("Plato", /*nickname_reset_count*/ 20),
+        format_agent_base_name("Plato", /*base_name_reset_count*/ 20),
         "Plato the 21st"
+    );
+}
+
+#[test]
+fn format_agent_base_name_uses_numeric_suffix_for_chinese_names() {
+    assert_eq!(
+        format_agent_base_name("墨子", /*base_name_reset_count*/ 0),
+        "墨子"
+    );
+    assert_eq!(
+        format_agent_base_name("墨子", /*base_name_reset_count*/ 1),
+        "墨子2"
     );
 }
 
@@ -49,7 +61,7 @@ fn thread_spawn_depth_increments_and_enforces_limit() {
         parent_thread_id: ThreadId::new(),
         depth: 1,
         agent_path: None,
-        agent_nickname: None,
+        agent_display_name: None,
         agent_role: None,
     });
     let child_depth = next_thread_spawn_depth(&session_source);
@@ -165,29 +177,29 @@ fn failed_spawn_keeps_nickname_marked_used() {
     let mut reservation = registry
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve slot");
-    let agent_nickname = reservation
-        .reserve_agent_nickname_with_preference(&["alpha"], /*preferred*/ None)
+    let agent_display_name = reservation
+        .reserve_agent_base_name_with_preference(&["alpha"], /*preferred*/ None)
         .expect("reserve agent name");
-    assert_eq!(agent_nickname, "alpha");
+    assert_eq!(agent_display_name, "alpha");
     drop(reservation);
 
     let mut reservation = registry
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve slot");
-    let agent_nickname = reservation
-        .reserve_agent_nickname_with_preference(&["alpha", "beta"], /*preferred*/ None)
+    let agent_display_name = reservation
+        .reserve_agent_base_name_with_preference(&["alpha", "beta"], /*preferred*/ None)
         .expect("unused name should still be preferred");
-    assert_eq!(agent_nickname, "beta");
+    assert_eq!(agent_display_name, "beta");
 }
 
 #[test]
-fn agent_nickname_resets_used_pool_when_exhausted() {
+fn agent_display_name_resets_used_pool_when_exhausted() {
     let registry = Arc::new(AgentRegistry::default());
     let mut first = registry
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve first slot");
     let first_name = first
-        .reserve_agent_nickname_with_preference(&["alpha"], /*preferred*/ None)
+        .reserve_agent_base_name_with_preference(&["alpha"], /*preferred*/ None)
         .expect("reserve first agent name");
     let first_id = ThreadId::new();
     first.commit(agent_metadata(first_id));
@@ -197,14 +209,14 @@ fn agent_nickname_resets_used_pool_when_exhausted() {
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve second slot");
     let second_name = second
-        .reserve_agent_nickname_with_preference(&["alpha"], /*preferred*/ None)
+        .reserve_agent_base_name_with_preference(&["alpha"], /*preferred*/ None)
         .expect("name should be reused after pool reset");
     assert_eq!(second_name, "alpha the 2nd");
     let active_agents = registry
         .active_agents
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    assert_eq!(active_agents.nickname_reset_count, 1);
+    assert_eq!(active_agents.base_name_reset_count, 1);
 }
 
 #[test]
@@ -215,7 +227,7 @@ fn released_nickname_stays_used_until_pool_reset() {
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve first slot");
     let first_name = first
-        .reserve_agent_nickname_with_preference(&["alpha"], /*preferred*/ None)
+        .reserve_agent_base_name_with_preference(&["alpha"], /*preferred*/ None)
         .expect("reserve first agent name");
     let first_id = ThreadId::new();
     first.commit(agent_metadata(first_id));
@@ -227,7 +239,7 @@ fn released_nickname_stays_used_until_pool_reset() {
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve second slot");
     let second_name = second
-        .reserve_agent_nickname_with_preference(&["alpha", "beta"], /*preferred*/ None)
+        .reserve_agent_base_name_with_preference(&["alpha", "beta"], /*preferred*/ None)
         .expect("released name should still be marked used");
     assert_eq!(second_name, "beta");
     let second_id = ThreadId::new();
@@ -238,7 +250,7 @@ fn released_nickname_stays_used_until_pool_reset() {
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve third slot");
     let third_name = third
-        .reserve_agent_nickname_with_preference(&["alpha", "beta"], /*preferred*/ None)
+        .reserve_agent_base_name_with_preference(&["alpha", "beta"], /*preferred*/ None)
         .expect("pool reset should permit a duplicate");
     let expected_names = HashSet::from(["alpha the 2nd".to_string(), "beta the 2nd".to_string()]);
     assert!(expected_names.contains(&third_name));
@@ -246,7 +258,47 @@ fn released_nickname_stays_used_until_pool_reset() {
         .active_agents
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    assert_eq!(active_agents.nickname_reset_count, 1);
+    assert_eq!(active_agents.base_name_reset_count, 1);
+}
+
+#[test]
+fn agent_id_for_display_name_resolves_unique_non_root_agent() {
+    let registry = AgentRegistry::default();
+    let thread_id = ThreadId::new();
+    registry.register_spawned_thread(AgentMetadata {
+        agent_id: Some(thread_id),
+        agent_path: Some(agent_path("/root/mozi")),
+        agent_display_name: Some("墨子".to_string()),
+        ..Default::default()
+    });
+
+    assert_eq!(
+        registry
+            .agent_id_for_display_name("墨子")
+            .expect("nickname resolution should not fail"),
+        Some(thread_id)
+    );
+}
+
+#[test]
+fn agent_id_for_display_name_rejects_ambiguous_names() {
+    let registry = AgentRegistry::default();
+    for path in ["/root/a", "/root/b"] {
+        registry.register_spawned_thread(AgentMetadata {
+            agent_id: Some(ThreadId::new()),
+            agent_path: Some(agent_path(path)),
+            agent_display_name: Some("墨子".to_string()),
+            ..Default::default()
+        });
+    }
+
+    let err = registry
+        .agent_id_for_display_name("墨子")
+        .expect_err("duplicate nickname should be rejected");
+    let PraxisErr::UnsupportedOperation(message) = err else {
+        panic!("expected unsupported operation error");
+    };
+    assert!(message.contains("ambiguous"));
 }
 
 #[test]
@@ -257,7 +309,7 @@ fn repeated_resets_advance_the_ordinal_suffix() {
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve first slot");
     let first_name = first
-        .reserve_agent_nickname_with_preference(&["Plato"], /*preferred*/ None)
+        .reserve_agent_base_name_with_preference(&["Plato"], /*preferred*/ None)
         .expect("reserve first agent name");
     let first_id = ThreadId::new();
     first.commit(agent_metadata(first_id));
@@ -268,7 +320,7 @@ fn repeated_resets_advance_the_ordinal_suffix() {
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve second slot");
     let second_name = second
-        .reserve_agent_nickname_with_preference(&["Plato"], /*preferred*/ None)
+        .reserve_agent_base_name_with_preference(&["Plato"], /*preferred*/ None)
         .expect("reserve second agent name");
     let second_id = ThreadId::new();
     second.commit(agent_metadata(second_id));
@@ -279,14 +331,14 @@ fn repeated_resets_advance_the_ordinal_suffix() {
         .reserve_spawn_slot(/*max_threads*/ None)
         .expect("reserve third slot");
     let third_name = third
-        .reserve_agent_nickname_with_preference(&["Plato"], /*preferred*/ None)
+        .reserve_agent_base_name_with_preference(&["Plato"], /*preferred*/ None)
         .expect("reserve third agent name");
     assert_eq!(third_name, "Plato the 3rd");
     let active_agents = registry
         .active_agents
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    assert_eq!(active_agents.nickname_reset_count, 2);
+    assert_eq!(active_agents.base_name_reset_count, 2);
 }
 
 #[test]

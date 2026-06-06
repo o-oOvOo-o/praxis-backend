@@ -61,7 +61,10 @@ impl ContextManager {
         Self {
             items: Vec::new(),
             token_info: TokenUsageInfo::new_or_append(
-                &None, &None, /*model_context_window*/ None,
+                &None,
+                &None,
+                /*model_context_window*/ None,
+                /*model_auto_compact_token_limit*/ None,
             ),
             reference_context_item: None,
         }
@@ -254,11 +257,13 @@ impl ContextManager {
         &mut self,
         usage: &TokenUsage,
         model_context_window: Option<i64>,
+        model_auto_compact_token_limit: Option<i64>,
     ) {
         self.token_info = TokenUsageInfo::new_or_append(
             &self.token_info,
             &Some(usage.clone()),
             model_context_window,
+            model_auto_compact_token_limit,
         );
     }
 
@@ -301,7 +306,7 @@ impl ContextManager {
         let last_tokens = self
             .token_info
             .as_ref()
-            .map(|info| info.last_token_usage.total_tokens)
+            .map(|info| info.last_token_usage.tokens_in_context_window())
             .unwrap_or(0);
         let items_after_last_model_generated_tokens = self
             .items_after_last_model_generated_item()
@@ -326,7 +331,7 @@ impl ContextManager {
         let items_after_last_model_generated = self.items_after_last_model_generated_item();
 
         TotalTokenUsageBreakdown {
-            last_api_response_total_tokens: last_usage.total_tokens,
+            last_api_response_total_tokens: last_usage.tokens_in_context_window(),
             all_history_items_model_visible_bytes: self
                 .items
                 .iter()

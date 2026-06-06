@@ -234,6 +234,69 @@ impl Session {
             .map(|goal| goal.map(protocol_goal_from_state))
     }
 
+    pub(crate) async fn user_set_thread_goal(
+        self: &Arc<Self>,
+        objective: String,
+        token_budget: Option<Option<i64>>,
+    ) -> anyhow::Result<ThreadGoal> {
+        validate_goal_budget(token_budget.flatten())?;
+        let objective = objective.trim().to_string();
+        if let Err(err) = validate_thread_goal_objective(objective.as_str()) {
+            anyhow::bail!("{err}");
+        }
+
+        let state_db = self.require_state_db_for_thread_goals().await?;
+        self.account_thread_goal_wall_clock_usage(
+            &state_db,
+            praxis_state::GoalAccountingMode::ActiveOnly,
+        )
+        .await?;
+        let existing_goal = state_db.get_thread_goal(self.conversation_id).await?;
+        let goal = if let Some(existing_goal) = existing_goal {
+            state_db
+                .update_thread_goal(
+                    self.conversation_id,
+                    praxis_state::GoalUpdate {
+                        objective: Some(objective),
+                        status: Some(praxis_state::ThreadGoalStatus::Active),
+                        token_budget,
+                        expected_goal_id: Some(existing_goal.goal_id),
+                    },
+                )
+                .await?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "cannot update goal for thread {}: no goal exists",
+                        self.conversation_id
+                    )
+                })?
+        } else {
+            state_db
+                .insert_thread_goal(
+                    self.conversation_id,
+                    objective.as_str(),
+                    praxis_state::ThreadGoalStatus::Active,
+                    token_budget.flatten(),
+                )
+                .await?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "thread {} already has a goal; update or clear it before creating another",
+                        self.conversation_id
+                    )
+                })?
+        };
+        let goal_id = goal.goal_id.clone();
+        let protocol_goal = protocol_goal_from_state(goal);
+        self.mark_active_goal_accounting(
+            goal_id,
+            None,
+            self.total_token_usage().await.unwrap_or_default(),
+        )
+        .await;
+        Ok(protocol_goal)
+    }
+
     pub(crate) async fn create_thread_goal(
         self: &Arc<Self>,
         turn_context: &TurnContext,
@@ -283,6 +346,40 @@ impl Session {
         turn_context: &TurnContext,
         request: SetGoalRequest,
     ) -> anyhow::Result<ThreadGoal> {
+        let protocol_goal = self
+            .set_thread_goal_without_event(request, Some(turn_context.sub_id.clone()))
+            .await?;
+        self.emit_thread_goal_updated(turn_context, protocol_goal.clone())
+            .await;
+        Ok(protocol_goal)
+    }
+
+    pub(crate) async fn user_update_thread_goal(
+        self: &Arc<Self>,
+        request: SetGoalRequest,
+    ) -> anyhow::Result<ThreadGoal> {
+        self.set_thread_goal_without_event(request, None).await
+    }
+
+    pub(crate) async fn user_clear_thread_goal(self: &Arc<Self>) -> anyhow::Result<bool> {
+        let state_db = self.require_state_db_for_thread_goals().await?;
+        self.account_thread_goal_wall_clock_usage(
+            &state_db,
+            praxis_state::GoalAccountingMode::ActiveOnly,
+        )
+        .await?;
+        let cleared = state_db.delete_thread_goal(self.conversation_id).await?;
+        if cleared {
+            self.clear_stopped_thread_goal_runtime_state().await;
+        }
+        Ok(cleared)
+    }
+
+    async fn set_thread_goal_without_event(
+        self: &Arc<Self>,
+        request: SetGoalRequest,
+        turn_id: Option<String>,
+    ) -> anyhow::Result<ThreadGoal> {
         let SetGoalRequest {
             objective,
             status,
@@ -327,15 +424,13 @@ impl Session {
         if goal_status == praxis_state::ThreadGoalStatus::Active {
             self.mark_active_goal_accounting(
                 goal_id,
-                Some(turn_context.sub_id.clone()),
+                turn_id,
                 self.total_token_usage().await.unwrap_or_default(),
             )
             .await;
         } else {
             self.clear_stopped_thread_goal_runtime_state().await;
         }
-        self.emit_thread_goal_updated(turn_context, protocol_goal.clone())
-            .await;
         Ok(protocol_goal)
     }
 

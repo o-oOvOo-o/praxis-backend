@@ -417,6 +417,7 @@ fn plugin_used_event_serializes_expected_shape() {
                 "plugin_name": "sample",
                 "marketplace_name": "test",
                 "has_skills": true,
+                "has_llm": false,
                 "mcp_server_count": 2,
                 "connector_ids": ["calendar", "drive"],
                 "product_client_id": originator().value,
@@ -446,6 +447,7 @@ fn plugin_management_event_serializes_expected_shape() {
                 "plugin_name": "sample",
                 "marketplace_name": "test",
                 "has_skills": true,
+                "has_llm": false,
                 "mcp_server_count": 2,
                 "connector_ids": ["calendar", "drive"],
                 "product_client_id": originator().value
@@ -611,6 +613,7 @@ async fn reducer_ingests_plugin_state_changed_fact() {
                 "plugin_name": "sample",
                 "marketplace_name": "test",
                 "has_skills": true,
+                "has_llm": false,
                 "mcp_server_count": 2,
                 "connector_ids": ["calendar", "drive"],
                 "product_client_id": originator().value
@@ -627,6 +630,7 @@ fn sample_plugin_metadata() -> PluginTelemetryMetadata {
             display_name: "sample".to_string(),
             description: None,
             has_skills: true,
+            has_llm: false,
             mcp_server_names: vec!["mcp-1".to_string(), "mcp-2".to_string()],
             app_connector_ids: vec![
                 AppConnectorId("calendar".to_string()),

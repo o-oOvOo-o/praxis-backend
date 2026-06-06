@@ -193,7 +193,7 @@ async fn same_conversation_can_switch_from_gpt_to_deepseek_provider() -> Result<
         env_key_instructions: None,
         experimental_bearer_token: None,
         auth: None,
-        wire_api: WireApi::Common,
+        wire_api: WireApi::OpenAiCompat,
         compat: None,
         query_params: None,
         http_headers: None,

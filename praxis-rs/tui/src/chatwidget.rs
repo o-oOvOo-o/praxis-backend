@@ -48,6 +48,7 @@ use url::Url;
 use self::realtime::PendingSteerCompareKey;
 use crate::app_command::AppCommand;
 use crate::app_event::RealtimeAudioDeviceKind;
+use crate::app_event::ThreadGoalSetMode;
 use crate::app_gateway_approval_conversions::network_approval_context_to_core;
 use crate::app_gateway_session::ThreadSessionState;
 use crate::app_gateway_session::token_usage_info_from_app_gateway;
@@ -96,6 +97,9 @@ use praxis_app_gateway_protocol::McpServerStartupState;
 use praxis_app_gateway_protocol::McpServerStatusUpdatedNotification;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
+use praxis_app_gateway_protocol::ThreadGoal;
+use praxis_app_gateway_protocol::ThreadGoalClearedNotification;
+use praxis_app_gateway_protocol::ThreadGoalStatus as AppGatewayThreadGoalStatus;
 use praxis_app_gateway_protocol::ThreadControlState;
 use praxis_app_gateway_protocol::ThreadControllerKind;
 use praxis_app_gateway_protocol::ThreadItem;
@@ -285,12 +289,6 @@ const ACTIVE_CELL_ANIMATION_FRAME_DELAY_UNFOCUSED: Duration = Duration::from_mil
 const DEEPSEEK_HEADER_HEIGHT: u16 = 1;
 const DEEPSEEK_FOOTER_HEIGHT: u16 = 1;
 const DEEPSEEK_CHROME_MIN_HEIGHT: u16 = 6;
-const DEEPSEEK_HEADER_BG: Color = Color::Rgb(8, 14, 22);
-const DEEPSEEK_FOOTER_BG: Color = Color::Rgb(5, 10, 18);
-const DEEPSEEK_BLUE: Color = Color::Rgb(86, 156, 214);
-const DEEPSEEK_SKY: Color = Color::Rgb(125, 211, 252);
-const DEEPSEEK_MUTED: Color = Color::Rgb(170, 180, 174);
-const DEEPSEEK_TEXT: Color = Color::Rgb(238, 244, 240);
 const CENTER_ENTRY_MAX_WIDTH: u16 = 88;
 const CENTER_ENTRY_MIN_SIDE_PADDING: u16 = 4;
 const CENTER_ENTRY_INTRO_HEIGHT: u16 = 7;
@@ -364,6 +362,7 @@ use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
+use crate::center_theme;
 use crate::clipboard_paste::paste_image_to_temp_png;
 use crate::clipboard_text;
 use crate::collaboration_modes;
@@ -1032,6 +1031,7 @@ pub(crate) struct ChatWidget {
     last_visible_patch_cell_ids: RefCell<Vec<crate::history_presentation::PatchCellId>>,
     active_cell_render_cache: RefCell<Option<ActiveCellRenderCache>>,
     center_active_tail_cache: RefCell<Option<CenterActiveTailCache>>,
+    center_transcript_viewport_cache: RefCell<Option<CenterTranscriptViewportCache>>,
     // Feedback sink for /feedback
     feedback: praxis_feedback::CodexFeedback,
     // Current session rollout path (if known)
@@ -1108,6 +1108,26 @@ struct CenterActiveTailCache {
 struct CenterTranscriptViewport {
     content_area: Rect,
     lines: Vec<Line<'static>>,
+    patch_cell_ids: Vec<crate::history_presentation::PatchCellId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CenterTranscriptViewportCacheKey {
+    width: u16,
+    height: u16,
+    scroll_from_bottom: usize,
+    theme_kind: center_theme::CenterThemeKind,
+    committed_len: usize,
+    committed_first_ptr: usize,
+    committed_last_ptr: usize,
+    presentation_revision: u64,
+    active_key: Option<ActiveCellRenderCacheKey>,
+}
+
+#[derive(Clone, Debug)]
+struct CenterTranscriptViewportCache {
+    key: CenterTranscriptViewportCacheKey,
+    viewport: CenterTranscriptViewport,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1189,7 +1209,9 @@ fn thread_control_display_label(control_state: &ThreadControlState) -> String {
 /// degrades to the previous behavior of showing raw thread ids.
 #[derive(Clone, Debug, Default)]
 struct CollabAgentMetadata {
-    agent_nickname: Option<String>,
+    agent_base_name: Option<String>,
+    agent_title: Option<String>,
+    agent_display_name: Option<String>,
     agent_role: Option<String>,
 }
 
@@ -1786,7 +1808,9 @@ fn app_gateway_collab_agent_statuses_to_core(
             .unwrap_or_default();
         agent_statuses.push(CollabAgentStatusEntry {
             thread_id,
-            agent_nickname: metadata.agent_nickname,
+            agent_base_name: metadata.agent_base_name,
+            agent_title: metadata.agent_title,
+            agent_display_name: metadata.agent_display_name,
             agent_role: metadata.agent_role,
             status: status.clone(),
         });
@@ -1814,7 +1838,9 @@ fn app_gateway_collab_receiver_agent_refs(
                 .unwrap_or_default();
             Some(CollabAgentRef {
                 thread_id,
-                agent_nickname: metadata.agent_nickname,
+                agent_base_name: metadata.agent_base_name,
+                agent_title: metadata.agent_title,
+                agent_display_name: metadata.agent_display_name,
                 agent_role: metadata.agent_role,
             })
         })
@@ -1890,13 +1916,17 @@ impl ChatWidget {
     pub(crate) fn set_collab_agent_metadata(
         &mut self,
         thread_id: ThreadId,
-        agent_nickname: Option<String>,
+        agent_base_name: Option<String>,
+        agent_title: Option<String>,
+        agent_display_name: Option<String>,
         agent_role: Option<String>,
     ) {
         self.collab_agent_metadata.insert(
             thread_id,
             CollabAgentMetadata {
-                agent_nickname,
+                agent_base_name,
+                agent_title,
+                agent_display_name,
                 agent_role,
             },
         );
@@ -2850,6 +2880,78 @@ impl ChatWidget {
             Some(format_goal_elapsed(notification.goal.time_used_seconds));
     }
 
+    fn on_thread_goal_cleared_notification(
+        &mut self,
+        notification: ThreadGoalClearedNotification,
+        replay_kind: Option<ReplayKind>,
+    ) {
+        if matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
+            return;
+        }
+        match ThreadId::from_string(&notification.thread_id) {
+            Ok(thread_id) => self.on_thread_goal_cleared(thread_id),
+            Err(err) => {
+                tracing::warn!(
+                    thread_id = notification.thread_id,
+                    error = %err,
+                    "ignoring app-gateway ThreadGoalCleared with invalid thread_id"
+                );
+            }
+        }
+    }
+
+    pub(crate) fn on_thread_goal_cleared(&mut self, thread_id: ThreadId) {
+        if self.thread_id != Some(thread_id) {
+            return;
+        }
+        self.work_panel.clear_goal();
+        self.pending_goal_completion_elapsed = None;
+        self.request_redraw();
+    }
+
+    pub(crate) fn show_goal_summary(&mut self, goal: &ThreadGoal) {
+        let mut lines = vec![
+            format!("Goal: {}", app_gateway_goal_status_label(goal.status)),
+            format!("Objective: {}", goal.objective),
+            format!("Time used: {}", format_goal_elapsed(goal.time_used_seconds)),
+            format!("Tokens used: {}", format_tokens_compact(goal.tokens_used)),
+        ];
+        if let Some(token_budget) = goal.token_budget {
+            lines.push(format!(
+                "Token budget: {}",
+                format_tokens_compact(token_budget)
+            ));
+        }
+        self.add_info_message(
+            lines.join("\n"),
+            Some("Commands: /goal edit, /goal pause, /goal resume, /goal clear".to_string()),
+        );
+    }
+
+    pub(crate) fn show_goal_edit_prompt(&mut self, thread_id: ThreadId, goal: ThreadGoal) {
+        let tx = self.app_event_tx.clone();
+        let status = edited_goal_status(goal.status);
+        let token_budget = goal.token_budget;
+        let view = CustomPromptView::new_with_initial_text(
+            "Edit goal".to_string(),
+            "Type a goal objective and press Enter".to_string(),
+            /*context_label*/ None,
+            goal.objective,
+            Box::new(move |objective| {
+                tx.send(AppEvent::SetThreadGoalObjective {
+                    thread_id,
+                    objective,
+                    mode: ThreadGoalSetMode::UpdateExisting {
+                        status,
+                        token_budget,
+                    },
+                });
+            }),
+        );
+        self.bottom_pane.show_view(Box::new(view));
+        self.request_redraw();
+    }
+
     #[cfg(test)]
     fn on_core_thread_goal_updated(
         &mut self,
@@ -3126,6 +3228,7 @@ impl ChatWidget {
                     total_token_usage: TokenUsage::default(),
                     last_token_usage: TokenUsage::default(),
                     model_context_window: Some(model_context_window),
+                    model_auto_compact_token_limit: None,
                 }
             }
         };
@@ -3154,13 +3257,15 @@ impl ChatWidget {
             return None;
         }
 
-        Some(info.total_token_usage.tokens_in_context_window())
+        Some(info.last_token_usage.tokens_in_context_window())
     }
 
     fn status_budget_limit(&self, info: &TokenUsageInfo) -> Option<i64> {
         let auto_compact_limit = self
-            .config
-            .model_auto_compact_token_limit
+            .token_info
+            .as_ref()
+            .and_then(|info| info.model_auto_compact_token_limit)
+            .or(self.config.model_auto_compact_token_limit)
             .filter(|limit| *limit > 0);
         let context_window = info
             .model_context_window
@@ -3177,9 +3282,13 @@ impl ChatWidget {
         }
     }
 
+    fn status_context_used_tokens(info: &TokenUsageInfo) -> i64 {
+        info.last_token_usage.tokens_in_context_window().max(0)
+    }
+
     fn status_budget_message(&self) -> Option<String> {
         let info = self.token_info.as_ref()?;
-        let used_tokens = info.total_token_usage.tokens_in_context_window().max(0);
+        let used_tokens = Self::status_context_used_tokens(info);
         let cache_message = self.status_cache_message();
         if used_tokens == 0 {
             return cache_message;
@@ -3194,7 +3303,7 @@ impl ChatWidget {
         let used_fmt = format_tokens_compact(used_tokens);
         let limit_fmt = format_tokens_compact(limit);
         let context_message = if used_tokens >= limit {
-            format!("Context: {used_fmt} used ({limit_fmt} limit)")
+            format!("Context: {used_fmt} used ({limit_fmt} compact)")
         } else {
             let used_percent = ((used_tokens as f64 / limit as f64) * 100.0)
                 .round()
@@ -4472,9 +4581,15 @@ impl ChatWidget {
                             call_id: id,
                             sender_thread_id,
                             new_thread_id: first_receiver,
-                            new_agent_nickname: first_receiver_metadata
+                            new_agent_base_name: first_receiver_metadata
                                 .as_ref()
-                                .and_then(|metadata| metadata.agent_nickname.clone()),
+                                .and_then(|metadata| metadata.agent_base_name.clone()),
+                            new_agent_title: first_receiver_metadata
+                                .as_ref()
+                                .and_then(|metadata| metadata.agent_title.clone()),
+                            new_agent_display_name: first_receiver_metadata
+                                .as_ref()
+                                .and_then(|metadata| metadata.agent_display_name.clone()),
                             new_agent_role: first_receiver_metadata
                                 .as_ref()
                                 .and_then(|metadata| metadata.agent_role.clone()),
@@ -4512,9 +4627,15 @@ impl ChatWidget {
                             sender_thread_id,
                             receiver_thread_id,
                             kind,
-                            receiver_agent_nickname: first_receiver_metadata
+                            receiver_agent_base_name: first_receiver_metadata
                                 .as_ref()
-                                .and_then(|metadata| metadata.agent_nickname.clone()),
+                                .and_then(|metadata| metadata.agent_base_name.clone()),
+                            receiver_agent_title: first_receiver_metadata
+                                .as_ref()
+                                .and_then(|metadata| metadata.agent_title.clone()),
+                            receiver_agent_display_name: first_receiver_metadata
+                                .as_ref()
+                                .and_then(|metadata| metadata.agent_display_name.clone()),
                             receiver_agent_role: first_receiver_metadata
                                 .as_ref()
                                 .and_then(|metadata| metadata.agent_role.clone()),
@@ -4538,9 +4659,15 @@ impl ChatWidget {
                                 call_id: id,
                                 sender_thread_id,
                                 receiver_thread_id,
-                                receiver_agent_nickname: first_receiver_metadata
+                                receiver_agent_base_name: first_receiver_metadata
                                     .as_ref()
-                                    .and_then(|metadata| metadata.agent_nickname.clone()),
+                                    .and_then(|metadata| metadata.agent_base_name.clone()),
+                                receiver_agent_title: first_receiver_metadata
+                                    .as_ref()
+                                    .and_then(|metadata| metadata.agent_title.clone()),
+                                receiver_agent_display_name: first_receiver_metadata
+                                    .as_ref()
+                                    .and_then(|metadata| metadata.agent_display_name.clone()),
                                 receiver_agent_role: first_receiver_metadata
                                     .as_ref()
                                     .and_then(|metadata| metadata.agent_role.clone()),
@@ -4552,9 +4679,15 @@ impl ChatWidget {
                                 call_id: id,
                                 sender_thread_id,
                                 receiver_thread_id,
-                                receiver_agent_nickname: first_receiver_metadata
+                                receiver_agent_base_name: first_receiver_metadata
                                     .as_ref()
-                                    .and_then(|metadata| metadata.agent_nickname.clone()),
+                                    .and_then(|metadata| metadata.agent_base_name.clone()),
+                                receiver_agent_title: first_receiver_metadata
+                                    .as_ref()
+                                    .and_then(|metadata| metadata.agent_title.clone()),
+                                receiver_agent_display_name: first_receiver_metadata
+                                    .as_ref()
+                                    .and_then(|metadata| metadata.agent_display_name.clone()),
                                 receiver_agent_role: first_receiver_metadata
                                     .as_ref()
                                     .and_then(|metadata| metadata.agent_role.clone()),
@@ -4613,9 +4746,15 @@ impl ChatWidget {
                             call_id: id,
                             sender_thread_id,
                             receiver_thread_id,
-                            receiver_agent_nickname: first_receiver_metadata
+                            receiver_agent_base_name: first_receiver_metadata
                                 .as_ref()
-                                .and_then(|metadata| metadata.agent_nickname.clone()),
+                                .and_then(|metadata| metadata.agent_base_name.clone()),
+                            receiver_agent_title: first_receiver_metadata
+                                .as_ref()
+                                .and_then(|metadata| metadata.agent_title.clone()),
+                            receiver_agent_display_name: first_receiver_metadata
+                                .as_ref()
+                                .and_then(|metadata| metadata.agent_display_name.clone()),
                             receiver_agent_role: first_receiver_metadata
                                 .as_ref()
                                 .and_then(|metadata| metadata.agent_role.clone()),
@@ -5359,7 +5498,7 @@ impl ChatWidget {
             settings: fallback_default,
         };
 
-        let active_cell = Some(Self::placeholder_session_header_cell(&config, &tui_config));
+        let active_cell = None;
 
         let current_cwd = Some(config.cwd.to_path_buf());
         let queued_message_edit_binding = queued_message_edit_binding_for_terminal(terminal_info());
@@ -5483,6 +5622,7 @@ impl ChatWidget {
             last_visible_patch_cell_ids: RefCell::new(Vec::new()),
             active_cell_render_cache: RefCell::new(None),
             center_active_tail_cache: RefCell::new(None),
+            center_transcript_viewport_cache: RefCell::new(None),
             feedback,
             current_rollout_path: None,
             current_cwd,
@@ -6607,7 +6747,7 @@ impl ChatWidget {
                 }
             }
             SlashCommand::Goal => {
-                self.submit_user_message(Self::goal_status_prompt().into());
+                self.dispatch_goal_command(None);
             }
             SlashCommand::ReleaseThread => {
                 if self.thread_control_state.is_some() {
@@ -6999,18 +7139,7 @@ impl ChatWidget {
                 else {
                     return;
                 };
-                let prepared_trimmed = prepared_args.trim();
-                let prompt = match prepared_trimmed.to_ascii_lowercase().as_str() {
-                    "" | "status" => Self::goal_status_prompt(),
-                    "complete" => {
-                        "Mark the current thread goal complete only if it is actually achieved. Use update_goal with status \"complete\" if no required work remains; otherwise explain what is still missing.".to_string()
-                    }
-                    "blocked" => {
-                        "Mark the current thread goal blocked only if the same blocking condition has repeated for at least three consecutive goal turns and progress is impossible without user input. Use update_goal with status \"blocked\" only if that threshold is met; otherwise keep working.".to_string()
-                    }
-                    objective => Self::goal_create_prompt(objective),
-                };
-                self.submit_user_message(prompt.into());
+                self.dispatch_goal_command(Some(prepared_args));
             }
             SlashCommand::Review if !trimmed.is_empty() => {
                 let Some((prepared_args, _prepared_elements)) = self
@@ -7080,14 +7209,60 @@ impl ChatWidget {
         }
     }
 
-    fn goal_status_prompt() -> String {
-        "Use get_goal to inspect the current persisted thread goal. If no goal exists, say that no goal is set and that /goal <objective> can create one.".to_string()
-    }
+    fn dispatch_goal_command(&mut self, args: Option<String>) {
+        let trimmed = args.as_deref().unwrap_or_default().trim();
+        let command = trimmed.to_ascii_lowercase();
+        let Some(thread_id) = self.thread_id else {
+            self.add_error_message("No active thread is available for /goal.".to_string());
+            self.bottom_pane.drain_pending_submission_state();
+            return;
+        };
 
-    fn goal_create_prompt(objective: &str) -> String {
-        format!(
-            "Create a persistent thread goal with this exact objective. Use create_goal with the objective exactly as written, then continue working toward it.\n\n<objective>\n{objective}\n</objective>"
-        )
+        match command.as_str() {
+            "" | "status" => {
+                self.app_event_tx
+                    .send(AppEvent::OpenThreadGoalMenu { thread_id });
+            }
+            "pause" => {
+                self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
+                    thread_id,
+                    status: AppGatewayThreadGoalStatus::Paused,
+                });
+            }
+            "resume" => {
+                self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
+                    thread_id,
+                    status: AppGatewayThreadGoalStatus::Active,
+                });
+            }
+            "complete" => {
+                self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
+                    thread_id,
+                    status: AppGatewayThreadGoalStatus::Complete,
+                });
+            }
+            "block" | "blocked" => {
+                self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
+                    thread_id,
+                    status: AppGatewayThreadGoalStatus::Blocked,
+                });
+            }
+            "clear" => {
+                self.app_event_tx.send(AppEvent::ClearThreadGoal { thread_id });
+            }
+            "edit" => {
+                self.app_event_tx
+                    .send(AppEvent::OpenThreadGoalEditor { thread_id: Some(thread_id) });
+            }
+            _ => {
+                self.app_event_tx.send(AppEvent::SetThreadGoalObjective {
+                    thread_id,
+                    objective: trimmed.to_string(),
+                    mode: ThreadGoalSetMode::ReplaceExisting,
+                });
+            }
+        }
+        self.bottom_pane.drain_pending_submission_state();
     }
 
     fn show_rename_prompt(&mut self) {
@@ -7938,6 +8113,9 @@ impl ChatWidget {
             }
             ServerNotification::ThreadGoalUpdated(notification) => {
                 self.on_thread_goal_updated_notification(notification, replay_kind);
+            }
+            ServerNotification::ThreadGoalCleared(notification) => {
+                self.on_thread_goal_cleared_notification(notification, replay_kind);
             }
             ServerNotification::ThreadControlChanged(notification) => {
                 if self.thread_id().is_some_and(|thread_id| {
@@ -8866,6 +9044,8 @@ impl ChatWidget {
         // worst causes a one-time cache-key collision.
         self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
         self.active_cell_render_cache.borrow_mut().take();
+        self.center_active_tail_cache.borrow_mut().take();
+        self.center_transcript_viewport_cache.borrow_mut().take();
     }
 
     fn notify(&mut self, notification: Notification) {
@@ -9155,6 +9335,13 @@ impl ChatWidget {
         self.token_info
             .as_ref()
             .map(|info| info.total_token_usage.clone())
+            .unwrap_or_default()
+    }
+
+    fn status_line_context_usage(&self) -> TokenUsage {
+        self.token_info
+            .as_ref()
+            .map(|info| info.last_token_usage.clone())
             .unwrap_or_default()
     }
 
@@ -11545,6 +11732,14 @@ impl ChatWidget {
         self.config.model_provider_id.as_str()
     }
 
+    pub(crate) fn center_theme(&self) -> center_theme::CenterTheme {
+        center_theme::for_model(self.current_model_provider_id(), self.model_display_name())
+    }
+
+    fn center_theme_kind(&self) -> center_theme::CenterThemeKind {
+        center_theme::kind_for_model(self.current_model_provider_id(), self.model_display_name())
+    }
+
     pub(crate) fn realtime_conversation_is_live(&self) -> bool {
         self.realtime_conversation.is_live()
     }
@@ -11841,37 +12036,11 @@ impl ChatWidget {
         self.bottom_pane.plugins().map(Vec::as_slice)
     }
 
-    /// Build a placeholder header cell while the session is configuring.
-    fn placeholder_session_header_cell(
-        config: &Config,
-        tui_config: &TuiRuntimeConfig,
-    ) -> Box<dyn HistoryCell> {
-        let placeholder_style = Style::default().add_modifier(Modifier::DIM | Modifier::ITALIC);
-        if tui_config.animations {
-            Box::new(
-                history_cell::SessionHeaderHistoryCell::new_with_style_animated(
-                    DEFAULT_MODEL_DISPLAY_NAME.to_string(),
-                    placeholder_style,
-                    /*reasoning_effort*/ None,
-                    /*show_fast_status*/ false,
-                    config.cwd.to_path_buf(),
-                    PRAXIS_CLI_VERSION,
-                ),
-            )
-        } else {
-            Box::new(history_cell::SessionHeaderHistoryCell::new_with_style(
-                DEFAULT_MODEL_DISPLAY_NAME.to_string(),
-                placeholder_style,
-                /*reasoning_effort*/ None,
-                /*show_fast_status*/ false,
-                config.cwd.to_path_buf(),
-                PRAXIS_CLI_VERSION,
-            ))
-        }
-    }
-
     /// Merge the real session info cell with any placeholder header to avoid double boxes.
     fn apply_session_info_cell(&mut self, cell: history_cell::SessionInfoCell) {
+        if cell.display_lines(u16::MAX).is_empty() {
+            return;
+        }
         let mut session_info_cell = Some(Box::new(cell) as Box<dyn HistoryCell>);
         let merged_header = if let Some(active) = self.active_cell.take() {
             if active
@@ -13650,12 +13819,14 @@ impl ChatWidget {
             self.replace_visible_patch_cell_ids(Vec::new());
             self.render_center_entry_intro(layout, buf);
         } else {
-            self.replace_visible_patch_cell_ids(self.center_visible_patch_cell_ids(
-                layout,
-                transcript_cells,
-                scroll_from_bottom,
-            ));
-            self.render_center_transcript(layout, buf, transcript_cells, scroll_from_bottom);
+            if let Some(viewport) =
+                self.center_transcript_viewport(layout, transcript_cells, scroll_from_bottom)
+            {
+                self.replace_visible_patch_cell_ids(viewport.patch_cell_ids.clone());
+                self.render_center_transcript_viewport(&viewport, buf);
+            } else {
+                self.replace_visible_patch_cell_ids(Vec::new());
+            }
         }
         self.render_work_panel(layout, buf);
         self.render_bottom_pane(layout, buf);
@@ -13691,26 +13862,20 @@ impl ChatWidget {
         *self.last_visible_patch_cell_ids.borrow_mut() = ids;
     }
 
-    fn center_visible_patch_cell_ids(
+    fn center_visible_patch_cell_ids_for_viewport(
         &self,
-        layout: ChatWidgetLayout,
         transcript_cells: &[Arc<dyn HistoryCell>],
+        width: u16,
+        visible_rows: usize,
         scroll_from_bottom: usize,
     ) -> Vec<crate::history_presentation::PatchCellId> {
-        let Some(content_area) = layout.active_content_area else {
-            return Vec::new();
-        };
-        if content_area.is_empty() {
-            return Vec::new();
-        }
-
-        let width = content_area.width;
         let mut skip = scroll_from_bottom;
-        let mut needed = usize::from(content_area.height);
+        let mut needed = visible_rows;
         let mut ids = Vec::new();
 
         let active_tail_len = self.center_active_tail_cache(width).map_or(0, |cache| {
-            Self::chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone()).len()
+            self.chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone())
+                .len()
         });
         let active_id = self
             .active_cell
@@ -13732,7 +13897,9 @@ impl ChatWidget {
             if needed == 0 {
                 break;
             }
-            let cell_len = Self::chat_timeline_lines_for_cell(cell.as_ref(), width).len();
+            let cell_len = self
+                .chat_timeline_lines_for_cell(cell.as_ref(), width)
+                .len();
             if cell_len == 0 {
                 continue;
             }
@@ -13854,7 +14021,10 @@ impl ChatWidget {
         if area.is_empty() {
             return;
         }
-        Block::default().style(Style::default()).render(area, buf);
+        let theme = self.center_theme();
+        Block::default()
+            .style(Style::default().bg(theme.base_bg).fg(theme.text))
+            .render(area, buf);
     }
 
     fn render_deepseek_header(&self, area: Rect, buf: &mut Buffer) {
@@ -13865,8 +14035,9 @@ impl ChatWidget {
         if area.is_empty() {
             return;
         }
+        let theme = self.center_theme();
         Block::default()
-            .style(Style::default().bg(DEEPSEEK_HEADER_BG))
+            .style(Style::default().bg(theme.header_bg))
             .render(area, buf);
 
         let workspace = self
@@ -13886,58 +14057,58 @@ impl ChatWidget {
         let budget = self.status_budget_message();
         let model_style = if model_hovered {
             Style::default()
-                .fg(DEEPSEEK_SKY)
-                .bg(Color::Rgb(28, 44, 37))
+                .fg(theme.accent)
+                .bg(theme.hover_bg)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(DEEPSEEK_TEXT)
+            Style::default().fg(theme.text)
         };
         let provider_style = if model_hovered {
-            Style::default().fg(DEEPSEEK_SKY).bg(Color::Rgb(28, 44, 37))
+            Style::default().fg(theme.accent).bg(theme.hover_bg)
         } else {
-            Style::default().fg(DEEPSEEK_MUTED)
+            Style::default().fg(theme.muted)
         };
 
         let mut spans = vec![
             Span::styled(
                 " Praxis ",
                 Style::default()
-                    .fg(DEEPSEEK_SKY)
-                    .bg(DEEPSEEK_HEADER_BG)
+                    .fg(theme.accent)
+                    .bg(theme.header_bg)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(workspace.to_string(), Style::default().fg(DEEPSEEK_TEXT)),
-            Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)),
-            Span::styled(mode.to_string(), Style::default().fg(DEEPSEEK_BLUE)),
-            Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)),
+            Span::styled(workspace.to_string(), Style::default().fg(theme.text)),
+            Span::styled("  ", Style::default().bg(theme.header_bg)),
+            Span::styled(mode.to_string(), Style::default().fg(theme.control_accent)),
+            Span::styled("  ", Style::default().bg(theme.header_bg)),
             Span::styled(self.model_display_name().to_string(), model_style),
             Span::styled(format!(" ({provider})"), provider_style),
-            Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)),
-            Span::styled(thread.to_string(), Style::default().fg(DEEPSEEK_MUTED)),
+            Span::styled("  ", Style::default().bg(theme.header_bg)),
+            Span::styled(thread.to_string(), Style::default().fg(theme.muted)),
         ];
         if let Some(control_state) = self.thread_control_state.as_ref() {
-            spans.push(Span::styled("  ", Style::default().bg(DEEPSEEK_HEADER_BG)));
+            spans.push(Span::styled("  ", Style::default().bg(theme.header_bg)));
             spans.push(Span::styled(
                 format!("Locked by {}", thread_control_display_label(control_state)),
                 Style::default()
-                    .fg(DEEPSEEK_SKY)
-                    .bg(DEEPSEEK_HEADER_BG)
+                    .fg(theme.accent)
+                    .bg(theme.header_bg)
                     .add_modifier(Modifier::BOLD),
             ));
         }
         if let Some(budget) = budget {
             spans.push(Span::styled(
                 format!("  {budget}"),
-                Style::default().fg(DEEPSEEK_MUTED),
+                Style::default().fg(theme.muted),
             ));
         }
 
         let line = truncate_line_with_ellipsis_if_overflow(
-            Line::from(spans).style(Style::default().bg(DEEPSEEK_HEADER_BG)),
+            Line::from(spans).style(Style::default().bg(theme.header_bg)),
             area.width as usize,
         );
         Paragraph::new(line)
-            .style(Style::default().bg(DEEPSEEK_HEADER_BG))
+            .style(Style::default().bg(theme.header_bg))
             .render(area, buf);
     }
 
@@ -13945,8 +14116,9 @@ impl ChatWidget {
         if area.is_empty() {
             return;
         }
+        let theme = self.center_theme();
         Block::default()
-            .style(Style::default().bg(DEEPSEEK_FOOTER_BG))
+            .style(Style::default().bg(theme.footer_bg))
             .render(area, buf);
 
         let running = self.bottom_pane.is_task_running();
@@ -13969,18 +14141,18 @@ impl ChatWidget {
                 format!(" {state_label}"),
                 Style::default()
                     .fg(if state_is_locked || running {
-                        DEEPSEEK_SKY
+                        theme.accent
                     } else {
-                        DEEPSEEK_MUTED
+                        theme.muted
                     })
-                    .bg(DEEPSEEK_FOOTER_BG)
+                    .bg(theme.footer_bg)
                     .add_modifier(if state_is_locked || running {
                         Modifier::BOLD
                     } else {
                         Modifier::empty()
                     }),
             ),
-            Span::styled("  ", Style::default().bg(DEEPSEEK_FOOTER_BG)),
+            Span::styled("  ", Style::default().bg(theme.footer_bg)),
             Span::styled(
                 if state_is_locked {
                     "controlled live view | input locked"
@@ -13989,21 +14161,23 @@ impl ChatWidget {
                 } else {
                     "Enter send | Shift+Enter newline"
                 },
-                Style::default().fg(DEEPSEEK_MUTED).bg(DEEPSEEK_FOOTER_BG),
+                Style::default().fg(theme.muted).bg(theme.footer_bg),
             ),
         ];
         if queued_count > 0 {
             spans.push(Span::styled(
                 format!("  queued {queued_count}"),
-                Style::default().fg(DEEPSEEK_BLUE).bg(DEEPSEEK_FOOTER_BG),
+                Style::default()
+                    .fg(theme.control_accent)
+                    .bg(theme.footer_bg),
             ));
         }
         let line = truncate_line_with_ellipsis_if_overflow(
-            Line::from(spans).style(Style::default().bg(DEEPSEEK_FOOTER_BG)),
+            Line::from(spans).style(Style::default().bg(theme.footer_bg)),
             area.width as usize,
         );
         Paragraph::new(line)
-            .style(Style::default().bg(DEEPSEEK_FOOTER_BG))
+            .style(Style::default().bg(theme.footer_bg))
             .render(area, buf);
     }
 
@@ -14172,11 +14346,7 @@ impl ChatWidget {
     }
 
     fn center_entry_state_active(&self) -> bool {
-        self.thread_id.is_none()
-            && self
-                .active_cell
-                .as_ref()
-                .is_none_or(|cell| cell.as_any().is::<history_cell::SessionHeaderHistoryCell>())
+        self.thread_id.is_none() && self.active_cell.is_none()
     }
 
     fn render_center_entry_intro(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
@@ -14202,19 +14372,18 @@ impl ChatWidget {
             UiLanguage::En => "New coordinator thread in this workspace.",
             UiLanguage::Cn => "此工作区的新协调线程。",
         };
+        let theme = self.center_theme();
         let cat = self.center_cat_frame();
         let lines = vec![
-            Line::from(Span::styled(cat[0], Style::default().fg(DEEPSEEK_SKY))),
-            Line::from(Span::styled(cat[1], Style::default().fg(DEEPSEEK_SKY))),
-            Line::from(Span::styled(cat[2], Style::default().fg(DEEPSEEK_SKY))),
+            Line::from(Span::styled(cat[0], Style::default().fg(theme.accent))),
+            Line::from(Span::styled(cat[1], Style::default().fg(theme.accent))),
+            Line::from(Span::styled(cat[2], Style::default().fg(theme.accent))),
             Line::from(""),
             Line::from(Span::styled(
                 title,
-                Style::default()
-                    .fg(DEEPSEEK_TEXT)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
             )),
-            Line::from(Span::styled(subtitle, Style::default().fg(DEEPSEEK_MUTED))),
+            Line::from(Span::styled(subtitle, Style::default().fg(theme.muted))),
         ];
         Paragraph::new(Text::from(lines))
             .alignment(Alignment::Center)
@@ -14252,6 +14421,7 @@ impl ChatWidget {
         let mut cursor_x = row.x.saturating_add(left_pad);
         let mut spans: Vec<Span<'static>> = vec![Span::raw(" ".repeat(left_pad as usize))];
         let mut has_chip = false;
+        let theme = self.center_theme();
         let mut push_chip = |chip: String, style: Style, target: &Cell<Option<Rect>>| {
             if cursor_x >= row.right() {
                 return;
@@ -14283,9 +14453,7 @@ impl ChatWidget {
         let model_chip = format!(" {model_label} ▾ ");
         push_chip(
             model_chip,
-            Style::default()
-                .fg(DEEPSEEK_TEXT)
-                .bg(Color::Rgb(28, 34, 46)),
+            Style::default().fg(theme.text).bg(theme.chip_model_bg),
             &self.center_launch_model_area,
         );
 
@@ -14293,9 +14461,7 @@ impl ChatWidget {
         let reasoning_chip = format!(" Reason {reasoning_label} ▾ ");
         push_chip(
             reasoning_chip,
-            Style::default()
-                .fg(DEEPSEEK_TEXT)
-                .bg(Color::Rgb(35, 31, 43)),
+            Style::default().fg(theme.text).bg(theme.chip_reasoning_bg),
             &self.center_launch_reasoning_area,
         );
 
@@ -14303,8 +14469,8 @@ impl ChatWidget {
         push_chip(
             rank_chip,
             Style::default()
-                .fg(DEEPSEEK_SKY)
-                .bg(Color::Rgb(24, 42, 34))
+                .fg(theme.accent)
+                .bg(theme.chip_rank_bg)
                 .add_modifier(Modifier::BOLD),
             &self.center_launch_rank_area,
         );
@@ -14314,9 +14480,7 @@ impl ChatWidget {
         let permission_chip = format!(" {permission_label} ▾ ");
         push_chip(
             permission_chip,
-            Style::default()
-                .fg(DEEPSEEK_TEXT)
-                .bg(Color::Rgb(24, 34, 42)),
+            Style::default().fg(theme.text).bg(theme.chip_permission_bg),
             &self.center_launch_permissions_area,
         );
 
@@ -14427,13 +14591,10 @@ impl ChatWidget {
             return;
         }
 
+        let theme = self.center_theme();
         Block::default()
             .borders(Borders::ALL)
-            .style(
-                Style::default()
-                    .fg(DEEPSEEK_TEXT)
-                    .bg(Color::Rgb(10, 17, 22)),
-            )
+            .style(Style::default().fg(theme.text).bg(theme.dropdown_bg))
             .render(area, buf);
 
         let inner_width = area.width.saturating_sub(2);
@@ -14451,20 +14612,20 @@ impl ChatWidget {
                 break;
             }
             let bg = if item.is_current {
-                Color::Rgb(26, 48, 38)
+                theme.dropdown_current_bg
             } else {
-                Color::Rgb(10, 17, 22)
+                theme.dropdown_bg
             };
             let fg = if item.is_disabled {
-                Color::Rgb(88, 96, 92)
+                theme.disabled
             } else if item.is_current {
-                DEEPSEEK_SKY
+                theme.accent
             } else {
-                DEEPSEEK_TEXT
+                theme.text
             };
             let marker = if item.is_current { "● " } else { "  " };
             let mut line = Line::from(vec![
-                Span::styled(marker, Style::default().fg(DEEPSEEK_SKY).bg(bg)),
+                Span::styled(marker, Style::default().fg(theme.accent).bg(bg)),
                 Span::styled(item.name, Style::default().fg(fg).bg(bg)),
             ]);
             if let Some(description) = item.description {
@@ -14472,9 +14633,9 @@ impl ChatWidget {
                     format!("  {description}"),
                     Style::default()
                         .fg(if item.is_disabled {
-                            Color::Rgb(80, 86, 84)
+                            theme.disabled
                         } else {
-                            DEEPSEEK_MUTED
+                            theme.muted
                         })
                         .bg(bg),
                 ));
@@ -14499,18 +14660,11 @@ impl ChatWidget {
         self.center_launch_dropdown_targets.borrow_mut().clear();
     }
 
-    fn render_center_transcript(
+    fn render_center_transcript_viewport(
         &self,
-        layout: ChatWidgetLayout,
+        viewport: &CenterTranscriptViewport,
         buf: &mut Buffer,
-        transcript_cells: &[Arc<dyn HistoryCell>],
-        scroll_from_bottom: usize,
     ) {
-        let Some(viewport) =
-            self.center_transcript_viewport(layout, transcript_cells, scroll_from_bottom)
-        else {
-            return;
-        };
         if viewport.lines.is_empty() {
             return;
         }
@@ -14548,15 +14702,70 @@ impl ChatWidget {
         if content_area.is_empty() {
             return None;
         }
-        Some(CenterTranscriptViewport {
+        let key = self.center_transcript_viewport_cache_key(
             content_area,
-            lines: self.center_transcript_visible_lines(
-                transcript_cells,
-                content_area.width,
-                usize::from(content_area.height),
-                scroll_from_bottom,
-            ),
-        })
+            transcript_cells,
+            scroll_from_bottom,
+        );
+        let needs_refresh = self
+            .center_transcript_viewport_cache
+            .borrow()
+            .as_ref()
+            .is_none_or(|cache| cache.key != key);
+        if needs_refresh {
+            let visible_rows = usize::from(content_area.height);
+            let viewport = CenterTranscriptViewport {
+                content_area,
+                lines: self.center_transcript_visible_lines(
+                    transcript_cells,
+                    content_area.width,
+                    visible_rows,
+                    scroll_from_bottom,
+                ),
+                patch_cell_ids: self.center_visible_patch_cell_ids_for_viewport(
+                    transcript_cells,
+                    content_area.width,
+                    visible_rows,
+                    scroll_from_bottom,
+                ),
+            };
+            *self.center_transcript_viewport_cache.borrow_mut() =
+                Some(CenterTranscriptViewportCache { key, viewport });
+        }
+
+        Some(
+            self.center_transcript_viewport_cache
+                .borrow()
+                .as_ref()
+                .expect("center transcript viewport cache should be populated")
+                .viewport
+                .clone(),
+        )
+    }
+
+    fn center_transcript_viewport_cache_key(
+        &self,
+        content_area: Rect,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        scroll_from_bottom: usize,
+    ) -> CenterTranscriptViewportCacheKey {
+        CenterTranscriptViewportCacheKey {
+            width: content_area.width,
+            height: content_area.height,
+            scroll_from_bottom,
+            committed_len: transcript_cells.len(),
+            committed_first_ptr: transcript_cells
+                .first()
+                .map(Self::history_cell_ptr_id)
+                .unwrap_or(0),
+            committed_last_ptr: transcript_cells
+                .last()
+                .map(Self::history_cell_ptr_id)
+                .unwrap_or(0),
+            presentation_revision: history_cell::history_presentation_revision(),
+            active_key: self.active_cell_render_cache_key(content_area.width),
+            theme_kind: self.center_theme_kind(),
+        }
     }
 
     fn center_transcript_visible_lines(
@@ -14575,7 +14784,7 @@ impl ChatWidget {
 
         let active_tail = self
             .center_active_tail_cache(width)
-            .map(|cache| Self::chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone()))
+            .map(|cache| self.chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone()))
             .unwrap_or_default();
         Self::collect_center_lines_from_bottom(&active_tail, &mut skip, &mut needed, &mut lines);
 
@@ -14588,7 +14797,7 @@ impl ChatWidget {
             if needed == 0 {
                 break;
             }
-            let cell_lines = Self::chat_timeline_lines_for_cell(cell.as_ref(), width);
+            let cell_lines = self.chat_timeline_lines_for_cell(cell.as_ref(), width);
             if cell_lines.is_empty() {
                 continue;
             }
@@ -14642,7 +14851,8 @@ impl ChatWidget {
 
         let mut rows = 0usize;
         let active_len = self.center_active_tail_cache(width).map_or(0, |cache| {
-            Self::chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone()).len()
+            self.chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone())
+                .len()
         });
         rows = rows.saturating_add(active_len);
         if rows >= limit {
@@ -14656,7 +14866,9 @@ impl ChatWidget {
         }
 
         for (index, cell) in transcript_cells.iter().enumerate().rev() {
-            let cell_len = Self::chat_timeline_lines_for_cell(cell.as_ref(), width).len();
+            let cell_len = self
+                .chat_timeline_lines_for_cell(cell.as_ref(), width)
+                .len();
             if cell_len == 0 {
                 continue;
             }
@@ -14675,20 +14887,26 @@ impl ChatWidget {
         rows
     }
 
-    fn chat_timeline_lines_for_cell(cell: &dyn HistoryCell, width: u16) -> Vec<Line<'static>> {
+    fn chat_timeline_lines_for_cell(
+        &self,
+        cell: &dyn HistoryCell,
+        width: u16,
+    ) -> Vec<Line<'static>> {
         let lane = cell.chat_lane();
         let lane_width = Self::chat_timeline_lane_width(width, lane);
         let lines = Self::center_wrap_lines(cell.committed_display_lines(lane_width), lane_width);
-        Self::chat_timeline_lines_for_raw(width, lane, lines)
+        self.chat_timeline_lines_for_raw(width, lane, lines)
     }
 
     fn chat_timeline_lines_for_raw(
+        &self,
         width: u16,
         lane: ChatLane,
         lines: Vec<Line<'static>>,
     ) -> Vec<Line<'static>> {
         let lane_width = Self::chat_timeline_lane_width(width, lane);
         let wrapped = Self::center_wrap_lines(lines, lane_width);
+        let theme = self.center_theme();
         match lane {
             ChatLane::Assistant => wrapped
                 .into_iter()
@@ -14696,7 +14914,7 @@ impl ChatWidget {
                 .collect(),
             ChatLane::User => wrapped
                 .into_iter()
-                .map(|line| Self::user_timeline_row(width, lane_width, line))
+                .map(|line| Self::user_timeline_row(width, lane_width, line, theme))
                 .collect(),
         }
     }
@@ -14741,13 +14959,18 @@ impl ChatWidget {
         Line::from(spans)
     }
 
-    fn user_timeline_row(width: u16, lane_width: u16, line: Line<'static>) -> Line<'static> {
+    fn user_timeline_row(
+        width: u16,
+        lane_width: u16,
+        line: Line<'static>,
+        theme: center_theme::CenterTheme,
+    ) -> Line<'static> {
         if width == 0 {
             return Line::from("");
         }
 
-        let bubble_bg = Color::Rgb(34, 38, 42);
-        let bubble_fg = DEEPSEEK_TEXT;
+        let bubble_bg = theme.user_bubble_bg;
+        let bubble_fg = theme.text;
         let (frame_left, frame_width) = Self::chat_timeline_frame(width);
         let padded_bubble = frame_width > 2;
         let inner_width = if padded_bubble {
@@ -14970,10 +15193,11 @@ impl ChatWidget {
         if area.is_empty() {
             return;
         }
+        let theme = self.center_theme();
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Rgb(46, 63, 66)))
-            .style(Style::default().bg(Color::Rgb(7, 12, 18)))
+            .border_style(Style::default().fg(theme.border_muted))
+            .style(Style::default().bg(theme.input_bg))
             .render(area, buf);
     }
 
@@ -15245,6 +15469,29 @@ fn format_goal_elapsed(seconds: i64) -> String {
         (0, minutes) => format!("{minutes}m"),
         (hours, 0) => format!("{hours}h"),
         (hours, minutes) => format!("{hours}h{minutes}m"),
+    }
+}
+
+fn app_gateway_goal_status_label(status: AppGatewayThreadGoalStatus) -> &'static str {
+    match status {
+        AppGatewayThreadGoalStatus::Active => "active",
+        AppGatewayThreadGoalStatus::Paused => "paused",
+        AppGatewayThreadGoalStatus::Blocked => "blocked",
+        AppGatewayThreadGoalStatus::UsageLimited => "usage limited",
+        AppGatewayThreadGoalStatus::BudgetLimited => "budget limited",
+        AppGatewayThreadGoalStatus::Complete => "complete",
+    }
+}
+
+fn edited_goal_status(status: AppGatewayThreadGoalStatus) -> AppGatewayThreadGoalStatus {
+    match status {
+        AppGatewayThreadGoalStatus::Active => AppGatewayThreadGoalStatus::Active,
+        AppGatewayThreadGoalStatus::Paused
+        | AppGatewayThreadGoalStatus::Blocked
+        | AppGatewayThreadGoalStatus::UsageLimited => status,
+        AppGatewayThreadGoalStatus::BudgetLimited | AppGatewayThreadGoalStatus::Complete => {
+            AppGatewayThreadGoalStatus::Active
+        }
     }
 }
 

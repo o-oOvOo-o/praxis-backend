@@ -28,55 +28,36 @@ const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer su
 pub(crate) const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
 pub(crate) const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.\nMore info: https://github.com/openai/codex/discussions/7782";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FirstPartyModelOwner {
+    pub provider_id: &'static str,
+    pub owner_label: &'static str,
+}
+
+pub fn first_party_model_owner(model: &str) -> Option<FirstPartyModelOwner> {
+    let policy = crate::llm::registry::LlmProfileRegistry::builtin_static()
+        .first_party_policy_for_model(model)?;
+    Some(FirstPartyModelOwner {
+        provider_id: policy.canonical_provider_id?,
+        owner_label: policy.owner_label,
+    })
+}
+
+pub fn provider_accepts_registered_model_catalog(
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+    model: &str,
+) -> bool {
+    crate::llm::registry::LlmProfileRegistry::builtin_static()
+        .provider_accepts_known_first_party_model(provider_id, provider, model)
+}
+
 pub fn provider_accepts_known_first_party_model(
     provider_id: &str,
     provider: &ModelProviderInfo,
     model: &str,
 ) -> bool {
-    if is_deepseek_first_party_provider(provider_id, provider) {
-        return is_deepseek_first_party_model(model);
-    }
-
-    if is_openai_first_party_provider(provider_id, provider) {
-        return is_openai_first_party_model(model);
-    }
-
-    true
-}
-
-pub fn is_deepseek_first_party_provider(provider_id: &str, provider: &ModelProviderInfo) -> bool {
-    provider_id.eq_ignore_ascii_case("deepseek")
-        || provider.name.eq_ignore_ascii_case("deepseek")
-        || provider
-            .base_url
-            .as_deref()
-            .is_some_and(|base_url| base_url.to_ascii_lowercase().contains("api.deepseek.com"))
-}
-
-pub fn is_openai_first_party_provider(provider_id: &str, provider: &ModelProviderInfo) -> bool {
-    provider_id == OPENAI_PROVIDER_ID
-        || provider.name.eq_ignore_ascii_case(OPENAI_PROVIDER_NAME)
-        || provider
-            .base_url
-            .as_deref()
-            .is_some_and(|base_url| base_url.to_ascii_lowercase().contains("api.openai.com"))
-}
-
-pub fn is_deepseek_first_party_model(model: &str) -> bool {
-    matches!(
-        model.trim().to_ascii_lowercase().as_str(),
-        "deepseek-v4-pro" | "deepseek-v4-flash"
-    )
-}
-
-pub fn is_openai_first_party_model(model: &str) -> bool {
-    let model = model.trim().to_ascii_lowercase();
-    model.starts_with("gpt-")
-        || model.starts_with("o1")
-        || model.starts_with("o3")
-        || model.starts_with("o4")
-        || model.starts_with("chatgpt-")
-        || model.contains("-codex")
+    provider_accepts_registered_model_catalog(provider_id, provider, model)
 }
 
 /// Wire protocol that the provider speaks.
@@ -89,7 +70,8 @@ pub enum WireApi {
     /// Anthropic/Claude-style messages API.
     Claude,
     /// Generic OpenAI-compatible chat/completions-style API.
-    Common,
+    #[serde(rename = "openai_compat", alias = "common")]
+    OpenAiCompat,
 }
 
 impl fmt::Display for WireApi {
@@ -97,7 +79,7 @@ impl fmt::Display for WireApi {
         let value = match self {
             Self::Responses => "responses",
             Self::Claude => "claude",
-            Self::Common => "common",
+            Self::OpenAiCompat => "openai_compat",
         };
         f.write_str(value)
     }
@@ -112,11 +94,11 @@ impl<'de> Deserialize<'de> for WireApi {
         match value.as_str() {
             "responses" => Ok(Self::Responses),
             "claude" => Ok(Self::Claude),
-            "common" => Ok(Self::Common),
+            "openai_compat" | "common" => Ok(Self::OpenAiCompat),
             "chat" => Err(serde::de::Error::custom(CHAT_WIRE_API_REMOVED_ERROR)),
             _ => Err(serde::de::Error::unknown_variant(
                 &value,
-                &["responses", "claude", "common"],
+                &["responses", "claude", "openai_compat"],
             )),
         }
     }

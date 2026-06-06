@@ -48,7 +48,9 @@ fn apply_session_meta_from_item(metadata: &mut ThreadMetadata, meta_line: &Sessi
     }
     metadata.id = meta_line.meta.id;
     metadata.source = enum_to_string(&meta_line.meta.source);
-    metadata.agent_nickname = meta_line.meta.agent_nickname.clone();
+    metadata.agent_base_name = meta_line.meta.agent_base_name.clone();
+    metadata.agent_title = meta_line.meta.agent_title.clone();
+    metadata.agent_display_name = meta_line.meta.agent_display_name.clone();
     metadata.agent_role = meta_line.meta.agent_role.clone();
     metadata.agent_path = meta_line.meta.agent_path.clone();
     if let Some(provider) = meta_line.meta.model_provider.as_deref() {
@@ -407,7 +409,7 @@ mod tests {
                     cli_version: "0.0.0".to_string(),
                     source: SessionSource::Cli,
                     agent_path: None,
-                    agent_nickname: None,
+                    agent_display_name: None,
                     agent_role: None,
                     model_provider: Some("openai".to_string()),
                     base_instructions: None,
@@ -534,7 +536,7 @@ mod tests {
                     cli_version: "0.0.0".to_string(),
                     source: SessionSource::Cli,
                     agent_path: None,
-                    agent_nickname: None,
+                    agent_display_name: None,
                     agent_role: None,
                     model_provider: Some("openai".to_string()),
                     base_instructions: None,
@@ -560,7 +562,7 @@ mod tests {
             updated_at: created_at,
             source: "cli".to_string(),
             agent_path: None,
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: None,
             model_provider: "openai".to_string(),
             model: None,

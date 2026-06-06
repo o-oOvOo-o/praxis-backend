@@ -1,0 +1,2 @@
+pub(crate) const BASE: &str =
+    include_str!("../../../../templates/prompt_profiles/deepseek/base.md");

@@ -144,7 +144,7 @@ fn read_declared_role(
         let parsed_file = read_resolved_agent_role_file(config_file, Some(declared_role_name))?;
         role_name = parsed_file.role_name;
         role.description = parsed_file.description.or(role.description);
-        role.nickname_candidates = parsed_file.nickname_candidates.or(role.nickname_candidates);
+        role.base_name_candidates = parsed_file.base_name_candidates.or(role.base_name_candidates);
     }
 
     Ok((role_name, role))
@@ -153,10 +153,10 @@ fn read_declared_role(
 fn merge_missing_role_fields(role: &mut AgentRoleConfig, fallback: &AgentRoleConfig) {
     role.description = role.description.clone().or(fallback.description.clone());
     role.config_file = role.config_file.clone().or(fallback.config_file.clone());
-    role.nickname_candidates = role
-        .nickname_candidates
+    role.base_name_candidates = role
+        .base_name_candidates
         .clone()
-        .or(fallback.nickname_candidates.clone());
+        .or(fallback.base_name_candidates.clone());
 }
 
 fn agents_toml_from_layer(layer_toml: &TomlValue) -> std::io::Result<Option<AgentsToml>> {
@@ -181,15 +181,15 @@ fn agent_role_config_from_toml(
         &format!("agents.{role_name}.description"),
         role.description.as_deref(),
     )?;
-    let nickname_candidates = normalize_agent_role_nickname_candidates(
-        &format!("agents.{role_name}.nickname_candidates"),
-        role.nickname_candidates.as_deref(),
+    let base_name_candidates = normalize_agent_role_base_name_candidates(
+        &format!("agents.{role_name}.base_name_candidates"),
+        role.base_name_candidates.as_deref(),
     )?;
 
     Ok(AgentRoleConfig {
         description,
         config_file,
-        nickname_candidates,
+        base_name_candidates,
     })
 }
 
@@ -198,7 +198,7 @@ fn agent_role_config_from_toml(
 struct RawAgentRoleFileToml {
     name: Option<String>,
     description: Option<String>,
-    nickname_candidates: Option<Vec<String>>,
+    base_name_candidates: Option<Vec<String>>,
     #[serde(flatten)]
     config: ConfigToml,
 }
@@ -207,7 +207,7 @@ struct RawAgentRoleFileToml {
 pub(crate) struct ResolvedAgentRoleFile {
     pub(crate) role_name: String,
     pub(crate) description: Option<String>,
-    pub(crate) nickname_candidates: Option<Vec<String>>,
+    pub(crate) base_name_candidates: Option<Vec<String>>,
     pub(crate) config: TomlValue,
 }
 
@@ -263,12 +263,12 @@ pub(crate) fn parse_agent_role_file_contents(
             )
         })?;
 
-    let nickname_candidates = normalize_agent_role_nickname_candidates(
+    let base_name_candidates = normalize_agent_role_base_name_candidates(
         &format!(
-            "agent role file {}.nickname_candidates",
+            "agent role file {}.base_name_candidates",
             role_file_label.display()
         ),
-        parsed.nickname_candidates.as_deref(),
+        parsed.base_name_candidates.as_deref(),
     )?;
 
     let mut config = role_file_toml;
@@ -283,12 +283,12 @@ pub(crate) fn parse_agent_role_file_contents(
     };
     config_table.remove("name");
     config_table.remove("description");
-    config_table.remove("nickname_candidates");
+    config_table.remove("base_name_candidates");
 
     Ok(ResolvedAgentRoleFile {
         role_name,
         description,
-        nickname_candidates,
+        base_name_candidates,
         config,
     })
 }
@@ -389,41 +389,41 @@ fn validate_agent_role_config_file(
     }
 }
 
-fn normalize_agent_role_nickname_candidates(
+fn normalize_agent_role_base_name_candidates(
     field_label: &str,
-    nickname_candidates: Option<&[String]>,
+    base_name_candidates: Option<&[String]>,
 ) -> std::io::Result<Option<Vec<String>>> {
-    let Some(nickname_candidates) = nickname_candidates else {
+    let Some(base_name_candidates) = base_name_candidates else {
         return Ok(None);
     };
 
-    if nickname_candidates.is_empty() {
+    if base_name_candidates.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!("{field_label} must contain at least one name"),
         ));
     }
 
-    let mut normalized_candidates = Vec::with_capacity(nickname_candidates.len());
+    let mut normalized_candidates = Vec::with_capacity(base_name_candidates.len());
     let mut seen_candidates = BTreeSet::new();
 
-    for nickname in nickname_candidates {
-        let normalized_nickname = nickname.trim();
-        if normalized_nickname.is_empty() {
+    for base_name in base_name_candidates {
+        let normalized_base_name = base_name.trim();
+        if normalized_base_name.is_empty() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("{field_label} cannot contain blank names"),
             ));
         }
 
-        if !seen_candidates.insert(normalized_nickname.to_owned()) {
+        if !seen_candidates.insert(normalized_base_name.to_owned()) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("{field_label} cannot contain duplicates"),
             ));
         }
 
-        if !normalized_nickname
+        if !normalized_base_name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'))
         {
@@ -435,7 +435,7 @@ fn normalize_agent_role_nickname_candidates(
             ));
         }
 
-        normalized_candidates.push(normalized_nickname.to_owned());
+        normalized_candidates.push(normalized_base_name.to_owned());
     }
 
     Ok(Some(normalized_candidates))
@@ -479,7 +479,7 @@ fn discover_agent_roles_in_dir(
             AgentRoleConfig {
                 description: parsed_file.description,
                 config_file: Some(agent_file),
-                nickname_candidates: parsed_file.nickname_candidates,
+                base_name_candidates: parsed_file.base_name_candidates,
             },
         );
     }

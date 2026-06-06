@@ -1803,6 +1803,9 @@ pub struct TokenUsageInfo {
     // TODO(aibrahim): make this not optional
     #[ts(type = "number | null")]
     pub model_context_window: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number | null")]
+    pub model_auto_compact_token_limit: Option<i64>,
 }
 
 impl TokenUsageInfo {
@@ -1810,6 +1813,7 @@ impl TokenUsageInfo {
         info: &Option<TokenUsageInfo>,
         last: &Option<TokenUsage>,
         model_context_window: Option<i64>,
+        model_auto_compact_token_limit: Option<i64>,
     ) -> Option<Self> {
         if info.is_none() && last.is_none() {
             return None;
@@ -1821,6 +1825,7 @@ impl TokenUsageInfo {
                 total_token_usage: TokenUsage::default(),
                 last_token_usage: TokenUsage::default(),
                 model_context_window,
+                model_auto_compact_token_limit,
             },
         };
         if let Some(last) = last {
@@ -1828,6 +1833,9 @@ impl TokenUsageInfo {
         }
         if let Some(model_context_window) = model_context_window {
             info.model_context_window = Some(model_context_window);
+        }
+        if let Some(model_auto_compact_token_limit) = model_auto_compact_token_limit {
+            info.model_auto_compact_token_limit = Some(model_auto_compact_token_limit);
         }
         Some(info)
     }
@@ -1843,10 +1851,12 @@ impl TokenUsageInfo {
 
         self.model_context_window = Some(context_window);
         self.total_token_usage = TokenUsage {
+            input_tokens: context_window,
             total_tokens: context_window,
             ..TokenUsage::default()
         };
         self.last_token_usage = TokenUsage {
+            input_tokens: delta,
             total_tokens: delta,
             ..TokenUsage::default()
         };
@@ -1857,6 +1867,7 @@ impl TokenUsageInfo {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
             model_context_window: Some(context_window),
+            model_auto_compact_token_limit: None,
         };
         info.fill_to_context_window(context_window);
         info
@@ -1946,7 +1957,12 @@ impl TokenUsage {
     }
 
     pub fn tokens_in_context_window(&self) -> i64 {
-        self.total_tokens
+        let input_tokens = self.input_tokens.max(0);
+        if input_tokens > 0 {
+            input_tokens
+        } else {
+            self.total_tokens.max(0)
+        }
     }
 
     /// Estimate the remaining user-controllable percentage of the model's context window.
@@ -2325,7 +2341,11 @@ pub enum SubAgentSource {
         #[serde(default)]
         agent_path: Option<AgentPath>,
         #[serde(default)]
-        agent_nickname: Option<String>,
+        agent_base_name: Option<String>,
+        #[serde(default)]
+        agent_title: Option<String>,
+        #[serde(default, alias = "agent_nickname")]
+        agent_display_name: Option<String>,
         #[serde(default, alias = "agent_type")]
         agent_role: Option<String>,
     },
@@ -2367,10 +2387,31 @@ impl SessionSource {
         })
     }
 
-    pub fn get_nickname(&self) -> Option<String> {
+    pub fn get_agent_base_name(&self) -> Option<String> {
         match self {
-            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_nickname, .. }) => {
-                agent_nickname.clone()
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_base_name, .. }) => {
+                agent_base_name.clone()
+            }
+            SessionSource::SubAgent(SubAgentSource::MemoryConsolidation) => {
+                Some("Morpheus".to_string())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn get_agent_title(&self) -> Option<String> {
+        match self {
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_title, .. }) => {
+                agent_title.clone()
+            }
+            _ => None,
+        }
+    }
+
+    pub fn get_agent_display_name(&self) -> Option<String> {
+        match self {
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_display_name, .. }) => {
+                agent_display_name.clone()
             }
             SessionSource::SubAgent(SubAgentSource::MemoryConsolidation) => {
                 Some("Morpheus".to_string())
@@ -2455,9 +2496,15 @@ pub struct SessionMeta {
     pub cli_version: String,
     #[serde(default)]
     pub source: SessionSource,
-    /// Optional random unique nickname assigned to an AgentControl-spawned sub-agent.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_nickname: Option<String>,
+    /// Optional base name assigned to an AgentControl-spawned sub-agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to an AgentControl-spawned sub-agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_title: Option<String>,
+    /// Optional display name assigned to an AgentControl-spawned sub-agent.
+    #[serde(default, alias = "agent_nickname", skip_serializing_if = "Option::is_none")]
+    pub agent_display_name: Option<String>,
     /// Optional role (agent_role) assigned to an AgentControl-spawned sub-agent.
     #[serde(default, alias = "agent_type", skip_serializing_if = "Option::is_none")]
     pub agent_role: Option<String>,
@@ -2485,7 +2532,9 @@ impl Default for SessionMeta {
             originator: String::new(),
             cli_version: String::new(),
             source: SessionSource::default(),
-            agent_nickname: None,
+            agent_base_name: None,
+            agent_title: None,
+            agent_display_name: None,
             agent_role: None,
             agent_path: None,
             model_provider: None,
@@ -3052,6 +3101,8 @@ pub enum Product {
     Praxis,
     #[serde(alias = "ATLAS")]
     Atlas,
+    #[serde(alias = "CUNNING3D", alias = "c3d", alias = "C3D")]
+    Cunning3d,
 }
 impl Product {
     pub fn to_app_platform(self) -> &'static str {
@@ -3059,6 +3110,7 @@ impl Product {
             Self::Chatgpt => "chat",
             Self::Praxis => "praxis",
             Self::Atlas => "atlas",
+            Self::Cunning3d => "cunning3d",
         }
     }
 
@@ -3068,6 +3120,9 @@ impl Product {
             "chatgpt" => Some(Self::Chatgpt),
             "praxis" | "codex" => Some(Self::Praxis),
             "atlas" => Some(Self::Atlas),
+            "cunning3d" | "cunning3d-desktop" | "cunning3d_desktop" | "c3d" => {
+                Some(Self::Cunning3d)
+            }
             _ => None,
         }
     }
@@ -3395,9 +3450,15 @@ pub struct CollabAgentSpawnBeginEvent {
 pub struct CollabAgentRef {
     /// Thread ID of the receiver/new agent.
     pub thread_id: ThreadId,
-    /// Optional nickname assigned to an AgentControl-spawned sub-agent.
+    /// Optional base name assigned to an AgentControl-spawned sub-agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_nickname: Option<String>,
+    pub agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to an AgentControl-spawned sub-agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_title: Option<String>,
+    /// Optional display name assigned to an AgentControl-spawned sub-agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_display_name: Option<String>,
     /// Optional role (agent_role) assigned to an AgentControl-spawned sub-agent.
     #[serde(default, alias = "agent_type", skip_serializing_if = "Option::is_none")]
     pub agent_role: Option<String>,
@@ -3407,9 +3468,15 @@ pub struct CollabAgentRef {
 pub struct CollabAgentStatusEntry {
     /// Thread ID of the receiver/new agent.
     pub thread_id: ThreadId,
-    /// Optional nickname assigned to an AgentControl-spawned sub-agent.
+    /// Optional base name assigned to an AgentControl-spawned sub-agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_nickname: Option<String>,
+    pub agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to an AgentControl-spawned sub-agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_title: Option<String>,
+    /// Optional display name assigned to an AgentControl-spawned sub-agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_display_name: Option<String>,
     /// Optional role (agent_role) assigned to an AgentControl-spawned sub-agent.
     #[serde(default, alias = "agent_type", skip_serializing_if = "Option::is_none")]
     pub agent_role: Option<String>,
@@ -3425,9 +3492,15 @@ pub struct CollabAgentSpawnEndEvent {
     pub sender_thread_id: ThreadId,
     /// Thread ID of the newly spawned agent, if it was created.
     pub new_thread_id: Option<ThreadId>,
-    /// Optional nickname assigned to the new agent.
+    /// Optional base name assigned to the new agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub new_agent_nickname: Option<String>,
+    pub new_agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to the new agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_agent_title: Option<String>,
+    /// Optional display name assigned to the new agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_agent_display_name: Option<String>,
     /// Optional role assigned to the new agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub new_agent_role: Option<String>,
@@ -3475,9 +3548,15 @@ pub struct CollabAgentInteractionEndEvent {
     pub receiver_thread_id: ThreadId,
     /// The message interaction surface used by the sender.
     pub kind: CollabAgentInteractionKind,
-    /// Optional nickname assigned to the receiver agent.
+    /// Optional base name assigned to the receiver agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub receiver_agent_nickname: Option<String>,
+    pub receiver_agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to the receiver agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_agent_title: Option<String>,
+    /// Optional display name assigned to the receiver agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_agent_display_name: Option<String>,
     /// Optional role assigned to the receiver agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receiver_agent_role: Option<String>,
@@ -3494,7 +3573,7 @@ pub struct CollabWaitingBeginEvent {
     pub sender_thread_id: ThreadId,
     /// Thread ID of the receivers.
     pub receiver_thread_ids: Vec<ThreadId>,
-    /// Optional nicknames/roles for receivers.
+    /// Optional identity/role metadata for receivers.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub receiver_agents: Vec<CollabAgentRef>,
     /// ID of the waiting call.
@@ -3532,9 +3611,15 @@ pub struct CollabCloseEndEvent {
     pub sender_thread_id: ThreadId,
     /// Thread ID of the receiver.
     pub receiver_thread_id: ThreadId,
-    /// Optional nickname assigned to the receiver agent.
+    /// Optional base name assigned to the receiver agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub receiver_agent_nickname: Option<String>,
+    pub receiver_agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to the receiver agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_agent_title: Option<String>,
+    /// Optional display name assigned to the receiver agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_agent_display_name: Option<String>,
     /// Optional role assigned to the receiver agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receiver_agent_role: Option<String>,
@@ -3551,9 +3636,15 @@ pub struct CollabResumeBeginEvent {
     pub sender_thread_id: ThreadId,
     /// Thread ID of the receiver.
     pub receiver_thread_id: ThreadId,
-    /// Optional nickname assigned to the receiver agent.
+    /// Optional base name assigned to the receiver agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub receiver_agent_nickname: Option<String>,
+    pub receiver_agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to the receiver agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_agent_title: Option<String>,
+    /// Optional display name assigned to the receiver agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_agent_display_name: Option<String>,
     /// Optional role assigned to the receiver agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receiver_agent_role: Option<String>,
@@ -3567,9 +3658,15 @@ pub struct CollabResumeEndEvent {
     pub sender_thread_id: ThreadId,
     /// Thread ID of the receiver.
     pub receiver_thread_id: ThreadId,
-    /// Optional nickname assigned to the receiver agent.
+    /// Optional base name assigned to the receiver agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub receiver_agent_nickname: Option<String>,
+    pub receiver_agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to the receiver agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_agent_title: Option<String>,
+    /// Optional display name assigned to the receiver agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver_agent_display_name: Option<String>,
     /// Optional role assigned to the receiver agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receiver_agent_role: Option<String>,
@@ -3712,6 +3809,14 @@ mod tests {
             Some(Product::Atlas)
         );
         assert_eq!(
+            SessionSource::Custom("cunning3d".to_string()).restriction_product(),
+            Some(Product::Cunning3d)
+        );
+        assert_eq!(
+            SessionSource::Custom("c3d".to_string()).restriction_product(),
+            Some(Product::Cunning3d)
+        );
+        assert_eq!(
             SessionSource::Custom("praxis".to_string()).restriction_product(),
             Some(Product::Praxis)
         );
@@ -3739,6 +3844,10 @@ mod tests {
         assert!(
             !SessionSource::Custom("atlas-dev".to_string())
                 .matches_product_restriction(&[Product::Atlas])
+        );
+        assert!(
+            SessionSource::Custom("cunning3d".to_string())
+                .matches_product_restriction(&[Product::Cunning3d])
         );
         assert!(SessionSource::Custom("atlas-dev".to_string()).matches_product_restriction(&[]));
     }
@@ -4738,6 +4847,7 @@ mod tests {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
             model_context_window: Some(258_400),
+            model_auto_compact_token_limit: None,
         });
         let last = Some(TokenUsage {
             input_tokens: 10,
@@ -4748,10 +4858,11 @@ mod tests {
             total_tokens: 10,
         });
 
-        let info = TokenUsageInfo::new_or_append(&initial, &last, Some(128_000))
+        let info = TokenUsageInfo::new_or_append(&initial, &last, Some(128_000), Some(120_000))
             .expect("new_or_append should return info");
 
         assert_eq!(info.model_context_window, Some(128_000));
+        assert_eq!(info.model_auto_compact_token_limit, Some(120_000));
     }
 
     #[test]
@@ -4760,6 +4871,7 @@ mod tests {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
             model_context_window: Some(258_400),
+            model_auto_compact_token_limit: Some(244_000),
         });
         let last = Some(TokenUsage {
             input_tokens: 10,
@@ -4771,9 +4883,15 @@ mod tests {
         });
 
         let info =
-            TokenUsageInfo::new_or_append(&initial, &last, /*model_context_window*/ None)
+            TokenUsageInfo::new_or_append(
+                &initial,
+                &last,
+                /*model_context_window*/ None,
+                /*model_auto_compact_token_limit*/ None,
+            )
                 .expect("new_or_append should return info");
 
         assert_eq!(info.model_context_window, Some(258_400));
+        assert_eq!(info.model_auto_compact_token_limit, Some(244_000));
     }
 }

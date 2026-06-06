@@ -67,7 +67,9 @@ impl ToolHandler for Handler {
                             call_id: call_id.clone(),
                             sender_thread_id: session.conversation_id,
                             receiver_thread_id: agent_id,
-                            receiver_agent_nickname: receiver_agent.agent_nickname.clone(),
+                            receiver_agent_base_name: receiver_agent.agent_base_name.clone(),
+                            receiver_agent_title: receiver_agent.agent_title.clone(),
+                            receiver_agent_display_name: receiver_agent.agent_display_name.clone(),
                             receiver_agent_role: receiver_agent.agent_role.clone(),
                             status,
                         }
@@ -91,7 +93,9 @@ impl ToolHandler for Handler {
                     call_id,
                     sender_thread_id: session.conversation_id,
                     receiver_thread_id: agent_id,
-                    receiver_agent_nickname: receiver_agent.agent_nickname,
+                    receiver_agent_base_name: receiver_agent.agent_base_name,
+                    receiver_agent_title: receiver_agent.agent_title,
+                    receiver_agent_display_name: receiver_agent.agent_display_name,
                     receiver_agent_role: receiver_agent.agent_role,
                     status: status.clone(),
                 }

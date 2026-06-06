@@ -39,7 +39,7 @@ async fn write_session_with_user_event(praxis_home: &Path) -> io::Result<()> {
             cli_version: "test_version".to_string(),
             source: SessionSource::Cli,
             agent_path: None,
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: None,
             model_provider: None,
             base_instructions: None,

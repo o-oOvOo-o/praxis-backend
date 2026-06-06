@@ -128,7 +128,7 @@ impl ProviderSetupKind {
             env_key_instructions: None,
             experimental_bearer_token: Some(api_key),
             auth: None,
-            wire_api: WireApi::Common,
+            wire_api: WireApi::OpenAiCompat,
             compat,
             query_params: None,
             http_headers: None,

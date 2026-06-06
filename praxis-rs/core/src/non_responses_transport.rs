@@ -45,6 +45,10 @@ const DEFAULT_CLAUDE_MAX_TOKENS: i64 = 4096;
 const COMMON_TOOL_RESULT_BRIDGE_MESSAGE: &str = "I have processed the tool results.";
 const COMMON_POST_FINISH_GRACE_MS: u64 = 1_500;
 const COMMON_DEEPSEEK_MESSAGE_IDLE_GRACE_MS: u64 = 15_000;
+const COMMON_THINK_OPEN_TAG: &str = "<think>";
+const COMMON_THINK_CLOSE_TAG: &str = "</think>";
+const COMMON_THINK_TAG_TAIL_BYTES: usize = COMMON_THINK_CLOSE_TAG.len() - 1;
+const COMMON_THINK_PRELUDE_BUFFER_BYTES: usize = 128;
 
 pub(crate) async fn stream_claude_unary(
     api_provider: Provider,
@@ -82,7 +86,7 @@ pub(crate) async fn stream_common_unary(
     model_info: &ModelInfo,
     effort: Option<ReasoningEffortConfig>,
 ) -> Result<ResponseStream> {
-    let common_compat = CommonRequestCompat::from_provider(provider_info);
+    let common_compat = CommonRequestCompat::from_provider_and_model(provider_info, model_info);
     let thinking_policy = CommonThinkingPolicy::from_format(common_compat.thinking_format);
     let request_body = build_common_request(prompt, model_info, provider_info, effort, true)?;
     let response = send_request(
@@ -320,7 +324,7 @@ fn build_common_request(
     stream: bool,
 ) -> Result<Value> {
     let formatted_input = prompt.get_formatted_input();
-    let compat = CommonRequestCompat::from_provider(provider_info);
+    let compat = CommonRequestCompat::from_provider_and_model(provider_info, model_info);
     let messages = build_common_messages(prompt, &formatted_input, &compat);
 
     let tools = prompt
@@ -378,6 +382,7 @@ enum CommonThinkingRequestStyle {
     ReasoningEffortField,
     OpenRouterReasoningObject,
     EnableThinkingBool,
+    ZaiThinkingObject,
     QwenChatTemplateKwargs,
 }
 
@@ -414,7 +419,14 @@ impl CommonThinkingPolicy {
                 complete_on_message_idle: true,
                 complete_on_finish_reason: true,
             },
-            ModelProviderThinkingFormat::Zai | ModelProviderThinkingFormat::Qwen => Self {
+            ModelProviderThinkingFormat::Zai => Self {
+                request_style: CommonThinkingRequestStyle::ZaiThinkingObject,
+                replay_field: Some("reasoning_content"),
+                response_fields: &["reasoning_content", "reasoning"],
+                complete_on_message_idle: false,
+                complete_on_finish_reason: false,
+            },
+            ModelProviderThinkingFormat::Qwen => Self {
                 request_style: CommonThinkingRequestStyle::EnableThinkingBool,
                 replay_field: Some("reasoning_content"),
                 response_fields: &["reasoning_content", "reasoning"],
@@ -448,8 +460,11 @@ impl Default for CommonRequestCompat {
 }
 
 impl CommonRequestCompat {
-    fn from_provider(provider_info: &ModelProviderInfo) -> Self {
-        let inferred_compat = infer_common_request_compat(provider_info.base_url.as_deref());
+    fn from_provider_and_model(provider_info: &ModelProviderInfo, model_info: &ModelInfo) -> Self {
+        let inferred_compat = infer_common_request_compat(
+            provider_info.base_url.as_deref(),
+            model_info.slug.as_str(),
+        );
         let compat = Some(merge_common_request_compat(
             inferred_compat,
             provider_info.compat.clone(),
@@ -482,29 +497,34 @@ impl CommonRequestCompat {
 
 fn infer_common_request_compat(
     base_url: Option<&str>,
+    model_slug: &str,
 ) -> crate::model_provider_info::ModelProviderCompatInfo {
     let mut compat = crate::model_provider_info::ModelProviderCompatInfo::default();
-    let Some(base_url) = base_url else {
-        return compat;
-    };
-    let lower = base_url.to_ascii_lowercase();
-    let is_non_openai = !lower.contains("api.openai.com");
-    if is_non_openai {
-        compat.supports_developer_role = Some(false);
-        compat.supports_reasoning_effort = Some(true);
+    if let Some(base_url) = base_url {
+        let lower = base_url.to_ascii_lowercase();
+        let is_non_openai = !lower.contains("api.openai.com");
+        if is_non_openai {
+            compat.supports_developer_role = Some(false);
+            compat.supports_reasoning_effort = Some(true);
+        }
+        if lower.contains("openrouter.ai") {
+            compat.thinking_format = Some(ModelProviderThinkingFormat::Openrouter);
+        }
+        if lower.contains("deepseek.com") {
+            compat.thinking_format = Some(ModelProviderThinkingFormat::Deepseek);
+        }
+        if lower.contains("api.x.ai") {
+            compat.supports_reasoning_effort = Some(false);
+        }
+        if lower.contains("bigmodel.cn") || lower.contains("z.ai") {
+            compat.supports_reasoning_effort = Some(false);
+            compat.max_tokens_field = Some(ModelProviderMaxTokensField::MaxTokens);
+            compat.thinking_format = Some(ModelProviderThinkingFormat::Zai);
+        }
     }
-    if lower.contains("openrouter.ai") {
-        compat.thinking_format = Some(ModelProviderThinkingFormat::Openrouter);
-    }
-    if lower.contains("deepseek.com") {
-        compat.thinking_format = Some(ModelProviderThinkingFormat::Deepseek);
-    }
-    if lower.contains("api.x.ai") {
-        compat.supports_reasoning_effort = Some(false);
-    }
-    if lower.contains("bigmodel.cn") || lower.contains("z.ai") {
-        compat.supports_reasoning_effort = Some(false);
-        compat.max_tokens_field = Some(ModelProviderMaxTokensField::MaxTokens);
+
+    let model_slug = model_slug.trim().to_ascii_lowercase();
+    if model_slug.starts_with("glm-") {
         compat.thinking_format = Some(ModelProviderThinkingFormat::Zai);
     }
     compat
@@ -1210,6 +1230,14 @@ fn apply_common_reasoning_config(
                 Value::Bool(reasoning_effort_enables_thinking(effort)),
             );
         }
+        CommonThinkingRequestStyle::ZaiThinkingObject => {
+            let thinking_type = if reasoning_effort_enables_thinking(effort) {
+                "enabled"
+            } else {
+                "disabled"
+            };
+            request.insert("thinking".to_string(), json!({ "type": thinking_type }));
+        }
         CommonThinkingRequestStyle::QwenChatTemplateKwargs => {
             request.insert(
                 "chat_template_kwargs".to_string(),
@@ -1619,6 +1647,7 @@ struct CommonStreamState {
     reasoning_id: Option<String>,
     message_text: String,
     message_open: bool,
+    think_tag_parser: CommonThinkTagStreamState,
     tool_calls: BTreeMap<usize, CommonToolCallState>,
     tool_calls_emitted: bool,
     token_usage: Option<TokenUsage>,
@@ -1632,6 +1661,174 @@ struct CommonToolCallState {
     call_id: Option<String>,
     name: Option<String>,
     arguments: String,
+}
+
+#[derive(Default)]
+struct CommonThinkTagStreamState {
+    mode: CommonThinkTagMode,
+    pending: String,
+    saw_tag: bool,
+}
+
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum CommonThinkTagMode {
+    #[default]
+    Text,
+    Reasoning,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CommonThinkTag {
+    Open,
+    Close,
+}
+
+enum CommonThinkSegment {
+    Text(String),
+    Reasoning(String),
+}
+
+impl CommonThinkTagStreamState {
+    fn push(&mut self, text: &str) -> Vec<CommonThinkSegment> {
+        self.pending.push_str(text);
+        self.drain(false)
+    }
+
+    fn finish(&mut self) -> Vec<CommonThinkSegment> {
+        self.drain(true)
+    }
+
+    fn drain(&mut self, finish: bool) -> Vec<CommonThinkSegment> {
+        let mut segments = Vec::new();
+        loop {
+            match self.mode {
+                CommonThinkTagMode::Text => {
+                    let Some((index, tag, tag_len)) = find_common_think_tag(&self.pending) else {
+                        if let Some(text) = self.take_pending_text_prefix(finish) {
+                            push_common_think_segment(
+                                &mut segments,
+                                CommonThinkSegment::Text(text),
+                            );
+                        }
+                        break;
+                    };
+
+                    let prefix = self.pending[..index].to_string();
+                    self.pending.drain(..index + tag_len);
+                    self.saw_tag = true;
+                    match tag {
+                        CommonThinkTag::Open => {
+                            push_common_think_segment(
+                                &mut segments,
+                                CommonThinkSegment::Text(prefix),
+                            );
+                            self.mode = CommonThinkTagMode::Reasoning;
+                        }
+                        CommonThinkTag::Close => {
+                            push_common_think_segment(
+                                &mut segments,
+                                CommonThinkSegment::Reasoning(prefix),
+                            );
+                            self.mode = CommonThinkTagMode::Text;
+                        }
+                    }
+                }
+                CommonThinkTagMode::Reasoning => {
+                    let Some(index) =
+                        find_ascii_case_insensitive(&self.pending, COMMON_THINK_CLOSE_TAG)
+                    else {
+                        if let Some(text) = self.take_pending_reasoning_prefix(finish) {
+                            push_common_think_segment(
+                                &mut segments,
+                                CommonThinkSegment::Reasoning(text),
+                            );
+                        }
+                        break;
+                    };
+
+                    let prefix = self.pending[..index].to_string();
+                    self.pending.drain(..index + COMMON_THINK_CLOSE_TAG.len());
+                    self.saw_tag = true;
+                    push_common_think_segment(&mut segments, CommonThinkSegment::Reasoning(prefix));
+                    self.mode = CommonThinkTagMode::Text;
+                }
+            }
+        }
+        segments
+    }
+
+    fn take_pending_text_prefix(&mut self, finish: bool) -> Option<String> {
+        if self.pending.is_empty() {
+            return None;
+        }
+        if finish {
+            return Some(std::mem::take(&mut self.pending));
+        }
+        if !self.saw_tag && self.pending.len() <= COMMON_THINK_PRELUDE_BUFFER_BYTES {
+            return None;
+        }
+        self.take_safe_pending_prefix()
+    }
+
+    fn take_pending_reasoning_prefix(&mut self, finish: bool) -> Option<String> {
+        if self.pending.is_empty() {
+            return None;
+        }
+        if finish {
+            return Some(std::mem::take(&mut self.pending));
+        }
+        self.take_safe_pending_prefix()
+    }
+
+    fn take_safe_pending_prefix(&mut self) -> Option<String> {
+        if self.pending.len() <= COMMON_THINK_TAG_TAIL_BYTES {
+            return None;
+        }
+        let prefix_len = floor_char_boundary(
+            self.pending.as_str(),
+            self.pending.len() - COMMON_THINK_TAG_TAIL_BYTES,
+        );
+        if prefix_len == 0 {
+            return None;
+        }
+        Some(self.pending.drain(..prefix_len).collect())
+    }
+}
+
+fn push_common_think_segment(segments: &mut Vec<CommonThinkSegment>, segment: CommonThinkSegment) {
+    let is_empty = match &segment {
+        CommonThinkSegment::Text(text) | CommonThinkSegment::Reasoning(text) => text.is_empty(),
+    };
+    if !is_empty {
+        segments.push(segment);
+    }
+}
+
+fn find_common_think_tag(text: &str) -> Option<(usize, CommonThinkTag, usize)> {
+    let open = find_ascii_case_insensitive(text, COMMON_THINK_OPEN_TAG)
+        .map(|index| (index, CommonThinkTag::Open, COMMON_THINK_OPEN_TAG.len()));
+    let close = find_ascii_case_insensitive(text, COMMON_THINK_CLOSE_TAG)
+        .map(|index| (index, CommonThinkTag::Close, COMMON_THINK_CLOSE_TAG.len()));
+    match (open, close) {
+        (Some(open), Some(close)) => Some(if open.0 <= close.0 { open } else { close }),
+        (Some(tag), None) | (None, Some(tag)) => Some(tag),
+        (None, None) => None,
+    }
+}
+
+fn find_ascii_case_insensitive(text: &str, needle: &str) -> Option<usize> {
+    text.to_ascii_lowercase().find(needle)
+}
+
+fn floor_char_boundary(text: &str, index: usize) -> usize {
+    if index >= text.len() {
+        return text.len();
+    }
+    let mut index = index;
+    while index > 0 && !text.is_char_boundary(index) {
+        index -= 1;
+    }
+    index
 }
 
 async fn process_claude_sse(
@@ -1959,6 +2156,7 @@ async fn process_common_stream_event(
             }
 
             if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
+                emit_common_content_done(state, tx_event).await?;
                 emit_common_reasoning_done(state, tx_event).await?;
                 if state.message_open {
                     emit_common_message_done(state, tx_event).await?;
@@ -1993,8 +2191,7 @@ async fn process_common_stream_event(
             if let Some(text) = extract_common_stream_delta_text(delta.get("content"))
                 && !text.is_empty()
             {
-                emit_common_reasoning_done(state, tx_event).await?;
-                emit_common_text_delta(state, tx_event, &text).await?;
+                emit_common_content_delta(state, tx_event, &text).await?;
             }
         }
 
@@ -2003,10 +2200,12 @@ async fn process_common_stream_event(
             state.finish_reason_at.get_or_insert_with(Instant::now);
             match reason {
                 "tool_calls" => {
+                    emit_common_content_done(state, tx_event).await?;
                     emit_common_message_done(state, tx_event).await?;
                     emit_common_tool_calls(state, tx_event).await?;
                 }
                 "stop" | "length" | "content_filter" => {
+                    emit_common_content_done(state, tx_event).await?;
                     emit_common_message_done(state, tx_event).await?;
                 }
                 _ => {}
@@ -2162,6 +2361,43 @@ async fn emit_common_text_delta(
     state.message_text.push_str(delta);
     state.last_content_delta_at = Some(Instant::now());
     send_stream_event(tx_event, ResponseEvent::OutputTextDelta(delta.to_string())).await
+}
+
+async fn emit_common_content_delta(
+    state: &mut CommonStreamState,
+    tx_event: &mpsc::Sender<Result<ResponseEvent>>,
+    delta: &str,
+) -> Result<()> {
+    let segments = state.think_tag_parser.push(delta);
+    emit_common_content_segments(state, tx_event, segments).await
+}
+
+async fn emit_common_content_done(
+    state: &mut CommonStreamState,
+    tx_event: &mpsc::Sender<Result<ResponseEvent>>,
+) -> Result<()> {
+    let segments = state.think_tag_parser.finish();
+    emit_common_content_segments(state, tx_event, segments).await
+}
+
+async fn emit_common_content_segments(
+    state: &mut CommonStreamState,
+    tx_event: &mpsc::Sender<Result<ResponseEvent>>,
+    segments: Vec<CommonThinkSegment>,
+) -> Result<()> {
+    for segment in segments {
+        match segment {
+            CommonThinkSegment::Text(text) => {
+                emit_common_reasoning_done(state, tx_event).await?;
+                emit_common_text_delta(state, tx_event, &text).await?;
+            }
+            CommonThinkSegment::Reasoning(text) => {
+                emit_common_message_done(state, tx_event).await?;
+                emit_common_reasoning_delta(state, tx_event, &text).await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn emit_common_reasoning_delta(
@@ -2345,6 +2581,7 @@ async fn emit_common_completion(
     state: &mut CommonStreamState,
     tx_event: &mpsc::Sender<Result<ResponseEvent>>,
 ) -> Result<()> {
+    emit_common_content_done(state, tx_event).await?;
     emit_common_reasoning_done(state, tx_event).await?;
     emit_common_message_done(state, tx_event).await?;
     emit_common_tool_calls(state, tx_event).await?;
@@ -2503,16 +2740,13 @@ fn parse_common_response(
         items.push(common_reasoning_item(reasoning_content));
     }
 
-    if let Some(text) = extract_common_response_text(message.get("content"))
-        && !text.is_empty()
-    {
-        items.push(ResponseItem::Message {
-            id: None,
-            role: "assistant".to_string(),
-            content: vec![ContentItem::OutputText { text }],
-            end_turn: None,
-            phase: None,
-        });
+    if let Some(text) = extract_common_response_text(message.get("content")) {
+        for segment in split_common_think_tag_segments(&text) {
+            match segment {
+                CommonThinkSegment::Text(text) => push_common_message_item(&mut items, text),
+                CommonThinkSegment::Reasoning(text) => items.push(common_reasoning_item(text)),
+            }
+        }
     }
 
     if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
@@ -2592,6 +2826,25 @@ fn common_reasoning_item_with_id(id: String, text: String) -> ResponseItem {
         content: Some(vec![ReasoningItemContent::ReasoningText { text }]),
         encrypted_content: None,
     }
+}
+
+fn push_common_message_item(items: &mut Vec<ResponseItem>, text: String) {
+    if text.is_empty() {
+        return;
+    }
+    items.push(ResponseItem::Message {
+        id: None,
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText { text }],
+        end_turn: None,
+        phase: None,
+    });
+}
+
+fn split_common_think_tag_segments(text: &str) -> Vec<CommonThinkSegment> {
+    let mut parser = CommonThinkTagStreamState::default();
+    parser.pending.push_str(text);
+    parser.finish()
 }
 
 fn extract_common_response_text(content: Option<&Value>) -> Option<String> {
@@ -2827,6 +3080,12 @@ mod tests {
         info
     }
 
+    fn model_info_with_slug(slug: &str) -> ModelInfo {
+        let mut info = model_info();
+        info.slug = slug.to_string();
+        info
+    }
+
     fn provider(base_url: String) -> Provider {
         Provider {
             name: "test".to_string(),
@@ -2854,7 +3113,7 @@ mod tests {
             env_key_instructions: None,
             experimental_bearer_token: None,
             auth: None,
-            wire_api: crate::model_provider_info::WireApi::Common,
+            wire_api: crate::model_provider_info::WireApi::OpenAiCompat,
             compat,
             query_params: None,
             http_headers: None,
@@ -3298,7 +3557,7 @@ mod tests {
     }
 
     #[test]
-    fn common_request_can_use_model_default_reasoning_for_zai_toggle() {
+    fn common_request_can_use_model_default_reasoning_for_zai_thinking_object() {
         let provider =
             common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
                 thinking_format: Some(crate::model_provider_info::ModelProviderThinkingFormat::Zai),
@@ -3314,11 +3573,30 @@ mod tests {
         )
         .expect("common request should build");
 
-        assert_eq!(request["enable_thinking"], true);
+        assert_eq!(request["thinking"]["type"], "enabled");
+        assert!(request.get("enable_thinking").is_none());
     }
 
     #[test]
-    fn common_request_can_disable_zai_toggle_with_explicit_none_effort() {
+    fn common_request_uses_glm_model_slug_for_zai_thinking_object() {
+        let provider = common_provider_info(None);
+
+        let request = build_common_request(
+            &Prompt::default(),
+            &model_info_with_slug("glm-5.1"),
+            &provider,
+            Some(ReasoningEffortConfig::High),
+            true,
+        )
+        .expect("common request should build");
+
+        assert_eq!(request["thinking"]["type"], "enabled");
+        assert!(request.get("enable_thinking").is_none());
+        assert!(request.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn common_request_can_disable_zai_thinking_object_with_explicit_none_effort() {
         let provider =
             common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
                 thinking_format: Some(crate::model_provider_info::ModelProviderThinkingFormat::Zai),
@@ -3334,7 +3612,21 @@ mod tests {
         )
         .expect("common request should build");
 
-        assert_eq!(request["enable_thinking"], false);
+        assert_eq!(request["thinking"]["type"], "disabled");
+        assert!(request.get("enable_thinking").is_none());
+    }
+
+    #[test]
+    fn common_think_tag_parser_handles_explicit_and_stray_close_tags() {
+        let segments = split_common_think_tag_segments("<think>hidden</think>visible");
+        assert_eq!(segments.len(), 2);
+        assert!(matches!(&segments[0], CommonThinkSegment::Reasoning(text) if text == "hidden"));
+        assert!(matches!(&segments[1], CommonThinkSegment::Text(text) if text == "visible"));
+
+        let segments = split_common_think_tag_segments("hidden</think>visible");
+        assert_eq!(segments.len(), 2);
+        assert!(matches!(&segments[0], CommonThinkSegment::Reasoning(text) if text == "hidden"));
+        assert!(matches!(&segments[1], CommonThinkSegment::Text(text) if text == "visible"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3577,6 +3869,61 @@ mod tests {
         );
         assert!(
             matches!(events[3], ResponseEvent::Completed { ref response_id, .. } if response_id == "chatcmpl_reasoning")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn common_unary_extracts_think_tags_from_message_content() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(header("authorization", "Bearer common-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "id": "chatcmpl_think_tags",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": "hidden reasoning</think>visible answer"
+                    }
+                }],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let stream = stream_common_unary(
+            provider(server.uri()),
+            CoreAuthProvider::for_test(Some("common-key"), None),
+            &common_provider_info(None),
+            &Prompt::default(),
+            &model_info(),
+            None,
+        )
+        .await
+        .expect("common stream");
+
+        let events = drain_stream(stream).await;
+        assert_eq!(events.len(), 4);
+        assert!(matches!(events[0], ResponseEvent::Created));
+        assert!(matches!(
+            events[1],
+            ResponseEvent::OutputItemDone(ResponseItem::Reasoning { ref content, .. })
+                if matches!(
+                    content.as_deref(),
+                    Some([ReasoningItemContent::ReasoningText { text }]) if text == "hidden reasoning"
+                )
+        ));
+        assert!(matches!(
+            events[2],
+            ResponseEvent::OutputItemDone(ResponseItem::Message { ref content, .. })
+                if matches!(content.as_slice(), [ContentItem::OutputText { text }] if text == "visible answer")
+        ));
+        assert!(
+            matches!(events[3], ResponseEvent::Completed { ref response_id, .. } if response_id == "chatcmpl_think_tags")
         );
     }
 
@@ -3852,6 +4199,103 @@ mod tests {
             ResponseEvent::Completed { ref response_id, token_usage: Some(TokenUsage { input_tokens: 12, cached_input_tokens: 1, output_tokens: 4, total_tokens: 16, .. }) }
                 if response_id == "chat_stream_1"
         ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn common_sse_extracts_think_tags_across_content_deltas() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(header("authorization", "Bearer common-key"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(
+                    [
+                        sse_data(json!({
+                            "id": "chat_stream_think",
+                            "choices": [{
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": "<think>stream "
+                                },
+                                "finish_reason": null
+                            }]
+                        })),
+                        sse_data(json!({
+                            "id": "chat_stream_think",
+                            "choices": [{
+                                "delta": {
+                                    "content": "thought</think>hel"
+                                },
+                                "finish_reason": null
+                            }]
+                        })),
+                        sse_data(json!({
+                            "id": "chat_stream_think",
+                            "choices": [{
+                                "delta": {
+                                    "content": "lo"
+                                },
+                                "finish_reason": null
+                            }]
+                        })),
+                        sse_data(json!({
+                            "id": "chat_stream_think",
+                            "choices": [{
+                                "delta": {},
+                                "finish_reason": "stop"
+                            }]
+                        })),
+                        "data: [DONE]\n\n".to_string(),
+                    ]
+                    .join(""),
+                    "text/event-stream",
+                ),
+            )
+            .mount(&server)
+            .await;
+
+        let stream = stream_common_unary(
+            provider(server.uri()),
+            CoreAuthProvider::for_test(Some("common-key"), None),
+            &common_provider_info(None),
+            &Prompt::default(),
+            &model_info(),
+            None,
+        )
+        .await
+        .expect("common sse stream");
+
+        let events = drain_stream(stream).await;
+        assert_eq!(events.len(), 8);
+        assert!(matches!(events[0], ResponseEvent::Created));
+        assert!(matches!(
+            events[1],
+            ResponseEvent::OutputItemAdded(ResponseItem::Reasoning { .. })
+        ));
+        assert!(matches!(
+            events[2],
+            ResponseEvent::ReasoningContentDelta { ref delta, .. } if delta == "stream thought"
+        ));
+        assert!(matches!(
+            events[3],
+            ResponseEvent::OutputItemDone(ResponseItem::Reasoning { .. })
+        ));
+        assert!(matches!(
+            events[4],
+            ResponseEvent::OutputItemAdded(ResponseItem::Message { .. })
+        ));
+        assert!(matches!(
+            events[5],
+            ResponseEvent::OutputTextDelta(ref delta) if delta == "hello"
+        ));
+        assert!(matches!(
+            events[6],
+            ResponseEvent::OutputItemDone(ResponseItem::Message { ref content, .. })
+                if matches!(content.as_slice(), [ContentItem::OutputText { text }] if text == "hello")
+        ));
+        assert!(
+            matches!(events[7], ResponseEvent::Completed { ref response_id, .. } if response_id == "chat_stream_think")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -17,6 +17,7 @@ use praxis_app_gateway_protocol::PluginReadParams;
 use praxis_app_gateway_protocol::PluginReadResponse;
 use praxis_app_gateway_protocol::PluginUninstallResponse;
 use praxis_app_gateway_protocol::ThreadListResponse;
+use praxis_app_gateway_protocol::ThreadGoalStatus;
 use praxis_chatgpt::connectors::AppInfo;
 use praxis_core::ModelProviderInfo;
 use praxis_file_search::FileMatch;
@@ -78,6 +79,15 @@ pub(crate) struct ConnectorsSnapshot {
     pub(crate) connectors: Vec<AppInfo>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) enum ThreadGoalSetMode {
+    ReplaceExisting,
+    UpdateExisting {
+        status: ThreadGoalStatus,
+        token_budget: Option<i64>,
+    },
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum AppEvent {
@@ -116,6 +126,34 @@ pub(crate) enum AppEvent {
 
     /// Ask the backend to regenerate the current thread name from conversation context.
     RegenerateThreadName {
+        thread_id: ThreadId,
+    },
+
+    /// Open the local summary/menu for the active thread goal.
+    OpenThreadGoalMenu {
+        thread_id: ThreadId,
+    },
+
+    /// Open the local goal objective editor.
+    OpenThreadGoalEditor {
+        thread_id: Option<ThreadId>,
+    },
+
+    /// Create, replace, or edit a thread goal objective through the gateway API.
+    SetThreadGoalObjective {
+        thread_id: ThreadId,
+        objective: String,
+        mode: ThreadGoalSetMode,
+    },
+
+    /// Update the thread goal status through the gateway API.
+    SetThreadGoalStatus {
+        thread_id: ThreadId,
+        status: ThreadGoalStatus,
+    },
+
+    /// Clear the persisted thread goal through the gateway API.
+    ClearThreadGoal {
         thread_id: ThreadId,
     },
 

@@ -95,7 +95,7 @@ async fn apply_role_returns_unavailable_for_missing_user_role_file() {
         AgentRoleConfig {
             description: None,
             config_file: Some(PathBuf::from("/path/does/not/exist.toml")),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -115,7 +115,7 @@ async fn apply_role_returns_unavailable_for_invalid_user_role_toml() {
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -135,7 +135,7 @@ async fn apply_role_ignores_agent_metadata_fields_in_user_role_file() {
         r#"
 name = "archivist"
 description = "Role metadata"
-nickname_candidates = ["Hypatia"]
+base_name_candidates = ["Hypatia"]
 developer_instructions = "Stay focused"
 model = "role-model"
 "#,
@@ -146,7 +146,7 @@ model = "role-model"
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -177,7 +177,7 @@ async fn apply_role_preserves_unspecified_keys() {
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -236,7 +236,7 @@ model_provider = "test-provider"
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -290,7 +290,7 @@ model_verbosity = "high"
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -356,7 +356,7 @@ model_provider = "role-provider"
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -414,7 +414,7 @@ model_provider = "base-provider"
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -478,7 +478,7 @@ model_reasoning_effort = "high"
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -522,7 +522,7 @@ writable_roots = ["./sandbox-root"]
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -584,7 +584,7 @@ async fn apply_role_takes_precedence_over_existing_session_flags_for_same_key() 
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -627,7 +627,7 @@ enabled = false
         AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
 
@@ -661,7 +661,7 @@ fn spawn_tool_spec_build_deduplicates_user_defined_built_in_roles() {
             AgentRoleConfig {
                 description: Some("user override".to_string()),
                 config_file: None,
-                nickname_candidates: None,
+                base_name_candidates: None,
             },
         ),
         ("researcher".to_string(), AgentRoleConfig::default()),
@@ -682,7 +682,7 @@ fn spawn_tool_spec_lists_user_defined_roles_before_built_ins() {
         AgentRoleConfig {
             description: Some("first".to_string()),
             config_file: None,
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     )]);
 
@@ -709,7 +709,7 @@ fn spawn_tool_spec_marks_role_locked_model_and_reasoning_effort() {
         AgentRoleConfig {
             description: Some("Research carefully.".to_string()),
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     )]);
 
@@ -734,7 +734,7 @@ fn spawn_tool_spec_marks_role_locked_reasoning_effort_only() {
         AgentRoleConfig {
             description: Some("Review carefully.".to_string()),
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     )]);
 

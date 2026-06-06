@@ -244,7 +244,7 @@ pub(super) async fn build_enabled_tools(
     exec: &ExecContext,
 ) -> Vec<praxis_code_mode::ToolDefinition> {
     let router = build_nested_router(exec).await;
-    let specs = router.specs();
+    let specs = router.model_visible_specs();
     collect_code_mode_tool_definitions(&specs)
 }
 
@@ -261,6 +261,18 @@ async fn build_nested_router(exec: &ExecContext) -> ToolRouter {
         .into_iter()
         .map(|(name, tool_info)| (name, tool_info.tool))
         .collect();
+    let tool_visibility_policy = exec
+        .session
+        .llm_runtime_catalog()
+        .tool_visibility_policy_for_model(
+            &exec.turn.model_info,
+            &exec.turn.config.model_provider_id,
+            &exec.turn.provider,
+            exec.turn
+                .session_source
+                .restriction_product()
+                .and_then(crate::llm::ids::ProductProfileId::from_product),
+        );
 
     ToolRouter::from_config(
         &nested_tools_config,
@@ -269,6 +281,7 @@ async fn build_nested_router(exec: &ExecContext) -> ToolRouter {
             app_tools: None,
             discoverable_tools: None,
             dynamic_tools: exec.turn.dynamic_tools.as_slice(),
+            tool_visibility_policy: tool_visibility_policy.as_ref(),
         },
     )
 }

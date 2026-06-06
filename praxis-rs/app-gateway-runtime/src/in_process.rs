@@ -103,6 +103,7 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
             | ServerNotification::ItemCompleted(_)
             | ServerNotification::ThreadControlChanged(_)
             | ServerNotification::ThreadGoalUpdated(_)
+            | ServerNotification::ThreadGoalCleared(_)
             | ServerNotification::AgentMessageDelta(_)
             | ServerNotification::PlanDelta(_)
             | ServerNotification::ReasoningSummaryTextDelta(_)

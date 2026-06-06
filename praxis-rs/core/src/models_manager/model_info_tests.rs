@@ -1,5 +1,7 @@
 use super::*;
 use crate::config::test_config;
+use praxis_protocol::openai_models::ReasoningEffort;
+use praxis_protocol::openai_models::ReasoningEffortPreset;
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -86,4 +88,37 @@ fn common_model_uses_provider_neutral_thinking_labels() {
             .iter()
             .any(|preset| preset.description == "Enable deeper model thinking.")
     );
+}
+
+#[test]
+fn known_gpt55_capability_overlay_restores_xhigh_reasoning() {
+    let mut remote_model = model_info_from_slug("gpt-5.5");
+    remote_model.supported_reasoning_levels = vec![
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Minimal,
+            description: "Remote minimal".to_string(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Low,
+            description: "Remote low".to_string(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::Medium,
+            description: "Remote medium".to_string(),
+        },
+        ReasoningEffortPreset {
+            effort: ReasoningEffort::High,
+            description: "Remote high".to_string(),
+        },
+    ];
+
+    let updated = with_known_model_capability_overrides(remote_model);
+    let efforts = updated
+        .supported_reasoning_levels
+        .iter()
+        .map(|preset| preset.effort)
+        .collect::<Vec<_>>();
+
+    assert!(efforts.contains(&ReasoningEffort::Minimal));
+    assert!(efforts.contains(&ReasoningEffort::XHigh));
 }

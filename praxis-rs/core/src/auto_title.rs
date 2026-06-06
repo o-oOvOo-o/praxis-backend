@@ -301,7 +301,9 @@ async fn title_via_model_runtime_for_preview(
         tools: Vec::new(),
         parallel_tool_calls: false,
         base_instructions: BaseInstructions {
-            text: title_instructions(title_context.profile).to_string(),
+            text: title_context
+                .instructions
+                .unwrap_or_else(|| title_instructions(title_context.profile).to_string()),
         },
         personality: title_context.personality,
         output_schema: None,

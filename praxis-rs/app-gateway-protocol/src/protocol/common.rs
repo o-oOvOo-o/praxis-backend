@@ -465,6 +465,22 @@ client_request_definitions! {
         params: api::ThreadReadParams,
         response: api::ThreadReadResponse,
     },
+    ThreadGoalGet => "thread/goal/get" {
+        params: api::ThreadGoalGetParams,
+        response: api::ThreadGoalGetResponse,
+    },
+    ThreadGoalSet => "thread/goal/set" {
+        params: api::ThreadGoalSetParams,
+        response: api::ThreadGoalSetResponse,
+    },
+    ThreadGoalUpdate => "thread/goal/update" {
+        params: api::ThreadGoalUpdateParams,
+        response: api::ThreadGoalUpdateResponse,
+    },
+    ThreadGoalClear => "thread/goal/clear" {
+        params: api::ThreadGoalClearParams,
+        response: api::ThreadGoalClearResponse,
+    },
     #[experimental("thread/control/acquire")]
     ThreadControlAcquire => "thread/control/acquire" {
         params: api::ThreadControlAcquireParams,
@@ -1051,6 +1067,7 @@ server_notification_definitions! {
     #[experimental("thread/control/changed")]
     ThreadControlChanged => "thread/control/changed" (api::ThreadControlChangedNotification),
     ThreadGoalUpdated => "thread/goal/updated" (api::ThreadGoalUpdatedNotification),
+    ThreadGoalCleared => "thread/goal/cleared" (api::ThreadGoalClearedNotification),
     TurnStarted => "turn/started" (api::TurnStartedNotification),
     HookStarted => "hook/started" (api::HookStartedNotification),
     TurnCompleted => "turn/completed" (api::TurnCompletedNotification),
@@ -1380,7 +1397,9 @@ mod tests {
                     cwd: PathBuf::from("/tmp"),
                     cli_version: "0.0.0".to_string(),
                     source: api::SessionSource::Exec,
-                    agent_nickname: None,
+                    agent_base_name: None,
+                    agent_title: None,
+                    agent_display_name: None,
                     agent_role: None,
                     git_info: None,
                     name: None,

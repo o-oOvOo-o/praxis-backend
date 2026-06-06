@@ -1,0 +1,13 @@
+You are working in E:/qwen-harness.
+
+Build a small but polished playable browser game page called Neon Drift Range. It should be a real canvas/WebGL interaction, not a text mockup.
+
+Requirements:
+- Inspect the current workspace before editing.
+- Create a self-contained webpage with no build step.
+- The player controls a fast hover craft, dodges blocks, and shoots targets.
+- Include start, playing, and game-over/restart flow.
+- Include visible score, health, and elapsed distance/progress.
+- Use stable performance practices: one canvas, no per-frame DOM spam.
+- Verify by running commands and, if practical, launching a local server and checking the page loads.
+- Final response must list files, controls, and verification evidence.

@@ -4,6 +4,7 @@ use super::PluginManifestPaths;
 use super::curated_plugins_repo_path;
 use super::load_plugin_manifest;
 use super::manifest::PluginManifestInterface;
+use super::manifest::PluginManifestLlm;
 use super::marketplace::MarketplaceError;
 use super::marketplace::MarketplaceInterface;
 use super::marketplace::MarketplaceListError;
@@ -156,6 +157,7 @@ pub struct PluginDetail {
     pub source: MarketplacePluginSource,
     pub policy: MarketplacePluginPolicy,
     pub interface: Option<PluginManifestInterface>,
+    pub llm: Option<PluginManifestLlm>,
     pub installed: bool,
     pub enabled: bool,
     pub skills: Vec<SkillMetadata>,
@@ -179,6 +181,7 @@ pub struct ConfiguredMarketplacePlugin {
     pub source: MarketplacePluginSource,
     pub policy: MarketplacePluginPolicy,
     pub interface: Option<PluginManifestInterface>,
+    pub llm: Option<PluginManifestLlm>,
     pub installed: bool,
     pub enabled: bool,
 }
@@ -201,6 +204,7 @@ impl From<PluginDetail> for PluginCapabilitySummary {
             display_name: value.name,
             description: prompt_safe_plugin_description(value.description.as_deref()),
             has_skills,
+            has_llm: value.llm.is_some(),
             mcp_server_names: value.mcp_server_names,
             app_connector_ids: value.apps,
         }
@@ -884,6 +888,7 @@ impl PluginsManager {
                             source: plugin.source,
                             policy: plugin.policy,
                             interface: plugin.interface,
+                            llm: plugin.llm,
                         })
                     })
                     .collect::<Vec<_>>();
@@ -993,6 +998,7 @@ impl PluginsManager {
                 source: plugin.source,
                 policy: plugin.policy,
                 interface: plugin.interface,
+                llm: manifest.llm,
                 installed: installed_plugins.contains(&plugin_key),
                 enabled: enabled_plugins.contains(&plugin_key),
                 skills: resolved_skills.skills,
@@ -1416,6 +1422,7 @@ fn load_plugin(
         has_enabled_skills: false,
         mcp_servers: HashMap::new(),
         apps: Vec::new(),
+        llm: None,
         error: None,
     };
 
@@ -1457,6 +1464,7 @@ fn load_plugin(
         .map(str::to_string)
         .or_else(|| Some(manifest.name.clone()));
     loaded_plugin.manifest_description = manifest.description.clone();
+    loaded_plugin.llm = manifest.llm.clone();
     loaded_plugin.skill_roots = plugin_skill_roots(plugin_root.as_path(), manifest_paths);
     let resolved_skills = load_plugin_skills(
         plugin_root.as_path(),
@@ -1674,6 +1682,7 @@ pub fn plugin_telemetry_metadata_from_root(
             display_name: plugin_id.plugin_name.clone(),
             description: None,
             has_skills,
+            has_llm: manifest.llm.is_some(),
             mcp_server_names,
             app_connector_ids: load_plugin_apps(plugin_root),
         }),

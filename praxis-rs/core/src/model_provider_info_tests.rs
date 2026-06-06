@@ -132,7 +132,19 @@ wire_api = "claude"
 }
 
 #[test]
-fn test_deserialize_common_wire_api() {
+fn test_deserialize_openai_compat_wire_api() {
+    let provider_toml = r#"
+name = "OpenAI Compatible"
+base_url = "https://example.com/v1"
+wire_api = "openai_compat"
+        "#;
+
+    let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
+    assert_eq!(provider.wire_api, WireApi::OpenAiCompat);
+}
+
+#[test]
+fn test_deserialize_common_wire_api_alias() {
     let provider_toml = r#"
 name = "OpenAI Compatible"
 base_url = "https://example.com/v1"
@@ -140,7 +152,7 @@ wire_api = "common"
         "#;
 
     let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
-    assert_eq!(provider.wire_api, WireApi::Common);
+    assert_eq!(provider.wire_api, WireApi::OpenAiCompat);
 }
 
 #[test]

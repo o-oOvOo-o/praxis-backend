@@ -1,0 +1,19 @@
+All done. Here's the summary:
+
+**Server**: PID `28876` (Python http.server), already running on port `8092`, serving `E:/qwen-harness-mini`.
+**URL**: `http://localhost:8092/index.html`
+**File**: [index.html](/E:/qwen-harness-mini/index.html) (23 KB, self-contained)
+
+**What's in the game**:
+
+A neon hovercraft racer built on Three.js (CDN importmap, no build step). Full-window 3D scene with perspective camera, fog, hemisphere + directional + point lights, and a starfield backdrop. The track is a scrolling neon grid with 5 lanes, side rail walls, and cross beams for depth. The hovercraft is a multi-part model (body, cockpit, wings, glowing engine with thruster light) that bobs, tilts on steering, and has camera follow with shake on hits.
+
+Obstacles (rotating red/orange/yellow cubes) spawn with increasing frequency and can be shot for points. Green icosahedron targets float and bob, giving score + health on pickup or when shot. Bullets are yellow spheres with cooldown. Particle bursts on every collision/destruction (capped at 200). HUD shows score, distance, speed, health bar, and speed-line overlay during boost.
+
+**Controls**: A/D or Left/Right arrows steer, W/S or Up/Down boost/brake, Space shoots, Enter/Space starts and restarts.
+
+**Game flow**: start screen with instructions, playing with progressive difficulty (speed and spawn rate scale with distance), game over when health hits 0 with final score display and restart prompt.
+
+**Automated hooks preserved**: `window.render_game_to_text()` returns JSON with `state`, `mode`, `score`, `distance`, `health`, `speed`, `playerX/Y/Z`, `playerLane`, `obstacleCount`, `targetCount`, `bulletCount`, `particleCount`, `boostFactor`. `window.advanceTime(ms)` steps simulation deterministically. `window.simulateKey(code, type)` dispatches keyboard events.
+
+**Verification**: HTTP 200 confirmed, JS syntax passed `node --check`, all hooks and Three.js elements present in served HTML, no duplicate servers on port 8092.

@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::ModelProviderInfo;
 use crate::Prompt;
 use crate::client::ModelClientSession;
 use crate::client_common::ResponseEvent;
@@ -9,6 +8,8 @@ use crate::context_manager::is_user_turn_boundary;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
 use crate::event_mapping::is_contextual_user_message_content;
+use crate::llm::runtime::LlmPromptPurpose;
+use crate::llm::tasks::compact::CompactExecutionPolicy;
 #[cfg(test)]
 use crate::praxis::PreviousTurnSettings;
 use crate::praxis::Session;
@@ -56,8 +57,26 @@ pub(crate) enum InitialContextInjection {
     DoNotInject,
 }
 
-pub(crate) fn should_use_remote_compact_task(provider: &ModelProviderInfo) -> bool {
-    provider.is_openai()
+pub(crate) fn compact_execution_policy_for_turn(
+    sess: &Session,
+    turn_context: &TurnContext,
+) -> CompactExecutionPolicy {
+    let product_profile = turn_context
+        .session_source
+        .restriction_product()
+        .and_then(crate::llm::ids::ProductProfileId::from_product);
+    sess.llm_runtime_catalog()
+        .compact_execution_policy_for_model(
+            &turn_context.model_info,
+            &turn_context.config.model_provider_id,
+            &turn_context.provider,
+            product_profile,
+        )
+        .unwrap_or(CompactExecutionPolicy::LocalPrompt)
+}
+
+pub(crate) fn should_use_remote_compact_task(sess: &Session, turn_context: &TurnContext) -> bool {
+    compact_execution_policy_for_turn(sess, turn_context) == CompactExecutionPolicy::RemoteResponses
 }
 
 pub(crate) async fn run_inline_auto_compact_task(
@@ -122,6 +141,19 @@ async fn run_compact_task_inner(
 
     let max_retries = turn_context.provider.stream_max_retries();
     let mut retries = 0;
+    let compact_system_prompt = sess
+        .llm_runtime_catalog()
+        .resolve_prompt_for_model(
+            &turn_context.model_info,
+            &turn_context.config.model_provider_id,
+            &turn_context.provider,
+            turn_context
+                .session_source
+                .restriction_product()
+                .and_then(crate::llm::ids::ProductProfileId::from_product),
+            LlmPromptPurpose::Compact,
+        )
+        .unwrap_or_else(|| SUMMARIZATION_SYSTEM_PROMPT.to_string());
     let mut client_session = sess.services.model_runtime.new_session_for(
         &turn_context.config.model_provider_id,
         &turn_context.provider,
@@ -146,7 +178,7 @@ async fn run_compact_task_inner(
                 phase: None,
             }],
             base_instructions: BaseInstructions {
-                text: SUMMARIZATION_SYSTEM_PROMPT.to_string(),
+                text: compact_system_prompt.clone(),
             },
             ..Default::default()
         };

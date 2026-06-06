@@ -3156,8 +3156,12 @@ pub struct Thread {
     pub cli_version: String,
     /// Origin of the thread (CLI, VSCode, praxis exec, praxis app-gateway, etc.).
     pub source: SessionSource,
-    /// Optional random unique nickname assigned to an AgentControl-spawned sub-agent.
-    pub agent_nickname: Option<String>,
+    /// Optional base name assigned to an AgentControl-spawned sub-agent.
+    pub agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to an AgentControl-spawned sub-agent.
+    pub agent_title: Option<String>,
+    /// Optional display name assigned to an AgentControl-spawned sub-agent.
+    pub agent_display_name: Option<String>,
     /// Optional role (agent_role) assigned to an AgentControl-spawned sub-agent.
     pub agent_role: Option<String>,
     /// Optional Git metadata captured when the thread was created.
@@ -3315,12 +3319,85 @@ impl From<CoreThreadGoal> for ThreadGoal {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadGoalGetParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalGetResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub goal: Option<ThreadGoal>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalSetParams {
+    pub thread_id: String,
+    pub objective: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub token_budget: Option<i64>,
+    #[serde(default)]
+    pub clear_token_budget: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalSetResponse {
+    pub goal: ThreadGoal,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalUpdateParams {
+    pub thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub objective: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub status: Option<ThreadGoalStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub token_budget: Option<i64>,
+    #[serde(default)]
+    pub clear_token_budget: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalUpdateResponse {
+    pub goal: ThreadGoal,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalClearParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalClearResponse {
+    pub cleared: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadGoalUpdatedNotification {
     pub thread_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub turn_id: Option<String>,
     pub goal: ThreadGoal,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoalClearedNotification {
+    pub thread_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -3331,6 +3408,9 @@ pub struct ThreadTokenUsage {
     // TODO(aibrahim): make this not optional
     #[ts(type = "number | null")]
     pub model_context_window: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number | null")]
+    pub model_auto_compact_token_limit: Option<i64>,
 }
 
 impl From<CoreTokenUsageInfo> for ThreadTokenUsage {
@@ -3339,6 +3419,7 @@ impl From<CoreTokenUsageInfo> for ThreadTokenUsage {
             total: value.total_token_usage.into(),
             last: value.last_token_usage.into(),
             model_context_window: value.model_context_window,
+            model_auto_compact_token_limit: value.model_auto_compact_token_limit,
         }
     }
 }

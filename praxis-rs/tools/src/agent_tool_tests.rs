@@ -56,8 +56,10 @@ fn spawn_agent_tool_requires_task_name_and_lists_visible_models() {
     assert!(description.contains("visible display (`visible-model`)"));
     assert!(!description.contains("hidden display (`hidden-model`)"));
     assert!(properties.contains_key("task_name"));
+    assert!(properties.contains_key("title"));
     assert!(properties.contains_key("message"));
     assert!(properties.contains_key("fork_turns"));
+    assert!(properties.contains_key("model_provider"));
     assert!(!properties.contains_key("items"));
     assert!(!properties.contains_key("fork_context"));
     assert_eq!(
@@ -68,7 +70,11 @@ fn spawn_agent_tool_requires_task_name_and_lists_visible_models() {
     );
     assert_eq!(
         required,
-        Some(vec!["task_name".to_string(), "message".to_string()])
+        Some(vec![
+            "task_name".to_string(),
+            "title".to_string(),
+            "message".to_string()
+        ])
     );
     assert_eq!(
         output_schema.expect("spawn_agent output schema")["required"],
@@ -201,7 +207,13 @@ fn list_agents_tool_includes_path_prefix_and_agent_fields() {
     assert!(properties.contains_key("path_prefix"));
     assert_eq!(
         output_schema.expect("list_agents output schema")["properties"]["agents"]["items"]["required"],
-        json!(["agent_name", "agent_status", "last_task_message"])
+        json!([
+            "agent_name",
+            "agent_display_name",
+            "agent_role",
+            "agent_status",
+            "last_task_message"
+        ])
     );
 }
 

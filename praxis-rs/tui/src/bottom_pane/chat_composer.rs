@@ -4788,6 +4788,7 @@ mod tests {
             display_name: "Sample Plugin".to_string(),
             description: None,
             has_skills: true,
+            has_llm: false,
             mcp_server_names: vec!["sample".to_string()],
             app_connector_ids: Vec::new(),
         }]));
@@ -4840,6 +4841,7 @@ mod tests {
                     .to_string(),
             ),
             has_skills: true,
+            has_llm: false,
             mcp_server_names: vec!["google-calendar".to_string()],
             app_connector_ids: vec![praxis_core::plugins::AppConnectorId(
                 "google_calendar".to_string(),
@@ -4895,6 +4897,7 @@ mod tests {
                             .to_string(),
                     ),
                     has_skills: true,
+                    has_llm: false,
                     mcp_server_names: vec!["sample".to_string()],
                     app_connector_ids: vec![praxis_core::plugins::AppConnectorId(
                         "calendar".to_string(),
@@ -4938,6 +4941,7 @@ mod tests {
                         .to_string(),
                 ),
                 has_skills: false,
+                has_llm: false,
                 mcp_server_names: vec!["google-calendar".to_string()],
                 app_connector_ids: Vec::new(),
             }]));

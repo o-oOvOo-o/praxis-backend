@@ -4,9 +4,17 @@ pub use praxis_utils_plugins::PLUGIN_MANIFEST_PATH;
 pub use praxis_utils_plugins::mention_syntax;
 pub use praxis_utils_plugins::plugin_namespace_for_skill_path;
 
+mod llm_manifest;
 mod load_outcome;
 mod plugin_id;
 
+pub use llm_manifest::PluginLlmManifest;
+pub use llm_manifest::PluginLlmModel;
+pub use llm_manifest::PluginLlmModelCatalog;
+pub use llm_manifest::PluginLlmProduct;
+pub use llm_manifest::PluginLlmProfile;
+pub use llm_manifest::PluginLlmPromptSlot;
+pub use llm_manifest::PluginLlmToolPolicy;
 pub use load_outcome::EffectiveSkillRoots;
 pub use load_outcome::LoadedPlugin;
 pub use load_outcome::PluginLoadOutcome;
@@ -24,6 +32,7 @@ pub struct PluginCapabilitySummary {
     pub display_name: String,
     pub description: Option<String>,
     pub has_skills: bool,
+    pub has_llm: bool,
     pub mcp_server_names: Vec<String>,
     pub app_connector_ids: Vec<AppConnectorId>,
 }

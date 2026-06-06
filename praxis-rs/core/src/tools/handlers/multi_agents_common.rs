@@ -2,6 +2,9 @@ use crate::agent::AgentStatus;
 use crate::config::Config;
 use crate::error::PraxisErr;
 use crate::function_tool::FunctionCallError;
+use crate::llm::registry::LlmProfileRegistry;
+use crate::model_provider_info::ModelProviderInfo;
+use crate::model_provider_info::OPENAI_PROVIDER_ID;
 use crate::models_manager::manager::RefreshStrategy;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
@@ -11,10 +14,11 @@ use crate::tools::context::ToolPayload;
 use praxis_features::Feature;
 use praxis_protocol::AgentPath;
 use praxis_protocol::ThreadId;
-use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::ResponseInputItem;
+use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::openai_models::ReasoningEffortPreset;
+use praxis_protocol::openai_models::known_openai_compatible_model_info;
 use praxis_protocol::protocol::CollabAgentRef;
 use praxis_protocol::protocol::CollabAgentStatusEntry;
 use praxis_protocol::protocol::Op;
@@ -23,6 +27,7 @@ use praxis_protocol::protocol::SubAgentSource;
 use praxis_protocol::user_input::UserInput;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 /// Minimum wait timeout to prevent tight polling loops from burning CPU.
@@ -86,7 +91,9 @@ pub(crate) fn build_wait_agent_statuses(
         if let Some(status) = statuses.get(&receiver_agent.thread_id) {
             entries.push(CollabAgentStatusEntry {
                 thread_id: receiver_agent.thread_id,
-                agent_nickname: receiver_agent.agent_nickname.clone(),
+                agent_base_name: receiver_agent.agent_base_name.clone(),
+                agent_title: receiver_agent.agent_title.clone(),
+                agent_display_name: receiver_agent.agent_display_name.clone(),
                 agent_role: receiver_agent.agent_role.clone(),
                 status: status.clone(),
             });
@@ -98,7 +105,9 @@ pub(crate) fn build_wait_agent_statuses(
         .filter(|(thread_id, _)| !seen.contains_key(thread_id))
         .map(|(thread_id, status)| CollabAgentStatusEntry {
             thread_id: *thread_id,
-            agent_nickname: None,
+            agent_base_name: None,
+            agent_title: None,
+            agent_display_name: None,
             agent_role: None,
             status: status.clone(),
         })
@@ -139,6 +148,7 @@ pub(crate) fn thread_spawn_source(
     depth: i32,
     agent_role: Option<&str>,
     task_name: Option<String>,
+    agent_title: Option<String>,
 ) -> Result<SessionSource, FunctionCallError> {
     let agent_path = task_name
         .as_deref()
@@ -154,7 +164,9 @@ pub(crate) fn thread_spawn_source(
         parent_thread_id,
         depth,
         agent_path,
-        agent_nickname: None,
+        agent_base_name: None,
+        agent_title,
+        agent_display_name: None,
         agent_role: agent_role.map(str::to_string),
     }))
 }
@@ -200,13 +212,8 @@ pub(crate) fn parse_collab_input(
 /// approval policy, sandbox, and cwd. Role-specific overrides are layered after this step;
 /// skipping this helper and cloning stale config state directly can send the child agent out with
 /// the wrong provider or runtime policy.
-pub(crate) fn build_agent_spawn_config(
-    base_instructions: &BaseInstructions,
-    turn: &TurnContext,
-) -> Result<Config, FunctionCallError> {
-    let mut config = build_agent_shared_config(turn)?;
-    config.base_instructions = Some(base_instructions.text.clone());
-    Ok(config)
+pub(crate) fn build_agent_spawn_config(turn: &TurnContext) -> Result<Config, FunctionCallError> {
+    build_agent_shared_config(turn)
 }
 
 pub(crate) fn build_agent_resume_config(
@@ -224,6 +231,7 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallE
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
     config.model = Some(turn.model_info.slug.clone());
+    config.model_provider_id = turn.config.model_provider_id.clone();
     config.model_provider = turn.provider.clone();
     config.model_reasoning_effort = turn.reasoning_effort;
     config.model_reasoning_summary = Some(turn.reasoning_summary);
@@ -275,11 +283,33 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
     session: &Session,
     turn: &TurnContext,
     config: &mut Config,
+    requested_model_provider: Option<&str>,
     requested_model: Option<&str>,
     requested_reasoning_effort: Option<ReasoningEffort>,
 ) -> Result<(), FunctionCallError> {
-    if requested_model.is_none() && requested_reasoning_effort.is_none() {
+    let requested_model_provider = requested_model_provider
+        .map(str::trim)
+        .filter(|provider| !provider.is_empty());
+    let requested_model = requested_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty());
+
+    if requested_model_provider.is_none()
+        && requested_model.is_none()
+        && requested_reasoning_effort.is_none()
+    {
         return Ok(());
+    }
+
+    if let Some(provider_selector) = requested_model_provider {
+        apply_spawn_agent_model_provider_override(config, provider_selector)?;
+    }
+
+    let model_candidates = requested_model
+        .map(|model| spawn_agent_model_candidates(model, &config.notices.model_migrations))
+        .unwrap_or_default();
+    if requested_model_provider.is_none() {
+        infer_spawn_agent_model_provider(config, &model_candidates);
     }
 
     if let Some(requested_model) = requested_model {
@@ -288,13 +318,46 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
             .models_manager
             .list_models_for_config(config, RefreshStrategy::Offline)
             .await;
-        let selected_model_name = find_spawn_agent_model_name(&available_models, requested_model)?;
+        let selected_model_name = resolve_spawn_agent_model_name(
+            &available_models,
+            requested_model,
+            &config.notices.model_migrations,
+            config,
+        )?;
         let selected_model_info = session
             .services
             .models_manager
             .get_model_info(&selected_model_name, config)
             .await;
 
+        config.model = Some(selected_model_name.clone());
+        if let Some(reasoning_effort) = requested_reasoning_effort {
+            validate_spawn_agent_reasoning_effort(
+                &selected_model_name,
+                &selected_model_info.supported_reasoning_levels,
+                reasoning_effort,
+            )?;
+            config.model_reasoning_effort = Some(reasoning_effort);
+        } else {
+            config.model_reasoning_effort = selected_model_info.default_reasoning_level;
+        }
+
+        return Ok(());
+    }
+
+    if requested_model_provider.is_some() {
+        let available_models = session
+            .services
+            .models_manager
+            .list_models_for_config(config, RefreshStrategy::Offline)
+            .await;
+        let selected_model_name =
+            select_spawn_agent_provider_default_model(&available_models, config)?;
+        let selected_model_info = session
+            .services
+            .models_manager
+            .get_model_info(&selected_model_name, config)
+            .await;
         config.model = Some(selected_model_name.clone());
         if let Some(reasoning_effort) = requested_reasoning_effort {
             validate_spawn_agent_reasoning_effort(
@@ -322,24 +385,295 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
     Ok(())
 }
 
-fn find_spawn_agent_model_name(
-    available_models: &[praxis_protocol::openai_models::ModelPreset],
-    requested_model: &str,
-) -> Result<String, FunctionCallError> {
-    available_models
+fn apply_spawn_agent_model_provider_override(
+    config: &mut Config,
+    requested_model_provider: &str,
+) -> Result<(), FunctionCallError> {
+    let (provider_id, provider) =
+        resolve_spawn_agent_model_provider(config, requested_model_provider)?;
+    config.model_provider_id = provider_id;
+    config.model_provider = provider;
+    Ok(())
+}
+
+fn resolve_spawn_agent_model_provider(
+    config: &Config,
+    requested_model_provider: &str,
+) -> Result<(String, ModelProviderInfo), FunctionCallError> {
+    for selector in spawn_agent_model_provider_candidates(requested_model_provider) {
+        if let Some((provider_id, provider)) = config
+            .model_providers
+            .iter()
+            .find(|(provider_id, _)| provider_id.eq_ignore_ascii_case(selector.as_str()))
+        {
+            return Ok((provider_id.clone(), provider.clone()));
+        }
+
+        if let Some((provider_id, provider)) = config
+            .model_providers
+            .iter()
+            .find(|(_, provider)| provider.name.eq_ignore_ascii_case(selector.as_str()))
+        {
+            return Ok((provider_id.clone(), provider.clone()));
+        }
+    }
+
+    let mut available = config
+        .model_providers
         .iter()
-        .find(|model| model.model == requested_model)
-        .map(|model| model.model.clone())
-        .ok_or_else(|| {
-            let available = available_models
-                .iter()
-                .map(|model| model.model.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            FunctionCallError::RespondToModel(format!(
-                "Unknown model `{requested_model}` for spawn_agent. Available models: {available}"
-            ))
-        })
+        .map(|(provider_id, provider)| format!("{provider_id} ({})", provider.name))
+        .collect::<Vec<_>>();
+    available.sort();
+    Err(FunctionCallError::RespondToModel(format!(
+        "Unknown model_provider `{requested_model_provider}` for spawn_agent. Available providers: {}",
+        available.join(", ")
+    )))
+}
+
+fn spawn_agent_model_provider_candidates(requested_model_provider: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let trimmed = requested_model_provider.trim();
+    push_spawn_agent_model_candidate(&mut candidates, trimmed.to_string());
+    let normalized = trimmed
+        .chars()
+        .filter(|ch| !matches!(ch, '-' | '_' | '/' | ' '))
+        .collect::<String>()
+        .to_ascii_lowercase();
+    match normalized.as_str() {
+        "codex" | "responses" | "openairesponses" | "codexresponses" | "gpt" | "chatgpt" => {
+            push_spawn_agent_model_candidate(&mut candidates, OPENAI_PROVIDER_ID.to_string());
+            push_spawn_agent_model_candidate(&mut candidates, "OpenAI".to_string());
+        }
+        _ => {}
+    }
+    candidates
+}
+
+fn infer_spawn_agent_model_provider(config: &mut Config, model_candidates: &[String]) {
+    if model_candidates.is_empty() {
+        return;
+    }
+
+    let registry = LlmProfileRegistry::builtin_static();
+    for candidate in model_candidates {
+        if let Some(provider_switch) = registry.provider_switch_for_selected_model(
+            config.model_provider_id.as_str(),
+            &config.model_provider,
+            candidate,
+            &config.model_providers,
+        ) {
+            config.model_provider_id = provider_switch.provider_id;
+            config.model_provider = provider_switch.provider;
+            return;
+        }
+    }
+}
+
+fn select_spawn_agent_provider_default_model(
+    available_models: &[ModelPreset],
+    config: &Config,
+) -> Result<String, FunctionCallError> {
+    if let Some(current_model) = config.model.as_deref()
+        && let Some(model) = available_models
+            .iter()
+            .find(|model| model.model == current_model)
+    {
+        return Ok(model.model.clone());
+    }
+
+    if let Some(model) = available_models
+        .iter()
+        .find(|model| model.is_default)
+        .or_else(|| available_models.first())
+    {
+        return Ok(model.model.clone());
+    }
+
+    Err(FunctionCallError::RespondToModel(format!(
+        "No available models for spawn_agent provider `{}`.",
+        config.model_provider_id
+    )))
+}
+
+fn resolve_spawn_agent_model_name(
+    available_models: &[ModelPreset],
+    requested_model: &str,
+    model_migrations: &BTreeMap<String, String>,
+    config: &Config,
+) -> Result<String, FunctionCallError> {
+    let candidates = spawn_agent_model_candidates(requested_model, model_migrations);
+    for candidate in &candidates {
+        if let Some(model) = available_models
+            .iter()
+            .find(|model| model.model == *candidate)
+        {
+            return Ok(model.model.clone());
+        }
+    }
+
+    let registry = LlmProfileRegistry::builtin_static();
+    for candidate in &candidates {
+        if known_openai_compatible_model_info(candidate).is_some()
+            && registry.provider_accepts_known_first_party_model(
+                config.model_provider_id.as_str(),
+                &config.model_provider,
+                candidate,
+            )
+        {
+            return Ok(candidate.clone());
+        }
+    }
+
+    let available = available_models
+        .iter()
+        .map(|model| model.model.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let candidate_note = if candidates.len() > 1 {
+        format!(" Resolved candidates: {}.", candidates.join(", "))
+    } else {
+        String::new()
+    };
+    let provider_id = config.model_provider_id.as_str();
+    Err(FunctionCallError::RespondToModel(format!(
+        "Unknown model `{requested_model}` for spawn_agent provider `{provider_id}`.{candidate_note} Available models: {available}"
+    )))
+}
+
+fn spawn_agent_model_candidates(
+    requested_model: &str,
+    model_migrations: &BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+    push_spawn_agent_model_candidate(&mut candidates, requested_model.trim().to_string());
+
+    for normalized in normalize_spawn_agent_model_aliases(requested_model) {
+        push_spawn_agent_model_candidate(&mut candidates, normalized);
+    }
+
+    let pre_migration_candidates = candidates.clone();
+    for candidate in pre_migration_candidates {
+        if let Some(migrated) = model_migrations.get(&candidate) {
+            push_spawn_agent_model_candidate(&mut candidates, migrated.clone());
+        }
+    }
+
+    candidates
+}
+
+fn normalize_spawn_agent_model_aliases(requested_model: &str) -> Vec<String> {
+    let compact = requested_model.split_whitespace().collect::<String>();
+    if compact.is_empty() {
+        return Vec::new();
+    }
+
+    let lower = compact.replace('_', "-").to_ascii_lowercase();
+    let normalized = if lower
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_digit())
+    {
+        format!("gpt-{lower}")
+    } else if let Some(rest) = lower.strip_prefix("codex-") {
+        normalize_codex_model_alias(rest).unwrap_or(lower.clone())
+    } else if let Some(rest) = lower.strip_prefix("codex") {
+        normalize_codex_model_alias(rest).unwrap_or(lower.clone())
+    } else if let Some(rest) = lower.strip_prefix("gpt-") {
+        format!("gpt-{rest}")
+    } else if let Some(rest) = lower.strip_prefix("gpt") {
+        if rest
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_ascii_digit())
+        {
+            format!("gpt-{rest}")
+        } else {
+            lower
+        }
+    } else {
+        lower
+    };
+
+    let mut aliases = Vec::new();
+    if normalized != requested_model.trim() {
+        aliases.push(normalized.clone());
+    }
+
+    if let Some(stripped) = strip_embedded_reasoning_suffix(normalized.as_str())
+        && stripped != normalized
+        && stripped != requested_model.trim()
+    {
+        aliases.push(stripped);
+    }
+
+    aliases
+}
+
+fn normalize_codex_model_alias(rest: &str) -> Option<String> {
+    let rest = rest.trim_start_matches('-');
+    if rest
+        .chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_digit())
+    {
+        Some(format!("gpt-{rest}"))
+    } else {
+        None
+    }
+}
+
+fn strip_embedded_reasoning_suffix(model: &str) -> Option<String> {
+    for suffix in ["-xhigh", "-x-high", "-high", "xhigh", "x-high"] {
+        if let Some(base) = model.strip_suffix(suffix)
+            && !base.is_empty()
+        {
+            return Some(base.trim_end_matches('-').to_string());
+        }
+    }
+    None
+}
+
+fn push_spawn_agent_model_candidate(candidates: &mut Vec<String>, candidate: String) {
+    if candidate.is_empty() || candidates.iter().any(|existing| existing == &candidate) {
+        return;
+    }
+    candidates.push(candidate);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_agent_model_candidates_accept_natural_codex_aliases() {
+        let migrations = BTreeMap::new();
+        assert_eq!(
+            spawn_agent_model_candidates("5.5", &migrations),
+            vec!["5.5".to_string(), "gpt-5.5".to_string()]
+        );
+        assert!(
+            spawn_agent_model_candidates("gpt5.5", &migrations).contains(&"gpt-5.5".to_string())
+        );
+        assert!(
+            spawn_agent_model_candidates("codex5.5", &migrations).contains(&"gpt-5.5".to_string())
+        );
+        assert!(
+            spawn_agent_model_candidates("gpt 5.5 xhigh", &migrations)
+                .contains(&"gpt-5.5".to_string())
+        );
+    }
+
+    #[test]
+    fn spawn_agent_model_provider_candidates_accept_codex_aliases() {
+        assert!(
+            spawn_agent_model_provider_candidates("codex")
+                .contains(&OPENAI_PROVIDER_ID.to_string())
+        );
+        assert!(
+            spawn_agent_model_provider_candidates("codex/responses")
+                .contains(&OPENAI_PROVIDER_ID.to_string())
+        );
+    }
 }
 
 fn validate_spawn_agent_reasoning_effort(

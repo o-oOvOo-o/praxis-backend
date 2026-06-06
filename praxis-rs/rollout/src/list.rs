@@ -59,8 +59,12 @@ pub struct ThreadItem {
     pub git_origin_url: Option<String>,
     /// Session source from session metadata.
     pub source: Option<SessionSource>,
-    /// Random unique nickname from session metadata for AgentControl-spawned sub-agents.
-    pub agent_nickname: Option<String>,
+    /// Base name from session metadata for AgentControl-spawned sub-agents.
+    pub agent_base_name: Option<String>,
+    /// Short responsibility title from session metadata for AgentControl-spawned sub-agents.
+    pub agent_title: Option<String>,
+    /// Display name from session metadata for AgentControl-spawned sub-agents.
+    pub agent_display_name: Option<String>,
     /// Role (agent_role) from session metadata for AgentControl-spawned sub-agents.
     pub agent_role: Option<String>,
     /// Model provider from session metadata.
@@ -86,7 +90,9 @@ struct HeadTailSummary {
     git_sha: Option<String>,
     git_origin_url: Option<String>,
     source: Option<SessionSource>,
-    agent_nickname: Option<String>,
+    agent_base_name: Option<String>,
+    agent_title: Option<String>,
+    agent_display_name: Option<String>,
     agent_role: Option<String>,
     model_provider: Option<String>,
     cli_version: Option<String>,
@@ -716,7 +722,9 @@ async fn build_thread_item(
             git_sha,
             git_origin_url,
             source,
-            agent_nickname,
+            agent_base_name,
+            agent_title,
+            agent_display_name,
             agent_role,
             model_provider,
             cli_version,
@@ -736,7 +744,9 @@ async fn build_thread_item(
             git_sha,
             git_origin_url,
             source,
-            agent_nickname,
+            agent_base_name,
+            agent_title,
+            agent_display_name,
             agent_role,
             model_provider,
             cli_version,
@@ -1022,7 +1032,9 @@ async fn read_head_summary(path: &Path, head_limit: usize) -> io::Result<HeadTai
             RolloutItem::SessionMeta(session_meta_line) => {
                 if !summary.saw_session_meta {
                     summary.source = Some(session_meta_line.meta.source.clone());
-                    summary.agent_nickname = session_meta_line.meta.agent_nickname.clone();
+                    summary.agent_base_name = session_meta_line.meta.agent_base_name.clone();
+                    summary.agent_title = session_meta_line.meta.agent_title.clone();
+                    summary.agent_display_name = session_meta_line.meta.agent_display_name.clone();
                     summary.agent_role = session_meta_line.meta.agent_role.clone();
                     summary.model_provider = session_meta_line.meta.model_provider.clone();
                     summary.thread_id = Some(session_meta_line.meta.id);

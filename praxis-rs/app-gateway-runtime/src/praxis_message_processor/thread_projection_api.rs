@@ -82,7 +82,9 @@ pub(crate) fn summary_from_state_db_metadata(
     last_cost_micros: Option<i64>,
     token_usage_info: Option<praxis_protocol::protocol::TokenUsageInfo>,
     selfwork_plan_path: Option<PathBuf>,
-    agent_nickname: Option<String>,
+    agent_base_name: Option<String>,
+    agent_title: Option<String>,
+    agent_display_name: Option<String>,
     agent_role: Option<String>,
     git_sha: Option<String>,
     git_branch: Option<String>,
@@ -92,7 +94,8 @@ pub(crate) fn summary_from_state_db_metadata(
     let source = serde_json::from_str(&source)
         .or_else(|_| serde_json::from_value(serde_json::Value::String(source.clone())))
         .unwrap_or(praxis_protocol::protocol::SessionSource::Unknown);
-    let source = with_thread_spawn_agent_metadata(source, agent_nickname, agent_role);
+    let source =
+        with_thread_spawn_agent_metadata(source, agent_base_name, agent_title, agent_display_name, agent_role);
     let git_info = if git_sha.is_none() && git_branch.is_none() && git_origin_url.is_none() {
         None
     } else {
@@ -143,7 +146,9 @@ fn summary_from_thread_metadata(metadata: &ThreadMetadata) -> RolloutSummary {
         metadata.last_cost_micros,
         metadata.token_usage_info.clone(),
         metadata.selfwork_plan_path.clone(),
-        metadata.agent_nickname.clone(),
+        metadata.agent_base_name.clone(),
+        metadata.agent_title.clone(),
+        metadata.agent_display_name.clone(),
         metadata.agent_role.clone(),
         metadata.git_sha.clone(),
         metadata.git_branch.clone(),
@@ -214,7 +219,9 @@ pub(crate) async fn read_summary_from_rollout(
     let mut session_meta = session_meta;
     session_meta.source = with_thread_spawn_agent_metadata(
         session_meta.source.clone(),
-        session_meta.agent_nickname.clone(),
+        session_meta.agent_base_name.clone(),
+        session_meta.agent_title.clone(),
+        session_meta.agent_display_name.clone(),
         session_meta.agent_role.clone(),
     );
 
@@ -398,10 +405,16 @@ pub(crate) fn preview_from_rollout_items(items: &[RolloutItem]) -> String {
 
 fn with_thread_spawn_agent_metadata(
     source: praxis_protocol::protocol::SessionSource,
-    agent_nickname: Option<String>,
+    agent_base_name: Option<String>,
+    agent_title: Option<String>,
+    agent_display_name: Option<String>,
     agent_role: Option<String>,
 ) -> praxis_protocol::protocol::SessionSource {
-    if agent_nickname.is_none() && agent_role.is_none() {
+    if agent_base_name.is_none()
+        && agent_title.is_none()
+        && agent_display_name.is_none()
+        && agent_role.is_none()
+    {
         return source;
     }
 
@@ -411,7 +424,9 @@ fn with_thread_spawn_agent_metadata(
                 parent_thread_id,
                 depth,
                 agent_path,
-                agent_nickname: existing_agent_nickname,
+                agent_base_name: existing_agent_base_name,
+                agent_title: existing_agent_title,
+                agent_display_name: existing_agent_display_name,
                 agent_role: existing_agent_role,
             },
         ) => praxis_protocol::protocol::SessionSource::SubAgent(
@@ -419,7 +434,9 @@ fn with_thread_spawn_agent_metadata(
                 parent_thread_id,
                 depth,
                 agent_path,
-                agent_nickname: agent_nickname.or(existing_agent_nickname),
+                agent_base_name: agent_base_name.or(existing_agent_base_name),
+                agent_title: agent_title.or(existing_agent_title),
+                agent_display_name: agent_display_name.or(existing_agent_display_name),
                 agent_role: agent_role.or(existing_agent_role),
             },
         ),
@@ -466,7 +483,9 @@ pub(crate) fn build_thread_from_snapshot(
         path,
         cwd: config_snapshot.cwd.clone(),
         cli_version: env!("CARGO_PKG_VERSION").to_string(),
-        agent_nickname: config_snapshot.session_source.get_nickname(),
+        agent_base_name: config_snapshot.session_source.get_agent_base_name(),
+        agent_title: config_snapshot.session_source.get_agent_title(),
+        agent_display_name: config_snapshot.session_source.get_agent_display_name(),
         agent_role: config_snapshot.session_source.get_agent_role(),
         source: config_snapshot.session_source.clone().into(),
         git_info: None,
@@ -521,7 +540,9 @@ pub(crate) fn summary_to_thread(summary: RolloutSummary) -> Thread {
         path: Some(path),
         cwd,
         cli_version,
-        agent_nickname: source.get_nickname(),
+        agent_base_name: source.get_agent_base_name(),
+        agent_title: source.get_agent_title(),
+        agent_display_name: source.get_agent_display_name(),
         agent_role: source.get_agent_role(),
         source: source.into(),
         git_info,

@@ -74,6 +74,7 @@ pub(crate) fn list_tool_suggest_discoverable_plugins(
                     name: plugin.display_name,
                     description: plugin.description,
                     has_skills: plugin.has_skills,
+                    has_llm: plugin.has_llm,
                     mcp_server_names: plugin.mcp_server_names,
                     app_connector_ids: plugin
                         .app_connector_ids

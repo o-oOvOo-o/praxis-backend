@@ -1,0 +1,33 @@
+All green. The game is live at **http://localhost:8091/**
+
+---
+
+**Files created**
+
+- [index.html](/E:/qwen-harness/index.html) — single self-contained page, no build step, no dependencies
+
+**Controls**
+
+- **A/D** or **Arrow Keys** — steer the hovercraft left/right
+- **Mouse movement** — craft follows your cursor laterally
+- **Space** or **Click** — shoot
+- **Space/Tap** on menu or game-over screens — start/restart
+
+**Gameplay**
+
+- Red wireframe blocks are obstacles — hitting one costs health and triggers screen shake
+- Yellow pulsing rings are targets — shoot them for score, chain hits for combo multiplier (up to 8x)
+- Speed ramps over time (shown as a multiplier under the distance readout)
+- 5 HP, brief invulnerability flash after each hit
+
+**HUD** — score (top-left), distance in meters (top-center), speed multiplier, health bar (top-right), combo counter (center when active)
+
+**Game flow** — neon title screen → playing → "SIGNAL LOST" game-over with final score/best score → retry
+
+**Verification evidence**
+
+- HTTP 200 from `localhost:8091`, 20,837 bytes served
+- Confirmed presence of `<canvas>`, `render_game_to_text()`, `advanceTime()`, and `requestAnimationFrame` loop
+- JavaScript syntax validated via Node `new Function()` parse — no errors
+- Single canvas, no per-frame DOM writes, all rendering through Canvas 2D API
+- `window.render_game_to_text()` and `window.advanceTime(ms)` exposed for automated testing

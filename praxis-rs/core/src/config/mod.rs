@@ -20,10 +20,6 @@ use crate::model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
 use crate::model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use crate::model_provider_info::OPENAI_PROVIDER_ID;
 use crate::model_provider_info::built_in_model_providers;
-use crate::model_provider_info::is_deepseek_first_party_model;
-use crate::model_provider_info::is_deepseek_first_party_provider;
-use crate::model_provider_info::is_openai_first_party_model;
-use crate::model_provider_info::is_openai_first_party_provider;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use crate::project_doc::LOCAL_PROJECT_DOC_FILENAME;
@@ -1577,7 +1573,7 @@ pub struct AgentsToml {
     /// [agents.researcher]
     /// description = "Research-focused role."
     /// config_file = "./agents/researcher.toml"
-    /// nickname_candidates = ["Herodotus", "Ibn Battuta"]
+    /// base_name_candidates = ["Herodotus", "Ibn Battuta"]
     /// ```
     #[serde(default, flatten)]
     pub roles: BTreeMap<String, AgentRoleToml>,
@@ -1590,8 +1586,8 @@ pub struct AgentRoleConfig {
     pub description: Option<String>,
     /// Path to a role-specific config layer.
     pub config_file: Option<PathBuf>,
-    /// Candidate nicknames for agents spawned with this role.
-    pub nickname_candidates: Option<Vec<String>>,
+    /// Candidate base names for agents spawned with this role.
+    pub base_name_candidates: Option<Vec<String>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
@@ -1605,8 +1601,8 @@ pub struct AgentRoleToml {
     /// Relative paths are resolved relative to the `config.toml` that defines them.
     pub config_file: Option<AbsolutePathBuf>,
 
-    /// Candidate nicknames for agents spawned with this role.
-    pub nickname_candidates: Option<Vec<String>>,
+    /// Candidate base names for agents spawned with this role.
+    pub base_name_candidates: Option<Vec<String>>,
 }
 
 impl From<ToolsToml> for Tools {
@@ -1881,37 +1877,23 @@ fn normalize_provider_for_selected_model(
         return (model_provider_id, model_provider);
     };
 
-    if is_deepseek_first_party_provider(&model_provider_id, &model_provider)
-        && is_openai_first_party_model(model)
-        && let Some(openai_provider) = model_providers.get(OPENAI_PROVIDER_ID).cloned()
+    if let Some(provider_switch) = crate::llm::registry::LlmProfileRegistry::builtin_static()
+        .provider_switch_for_selected_model(
+            &model_provider_id,
+            &model_provider,
+            model,
+            model_providers,
+        )
     {
         startup_warnings.push(format!(
-            "Model `{model}` belongs to OpenAI/Codex; switched provider from `{model_provider_id}` to `{OPENAI_PROVIDER_ID}` for this run."
+            "Model `{model}` belongs to {}; switched provider from `{model_provider_id}` to `{}` for this run.",
+            provider_switch.model_owner_label,
+            provider_switch.provider_id
         ));
-        return (OPENAI_PROVIDER_ID.to_string(), openai_provider);
-    }
-
-    if is_openai_first_party_provider(&model_provider_id, &model_provider)
-        && is_deepseek_first_party_model(model)
-        && let Some((deepseek_provider_id, deepseek_provider)) =
-            find_deepseek_first_party_provider(model_providers)
-    {
-        startup_warnings.push(format!(
-            "Model `{model}` belongs to DeepSeek; switched provider from `{model_provider_id}` to `{deepseek_provider_id}` for this run."
-        ));
-        return (deepseek_provider_id, deepseek_provider);
+        return (provider_switch.provider_id, provider_switch.provider);
     }
 
     (model_provider_id, model_provider)
-}
-
-fn find_deepseek_first_party_provider(
-    model_providers: &HashMap<String, ModelProviderInfo>,
-) -> Option<(String, ModelProviderInfo)> {
-    model_providers
-        .iter()
-        .find(|(provider_id, provider)| is_deepseek_first_party_provider(provider_id, provider))
-        .map(|(provider_id, provider)| (provider_id.clone(), provider.clone()))
 }
 
 fn deserialize_model_providers<'de, D>(

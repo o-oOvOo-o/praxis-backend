@@ -1,12 +1,16 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use praxis_login::AuthManager;
+use futures::StreamExt;
+use praxis_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
 use tracing::debug;
 use tracing::warn;
 
+use crate::client_common::Prompt;
+use crate::client_common::ResponseEvent;
 use crate::praxis::Session;
 
 const SUMMARY_CHAR_LIMIT: usize = 240;
@@ -27,23 +31,14 @@ pub(crate) async fn maybe_auto_generate_summary(
     };
 
     let heuristic = heuristic_summary(&conversation_preview);
-    let (base_url, model_slug) = sess.model_endpoint_info().await;
-    let auth_manager = sess.services.auth_manager.clone();
     let sess = Arc::clone(sess);
 
     tokio::spawn(async move {
-        let summary = match summary_via_api(
-            &auth_manager,
-            base_url.as_deref(),
-            &model_slug,
-            &conversation_preview,
-        )
-        .await
-        {
+        let summary = match summary_via_model_runtime(&sess, &conversation_preview).await {
             Ok(summary) if !summary.trim().is_empty() => sanitize_summary(&summary),
             Ok(_) => heuristic.clone(),
             Err(err) => {
-                debug!("auto-summary API call failed, using heuristic: {err:#}");
+                debug!("auto-summary model request failed, using heuristic: {err:#}");
                 heuristic.clone()
             }
         };
@@ -202,69 +197,64 @@ fn truncate_chars(text: String, max_chars: usize) -> String {
     }
 }
 
-async fn summary_via_api(
-    auth_manager: &Arc<AuthManager>,
-    base_url: Option<&str>,
-    model_slug: &str,
+async fn summary_via_model_runtime(
+    sess: &Arc<Session>,
     conversation_preview: &str,
 ) -> anyhow::Result<String> {
-    let base = base_url.unwrap_or("https://api.openai.com/v1");
-    let base = base.trim_end_matches('/');
-    let url = format!("{base}/v1/responses");
+    let summary_context = sess.auto_summary_model_context().await;
+    let prompt = Prompt {
+        input: vec![ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: conversation_preview.to_string(),
+            }],
+            end_turn: None,
+            phase: None,
+        }],
+        base_instructions: BaseInstructions {
+            text: summary_context.instructions.unwrap_or_else(|| {
+                crate::llm::tasks::summary::SUMMARY_MODEL_INSTRUCTIONS.to_string()
+            }),
+        },
+        personality: summary_context.personality,
+        output_schema: None,
+        ..Default::default()
+    };
 
-    let token = auth_manager
-        .auth()
-        .await
-        .and_then(|auth| auth.get_token().ok())
-        .ok_or_else(|| anyhow::anyhow!("no auth token available for auto-summary"))?;
+    let mut client_session = sess
+        .services
+        .model_runtime
+        .new_session_for(&summary_context.provider_id, &summary_context.provider);
+    let stream_future = client_session.stream(
+        &prompt,
+        &summary_context.model_info,
+        &summary_context.session_telemetry,
+        None,
+        ReasoningSummaryConfig::None,
+        summary_context.service_tier,
+        None,
+    );
+    let mut stream =
+        tokio::time::timeout(std::time::Duration::from_secs(20), stream_future).await??;
 
-    let payload = serde_json::json!({
-        "model": model_slug,
-        "instructions": "Generate a compact session summary for a conversation picker. Mention the main user goal, the most important progress or result, and the next unresolved step if there is one. Output plain text only, 1-3 sentences, maximum 220 characters.",
-        "input": conversation_preview,
-        "stream": false,
-        "store": false,
-    });
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()?;
-
-    let resp = client
-        .post(&url)
-        .bearer_auth(&token)
-        .json(&payload)
-        .send()
-        .await?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        anyhow::bail!("auto-summary API returned {status}: {body}");
-    }
-
-    let body: serde_json::Value = resp.json().await?;
-
-    if let Some(text) = body["output_text"].as_str() {
-        return Ok(text.to_string());
-    }
-
-    if let Some(output) = body["output"].as_array() {
-        for item in output {
-            if item["type"].as_str() == Some("message")
-                && let Some(content) = item["content"].as_array()
-            {
-                for c in content {
-                    if c["type"].as_str() == Some("output_text")
-                        && let Some(text) = c["text"].as_str()
-                    {
-                        return Ok(text.to_string());
-                    }
+    let mut result = String::new();
+    while let Some(event) =
+        tokio::time::timeout(std::time::Duration::from_secs(20), stream.next()).await?
+    {
+        match event? {
+            ResponseEvent::OutputTextDelta(delta) => result.push_str(&delta),
+            ResponseEvent::OutputItemDone(ResponseItem::Message { content, .. }) => {
+                if result.is_empty()
+                    && let Some(text) = crate::compact::content_items_to_text(&content)
+                {
+                    result.push_str(&text);
                 }
             }
+            ResponseEvent::Completed { .. } => return Ok(result),
+            _ => {}
         }
     }
 
-    warn!("auto-summary: could not parse API response: {body}");
-    anyhow::bail!("unexpected response shape")
+    anyhow::bail!("auto-summary stream closed before completion")
 }

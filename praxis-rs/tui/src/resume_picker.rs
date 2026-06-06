@@ -3094,7 +3094,7 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             cli_version: String::from("0.0.0"),
             source: praxis_app_gateway_protocol::SessionSource::Cli,
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: None,
             git_info: None,
             name: Some(String::from("Named thread")),

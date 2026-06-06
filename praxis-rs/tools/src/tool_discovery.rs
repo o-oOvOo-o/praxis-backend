@@ -128,6 +128,7 @@ pub struct DiscoverablePluginInfo {
     pub name: String,
     pub description: Option<String>,
     pub has_skills: bool,
+    pub has_llm: bool,
     pub mcp_server_names: Vec<String>,
     pub app_connector_ids: Vec<String>,
 }
@@ -139,6 +140,7 @@ pub struct ToolSuggestEntry {
     pub description: Option<String>,
     pub tool_type: DiscoverableToolType,
     pub has_skills: bool,
+    pub has_llm: bool,
     pub mcp_server_names: Vec<String>,
     pub app_connector_ids: Vec<String>,
 }
@@ -349,6 +351,7 @@ pub fn collect_tool_suggest_entries(
                 description: connector.description.clone(),
                 tool_type: DiscoverableToolType::Connector,
                 has_skills: false,
+                has_llm: false,
                 mcp_server_names: Vec::new(),
                 app_connector_ids: Vec::new(),
             },
@@ -358,6 +361,7 @@ pub fn collect_tool_suggest_entries(
                 description: plugin.description.clone(),
                 tool_type: DiscoverableToolType::Plugin,
                 has_skills: plugin.has_skills,
+                has_llm: plugin.has_llm,
                 mcp_server_names: plugin.mcp_server_names.clone(),
                 app_connector_ids: plugin.app_connector_ids.clone(),
             },
@@ -409,6 +413,9 @@ fn plugin_summary(tool: &ToolSuggestEntry) -> String {
     let mut details = Vec::new();
     if tool.has_skills {
         details.push("skills".to_string());
+    }
+    if tool.has_llm {
+        details.push("LLM model profiles".to_string());
     }
     if !tool.mcp_server_names.is_empty() {
         details.push(format!("MCP servers: {}", tool.mcp_server_names.join(", ")));

@@ -125,7 +125,7 @@ impl UiLanguage {
         match (self, thread_controller) {
             (Self::En, true) => "agent group",
             (Self::En, false) => "external",
-            (Self::Cn, true) => "Agent Group",
+            (Self::Cn, true) => "线程组",
             (Self::Cn, false) => "外部",
         }
     }

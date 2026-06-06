@@ -268,6 +268,7 @@ fn assert_model_tools(
             app_tools: None,
             discoverable_tools: None,
             dynamic_tools: &[],
+            tool_visibility_policy: None,
         },
     );
     let model_visible_specs = router.model_visible_specs();

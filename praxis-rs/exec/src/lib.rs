@@ -15,10 +15,15 @@ pub use cli::Command;
 pub use cli::ReviewArgs;
 use event_processor_with_human_output::EventProcessorWithHumanOutput;
 use event_processor_with_jsonl_output::EventProcessorWithJsonOutput;
+use praxis_app_gateway_client::AppGatewayClient;
+use praxis_app_gateway_client::AppGatewayEvent;
+use praxis_app_gateway_client::DEFAULT_LOCAL_APP_GATEWAY_ADDR;
+use praxis_app_gateway_client::DEFAULT_LOCAL_APP_GATEWAY_URL;
 use praxis_app_gateway_client::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
 use praxis_app_gateway_client::NativeAppGatewayClient;
 use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
-use praxis_app_gateway_client::NativeGatewayEvent;
+use praxis_app_gateway_client::RemoteAppGatewayClient;
+use praxis_app_gateway_client::RemoteAppGatewayConnectArgs;
 use praxis_app_gateway_protocol::ClientRequest;
 use praxis_app_gateway_protocol::ConfigWarningNotification;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
@@ -90,10 +95,14 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::io::Read;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 use supports_color::Stream;
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tracing::Instrument;
 use tracing::error;
 use tracing::field;
@@ -109,6 +118,7 @@ use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
 
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
+const LOCAL_APP_GATEWAY_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
 
 enum InitialOperation {
     UserTurn {
@@ -150,6 +160,7 @@ impl RequestIdSequencer {
 
 struct ExecRunArgs {
     in_process_start_args: NativeAppGatewayClientStartArgs,
+    remote_app_gateway: Option<ExecRemoteAppGateway>,
     command: Option<ExecCommand>,
     config: Config,
     dangerously_bypass_approvals_and_sandbox: bool,
@@ -165,6 +176,72 @@ struct ExecRunArgs {
     stderr_with_ansi: bool,
 }
 
+#[derive(Clone, Debug)]
+pub struct ExecRemoteAppGateway {
+    pub websocket_url: String,
+    pub auth_token: Option<String>,
+}
+
+async fn local_shared_app_gateway_is_listening() -> bool {
+    let Ok(addr) = DEFAULT_LOCAL_APP_GATEWAY_ADDR.parse::<SocketAddr>() else {
+        return false;
+    };
+    matches!(
+        timeout(LOCAL_APP_GATEWAY_CONNECT_TIMEOUT, TcpStream::connect(addr)).await,
+        Ok(Ok(_))
+    )
+}
+
+async fn connect_remote_exec_app_gateway(
+    remote: ExecRemoteAppGateway,
+) -> anyhow::Result<AppGatewayClient> {
+    let client = RemoteAppGatewayClient::connect(RemoteAppGatewayConnectArgs {
+        websocket_url: remote.websocket_url,
+        auth_token: remote.auth_token,
+        client_name: "praxis_exec".to_string(),
+        client_version: env!("CARGO_PKG_VERSION").to_string(),
+        experimental_api: true,
+        opt_out_notification_methods: Vec::new(),
+        channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
+    })
+    .await
+    .map_err(|err| anyhow::anyhow!("failed to connect remote app-gateway client: {err}"))?;
+    Ok(AppGatewayClient::Remote(client))
+}
+
+async fn start_exec_app_gateway(
+    in_process_start_args: NativeAppGatewayClientStartArgs,
+    remote_app_gateway: Option<ExecRemoteAppGateway>,
+) -> anyhow::Result<AppGatewayClient> {
+    if let Some(remote) = remote_app_gateway {
+        return connect_remote_exec_app_gateway(remote).await;
+    }
+
+    if local_shared_app_gateway_is_listening().await {
+        match connect_remote_exec_app_gateway(ExecRemoteAppGateway {
+            websocket_url: DEFAULT_LOCAL_APP_GATEWAY_URL.to_string(),
+            auth_token: None,
+        })
+        .await
+        {
+            Ok(client) => return Ok(client),
+            Err(err) => {
+                warn!(
+                    %err,
+                    "local Praxis app-gateway is listening but not usable; using embedded app-gateway"
+                );
+            }
+        }
+    }
+
+    let client = NativeAppGatewayClient::start(in_process_start_args)
+        .await
+        .map_err(|err| {
+            anyhow::anyhow!("failed to initialize embedded app-gateway client: {err}")
+        })?;
+    Ok(AppGatewayClient::Native(client))
+}
+
 fn exec_root_span() -> tracing::Span {
     info_span!(
         "codex.exec",
@@ -174,7 +251,11 @@ fn exec_root_span() -> tracing::Span {
     )
 }
 
-pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
+pub async fn run_main(
+    cli: Cli,
+    arg0_paths: Arg0DispatchPaths,
+    remote_app_gateway: Option<ExecRemoteAppGateway>,
+) -> anyhow::Result<()> {
     if let Err(err) = set_default_originator("praxis_exec".to_string()) {
         tracing::warn!(
             ?err,
@@ -451,6 +532,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
     };
     run_exec_session(ExecRunArgs {
         in_process_start_args,
+        remote_app_gateway,
         command,
         config,
         dangerously_bypass_approvals_and_sandbox,
@@ -472,6 +554,7 @@ pub async fn run_main(cli: Cli, arg0_paths: Arg0DispatchPaths) -> anyhow::Result
 async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     let ExecRunArgs {
         in_process_start_args,
+        remote_app_gateway,
         command,
         config,
         dangerously_bypass_approvals_and_sandbox,
@@ -528,11 +611,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
     }
 
     let mut request_ids = RequestIdSequencer::new();
-    let mut client = NativeAppGatewayClient::start(in_process_start_args)
-        .await
-        .map_err(|err| {
-            anyhow::anyhow!("failed to initialize in-process app-gateway client: {err}")
-        })?;
+    let mut client = start_exec_app_gateway(in_process_start_args, remote_app_gateway).await?;
 
     // Handle resume subcommand through existing `thread/list` + `thread/resume`
     // APIs so exec no longer reaches into rollout storage directly.
@@ -768,10 +847,10 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
         };
 
         match server_event {
-            NativeGatewayEvent::ServerRequest(request) => {
+            AppGatewayEvent::ServerRequest(request) => {
                 handle_server_request(&client, request, &mut error_seen).await;
             }
-            NativeGatewayEvent::Notification(mut notification) => {
+            AppGatewayEvent::ServerNotification(mut notification) => {
                 if let ServerNotification::Error(payload) = &notification {
                     if payload.thread_id == primary_thread_id_for_requests
                         && payload.turn_id == task_id
@@ -816,16 +895,22 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     }
                 }
             }
-            NativeGatewayEvent::Lagged { skipped } => {
+            AppGatewayEvent::Lagged { skipped } => {
                 let message = lagged_event_warning_message(skipped);
                 warn!("{message}");
                 event_processor.process_warning(message);
+            }
+            AppGatewayEvent::Disconnected { message } => {
+                warn!("{message}");
+                event_processor.process_warning(message);
+                error_seen = true;
+                break;
             }
         }
     }
 
     if let Err(err) = client.shutdown().await {
-        warn!("in-process app-gateway shutdown failed: {err}");
+        warn!("app-gateway client shutdown failed: {err}");
     }
     event_processor.print_final_output();
     if error_seen {
@@ -894,7 +979,7 @@ fn approvals_reviewer_override_from_config(
 }
 
 async fn send_request_with_response<T>(
-    client: &NativeAppGatewayClient,
+    client: &AppGatewayClient,
     request: ClientRequest,
     method: &str,
 ) -> Result<T, String>
@@ -996,7 +1081,7 @@ fn session_configured_from_thread_response(
 }
 
 fn lagged_event_warning_message(skipped: usize) -> String {
-    format!("in-process app-gateway event stream lagged; dropped {skipped} events")
+    format!("app-gateway event stream lagged; dropped {skipped} events")
 }
 
 fn should_process_notification(
@@ -1052,7 +1137,7 @@ fn should_process_notification(
 }
 
 async fn maybe_backfill_turn_completed_items(
-    client: &NativeAppGatewayClient,
+    client: &AppGatewayClient,
     request_ids: &mut RequestIdSequencer,
     notification: &mut ServerNotification,
 ) {
@@ -1155,7 +1240,7 @@ fn cwds_match(current_cwd: &Path, session_cwd: &Path) -> bool {
 }
 
 async fn resolve_resume_thread_id(
-    client: &NativeAppGatewayClient,
+    client: &AppGatewayClient,
     config: &Config,
     args: &crate::cli::ResumeArgs,
 ) -> anyhow::Result<Option<String>> {
@@ -1262,7 +1347,7 @@ fn canceled_mcp_server_elicitation_response() -> Result<Value, String> {
 }
 
 async fn request_shutdown(
-    client: &NativeAppGatewayClient,
+    client: &AppGatewayClient,
     request_ids: &mut RequestIdSequencer,
     thread_id: &str,
 ) -> Result<(), String> {
@@ -1278,7 +1363,7 @@ async fn request_shutdown(
 }
 
 async fn resolve_server_request(
-    client: &NativeAppGatewayClient,
+    client: &AppGatewayClient,
     request_id: RequestId,
     value: serde_json::Value,
     method: &str,
@@ -1290,7 +1375,7 @@ async fn resolve_server_request(
 }
 
 async fn reject_server_request(
-    client: &NativeAppGatewayClient,
+    client: &AppGatewayClient,
     request_id: RequestId,
     method: &str,
     reason: String,
@@ -1321,7 +1406,7 @@ fn server_request_method_name(request: &ServerRequest) -> String {
 }
 
 async fn handle_server_request(
-    client: &NativeAppGatewayClient,
+    client: &AppGatewayClient,
     request: ServerRequest,
     error_seen: &mut bool,
 ) {
@@ -1840,7 +1925,7 @@ mod tests {
     fn lagged_event_warning_message_is_explicit() {
         assert_eq!(
             lagged_event_warning_message(/*skipped*/ 7),
-            "in-process app-gateway event stream lagged; dropped 7 events".to_string()
+            "app-gateway event stream lagged; dropped 7 events".to_string()
         );
     }
 

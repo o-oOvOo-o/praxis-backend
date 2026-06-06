@@ -304,7 +304,7 @@ impl ProviderInterface {
                 }
             }
             WireApi::Claude => Self::ClaudeCode,
-            WireApi::Common => Self::OpenAiCompatible,
+            WireApi::OpenAiCompat => Self::OpenAiCompatible,
         }
     }
 }

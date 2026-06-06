@@ -2,11 +2,20 @@ use praxis_utils_absolute_path::AbsolutePathBuf;
 use praxis_utils_plugins::PLUGIN_MANIFEST_PATH;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Component;
 use std::path::Path;
 const MAX_DEFAULT_PROMPT_COUNT: usize = 3;
 const MAX_DEFAULT_PROMPT_LEN: usize = 128;
+
+pub use praxis_plugin::PluginLlmManifest as PluginManifestLlm;
+pub use praxis_plugin::PluginLlmModel as PluginManifestLlmModel;
+pub use praxis_plugin::PluginLlmModelCatalog as PluginManifestLlmModelCatalog;
+pub use praxis_plugin::PluginLlmProduct as PluginManifestLlmProduct;
+pub use praxis_plugin::PluginLlmProfile as PluginManifestLlmProfile;
+pub use praxis_plugin::PluginLlmPromptSlot as PluginManifestLlmPromptSlot;
+pub use praxis_plugin::PluginLlmToolPolicy as PluginManifestToolPolicy;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,6 +34,8 @@ struct RawPluginManifest {
     apps: Option<String>,
     #[serde(default)]
     interface: Option<RawPluginManifestInterface>,
+    #[serde(default)]
+    llm: Option<RawPluginManifestLlm>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +44,7 @@ pub(crate) struct PluginManifest {
     pub(crate) description: Option<String>,
     pub(crate) paths: PluginManifestPaths,
     pub(crate) interface: Option<PluginManifestInterface>,
+    pub(crate) llm: Option<PluginManifestLlm>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +108,94 @@ struct RawPluginManifestInterface {
     screenshots: Vec<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPluginManifestLlm {
+    #[serde(default)]
+    profiles: Vec<RawPluginManifestLlmProfile>,
+    #[serde(default)]
+    products: Vec<RawPluginManifestLlmProduct>,
+    #[serde(default)]
+    tool_policies: Vec<RawPluginManifestToolPolicy>,
+    #[serde(default, alias = "model_catalogs")]
+    model_catalogs: Vec<RawPluginManifestModelCatalog>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPluginManifestLlmProfile {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    wire: Option<String>,
+    #[serde(default)]
+    behavior: Option<String>,
+    #[serde(default)]
+    prompts: BTreeMap<String, String>,
+    #[serde(default)]
+    tasks: Option<String>,
+    #[serde(default)]
+    tools: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPluginManifestLlmProduct {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    prompts: BTreeMap<String, String>,
+    #[serde(default)]
+    tasks: Option<String>,
+    #[serde(default)]
+    tools: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPluginManifestToolPolicy {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    applies_to: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPluginManifestModelCatalog {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    wire: Option<String>,
+    #[serde(default)]
+    models: Vec<RawPluginManifestModel>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPluginManifestModel {
+    #[serde(default, alias = "model")]
+    slug: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    priority: Option<i32>,
+    #[serde(default)]
+    context_window: Option<i64>,
+    #[serde(default)]
+    default_reasoning_effort: Option<praxis_protocol::openai_models::ReasoningEffort>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum RawPluginManifestDefaultPrompt {
@@ -126,6 +226,7 @@ pub(crate) fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest>
                 mcp_servers,
                 apps,
                 interface,
+                llm,
             } = manifest;
             let name = plugin_root
                 .file_name()
@@ -215,6 +316,7 @@ pub(crate) fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest>
                     apps: resolve_manifest_path(plugin_root, "apps", apps.as_deref()),
                 },
                 interface,
+                llm: resolve_llm_manifest(plugin_root, llm),
             })
         }
         Err(err) => {
@@ -328,9 +430,231 @@ fn json_value_type(value: &JsonValue) -> &'static str {
     }
 }
 
+fn resolve_llm_manifest(
+    plugin_root: &Path,
+    raw_llm: Option<RawPluginManifestLlm>,
+) -> Option<PluginManifestLlm> {
+    let raw_llm = raw_llm?;
+    let profiles = raw_llm
+        .profiles
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, raw)| resolve_llm_profile(plugin_root, index, raw))
+        .collect::<Vec<_>>();
+    let products = raw_llm
+        .products
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, raw)| resolve_llm_product(plugin_root, index, raw))
+        .collect::<Vec<_>>();
+    let tool_policies = raw_llm
+        .tool_policies
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, raw)| resolve_llm_tool_policy(plugin_root, index, raw))
+        .collect::<Vec<_>>();
+    let model_catalogs = raw_llm
+        .model_catalogs
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, raw)| resolve_llm_model_catalog(plugin_root, index, raw))
+        .collect::<Vec<_>>();
+
+    (!profiles.is_empty()
+        || !products.is_empty()
+        || !tool_policies.is_empty()
+        || !model_catalogs.is_empty())
+    .then_some(PluginManifestLlm {
+        profiles,
+        products,
+        tool_policies,
+        model_catalogs,
+    })
+}
+
+fn resolve_llm_profile(
+    plugin_root: &Path,
+    index: usize,
+    raw: RawPluginManifestLlmProfile,
+) -> Option<PluginManifestLlmProfile> {
+    let field = format!("llm.profiles[{index}].id");
+    let id = resolve_manifest_id(plugin_root, &field, &raw.id)?;
+    Some(PluginManifestLlmProfile {
+        id,
+        provider: normalize_optional_manifest_string(raw.provider),
+        wire: normalize_optional_manifest_string(raw.wire),
+        behavior: resolve_manifest_path(
+            plugin_root,
+            &format!("llm.profiles[{index}].behavior"),
+            raw.behavior.as_deref(),
+        ),
+        prompts: resolve_prompt_slots(
+            plugin_root,
+            &format!("llm.profiles[{index}].prompts"),
+            raw.prompts,
+        ),
+        tasks: resolve_manifest_path(
+            plugin_root,
+            &format!("llm.profiles[{index}].tasks"),
+            raw.tasks.as_deref(),
+        ),
+        tools: resolve_manifest_path(
+            plugin_root,
+            &format!("llm.profiles[{index}].tools"),
+            raw.tools.as_deref(),
+        ),
+    })
+}
+
+fn resolve_llm_product(
+    plugin_root: &Path,
+    index: usize,
+    raw: RawPluginManifestLlmProduct,
+) -> Option<PluginManifestLlmProduct> {
+    let field = format!("llm.products[{index}].id");
+    let id = resolve_manifest_id(plugin_root, &field, &raw.id)?;
+    Some(PluginManifestLlmProduct {
+        id,
+        prompts: resolve_prompt_slots(
+            plugin_root,
+            &format!("llm.products[{index}].prompts"),
+            raw.prompts,
+        ),
+        tasks: resolve_manifest_path(
+            plugin_root,
+            &format!("llm.products[{index}].tasks"),
+            raw.tasks.as_deref(),
+        ),
+        tools: resolve_manifest_path(
+            plugin_root,
+            &format!("llm.products[{index}].tools"),
+            raw.tools.as_deref(),
+        ),
+    })
+}
+
+fn resolve_llm_tool_policy(
+    plugin_root: &Path,
+    index: usize,
+    raw: RawPluginManifestToolPolicy,
+) -> Option<PluginManifestToolPolicy> {
+    let id = resolve_manifest_id(
+        plugin_root,
+        &format!("llm.toolPolicies[{index}].id"),
+        &raw.id,
+    )?;
+    let path = resolve_manifest_path(
+        plugin_root,
+        &format!("llm.toolPolicies[{index}].path"),
+        raw.path.as_deref(),
+    )?;
+    Some(PluginManifestToolPolicy {
+        id,
+        path,
+        applies_to: raw
+            .applies_to
+            .into_iter()
+            .filter_map(|value| normalize_manifest_string(&value))
+            .collect(),
+    })
+}
+
+fn resolve_llm_model_catalog(
+    plugin_root: &Path,
+    index: usize,
+    raw: RawPluginManifestModelCatalog,
+) -> Option<PluginManifestLlmModelCatalog> {
+    let id = resolve_manifest_id(
+        plugin_root,
+        &format!("llm.modelCatalogs[{index}].id"),
+        &raw.id,
+    )?;
+    let models = raw
+        .models
+        .into_iter()
+        .enumerate()
+        .filter_map(|(model_index, raw_model)| {
+            resolve_llm_model(plugin_root, index, model_index, raw_model)
+        })
+        .collect::<Vec<_>>();
+    if models.is_empty() {
+        tracing::warn!(
+            path = %plugin_root.join(PLUGIN_MANIFEST_PATH).display(),
+            "ignoring llm.modelCatalogs[{index}]: models must not be empty"
+        );
+        return None;
+    }
+
+    Some(PluginManifestLlmModelCatalog {
+        id,
+        label: normalize_optional_manifest_string(raw.label),
+        provider: normalize_optional_manifest_string(raw.provider),
+        wire: normalize_optional_manifest_string(raw.wire),
+        models,
+    })
+}
+
+fn resolve_llm_model(
+    plugin_root: &Path,
+    catalog_index: usize,
+    model_index: usize,
+    raw: RawPluginManifestModel,
+) -> Option<PluginManifestLlmModel> {
+    let slug = resolve_manifest_id(
+        plugin_root,
+        &format!("llm.modelCatalogs[{catalog_index}].models[{model_index}].slug"),
+        &raw.slug,
+    )?;
+    Some(PluginManifestLlmModel {
+        slug,
+        display_name: normalize_optional_manifest_string(raw.display_name),
+        description: normalize_optional_manifest_string(raw.description),
+        priority: raw.priority,
+        context_window: raw.context_window,
+        default_reasoning_effort: raw.default_reasoning_effort,
+    })
+}
+
+fn resolve_prompt_slots(
+    plugin_root: &Path,
+    field: &str,
+    prompts: BTreeMap<String, String>,
+) -> Vec<PluginManifestLlmPromptSlot> {
+    prompts
+        .into_iter()
+        .filter_map(|(slot, path)| {
+            let slot = normalize_manifest_string(&slot)?;
+            let field = format!("{field}.{slot}");
+            resolve_manifest_path(plugin_root, &field, Some(path.as_str()))
+                .map(|path| PluginManifestLlmPromptSlot { slot, path })
+        })
+        .collect()
+}
+
+fn resolve_manifest_id(plugin_root: &Path, field: &str, value: &str) -> Option<String> {
+    let Some(value) = normalize_manifest_string(value) else {
+        let manifest_path = plugin_root.join(PLUGIN_MANIFEST_PATH);
+        tracing::warn!(
+            path = %manifest_path.display(),
+            "ignoring {field}: id must not be empty"
+        );
+        return None;
+    };
+    Some(value)
+}
+
+fn normalize_optional_manifest_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| normalize_manifest_string(&value))
+}
+
+fn normalize_manifest_string(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
 fn resolve_manifest_path(
     plugin_root: &Path,
-    field: &'static str,
+    field: &str,
     path: Option<&str>,
 ) -> Option<AbsolutePathBuf> {
     // `plugin.json` paths are required to be relative to the plugin root and we return the
@@ -382,17 +706,20 @@ mod tests {
     use tempfile::tempdir;
 
     fn write_manifest(plugin_root: &Path, interface: &str) {
-        fs::create_dir_all(plugin_root.join(".codex-plugin")).expect("create manifest dir");
-        fs::write(
-            plugin_root.join(".codex-plugin/plugin.json"),
-            format!(
+        write_raw_manifest(
+            plugin_root,
+            &format!(
                 r#"{{
   "name": "demo-plugin",
   "interface": {interface}
 }}"#
             ),
-        )
-        .expect("write manifest");
+        );
+    }
+
+    fn write_raw_manifest(plugin_root: &Path, manifest: &str) {
+        fs::create_dir_all(plugin_root.join(".codex-plugin")).expect("create manifest dir");
+        fs::write(plugin_root.join(".codex-plugin/plugin.json"), manifest).expect("write manifest");
     }
 
     fn load_manifest(plugin_root: &Path) -> PluginManifest {
@@ -472,5 +799,97 @@ mod tests {
         let interface = manifest.interface.expect("plugin interface");
 
         assert_eq!(interface.default_prompt, None);
+    }
+
+    #[test]
+    fn plugin_manifest_resolves_llm_profile_product_and_tool_policy_paths() {
+        let tmp = tempdir().expect("tempdir");
+        let plugin_root = tmp.path().join("demo-plugin");
+        write_raw_manifest(
+            &plugin_root,
+            r#"{
+  "name": "demo-plugin",
+  "llm": {
+    "profiles": [
+      {
+        "id": "deepseek",
+        "provider": "deepseek",
+        "wire": "openai_compat",
+        "behavior": "./llm/deepseek/behavior.toml",
+        "prompts": {
+          "base": "./llm/deepseek/prompts/base.md"
+        },
+        "tasks": "./llm/deepseek/tasks.toml",
+        "tools": "./llm/deepseek/tools.toml"
+      }
+    ],
+    "products": [
+      {
+        "id": "cunning3d",
+        "prompts": {
+          "base": "./llm/products/cunning3d/base.md"
+        }
+      }
+    ],
+    "toolPolicies": [
+      {
+        "id": "c3d-dev",
+        "path": "./llm/tools/c3d-dev.toml",
+        "appliesTo": ["deepseek", "codex/responses"]
+      }
+    ],
+    "modelCatalogs": [
+      {
+        "id": "aliyun-coder",
+        "label": "Aliyun Coder",
+        "provider": "dashscope",
+        "wire": "openai_compat",
+        "models": [
+          {
+            "slug": "qwen3-coder-plus",
+            "displayName": "Qwen3 Coder Plus",
+            "description": "Aliyun coding model",
+            "priority": 20,
+            "contextWindow": 262144,
+            "defaultReasoningEffort": "high"
+          }
+        ]
+      }
+    ]
+  }
+}"#,
+        );
+
+        let manifest = load_manifest(&plugin_root);
+        let llm = manifest.llm.expect("plugin llm manifest");
+
+        assert_eq!(llm.profiles[0].id, "deepseek");
+        assert_eq!(llm.profiles[0].provider.as_deref(), Some("deepseek"));
+        assert_eq!(llm.profiles[0].wire.as_deref(), Some("openai_compat"));
+        assert!(
+            llm.profiles[0].prompts[0]
+                .path
+                .as_path()
+                .ends_with("llm/deepseek/prompts/base.md")
+        );
+        assert_eq!(llm.products[0].id, "cunning3d");
+        assert!(
+            llm.products[0].prompts[0]
+                .path
+                .as_path()
+                .ends_with("llm/products/cunning3d/base.md")
+        );
+        assert_eq!(llm.tool_policies[0].id, "c3d-dev");
+        assert_eq!(
+            llm.tool_policies[0].applies_to,
+            vec!["deepseek".to_string(), "codex/responses".to_string()]
+        );
+        assert_eq!(llm.model_catalogs[0].id, "aliyun-coder");
+        assert_eq!(llm.model_catalogs[0].provider.as_deref(), Some("dashscope"));
+        assert_eq!(llm.model_catalogs[0].models[0].slug, "qwen3-coder-plus");
+        assert_eq!(
+            llm.model_catalogs[0].models[0].display_name.as_deref(),
+            Some("Qwen3 Coder Plus")
+        );
     }
 }

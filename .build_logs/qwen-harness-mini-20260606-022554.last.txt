@@ -1,0 +1,22 @@
+All good — server is up and serving the game correctly.
+
+**Mini Drift Check is live.**
+
+**File:** [index.html](E:/qwen-harness-mini/index.html)
+
+**Server:** `http://localhost:8092` (PID `28876`, Python http.server in background)
+
+**Controls:**
+- `Enter` / `Space` — start game from title screen
+- `Arrow Left` / `A` — drift left
+- `Arrow Right` / `D` — drift right
+- Crash into a red obstacle and you're back at the title screen with your last score shown
+
+**HUD:** Score (top-left), distance traveled (below score), speed (top-right).
+
+**Test hooks exposed on `window`:**
+- `render_game_to_text()` — returns a JSON string with state, score, distance, speed, player position/lane, and all obstacle positions
+- `advanceTime(ms)` — steps the simulation forward by `ms` milliseconds without needing real animation frames
+- `simulateKey(code, type)` — fires a synthetic keyboard event (e.g. `simulateKey('Space', 'keydown')`)
+
+**Verification evidence:** HTTP 200, response length matches file size (5989 bytes), canvas and hook strings confirmed present in served content.

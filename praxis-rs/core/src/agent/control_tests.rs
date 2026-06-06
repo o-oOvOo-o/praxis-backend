@@ -62,6 +62,22 @@ fn text_input(text: &str) -> Op {
     .into()
 }
 
+#[test]
+fn thread_spawn_agent_display_name_combines_chinese_name_and_short_title() {
+    assert_eq!(
+        format_thread_spawn_agent_display_name("墨子", Some("负责GUI")),
+        "墨子-负责GUI"
+    );
+    assert_eq!(
+        format_thread_spawn_agent_display_name("墨子", Some("墨子-负责GUI")),
+        "墨子-负责GUI"
+    );
+    assert_eq!(
+        format_thread_spawn_agent_display_name("庄子", Some("墨子-负责GUI")),
+        "庄子-负责GUI"
+    );
+}
+
 struct AgentControlHarness {
     _home: TempDir,
     config: Config,
@@ -597,12 +613,13 @@ async fn spawn_agent_can_fork_parent_thread_history() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: None,
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id),
                 fork_mode: Some(SpawnAgentForkMode::FullHistory),
+                agent_title: None,
             },
         )
         .await
@@ -683,12 +700,13 @@ async fn spawn_agent_fork_injects_output_for_parent_spawn_call() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: None,
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id.clone()),
                 fork_mode: Some(SpawnAgentForkMode::FullHistory),
+                agent_title: None,
             },
         )
         .await
@@ -756,12 +774,13 @@ async fn spawn_agent_fork_flushes_parent_rollout_before_loading_history() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: None,
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id.clone()),
                 fork_mode: Some(SpawnAgentForkMode::FullHistory),
+                agent_title: None,
             },
         )
         .await
@@ -883,12 +902,13 @@ async fn spawn_agent_fork_last_n_turns_keeps_only_recent_turns() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: None,
             })),
             SpawnAgentOptions {
                 fork_parent_spawn_call_id: Some(parent_spawn_call_id),
                 fork_mode: Some(SpawnAgentForkMode::LastNTurns(2)),
+                agent_title: None,
             },
         )
         .await
@@ -1181,7 +1201,7 @@ async fn spawn_child_completion_notifies_parent_history() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -1217,7 +1237,7 @@ async fn multi_agent_completion_ignores_dead_direct_parent() {
                 parent_thread_id: root_thread_id,
                 depth: 1,
                 agent_path: Some(worker_path.clone()),
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -1233,7 +1253,7 @@ async fn multi_agent_completion_ignores_dead_direct_parent() {
                 parent_thread_id: worker_thread_id,
                 depth: 2,
                 agent_path: Some(tester_path.clone()),
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -1328,7 +1348,7 @@ async fn multi_agent_completion_queues_message_for_direct_parent() {
             parent_thread_id: worker_thread_id,
             depth: 2,
             agent_path: Some(tester_path.clone()),
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: Some("explorer".to_string()),
         })),
         tester_path.to_string(),
@@ -1411,7 +1431,7 @@ async fn completion_watcher_notifies_parent_when_child_is_missing() {
             parent_thread_id,
             depth: 1,
             agent_path: None,
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: Some("explorer".to_string()),
         })),
         child_thread_id.to_string(),
@@ -1441,7 +1461,7 @@ async fn completion_watcher_notifies_parent_when_child_is_missing() {
 }
 
 #[tokio::test]
-async fn spawn_thread_subagent_gets_random_nickname_in_session_source() {
+async fn spawn_thread_subagent_gets_stable_chinese_nickname_in_session_source() {
     let harness = AgentControlHarness::new().await;
     let (parent_thread_id, _parent_thread) = harness.start_thread().await;
 
@@ -1454,7 +1474,7 @@ async fn spawn_thread_subagent_gets_random_nickname_in_session_source() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -1471,7 +1491,7 @@ async fn spawn_thread_subagent_gets_random_nickname_in_session_source() {
     let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
         parent_thread_id: seen_parent_thread_id,
         depth,
-        agent_nickname,
+        agent_display_name,
         agent_role,
         ..
     }) = snapshot.session_source
@@ -1480,19 +1500,19 @@ async fn spawn_thread_subagent_gets_random_nickname_in_session_source() {
     };
     assert_eq!(seen_parent_thread_id, parent_thread_id);
     assert_eq!(depth, 1);
-    assert!(agent_nickname.is_some());
+    assert_eq!(agent_display_name, Some("墨子".to_string()));
     assert_eq!(agent_role, Some("explorer".to_string()));
 }
 
 #[tokio::test]
-async fn spawn_thread_subagent_uses_role_specific_nickname_candidates() {
+async fn spawn_thread_subagent_uses_role_specific_base_name_candidates() {
     let mut harness = AgentControlHarness::new().await;
     harness.config.agent_roles.insert(
         "researcher".to_string(),
         AgentRoleConfig {
             description: Some("Research role".to_string()),
             config_file: None,
-            nickname_candidates: Some(vec!["Atlas".to_string()]),
+            base_name_candidates: Some(vec!["Atlas".to_string()]),
         },
     );
     let (parent_thread_id, _parent_thread) = harness.start_thread().await;
@@ -1506,7 +1526,7 @@ async fn spawn_thread_subagent_uses_role_specific_nickname_candidates() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("researcher".to_string()),
             })),
         )
@@ -1520,12 +1540,12 @@ async fn spawn_thread_subagent_uses_role_specific_nickname_candidates() {
         .expect("child thread should be registered");
     let snapshot = child_thread.config_snapshot().await;
 
-    let SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_nickname, .. }) =
+    let SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_display_name, .. }) =
         snapshot.session_source
     else {
         panic!("expected thread-spawn sub-agent source");
     };
-    assert_eq!(agent_nickname, Some("Atlas".to_string()));
+    assert_eq!(agent_display_name, Some("Atlas".to_string()));
 }
 
 #[tokio::test]
@@ -1563,7 +1583,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: Some(agent_path.clone()),
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -1598,7 +1618,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
     let original_snapshot = child_thread.config_snapshot().await;
     let original_nickname = original_snapshot
         .session_source
-        .get_nickname()
+        .get_agent_display_name()
         .expect("spawned sub-agent should have a nickname");
     let state_db = child_thread
         .state_db()
@@ -1606,7 +1626,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
     timeout(Duration::from_secs(5), async {
         loop {
             if let Ok(Some(metadata)) = state_db.get_thread(child_thread_id).await
-                && metadata.agent_nickname.is_some()
+                && metadata.agent_display_name.is_some()
                 && metadata.agent_role.as_deref() == Some("explorer")
             {
                 break;
@@ -1632,7 +1652,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: Some(agent_path.clone()),
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: None,
             }),
         )
@@ -1651,7 +1671,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
         parent_thread_id: resumed_parent_thread_id,
         depth: resumed_depth,
         agent_path: resumed_agent_path,
-        agent_nickname: resumed_nickname,
+        agent_display_name: resumed_nickname,
         agent_role: resumed_role,
         ..
     }) = resumed_snapshot.session_source
@@ -1751,7 +1771,7 @@ async fn shutdown_agent_tree_closes_live_descendants() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -1766,7 +1786,7 @@ async fn shutdown_agent_tree_closes_live_descendants() {
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
         )
@@ -1836,7 +1856,7 @@ async fn shutdown_agent_tree_closes_descendants_when_started_at_child() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -1851,7 +1871,7 @@ async fn shutdown_agent_tree_closes_descendants_when_started_at_child() {
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
         )
@@ -1927,7 +1947,7 @@ async fn resume_thread_from_rollout_does_not_reopen_closed_descendants() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -1942,7 +1962,7 @@ async fn resume_thread_from_rollout_does_not_reopen_closed_descendants() {
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
         )
@@ -2022,7 +2042,7 @@ async fn resume_closed_child_reopens_open_descendants() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -2037,7 +2057,7 @@ async fn resume_closed_child_reopens_open_descendants() {
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
         )
@@ -2077,7 +2097,7 @@ async fn resume_closed_child_reopens_open_descendants() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: None,
             }),
         )
@@ -2119,7 +2139,7 @@ async fn resume_thread_from_rollout_reopens_open_descendants_after_manager_shutd
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -2134,7 +2154,7 @@ async fn resume_thread_from_rollout_reopens_open_descendants_after_manager_shutd
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
         )
@@ -2210,7 +2230,7 @@ async fn resume_thread_from_rollout_uses_edge_data_when_descendant_metadata_sour
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -2225,7 +2245,7 @@ async fn resume_thread_from_rollout_uses_edge_data_when_descendant_metadata_sour
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
         )
@@ -2263,7 +2283,7 @@ async fn resume_thread_from_rollout_uses_edge_data_when_descendant_metadata_sour
             parent_thread_id: ThreadId::new(),
             depth: 99,
             agent_path: None,
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: Some("worker".to_string()),
         }))
         .expect("stale session source should serialize");
@@ -2341,7 +2361,7 @@ async fn resume_thread_from_rollout_skips_descendants_when_parent_resume_fails()
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
         )
@@ -2356,7 +2376,7 @@ async fn resume_thread_from_rollout_skips_descendants_when_parent_resume_fails()
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
         )

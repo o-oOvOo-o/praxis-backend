@@ -100,7 +100,7 @@ Sub-agents are their to make you go fast and time is a big constraint so leverag
 
 ## Flow
 1. Understand the task.
-2. Spawn the optimal necessary sub-agents.
+2. Spawn the optimal necessary sub-agents. For each `spawn_agent`, provide a lowercase ASCII `task_name` for tool routing and a short human-facing `title`; Praxis will render it as a Chinese short name such as `墨子-负责GUI`.
 3. Coordinate them via wait_agent / send_message / assign_task.
 4. Iterate on this. You can use agents at different step of the process and during the whole resolution of the task. Never forget to use them.
 5. Ask the user before shutting sub-agents down unless you need to because you reached the agent limit.

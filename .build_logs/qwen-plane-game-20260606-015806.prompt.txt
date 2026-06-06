@@ -1,0 +1,16 @@
+You are working in E:/qwentest.
+
+Build a real playable prototype of a Minecraft-style plane shooter. Do not build a generic voxel walking demo. The game must be an aircraft shooter with forward progression.
+
+Requirements:
+- If there is no existing project, create a self-contained web game project that can run from a local static server or by opening the HTML file.
+- Theme: Minecraft / voxel / blocky visual style.
+- Player controls an aircraft in the sky while the world continuously advances forward.
+- Ground tanks must be billboard/card/sprite style targets placed on a voxel/blocky ground.
+- The aircraft must be controllable: left/right/up/down movement, shooting, dodging ground fire.
+- Add enemy tank fire, collisions, health/lives, score, distance/progression, start and restart flow.
+- The screen must contain real visuals, not text-only UI: blocky terrain grid, billboard tanks, player aircraft, bullets, explosions or hit effects.
+- Keep runtime performance stable; do not create many DOM nodes per frame. Prefer canvas, WebGL, or Three.js as appropriate.
+- First write a concise gameplay/design note in README or source comments, then implement.
+- After implementation, run a minimal verification command or smoke test to confirm the entry file exists and JavaScript has no obvious syntax error.
+- Final answer must list created files, run instructions, controls, and verification result.

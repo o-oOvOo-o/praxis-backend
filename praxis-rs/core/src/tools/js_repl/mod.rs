@@ -1574,6 +1574,7 @@ impl JsReplManager {
                 app_tools: None,
                 discoverable_tools: None,
                 dynamic_tools: exec.turn.dynamic_tools.as_slice(),
+                tool_visibility_policy: None,
             },
         );
 

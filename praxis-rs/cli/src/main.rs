@@ -781,30 +781,30 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             handle_app_exit(exit_info)?;
         }
         Some(Subcommand::Exec(mut exec_cli)) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "exec",
-            )?;
             prepend_config_flags(
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            praxis_exec::run_main(exec_cli, arg0_paths.clone()).await?;
+            let remote_app_gateway = resolve_exec_remote_app_gateway(
+                root_remote.clone(),
+                root_remote_auth_token_env.clone(),
+            )
+            .await?;
+            praxis_exec::run_main(exec_cli, arg0_paths.clone(), remote_app_gateway).await?;
         }
         Some(Subcommand::Review(review_args)) => {
-            reject_remote_mode_for_subcommand(
-                root_remote.as_deref(),
-                root_remote_auth_token_env.as_deref(),
-                "review",
-            )?;
             let mut exec_cli = ExecCli::try_parse_from(["codex", "exec"])?;
             exec_cli.command = Some(ExecCommand::Review(review_args));
             prepend_config_flags(
                 &mut exec_cli.config_overrides,
                 root_config_overrides.clone(),
             );
-            praxis_exec::run_main(exec_cli, arg0_paths.clone()).await?;
+            let remote_app_gateway = resolve_exec_remote_app_gateway(
+                root_remote.clone(),
+                root_remote_auth_token_env.clone(),
+            )
+            .await?;
+            praxis_exec::run_main(exec_cli, arg0_paths.clone(), remote_app_gateway).await?;
         }
         Some(Subcommand::McpServer) => {
             reject_remote_mode_for_subcommand(
@@ -1384,6 +1384,30 @@ where
 
 fn read_remote_auth_token_from_env_var(env_var_name: &str) -> anyhow::Result<String> {
     read_remote_auth_token_from_env_var_with(env_var_name, |name| std::env::var(name))
+}
+
+async fn resolve_exec_remote_app_gateway(
+    remote: Option<String>,
+    remote_auth_token_env: Option<String>,
+) -> anyhow::Result<Option<praxis_exec::ExecRemoteAppGateway>> {
+    if remote_auth_token_env.is_some() && remote.is_none() {
+        anyhow::bail!("`--remote-auth-token-env` requires `--remote`.");
+    }
+
+    if let Some(remote) = remote {
+        let websocket_url = praxis_tui::normalize_remote_addr(remote.as_str())
+            .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        let auth_token = remote_auth_token_env
+            .as_deref()
+            .map(read_remote_auth_token_from_env_var)
+            .transpose()?;
+        return Ok(Some(praxis_exec::ExecRemoteAppGateway {
+            websocket_url,
+            auth_token,
+        }));
+    }
+
+    Ok(None)
 }
 
 async fn run_interactive_tui(
@@ -2125,11 +2149,11 @@ mod tests {
     }
 
     #[test]
-    fn reject_remote_mode_for_non_interactive_subcommands() {
+    fn reject_remote_mode_for_other_non_interactive_subcommands() {
         let err = reject_remote_mode_for_subcommand(
             Some("127.0.0.1:4500"),
             /*remote_auth_token_env*/ None,
-            "exec",
+            "mcp-server",
         )
         .expect_err("non-interactive subcommands should reject --remote");
         assert!(
@@ -2143,7 +2167,7 @@ mod tests {
         let err = reject_remote_mode_for_subcommand(
             /*remote*/ None,
             Some("CODEX_REMOTE_AUTH_TOKEN"),
-            "exec",
+            "mcp-server",
         )
         .expect_err("non-interactive subcommands should reject --remote-auth-token-env");
         assert!(

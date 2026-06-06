@@ -1,0 +1,14 @@
+You are working in E:/qwen-harness-mini.
+
+Upgrade the current simple 2D demo into a more advanced polished 3D browser game. Replace the existing index.html if needed.
+
+Requirements:
+- Inspect the workspace first with rg --files.
+- Build a self-contained Three.js game page with no build step, using CDN/importmap if needed.
+- The game should feel substantially more advanced than the current 2D demo: full-window 3D scene, perspective camera, neon racing track, hovercraft/player vehicle, 3D obstacles, collectible/shootable targets, particles or hit effects, lighting/fog, and a polished HUD.
+- Controls: A/D or arrows steer, W/S or up/down adjust lane/height or boost/brake, Space shoots, Enter/Space starts/restarts.
+- Include start, playing, and game-over/restart flow.
+- Keep stable performance: one WebGL canvas, object arrays with caps, no per-frame DOM spam.
+- Preserve automated hooks: window.render_game_to_text(), window.advanceTime(ms), and window.simulateKey(code,type). The state JSON must include mode/state, score, distance, health, player position, obstacle/target counts, and bullet count.
+- Verify file existence, JS syntax, served HTTP 200, and presence of canvas/hooks. Start or reuse local server on port 8092 cleanly; do not leave duplicate servers.
+- Final response must mention server PID, URL, files, controls, and verification evidence.

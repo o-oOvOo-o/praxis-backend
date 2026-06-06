@@ -29,18 +29,21 @@ impl SessionTask for CompactTask {
         _cancellation_token: CancellationToken,
     ) -> Option<String> {
         let session = session.clone_session();
-        let _ = if crate::compact::should_use_remote_compact_task(&ctx.provider) {
+        let compact_policy = crate::compact::compact_execution_policy_for_turn(&session, &ctx);
+        let _ = if compact_policy
+            == crate::llm::tasks::compact::CompactExecutionPolicy::RemoteResponses
+        {
             let _ = session.services.session_telemetry.counter(
                 "codex.task.compact",
                 /*inc*/ 1,
-                &[("type", "remote")],
+                &[("type", compact_policy.telemetry_kind())],
             );
             crate::compact_remote::run_remote_compact_task(session.clone(), ctx).await
         } else {
             let _ = session.services.session_telemetry.counter(
                 "codex.task.compact",
                 /*inc*/ 1,
-                &[("type", "local")],
+                &[("type", compact_policy.telemetry_kind())],
             );
             crate::compact::run_compact_task(session.clone(), ctx, input).await
         };

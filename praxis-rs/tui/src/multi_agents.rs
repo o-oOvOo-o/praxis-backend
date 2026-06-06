@@ -34,11 +34,40 @@ use std::collections::HashSet;
 const COLLAB_PROMPT_PREVIEW_GRAPHEMES: usize = 160;
 const COLLAB_AGENT_ERROR_PREVIEW_GRAPHEMES: usize = 160;
 const COLLAB_AGENT_RESPONSE_PREVIEW_GRAPHEMES: usize = 240;
+const SUBAGENT_TITLE_GRAPHEMES: usize = 32;
+const SUBAGENT_NAMES_CN: &[&str] = &[
+    "墨子",
+    "庄子",
+    "孟子",
+    "荀子",
+    "韩非",
+    "屈原",
+    "李白",
+    "杜甫",
+    "苏轼",
+    "辛弃疾",
+    "王阳明",
+    "沈括",
+    "鲁迅",
+    "胡适",
+    "钱学森",
+    "华罗庚",
+    "竺可桢",
+    "顾准",
+    "张衡",
+    "祖冲之",
+    "蔡伦",
+    "王安石",
+    "李清照",
+    "曹雪芹",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentPickerThreadEntry {
+    pub(crate) agent_base_name: Option<String>,
+    pub(crate) agent_title: Option<String>,
     /// Human-friendly nickname shown in picker rows and footer labels.
-    pub(crate) agent_nickname: Option<String>,
+    pub(crate) agent_display_name: Option<String>,
     /// Agent type shown in brackets when present, for example `worker`.
     pub(crate) agent_role: Option<String>,
     /// Whether the thread has emitted a close event and should render dimmed.
@@ -48,6 +77,8 @@ pub(crate) struct AgentPickerThreadEntry {
 #[derive(Clone, Copy)]
 struct AgentLabel<'a> {
     thread_id: Option<ThreadId>,
+    base_name: Option<&'a str>,
+    title: Option<&'a str>,
     nickname: Option<&'a str>,
     role: Option<&'a str>,
 }
@@ -68,7 +99,9 @@ pub(crate) fn agent_picker_status_dot_spans(is_closed: bool) -> Vec<Span<'static
 }
 
 pub(crate) fn format_agent_picker_item_name(
-    agent_nickname: Option<&str>,
+    agent_base_name: Option<&str>,
+    agent_title: Option<&str>,
+    agent_display_name: Option<&str>,
     agent_role: Option<&str>,
     is_primary: bool,
 ) -> String {
@@ -76,16 +109,93 @@ pub(crate) fn format_agent_picker_item_name(
         return "Main [default]".to_string();
     }
 
-    let agent_nickname = agent_nickname
-        .map(str::trim)
-        .filter(|nickname| !nickname.is_empty());
+    let agent_display_name = agent_identity_display(
+        /*thread_id*/ None,
+        agent_base_name,
+        agent_title,
+        agent_display_name,
+    );
     let agent_role = agent_role.map(str::trim).filter(|role| !role.is_empty());
-    match (agent_nickname, agent_role) {
-        (Some(agent_nickname), Some(agent_role)) => format!("{agent_nickname} [{agent_role}]"),
-        (Some(agent_nickname), None) => agent_nickname.to_string(),
+    match (agent_display_name.as_deref(), agent_role) {
+        (Some(agent_display_name), Some(agent_role)) => {
+            format!("{agent_display_name} [{agent_role}]")
+        }
+        (Some(agent_display_name), None) => agent_display_name.to_string(),
         (None, Some(agent_role)) => format!("[{agent_role}]"),
         (None, None) => "Agent".to_string(),
     }
+}
+
+pub(crate) fn format_agent_picker_item_name_for_thread(
+    thread_id: ThreadId,
+    agent_base_name: Option<&str>,
+    agent_title: Option<&str>,
+    agent_display_name: Option<&str>,
+    agent_role: Option<&str>,
+    is_primary: bool,
+) -> String {
+    if is_primary {
+        return "Main [default]".to_string();
+    }
+
+    let agent_name =
+        subagent_display_name(thread_id, agent_base_name, agent_title, agent_display_name);
+    let agent_role = agent_role.map(str::trim).filter(|role| !role.is_empty());
+    match agent_role {
+        Some(agent_role) => format!("{agent_name} [{agent_role}]"),
+        None => agent_name,
+    }
+}
+
+pub(crate) fn subagent_display_name(
+    thread_id: ThreadId,
+    agent_base_name: Option<&str>,
+    agent_title: Option<&str>,
+    agent_display_name: Option<&str>,
+) -> String {
+    agent_identity_display(
+        Some(thread_id),
+        agent_base_name,
+        agent_title,
+        agent_display_name,
+    )
+    .unwrap_or_else(|| hashed_subagent_name(thread_id).to_string())
+}
+
+fn agent_identity_display(
+    thread_id: Option<ThreadId>,
+    agent_base_name: Option<&str>,
+    agent_title: Option<&str>,
+    agent_display_name: Option<&str>,
+) -> Option<String> {
+    let base_name = agent_base_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            agent_display_name
+                .map(str::trim)
+                .filter(|name| !name.is_empty() && !name.is_ascii())
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| thread_id.map(|thread_id| hashed_subagent_name(thread_id).to_string()));
+    let base_name = base_name?;
+    let title = agent_title
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(|title| truncate_text(title, SUBAGENT_TITLE_GRAPHEMES));
+    match title {
+        Some(title) => Some(format!("{base_name} - {title}")),
+        None => Some(base_name),
+    }
+}
+
+fn hashed_subagent_name(thread_id: ThreadId) -> &'static str {
+    let mut hash = 0usize;
+    for byte in thread_id.to_string().bytes() {
+        hash = hash.wrapping_mul(33).wrapping_add(usize::from(byte));
+    }
+    SUBAGENT_NAMES_CN[hash % SUBAGENT_NAMES_CN.len()]
 }
 
 pub(crate) fn previous_agent_shortcut() -> crate::key_hint::KeyBinding {
@@ -179,7 +289,9 @@ pub(crate) fn spawn_end(
         call_id: _,
         sender_thread_id: _,
         new_thread_id,
-        new_agent_nickname,
+        new_agent_base_name,
+        new_agent_title,
+        new_agent_display_name,
         new_agent_role,
         prompt,
         status: _,
@@ -191,7 +303,9 @@ pub(crate) fn spawn_end(
             "Spawned",
             AgentLabel {
                 thread_id: Some(thread_id),
-                nickname: new_agent_nickname.as_deref(),
+                base_name: new_agent_base_name.as_deref(),
+                title: new_agent_title.as_deref(),
+                nickname: new_agent_display_name.as_deref(),
                 role: new_agent_role.as_deref(),
             },
             spawn_request,
@@ -212,7 +326,9 @@ pub(crate) fn interaction_end(ev: CollabAgentInteractionEndEvent) -> PlainHistor
         sender_thread_id: _,
         receiver_thread_id,
         kind,
-        receiver_agent_nickname,
+        receiver_agent_base_name,
+        receiver_agent_title,
+        receiver_agent_display_name,
         receiver_agent_role,
         prompt,
         status: _,
@@ -226,7 +342,9 @@ pub(crate) fn interaction_end(ev: CollabAgentInteractionEndEvent) -> PlainHistor
         title_prefix,
         AgentLabel {
             thread_id: Some(receiver_thread_id),
-            nickname: receiver_agent_nickname.as_deref(),
+            base_name: receiver_agent_base_name.as_deref(),
+            title: receiver_agent_title.as_deref(),
+            nickname: receiver_agent_display_name.as_deref(),
             role: receiver_agent_role.as_deref(),
         },
         /*spawn_request*/ None,
@@ -286,7 +404,9 @@ pub(crate) fn close_end(ev: CollabCloseEndEvent) -> PlainHistoryCell {
         call_id: _,
         sender_thread_id: _,
         receiver_thread_id,
-        receiver_agent_nickname,
+        receiver_agent_base_name,
+        receiver_agent_title,
+        receiver_agent_display_name,
         receiver_agent_role,
         status: _,
     } = ev;
@@ -296,7 +416,9 @@ pub(crate) fn close_end(ev: CollabCloseEndEvent) -> PlainHistoryCell {
             "Closed",
             AgentLabel {
                 thread_id: Some(receiver_thread_id),
-                nickname: receiver_agent_nickname.as_deref(),
+                base_name: receiver_agent_base_name.as_deref(),
+                title: receiver_agent_title.as_deref(),
+                nickname: receiver_agent_display_name.as_deref(),
                 role: receiver_agent_role.as_deref(),
             },
             /*spawn_request*/ None,
@@ -310,7 +432,9 @@ pub(crate) fn resume_begin(ev: CollabResumeBeginEvent) -> PlainHistoryCell {
         call_id: _,
         sender_thread_id: _,
         receiver_thread_id,
-        receiver_agent_nickname,
+        receiver_agent_base_name,
+        receiver_agent_title,
+        receiver_agent_display_name,
         receiver_agent_role,
     } = ev;
 
@@ -319,7 +443,9 @@ pub(crate) fn resume_begin(ev: CollabResumeBeginEvent) -> PlainHistoryCell {
             "Resuming",
             AgentLabel {
                 thread_id: Some(receiver_thread_id),
-                nickname: receiver_agent_nickname.as_deref(),
+                base_name: receiver_agent_base_name.as_deref(),
+                title: receiver_agent_title.as_deref(),
+                nickname: receiver_agent_display_name.as_deref(),
                 role: receiver_agent_role.as_deref(),
             },
             /*spawn_request*/ None,
@@ -333,7 +459,9 @@ pub(crate) fn resume_end(ev: CollabResumeEndEvent) -> PlainHistoryCell {
         call_id: _,
         sender_thread_id: _,
         receiver_thread_id,
-        receiver_agent_nickname,
+        receiver_agent_base_name,
+        receiver_agent_title,
+        receiver_agent_display_name,
         receiver_agent_role,
         status,
     } = ev;
@@ -343,7 +471,9 @@ pub(crate) fn resume_end(ev: CollabResumeEndEvent) -> PlainHistoryCell {
             "Resumed",
             AgentLabel {
                 thread_id: Some(receiver_thread_id),
-                nickname: receiver_agent_nickname.as_deref(),
+                base_name: receiver_agent_base_name.as_deref(),
+                title: receiver_agent_title.as_deref(),
+                nickname: receiver_agent_display_name.as_deref(),
                 role: receiver_agent_role.as_deref(),
             },
             /*spawn_request*/ None,
@@ -385,7 +515,9 @@ fn title_spans_line(mut spans: Vec<Span<'static>>) -> Line<'static> {
 fn agent_label_from_ref(agent: &CollabAgentRef) -> AgentLabel<'_> {
     AgentLabel {
         thread_id: Some(agent.thread_id),
-        nickname: agent.agent_nickname.as_deref(),
+        base_name: agent.agent_base_name.as_deref(),
+        title: agent.agent_title.as_deref(),
+        nickname: agent.agent_display_name.as_deref(),
         role: agent.agent_role.as_deref(),
     }
 }
@@ -396,16 +528,19 @@ fn agent_label_line(agent: AgentLabel<'_>) -> Line<'static> {
 
 fn agent_label_spans(agent: AgentLabel<'_>) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
-    let nickname = agent
-        .nickname
-        .map(str::trim)
-        .filter(|nickname| !nickname.is_empty());
     let role = agent.role.map(str::trim).filter(|role| !role.is_empty());
 
-    if let Some(nickname) = nickname {
-        spans.push(Span::from(nickname.to_string()).cyan().bold());
-    } else if let Some(thread_id) = agent.thread_id {
-        spans.push(Span::from(thread_id.to_string()).cyan());
+    if let Some(thread_id) = agent.thread_id {
+        spans.push(
+            Span::from(subagent_display_name(
+                thread_id,
+                agent.base_name,
+                agent.title,
+                agent.nickname,
+            ))
+                .cyan()
+                .bold(),
+        );
     } else {
         spans.push(Span::from("agent").cyan());
     }
@@ -458,7 +593,9 @@ fn merge_wait_receivers(
             .iter()
             .map(|thread_id| CollabAgentRef {
                 thread_id: *thread_id,
-                agent_nickname: None,
+                agent_base_name: None,
+                agent_title: None,
+                agent_display_name: None,
                 agent_role: None,
             })
             .collect();
@@ -472,7 +609,9 @@ fn merge_wait_receivers(
         if seen.insert(*thread_id) {
             receiver_agents.push(CollabAgentRef {
                 thread_id: *thread_id,
-                agent_nickname: None,
+                agent_base_name: None,
+                agent_title: None,
+                agent_display_name: None,
                 agent_role: None,
             });
         }
@@ -493,7 +632,9 @@ fn wait_complete_lines(
             .iter()
             .map(|(thread_id, status)| CollabAgentStatusEntry {
                 thread_id: *thread_id,
-                agent_nickname: None,
+                agent_base_name: None,
+                agent_title: None,
+                agent_display_name: None,
                 agent_role: None,
                 status: status.clone(),
             })
@@ -511,7 +652,9 @@ fn wait_complete_lines(
             .filter(|(thread_id, _)| !seen.contains(thread_id))
             .map(|(thread_id, status)| CollabAgentStatusEntry {
                 thread_id: *thread_id,
-                agent_nickname: None,
+                agent_base_name: None,
+                agent_title: None,
+                agent_display_name: None,
                 agent_role: None,
                 status: status.clone(),
             })
@@ -526,13 +669,17 @@ fn wait_complete_lines(
         .map(|entry| {
             let CollabAgentStatusEntry {
                 thread_id,
-                agent_nickname,
+                agent_base_name,
+                agent_title,
+                agent_display_name,
                 agent_role,
                 status,
             } = entry;
             let mut spans = agent_label_spans(AgentLabel {
                 thread_id: Some(thread_id),
-                nickname: agent_nickname.as_deref(),
+                base_name: agent_base_name.as_deref(),
+                title: agent_title.as_deref(),
+                nickname: agent_display_name.as_deref(),
                 role: agent_role.as_deref(),
             });
             spans.push(Span::from(": ").dim());
@@ -611,7 +758,9 @@ mod tests {
                 call_id: "call-spawn".to_string(),
                 sender_thread_id,
                 new_thread_id: Some(robie_id),
-                new_agent_nickname: Some("Robie".to_string()),
+                new_agent_base_name: Some("墨子".to_string()),
+                new_agent_title: Some("计算阶乘".to_string()),
+                new_agent_display_name: Some("Robie".to_string()),
                 new_agent_role: Some("explorer".to_string()),
                 prompt: "Compute 11! and reply with just the integer result.".to_string(),
                 model: "gpt-5".to_string(),
@@ -629,7 +778,9 @@ mod tests {
             sender_thread_id,
             receiver_thread_id: robie_id,
             kind: praxis_protocol::protocol::CollabAgentInteractionKind::SendMessage,
-            receiver_agent_nickname: Some("Robie".to_string()),
+            receiver_agent_base_name: Some("墨子".to_string()),
+            receiver_agent_title: Some("计算阶乘".to_string()),
+            receiver_agent_display_name: Some("Robie".to_string()),
             receiver_agent_role: Some("explorer".to_string()),
             prompt: "Please continue and return the answer only.".to_string(),
             status: AgentStatus::Running,
@@ -640,7 +791,9 @@ mod tests {
             receiver_thread_ids: vec![robie_id],
             receiver_agents: vec![CollabAgentRef {
                 thread_id: robie_id,
-                agent_nickname: Some("Robie".to_string()),
+                agent_base_name: Some("墨子".to_string()),
+                agent_title: Some("计算阶乘".to_string()),
+                agent_display_name: Some("Robie".to_string()),
                 agent_role: Some("explorer".to_string()),
             }],
             call_id: "call-wait".to_string(),
@@ -658,13 +811,17 @@ mod tests {
             agent_statuses: vec![
                 CollabAgentStatusEntry {
                     thread_id: robie_id,
-                    agent_nickname: Some("Robie".to_string()),
+                    agent_base_name: Some("墨子".to_string()),
+                    agent_title: Some("计算阶乘".to_string()),
+                    agent_display_name: Some("Robie".to_string()),
                     agent_role: Some("explorer".to_string()),
                     status: AgentStatus::Completed(Some("39916800".to_string())),
                 },
                 CollabAgentStatusEntry {
                     thread_id: bob_id,
-                    agent_nickname: Some("Bob".to_string()),
+                    agent_base_name: Some("荀子".to_string()),
+                    agent_title: Some("诊断超时".to_string()),
+                    agent_display_name: Some("Bob".to_string()),
                     agent_role: Some("worker".to_string()),
                     status: AgentStatus::Errored("tool timeout".to_string()),
                 },
@@ -676,7 +833,9 @@ mod tests {
             call_id: "call-close".to_string(),
             sender_thread_id,
             receiver_thread_id: robie_id,
-            receiver_agent_nickname: Some("Robie".to_string()),
+            receiver_agent_base_name: Some("墨子".to_string()),
+            receiver_agent_title: Some("计算阶乘".to_string()),
+            receiver_agent_display_name: Some("Robie".to_string()),
             receiver_agent_role: Some("explorer".to_string()),
             status: AgentStatus::Completed(Some("39916800".to_string())),
         });
@@ -750,7 +909,9 @@ mod tests {
                 call_id: "call-spawn".to_string(),
                 sender_thread_id,
                 new_thread_id: Some(robie_id),
-                new_agent_nickname: Some("Robie".to_string()),
+                new_agent_base_name: Some("墨子".to_string()),
+                new_agent_title: Some("计算阶乘".to_string()),
+                new_agent_display_name: Some("Robie".to_string()),
                 new_agent_role: Some("explorer".to_string()),
                 prompt: String::new(),
                 model: "gpt-5".to_string(),
@@ -765,7 +926,7 @@ mod tests {
 
         let lines = cell.display_lines(/*width*/ 200);
         let title = &lines[0];
-        assert_eq!(title.spans[2].content.as_ref(), "Robie");
+        assert_eq!(title.spans[2].content.as_ref(), "墨子 - 计算阶乘");
         assert_eq!(title.spans[2].style.fg, Some(Color::Cyan));
         assert!(title.spans[2].style.add_modifier.contains(Modifier::BOLD));
         assert_eq!(title.spans[4].content.as_ref(), "[explorer]");
@@ -786,7 +947,9 @@ mod tests {
             call_id: "call-resume".to_string(),
             sender_thread_id,
             receiver_thread_id: robie_id,
-            receiver_agent_nickname: Some("Robie".to_string()),
+            receiver_agent_base_name: Some("墨子".to_string()),
+            receiver_agent_title: Some("恢复任务".to_string()),
+            receiver_agent_display_name: Some("Robie".to_string()),
             receiver_agent_role: Some("explorer".to_string()),
             status: AgentStatus::Interrupted,
         });

@@ -26,7 +26,7 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoadedSubagentThread {
     pub(crate) thread_id: ThreadId,
-    pub(crate) agent_nickname: Option<String>,
+    pub(crate) agent_display_name: Option<String>,
     pub(crate) agent_role: Option<String>,
 }
 
@@ -87,7 +87,7 @@ pub(crate) fn find_loaded_subagent_threads_for_primary(
                 .remove(&thread_id)
                 .map(|thread| LoadedSubagentThread {
                     thread_id,
-                    agent_nickname: thread.agent_nickname,
+                    agent_display_name: thread.agent_display_name,
                     agent_role: thread.agent_role,
                 })
         })
@@ -123,7 +123,7 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             cli_version: "0.0.0".to_string(),
             source,
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: None,
             git_info: None,
             name: None,
@@ -155,11 +155,11 @@ mod tests {
                 parent_thread_id: primary_thread_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: Some("Scout".to_string()),
+                agent_display_name: Some("Scout".to_string()),
                 agent_role: Some("explorer".to_string()),
             }),
         );
-        child.agent_nickname = Some("Scout".to_string());
+        child.agent_display_name = Some("Scout".to_string());
         child.agent_role = Some("explorer".to_string());
 
         let mut grandchild = test_thread(
@@ -168,11 +168,11 @@ mod tests {
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
-                agent_nickname: Some("Atlas".to_string()),
+                agent_display_name: Some("Atlas".to_string()),
                 agent_role: Some("worker".to_string()),
             }),
         );
-        grandchild.agent_nickname = Some("Atlas".to_string());
+        grandchild.agent_display_name = Some("Atlas".to_string());
         grandchild.agent_role = Some("worker".to_string());
 
         let unrelated_child = test_thread(
@@ -181,7 +181,7 @@ mod tests {
                 parent_thread_id: unrelated_parent_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: Some("Other".to_string()),
+                agent_display_name: Some("Other".to_string()),
                 agent_role: Some("researcher".to_string()),
             }),
         );
@@ -201,12 +201,12 @@ mod tests {
             vec![
                 LoadedSubagentThread {
                     thread_id: child_thread_id,
-                    agent_nickname: Some("Scout".to_string()),
+                    agent_display_name: Some("Scout".to_string()),
                     agent_role: Some("explorer".to_string()),
                 },
                 LoadedSubagentThread {
                     thread_id: grandchild_thread_id,
-                    agent_nickname: Some("Atlas".to_string()),
+                    agent_display_name: Some("Atlas".to_string()),
                     agent_role: Some("worker".to_string()),
                 },
             ]

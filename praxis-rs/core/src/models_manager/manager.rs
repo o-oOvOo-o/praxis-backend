@@ -4,10 +4,13 @@ use crate::auth_env_telemetry::AuthEnvTelemetry;
 use crate::config::Config;
 use crate::error::PraxisErr;
 use crate::error::Result as CoreResult;
+use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::model_provider_info::ModelProviderInfo;
+use crate::model_provider_info::OPENAI_PROVIDER_ID;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::collaboration_mode_presets::builtin_collaboration_mode_presets;
 use crate::models_manager::model_info;
+use crate::plugins::PluginsManager;
 use crate::provider_decision_center::AuthRequestPurpose;
 use crate::provider_decision_center::ProviderDecisionCenter;
 use crate::response_debug_context::extract_response_debug_context;
@@ -43,6 +46,35 @@ const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 const MODELS_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
 const MODELS_ENDPOINT: &str = "/models";
+
+#[derive(Debug, Clone)]
+pub struct PluginModelPreset {
+    pub provider_id: String,
+    pub provider: ModelProviderInfo,
+    pub preset: ModelPreset,
+}
+
+pub fn plugin_model_presets_for_config(config: &Config) -> Vec<PluginModelPreset> {
+    let plugins_manager = PluginsManager::new(config.praxis_home.clone());
+    let plugin_outcome = plugins_manager.plugins_for_config(config);
+    let runtime_catalog =
+        LlmRuntimeCatalog::from_plugin_manifests(plugin_outcome.effective_llm_manifests());
+    let mut presets = Vec::new();
+    for (provider_id, provider) in &config.model_providers {
+        presets.extend(
+            runtime_catalog
+                .model_infos_for_provider(provider_id, provider)
+                .into_iter()
+                .map(|model| PluginModelPreset {
+                    provider_id: provider_id.clone(),
+                    provider: provider.clone(),
+                    preset: ModelPreset::from(model),
+                }),
+        );
+    }
+    presets
+}
+
 #[derive(Clone)]
 struct ModelsRequestTelemetry {
     auth_mode: Option<String>,
@@ -276,7 +308,11 @@ impl ModelsManager {
         } else {
             Self::static_remote_models_for_provider(&config.model_provider)
         };
-        self.build_available_models_for_provider(remote_models, &config.model_provider)
+        self.build_available_models_for_provider(
+            remote_models,
+            config.model_provider_id.as_str(),
+            &config.model_provider,
+        )
     }
 
     /// List collaboration mode presets.
@@ -314,7 +350,11 @@ impl ModelsManager {
         } else {
             Self::static_remote_models_for_provider(&config.model_provider)
         };
-        Ok(self.build_available_models_for_provider(remote_models, &config.model_provider))
+        Ok(self.build_available_models_for_provider(
+            remote_models,
+            config.model_provider_id.as_str(),
+            &config.model_provider,
+        ))
     }
 
     // todo(aibrahim): should be visible to core only and sent on session_configured event
@@ -432,6 +472,7 @@ impl ModelsManager {
         } else {
             model_info::model_info_from_slug(model)
         };
+        let model_info = model_info::with_known_model_capability_overrides(model_info);
         model_info::with_config_overrides(model_info, config)
     }
 
@@ -617,17 +658,35 @@ impl ModelsManager {
 
     /// Build picker-ready presets from the active catalog snapshot.
     fn build_available_models(&self, remote_models: Vec<ModelInfo>) -> Vec<ModelPreset> {
-        self.build_available_models_for_provider(remote_models, &self.provider)
+        self.build_available_models_for_provider(
+            remote_models,
+            model_catalog_provider_id_for_provider(&self.provider),
+            &self.provider,
+        )
     }
 
     fn build_available_models_for_provider(
         &self,
         mut remote_models: Vec<ModelInfo>,
+        provider_id: &str,
         provider: &ModelProviderInfo,
     ) -> Vec<ModelPreset> {
         remote_models.sort_by(|a, b| a.priority.cmp(&b.priority));
 
-        let mut presets: Vec<ModelPreset> = remote_models.into_iter().map(Into::into).collect();
+        let mut presets: Vec<ModelPreset> = remote_models
+            .into_iter()
+            .filter(|model| {
+                if matches!(self.catalog_mode, CatalogMode::Custom) {
+                    return true;
+                }
+                crate::model_provider_info::provider_accepts_registered_model_catalog(
+                    provider_id,
+                    provider,
+                    model.slug.as_str(),
+                )
+            })
+            .map(Into::into)
+            .collect();
         let auth_manager = self.auth_manager_for_provider(provider);
         let chatgpt_mode = matches!(auth_manager.auth_mode(), Some(AuthMode::Chatgpt));
         presets = ModelPreset::filter_by_auth(presets, chatgpt_mode);
@@ -695,6 +754,14 @@ impl ModelsManager {
             &[]
         };
         Self::construct_model_info_from_candidates(model, candidates, config)
+    }
+}
+
+fn model_catalog_provider_id_for_provider(provider: &ModelProviderInfo) -> &str {
+    if provider.is_openai() {
+        OPENAI_PROVIDER_ID
+    } else {
+        provider.name.as_str()
     }
 }
 

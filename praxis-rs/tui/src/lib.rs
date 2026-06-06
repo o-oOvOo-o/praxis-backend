@@ -13,6 +13,8 @@ use cwd_prompt::CwdPromptAction;
 use cwd_prompt::CwdPromptOutcome;
 use cwd_prompt::CwdSelection;
 use praxis_app_gateway_client::AppGatewayClient;
+use praxis_app_gateway_client::DEFAULT_LOCAL_APP_GATEWAY_ADDR;
+use praxis_app_gateway_client::DEFAULT_LOCAL_APP_GATEWAY_URL;
 use praxis_app_gateway_client::NativeAppGatewayClient;
 use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
 use praxis_app_gateway_client::RemoteAppGatewayClient;
@@ -82,8 +84,6 @@ use tracing::error;
 use tracing::warn;
 
 pub(crate) const TUI_APP_GATEWAY_CHANNEL_CAPACITY: usize = 8192;
-const DEFAULT_LOCAL_APP_GATEWAY_URL: &str = "ws://127.0.0.1:4222";
-const DEFAULT_LOCAL_APP_GATEWAY_ADDR: &str = "127.0.0.1:4222";
 const LOCAL_APP_GATEWAY_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
 const LOCAL_APP_GATEWAY_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(windows)]
@@ -121,6 +121,7 @@ mod audio_device {
     }
 }
 mod bottom_pane;
+mod center_theme;
 mod chatwidget;
 mod cli;
 mod clipboard_paste;

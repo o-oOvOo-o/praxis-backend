@@ -44,6 +44,17 @@ impl ToolWireProfile {
     }
 }
 
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub struct ToolCapabilityConfig {
+    pub web_search_backend: Option<ToolWebSearchBackend>,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum ToolWebSearchBackend {
+    Responses,
+    Praxis,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum UnifiedExecShellMode {
     Direct,
@@ -104,6 +115,7 @@ pub struct ToolsConfig {
     pub web_search_mode: Option<WebSearchMode>,
     pub web_search_config: Option<WebSearchConfig>,
     pub web_search_tool_type: WebSearchToolType,
+    pub tool_capabilities: ToolCapabilityConfig,
     pub image_gen_tool: bool,
     pub search_tool: bool,
     pub tool_suggest: bool,
@@ -216,6 +228,7 @@ impl ToolsConfig {
             web_search_mode: *web_search_mode,
             web_search_config: None,
             web_search_tool_type: model_info.web_search_tool_type,
+            tool_capabilities: ToolCapabilityConfig::default(),
             image_gen_tool: include_image_gen_tool,
             search_tool: include_search_tool,
             tool_suggest: include_tool_suggest,
@@ -271,6 +284,11 @@ impl ToolsConfig {
 
     pub fn with_web_search_config(mut self, web_search_config: Option<WebSearchConfig>) -> Self {
         self.web_search_config = web_search_config;
+        self
+    }
+
+    pub fn with_tool_capabilities(mut self, tool_capabilities: ToolCapabilityConfig) -> Self {
+        self.tool_capabilities = tool_capabilities;
         self
     }
 

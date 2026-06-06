@@ -290,6 +290,7 @@ fn test_tool_runtime(session: Arc<Session>, turn_context: Arc<TurnContext>) -> T
             app_tools: None,
             discoverable_tools: None,
             dynamic_tools: turn_context.dynamic_tools.as_slice(),
+            tool_visibility_policy: None,
         },
     ));
     let tracker = Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new()));
@@ -1013,6 +1014,7 @@ async fn record_initial_history_seeds_token_info_from_rollout() {
             total_tokens: 7,
         },
         model_context_window: Some(1_000),
+        model_auto_compact_token_limit: Some(900),
     };
     let info2 = TokenUsageInfo {
         total_token_usage: TokenUsage {
@@ -1032,6 +1034,7 @@ async fn record_initial_history_seeds_token_info_from_rollout() {
             total_tokens: 35,
         },
         model_context_window: Some(2_000),
+        model_auto_compact_token_limit: Some(1_800),
     };
 
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
@@ -1121,6 +1124,7 @@ async fn recompute_token_usage_updates_model_context_window() {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
             model_context_window: Some(258_400),
+            model_auto_compact_token_limit: Some(240_000),
         }));
     }
 
@@ -1131,6 +1135,7 @@ async fn recompute_token_usage_updates_model_context_window() {
 
     let actual = session.state.lock().await.token_info().expect("token info");
     assert_eq!(actual.model_context_window, Some(128_000));
+    assert_eq!(actual.model_auto_compact_token_limit, Some(115_200));
 }
 
 #[tokio::test]
@@ -2550,6 +2555,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
     ));
     let result = Session::new(
         session_configuration,
+        crate::llm::runtime::LlmRuntimeCatalog::default(),
         Arc::clone(&config),
         auth_manager,
         models_manager,
@@ -4897,6 +4903,7 @@ async fn fatal_tool_error_stops_turn_and_reports_error() {
             app_tools,
             discoverable_tools: None,
             dynamic_tools: turn_context.dynamic_tools.as_slice(),
+            tool_visibility_policy: None,
         },
     );
     let item = ResponseItem::CustomToolCall {

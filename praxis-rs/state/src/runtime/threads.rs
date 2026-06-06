@@ -9,14 +9,16 @@ struct ThreadSourceColumns {
     subagent_kind: Option<&'static str>,
     subagent_parent_thread_id: Option<String>,
     subagent_depth: Option<i64>,
-    subagent_agent_nickname: Option<String>,
+    subagent_agent_base_name: Option<String>,
+    subagent_agent_title: Option<String>,
+    subagent_agent_display_name: Option<String>,
 }
 
 impl StateRuntime {
     pub(crate) async fn backfill_thread_source_columns(&self) -> anyhow::Result<()> {
         let rows = sqlx::query(
             r#"
-SELECT id, source, agent_nickname
+SELECT id, source, agent_base_name, agent_title, agent_display_name
 FROM threads
 WHERE source_kind IS NULL OR source_kind = ''
             "#,
@@ -27,8 +29,15 @@ WHERE source_kind IS NULL OR source_kind = ''
         for row in rows {
             let id: String = row.try_get("id")?;
             let source: String = row.try_get("source")?;
-            let agent_nickname: Option<String> = row.try_get("agent_nickname")?;
-            let columns = thread_source_columns_from_source_str(&source, agent_nickname.as_deref());
+            let agent_base_name: Option<String> = row.try_get("agent_base_name")?;
+            let agent_title: Option<String> = row.try_get("agent_title")?;
+            let agent_display_name: Option<String> = row.try_get("agent_display_name")?;
+            let columns = thread_source_columns_from_source_str(
+                &source,
+                agent_base_name.as_deref(),
+                agent_title.as_deref(),
+                agent_display_name.as_deref(),
+            );
             sqlx::query(
                 r#"
 UPDATE threads
@@ -37,7 +46,9 @@ SET
     subagent_kind = ?,
     subagent_parent_thread_id = ?,
     subagent_depth = ?,
-    subagent_agent_nickname = ?
+    subagent_agent_base_name = ?,
+    subagent_agent_title = ?,
+    subagent_agent_display_name = ?
 WHERE id = ?
                 "#,
             )
@@ -45,7 +56,9 @@ WHERE id = ?
             .bind(columns.subagent_kind)
             .bind(columns.subagent_parent_thread_id.as_deref())
             .bind(columns.subagent_depth)
-            .bind(columns.subagent_agent_nickname.as_deref())
+            .bind(columns.subagent_agent_base_name.as_deref())
+            .bind(columns.subagent_agent_title.as_deref())
+            .bind(columns.subagent_agent_display_name.as_deref())
             .bind(id)
             .execute(self.pool.as_ref())
             .await?;
@@ -117,7 +130,9 @@ SELECT
     created_at,
     updated_at,
     source,
-    agent_nickname,
+    agent_base_name,
+    agent_title,
+    agent_display_name,
     agent_role,
     agent_path,
     model_provider,
@@ -166,7 +181,9 @@ SELECT
     created_at,
     updated_at,
     source,
-    agent_nickname,
+    agent_base_name,
+    agent_title,
+    agent_display_name,
     agent_role,
     agent_path,
     model_provider,
@@ -510,7 +527,9 @@ SELECT
     created_at,
     updated_at,
     source,
-    agent_nickname,
+    agent_base_name,
+    agent_title,
+    agent_display_name,
     agent_role,
     agent_path,
     model_provider,
@@ -615,7 +634,9 @@ FROM threads
         let token_usage_info_json = serialize_token_usage_info(metadata.token_usage_info.as_ref())?;
         let source_columns = thread_source_columns_from_source_str(
             &metadata.source,
-            metadata.agent_nickname.as_deref(),
+            metadata.agent_base_name.as_deref(),
+            metadata.agent_title.as_deref(),
+            metadata.agent_display_name.as_deref(),
         );
         let result = sqlx::query(
             r#"
@@ -629,8 +650,12 @@ INSERT INTO threads (
     subagent_kind,
     subagent_parent_thread_id,
     subagent_depth,
-    subagent_agent_nickname,
-    agent_nickname,
+    subagent_agent_base_name,
+    subagent_agent_title,
+    subagent_agent_display_name,
+    agent_base_name,
+    agent_title,
+    agent_display_name,
     agent_role,
     agent_path,
     model_provider,
@@ -654,7 +679,7 @@ INSERT INTO threads (
     git_origin_url,
     memory_mode,
     selfwork_plan_path
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -667,8 +692,12 @@ ON CONFLICT(id) DO NOTHING
         .bind(source_columns.subagent_kind)
         .bind(source_columns.subagent_parent_thread_id.as_deref())
         .bind(source_columns.subagent_depth)
-        .bind(source_columns.subagent_agent_nickname.as_deref())
-        .bind(metadata.agent_nickname.as_deref())
+        .bind(source_columns.subagent_agent_base_name.as_deref())
+        .bind(source_columns.subagent_agent_title.as_deref())
+        .bind(source_columns.subagent_agent_display_name.as_deref())
+        .bind(metadata.agent_base_name.as_deref())
+        .bind(metadata.agent_title.as_deref())
+        .bind(metadata.agent_display_name.as_deref())
         .bind(metadata.agent_role.as_deref())
         .bind(metadata.agent_path.as_deref())
         .bind(metadata.model_provider.as_str())
@@ -785,7 +814,9 @@ WHERE id = ?
         let token_usage_info_json = serialize_token_usage_info(metadata.token_usage_info.as_ref())?;
         let source_columns = thread_source_columns_from_source_str(
             &metadata.source,
-            metadata.agent_nickname.as_deref(),
+            metadata.agent_base_name.as_deref(),
+            metadata.agent_title.as_deref(),
+            metadata.agent_display_name.as_deref(),
         );
         sqlx::query(
             r#"
@@ -799,8 +830,12 @@ INSERT INTO threads (
     subagent_kind,
     subagent_parent_thread_id,
     subagent_depth,
-    subagent_agent_nickname,
-    agent_nickname,
+    subagent_agent_base_name,
+    subagent_agent_title,
+    subagent_agent_display_name,
+    agent_base_name,
+    agent_title,
+    agent_display_name,
     agent_role,
     agent_path,
     model_provider,
@@ -824,7 +859,7 @@ INSERT INTO threads (
     git_origin_url,
     memory_mode,
     selfwork_plan_path
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     rollout_path = excluded.rollout_path,
     created_at = excluded.created_at,
@@ -834,8 +869,12 @@ ON CONFLICT(id) DO UPDATE SET
     subagent_kind = excluded.subagent_kind,
     subagent_parent_thread_id = excluded.subagent_parent_thread_id,
     subagent_depth = excluded.subagent_depth,
-    subagent_agent_nickname = excluded.subagent_agent_nickname,
-    agent_nickname = excluded.agent_nickname,
+    subagent_agent_base_name = excluded.subagent_agent_base_name,
+    subagent_agent_title = excluded.subagent_agent_title,
+    subagent_agent_display_name = excluded.subagent_agent_display_name,
+    agent_base_name = excluded.agent_base_name,
+    agent_title = excluded.agent_title,
+    agent_display_name = excluded.agent_display_name,
     agent_role = excluded.agent_role,
     agent_path = excluded.agent_path,
     model_provider = excluded.model_provider,
@@ -869,8 +908,12 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(source_columns.subagent_kind)
         .bind(source_columns.subagent_parent_thread_id.as_deref())
         .bind(source_columns.subagent_depth)
-        .bind(source_columns.subagent_agent_nickname.as_deref())
-        .bind(metadata.agent_nickname.as_deref())
+        .bind(source_columns.subagent_agent_base_name.as_deref())
+        .bind(source_columns.subagent_agent_title.as_deref())
+        .bind(source_columns.subagent_agent_display_name.as_deref())
+        .bind(metadata.agent_base_name.as_deref())
+        .bind(metadata.agent_title.as_deref())
+        .bind(metadata.agent_display_name.as_deref())
         .bind(metadata.agent_role.as_deref())
         .bind(metadata.agent_path.as_deref())
         .bind(metadata.model_provider.as_str())
@@ -1150,17 +1193,26 @@ fn thread_spawn_parent_thread_id_from_source_str(source: &str) -> Option<ThreadI
 
 fn thread_source_columns_from_source_str(
     source: &str,
-    fallback_agent_nickname: Option<&str>,
+    fallback_agent_base_name: Option<&str>,
+    fallback_agent_title: Option<&str>,
+    fallback_agent_display_name: Option<&str>,
 ) -> ThreadSourceColumns {
     let parsed_source = serde_json::from_str(source)
         .or_else(|_| serde_json::from_value::<SessionSource>(Value::String(source.to_string())))
         .unwrap_or(SessionSource::Unknown);
-    thread_source_columns_from_source(parsed_source, fallback_agent_nickname)
+    thread_source_columns_from_source(
+        parsed_source,
+        fallback_agent_base_name,
+        fallback_agent_title,
+        fallback_agent_display_name,
+    )
 }
 
 fn thread_source_columns_from_source(
     source: SessionSource,
-    fallback_agent_nickname: Option<&str>,
+    fallback_agent_base_name: Option<&str>,
+    fallback_agent_title: Option<&str>,
+    fallback_agent_display_name: Option<&str>,
 ) -> ThreadSourceColumns {
     match source {
         SessionSource::Cli => ThreadSourceColumns {
@@ -1168,49 +1220,63 @@ fn thread_source_columns_from_source(
             subagent_kind: None,
             subagent_parent_thread_id: None,
             subagent_depth: None,
-            subagent_agent_nickname: None,
+            subagent_agent_base_name: None,
+            subagent_agent_title: None,
+            subagent_agent_display_name: None,
         },
         SessionSource::VSCode => ThreadSourceColumns {
             source_kind: "vscode",
             subagent_kind: None,
             subagent_parent_thread_id: None,
             subagent_depth: None,
-            subagent_agent_nickname: None,
+            subagent_agent_base_name: None,
+            subagent_agent_title: None,
+            subagent_agent_display_name: None,
         },
         SessionSource::Exec => ThreadSourceColumns {
             source_kind: "exec",
             subagent_kind: None,
             subagent_parent_thread_id: None,
             subagent_depth: None,
-            subagent_agent_nickname: None,
+            subagent_agent_base_name: None,
+            subagent_agent_title: None,
+            subagent_agent_display_name: None,
         },
         SessionSource::AppGateway => ThreadSourceColumns {
             source_kind: "app_gateway",
             subagent_kind: None,
             subagent_parent_thread_id: None,
             subagent_depth: None,
-            subagent_agent_nickname: None,
+            subagent_agent_base_name: None,
+            subagent_agent_title: None,
+            subagent_agent_display_name: None,
         },
         SessionSource::Mcp => ThreadSourceColumns {
             source_kind: "mcp",
             subagent_kind: None,
             subagent_parent_thread_id: None,
             subagent_depth: None,
-            subagent_agent_nickname: None,
+            subagent_agent_base_name: None,
+            subagent_agent_title: None,
+            subagent_agent_display_name: None,
         },
         SessionSource::Custom(_) => ThreadSourceColumns {
             source_kind: "custom",
             subagent_kind: None,
             subagent_parent_thread_id: None,
             subagent_depth: None,
-            subagent_agent_nickname: None,
+            subagent_agent_base_name: None,
+            subagent_agent_title: None,
+            subagent_agent_display_name: None,
         },
         SessionSource::Unknown => ThreadSourceColumns {
             source_kind: "unknown",
             subagent_kind: None,
             subagent_parent_thread_id: None,
             subagent_depth: None,
-            subagent_agent_nickname: None,
+            subagent_agent_base_name: None,
+            subagent_agent_title: None,
+            subagent_agent_display_name: None,
         },
         SessionSource::SubAgent(subagent) => match subagent {
             SubAgentSource::Review => ThreadSourceColumns {
@@ -1218,34 +1284,48 @@ fn thread_source_columns_from_source(
                 subagent_kind: Some("review"),
                 subagent_parent_thread_id: None,
                 subagent_depth: None,
-                subagent_agent_nickname: fallback_agent_nickname.map(str::to_string),
+                subagent_agent_base_name: fallback_agent_base_name.map(str::to_string),
+                subagent_agent_title: fallback_agent_title.map(str::to_string),
+                subagent_agent_display_name: fallback_agent_display_name.map(str::to_string),
             },
             SubAgentSource::Compact => ThreadSourceColumns {
                 source_kind: "subagent",
                 subagent_kind: Some("compact"),
                 subagent_parent_thread_id: None,
                 subagent_depth: None,
-                subagent_agent_nickname: fallback_agent_nickname.map(str::to_string),
+                subagent_agent_base_name: fallback_agent_base_name.map(str::to_string),
+                subagent_agent_title: fallback_agent_title.map(str::to_string),
+                subagent_agent_display_name: fallback_agent_display_name.map(str::to_string),
             },
             SubAgentSource::ThreadSpawn {
                 parent_thread_id,
                 depth,
-                agent_nickname,
+                agent_base_name,
+                agent_title,
+                agent_display_name,
                 ..
             } => ThreadSourceColumns {
                 source_kind: "subagent",
                 subagent_kind: Some("thread_spawn"),
                 subagent_parent_thread_id: Some(parent_thread_id.to_string()),
                 subagent_depth: Some(depth as i64),
-                subagent_agent_nickname: agent_nickname
-                    .or_else(|| fallback_agent_nickname.map(str::to_string)),
+                subagent_agent_base_name: agent_base_name
+                    .or_else(|| fallback_agent_base_name.map(str::to_string)),
+                subagent_agent_title: agent_title
+                    .or_else(|| fallback_agent_title.map(str::to_string)),
+                subagent_agent_display_name: agent_display_name
+                    .or_else(|| fallback_agent_display_name.map(str::to_string)),
             },
             SubAgentSource::MemoryConsolidation => ThreadSourceColumns {
                 source_kind: "subagent",
                 subagent_kind: Some("memory_consolidation"),
                 subagent_parent_thread_id: None,
                 subagent_depth: None,
-                subagent_agent_nickname: fallback_agent_nickname
+                subagent_agent_base_name: fallback_agent_base_name
+                    .map(str::to_string)
+                    .or_else(|| Some("Morpheus".to_string())),
+                subagent_agent_title: fallback_agent_title.map(str::to_string),
+                subagent_agent_display_name: fallback_agent_display_name
                     .map(str::to_string)
                     .or_else(|| Some("Morpheus".to_string())),
             },
@@ -1254,7 +1334,9 @@ fn thread_source_columns_from_source(
                 subagent_kind: Some("other"),
                 subagent_parent_thread_id: None,
                 subagent_depth: None,
-                subagent_agent_nickname: fallback_agent_nickname.map(str::to_string),
+                subagent_agent_base_name: fallback_agent_base_name.map(str::to_string),
+                subagent_agent_title: fallback_agent_title.map(str::to_string),
+                subagent_agent_display_name: fallback_agent_display_name.map(str::to_string),
             },
         },
     }
@@ -1528,7 +1610,7 @@ mod tests {
                 parent_thread_id: cli_id,
                 depth: 1,
                 agent_path: None,
-                agent_nickname: Some("builder".to_string()),
+                agent_display_name: Some("builder".to_string()),
                 agent_role: None,
             }));
         runtime.upsert_thread(&spawn).await.expect("spawn thread");
@@ -1630,7 +1712,7 @@ mod tests {
                 cli_version: String::new(),
                 source: SessionSource::Cli,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: None,
                 model_provider: None,
                 base_instructions: None,
@@ -1688,7 +1770,7 @@ mod tests {
                 cli_version: String::new(),
                 source: SessionSource::Cli,
                 agent_path: None,
-                agent_nickname: None,
+                agent_display_name: None,
                 agent_role: None,
                 model_provider: None,
                 base_instructions: None,
@@ -1932,6 +2014,7 @@ mod tests {
                     },
                     last_token_usage: praxis_protocol::protocol::TokenUsage::default(),
                     model_context_window: None,
+                    model_auto_compact_token_limit: None,
                 }),
                 rate_limits: None,
             },

@@ -5,9 +5,7 @@ use crate::agent::control::render_input_preview;
 use crate::agent::next_thread_spawn_depth;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
-use praxis_protocol::AgentPath;
-use praxis_protocol::protocol::InterAgentCommunication;
-use praxis_protocol::protocol::Op;
+use serde::de;
 
 pub(crate) struct Handler;
 
@@ -34,6 +32,7 @@ impl ToolHandler for Handler {
         let arguments = function_arguments(payload)?;
         let args: SpawnAgentArgs = parse_arguments(&arguments)?;
         let fork_mode = args.fork_mode()?;
+        let display_title = args.display_title()?;
         let role_name = args
             .agent_type
             .as_deref()
@@ -58,18 +57,22 @@ impl ToolHandler for Handler {
                     call_id: call_id.clone(),
                     sender_thread_id: session.conversation_id,
                     prompt: prompt.clone(),
-                    model: args.model.clone().unwrap_or_default(),
+                    model: args
+                        .model
+                        .clone()
+                        .or_else(|| args.model_provider.clone())
+                        .unwrap_or_default(),
                     reasoning_effort: args.reasoning_effort.unwrap_or_default(),
                 }
                 .into(),
             )
             .await;
-        let mut config =
-            build_agent_spawn_config(&session.get_base_instructions().await, turn.as_ref())?;
+        let mut config = build_agent_spawn_config(turn.as_ref())?;
         apply_requested_spawn_agent_model_overrides(
             &session,
             turn.as_ref(),
             &mut config,
+            args.model_provider.as_deref(),
             args.model.as_deref(),
             args.reasoning_effort,
         )
@@ -86,36 +89,19 @@ impl ToolHandler for Handler {
             child_depth,
             role_name,
             Some(args.task_name.clone()),
+            Some(display_title.clone()),
         )?;
         let result = session
             .services
             .agent_control
             .spawn_agent_with_metadata(
                 config,
-                match (spawn_source.get_agent_path(), initial_operation) {
-                    (Some(recipient), Op::UserInput { items, .. })
-                        if items
-                            .iter()
-                            .all(|item| matches!(item, UserInput::Text { .. })) =>
-                    {
-                        Op::InterAgentCommunication {
-                            communication: InterAgentCommunication::new(
-                                turn.session_source
-                                    .get_agent_path()
-                                    .unwrap_or_else(AgentPath::root),
-                                recipient,
-                                Vec::new(),
-                                prompt.clone(),
-                                /*trigger_turn*/ true,
-                            ),
-                        }
-                    }
-                    (_, initial_operation) => initial_operation,
-                },
+                initial_operation,
                 Some(spawn_source),
                 SpawnAgentOptions {
                     fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.clone()),
                     fork_mode,
+                    agent_title: Some(display_title),
                 },
             )
             .await
@@ -138,19 +124,23 @@ impl ToolHandler for Handler {
             }
             None => None,
         };
-        let (new_agent_path, new_agent_nickname, new_agent_role) =
+        let (new_agent_path, new_agent_base_name, new_agent_title, new_agent_display_name, new_agent_role) =
             match (&agent_snapshot, new_agent_metadata) {
                 (Some(snapshot), _) => (
                     snapshot.session_source.get_agent_path().map(String::from),
-                    snapshot.session_source.get_nickname(),
+                    snapshot.session_source.get_agent_base_name(),
+                    snapshot.session_source.get_agent_title(),
+                    snapshot.session_source.get_agent_display_name(),
                     snapshot.session_source.get_agent_role(),
                 ),
                 (None, Some(metadata)) => (
                     metadata.agent_path.map(String::from),
-                    metadata.agent_nickname,
+                    metadata.agent_base_name,
+                    metadata.agent_title,
+                    metadata.agent_display_name,
                     metadata.agent_role,
                 ),
-                (None, None) => (None, None, None),
+                (None, None) => (None, None, None, None, None),
             };
         let effective_model = agent_snapshot
             .as_ref()
@@ -160,7 +150,9 @@ impl ToolHandler for Handler {
             .as_ref()
             .and_then(|snapshot| snapshot.reasoning_effort)
             .unwrap_or(args.reasoning_effort.unwrap_or_default());
-        let nickname = new_agent_nickname.clone();
+        let result_agent_base_name = new_agent_base_name.clone();
+        let result_agent_title = new_agent_title.clone();
+        let result_agent_display_name = new_agent_display_name.clone();
         session
             .send_event(
                 &turn,
@@ -168,7 +160,9 @@ impl ToolHandler for Handler {
                     call_id,
                     sender_thread_id: session.conversation_id,
                     new_thread_id,
-                    new_agent_nickname,
+                    new_agent_base_name,
+                    new_agent_title,
+                    new_agent_display_name,
                     new_agent_role,
                     prompt,
                     model: effective_model,
@@ -194,7 +188,9 @@ impl ToolHandler for Handler {
         Ok(SpawnAgentResult {
             agent_id: None,
             task_name,
-            nickname,
+            agent_base_name: result_agent_base_name,
+            agent_title: result_agent_title,
+            agent_display_name: result_agent_display_name,
         })
     }
 }
@@ -204,13 +200,26 @@ impl ToolHandler for Handler {
 struct SpawnAgentArgs {
     message: String,
     task_name: String,
+    title: String,
     agent_type: Option<String>,
+    model_provider: Option<String>,
     model: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_reasoning_effort")]
     reasoning_effort: Option<ReasoningEffort>,
     fork_turns: Option<String>,
 }
 
 impl SpawnAgentArgs {
+    fn display_title(&self) -> Result<String, FunctionCallError> {
+        let title = self.title.trim();
+        if title.is_empty() {
+            return Err(FunctionCallError::RespondToModel(
+                "title must be a short human-facing responsibility label".to_string(),
+            ));
+        }
+        Ok(title.to_string())
+    }
+
     fn fork_mode(&self) -> Result<Option<SpawnAgentForkMode>, FunctionCallError> {
         let Some(fork_turns) = self
             .fork_turns
@@ -243,11 +252,66 @@ impl SpawnAgentArgs {
     }
 }
 
+fn deserialize_optional_reasoning_effort<'de, D>(
+    deserializer: D,
+) -> Result<Option<ReasoningEffort>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    value
+        .as_deref()
+        .map(parse_spawn_agent_reasoning_effort)
+        .transpose()
+        .map_err(de::Error::custom)
+}
+
+fn parse_spawn_agent_reasoning_effort(value: &str) -> Result<ReasoningEffort, String> {
+    let compact = value
+        .trim()
+        .chars()
+        .filter(|ch| !matches!(ch, '-' | '_' | ' '))
+        .collect::<String>()
+        .to_ascii_lowercase();
+    match compact.as_str() {
+        "" => Err("reasoning_effort can't be empty".to_string()),
+        "none" | "off" | "false" => Ok(ReasoningEffort::None),
+        "minimal" | "min" => Ok(ReasoningEffort::Minimal),
+        "low" => Ok(ReasoningEffort::Low),
+        "medium" | "med" | "default" => Ok(ReasoningEffort::Medium),
+        "high" => Ok(ReasoningEffort::High),
+        "xhigh" | "extrahigh" | "max" | "maximum" | "highest" => Ok(ReasoningEffort::XHigh),
+        _ => value.parse(),
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub(crate) struct SpawnAgentResult {
     agent_id: Option<String>,
     task_name: String,
-    nickname: Option<String>,
+    agent_base_name: Option<String>,
+    agent_title: Option<String>,
+    agent_display_name: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawn_agent_args_accepts_reasoning_aliases() {
+        let args: SpawnAgentArgs = serde_json::from_str(
+            r#"{"message":"do it","task_name":"worker","title":"负责实现","reasoning_effort":"x-high"}"#,
+        )
+        .expect("x-high effort should parse");
+        assert_eq!(args.reasoning_effort, Some(ReasoningEffort::XHigh));
+
+        let args: SpawnAgentArgs = serde_json::from_str(
+            r#"{"message":"do it","task_name":"worker","title":"负责实现","reasoning_effort":"maximum"}"#,
+        )
+        .expect("maximum effort should parse");
+        assert_eq!(args.reasoning_effort, Some(ReasoningEffort::XHigh));
+    }
 }
 
 impl ToolOutput for SpawnAgentResult {

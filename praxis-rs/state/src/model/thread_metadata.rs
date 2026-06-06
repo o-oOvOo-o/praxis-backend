@@ -81,8 +81,12 @@ pub struct ThreadMetadata {
     pub updated_at: DateTime<Utc>,
     /// The session source (stringified enum).
     pub source: String,
-    /// Optional random unique nickname assigned to an AgentControl-spawned sub-agent.
-    pub agent_nickname: Option<String>,
+    /// Optional base name assigned to an AgentControl-spawned sub-agent.
+    pub agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to an AgentControl-spawned sub-agent.
+    pub agent_title: Option<String>,
+    /// Optional display name assigned to an AgentControl-spawned sub-agent.
+    pub agent_display_name: Option<String>,
     /// Optional role (agent_role) assigned to an AgentControl-spawned sub-agent.
     pub agent_role: Option<String>,
     /// Optional canonical agent path assigned to an AgentControl-spawned sub-agent.
@@ -140,8 +144,12 @@ pub struct ThreadMetadataBuilder {
     pub updated_at: Option<DateTime<Utc>>,
     /// The session source.
     pub source: SessionSource,
-    /// Optional random unique nickname assigned to the session.
-    pub agent_nickname: Option<String>,
+    /// Optional base name assigned to the session.
+    pub agent_base_name: Option<String>,
+    /// Optional short responsibility title assigned to the session.
+    pub agent_title: Option<String>,
+    /// Optional display name assigned to the session.
+    pub agent_display_name: Option<String>,
     /// Optional role (agent_role) assigned to the session.
     pub agent_role: Option<String>,
     /// Optional canonical agent path assigned to the session.
@@ -180,7 +188,9 @@ impl ThreadMetadataBuilder {
             created_at,
             updated_at: None,
             source,
-            agent_nickname: None,
+            agent_base_name: None,
+            agent_title: None,
+            agent_display_name: None,
             agent_role: None,
             agent_path: None,
             model_provider: None,
@@ -211,7 +221,18 @@ impl ThreadMetadataBuilder {
             created_at,
             updated_at,
             source,
-            agent_nickname: self.agent_nickname.clone(),
+            agent_base_name: self
+                .agent_base_name
+                .clone()
+                .or_else(|| self.source.get_agent_base_name()),
+            agent_title: self
+                .agent_title
+                .clone()
+                .or_else(|| self.source.get_agent_title()),
+            agent_display_name: self
+                .agent_display_name
+                .clone()
+                .or_else(|| self.source.get_agent_display_name()),
             agent_role: self.agent_role.clone(),
             agent_path: self
                 .agent_path
@@ -275,8 +296,14 @@ impl ThreadMetadata {
         if self.source != other.source {
             diffs.push("source");
         }
-        if self.agent_nickname != other.agent_nickname {
-            diffs.push("agent_nickname");
+        if self.agent_base_name != other.agent_base_name {
+            diffs.push("agent_base_name");
+        }
+        if self.agent_title != other.agent_title {
+            diffs.push("agent_title");
+        }
+        if self.agent_display_name != other.agent_display_name {
+            diffs.push("agent_display_name");
         }
         if self.agent_role != other.agent_role {
             diffs.push("agent_role");
@@ -356,7 +383,9 @@ pub(crate) struct ThreadRow {
     created_at: i64,
     updated_at: i64,
     source: String,
-    agent_nickname: Option<String>,
+    agent_base_name: Option<String>,
+    agent_title: Option<String>,
+    agent_display_name: Option<String>,
     agent_role: Option<String>,
     agent_path: Option<String>,
     model_provider: String,
@@ -388,7 +417,9 @@ impl ThreadRow {
             created_at: row.try_get("created_at")?,
             updated_at: row.try_get("updated_at")?,
             source: row.try_get("source")?,
-            agent_nickname: row.try_get("agent_nickname")?,
+            agent_base_name: row.try_get("agent_base_name")?,
+            agent_title: row.try_get("agent_title")?,
+            agent_display_name: row.try_get("agent_display_name")?,
             agent_role: row.try_get("agent_role")?,
             agent_path: row.try_get("agent_path")?,
             model_provider: row.try_get("model_provider")?,
@@ -424,7 +455,9 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             created_at,
             updated_at,
             source,
-            agent_nickname,
+            agent_base_name,
+            agent_title,
+            agent_display_name,
             agent_role,
             agent_path,
             model_provider,
@@ -453,7 +486,9 @@ impl TryFrom<ThreadRow> for ThreadMetadata {
             created_at: epoch_seconds_to_datetime(created_at)?,
             updated_at: epoch_seconds_to_datetime(updated_at)?,
             source,
-            agent_nickname,
+            agent_base_name,
+            agent_title,
+            agent_display_name,
             agent_role,
             agent_path,
             model_provider,
@@ -543,7 +578,7 @@ mod tests {
             created_at: 1_700_000_000,
             updated_at: 1_700_000_100,
             source: "cli".to_string(),
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: None,
             agent_path: None,
             model_provider: "openai".to_string(),
@@ -576,7 +611,7 @@ mod tests {
             created_at: DateTime::<Utc>::from_timestamp(1_700_000_000, 0).expect("timestamp"),
             updated_at: DateTime::<Utc>::from_timestamp(1_700_000_100, 0).expect("timestamp"),
             source: "cli".to_string(),
-            agent_nickname: None,
+            agent_display_name: None,
             agent_role: None,
             agent_path: None,
             model_provider: "openai".to_string(),

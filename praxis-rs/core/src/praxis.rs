@@ -26,6 +26,8 @@ use crate::compact_remote::run_inline_remote_auto_compact_task;
 use crate::config::ManagedFeatures;
 use crate::connectors;
 use crate::exec_policy::ExecPolicyManager;
+use crate::llm::runtime::LlmPromptPurpose;
+use crate::llm::runtime::LlmRuntimeCatalog;
 #[cfg(test)]
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::manager::ModelsManager;
@@ -108,6 +110,7 @@ use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::models::format_allow_prefixes;
 use praxis_protocol::openai_models::ModelInfo;
+use praxis_protocol::openai_models::ModelsResponse;
 use praxis_protocol::permissions::FileSystemSandboxPolicy;
 use praxis_protocol::permissions::NetworkSandboxPolicy;
 use praxis_protocol::protocol::FileChange;
@@ -389,6 +392,7 @@ use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_protocol::protocol::TurnDiffEvent;
 use praxis_protocol::protocol::WarningEvent;
 use praxis_protocol::user_input::UserInput;
+use praxis_tools::ToolCapabilityConfig;
 use praxis_tools::ToolWireProfile;
 use praxis_tools::ToolsConfig;
 use praxis_tools::ToolsConfigParams;
@@ -415,8 +419,25 @@ fn tool_wire_profile_for_wire_api(wire_api: WireApi) -> ToolWireProfile {
     match wire_api {
         WireApi::Responses => ToolWireProfile::Responses,
         WireApi::Claude => ToolWireProfile::Claude,
-        WireApi::Common => ToolWireProfile::Common,
+        WireApi::OpenAiCompat => ToolWireProfile::Common,
     }
+}
+
+fn tool_capabilities_for_turn_model(
+    llm_runtime_catalog: &LlmRuntimeCatalog,
+    model_info: &ModelInfo,
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+    session_source: &SessionSource,
+) -> ToolCapabilityConfig {
+    llm_runtime_catalog.tool_capabilities_for_model(
+        model_info,
+        provider_id,
+        provider,
+        session_source
+            .restriction_product()
+            .and_then(crate::llm::ids::ProductProfileId::from_product),
+    )
 }
 
 /// Wrapper returned by [`Praxis::spawn`] containing the spawned [`Praxis`],
@@ -454,6 +475,32 @@ pub(crate) const SUBMISSION_CHANNEL_CAPACITY: usize = 512;
 const CYBER_VERIFY_URL: &str = "https://chatgpt.com/cyber";
 const CYBER_SAFETY_URL: &str = "https://developers.openai.com/codex/concepts/cyber-safety";
 const DIRECT_APP_TOOL_EXPOSURE_THRESHOLD: usize = 100;
+
+fn merge_plugin_model_catalog(config: &mut Config, llm_runtime_catalog: &LlmRuntimeCatalog) {
+    let plugin_models = llm_runtime_catalog
+        .model_infos_for_provider(&config.model_provider_id, &config.model_provider);
+    if plugin_models.is_empty() {
+        return;
+    }
+
+    let model_catalog = config
+        .model_catalog
+        .get_or_insert_with(ModelsResponse::default);
+    for plugin_model in plugin_models {
+        if let Some(existing) = model_catalog
+            .models
+            .iter_mut()
+            .find(|model| model.slug == plugin_model.slug)
+        {
+            *existing = plugin_model;
+        } else {
+            model_catalog.models.push(plugin_model);
+        }
+    }
+    model_catalog
+        .models
+        .sort_by(|left, right| left.priority.cmp(&right.priority));
+}
 
 impl Praxis {
     /// Spawn a new [`Praxis`] and initialize the session.
@@ -508,6 +555,9 @@ impl Praxis {
 
         let plugin_outcome = plugins_manager.plugins_for_config(&config);
         let effective_skill_roots = plugin_outcome.effective_skill_roots();
+        let llm_runtime_catalog =
+            LlmRuntimeCatalog::from_plugin_manifests(plugin_outcome.effective_llm_manifests());
+        merge_plugin_model_catalog(&mut config, &llm_runtime_catalog);
         let skills_input = skills_load_input_from_config(&config, effective_skill_roots);
         let loaded_skills = skills_manager.skills_for_config(&skills_input);
 
@@ -606,6 +656,10 @@ impl Praxis {
                     &config.model_provider_id,
                     &config.model_provider,
                     config.personality,
+                    session_source
+                        .restriction_product()
+                        .and_then(crate::llm::ids::ProductProfileId::from_product),
+                    &llm_runtime_catalog,
                 )
             });
 
@@ -681,6 +735,7 @@ impl Praxis {
 
         let session = Session::new(
             session_configuration,
+            llm_runtime_catalog,
             config.clone(),
             auth_manager.clone(),
             models_manager.clone(),
@@ -849,6 +904,7 @@ pub(crate) struct Session {
     pub(crate) guardian_review_session: GuardianReviewSessionManager,
     pub(crate) services: SessionServices,
     pub(crate) goal_runtime: crate::goals::GoalRuntimeState,
+    llm_runtime_catalog: LlmRuntimeCatalog,
     js_repl: Arc<JsReplHandle>,
     next_internal_sub_id: AtomicU64,
     /// Guards one-shot auto-title generation so it runs at most once per session.
@@ -925,11 +981,22 @@ pub(crate) struct AutoTitleModelContext {
     pub(crate) provider_id: String,
     pub(crate) provider: ModelProviderInfo,
     pub(crate) model_info: ModelInfo,
+    pub(crate) instructions: Option<String>,
     pub(crate) session_telemetry: SessionTelemetry,
     pub(crate) service_tier: Option<ServiceTier>,
     pub(crate) personality: Option<Personality>,
     pub(crate) profile: AutoTitleProfile,
     pub(crate) reasoning_effort: Option<ReasoningEffortConfig>,
+}
+
+pub(crate) struct AutoSummaryModelContext {
+    pub(crate) provider_id: String,
+    pub(crate) provider: ModelProviderInfo,
+    pub(crate) model_info: ModelInfo,
+    pub(crate) instructions: Option<String>,
+    pub(crate) session_telemetry: SessionTelemetry,
+    pub(crate) service_tier: Option<ServiceTier>,
+    pub(crate) personality: Option<Personality>,
 }
 
 impl TurnContext {
@@ -990,6 +1057,7 @@ impl TurnContext {
             windows_sandbox_level: self.windows_sandbox_level,
         })
         .with_tool_wire_profile(tool_wire_profile_for_wire_api(self.provider.wire_api))
+        .with_tool_capabilities(self.tools_config.tool_capabilities.clone())
         .with_unified_exec_shell_mode(self.tools_config.unified_exec_shell_mode.clone())
         .with_web_search_config(self.tools_config.web_search_config.clone())
         .with_allow_login_shell(self.tools_config.allow_login_shell)
@@ -1452,6 +1520,7 @@ impl Session {
         per_turn_config: Config,
         model_info: ModelInfo,
         models_manager: &ModelsManager,
+        llm_runtime_catalog: &LlmRuntimeCatalog,
         network: Option<NetworkProxy>,
         environment: Arc<Environment>,
         sub_id: String,
@@ -1470,6 +1539,13 @@ impl Session {
         let auth_manager_for_context = auth_manager;
         let provider_for_context = provider;
         let session_telemetry_for_context = session_telemetry;
+        let tool_capabilities = tool_capabilities_for_turn_model(
+            llm_runtime_catalog,
+            &model_info,
+            per_turn_config.model_provider_id.as_str(),
+            &provider_for_context,
+            &session_source,
+        );
         let tools_config = ToolsConfig::new(&ToolsConfigParams {
             model_info: &model_info,
             available_models: &models_manager
@@ -1484,6 +1560,7 @@ impl Session {
         .with_tool_wire_profile(tool_wire_profile_for_wire_api(
             provider_for_context.wire_api,
         ))
+        .with_tool_capabilities(tool_capabilities)
         .with_unified_exec_shell_mode_for_session(
             crate::tools::spec::tool_user_shell_type(user_shell),
             shell_zsh_path,
@@ -1555,6 +1632,7 @@ impl Session {
     #[allow(clippy::too_many_arguments)]
     async fn new(
         mut session_configuration: SessionConfiguration,
+        llm_runtime_catalog: LlmRuntimeCatalog,
         config: Arc<Config>,
         auth_manager: Arc<AuthManager>,
         models_manager: Arc<ModelsManager>,
@@ -2076,6 +2154,7 @@ impl Session {
             guardian_review_session: GuardianReviewSessionManager::default(),
             services,
             goal_runtime: crate::goals::GoalRuntimeState::new(),
+            llm_runtime_catalog,
             js_repl,
             next_internal_sub_id: AtomicU64::new(0),
             auto_title_attempted: AtomicBool::new(false),
@@ -2274,18 +2353,8 @@ impl Session {
         rollout.is_some() && self.services.state_db.is_some()
     }
 
-    /// Returns the model provider base URL and model slug for secondary API calls.
-    pub(crate) async fn model_endpoint_info(&self) -> (Option<String>, String) {
-        let state = self.state.lock().await;
-        let cfg = &state.session_configuration.original_config_do_not_use;
-        (
-            cfg.model_provider.base_url.clone(),
-            state
-                .session_configuration
-                .collaboration_mode
-                .model()
-                .to_string(),
-        )
+    pub(crate) fn llm_runtime_catalog(&self) -> &LlmRuntimeCatalog {
+        &self.llm_runtime_catalog
     }
 
     /// Returns the current model runtime context for internal metadata requests.
@@ -2295,16 +2364,45 @@ impl Session {
             state.session_configuration.clone()
         };
         let per_turn_config = Self::build_per_turn_config(&session_configuration);
+        let product_profile = session_configuration
+            .session_source
+            .restriction_product()
+            .and_then(crate::llm::ids::ProductProfileId::from_product);
         let current_model_slug = session_configuration.collaboration_mode.model().to_string();
         let current_model_info = self
             .services
             .models_manager
             .get_model_info(current_model_slug.as_str(), &per_turn_config)
             .await;
-        let selection = select_auto_title_model(
+        let mut selection = select_auto_title_model(
             &current_model_info,
             per_turn_config.model_provider_id.as_str(),
             &per_turn_config.model_provider,
+        );
+        if let Some(auto_title_policy) = self.llm_runtime_catalog.auto_title_task_policy_for_model(
+            &current_model_info,
+            per_turn_config.model_provider_id.as_str(),
+            &per_turn_config.model_provider,
+            product_profile,
+        ) {
+            if let Some(model_slug) = auto_title_policy.model_slug {
+                selection.model_slug = model_slug;
+            }
+            if let Some(reasoning_effort) = auto_title_policy.reasoning_effort {
+                selection.reasoning_effort = Some(reasoning_effort);
+            }
+            if let Some(suppress_model_default_reasoning) =
+                auto_title_policy.suppress_model_default_reasoning
+            {
+                selection.suppress_model_default_reasoning = suppress_model_default_reasoning;
+            }
+        }
+        let instructions = self.llm_runtime_catalog.resolve_prompt_for_model(
+            &current_model_info,
+            per_turn_config.model_provider_id.as_str(),
+            &per_turn_config.model_provider,
+            product_profile,
+            LlmPromptPurpose::AutoTitle,
         );
         let mut title_model_info = if selection.model_slug == current_model_info.slug {
             current_model_info
@@ -2321,6 +2419,7 @@ impl Session {
             provider_id: per_turn_config.model_provider_id.clone(),
             provider: per_turn_config.model_provider.clone(),
             model_info: title_model_info.clone(),
+            instructions,
             session_telemetry: self.services.session_telemetry.clone().with_model(
                 selection.model_slug.as_str(),
                 title_model_info.slug.as_str(),
@@ -2329,6 +2428,45 @@ impl Session {
             personality: session_configuration.personality,
             profile: selection.profile,
             reasoning_effort: selection.reasoning_effort,
+        }
+    }
+
+    /// Returns the current model runtime context for automatic thread summaries.
+    pub(crate) async fn auto_summary_model_context(&self) -> AutoSummaryModelContext {
+        let session_configuration = {
+            let state = self.state.lock().await;
+            state.session_configuration.clone()
+        };
+        let per_turn_config = Self::build_per_turn_config(&session_configuration);
+        let product_profile = session_configuration
+            .session_source
+            .restriction_product()
+            .and_then(crate::llm::ids::ProductProfileId::from_product);
+        let current_model_slug = session_configuration.collaboration_mode.model().to_string();
+        let model_info = self
+            .services
+            .models_manager
+            .get_model_info(current_model_slug.as_str(), &per_turn_config)
+            .await;
+        let instructions = self.llm_runtime_catalog.resolve_prompt_for_model(
+            &model_info,
+            per_turn_config.model_provider_id.as_str(),
+            &per_turn_config.model_provider,
+            product_profile,
+            LlmPromptPurpose::AutoSummary,
+        );
+        AutoSummaryModelContext {
+            provider_id: per_turn_config.model_provider_id.clone(),
+            provider: per_turn_config.model_provider.clone(),
+            model_info: model_info.clone(),
+            instructions,
+            session_telemetry: self
+                .services
+                .session_telemetry
+                .clone()
+                .with_model(current_model_slug.as_str(), model_info.slug.as_str()),
+            service_tier: session_configuration.service_tier,
+            personality: session_configuration.personality,
         }
     }
 
@@ -2584,31 +2722,40 @@ impl Session {
         &self,
         updates: SessionSettingsUpdate,
     ) -> ConstraintResult<()> {
-        let mut state = self.state.lock().await;
+        let (previous_configuration, mut updated) = {
+            let state = self.state.lock().await;
+            let previous_configuration = state.session_configuration.clone();
+            let updated = match previous_configuration.apply(&updates) {
+                Ok(updated) => updated,
+                Err(err) => {
+                    warn!("rejected session settings update: {err}");
+                    return Err(err);
+                }
+            };
+            (previous_configuration, updated)
+        };
 
-        match state.session_configuration.apply(&updates) {
-            Ok(updated) => {
-                let previous_cwd = state.session_configuration.cwd.clone();
-                let next_cwd = updated.cwd.clone();
-                let praxis_home = updated.praxis_home.clone();
-                let session_source = updated.session_source.clone();
-                state.session_configuration = updated;
-                drop(state);
-
-                self.maybe_refresh_shell_snapshot_for_cwd(
-                    &previous_cwd,
-                    &next_cwd,
-                    &praxis_home,
-                    &session_source,
-                );
-
-                Ok(())
-            }
-            Err(err) => {
-                warn!("rejected session settings update: {err}");
-                Err(err)
-            }
+        if Self::prompt_route_update_needed(&previous_configuration, &updated, &updates) {
+            self.refresh_model_base_instructions(&mut updated).await;
         }
+
+        let previous_cwd = previous_configuration.cwd.clone();
+        let next_cwd = updated.cwd.clone();
+        let praxis_home = updated.praxis_home.clone();
+        let session_source = updated.session_source.clone();
+        {
+            let mut state = self.state.lock().await;
+            state.session_configuration = updated;
+        }
+
+        self.maybe_refresh_shell_snapshot_for_cwd(
+            &previous_cwd,
+            &next_cwd,
+            &praxis_home,
+            &session_source,
+        );
+
+        Ok(())
     }
 
     pub(crate) async fn new_turn_with_sub_id(
@@ -2617,22 +2764,24 @@ impl Session {
         updates: SessionSettingsUpdate,
     ) -> ConstraintResult<Arc<TurnContext>> {
         let (
+            previous_configuration,
             session_configuration,
             sandbox_policy_changed,
             previous_cwd,
             praxis_home,
             session_source,
         ) = {
-            let mut state = self.state.lock().await;
-            match state.session_configuration.clone().apply(&updates) {
+            let state = self.state.lock().await;
+            let previous_configuration = state.session_configuration.clone();
+            match previous_configuration.apply(&updates) {
                 Ok(next) => {
-                    let previous_cwd = state.session_configuration.cwd.clone();
                     let sandbox_policy_changed =
-                        state.session_configuration.sandbox_policy != next.sandbox_policy;
+                        previous_configuration.sandbox_policy != next.sandbox_policy;
+                    let previous_cwd = previous_configuration.cwd.clone();
                     let praxis_home = next.praxis_home.clone();
                     let session_source = next.session_source.clone();
-                    state.session_configuration = next.clone();
                     (
+                        previous_configuration,
                         next,
                         sandbox_policy_changed,
                         previous_cwd,
@@ -2655,6 +2804,20 @@ impl Session {
             }
         };
 
+        let mut session_configuration = session_configuration;
+        if Self::prompt_route_update_needed(
+            &previous_configuration,
+            &session_configuration,
+            &updates,
+        ) {
+            self.refresh_model_base_instructions(&mut session_configuration)
+                .await;
+        }
+        {
+            let mut state = self.state.lock().await;
+            state.session_configuration = session_configuration.clone();
+        }
+
         self.maybe_refresh_shell_snapshot_for_cwd(
             &previous_cwd,
             &session_configuration.cwd,
@@ -2670,6 +2833,49 @@ impl Session {
                 sandbox_policy_changed,
             )
             .await)
+    }
+
+    fn prompt_route_update_needed(
+        previous: &SessionConfiguration,
+        next: &SessionConfiguration,
+        updates: &SessionSettingsUpdate,
+    ) -> bool {
+        updates.model_provider.is_some()
+            || updates.personality.is_some()
+            || updates.collaboration_mode.as_ref().is_some_and(|_| {
+                previous.collaboration_mode.model() != next.collaboration_mode.model()
+            })
+    }
+
+    async fn refresh_model_base_instructions(
+        &self,
+        session_configuration: &mut SessionConfiguration,
+    ) {
+        let per_turn_config = Self::build_per_turn_config(session_configuration);
+        if let Some(base_instructions) = per_turn_config.base_instructions.clone() {
+            session_configuration.base_instructions = base_instructions;
+            return;
+        }
+
+        let model = session_configuration.collaboration_mode.model().to_string();
+        let model_info = self
+            .services
+            .models_manager
+            .get_model_info(model.as_str(), &per_turn_config)
+            .await;
+        let product_profile = session_configuration
+            .session_source
+            .restriction_product()
+            .and_then(crate::llm::ids::ProductProfileId::from_product);
+        session_configuration.base_instructions =
+            crate::prompt_profiles::resolve_model_instructions(
+                &model_info,
+                per_turn_config.model_provider_id.as_str(),
+                &per_turn_config.model_provider,
+                session_configuration.personality,
+                product_profile,
+                &self.llm_runtime_catalog,
+            );
     }
 
     async fn new_turn_from_configuration(
@@ -2736,6 +2942,7 @@ impl Session {
             per_turn_config,
             model_info,
             &self.services.models_manager,
+            &self.llm_runtime_catalog,
             self.services
                 .network_proxy
                 .as_ref()
@@ -4032,7 +4239,11 @@ impl Session {
     ) {
         if let Some(token_usage) = token_usage {
             let mut state = self.state.lock().await;
-            state.update_token_info_from_usage(token_usage, turn_context.model_context_window());
+            state.update_token_info_from_usage(
+                token_usage,
+                turn_context.model_context_window(),
+                turn_context.model_info.auto_compact_token_limit(),
+            );
         }
         self.send_token_count_event(turn_context).await;
     }
@@ -4051,6 +4262,7 @@ impl Session {
                 total_token_usage: TokenUsage::default(),
                 last_token_usage: TokenUsage::default(),
                 model_context_window: None,
+                model_auto_compact_token_limit: None,
             });
 
             info.last_token_usage = TokenUsage {
@@ -4064,6 +4276,11 @@ impl Session {
 
             if let Some(model_context_window) = turn_context.model_context_window() {
                 info.model_context_window = Some(model_context_window);
+            }
+            if let Some(model_auto_compact_token_limit) =
+                turn_context.model_info.auto_compact_token_limit()
+            {
+                info.model_auto_compact_token_limit = Some(model_auto_compact_token_limit);
             }
 
             state.set_token_info(Some(info));
@@ -6547,7 +6764,7 @@ async fn run_auto_compact(
     turn_context: &Arc<TurnContext>,
     initial_context_injection: InitialContextInjection,
 ) -> PraxisResult<()> {
-    if should_use_remote_compact_task(&turn_context.provider) {
+    if should_use_remote_compact_task(sess.as_ref(), turn_context.as_ref()) {
         run_inline_remote_auto_compact_task(
             Arc::clone(sess),
             Arc::clone(turn_context),
@@ -7010,6 +7227,15 @@ pub(crate) async fn built_tools(
     } else {
         app_tools
     };
+    let tool_visibility_policy = sess.llm_runtime_catalog().tool_visibility_policy_for_model(
+        &turn_context.model_info,
+        &turn_context.config.model_provider_id,
+        &turn_context.provider,
+        turn_context
+            .session_source
+            .restriction_product()
+            .and_then(crate::llm::ids::ProductProfileId::from_product),
+    );
 
     Ok(Arc::new(ToolRouter::from_config(
         &turn_context.tools_config,
@@ -7023,6 +7249,7 @@ pub(crate) async fn built_tools(
             app_tools,
             discoverable_tools,
             dynamic_tools: turn_context.dynamic_tools.as_slice(),
+            tool_visibility_policy: tool_visibility_policy.as_ref(),
         },
     )))
 }

@@ -20,6 +20,7 @@
 
 use crate::multi_agents::AgentPickerThreadEntry;
 use crate::multi_agents::format_agent_picker_item_name;
+use crate::multi_agents::format_agent_picker_item_name_for_thread;
 use crate::multi_agents::next_agent_shortcut;
 use crate::multi_agents::previous_agent_shortcut;
 use praxis_protocol::ThreadId;
@@ -79,7 +80,9 @@ impl AgentNavigationState {
     pub(crate) fn upsert(
         &mut self,
         thread_id: ThreadId,
-        agent_nickname: Option<String>,
+        agent_base_name: Option<String>,
+        agent_title: Option<String>,
+        agent_display_name: Option<String>,
         agent_role: Option<String>,
         is_closed: bool,
     ) {
@@ -89,7 +92,9 @@ impl AgentNavigationState {
         self.threads.insert(
             thread_id,
             AgentPickerThreadEntry {
-                agent_nickname,
+                agent_base_name,
+                agent_title,
+                agent_display_name,
                 agent_role,
                 is_closed,
             },
@@ -107,7 +112,8 @@ impl AgentNavigationState {
             entry.is_closed = true;
         } else {
             self.upsert(
-                thread_id, /*agent_nickname*/ None, /*agent_role*/ None,
+                thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
+                /*agent_display_name*/ None, /*agent_role*/ None,
                 /*is_closed*/ true,
             );
         }
@@ -217,15 +223,20 @@ impl AgentNavigationState {
             self.threads
                 .get(&thread_id)
                 .map(|entry| {
-                    format_agent_picker_item_name(
-                        entry.agent_nickname.as_deref(),
+                    format_agent_picker_item_name_for_thread(
+                        thread_id,
+                        entry.agent_base_name.as_deref(),
+                        entry.agent_title.as_deref(),
+                        entry.agent_display_name.as_deref(),
                         entry.agent_role.as_deref(),
                         is_primary,
                     )
                 })
                 .unwrap_or_else(|| {
                     format_agent_picker_item_name(
-                        /*agent_nickname*/ None, /*agent_role*/ None, is_primary,
+                        /*agent_base_name*/ None,
+                        /*agent_title*/ None,
+                        /*agent_display_name*/ None, /*agent_role*/ None, is_primary,
                     )
                 }),
         )
@@ -273,18 +284,24 @@ mod tests {
 
         state.upsert(
             main_thread_id,
-            /*agent_nickname*/ None,
+            /*agent_base_name*/ None,
+            /*agent_title*/ None,
+            /*agent_display_name*/ None,
             /*agent_role*/ None,
             /*is_closed*/ false,
         );
         state.upsert(
             first_agent_id,
+            Some("墨子".to_string()),
+            Some("巡检仓库".to_string()),
             Some("Robie".to_string()),
             Some("explorer".to_string()),
             /*is_closed*/ false,
         );
         state.upsert(
             second_agent_id,
+            Some("荀子".to_string()),
+            Some("复核变更".to_string()),
             Some("Bob".to_string()),
             Some("worker".to_string()),
             /*is_closed*/ false,
@@ -299,6 +316,8 @@ mod tests {
 
         state.upsert(
             first_agent_id,
+            Some("墨子".to_string()),
+            Some("更新职责".to_string()),
             Some("Robie".to_string()),
             Some("worker".to_string()),
             /*is_closed*/ true,
@@ -344,7 +363,7 @@ mod tests {
 
         assert_eq!(
             state.active_agent_label(Some(first_agent_id), Some(main_thread_id)),
-            Some("Robie [explorer]".to_string())
+            Some("墨子 - 巡检仓库 [explorer]".to_string())
         );
         assert_eq!(
             state.active_agent_label(Some(main_thread_id), Some(main_thread_id)),
