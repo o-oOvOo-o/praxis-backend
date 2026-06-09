@@ -13,6 +13,8 @@ pub(crate) const TURN_ABORTED_OPEN_TAG: &str = "<turn_aborted>";
 pub(crate) const TURN_ABORTED_CLOSE_TAG: &str = "</turn_aborted>";
 pub(crate) const SUBAGENT_NOTIFICATION_OPEN_TAG: &str = "<subagent_notification>";
 pub(crate) const SUBAGENT_NOTIFICATION_CLOSE_TAG: &str = "</subagent_notification>";
+pub(crate) const RUNTIME_RECOVERY_OPEN_TAG: &str = "<praxis_runtime_recovery>";
+pub(crate) const RUNTIME_RECOVERY_CLOSE_TAG: &str = "</praxis_runtime_recovery>";
 
 pub(crate) const ENVIRONMENT_CONTEXT_FRAGMENT: ContextualUserFragmentDefinition =
     ContextualUserFragmentDefinition::new(
@@ -31,6 +33,8 @@ pub(crate) const SUBAGENT_NOTIFICATION_FRAGMENT: ContextualUserFragmentDefinitio
         SUBAGENT_NOTIFICATION_OPEN_TAG,
         SUBAGENT_NOTIFICATION_CLOSE_TAG,
     );
+pub(crate) const RUNTIME_RECOVERY_FRAGMENT: ContextualUserFragmentDefinition =
+    ContextualUserFragmentDefinition::new(RUNTIME_RECOVERY_OPEN_TAG, RUNTIME_RECOVERY_CLOSE_TAG);
 
 const CONTEXTUAL_USER_FRAGMENTS: &[ContextualUserFragmentDefinition] = &[
     AGENTS_MD_FRAGMENT,
@@ -39,6 +43,7 @@ const CONTEXTUAL_USER_FRAGMENTS: &[ContextualUserFragmentDefinition] = &[
     USER_SHELL_COMMAND_FRAGMENT,
     TURN_ABORTED_FRAGMENT,
     SUBAGENT_NOTIFICATION_FRAGMENT,
+    RUNTIME_RECOVERY_FRAGMENT,
 ];
 
 fn is_standard_contextual_user_text(text: &str) -> bool {
@@ -59,7 +64,9 @@ pub(crate) fn is_memory_excluded_contextual_user_fragment(content_item: &Content
     let ContentItem::InputText { text } = content_item else {
         return false;
     };
-    AGENTS_MD_FRAGMENT.matches_text(text) || SKILL_FRAGMENT.matches_text(text)
+    AGENTS_MD_FRAGMENT.matches_text(text)
+        || SKILL_FRAGMENT.matches_text(text)
+        || RUNTIME_RECOVERY_FRAGMENT.matches_text(text)
 }
 
 pub(crate) fn is_contextual_user_fragment(content_item: &ContentItem) -> bool {

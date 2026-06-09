@@ -234,8 +234,7 @@ impl AgentNavigationState {
                 })
                 .unwrap_or_else(|| {
                     format_agent_picker_item_name(
-                        /*agent_base_name*/ None,
-                        /*agent_title*/ None,
+                        /*agent_base_name*/ None, /*agent_title*/ None,
                         /*agent_display_name*/ None, /*agent_role*/ None, is_primary,
                     )
                 }),
@@ -363,7 +362,7 @@ mod tests {
 
         assert_eq!(
             state.active_agent_label(Some(first_agent_id), Some(main_thread_id)),
-            Some("墨子 - 巡检仓库 [explorer]".to_string())
+            Some("墨子-巡检仓库 [explorer]".to_string())
         );
         assert_eq!(
             state.active_agent_label(Some(main_thread_id), Some(main_thread_id)),

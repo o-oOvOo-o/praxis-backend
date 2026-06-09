@@ -17,6 +17,7 @@ pub(crate) fn profile() -> ProfileDescriptor {
         id: BehaviorProfileId::OpenRouter,
         label: "OpenRouter",
         instructions: None,
+        prompt_layers: &[],
         matcher: provider::matches,
         provider_policy: None,
         task_policy: ProfileTaskPolicyDescriptor {
@@ -24,6 +25,8 @@ pub(crate) fn profile() -> ProfileDescriptor {
                 AutoTitleProfile::Common,
             )),
             compact_execution: Some(CompactExecutionPolicy::LocalPrompt),
+            compact_model: None,
+            auto_compact_token_limit_cap: None,
         },
         tool_capabilities: ProfileToolCapabilityDescriptor::praxis_web_search(),
         priority: 800,

@@ -7,6 +7,7 @@ use crate::agent_os::RuntimeCommandRecord;
 use crate::agent_os::RuntimeCommandStatus;
 use crate::agent_os::WorkerRequestRecord;
 use crate::agent_os::WorkerRequestStatus;
+use crate::tools::loop_guard::ToolLoopDecision;
 use crate::util::truncate_to_char_boundary;
 
 pub(crate) struct Handler;
@@ -36,7 +37,7 @@ impl ToolHandler for Handler {
             .services
             .agent_control
             .register_session_root(session.conversation_id, &turn.session_source);
-        let agents = session
+        let raw_agents = session
             .services
             .agent_control
             .list_agents(
@@ -46,6 +47,11 @@ impl ToolHandler for Handler {
             )
             .await
             .map_err(collab_spawn_error)?;
+        let only_root = raw_agents.len() == 1 && raw_agents[0].agent_name == "/root";
+        let agents = raw_agents
+            .into_iter()
+            .filter(|agent| agent.agent_name != "/root")
+            .collect::<Vec<_>>();
 
         let mut artifacts = session.services.agent_os.query_artifacts().await;
         artifacts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
@@ -95,7 +101,19 @@ impl ToolHandler for Handler {
                 .collect(),
         };
 
-        Ok(ListAgentsResult { agents, agent_os })
+        let terminal_state = ListAgentsTerminalState::from_snapshot(only_root, &agents, &agent_os);
+        if let ToolLoopDecision::Block { message } = turn
+            .tool_loop_guard
+            .record_list_agents_terminal(terminal_state.should_stop_listing)
+        {
+            return Err(FunctionCallError::RespondToModel(message));
+        }
+
+        Ok(ListAgentsResult {
+            agents,
+            agent_os,
+            terminal_state,
+        })
     }
 }
 
@@ -109,6 +127,7 @@ struct ListAgentsArgs {
 pub(crate) struct ListAgentsResult {
     agents: Vec<ListedAgent>,
     agent_os: AgentOsSnapshot,
+    terminal_state: ListAgentsTerminalState,
 }
 
 #[derive(Debug, Serialize)]
@@ -118,6 +137,40 @@ struct AgentOsSnapshot {
     pending_worker_requests: Vec<AgentOsWorkerRequestSummary>,
     pending_runtime_commands: Vec<AgentOsRuntimeCommandSummary>,
     recent_intent_plans: Vec<AgentOsIntentPlanSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct ListAgentsTerminalState {
+    only_root: bool,
+    no_live_subagents: bool,
+    no_pending_agent_os_work: bool,
+    should_stop_listing: bool,
+    message: String,
+}
+
+impl ListAgentsTerminalState {
+    fn from_snapshot(only_root: bool, agents: &[ListedAgent], agent_os: &AgentOsSnapshot) -> Self {
+        let no_live_subagents = agents.is_empty();
+        let no_pending_agent_os_work = agent_os.leases.is_empty()
+            && agent_os.pending_worker_requests.is_empty()
+            && agent_os.pending_runtime_commands.is_empty();
+        let should_stop_listing = no_live_subagents && no_pending_agent_os_work;
+        let message = if should_stop_listing {
+            "No live sub-agents remain and AgentOS has no pending work; stop calling list_agents and summarize."
+        } else if no_live_subagents {
+            "No live sub-agents remain, but AgentOS still reports pending work."
+        } else {
+            "Live sub-agents remain; use targeted wait_agent, assign_task, or close_agent as needed."
+        }
+        .to_string();
+        Self {
+            only_root,
+            no_live_subagents,
+            no_pending_agent_os_work,
+            should_stop_listing,
+            message,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

@@ -31,12 +31,20 @@ use crate::praxis::TurnContext;
 use crate::state::ActiveTurn;
 use crate::state::RunningTask;
 use crate::state::TaskKind;
+use crate::stream_events_utils::handle_non_tool_response_item;
+use crate::stream_events_utils::last_assistant_message_from_item;
+use crate::stream_events_utils::model_empty_final_item;
+use crate::stream_events_utils::record_completed_response_item;
+use crate::stream_events_utils::subagent_workflow_empty_final_item;
+use crate::stream_events_utils::subagent_workflow_incomplete_final_item;
+use crate::stream_events_utils::tool_loop_guard_final_item;
 use praxis_login::AuthManager;
 use praxis_otel::SessionTelemetry;
 use praxis_otel::metrics::names::TURN_E2E_DURATION_METRIC;
 use praxis_otel::metrics::names::TURN_NETWORK_PROXY_METRIC;
 use praxis_otel::metrics::names::TURN_TOKEN_USAGE_METRIC;
 use praxis_otel::metrics::names::TURN_TOOL_CALL_METRIC;
+use praxis_protocol::config_types::ModeKind;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::models::ResponseItem;
@@ -92,6 +100,47 @@ fn emit_turn_network_proxy_metric(
         /*inc*/ 1,
         &[("active", active), tmp_mem],
     );
+}
+
+async fn synthesize_missing_task_final_message(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+) -> Option<String> {
+    let guard = &turn_context.tool_loop_guard;
+    if guard.has_terminal_model_error() {
+        return None;
+    }
+    let final_item = if guard.has_terminal_list_agents() {
+        Some(tool_loop_guard_final_item(Arc::clone(sess), "list_agents").await)
+    } else if guard.has_subagent_tool_calls() {
+        Some(if has_live_subagents_for_task(sess, turn_context).await {
+            subagent_workflow_incomplete_final_item(Arc::clone(sess)).await
+        } else {
+            subagent_workflow_empty_final_item(Arc::clone(sess)).await
+        })
+    } else {
+        Some(model_empty_final_item(Arc::clone(sess)).await)
+    }?;
+
+    let plan_mode = turn_context.collaboration_mode.mode == ModeKind::Plan;
+    if let Some(turn_item) =
+        handle_non_tool_response_item(sess.as_ref(), turn_context.as_ref(), &final_item, plan_mode)
+            .await
+    {
+        sess.emit_turn_item_started(turn_context, &turn_item).await;
+        sess.emit_turn_item_completed(turn_context, turn_item).await;
+    }
+    record_completed_response_item(sess.as_ref(), turn_context.as_ref(), &final_item).await;
+    last_assistant_message_from_item(&final_item, plan_mode)
+}
+
+async fn has_live_subagents_for_task(sess: &Arc<Session>, turn_context: &Arc<TurnContext>) -> bool {
+    sess.services
+        .agent_control
+        .list_agents(sess.conversation_id, &turn_context.session_source, None)
+        .await
+        .map(|agents| agents.into_iter().any(|agent| agent.agent_name != "/root"))
+        .unwrap_or(true)
 }
 
 /// Thin wrapper that exposes the parts of [`Session`] task runners need.
@@ -339,7 +388,7 @@ impl Session {
     pub async fn on_task_finished(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
-        last_agent_message: Option<String>,
+        mut last_agent_message: Option<String>,
     ) {
         turn_context
             .turn_metadata_state
@@ -385,6 +434,7 @@ impl Session {
                 }
             }
         }
+        let terminal_model_error = turn_context.tool_loop_guard.terminal_model_error_message();
         // Emit token usage metrics.
         if let Some(token_usage_at_turn_start) = token_usage_at_turn_start {
             // TODO(jif): drop this
@@ -468,8 +518,12 @@ impl Session {
                 &[("token_type", "reasoning_output"), tmp_mem],
             );
         }
+        if last_agent_message.is_none() && terminal_model_error.is_none() {
+            last_agent_message = synthesize_missing_task_final_message(self, &turn_context).await;
+        }
         let last_agent_message_for_title = last_agent_message.clone();
         let last_agent_message_for_summary = last_agent_message.clone();
+        let turn_completed = terminal_model_error.is_none();
         let event = EventMsg::TurnComplete(TurnCompleteEvent {
             turn_id: turn_context.sub_id.clone(),
             last_agent_message,
@@ -477,7 +531,7 @@ impl Session {
         if let Err(err) = self
             .goal_runtime_apply(GoalRuntimeEvent::TurnFinished {
                 turn_context: turn_context.as_ref(),
-                turn_completed: true,
+                turn_completed,
             })
             .await
         {
@@ -489,8 +543,12 @@ impl Session {
             .agent_os
             .complete_active_runtime_command_for_thread(
                 self.conversation_id,
-                /*succeeded*/ true,
-                "turn_finished",
+                turn_completed,
+                if turn_completed {
+                    "turn_finished"
+                } else {
+                    "turn_model_error"
+                },
             )
             .await
         {

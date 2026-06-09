@@ -3,6 +3,7 @@ pub mod context;
 pub mod events;
 pub(crate) mod handlers;
 pub mod js_repl;
+pub(crate) mod loop_guard;
 pub(crate) mod network_approval;
 pub mod orchestrator;
 mod output_policy;

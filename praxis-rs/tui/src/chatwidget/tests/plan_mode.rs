@@ -863,6 +863,7 @@ async fn submit_user_message_queues_while_compaction_turn_is_running() {
                 status: AppGatewayTurnStatus::InProgress,
                 error: None,
             },
+            model_context_window: None,
         }),
         /*replay_kind*/ None,
     );

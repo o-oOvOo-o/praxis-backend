@@ -61,9 +61,7 @@ impl ContextManager {
         Self {
             items: Vec::new(),
             token_info: TokenUsageInfo::new_or_append(
-                &None,
-                &None,
-                /*model_context_window*/ None,
+                &None, &None, /*model_context_window*/ None,
                 /*model_auto_compact_token_limit*/ None,
             ),
             reference_context_item: None,

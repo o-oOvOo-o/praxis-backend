@@ -94,8 +94,13 @@ pub(crate) fn summary_from_state_db_metadata(
     let source = serde_json::from_str(&source)
         .or_else(|_| serde_json::from_value(serde_json::Value::String(source.clone())))
         .unwrap_or(praxis_protocol::protocol::SessionSource::Unknown);
-    let source =
-        with_thread_spawn_agent_metadata(source, agent_base_name, agent_title, agent_display_name, agent_role);
+    let source = with_thread_spawn_agent_metadata(
+        source,
+        agent_base_name,
+        agent_title,
+        agent_display_name,
+        agent_role,
+    );
     let git_info = if git_sha.is_none() && git_branch.is_none() && git_origin_url.is_none() {
         None
     } else {

@@ -1,5 +1,6 @@
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::ModelsResponse;
+use praxis_protocol::openai_models::known_openai_compatible_picker_model_infos;
 
 const BUNDLED_MODELS_JSON: &str = include_str!("../../models.json");
 
@@ -13,6 +14,16 @@ pub const HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG: &str =
 pub fn bundled_model_presets() -> Vec<ModelPreset> {
     let mut response: ModelsResponse = serde_json::from_str(BUNDLED_MODELS_JSON)
         .unwrap_or_else(|err| panic!("failed to parse bundled models.json: {err}"));
+    for model in known_openai_compatible_picker_model_infos() {
+        if response
+            .models
+            .iter()
+            .any(|existing| existing.slug == model.slug)
+        {
+            continue;
+        }
+        response.models.push(model);
+    }
     response.models.sort_by(|a, b| a.priority.cmp(&b.priority));
     response.models.into_iter().map(ModelPreset::from).collect()
 }

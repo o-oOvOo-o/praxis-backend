@@ -24,6 +24,8 @@ fn thread_metadata(cwd: &str, title: &str, first_user_message: &str) -> ThreadMe
             .expect("valid timestamp"),
         source: "cli".to_string(),
         agent_path: None,
+        agent_base_name: None,
+        agent_title: None,
         agent_display_name: None,
         agent_role: None,
         model_provider: "test-provider".to_string(),
@@ -44,6 +46,7 @@ fn thread_metadata(cwd: &str, title: &str, first_user_message: &str) -> ThreadMe
         git_sha: None,
         git_branch: Some("main".to_string()),
         git_origin_url: None,
+        token_usage_info: None,
     }
 }
 

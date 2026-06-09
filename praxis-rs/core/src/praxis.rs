@@ -25,8 +25,9 @@ use crate::compact::should_use_remote_compact_task;
 use crate::compact_remote::run_inline_remote_auto_compact_task;
 use crate::config::ManagedFeatures;
 use crate::connectors;
+use crate::contextual_user_message::RUNTIME_RECOVERY_FRAGMENT;
 use crate::exec_policy::ExecPolicyManager;
-use crate::llm::runtime::LlmPromptPurpose;
+use crate::llm::prompts::LlmPromptPurpose;
 use crate::llm::runtime::LlmRuntimeCatalog;
 #[cfg(test)]
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
@@ -49,6 +50,10 @@ use crate::stream_events_utils::handle_output_item_done;
 use crate::stream_events_utils::last_assistant_message_from_item;
 use crate::stream_events_utils::raw_assistant_output_text_from_item;
 use crate::stream_events_utils::record_completed_response_item;
+use crate::stream_events_utils::subagent_workflow_empty_final_item;
+use crate::stream_events_utils::subagent_workflow_incomplete_final_item;
+use crate::stream_events_utils::tool_loop_guard_final_item;
+use crate::tools::loop_guard::ToolLoopGuardState;
 use crate::turn_metadata::TurnMetadataState;
 use crate::util::error_or_panic;
 use async_channel::Receiver;
@@ -140,6 +145,7 @@ use praxis_rollout::state_db;
 use praxis_shell_command::parse_command::parse_command;
 use praxis_tools::filter_tool_suggest_discoverable_tools_for_client;
 use praxis_utils_output_truncation::TruncationPolicy;
+use praxis_utils_output_truncation::truncate_text;
 use praxis_utils_stream_parser::AssistantTextChunk;
 use praxis_utils_stream_parser::AssistantTextStreamParser;
 use praxis_utils_stream_parser::ProposedPlanSegment;
@@ -969,6 +975,7 @@ pub(crate) struct TurnContext {
     pub(crate) praxis_self_exe: Option<PathBuf>,
     pub(crate) praxis_linux_sandbox_exe: Option<PathBuf>,
     pub(crate) tool_call_gate: Arc<ReadinessFlag>,
+    pub(crate) tool_loop_guard: Arc<ToolLoopGuardState>,
     pub(crate) truncation_policy: TruncationPolicy,
     pub(crate) js_repl: Arc<JsReplHandle>,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
@@ -1104,6 +1111,7 @@ impl TurnContext {
             praxis_self_exe: self.praxis_self_exe.clone(),
             praxis_linux_sandbox_exe: self.praxis_linux_sandbox_exe.clone(),
             tool_call_gate: Arc::new(ReadinessFlag::new()),
+            tool_loop_guard: Arc::clone(&self.tool_loop_guard),
             truncation_policy,
             js_repl: Arc::clone(&self.js_repl),
             dynamic_tools: self.dynamic_tools.clone(),
@@ -1619,6 +1627,7 @@ impl Session {
             praxis_self_exe: per_turn_config.praxis_self_exe.clone(),
             praxis_linux_sandbox_exe: per_turn_config.praxis_linux_sandbox_exe.clone(),
             tool_call_gate: Arc::new(ReadinessFlag::new()),
+            tool_loop_guard: Arc::new(ToolLoopGuardState::default()),
             truncation_policy: model_info.truncation_policy.into(),
             js_repl,
             dynamic_tools: session_configuration.dynamic_tools.clone(),
@@ -4242,7 +4251,7 @@ impl Session {
             state.update_token_info_from_usage(
                 token_usage,
                 turn_context.model_context_window(),
-                turn_context.model_info.auto_compact_token_limit(),
+                effective_auto_compact_token_limit(self, turn_context),
             );
         }
         self.send_token_count_event(turn_context).await;
@@ -4278,7 +4287,7 @@ impl Session {
                 info.model_context_window = Some(model_context_window);
             }
             if let Some(model_auto_compact_token_limit) =
-                turn_context.model_info.auto_compact_token_limit()
+                effective_auto_compact_token_limit(self, turn_context)
             {
                 info.model_auto_compact_token_limit = Some(model_auto_compact_token_limit);
             }
@@ -6094,6 +6103,7 @@ async fn spawn_review_thread(
         praxis_self_exe: parent_turn_context.praxis_self_exe.clone(),
         praxis_linux_sandbox_exe: parent_turn_context.praxis_linux_sandbox_exe.clone(),
         tool_call_gate: Arc::new(ReadinessFlag::new()),
+        tool_loop_guard: Arc::new(ToolLoopGuardState::default()),
         js_repl: Arc::clone(&sess.js_repl),
         dynamic_tools: parent_turn_context.dynamic_tools.clone(),
         truncation_policy: model_info.truncation_policy.into(),
@@ -6203,17 +6213,19 @@ pub(crate) async fn run_turn(
         return None;
     }
 
-    let model_info = turn_context.model_info.clone();
-    let auto_compact_limit = model_info.auto_compact_token_limit().unwrap_or(i64::MAX);
+    let auto_compact_limit =
+        effective_auto_compact_token_limit(sess.as_ref(), turn_context.as_ref())
+            .unwrap_or(i64::MAX);
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
     // new user message are recorded. Estimate pending incoming items (context
     // diffs/full reinjection + user input) and trigger compaction preemptively
     // when they would push the thread over the compaction threshold.
-    if run_pre_sampling_compact(&sess, &turn_context)
-        .await
-        .is_err()
-    {
+    if let Err(err) = run_pre_sampling_compact(&sess, &turn_context).await {
+        let error_event = err.to_error_event(/*message_prefix*/ None);
         error!("Failed to run pre-sampling compact");
+        turn_context
+            .tool_loop_guard
+            .record_terminal_model_error(error_event.message);
         return None;
     }
 
@@ -6522,6 +6534,18 @@ pub(crate) async fn run_turn(
                     "post sampling token usage"
                 );
 
+                if needs_follow_up
+                    && let Some(message) = turn_context.tool_loop_guard.take_followup_intervention()
+                {
+                    let intervention: ResponseItem = DeveloperInstructions::new(message).into();
+                    sess.record_conversation_items(
+                        &turn_context,
+                        std::slice::from_ref(&intervention),
+                    )
+                    .await;
+                    continue;
+                }
+
                 // as long as compaction works well in getting us way below the token limit, we shouldn't worry about being in an infinite loop.
                 if token_limit_reached && needs_follow_up {
                     if run_auto_compact(
@@ -6539,6 +6563,36 @@ pub(crate) async fn run_turn(
 
                 if !needs_follow_up {
                     last_agent_message = sampling_request_last_agent_message;
+                    let has_terminal_list_agents =
+                        turn_context.tool_loop_guard.has_terminal_list_agents();
+                    let has_subagent_tool_calls =
+                        turn_context.tool_loop_guard.has_subagent_tool_calls();
+                    if last_agent_message.is_none()
+                        && !has_terminal_list_agents
+                        && !has_subagent_tool_calls
+                        && let Some(message) =
+                            turn_context.tool_loop_guard.record_empty_model_completion()
+                    {
+                        record_empty_model_recovery(&sess, &turn_context, message).await;
+                        continue;
+                    }
+                    if last_agent_message.is_none() {
+                        let synthetic_final_item = if has_terminal_list_agents {
+                            Some(tool_loop_guard_final_item(Arc::clone(&sess), "list_agents").await)
+                        } else if has_subagent_tool_calls {
+                            Some(if has_live_subagents_for_turn(&sess, &turn_context).await {
+                                subagent_workflow_incomplete_final_item(Arc::clone(&sess)).await
+                            } else {
+                                subagent_workflow_empty_final_item(Arc::clone(&sess)).await
+                            })
+                        } else {
+                            None
+                        };
+                        if let Some(final_item) = synthetic_final_item {
+                            last_agent_message =
+                                emit_synthetic_final_answer(&sess, &turn_context, final_item).await;
+                        }
+                    }
                     let stop_hook_permission_mode = match turn_context.approval_policy.value() {
                         AskForApproval::Never => "bypassPermissions",
                         AskForApproval::UnlessTrusted
@@ -6680,7 +6734,11 @@ pub(crate) async fn run_turn(
             }
             Err(e) => {
                 info!("Turn error: {e:#}");
-                let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
+                let error_event = e.to_error_event(/*message_prefix*/ None);
+                turn_context
+                    .tool_loop_guard
+                    .record_terminal_model_error(error_event.message.clone());
+                let event = EventMsg::Error(error_event);
                 sess.send_event(&turn_context, event).await;
                 // let the user continue the conversation
                 break;
@@ -6689,6 +6747,80 @@ pub(crate) async fn run_turn(
     }
 
     last_agent_message
+}
+
+pub(crate) async fn record_empty_model_recovery(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    message: String,
+) {
+    if let Err(err) = run_auto_compact(
+        sess,
+        turn_context,
+        InitialContextInjection::BeforeLastUserMessage,
+    )
+    .await
+    {
+        warn!(
+            turn_id = %turn_context.sub_id,
+            error = %err,
+            "empty model recovery compact failed; retrying with recovery context only"
+        );
+    }
+
+    let recovery_item = build_empty_model_recovery_item(sess, message).await;
+    sess.record_conversation_items(turn_context, std::slice::from_ref(&recovery_item))
+        .await;
+}
+
+async fn build_empty_model_recovery_item(sess: &Arc<Session>, message: String) -> ResponseItem {
+    let latest_user_message = collect_user_messages(sess.clone_history().await.raw_items())
+        .into_iter()
+        .last()
+        .map(|message| truncate_text(&message, TruncationPolicy::Tokens(2000)));
+
+    let mut body = String::from(
+        "Runtime recovery retry: the previous model response completed without assistant text or tool calls.",
+    );
+    body.push_str("\n\n");
+    body.push_str(message.trim());
+    body.push_str(
+        "\n\nTreat the latest non-contextual user message as the active task. Do not summarize old history. If it lists explicit tool steps, call the first required tool now.",
+    );
+    if let Some(latest_user_message) = latest_user_message
+        && !latest_user_message.trim().is_empty()
+    {
+        body.push_str("\n\nLatest non-contextual user message excerpt:\n");
+        body.push_str(latest_user_message.trim());
+    }
+
+    RUNTIME_RECOVERY_FRAGMENT.into_message(RUNTIME_RECOVERY_FRAGMENT.wrap(body))
+}
+
+async fn has_live_subagents_for_turn(sess: &Arc<Session>, turn_context: &Arc<TurnContext>) -> bool {
+    sess.services
+        .agent_control
+        .list_agents(sess.conversation_id, &turn_context.session_source, None)
+        .await
+        .map(|agents| agents.into_iter().any(|agent| agent.agent_name != "/root"))
+        .unwrap_or(true)
+}
+
+async fn emit_synthetic_final_answer(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    final_item: ResponseItem,
+) -> Option<String> {
+    let plan_mode = turn_context.collaboration_mode.mode == ModeKind::Plan;
+    if let Some(turn_item) =
+        handle_non_tool_response_item(sess.as_ref(), turn_context.as_ref(), &final_item, plan_mode)
+            .await
+    {
+        sess.emit_turn_item_started(turn_context, &turn_item).await;
+        sess.emit_turn_item_completed(turn_context, turn_item).await;
+    }
+    record_completed_response_item(sess.as_ref(), turn_context.as_ref(), &final_item).await;
+    last_assistant_message_from_item(&final_item, plan_mode)
 }
 
 async fn run_pre_sampling_compact(
@@ -6703,10 +6835,9 @@ async fn run_pre_sampling_compact(
     )
     .await?;
     let total_usage_tokens = sess.get_total_token_usage().await;
-    let auto_compact_limit = turn_context
-        .model_info
-        .auto_compact_token_limit()
-        .unwrap_or(i64::MAX);
+    let auto_compact_limit =
+        effective_auto_compact_token_limit(sess.as_ref(), turn_context.as_ref())
+            .unwrap_or(i64::MAX);
     // Compact if the total usage tokens are greater than the auto compact limit
     if total_usage_tokens >= auto_compact_limit {
         run_auto_compact(sess, turn_context, InitialContextInjection::DoNotInject).await?;
@@ -6740,10 +6871,9 @@ async fn maybe_run_previous_model_inline_compact(
     let Some(new_context_window) = turn_context.model_context_window() else {
         return Ok(false);
     };
-    let new_auto_compact_limit = turn_context
-        .model_info
-        .auto_compact_token_limit()
-        .unwrap_or(i64::MAX);
+    let new_auto_compact_limit =
+        effective_auto_compact_token_limit(sess.as_ref(), turn_context.as_ref())
+            .unwrap_or(i64::MAX);
     let should_run = total_usage_tokens > new_auto_compact_limit
         && previous_model_turn_context.model_info.slug != turn_context.model_info.slug
         && old_context_window > new_context_window;
@@ -6757,6 +6887,30 @@ async fn maybe_run_previous_model_inline_compact(
         return Ok(true);
     }
     Ok(false)
+}
+
+fn effective_auto_compact_token_limit(sess: &Session, turn_context: &TurnContext) -> Option<i64> {
+    let model_limit = turn_context.model_info.auto_compact_token_limit();
+    let product_profile = turn_context
+        .session_source
+        .restriction_product()
+        .and_then(crate::llm::ids::ProductProfileId::from_product);
+    let profile_cap = sess
+        .llm_runtime_catalog()
+        .auto_compact_token_limit_cap_for_model(
+            &turn_context.model_info,
+            &turn_context.config.model_provider_id,
+            &turn_context.provider,
+            product_profile,
+        )
+        .filter(|cap| *cap > 0);
+
+    match (model_limit, profile_cap) {
+        (Some(model_limit), Some(profile_cap)) => Some(model_limit.min(profile_cap)),
+        (Some(model_limit), None) => Some(model_limit),
+        (None, Some(profile_cap)) => Some(profile_cap),
+        (None, None) => None,
+    }
 }
 
 async fn run_auto_compact(
@@ -6950,7 +7104,7 @@ pub(crate) fn build_prompt(
         .filter(|tool| tool.defer_loading)
         .map(|tool| tool.name.as_str())
         .collect::<HashSet<_>>();
-    let tools = if deferred_dynamic_tools.is_empty() {
+    let mut tools = if deferred_dynamic_tools.is_empty() {
         router.model_visible_specs()
     } else {
         router
@@ -6959,6 +7113,7 @@ pub(crate) fn build_prompt(
             .filter(|spec| !deferred_dynamic_tools.contains(spec.name()))
             .collect()
     };
+    tools.retain(|spec| !turn_context.tool_loop_guard.should_hide_tool(spec.name()));
 
     Prompt {
         input,

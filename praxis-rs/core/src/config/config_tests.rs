@@ -99,6 +99,52 @@ fn load_config_normalizes_relative_cwd_override() -> std::io::Result<()> {
 }
 
 #[test]
+fn explicit_model_provider_override_prevents_model_owner_provider_switch() -> std::io::Result<()> {
+    let cfg: ConfigToml = toml::from_str(
+        r#"
+[model_providers.common]
+name = "Common"
+base_url = "https://token-plan.example.test/compatible-mode/v1"
+requires_openai_auth = false
+supports_websockets = false
+wire_api = "openai_compat"
+
+[model_providers.deepseek]
+name = "DeepSeek"
+base_url = "https://api.deepseek.com"
+requires_openai_auth = false
+supports_websockets = false
+wire_api = "openai_compat"
+"#,
+    )
+    .expect("TOML deserialization should succeed");
+    let praxis_home = tempdir()?;
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides {
+            model: Some("deepseek-v4-pro".to_string()),
+            model_provider: Some("common".to_string()),
+            cwd: Some(praxis_home.path().to_path_buf()),
+            ..Default::default()
+        },
+        praxis_home.path().to_path_buf(),
+    )?;
+
+    assert_eq!(config.model, Some("deepseek-v4-pro".to_string()));
+    assert_eq!(config.model_provider_id, "common");
+    assert!(
+        !config
+            .startup_warnings
+            .iter()
+            .any(|warning| warning.contains("switched provider")),
+        "explicit provider override should not be auto-switched: {:?}",
+        config.startup_warnings
+    );
+    Ok(())
+}
+
+#[test]
 fn test_toml_parsing() {
     let history_with_persistence = r#"
 [history]
@@ -4088,7 +4134,10 @@ fn load_config_rejects_duplicate_agent_role_base_name_candidates() -> std::io::R
                 AgentRoleToml {
                     description: Some("Research role".to_string()),
                     config_file: None,
-                    base_name_candidates: Some(vec!["Hypatia".to_string(), " Hypatia ".to_string()]),
+                    base_name_candidates: Some(vec![
+                        "Hypatia".to_string(),
+                        " Hypatia ".to_string(),
+                    ]),
                 },
             )]),
         }),

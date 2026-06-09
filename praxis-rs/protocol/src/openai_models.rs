@@ -410,6 +410,14 @@ pub fn known_openai_compatible_model_info(model_id: &str) -> Option<ModelInfo> {
     }
 }
 
+/// Local first-party model metadata that should be available in pickers even before remote catalog refresh catches up.
+pub fn known_openai_compatible_picker_model_infos() -> Vec<ModelInfo> {
+    ["gpt-5.5", "gpt-5.5-pro"]
+        .into_iter()
+        .filter_map(known_openai_compatible_model_info)
+        .collect()
+}
+
 fn openai_codex_model_info(
     model_id: &str,
     display_name: &str,

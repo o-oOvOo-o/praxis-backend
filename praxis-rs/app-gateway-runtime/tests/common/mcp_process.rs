@@ -129,6 +129,7 @@ impl McpProcess {
         cmd.stderr(Stdio::piped());
         cmd.current_dir(praxis_home);
         cmd.env("CODEX_HOME", praxis_home);
+        cmd.env("PRAXIS_HOME", praxis_home);
         cmd.env("RUST_LOG", "info");
         cmd.env_remove(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
         cmd.args(args);

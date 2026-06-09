@@ -157,11 +157,8 @@ impl AgentRegistry {
             .cloned()
     }
 
-    pub(crate) fn agent_id_for_display_name(
-        &self,
-        agent_display_name: &str,
-    ) -> Result<Option<ThreadId>> {
-        let needle = agent_display_name.trim();
+    pub(crate) fn agent_id_for_human_name(&self, agent_name: &str) -> Result<Option<ThreadId>> {
+        let needle = agent_name.trim();
         if needle.is_empty() {
             return Ok(None);
         }
@@ -175,11 +172,16 @@ impl AgentRegistry {
             .values()
             .filter(|metadata| {
                 !metadata.agent_path.as_ref().is_some_and(AgentPath::is_root)
-                    && metadata
+                    && (metadata
                         .agent_display_name
                         .as_deref()
                         .map(str::trim)
                         .is_some_and(|display_name| display_name == needle)
+                        || metadata
+                            .agent_base_name
+                            .as_deref()
+                            .map(str::trim)
+                            .is_some_and(|base_name| base_name == needle))
             })
             .filter_map(|metadata| metadata.agent_id);
 
@@ -188,7 +190,7 @@ impl AgentRegistry {
         };
         if matches.next().is_some() {
             return Err(PraxisErr::UnsupportedOperation(format!(
-                "agent display name `{needle}` is ambiguous; use the agent path instead"
+                "agent name `{needle}` is ambiguous; use the agent path or full display name instead"
             )));
         }
         Ok(Some(thread_id))
@@ -268,10 +270,7 @@ impl AgentRegistry {
                         &[],
                     );
                 }
-                format_agent_base_name(
-                    names.first().copied()?,
-                    active_agents.base_name_reset_count,
-                )
+                format_agent_base_name(names.first().copied()?, active_agents.base_name_reset_count)
             }
         };
         active_agents

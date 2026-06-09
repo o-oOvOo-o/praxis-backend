@@ -18,6 +18,7 @@ pub(crate) fn profile() -> ProfileDescriptor {
         id: BehaviorProfileId::CodexResponses,
         label: "Codex Responses",
         instructions: Some(prompts::RESPONSES),
+        prompt_layers: &[],
         matcher: provider::matches,
         provider_policy: Some(ProfileProviderPolicy {
             canonical_provider_id: Some(crate::model_provider_info::OPENAI_PROVIDER_ID),
@@ -30,6 +31,8 @@ pub(crate) fn profile() -> ProfileDescriptor {
                 AutoTitleProfile::CodexResponses,
             )),
             compact_execution: Some(CompactExecutionPolicy::RemoteResponses),
+            compact_model: None,
+            auto_compact_token_limit_cap: None,
         },
         tool_capabilities: ProfileToolCapabilityDescriptor::responses_web_search(),
         priority: 700,

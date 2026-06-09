@@ -367,6 +367,7 @@ mod tests {
         assert!(extension_ids.contains("common/openrouter"));
         assert!(extension_ids.contains("common/claude_placeholder"));
         assert!(extension_ids.contains("common/claude_placeholder/statement"));
+        assert!(extension_ids.contains("deepseek/smarter"));
         assert!(!extension_ids.contains("praxis/web_search"));
         assert!(!extension_ids.contains("praxis/web_search/obscura"));
         assert!(!extension_ids.contains("deepseek/web_search"));
@@ -533,7 +534,7 @@ mod tests {
     }
 
     #[test]
-    fn common_openai_compat_profile_reuses_deepseek_prompt_for_now() {
+    fn common_openai_compat_profile_uses_common_prompt() {
         let registry = builtin_registry();
         let common = registry
             .profiles()
@@ -543,7 +544,7 @@ mod tests {
 
         assert_eq!(
             common.instructions,
-            Some(crate::llm::profiles::deepseek::prompts::BASE)
+            Some(crate::llm::profiles::common::prompts::BASE)
         );
     }
 }

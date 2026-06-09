@@ -7,6 +7,7 @@ use praxis_apply_patch::ApplyPatchAction;
 use praxis_apply_patch::ApplyPatchFileChange;
 use praxis_protocol::protocol::FileChange;
 use praxis_protocol::protocol::FileSystemSandboxPolicy;
+use praxis_sandboxing::SandboxType;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -24,6 +25,9 @@ pub(crate) enum InternalApplyPatchInvocation {
     /// but [`ApplyPatchExec::auto_approved`] is used to determine the sandbox
     /// used with the `exec()`.
     DelegateToExec(ApplyPatchExec),
+
+    /// The patch is approved with no sandbox, so the handler applies verified contents after AgentOS preflight.
+    ApplyInProcess(ApplyPatchExec),
 }
 
 #[derive(Debug)]
@@ -48,15 +52,22 @@ pub(crate) async fn apply_patch(
     ) {
         SafetyCheck::AutoApprove {
             user_explicitly_approved,
-            ..
-        } => InternalApplyPatchInvocation::DelegateToExec(ApplyPatchExec {
-            action,
-            auto_approved: !user_explicitly_approved,
-            exec_approval_requirement: ExecApprovalRequirement::Skip {
-                bypass_sandbox: false,
-                proposed_execpolicy_amendment: None,
-            },
-        }),
+            sandbox_type,
+        } => {
+            let exec = ApplyPatchExec {
+                action,
+                auto_approved: !user_explicitly_approved,
+                exec_approval_requirement: ExecApprovalRequirement::Skip {
+                    bypass_sandbox: false,
+                    proposed_execpolicy_amendment: None,
+                },
+            };
+            if sandbox_type == SandboxType::None {
+                InternalApplyPatchInvocation::ApplyInProcess(exec)
+            } else {
+                InternalApplyPatchInvocation::DelegateToExec(exec)
+            }
+        }
         SafetyCheck::AskUser => {
             // Delegate the approval prompt (including cached approvals) to the
             // tool runtime, consistent with how shell/unified_exec approvals

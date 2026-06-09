@@ -8,7 +8,7 @@ use crate::context_manager::is_user_turn_boundary;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
 use crate::event_mapping::is_contextual_user_message_content;
-use crate::llm::runtime::LlmPromptPurpose;
+use crate::llm::prompts::LlmPromptPurpose;
 use crate::llm::tasks::compact::CompactExecutionPolicy;
 #[cfg(test)]
 use crate::praxis::PreviousTurnSettings;
@@ -61,22 +61,60 @@ pub(crate) fn compact_execution_policy_for_turn(
     sess: &Session,
     turn_context: &TurnContext,
 ) -> CompactExecutionPolicy {
-    let product_profile = turn_context
-        .session_source
-        .restriction_product()
-        .and_then(crate::llm::ids::ProductProfileId::from_product);
     sess.llm_runtime_catalog()
         .compact_execution_policy_for_model(
             &turn_context.model_info,
             &turn_context.config.model_provider_id,
             &turn_context.provider,
-            product_profile,
+            product_profile_for_turn(turn_context),
         )
         .unwrap_or(CompactExecutionPolicy::LocalPrompt)
 }
 
 pub(crate) fn should_use_remote_compact_task(sess: &Session, turn_context: &TurnContext) -> bool {
     compact_execution_policy_for_turn(sess, turn_context) == CompactExecutionPolicy::RemoteResponses
+}
+
+fn product_profile_for_turn(
+    turn_context: &TurnContext,
+) -> Option<crate::llm::ids::ProductProfileId> {
+    turn_context
+        .session_source
+        .restriction_product()
+        .and_then(crate::llm::ids::ProductProfileId::from_product)
+}
+
+fn compact_model_for_turn(sess: &Session, turn_context: &TurnContext) -> Option<String> {
+    sess.llm_runtime_catalog().compact_model_for_model(
+        &turn_context.model_info,
+        &turn_context.config.model_provider_id,
+        &turn_context.provider,
+        product_profile_for_turn(turn_context),
+    )
+}
+
+async fn local_compact_turn_context(
+    sess: &Session,
+    turn_context: &Arc<TurnContext>,
+) -> Arc<TurnContext> {
+    let Some(model) = compact_model_for_turn(sess, turn_context.as_ref())
+        .as_deref()
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(str::to_string)
+    else {
+        return turn_context.clone();
+    };
+    if turn_context.model_info.slug == model
+        || turn_context.config.model.as_deref() == Some(model.as_str())
+    {
+        return turn_context.clone();
+    }
+    Arc::new(
+        turn_context
+            .with_model(model, &sess.services.models_manager)
+            .await,
+    )
 }
 
 pub(crate) async fn run_inline_auto_compact_task(
@@ -129,34 +167,32 @@ async fn run_compact_task_inner(
     let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
         .await;
+    let compact_turn_context = local_compact_turn_context(sess.as_ref(), &turn_context).await;
 
     let history_snapshot = sess.clone_history().await;
     let raw_history_items = history_snapshot.raw_items().to_vec();
     let mut compact_plan = prepare_local_compaction(
-        history_snapshot.for_prompt(&turn_context.model_info.input_modalities),
+        history_snapshot.for_prompt(&compact_turn_context.model_info.input_modalities),
         mode,
     );
 
     let mut truncated_count = 0usize;
 
-    let max_retries = turn_context.provider.stream_max_retries();
+    let max_retries = compact_turn_context.provider.stream_max_retries();
     let mut retries = 0;
     let compact_system_prompt = sess
         .llm_runtime_catalog()
         .resolve_prompt_for_model(
-            &turn_context.model_info,
-            &turn_context.config.model_provider_id,
-            &turn_context.provider,
-            turn_context
-                .session_source
-                .restriction_product()
-                .and_then(crate::llm::ids::ProductProfileId::from_product),
+            &compact_turn_context.model_info,
+            &compact_turn_context.config.model_provider_id,
+            &compact_turn_context.provider,
+            product_profile_for_turn(compact_turn_context.as_ref()),
             LlmPromptPurpose::Compact,
         )
         .unwrap_or_else(|| SUMMARIZATION_SYSTEM_PROMPT.to_string());
     let mut client_session = sess.services.model_runtime.new_session_for(
-        &turn_context.config.model_provider_id,
-        &turn_context.provider,
+        &compact_turn_context.config.model_provider_id,
+        &compact_turn_context.provider,
     );
     // Reuse one client session so turn-scoped state (sticky routing, websocket incremental
     // request tracking)
@@ -164,7 +200,7 @@ async fn run_compact_task_inner(
 
     loop {
         let summary_prompt = compact_plan.to_prompt_text(local_compact_instruction(
-            turn_context.as_ref(),
+            compact_turn_context.as_ref(),
             compact_plan.previous_summary.is_some(),
         ));
         let prompt = Prompt {
@@ -182,9 +218,11 @@ async fn run_compact_task_inner(
             },
             ..Default::default()
         };
-        let turn_metadata_header = turn_context.turn_metadata_state.current_header_value();
+        let turn_metadata_header = compact_turn_context
+            .turn_metadata_state
+            .current_header_value();
         let attempt_result = drain_to_completed(
-            turn_context.as_ref(),
+            compact_turn_context.as_ref(),
             &mut client_session,
             turn_metadata_header.as_deref(),
             &prompt,

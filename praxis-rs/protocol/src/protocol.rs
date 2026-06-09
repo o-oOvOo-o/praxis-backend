@@ -559,11 +559,16 @@ impl InterAgentCommunication {
     }
 
     pub fn to_response_input_item(&self) -> ResponseInputItem {
+        let text = serde_json::to_string(self).unwrap_or_default();
+        if self.trigger_turn {
+            return ResponseInputItem::Message {
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText { text }],
+            };
+        }
         ResponseInputItem::Message {
             role: "assistant".to_string(),
-            content: vec![ContentItem::OutputText {
-                text: serde_json::to_string(self).unwrap_or_default(),
-            }],
+            content: vec![ContentItem::OutputText { text }],
         }
     }
 
@@ -2389,9 +2394,9 @@ impl SessionSource {
 
     pub fn get_agent_base_name(&self) -> Option<String> {
         match self {
-            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_base_name, .. }) => {
-                agent_base_name.clone()
-            }
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                agent_base_name, ..
+            }) => agent_base_name.clone(),
             SessionSource::SubAgent(SubAgentSource::MemoryConsolidation) => {
                 Some("Morpheus".to_string())
             }
@@ -2410,9 +2415,9 @@ impl SessionSource {
 
     pub fn get_agent_display_name(&self) -> Option<String> {
         match self {
-            SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_display_name, .. }) => {
-                agent_display_name.clone()
-            }
+            SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+                agent_display_name, ..
+            }) => agent_display_name.clone(),
             SessionSource::SubAgent(SubAgentSource::MemoryConsolidation) => {
                 Some("Morpheus".to_string())
             }
@@ -2503,7 +2508,11 @@ pub struct SessionMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_title: Option<String>,
     /// Optional display name assigned to an AgentControl-spawned sub-agent.
-    #[serde(default, alias = "agent_nickname", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "agent_nickname",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub agent_display_name: Option<String>,
     /// Optional role (agent_role) assigned to an AgentControl-spawned sub-agent.
     #[serde(default, alias = "agent_type", skip_serializing_if = "Option::is_none")]
@@ -4882,14 +4891,11 @@ mod tests {
             total_tokens: 10,
         });
 
-        let info =
-            TokenUsageInfo::new_or_append(
-                &initial,
-                &last,
-                /*model_context_window*/ None,
-                /*model_auto_compact_token_limit*/ None,
-            )
-                .expect("new_or_append should return info");
+        let info = TokenUsageInfo::new_or_append(
+            &initial, &last, /*model_context_window*/ None,
+            /*model_auto_compact_token_limit*/ None,
+        )
+        .expect("new_or_append should return info");
 
         assert_eq!(info.model_context_window, Some(258_400));
         assert_eq!(info.model_auto_compact_token_limit, Some(244_000));

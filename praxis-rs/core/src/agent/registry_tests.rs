@@ -61,6 +61,8 @@ fn thread_spawn_depth_increments_and_enforces_limit() {
         parent_thread_id: ThreadId::new(),
         depth: 1,
         agent_path: None,
+        agent_base_name: None,
+        agent_title: None,
         agent_display_name: None,
         agent_role: None,
     });
@@ -262,38 +264,62 @@ fn released_nickname_stays_used_until_pool_reset() {
 }
 
 #[test]
-fn agent_id_for_display_name_resolves_unique_non_root_agent() {
+fn agent_id_for_human_name_resolves_unique_display_name() {
     let registry = AgentRegistry::default();
     let thread_id = ThreadId::new();
     registry.register_spawned_thread(AgentMetadata {
         agent_id: Some(thread_id),
         agent_path: Some(agent_path("/root/mozi")),
+        agent_base_name: None,
+        agent_title: None,
         agent_display_name: Some("墨子".to_string()),
         ..Default::default()
     });
 
     assert_eq!(
         registry
-            .agent_id_for_display_name("墨子")
+            .agent_id_for_human_name("墨子")
             .expect("nickname resolution should not fail"),
         Some(thread_id)
     );
 }
 
 #[test]
-fn agent_id_for_display_name_rejects_ambiguous_names() {
+fn agent_id_for_human_name_resolves_unique_base_name() {
+    let registry = AgentRegistry::default();
+    let thread_id = ThreadId::new();
+    registry.register_spawned_thread(AgentMetadata {
+        agent_id: Some(thread_id),
+        agent_path: Some(agent_path("/root/mozi")),
+        agent_base_name: Some("墨子".to_string()),
+        agent_display_name: Some("墨子-目标解析A".to_string()),
+        ..Default::default()
+    });
+
+    assert_eq!(
+        registry
+            .agent_id_for_human_name("墨子")
+            .expect("base name resolution should not fail"),
+        Some(thread_id)
+    );
+}
+
+#[test]
+fn agent_id_for_human_name_rejects_ambiguous_names() {
     let registry = AgentRegistry::default();
     for path in ["/root/a", "/root/b"] {
         registry.register_spawned_thread(AgentMetadata {
             agent_id: Some(ThreadId::new()),
             agent_path: Some(agent_path(path)),
+            agent_base_name: None,
+            agent_title: None,
             agent_display_name: Some("墨子".to_string()),
             ..Default::default()
         });
     }
 
     let err = registry
-        .agent_id_for_display_name("墨子")
+        .agent_id_for_human_name("墨子")
         .expect_err("duplicate nickname should be rejected");
     let PraxisErr::UnsupportedOperation(message) = err else {
         panic!("expected unsupported operation error");
@@ -386,6 +412,8 @@ fn committed_agent_path_is_indexed_until_release() {
     reservation.commit(AgentMetadata {
         agent_id: Some(thread_id),
         agent_path: Some(agent_path("/root/researcher")),
+        agent_base_name: None,
+        agent_title: None,
         ..Default::default()
     });
 

@@ -15,6 +15,7 @@ use crate::llm::profiles::plugin::ProfileAutoTitleModel;
 use crate::llm::profiles::plugin::ProfileDescriptor;
 use crate::llm::profiles::plugin::ProfileMatchContext;
 use crate::llm::profiles::plugin::ProfileTaskPolicyDescriptor;
+use crate::llm::prompts::LlmPromptPurpose;
 use crate::llm::registry::LlmProfileRegistry;
 use crate::llm::tasks::compact::CompactExecutionPolicy;
 use crate::model_provider_info::ModelProviderInfo;
@@ -91,6 +92,8 @@ pub(crate) struct LlmAutoTitleTaskPolicy {
 struct LlmTaskPolicy {
     auto_title: Option<LlmAutoTitleTaskPolicy>,
     compact_execution: Option<CompactExecutionPolicy>,
+    compact_model: Option<String>,
+    auto_compact_token_limit_cap: Option<i64>,
 }
 
 impl LlmAutoTitleTaskPolicy {
@@ -123,11 +126,16 @@ impl LlmTaskPolicy {
                     ),
                 }),
             compact_execution: descriptor.compact_execution,
+            compact_model: descriptor.compact_model.map(str::to_string),
+            auto_compact_token_limit_cap: descriptor.auto_compact_token_limit_cap,
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.auto_title.is_none() && self.compact_execution.is_none()
+        self.auto_title.is_none()
+            && self.compact_execution.is_none()
+            && self.compact_model.is_none()
+            && self.auto_compact_token_limit_cap.is_none()
     }
 
     fn merge(&mut self, other: Self) {
@@ -138,6 +146,12 @@ impl LlmTaskPolicy {
         }
         if other.compact_execution.is_some() {
             self.compact_execution = other.compact_execution;
+        }
+        if other.compact_model.is_some() {
+            self.compact_model = other.compact_model;
+        }
+        if other.auto_compact_token_limit_cap.is_some() {
+            self.auto_compact_token_limit_cap = other.auto_compact_token_limit_cap;
         }
     }
 }
@@ -171,6 +185,22 @@ struct RawAutoTitleTaskPolicy {
 struct RawCompactTaskPolicy {
     #[serde(default)]
     execution: Option<String>,
+    #[serde(
+        default,
+        alias = "model_slug",
+        alias = "modelSlug",
+        alias = "compact_model",
+        alias = "compactModel"
+    )]
+    model: Option<String>,
+    #[serde(
+        default,
+        alias = "auto_compact_token_limit",
+        alias = "autoCompactTokenLimit",
+        alias = "token_limit_cap",
+        alias = "tokenLimitCap"
+    )]
+    auto_compact_token_limit_cap: Option<i64>,
 }
 
 impl LlmToolVisibilityPolicy {
@@ -217,61 +247,6 @@ impl LlmToolVisibilityPolicy {
                 .extend(other_visible_tools);
         }
         self.hidden_tools.extend(other.hidden_tools);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LlmPromptPurpose {
-    ModelInstructions,
-    AutoTitle,
-    AutoSummary,
-    Compact,
-}
-
-impl LlmPromptPurpose {
-    fn slots(self) -> &'static [&'static str] {
-        match self {
-            Self::ModelInstructions => &[
-                "base",
-                "system",
-                "instructions",
-                "model_instructions",
-                "modelInstructions",
-            ],
-            Self::AutoTitle => &[
-                "auto_title",
-                "autoTitle",
-                "title",
-                "task.title",
-                "task_title",
-                "tasks.title",
-            ],
-            Self::AutoSummary => &[
-                "auto_summary",
-                "autoSummary",
-                "summary",
-                "task.summary",
-                "task_summary",
-                "tasks.summary",
-            ],
-            Self::Compact => &[
-                "compact",
-                "compact_summary",
-                "compactSummary",
-                "task.compact",
-                "task_compact",
-                "tasks.compact",
-            ],
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::ModelInstructions => "model_instructions",
-            Self::AutoTitle => "auto_title",
-            Self::AutoSummary => "auto_summary",
-            Self::Compact => "compact",
-        }
     }
 }
 
@@ -563,6 +538,28 @@ impl LlmRuntimeCatalog {
     ) -> Option<CompactExecutionPolicy> {
         self.task_policy_for_model(model_info, provider_id, provider, product)?
             .compact_execution
+    }
+
+    pub(crate) fn compact_model_for_model(
+        &self,
+        model_info: &ModelInfo,
+        provider_id: &str,
+        provider: &ModelProviderInfo,
+        product: Option<ProductProfileId>,
+    ) -> Option<String> {
+        self.task_policy_for_model(model_info, provider_id, provider, product)?
+            .compact_model
+    }
+
+    pub(crate) fn auto_compact_token_limit_cap_for_model(
+        &self,
+        model_info: &ModelInfo,
+        provider_id: &str,
+        provider: &ModelProviderInfo,
+        product: Option<ProductProfileId>,
+    ) -> Option<i64> {
+        self.task_policy_for_model(model_info, provider_id, provider, product)?
+            .auto_compact_token_limit_cap
     }
 
     fn task_policy_for_model(
@@ -940,16 +937,28 @@ fn read_task_policy(
             || normalized.suppress_model_default_reasoning.is_some())
         .then_some(normalized)
     });
-    let compact_execution = raw
+    let (compact_execution, compact_model, auto_compact_token_limit_cap) = raw
         .compact
-        .and_then(|policy| policy.execution)
-        .and_then(|execution| parse_compact_execution_policy(&execution));
+        .map(|policy| {
+            (
+                policy
+                    .execution
+                    .and_then(|execution| parse_compact_execution_policy(&execution)),
+                policy
+                    .model
+                    .and_then(|model| normalize_non_empty_string(&model)),
+                normalize_compact_token_limit_cap(policy.auto_compact_token_limit_cap),
+            )
+        })
+        .unwrap_or_default();
     let policy = LlmTaskPolicy {
         auto_title,
         compact_execution,
+        compact_model,
+        auto_compact_token_limit_cap,
     };
 
-    (policy.auto_title.is_some() || policy.compact_execution.is_some()).then_some(policy)
+    (!policy.is_empty()).then_some(policy)
 }
 
 fn parse_compact_execution_policy(value: &str) -> Option<CompactExecutionPolicy> {
@@ -962,6 +971,17 @@ fn parse_compact_execution_policy(value: &str) -> Option<CompactExecutionPolicy>
             tracing::warn!("ignoring unknown compact execution policy `{value}`");
             None
         }
+    }
+}
+
+fn normalize_compact_token_limit_cap(value: Option<i64>) -> Option<i64> {
+    match value {
+        Some(value) if value > 0 => Some(value),
+        Some(value) => {
+            tracing::warn!("ignoring non-positive compact token limit cap `{value}`");
+            None
+        }
+        None => None,
     }
 }
 
@@ -1219,7 +1239,7 @@ mod tests {
         let policy_path = temp_dir.path().join("tasks.toml");
         std::fs::write(
             &policy_path,
-            "[auto_title]\nmodel = \"deepseek-v4-title\"\nreasoning_effort = \"low\"\nsuppress_model_default_reasoning = false\n\n[compact]\nexecution = \"local_prompt\"\n",
+            "[auto_title]\nmodel = \"deepseek-v4-title\"\nreasoning_effort = \"low\"\nsuppress_model_default_reasoning = false\n\n[compact]\nexecution = \"local_prompt\"\nmodel = \"deepseek-v4-flash\"\nauto_compact_token_limit = 42000\n",
         )
         .unwrap();
         let catalog = LlmRuntimeCatalog::from_plugin_manifests(vec![PluginLlmManifest {
@@ -1258,6 +1278,18 @@ mod tests {
             &provider,
             None,
         );
+        let compact_model = catalog.compact_model_for_model(
+            &model("deepseek-v4-pro"),
+            &provider_id,
+            &provider,
+            None,
+        );
+        let compact_limit_cap = catalog.auto_compact_token_limit_cap_for_model(
+            &model("deepseek-v4-pro"),
+            &provider_id,
+            &provider,
+            None,
+        );
 
         assert_eq!(
             title_policy.model_slug.as_deref(),
@@ -1266,6 +1298,8 @@ mod tests {
         assert_eq!(title_policy.reasoning_effort, Some(ReasoningEffort::Low));
         assert_eq!(title_policy.suppress_model_default_reasoning, Some(false));
         assert_eq!(compact_policy, Some(CompactExecutionPolicy::LocalPrompt));
+        assert_eq!(compact_model.as_deref(), Some("deepseek-v4-flash"));
+        assert_eq!(compact_limit_cap, Some(42_000));
     }
 
     #[test]
@@ -1355,12 +1389,12 @@ mod tests {
         let product_task_path = temp_dir.path().join("product-tasks.toml");
         std::fs::write(
             &profile_task_path,
-            "[auto_title]\nmodel = \"profile-title\"\nreasoning_effort = \"low\"\n\n[compact]\nexecution = \"local_prompt\"\n",
+            "[auto_title]\nmodel = \"profile-title\"\nreasoning_effort = \"low\"\n\n[compact]\nexecution = \"local_prompt\"\nmodel = \"profile-compact\"\nauto_compact_token_limit = 42000\n",
         )
         .unwrap();
         std::fs::write(
             &product_task_path,
-            "[auto_title]\nmodel = \"product-title\"\n\n[compact]\nexecution = \"remote_responses\"\n",
+            "[auto_title]\nmodel = \"product-title\"\n\n[compact]\nexecution = \"remote_responses\"\ncompact_model = \"product-compact\"\nauto_compact_token_limit = 24000\n",
         )
         .unwrap();
         let catalog = LlmRuntimeCatalog::from_plugin_manifests(vec![PluginLlmManifest {
@@ -1408,6 +1442,18 @@ mod tests {
             &provider,
             Some(ProductProfileId::Cunning3d),
         );
+        let compact_model = catalog.compact_model_for_model(
+            &model("deepseek-v4-pro"),
+            &provider_id,
+            &provider,
+            Some(ProductProfileId::Cunning3d),
+        );
+        let compact_limit_cap = catalog.auto_compact_token_limit_cap_for_model(
+            &model("deepseek-v4-pro"),
+            &provider_id,
+            &provider,
+            Some(ProductProfileId::Cunning3d),
+        );
 
         assert_eq!(title_policy.model_slug.as_deref(), Some("product-title"));
         assert_eq!(title_policy.reasoning_effort, Some(ReasoningEffort::Low));
@@ -1415,5 +1461,7 @@ mod tests {
             compact_policy,
             Some(CompactExecutionPolicy::RemoteResponses)
         );
+        assert_eq!(compact_model.as_deref(), Some("product-compact"));
+        assert_eq!(compact_limit_cap, Some(24_000));
     }
 }

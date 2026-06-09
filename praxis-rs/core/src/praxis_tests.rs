@@ -2383,7 +2383,7 @@ enabled = false
         crate::config::AgentRoleConfig {
             description: None,
             config_file: Some(role_path),
-            nickname_candidates: None,
+            base_name_candidates: None,
         },
     );
     crate::agent::role::apply_role_to_config(&mut child_config, Some("custom"))
@@ -2733,6 +2733,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     let skills_input =
         crate::skills_load_input_from_config(&per_turn_config, effective_skill_roots);
     let skills_outcome = Arc::new(services.skills_manager.skills_for_config(&skills_input));
+    let llm_runtime_catalog = crate::llm::runtime::LlmRuntimeCatalog::default();
     let turn_context = Session::make_turn_context(
         conversation_id,
         Some(Arc::clone(&auth_manager)),
@@ -2745,6 +2746,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         per_turn_config,
         model_info,
         &models_manager,
+        &llm_runtime_catalog,
         /*network*/ None,
         environment,
         "turn_id".to_string(),
@@ -2768,6 +2770,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         idle_pending_input: Mutex::new(Vec::new()),
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),
         services,
+        goal_runtime: crate::goals::GoalRuntimeState::new(),
+        llm_runtime_catalog,
         js_repl,
         next_internal_sub_id: AtomicU64::new(0),
         auto_title_attempted: AtomicBool::new(false),
@@ -3113,6 +3117,7 @@ async fn user_turn_updates_approvals_reviewer() {
             approvals_reviewer: Some(praxis_config::types::ApprovalsReviewer::GuardianSubagent),
             sandbox_policy: config.permissions.sandbox_policy.get().clone(),
             model: turn_context.model_info.slug.clone(),
+            model_provider: Some(config.model_provider_id.clone()),
             effort: config.model_reasoning_effort,
             summary: config.model_reasoning_summary,
             service_tier: None,
@@ -3574,6 +3579,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
     let skills_input =
         crate::skills_load_input_from_config(&per_turn_config, effective_skill_roots);
     let skills_outcome = Arc::new(services.skills_manager.skills_for_config(&skills_input));
+    let llm_runtime_catalog = crate::llm::runtime::LlmRuntimeCatalog::default();
     let turn_context = Arc::new(Session::make_turn_context(
         conversation_id,
         Some(Arc::clone(&auth_manager)),
@@ -3586,6 +3592,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         per_turn_config,
         model_info,
         &models_manager,
+        &llm_runtime_catalog,
         /*network*/ None,
         environment,
         "turn_id".to_string(),
@@ -3609,6 +3616,8 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         idle_pending_input: Mutex::new(Vec::new()),
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),
         services,
+        goal_runtime: crate::goals::GoalRuntimeState::new(),
+        llm_runtime_catalog,
         js_repl,
         next_internal_sub_id: AtomicU64::new(0),
         auto_title_attempted: AtomicBool::new(false),

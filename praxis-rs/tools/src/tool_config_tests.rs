@@ -50,6 +50,76 @@ fn model_info() -> ModelInfo {
 }
 
 #[test]
+fn enabled_web_search_mode_defaults_to_responses_web_search_backend() {
+    let model_info = model_info();
+    let features = Features::with_defaults();
+    let available_models = Vec::new();
+
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features: &features,
+        web_search_mode: Some(WebSearchMode::Cached),
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    });
+
+    assert_eq!(
+        tools_config.tool_capabilities.web_search_backend,
+        Some(ToolWebSearchBackend::Responses)
+    );
+}
+
+#[test]
+fn tool_capability_overlay_preserves_native_web_search_when_empty() {
+    let model_info = model_info();
+    let features = Features::with_defaults();
+    let available_models = Vec::new();
+
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features: &features,
+        web_search_mode: Some(WebSearchMode::Cached),
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    })
+    .with_tool_capabilities(ToolCapabilityConfig::default());
+
+    assert_eq!(
+        tools_config.tool_capabilities.web_search_backend,
+        Some(ToolWebSearchBackend::Responses)
+    );
+}
+
+#[test]
+fn tool_capability_overlay_can_replace_native_web_search_backend() {
+    let model_info = model_info();
+    let features = Features::with_defaults();
+    let available_models = Vec::new();
+
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features: &features,
+        web_search_mode: Some(WebSearchMode::Cached),
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    })
+    .with_tool_capabilities(ToolCapabilityConfig {
+        web_search_backend: Some(ToolWebSearchBackend::Praxis),
+    });
+
+    assert_eq!(
+        tools_config.tool_capabilities.web_search_backend,
+        Some(ToolWebSearchBackend::Praxis)
+    );
+}
+
+#[test]
 fn unified_exec_is_blocked_for_windows_sandboxed_policies_only() {
     assert!(!unified_exec_allowed_in_environment(
         /*is_windows*/ true,

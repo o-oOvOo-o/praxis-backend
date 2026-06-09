@@ -2168,13 +2168,20 @@ async fn process_common_stream_event(
                         .map(|value| value as usize)
                         .unwrap_or(fallback_index);
                     let entry = state.tool_calls.entry(index).or_default();
-                    if let Some(call_id) = tool_call.get("id").and_then(Value::as_str) {
+                    if let Some(call_id) = tool_call
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|call_id| !call_id.is_empty())
+                    {
                         entry.call_id = Some(call_id.to_string());
                     }
                     if let Some(name) = tool_call
                         .get("function")
                         .and_then(|function| function.get("name"))
                         .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|name| !name.is_empty())
                     {
                         entry.name = Some(name.to_string());
                     }
@@ -2552,15 +2559,16 @@ async fn emit_common_tool_calls(
     }
     let tool_calls = std::mem::take(&mut state.tool_calls);
     for (index, tool_call) in tool_calls {
-        let name = tool_call.name.unwrap_or_else(|| format!("tool_{index}"));
-        let call_id = tool_call
-            .call_id
-            .unwrap_or_else(|| format!("common-tool-{index}-{}", Uuid::new_v4()));
         let arguments = if tool_call.arguments.is_empty() {
             "{}".to_string()
         } else {
             tool_call.arguments
         };
+        let name = normalize_common_tool_call_name(tool_call.name, &arguments)
+            .unwrap_or_else(|| format!("tool_{index}"));
+        let call_id = tool_call
+            .call_id
+            .unwrap_or_else(|| format!("common-tool-{index}-{}", Uuid::new_v4()));
         send_stream_event(
             tx_event,
             ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
@@ -2757,23 +2765,25 @@ fn parse_common_response(
                         .to_string(),
                 )
             })?;
-            let name = function
+            let raw_name = function
                 .get("name")
                 .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    PraxisErr::InvalidRequest(
-                        "provider returned invalid common response: tool function missing `name`"
-                            .to_string(),
-                    )
-                })?
-                .to_string();
+                .map(str::to_string);
             let arguments = function
                 .get("arguments")
                 .map(value_to_json_string)
                 .unwrap_or_else(|| "{}".to_string());
+            let name = normalize_common_tool_call_name(raw_name, &arguments).ok_or_else(|| {
+                PraxisErr::InvalidRequest(
+                    "provider returned invalid common response: tool function missing `name`"
+                        .to_string(),
+                )
+            })?;
             let call_id = tool_call
                 .get("id")
                 .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|call_id| !call_id.is_empty())
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("common-tool-{index}-{}", Uuid::new_v4()));
             items.push(ResponseItem::FunctionCall {
@@ -2791,6 +2801,40 @@ fn parse_common_response(
         token_usage: parse_common_usage(response_json.get("usage")),
         items,
     })
+}
+
+fn normalize_common_tool_call_name(name: Option<String>, arguments: &str) -> Option<String> {
+    if let Some(name) = name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        return Some(name.to_string());
+    }
+
+    infer_common_tool_call_name_from_arguments(arguments).map(str::to_string)
+}
+
+fn infer_common_tool_call_name_from_arguments(arguments: &str) -> Option<&'static str> {
+    let value = serde_json::from_str::<Value>(arguments).ok()?;
+    let map = value.as_object()?;
+
+    if map.contains_key("task_name") && map.contains_key("message") {
+        return Some("spawn_agent");
+    }
+    if map.contains_key("timeout_ms") && map.len() == 1 {
+        return Some("wait_agent");
+    }
+    if map.contains_key("path_prefix") {
+        return Some("list_agents");
+    }
+    if map.contains_key("target") && map.contains_key("message") {
+        return Some("send_message");
+    }
+    if map.contains_key("target") && map.contains_key("objective") {
+        return Some("assign_task");
+    }
+    None
 }
 
 fn extract_common_reasoning_content(
@@ -4199,6 +4243,69 @@ mod tests {
             ResponseEvent::Completed { ref response_id, token_usage: Some(TokenUsage { input_tokens: 12, cached_input_tokens: 1, output_tokens: 4, total_tokens: 16, .. }) }
                 if response_id == "chat_stream_1"
         ));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn common_sse_inferrs_spawn_agent_when_tool_name_is_empty() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(header("authorization", "Bearer common-key"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(
+                    [
+                        sse_data(json!({
+                            "id": "chat_stream_empty_tool_name",
+                            "choices": [{
+                                "delta": {
+                                    "tool_calls": [{
+                                        "index": 0,
+                                        "id": "",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "",
+                                            "arguments": "{\"task_name\":\"worker_a\",\"message\":\"do it\"}"
+                                        }
+                                    }]
+                                },
+                                "finish_reason": null
+                            }]
+                        })),
+                        sse_data(json!({
+                            "id": "chat_stream_empty_tool_name",
+                            "choices": [{
+                                "delta": {},
+                                "finish_reason": "tool_calls"
+                            }]
+                        })),
+                        "data: [DONE]\n\n".to_string(),
+                    ]
+                    .join(""),
+                    "text/event-stream",
+                ),
+            )
+            .mount(&server)
+            .await;
+
+        let stream = stream_common_unary(
+            provider(server.uri()),
+            CoreAuthProvider::for_test(Some("common-key"), None),
+            &common_provider_info(None),
+            &Prompt::default(),
+            &model_info(),
+            None,
+        )
+        .await
+        .expect("common sse stream");
+
+        let events = drain_stream(stream).await;
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ResponseEvent::OutputItemDone(ResponseItem::FunctionCall { name, call_id, arguments, .. })
+                if name == "spawn_agent"
+                    && call_id.starts_with("common-tool-0-")
+                    && arguments == "{\"task_name\":\"worker_a\",\"message\":\"do it\"}"
+        )));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

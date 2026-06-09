@@ -36,7 +36,7 @@ pub fn create_spawn_agent_tool(options: SpawnAgentToolOptions<'_>) -> ToolSpec {
         "title".to_string(),
         JsonSchema::String {
             description: Some(
-                "Short human-facing responsibility label for the new agent, such as `负责GUI` or `碰撞系统`. Praxis combines it with a Chinese base name, for example `墨子-负责GUI`."
+                "Optional short human-facing responsibility label for the new agent, such as `负责GUI` or `碰撞系统`. Praxis combines it with a Chinese base name, for example `墨子-负责GUI`; when omitted, Praxis derives a label from `task_name`."
                     .to_string(),
             ),
         },
@@ -52,11 +52,7 @@ pub fn create_spawn_agent_tool(options: SpawnAgentToolOptions<'_>) -> ToolSpec {
         defer_loading: None,
         parameters: JsonSchema::Object {
             properties,
-            required: Some(vec![
-                "task_name".to_string(),
-                "title".to_string(),
-                "message".to_string(),
-            ]),
+            required: Some(vec!["task_name".to_string(), "message".to_string()]),
             additional_properties: Some(false.into()),
         },
         output_schema: Some(spawn_agent_output_schema()),
@@ -65,26 +61,20 @@ pub fn create_spawn_agent_tool(options: SpawnAgentToolOptions<'_>) -> ToolSpec {
 
 pub fn create_send_message_tool() -> ToolSpec {
     let properties = BTreeMap::from([
-        (
-            "target".to_string(),
-            JsonSchema::String {
-                description: Some(
-                    "Agent id, canonical task name, or user-facing Chinese short name to message (from spawn_agent).".to_string(),
-                ),
-            },
-        ),
+        ("target".to_string(), agent_target_schema("message")),
         (
             "message".to_string(),
             JsonSchema::String {
-                description: Some("Message text to queue on the target agent.".to_string()),
+                description: Some(
+                    "Message text to queue on the target agent. This does not wake the target or produce a new result by itself; use assign_task when you need the target to run now.".to_string(),
+                ),
             },
         ),
     ]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "send_message".to_string(),
-        description: "Add a text message to an existing agent without triggering a new turn."
-            .to_string(),
+        description: "Queue a text message for an existing agent without triggering a new turn. Do not call wait_agent expecting send_message to produce a fresh target reply; use assign_task for work that must run now and return a result.".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::Object {
@@ -98,14 +88,7 @@ pub fn create_send_message_tool() -> ToolSpec {
 
 pub fn create_assign_task_tool() -> ToolSpec {
     let properties = BTreeMap::from([
-        (
-            "target".to_string(),
-            JsonSchema::String {
-                description: Some(
-                    "Agent id, canonical task name, or user-facing Chinese short name to assign (from spawn_agent).".to_string(),
-                ),
-            },
-        ),
+        ("target".to_string(), agent_target_schema("assign")),
         (
             "objective".to_string(),
             JsonSchema::String {
@@ -183,7 +166,7 @@ pub fn create_assign_task_tool() -> ToolSpec {
 
     ToolSpec::Function(ResponsesApiTool {
         name: "assign_task".to_string(),
-        description: "Create a structured AgentOS task for an existing non-root agent and trigger a turn in the target. Scope and resources become runtime scheduling facts, not chat-only guidance.".to_string(),
+        description: "Create a structured AgentOS task for an existing non-root agent and trigger a new turn in the target. Use this, not send_message, when the target must do new work and return a result. Scope and resources become runtime scheduling facts, not chat-only guidance.".to_string(),
         strict: false,
         defer_loading: None,
         parameters: JsonSchema::Object {
@@ -206,10 +189,18 @@ fn string_array_schema(description: &str) -> JsonSchema {
     }
 }
 
+fn agent_target_schema(action: &str) -> JsonSchema {
+    JsonSchema::String {
+        description: Some(format!(
+            "Stable target for the agent to {action}. Prefer `recommended_target` from spawn_agent or list_agents; it is normally the thread id and is the most reliable value. Do not use `agent_name`, canonical task names, display names, or Chinese base names when `recommended_target` is available; those are accepted only for recovery or older tool outputs."
+        )),
+    }
+}
+
 pub fn create_wait_agent_tool(options: WaitAgentTimeoutOptions) -> ToolSpec {
     ToolSpec::Function(ResponsesApiTool {
         name: "wait_agent".to_string(),
-        description: "Wait for a mailbox update from any live agent, including queued messages and final-status notifications. Returns a brief wait summary instead of agent content, or a timeout summary if no mailbox update arrives before the deadline."
+        description: "Wait for an agent update. With target, wait for that target agent to reach a final status and return the target status. Without target, wait for any mailbox or AgentOS state update. wait_agent never wakes an idle target by itself."
             .to_string(),
         strict: false,
         defer_loading: None,
@@ -232,7 +223,7 @@ pub fn create_list_agents_tool() -> ToolSpec {
     ToolSpec::Function(ResponsesApiTool {
         name: "list_agents".to_string(),
         description:
-            "List live agents in the current root thread tree. Optionally filter by task-path prefix."
+            "List live sub-agents in the current root thread tree. Optionally filter by task-path prefix. The current `/root` main agent is intentionally omitted. If `agents` is empty and AgentOS pending lists are empty, all sub-agents are closed or absent, so stop listing and summarize."
                 .to_string(),
         strict: false,
         defer_loading: None,
@@ -432,14 +423,7 @@ pub fn create_poll_runtime_commands_tool() -> ToolSpec {
 }
 
 pub fn create_close_agent_tool() -> ToolSpec {
-    let properties = BTreeMap::from([(
-        "target".to_string(),
-        JsonSchema::String {
-            description: Some(
-                "Agent id, canonical task name, or user-facing Chinese short name to close (from spawn_agent).".to_string(),
-            ),
-        },
-    )]);
+    let properties = BTreeMap::from([("target".to_string(), agent_target_schema("close"))]);
 
     ToolSpec::Function(ResponsesApiTool {
         name: "close_agent".to_string(),
@@ -492,7 +476,7 @@ fn spawn_agent_output_schema() -> Value {
         "properties": {
             "agent_id": {
                 "type": ["string", "null"],
-                "description": "Opaque thread identifier for the spawned agent when exposed by the runtime."
+                "description": "Stable thread identifier for the spawned agent. Prefer this as the target for wait_agent, assign_task, send_message, and close_agent."
             },
             "task_name": {
                 "type": "string",
@@ -509,9 +493,17 @@ fn spawn_agent_output_schema() -> Value {
             "agent_display_name": {
                 "type": ["string", "null"],
                 "description": "User-facing display name combining base name and title, for example `墨子-负责GUI`."
+            },
+            "recommended_target": {
+                "type": "string",
+                "description": "Best target string to reuse for follow-up tools. Usually this is the stable thread id."
+            },
+            "next_action": {
+                "type": "string",
+                "description": "Plain-language next step for coordinating this spawned worker."
             }
         },
-        "required": ["agent_id", "task_name", "agent_base_name", "agent_title", "agent_display_name"],
+        "required": ["agent_id", "task_name", "agent_base_name", "agent_title", "agent_display_name", "recommended_target", "next_action"],
         "additionalProperties": false
     })
 }
@@ -527,9 +519,48 @@ fn message_submission_output_schema() -> Value {
             "runtime_command_id": {
                 "type": ["string", "null"],
                 "description": "AgentOS RuntimeCommand id for structured assign_task dispatches."
+            },
+            "target": {
+                "type": "string",
+                "description": "Original target string requested by the caller."
+            },
+            "target_thread_id": {
+                "type": "string",
+                "description": "Resolved stable target thread id. Prefer this for the next wait_agent or assign_task call."
+            },
+            "target_agent_base_name": {
+                "type": ["string", "null"],
+                "description": "Resolved Chinese base name for the target, when available."
+            },
+            "target_agent_title": {
+                "type": ["string", "null"],
+                "description": "Resolved short responsibility title for the target, when available."
+            },
+            "target_agent_display_name": {
+                "type": ["string", "null"],
+                "description": "Resolved user-facing display name for the target, when available."
+            },
+            "delivery_mode": {
+                "type": "string",
+                "enum": ["send_message", "assign_task"],
+                "description": "Whether this call only queued a message or triggered an assigned task turn."
+            },
+            "next_action": {
+                "type": "string",
+                "description": "Plain-language next step; assign_task results normally tell the caller to wait_agent on target_thread_id."
             }
         },
-        "required": ["submission_id", "runtime_command_id"],
+        "required": [
+            "submission_id",
+            "runtime_command_id",
+            "target",
+            "target_thread_id",
+            "target_agent_base_name",
+            "target_agent_title",
+            "target_agent_display_name",
+            "delivery_mode",
+            "next_action"
+        ],
         "additionalProperties": false
     })
 }
@@ -543,6 +574,18 @@ fn list_agents_output_schema() -> Value {
                 "items": {
                     "type": "object",
                     "properties": {
+                        "thread_id": {
+                            "type": "string",
+                            "description": "Stable thread id for this agent. Prefer this as the target when names are ambiguous."
+                        },
+                        "recommended_target": {
+                            "type": "string",
+                            "description": "Stable target string to use for wait_agent, assign_task, send_message, or close_agent. Prefer this over agent_name or display names."
+                        },
+                        "next_action": {
+                            "type": "string",
+                            "description": "Plain-language next coordination step for this agent."
+                        },
                         "agent_name": {
                             "type": "string",
                             "description": "Canonical task name for the agent when available, otherwise the agent id."
@@ -572,10 +615,43 @@ fn list_agents_output_schema() -> Value {
                             "description": "Most recent user or inter-agent instruction received by the agent, when available."
                         }
                     },
-                    "required": ["agent_name", "agent_base_name", "agent_title", "agent_display_name", "agent_role", "agent_status", "last_task_message"],
+                    "required": ["thread_id", "recommended_target", "next_action", "agent_name", "agent_base_name", "agent_title", "agent_display_name", "agent_role", "agent_status", "last_task_message"],
                     "additionalProperties": false
                 },
-                "description": "Live agents visible in the current root thread tree."
+                "description": "Live sub-agents visible in the current root thread tree. The current `/root` main agent is omitted."
+            },
+            "terminal_state": {
+                "type": "object",
+                "properties": {
+                    "only_root": {
+                        "type": "boolean",
+                        "description": "True when the unfiltered registry only contained `/root`, the current main agent."
+                    },
+                    "no_live_subagents": {
+                        "type": "boolean",
+                        "description": "True when no returned row represents a live sub-agent."
+                    },
+                    "no_pending_agent_os_work": {
+                        "type": "boolean",
+                        "description": "True when AgentOS has no leases, pending worker requests, or pending runtime commands."
+                    },
+                    "should_stop_listing": {
+                        "type": "boolean",
+                        "description": "True when repeated list_agents calls are useless; summarize instead."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Plain-language instruction for what the agent should do next."
+                    }
+                },
+                "required": [
+                    "only_root",
+                    "no_live_subagents",
+                    "no_pending_agent_os_work",
+                    "should_stop_listing",
+                    "message"
+                ],
+                "additionalProperties": false
             },
             "agent_os": {
                 "type": "object",
@@ -759,7 +835,7 @@ fn list_agents_output_schema() -> Value {
                 "additionalProperties": false
             }
         },
-        "required": ["agents", "agent_os"],
+        "required": ["agents", "agent_os", "terminal_state"],
         "additionalProperties": false
     })
 }
@@ -946,14 +1022,51 @@ fn wait_output_schema() -> Value {
         "properties": {
             "message": {
                 "type": "string",
-                "description": "Brief wait summary without the agent's final content."
+                "description": "Brief wait summary."
             },
             "timed_out": {
                 "type": "boolean",
-                "description": "Whether the wait call returned due to timeout before any agent reached a final status."
+                "description": "Whether the wait call returned due to timeout."
+            },
+            "source": {
+                "type": "string",
+                "enum": ["mailbox", "agent_os", "target_status", "timeout"],
+                "description": "Why wait_agent returned."
+            },
+            "agent_os_sequence": {
+                "type": ["integer", "null"],
+                "description": "AgentOS change sequence observed when wait_agent returned."
+            },
+            "target": {
+                "type": "string",
+                "description": "Requested target when target mode was used."
+            },
+            "target_thread_id": {
+                "type": "string",
+                "description": "Resolved target thread id when target mode was used."
+            },
+            "target_agent_base_name": {
+                "type": "string",
+                "description": "Resolved target Chinese base name when target mode was used and available."
+            },
+            "target_agent_title": {
+                "type": "string",
+                "description": "Resolved target responsibility title when target mode was used and available."
+            },
+            "target_agent_display_name": {
+                "type": "string",
+                "description": "Resolved target display name when target mode was used and available."
+            },
+            "target_status": {
+                "description": "Resolved target's status when target mode was used.",
+                "allOf": [agent_status_output_schema()]
+            },
+            "next_action": {
+                "type": "string",
+                "description": "Plain-language next step for worker coordination."
             }
         },
-        "required": ["message", "timed_out"],
+        "required": ["message", "timed_out", "source", "agent_os_sequence", "next_action"],
         "additionalProperties": false
     })
 }
@@ -1037,6 +1150,9 @@ fn spawn_agent_tool_description(
         Spawn a sub-agent for a well-scoped task. {return_value_description} This spawn_agent tool provides you access to smaller but more efficient sub-agents. A mini model can solve many tasks faster than the main model. You should follow the rules and guidelines below to use this tool.
 
 {available_models_description}
+### Cross-provider coding workers
+- Picker-visible models above may only reflect the current provider. When a Codex/GPT worker is needed and the OpenAI provider is configured, you may still explicitly set `model_provider` to `openai`, `model` to `gpt-5.5`, and `reasoning_effort` to `xhigh`. Natural model aliases such as `5.5`, `gpt5.5`, `codex5.5`, and `gpt 5.5 xhigh` are accepted, but explicit fields are more reliable.
+
 ### When to delegate vs. do the subtask yourself
 - First, quickly analyze the overall user task and form a succinct high-level plan. Identify which tasks are immediate blockers on the critical path, and which tasks are sidecar tasks that are needed but can run in parallel without blocking the next local step. As part of that plan, explicitly decide what immediate task you should do locally right now. Do this planning step before delegating to agents so you do not hand off the immediate blocking task to a submodel and then waste time waiting on it.
 - Use the smaller subagent when a subtask is easy enough for it to handle and can run in parallel with your local work. Prefer delegating concrete, bounded sidecar tasks that materially advance the main task without blocking your immediate next local step.
@@ -1046,7 +1162,7 @@ fn spawn_agent_tool_description(
 ### Designing delegated subtasks
 - Subtasks must be concrete, well-defined, and self-contained.
 - Delegated subtasks must materially advance the main task.
-- Always provide both `task_name` and `title`: `task_name` is the lowercase ASCII canonical tool reference, while `title` is a short human-facing responsibility label that Praxis renders as a Chinese display name such as `墨子-负责GUI`.
+- Provide `task_name` as the lowercase ASCII canonical tool reference. Also provide `title` when you know a concise human-facing responsibility label; Praxis can derive it from `task_name` if omitted, but an explicit title renders better as a Chinese display name such as `墨子-负责GUI`. `title` is the responsibility, not the agent name; never set it to `墨子`, `荀子`, or another base name by itself.
 - Do not duplicate work between the main rollout and delegated subtasks.
 - Avoid issuing multiple delegate calls on the same unresolved thread unless the new delegated task is genuinely different and necessary.
 - Narrow the delegated ask to the concrete output you need next.
@@ -1099,15 +1215,18 @@ fn spawn_agent_models_description(models: &[ModelPreset]) -> String {
 }
 
 fn wait_agent_tool_parameters(options: WaitAgentTimeoutOptions) -> JsonSchema {
-    let properties = BTreeMap::from([(
-        "timeout_ms".to_string(),
-        JsonSchema::Number {
-            description: Some(format!(
-                "Optional timeout in milliseconds. Defaults to {}, min {}, max {}. Prefer longer waits (minutes) to avoid busy polling.",
-                options.default_timeout_ms, options.min_timeout_ms, options.max_timeout_ms,
-            )),
-        },
-    )]);
+    let properties = BTreeMap::from([
+        ("target".to_string(), agent_target_schema("wait on")),
+        (
+            "timeout_ms".to_string(),
+            JsonSchema::Number {
+                description: Some(format!(
+                    "Optional timeout in milliseconds. Defaults to {}, min {}, max {}. Prefer longer waits (minutes) to avoid busy polling.",
+                    options.default_timeout_ms, options.min_timeout_ms, options.max_timeout_ms,
+                )),
+            },
+        ),
+    ]);
 
     JsonSchema::Object {
         properties,

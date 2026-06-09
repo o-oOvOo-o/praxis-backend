@@ -251,18 +251,22 @@ fn test_build_specs_multi_agent_uses_task_names_and_hides_resume() {
     assert!(!properties.contains_key("fork_context"));
     assert_eq!(
         required.as_ref(),
-        Some(&vec![
-            "task_name".to_string(),
-            "title".to_string(),
-            "message".to_string()
-        ])
+        Some(&vec!["task_name".to_string(), "message".to_string()])
     );
     let output_schema = output_schema
         .as_ref()
         .expect("spawn_agent should define output schema");
     assert_eq!(
         output_schema["required"],
-        json!(["agent_id", "task_name", "nickname"])
+        json!([
+            "agent_id",
+            "task_name",
+            "agent_base_name",
+            "agent_title",
+            "agent_display_name",
+            "recommended_target",
+            "next_action"
+        ])
     );
 
     let send_message = find_tool(&tools, "send_message");
@@ -338,6 +342,7 @@ fn test_build_specs_multi_agent_uses_task_names_and_hides_resume() {
         panic!("wait_agent should use object params");
     };
     assert!(!properties.contains_key("targets"));
+    assert!(properties.contains_key("target"));
     assert!(properties.contains_key("timeout_ms"));
     assert_eq!(required, &None);
     let output_schema = output_schema
@@ -345,7 +350,11 @@ fn test_build_specs_multi_agent_uses_task_names_and_hides_resume() {
         .expect("wait_agent should define output schema");
     assert_eq!(
         output_schema["properties"]["message"]["description"],
-        json!("Brief wait summary without the agent's final content.")
+        json!("Brief wait summary.")
+    );
+    assert_eq!(
+        output_schema["properties"]["source"]["enum"],
+        json!(["mailbox", "agent_os", "target_status", "timeout"])
     );
 
     let list_agents = find_tool(&tools, "list_agents");
@@ -373,7 +382,12 @@ fn test_build_specs_multi_agent_uses_task_names_and_hides_resume() {
     assert_eq!(
         output_schema["properties"]["agents"]["items"]["required"],
         json!([
+            "thread_id",
+            "recommended_target",
+            "next_action",
             "agent_name",
+            "agent_base_name",
+            "agent_title",
             "agent_display_name",
             "agent_role",
             "agent_status",

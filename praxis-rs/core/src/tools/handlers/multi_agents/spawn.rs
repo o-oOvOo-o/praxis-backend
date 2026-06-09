@@ -124,24 +124,29 @@ impl ToolHandler for Handler {
             }
             None => None,
         };
-        let (new_agent_path, new_agent_base_name, new_agent_title, new_agent_display_name, new_agent_role) =
-            match (&agent_snapshot, new_agent_metadata) {
-                (Some(snapshot), _) => (
-                    snapshot.session_source.get_agent_path().map(String::from),
-                    snapshot.session_source.get_agent_base_name(),
-                    snapshot.session_source.get_agent_title(),
-                    snapshot.session_source.get_agent_display_name(),
-                    snapshot.session_source.get_agent_role(),
-                ),
-                (None, Some(metadata)) => (
-                    metadata.agent_path.map(String::from),
-                    metadata.agent_base_name,
-                    metadata.agent_title,
-                    metadata.agent_display_name,
-                    metadata.agent_role,
-                ),
-                (None, None) => (None, None, None, None, None),
-            };
+        let (
+            new_agent_path,
+            new_agent_base_name,
+            new_agent_title,
+            new_agent_display_name,
+            new_agent_role,
+        ) = match (&agent_snapshot, new_agent_metadata) {
+            (Some(snapshot), _) => (
+                snapshot.session_source.get_agent_path().map(String::from),
+                snapshot.session_source.get_agent_base_name(),
+                snapshot.session_source.get_agent_title(),
+                snapshot.session_source.get_agent_display_name(),
+                snapshot.session_source.get_agent_role(),
+            ),
+            (None, Some(metadata)) => (
+                metadata.agent_path.map(String::from),
+                metadata.agent_base_name,
+                metadata.agent_title,
+                metadata.agent_display_name,
+                metadata.agent_role,
+            ),
+            (None, None) => (None, None, None, None, None),
+        };
         let effective_model = agent_snapshot
             .as_ref()
             .map(|snapshot| snapshot.model.clone())
@@ -185,12 +190,25 @@ impl ToolHandler for Handler {
             )
         })?;
 
+        let agent_id = new_thread_id.map(|thread_id| thread_id.to_string());
+        let recommended_target = agent_id.clone().unwrap_or_else(|| {
+            result_agent_display_name
+                .clone()
+                .or_else(|| result_agent_base_name.clone())
+                .unwrap_or_else(|| task_name.clone())
+        });
+        let next_action = format!(
+            "Call wait_agent with target `{recommended_target}` to wait for this worker; use assign_task with the same target for later work."
+        );
+
         Ok(SpawnAgentResult {
-            agent_id: None,
+            agent_id,
             task_name,
             agent_base_name: result_agent_base_name,
             agent_title: result_agent_title,
             agent_display_name: result_agent_display_name,
+            recommended_target,
+            next_action,
         })
     }
 }
@@ -200,7 +218,8 @@ impl ToolHandler for Handler {
 struct SpawnAgentArgs {
     message: String,
     task_name: String,
-    title: String,
+    #[serde(default)]
+    title: Option<String>,
     agent_type: Option<String>,
     model_provider: Option<String>,
     model: Option<String>,
@@ -211,13 +230,20 @@ struct SpawnAgentArgs {
 
 impl SpawnAgentArgs {
     fn display_title(&self) -> Result<String, FunctionCallError> {
-        let title = self.title.trim();
-        if title.is_empty() {
-            return Err(FunctionCallError::RespondToModel(
-                "title must be a short human-facing responsibility label".to_string(),
-            ));
+        if let Some(title) = self
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+        {
+            return Ok(title.to_string());
         }
-        Ok(title.to_string())
+        derive_spawn_agent_title(&self.task_name).ok_or_else(|| {
+            FunctionCallError::RespondToModel(
+                "title must be a short human-facing responsibility label when task_name is empty"
+                    .to_string(),
+            )
+        })
     }
 
     fn fork_mode(&self) -> Result<Option<SpawnAgentForkMode>, FunctionCallError> {
@@ -249,6 +275,34 @@ impl SpawnAgentArgs {
         }
 
         Ok(Some(SpawnAgentForkMode::LastNTurns(last_n_turns)))
+    }
+}
+
+fn derive_spawn_agent_title(task_name: &str) -> Option<String> {
+    let tail = task_name
+        .trim()
+        .rsplit(|ch| ch == '/' || ch == '\\')
+        .find(|part| !part.trim().is_empty())?
+        .trim();
+    let mut title = String::new();
+    let mut previous_space = false;
+    for ch in tail.chars() {
+        let normalized = if matches!(ch, '_' | '-') { ' ' } else { ch };
+        if normalized.is_whitespace() {
+            if !previous_space && !title.is_empty() {
+                title.push(' ');
+                previous_space = true;
+            }
+        } else {
+            title.push(normalized);
+            previous_space = false;
+        }
+    }
+    let title = title.trim();
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.to_string())
     }
 }
 
@@ -292,6 +346,8 @@ pub(crate) struct SpawnAgentResult {
     agent_base_name: Option<String>,
     agent_title: Option<String>,
     agent_display_name: Option<String>,
+    recommended_target: String,
+    next_action: String,
 }
 
 #[cfg(test)]
@@ -311,6 +367,18 @@ mod tests {
         )
         .expect("maximum effort should parse");
         assert_eq!(args.reasoning_effort, Some(ReasoningEffort::XHigh));
+    }
+
+    #[test]
+    fn spawn_agent_args_derives_title_when_missing() {
+        let args: SpawnAgentArgs =
+            serde_json::from_str(r#"{"message":"do it","task_name":"/root/assign_round2_worker"}"#)
+                .expect("missing title should parse");
+
+        assert_eq!(
+            args.display_title().expect("title should be derived"),
+            "assign round2 worker"
+        );
     }
 }
 

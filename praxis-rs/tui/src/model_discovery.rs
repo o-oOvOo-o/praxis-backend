@@ -68,6 +68,17 @@ pub(crate) fn build_model_catalog(
     let mut seen = BTreeSet::<(String, String)>::new();
 
     for preset in server_models {
+        if let Some((provider_id, provider)) = server_preset_provider(config, &preset) {
+            push_provider_preset_trusted(
+                &mut models,
+                &mut metadata_by_preset_id,
+                &mut seen,
+                provider_id.as_str(),
+                &provider,
+                preset,
+            );
+            continue;
+        }
         push_provider_preset_trusted(
             &mut models,
             &mut metadata_by_preset_id,
@@ -78,9 +89,7 @@ pub(crate) fn build_model_catalog(
         );
     }
 
-    if config.model_provider_id != OPENAI_PROVIDER_ID
-        && let Some(openai_provider) = config.model_providers.get(OPENAI_PROVIDER_ID)
-    {
+    if let Some(openai_provider) = config.model_providers.get(OPENAI_PROVIDER_ID) {
         for preset in bundled_api_model_presets() {
             push_provider_preset(
                 &mut models,
@@ -132,10 +141,36 @@ pub(crate) fn build_model_catalog(
         models.push(preset);
     }
 
+    prioritize_local_frontier_models(&mut models);
+
     DiscoveredModelCatalog {
         models,
         metadata_by_preset_id,
     }
+}
+
+fn server_preset_provider(
+    config: &Config,
+    preset: &ModelPreset,
+) -> Option<(String, ModelProviderInfo)> {
+    let provider_id = provider_id_from_scoped_preset_id(preset.id.as_str(), preset.model.as_str())?;
+    let provider = config.model_providers.get(provider_id)?.clone();
+    Some((provider_id.to_string(), provider))
+}
+
+fn prioritize_local_frontier_models(models: &mut Vec<ModelPreset>) {
+    let mut indexed = std::mem::take(models)
+        .into_iter()
+        .enumerate()
+        .collect::<Vec<_>>();
+    indexed.sort_by_key(|(index, preset)| (local_frontier_model_rank(preset), *index));
+    *models = indexed.into_iter().map(|(_, preset)| preset).collect();
+}
+
+fn local_frontier_model_rank(preset: &ModelPreset) -> (u8, i32) {
+    known_openai_compatible_model_info(preset.model.as_str())
+        .map(|info| (0, info.priority))
+        .unwrap_or((1, 0))
 }
 
 fn push_provider_preset(
@@ -476,6 +511,12 @@ fn provider_scoped_preset_id(provider_id: &str, model: &str) -> String {
     format!("{}::{}", sanitize_provider_id(provider_id), model)
 }
 
+fn provider_id_from_scoped_preset_id<'a>(preset_id: &'a str, model: &str) -> Option<&'a str> {
+    let suffix = format!("::{model}");
+    let provider_id = preset_id.strip_suffix(suffix.as_str())?;
+    (!provider_id.is_empty()).then_some(provider_id)
+}
+
 fn discover_praxis_config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let mut seen = BTreeSet::new();
@@ -551,4 +592,171 @@ fn normalize_path(path: &Path) -> String {
 
 fn same_path(left: &Path, right: &Path) -> bool {
     normalize_path(left) == normalize_path(right)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use praxis_core::config::ConfigBuilder;
+
+    fn test_preset(model: &str) -> ModelPreset {
+        ModelPreset {
+            id: model.to_string(),
+            model: model.to_string(),
+            display_name: model.to_string(),
+            description: String::new(),
+            default_reasoning_effort: ReasoningEffort::Medium,
+            supported_reasoning_efforts: vec![ReasoningEffortPreset {
+                effort: ReasoningEffort::Medium,
+                description: "medium".to_string(),
+            }],
+            supports_personality: false,
+            is_default: false,
+            upgrade: None,
+            show_in_picker: true,
+            availability_nux: None,
+            supported_in_api: true,
+            input_modalities: default_input_modalities(),
+        }
+    }
+
+    #[tokio::test]
+    async fn model_catalog_backfills_gpt55_when_current_provider_is_openai() {
+        let praxis_home = tempfile::tempdir().expect("temp praxis home");
+        let config = ConfigBuilder::default()
+            .praxis_home(praxis_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("config");
+        assert_eq!(config.model_provider_id, OPENAI_PROVIDER_ID);
+
+        let catalog = build_model_catalog(&config, Vec::new());
+        let preset_id = provider_scoped_preset_id(OPENAI_PROVIDER_ID, "gpt-5.5");
+        let gpt55 = catalog
+            .models
+            .iter()
+            .find(|preset| preset.id == preset_id)
+            .expect("GPT-5.5 should be locally backfilled for the OpenAI picker catalog");
+
+        assert_eq!(gpt55.model, "gpt-5.5");
+        assert!(gpt55.show_in_picker);
+        assert!(
+            gpt55
+                .supported_reasoning_efforts
+                .iter()
+                .any(|preset| preset.effort == ReasoningEffort::XHigh)
+        );
+        let metadata = catalog
+            .metadata_by_preset_id
+            .get(&preset_id)
+            .expect("GPT-5.5 should carry provider selection metadata");
+        assert_eq!(metadata.provider_id, OPENAI_PROVIDER_ID);
+    }
+
+    #[tokio::test]
+    async fn model_catalog_includes_gpt55_when_current_provider_is_not_openai() {
+        let praxis_home = tempfile::tempdir().expect("temp praxis home");
+        let mut config = ConfigBuilder::default()
+            .praxis_home(praxis_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("config");
+        assert!(
+            config.model_providers.contains_key(OPENAI_PROVIDER_ID),
+            "built-in OpenAI provider should be available for cross-provider model picking"
+        );
+        config.model_provider_id = "deepseek".to_string();
+
+        let catalog = build_model_catalog(&config, Vec::new());
+        let preset_id = provider_scoped_preset_id(OPENAI_PROVIDER_ID, "gpt-5.5");
+        let gpt55 = catalog
+            .models
+            .iter()
+            .find(|preset| preset.id == preset_id)
+            .expect("GPT-5.5 should be present in the TUI model picker catalog");
+
+        assert_eq!(gpt55.model, "gpt-5.5");
+        assert!(gpt55.show_in_picker);
+        assert!(
+            gpt55
+                .supported_reasoning_efforts
+                .iter()
+                .any(|preset| preset.effort == ReasoningEffort::XHigh)
+        );
+        let metadata = catalog
+            .metadata_by_preset_id
+            .get(&preset_id)
+            .expect("GPT-5.5 should carry provider selection metadata");
+        assert_eq!(metadata.provider_id, OPENAI_PROVIDER_ID);
+    }
+
+    #[test]
+    fn provider_scoped_preset_id_roundtrips() {
+        let preset_id = provider_scoped_preset_id(OPENAI_PROVIDER_ID, "gpt-5.5");
+
+        assert_eq!(
+            provider_id_from_scoped_preset_id(preset_id.as_str(), "gpt-5.5"),
+            Some(OPENAI_PROVIDER_ID)
+        );
+        assert_eq!(
+            provider_id_from_scoped_preset_id("gpt-5.5", "gpt-5.5"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_scoped_server_model_preserves_provider_metadata() {
+        let praxis_home = tempfile::tempdir().expect("temp praxis home");
+        let mut config = ConfigBuilder::default()
+            .praxis_home(praxis_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("config");
+        config.model_provider_id = "deepseek".to_string();
+
+        let mut server_model = test_preset("gpt-5.5");
+        server_model.id = provider_scoped_preset_id(OPENAI_PROVIDER_ID, "gpt-5.5");
+        let catalog = build_model_catalog(&config, vec![server_model]);
+        let preset_id = provider_scoped_preset_id(OPENAI_PROVIDER_ID, "gpt-5.5");
+        let metadata = catalog
+            .metadata_by_preset_id
+            .get(&preset_id)
+            .expect("server-scoped GPT-5.5 should keep OpenAI metadata");
+
+        assert_eq!(metadata.provider_id, OPENAI_PROVIDER_ID);
+    }
+
+    #[tokio::test]
+    async fn model_catalog_prioritizes_gpt55_before_remote_server_models() {
+        let praxis_home = tempfile::tempdir().expect("temp praxis home");
+        let config = ConfigBuilder::default()
+            .praxis_home(praxis_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("config");
+
+        let catalog = build_model_catalog(
+            &config,
+            vec![
+                test_preset("remote-model-a"),
+                test_preset("remote-model-b"),
+                test_preset("remote-model-c"),
+            ],
+        );
+        let gpt55_index = catalog
+            .models
+            .iter()
+            .position(|preset| preset.model == "gpt-5.5")
+            .expect("GPT-5.5 should be locally backfilled");
+        let remote_index = catalog
+            .models
+            .iter()
+            .position(|preset| preset.model == "remote-model-a")
+            .expect("remote server model should still be present");
+
+        assert!(
+            gpt55_index < remote_index,
+            "GPT-5.5 should stay near the top of the picker even when remote models arrive first"
+        );
+    }
 }

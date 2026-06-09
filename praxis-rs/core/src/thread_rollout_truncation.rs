@@ -46,7 +46,7 @@ pub(crate) fn user_message_positions_in_rollout(items: &[RolloutItem]) -> Vec<us
 ///
 /// A fork-turn boundary is either:
 /// - a real user message boundary, or
-/// - an assistant inter-agent envelope whose parsed `trigger_turn` is `true`.
+/// - an inter-agent envelope whose parsed `trigger_turn` is `true`.
 ///
 /// Like `user_message_positions_in_rollout`, this applies `ThreadRolledBack` markers so indexing
 /// reflects the effective post-rollback history. Rollback counts instruction turns, so a rollback
@@ -148,7 +148,7 @@ fn is_trigger_turn_boundary(item: &ResponseItem) -> bool {
         return false;
     };
 
-    role == "assistant"
+    (role == "assistant" || role == "user")
         && InterAgentCommunication::from_message_content(content)
             .is_some_and(|communication| communication.trigger_turn)
 }

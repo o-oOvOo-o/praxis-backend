@@ -1,5 +1,24 @@
 use super::*;
+use praxis_app_gateway_protocol::ThreadGoalStatus as AppGatewayThreadGoalStatus;
 use pretty_assertions::assert_eq;
+
+#[tokio::test]
+async fn raw_goal_command_is_intercepted_before_user_input_submission() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+
+    chat.submit_user_message("/goal pause".to_string().into());
+
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::SetThreadGoalStatus {
+            thread_id: actual_thread_id,
+            status: AppGatewayThreadGoalStatus::Paused,
+        }) if actual_thread_id == thread_id
+    );
+    assert_matches!(op_rx.try_recv(), Err(TryRecvError::Empty));
+}
 
 #[tokio::test]
 async fn slash_compact_eagerly_queues_follow_up_before_turn_start() {

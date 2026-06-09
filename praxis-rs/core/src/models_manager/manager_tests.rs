@@ -261,6 +261,37 @@ async fn get_model_info_tracks_fallback_usage() {
 }
 
 #[tokio::test]
+async fn list_models_includes_known_gpt55_picker_models() {
+    let praxis_home = tempdir().expect("temp dir");
+    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let manager = ModelsManager::new(
+        praxis_home.path().to_path_buf(),
+        auth_manager,
+        /*model_catalog*/ None,
+        CollaborationModesConfig::default(),
+    );
+
+    let models = manager.list_models(RefreshStrategy::Offline).await;
+    let gpt55 = models
+        .iter()
+        .find(|model| model.model == "gpt-5.5")
+        .expect("GPT-5.5 should be picker-visible from local known catalog");
+    let gpt55_pro = models
+        .iter()
+        .find(|model| model.model == "gpt-5.5-pro")
+        .expect("GPT-5.5 Pro should be picker-visible from local known catalog");
+
+    assert!(gpt55.show_in_picker);
+    assert!(gpt55_pro.show_in_picker);
+    assert!(
+        gpt55
+            .supported_reasoning_efforts
+            .iter()
+            .any(|preset| preset.effort == praxis_protocol::openai_models::ReasoningEffort::XHigh)
+    );
+}
+
+#[tokio::test]
 async fn get_model_info_uses_custom_catalog() {
     let praxis_home = tempdir().expect("temp dir");
     let config = ConfigBuilder::default()

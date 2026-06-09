@@ -523,7 +523,7 @@ fn server_notification_thread_events(
                 id: String::new(),
                 msg: EventMsg::TurnStarted(TurnStartedEvent {
                     turn_id: notification.turn.id,
-                    model_context_window: None,
+                    model_context_window: notification.model_context_window,
                     collaboration_mode_kind: ModeKind::default(),
                 }),
             }],

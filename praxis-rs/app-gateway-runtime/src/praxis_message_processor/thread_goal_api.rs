@@ -6,7 +6,9 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ThreadGoalGetParams,
     ) {
-        let thread = match self.goal_thread_for_request(request_id.clone(), &params.thread_id).await
+        let thread = match self
+            .goal_thread_for_request(request_id.clone(), &params.thread_id)
+            .await
         {
             Some(thread) => thread,
             None => return,
@@ -35,7 +37,10 @@ impl PraxisMessageProcessor {
         params: ThreadGoalSetParams,
     ) {
         let thread_id = params.thread_id.clone();
-        let thread = match self.goal_thread_for_request(request_id.clone(), &thread_id).await {
+        let thread = match self
+            .goal_thread_for_request(request_id.clone(), &thread_id)
+            .await
+        {
             Some(thread) => thread,
             None => return,
         };
@@ -47,10 +52,7 @@ impl PraxisMessageProcessor {
             Ok(goal) => {
                 let goal = praxis_app_gateway_protocol::ThreadGoal::from(goal);
                 self.outgoing
-                    .send_response(
-                        request_id,
-                        ThreadGoalSetResponse { goal: goal.clone() },
-                    )
+                    .send_response(request_id, ThreadGoalSetResponse { goal: goal.clone() })
                     .await;
                 self.broadcast_goal_updated(thread_id, goal).await;
             }
@@ -70,7 +72,10 @@ impl PraxisMessageProcessor {
         params: ThreadGoalUpdateParams,
     ) {
         let thread_id = params.thread_id.clone();
-        let thread = match self.goal_thread_for_request(request_id.clone(), &thread_id).await {
+        let thread = match self
+            .goal_thread_for_request(request_id.clone(), &thread_id)
+            .await
+        {
             Some(thread) => thread,
             None => return,
         };
@@ -83,10 +88,7 @@ impl PraxisMessageProcessor {
             Ok(goal) => {
                 let goal = praxis_app_gateway_protocol::ThreadGoal::from(goal);
                 self.outgoing
-                    .send_response(
-                        request_id,
-                        ThreadGoalUpdateResponse { goal: goal.clone() },
-                    )
+                    .send_response(request_id, ThreadGoalUpdateResponse { goal: goal.clone() })
                     .await;
                 self.broadcast_goal_updated(thread_id, goal).await;
             }
@@ -106,7 +108,10 @@ impl PraxisMessageProcessor {
         params: ThreadGoalClearParams,
     ) {
         let thread_id = params.thread_id.clone();
-        let thread = match self.goal_thread_for_request(request_id.clone(), &thread_id).await {
+        let thread = match self
+            .goal_thread_for_request(request_id.clone(), &thread_id)
+            .await
+        {
             Some(thread) => thread,
             None => return,
         };

@@ -145,6 +145,7 @@ fn turn_started_emits_turn_started_event() {
                 status: TurnStatus::InProgress,
                 error: None,
             },
+            model_context_window: None,
         }));
 
     assert_eq!(

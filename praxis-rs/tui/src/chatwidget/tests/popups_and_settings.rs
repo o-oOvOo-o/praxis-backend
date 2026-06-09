@@ -1618,6 +1618,65 @@ async fn model_picker_hides_show_in_picker_false_models_from_cache() {
 }
 
 #[tokio::test]
+async fn model_picker_shows_gpt55_on_primary_screen() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("praxis-auto-balanced")).await;
+    chat.thread_id = Some(ThreadId::new());
+    let preset = |slug: &str, display_name: &str| ModelPreset {
+        id: slug.to_string(),
+        model: slug.to_string(),
+        display_name: display_name.to_string(),
+        description: format!("{display_name} description"),
+        default_reasoning_effort: ReasoningEffortConfig::Medium,
+        supported_reasoning_efforts: vec![ReasoningEffortPreset {
+            effort: ReasoningEffortConfig::Medium,
+            description: "medium".to_string(),
+        }],
+        supports_personality: false,
+        is_default: false,
+        upgrade: None,
+        show_in_picker: true,
+        availability_nux: None,
+        supported_in_api: true,
+        input_modalities: default_input_modalities(),
+    };
+
+    chat.open_model_popup_with_presets(vec![
+        preset("praxis-auto-balanced", "Auto Balanced"),
+        preset("gpt-5.5", "GPT-5.5"),
+        preset("other-model", "Other Model"),
+    ]);
+    let popup = render_bottom_popup(&chat, /*width*/ 100);
+
+    assert!(
+        popup.contains("GPT-5.5"),
+        "expected GPT-5.5 to be available without opening a secondary all-models view:\n{popup}"
+    );
+    assert!(
+        popup.contains("All models"),
+        "expected remaining models to stay available through All models:\n{popup}"
+    );
+}
+
+#[tokio::test]
+async fn known_first_party_model_selection_metadata_falls_back_to_owner_provider() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    let ollama = chat
+        .config
+        .model_providers
+        .get("ollama")
+        .expect("built-in ollama provider")
+        .clone();
+    chat.config.model_provider_id = "ollama".to_string();
+    chat.config.model_provider = ollama;
+
+    let preset = get_available_model(&chat, "gpt-5.5");
+    let selection = chat.selection_metadata_or_current(&preset);
+
+    assert_eq!(selection.provider_id, "openai");
+    assert_eq!(selection.provider.name, "OpenAI");
+}
+
+#[tokio::test]
 async fn server_overloaded_error_does_not_switch_models() {
     let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(Some("gpt-5.2-codex")).await;
     chat.set_model("gpt-5.2-codex");

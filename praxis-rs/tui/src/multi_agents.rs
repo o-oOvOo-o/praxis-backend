@@ -168,14 +168,16 @@ fn agent_identity_display(
     agent_title: Option<&str>,
     agent_display_name: Option<&str>,
 ) -> Option<String> {
+    let display_name = agent_display_name
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
     let base_name = agent_base_name
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .map(ToOwned::to_owned)
         .or_else(|| {
-            agent_display_name
-                .map(str::trim)
-                .filter(|name| !name.is_empty() && !name.is_ascii())
+            display_name
+                .filter(|name| !name.is_ascii())
                 .map(ToOwned::to_owned)
         })
         .or_else(|| thread_id.map(|thread_id| hashed_subagent_name(thread_id).to_string()));
@@ -184,8 +186,14 @@ fn agent_identity_display(
         .map(str::trim)
         .filter(|title| !title.is_empty())
         .map(|title| truncate_text(title, SUBAGENT_TITLE_GRAPHEMES));
+    if let Some(display_name) = display_name
+        && display_name != base_name
+        && (display_name.starts_with(base_name.as_str()) || !display_name.is_ascii())
+    {
+        return Some(display_name.to_string());
+    }
     match title {
-        Some(title) => Some(format!("{base_name} - {title}")),
+        Some(title) => Some(format!("{base_name}-{title}")),
         None => Some(base_name),
     }
 }
@@ -538,8 +546,8 @@ fn agent_label_spans(agent: AgentLabel<'_>) -> Vec<Span<'static>> {
                 agent.title,
                 agent.nickname,
             ))
-                .cyan()
-                .bold(),
+            .cyan()
+            .bold(),
         );
     } else {
         spans.push(Span::from("agent").cyan());
@@ -926,7 +934,7 @@ mod tests {
 
         let lines = cell.display_lines(/*width*/ 200);
         let title = &lines[0];
-        assert_eq!(title.spans[2].content.as_ref(), "墨子 - 计算阶乘");
+        assert_eq!(title.spans[2].content.as_ref(), "墨子-计算阶乘");
         assert_eq!(title.spans[2].style.fg, Some(Color::Cyan));
         assert!(title.spans[2].style.add_modifier.contains(Modifier::BOLD));
         assert_eq!(title.spans[4].content.as_ref(), "[explorer]");

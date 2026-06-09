@@ -3,6 +3,8 @@ use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_tools::ToolWebSearchBackend;
 
+use crate::llm::prompts::LlmPromptPurpose;
+
 use super::super::ids::BehaviorProfileId;
 use crate::llm::tasks::compact::CompactExecutionPolicy;
 use crate::llm::tasks::title::AutoTitleProfile;
@@ -16,6 +18,7 @@ pub(crate) struct ProfileDescriptor {
     pub(crate) id: BehaviorProfileId,
     pub(crate) label: &'static str,
     pub(crate) instructions: Option<&'static str>,
+    pub(crate) prompt_layers: &'static [ProfilePromptLayerDescriptor],
     pub(crate) matcher: ProfileMatcher,
     pub(crate) provider_policy: Option<ProfileProviderPolicy>,
     pub(crate) task_policy: ProfileTaskPolicyDescriptor,
@@ -26,6 +29,23 @@ pub(crate) struct ProfileDescriptor {
 impl ProfileDescriptor {
     pub(crate) fn matches(self, ctx: &ProfileMatchContext<'_>) -> bool {
         (self.matcher)(ctx)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ProfilePromptLayerDescriptor {
+    pub(crate) id: &'static str,
+    pub(crate) purpose: LlmPromptPurpose,
+    pub(crate) content: &'static str,
+}
+
+impl ProfilePromptLayerDescriptor {
+    pub(crate) const fn model_instructions(id: &'static str, content: &'static str) -> Self {
+        Self {
+            id,
+            purpose: LlmPromptPurpose::ModelInstructions,
+            content,
+        }
     }
 }
 
@@ -51,6 +71,8 @@ impl ProfileProviderPolicy {
 pub(crate) struct ProfileTaskPolicyDescriptor {
     pub(crate) auto_title: Option<ProfileAutoTitlePolicyDescriptor>,
     pub(crate) compact_execution: Option<CompactExecutionPolicy>,
+    pub(crate) compact_model: Option<&'static str>,
+    pub(crate) auto_compact_token_limit_cap: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

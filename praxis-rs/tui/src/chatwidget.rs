@@ -37,6 +37,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::path::Path;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -97,11 +98,11 @@ use praxis_app_gateway_protocol::McpServerStartupState;
 use praxis_app_gateway_protocol::McpServerStatusUpdatedNotification;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
+use praxis_app_gateway_protocol::ThreadControlState;
+use praxis_app_gateway_protocol::ThreadControllerKind;
 use praxis_app_gateway_protocol::ThreadGoal;
 use praxis_app_gateway_protocol::ThreadGoalClearedNotification;
 use praxis_app_gateway_protocol::ThreadGoalStatus as AppGatewayThreadGoalStatus;
-use praxis_app_gateway_protocol::ThreadControlState;
-use praxis_app_gateway_protocol::ThreadControllerKind;
 use praxis_app_gateway_protocol::ThreadItem;
 use praxis_app_gateway_protocol::ToolRequestUserInputParams;
 use praxis_app_gateway_protocol::Turn;
@@ -116,6 +117,7 @@ use praxis_core::config::Config;
 use praxis_core::config::Constrained;
 use praxis_core::config::ConstraintResult;
 use praxis_core::config_loader::ConfigLayerStackOrdering;
+use praxis_core::first_party_model_owner;
 use praxis_core::plugins::PluginsManager;
 use praxis_core::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use praxis_core::skills::model::SkillMetadata;
@@ -3213,11 +3215,12 @@ impl ChatWidget {
         }
     }
 
-    #[cfg(test)]
     fn apply_turn_started_context_window(&mut self, model_context_window: Option<i64>) {
         let info = match self.token_info.take() {
             Some(mut info) => {
-                info.model_context_window = model_context_window;
+                if model_context_window.is_some() {
+                    info.model_context_window = model_context_window;
+                }
                 info
             }
             None => {
@@ -7248,11 +7251,13 @@ impl ChatWidget {
                 });
             }
             "clear" => {
-                self.app_event_tx.send(AppEvent::ClearThreadGoal { thread_id });
+                self.app_event_tx
+                    .send(AppEvent::ClearThreadGoal { thread_id });
             }
             "edit" => {
-                self.app_event_tx
-                    .send(AppEvent::OpenThreadGoalEditor { thread_id: Some(thread_id) });
+                self.app_event_tx.send(AppEvent::OpenThreadGoalEditor {
+                    thread_id: Some(thread_id),
+                });
             }
             _ => {
                 self.app_event_tx.send(AppEvent::SetThreadGoalObjective {
@@ -7263,6 +7268,45 @@ impl ChatWidget {
             }
         }
         self.bottom_pane.drain_pending_submission_state();
+    }
+
+    fn dispatch_slash_command_from_user_message(&mut self, user_message: &UserMessage) -> bool {
+        if !user_message.text.starts_with('/') {
+            return false;
+        }
+        let Some((name, rest, _rest_offset)) =
+            crate::bottom_pane::parse_slash_name(&user_message.text)
+        else {
+            return false;
+        };
+        let Ok(cmd) = SlashCommand::from_str(name) else {
+            return false;
+        };
+        if cmd == SlashCommand::Goal {
+            if !user_message.local_images.is_empty() || !user_message.remote_image_urls.is_empty() {
+                self.add_error_message("/goal does not accept image attachments.".to_string());
+                self.bottom_pane.drain_pending_submission_state();
+                return true;
+            }
+            self.dispatch_goal_command(Some(rest.to_string()));
+            return true;
+        }
+        if rest.trim().is_empty() {
+            self.dispatch_command(cmd);
+            return true;
+        }
+        if !user_message.local_images.is_empty() || !user_message.remote_image_urls.is_empty() {
+            self.add_info_message(
+                "Slash commands do not accept image attachments in the raw submission path."
+                    .to_string(),
+                /*hint*/ None,
+            );
+        }
+        self.add_error_message(format!(
+            "'/{name}' is a slash command. It was blocked from model input because the composer did not dispatch its inline arguments."
+        ));
+        self.bottom_pane.drain_pending_submission_state();
+        true
     }
 
     fn show_rename_prompt(&mut self) {
@@ -7357,6 +7401,9 @@ impl ChatWidget {
     }
 
     fn submit_user_message(&mut self, user_message: UserMessage) {
+        if self.dispatch_slash_command_from_user_message(&user_message) {
+            return;
+        }
         if let Some(label) = self.read_only_thread_control_label() {
             self.restore_user_message_to_composer(user_message);
             self.add_info_message(
@@ -8141,9 +8188,10 @@ impl ChatWidget {
                     }
                 }
             }
-            ServerNotification::TurnStarted(_) => {
+            ServerNotification::TurnStarted(notification) => {
                 self.last_non_retry_error = None;
                 if !matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
+                    self.apply_turn_started_context_window(notification.model_context_window);
                     self.on_task_started();
                 }
             }
@@ -10066,13 +10114,23 @@ impl ChatWidget {
     }
 
     fn selection_metadata_or_current(&self, preset: &ModelPreset) -> ModelCatalogSelectionMetadata {
-        self.model_catalog
-            .selection_metadata(preset.id.as_str())
-            .cloned()
-            .unwrap_or_else(|| ModelCatalogSelectionMetadata {
-                provider_id: self.current_model_provider_id().to_owned(),
-                provider: self.config.model_provider.clone(),
-            })
+        if let Some(metadata) = self.model_catalog.selection_metadata(preset.id.as_str()) {
+            return metadata.clone();
+        }
+
+        if let Some(owner) = first_party_model_owner(preset.model.as_str())
+            && let Some(provider) = self.config.model_providers.get(owner.provider_id)
+        {
+            return ModelCatalogSelectionMetadata {
+                provider_id: owner.provider_id.to_owned(),
+                provider: provider.clone(),
+            };
+        }
+
+        ModelCatalogSelectionMetadata {
+            provider_id: self.current_model_provider_id().to_owned(),
+            provider: self.config.model_provider.clone(),
+        }
     }
 
     fn model_picker_item_name(preset: &ModelPreset) -> String {
@@ -10089,6 +10147,27 @@ impl ChatWidget {
             && selection.provider_id == self.current_model_provider_id()
     }
 
+    fn is_frontier_direct_model(preset: &ModelPreset) -> bool {
+        matches!(preset.model.as_str(), "gpt-5.5" | "gpt-5.5-pro")
+    }
+
+    fn model_picker_primary_rank(preset: &ModelPreset) -> (u8, usize) {
+        if Self::is_auto_model(&preset.model) {
+            (0, Self::auto_model_order(&preset.model))
+        } else if Self::is_frontier_direct_model(preset) {
+            (
+                1,
+                match preset.model.as_str() {
+                    "gpt-5.5" => 0,
+                    "gpt-5.5-pro" => 1,
+                    _ => usize::MAX,
+                },
+            )
+        } else {
+            (2, usize::MAX)
+        }
+    }
+
     pub(crate) fn open_model_popup_with_presets(&mut self, presets: Vec<ModelPreset>) {
         let presets: Vec<ModelPreset> = presets
             .into_iter()
@@ -10101,17 +10180,17 @@ impl ChatWidget {
             .map(Self::model_picker_item_name)
             .unwrap_or_else(|| self.model_display_name().to_string());
 
-        let (mut auto_presets, other_presets): (Vec<ModelPreset>, Vec<ModelPreset>) = presets
+        let (mut primary_presets, other_presets): (Vec<ModelPreset>, Vec<ModelPreset>) = presets
             .into_iter()
-            .partition(|preset| Self::is_auto_model(&preset.model));
+            .partition(|preset| Self::model_picker_primary_rank(preset).0 < 2);
 
-        if auto_presets.is_empty() {
+        if primary_presets.is_empty() {
             self.open_all_models_popup(other_presets);
             return;
         }
 
-        auto_presets.sort_by_key(|preset| Self::auto_model_order(&preset.model));
-        let mut items: Vec<SelectionItem> = auto_presets
+        primary_presets.sort_by_key(Self::model_picker_primary_rank);
+        let mut items: Vec<SelectionItem> = primary_presets
             .into_iter()
             .map(|preset| {
                 let description =
@@ -13399,17 +13478,8 @@ impl ChatWidget {
             .filter(|(_, preset)| preset.show_in_picker)
             .collect::<Vec<_>>();
         indexed.sort_by_key(|(index, preset)| {
-            let auto_group = if Self::is_auto_model(&preset.model) {
-                0
-            } else {
-                1
-            };
-            let auto_order = if auto_group == 0 {
-                Self::auto_model_order(&preset.model)
-            } else {
-                usize::MAX
-            };
-            (auto_group, auto_order, *index)
+            let (group, order) = Self::model_picker_primary_rank(preset);
+            (group, order, *index)
         });
         indexed.into_iter().map(|(_, preset)| preset).collect()
     }

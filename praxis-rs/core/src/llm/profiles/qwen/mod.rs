@@ -18,6 +18,7 @@ pub(crate) fn profile() -> ProfileDescriptor {
         id: BehaviorProfileId::Qwen,
         label: "Qwen",
         instructions: Some(prompts::BASE),
+        prompt_layers: &[],
         matcher: provider::matches,
         provider_policy: Some(ProfileProviderPolicy {
             canonical_provider_id: Some(provider::QWEN_PROVIDER_ID),
@@ -30,6 +31,8 @@ pub(crate) fn profile() -> ProfileDescriptor {
                 AutoTitleProfile::Common,
             )),
             compact_execution: Some(CompactExecutionPolicy::LocalPrompt),
+            compact_model: None,
+            auto_compact_token_limit_cap: None,
         },
         tool_capabilities: ProfileToolCapabilityDescriptor::praxis_web_search(),
         priority: 900,

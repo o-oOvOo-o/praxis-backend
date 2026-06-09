@@ -1319,7 +1319,8 @@ impl CenterThreadRow {
 fn center_subagent_display_name(source: &AppGatewaySessionSource) -> Option<String> {
     match source {
         AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            agent_display_name, ..
+            agent_display_name,
+            ..
         }) => agent_display_name.clone(),
         _ => None,
     }
@@ -1336,9 +1337,9 @@ fn center_subagent_base_name(source: &AppGatewaySessionSource) -> Option<String>
 
 fn center_subagent_title(source: &AppGatewaySessionSource) -> Option<String> {
     match source {
-        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            agent_title, ..
-        }) => agent_title.clone(),
+        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_title, .. }) => {
+            agent_title.clone()
+        }
         _ => None,
     }
 }
@@ -1377,16 +1378,19 @@ fn refresh_center_subagent_summaries(rows: &mut [CenterThreadRow]) {
         .iter()
         .filter_map(center_subagent_child_summary)
         .collect();
+    let parent_indices: HashMap<ThreadId, usize> = rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (row.thread_id, index))
+        .collect();
     for row in rows.iter_mut() {
         row.subagents = CenterSubagentSummary::default();
     }
     for child in children {
-        let Some(parent) = rows
-            .iter_mut()
-            .find(|row| row.thread_id == child.parent_thread_id)
-        else {
+        let Some(parent_index) = parent_indices.get(&child.parent_thread_id).copied() else {
             continue;
         };
+        let parent = &mut rows[parent_index];
         parent.subagents.total = parent.subagents.total.saturating_add(1);
         if child.is_open {
             parent.subagents.open = parent.subagents.open.saturating_add(1);
@@ -1696,15 +1700,32 @@ impl CenterState {
                 .collect();
         }
 
+        let mut row_indices_by_thread_id = HashMap::with_capacity(self.rows.len());
+        let mut child_indices_by_parent_id: HashMap<ThreadId, Vec<usize>> = HashMap::new();
+        for (index, row) in self.rows.iter().enumerate() {
+            row_indices_by_thread_id.insert(row.thread_id, index);
+            if let Some(parent_thread_id) = row.subagent_parent_thread_id {
+                child_indices_by_parent_id
+                    .entry(parent_thread_id)
+                    .or_default()
+                    .push(index);
+            }
+        }
+
         let mut items = Vec::with_capacity(self.rows.len());
         let mut emitted = HashSet::new();
         for (index, row) in self.rows.iter().enumerate() {
             if row.subagent_parent_thread_id.is_none()
                 || row
                     .subagent_parent_thread_id
-                    .is_some_and(|parent_id| self.row_index(parent_id).is_none())
+                    .is_some_and(|parent_id| !row_indices_by_thread_id.contains_key(&parent_id))
             {
-                self.push_visible_row_tree(index, &mut emitted, &mut items);
+                self.push_visible_row_tree(
+                    index,
+                    &child_indices_by_parent_id,
+                    &mut emitted,
+                    &mut items,
+                );
             }
         }
         items
@@ -1713,6 +1734,7 @@ impl CenterState {
     fn push_visible_row_tree(
         &self,
         index: usize,
+        child_indices_by_parent_id: &HashMap<ThreadId, Vec<usize>>,
         emitted: &mut HashSet<usize>,
         items: &mut Vec<CenterVisibleItem>,
     ) {
@@ -1726,14 +1748,10 @@ impl CenterState {
         if !self.expanded_subagent_parent_ids.contains(&parent_id) {
             return;
         }
-        let child_indices = self
-            .rows
-            .iter()
-            .enumerate()
-            .filter_map(|(child_index, child)| {
-                (child.subagent_parent_thread_id == Some(parent_id)).then_some(child_index)
-            })
-            .collect::<Vec<_>>();
+        let child_indices = child_indices_by_parent_id
+            .get(&parent_id)
+            .cloned()
+            .unwrap_or_default();
 
         for child_index in child_indices.iter().copied() {
             if self
@@ -1741,7 +1759,7 @@ impl CenterState {
                 .get(child_index)
                 .is_some_and(|child| !center_row_is_closed(child))
             {
-                self.push_visible_row_tree(child_index, emitted, items);
+                self.push_visible_row_tree(child_index, child_indices_by_parent_id, emitted, items);
             }
         }
 
@@ -1764,7 +1782,7 @@ impl CenterState {
         }
         for child_index in child_indices {
             if self.rows.get(child_index).is_some_and(center_row_is_closed) {
-                self.push_visible_row_tree(child_index, emitted, items);
+                self.push_visible_row_tree(child_index, child_indices_by_parent_id, emitted, items);
             }
         }
     }
@@ -3167,9 +3185,7 @@ impl App {
             format!(
                 "{} ({short_id})",
                 subagent_display_name(
-                    thread_id,
-                    /*agent_base_name*/ None,
-                    /*agent_title*/ None,
+                    thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
                     /*agent_display_name*/ None,
                 )
             )
@@ -4014,16 +4030,12 @@ impl App {
                 continue;
             };
 
-            if self
-                .agent_navigation
-                .get(&thread_id)
-                .is_some_and(|entry| {
-                    entry.agent_base_name.is_some()
-                        || entry.agent_title.is_some()
-                        || entry.agent_display_name.is_some()
-                        || entry.agent_role.is_some()
-                })
-            {
+            if self.agent_navigation.get(&thread_id).is_some_and(|entry| {
+                entry.agent_base_name.is_some()
+                    || entry.agent_title.is_some()
+                    || entry.agent_display_name.is_some()
+                    || entry.agent_role.is_some()
+            }) {
                 continue;
             }
 
@@ -4193,8 +4205,7 @@ impl App {
         self.primary_session_configured = Some(session.clone());
         self.upsert_agent_picker_thread(
             thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
-            /*agent_display_name*/ None, /*agent_role*/ None,
-            /*is_closed*/ false,
+            /*agent_display_name*/ None, /*agent_role*/ None, /*is_closed*/ false,
         );
         let channel = self.ensure_thread_channel(thread_id);
         {
@@ -4436,15 +4447,14 @@ impl App {
             agent_display_name.clone(),
             agent_role.clone(),
         );
-        self.agent_navigation
-            .upsert(
-                thread_id,
-                agent_base_name,
-                agent_title,
-                agent_display_name,
-                agent_role,
-                is_closed,
-            );
+        self.agent_navigation.upsert(
+            thread_id,
+            agent_base_name,
+            agent_title,
+            agent_display_name,
+            agent_role,
+            is_closed,
+        );
         self.sync_active_agent_label();
     }
 
@@ -4519,8 +4529,7 @@ impl App {
                 } else {
                     self.upsert_agent_picker_thread(
                         thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
-                        /*agent_display_name*/ None, /*agent_role*/ None,
-                        is_closed,
+                        /*agent_display_name*/ None, /*agent_role*/ None, is_closed,
                     );
                 }
                 true
@@ -8069,8 +8078,7 @@ impl App {
         self.primary_session_configured = Some(session.clone());
         self.upsert_agent_picker_thread(
             thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
-            /*agent_display_name*/ None, /*agent_role*/ None,
-            /*is_closed*/ false,
+            /*agent_display_name*/ None, /*agent_role*/ None, /*is_closed*/ false,
         );
 
         let store = {
@@ -8193,7 +8201,10 @@ impl App {
                     "Goal set: {}",
                     truncate_for_goal_notice(goal.objective.as_str())
                 ),
-                Some("Use /goal to inspect it, /goal pause to pause it, or /goal edit to edit it.".to_string()),
+                Some(
+                    "Use /goal to inspect it, /goal pause to pause it, or /goal edit to edit it."
+                        .to_string(),
+                ),
             ),
             Err(err) => self
                 .chat_widget
@@ -13091,7 +13102,7 @@ guardian_approval = true
         app.refresh_pending_thread_approvals().await;
         assert_eq!(
             app.chat_widget.pending_thread_approvals(),
-            &["墨子 - 审批工具 [explorer]".to_string()]
+            &["墨子-审批工具 [explorer]".to_string()]
         );
 
         app.active_thread_id = Some(agent_thread_id);
@@ -13147,7 +13158,7 @@ guardian_approval = true
         assert_eq!(app.chat_widget.has_active_view(), true);
         assert_eq!(
             app.chat_widget.pending_thread_approvals(),
-            &["墨子 - 审批工具 [explorer]".to_string()]
+            &["墨子-审批工具 [explorer]".to_string()]
         );
 
         Ok(())
@@ -13625,8 +13636,7 @@ guardian_approval = true
             format!(
                 "{} | {}",
                 format_agent_picker_item_name(
-                    /*agent_base_name*/ None,
-                    /*agent_title*/ None,
+                    /*agent_base_name*/ None, /*agent_title*/ None,
                     /*agent_display_name*/ None, /*agent_role*/ None,
                     /*is_primary*/ false
                 ),
@@ -14019,6 +14029,7 @@ guardian_approval = true
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: thread_id.to_string(),
             turn: test_turn(turn_id, TurnStatus::InProgress, Vec::new()),
+            model_context_window: None,
         })
     }
 

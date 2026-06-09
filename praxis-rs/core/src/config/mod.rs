@@ -1870,12 +1870,17 @@ fn normalize_provider_for_selected_model(
     model_provider_id: String,
     model_provider: ModelProviderInfo,
     model: Option<&str>,
+    explicit_model_provider: bool,
     model_providers: &HashMap<String, ModelProviderInfo>,
     startup_warnings: &mut Vec<String>,
 ) -> (String, ModelProviderInfo) {
     let Some(model) = model.map(str::trim).filter(|model| !model.is_empty()) else {
         return (model_provider_id, model_provider);
     };
+
+    if explicit_model_provider {
+        return (model_provider_id, model_provider);
+    }
 
     if let Some(provider_switch) = crate::llm::registry::LlmProfileRegistry::builtin_static()
         .provider_switch_for_selected_model(
@@ -2320,6 +2325,8 @@ impl Config {
             model_providers.entry(key).or_insert(provider);
         }
 
+        let explicit_model_provider =
+            model_provider.is_some() || config_profile.model_provider.is_some();
         let model_provider_id = model_provider
             .or(config_profile.model_provider)
             .or(cfg.model_provider)
@@ -2432,6 +2439,7 @@ impl Config {
             model_provider_id,
             model_provider,
             model.as_deref(),
+            explicit_model_provider,
             &model_providers,
             &mut startup_warnings,
         );

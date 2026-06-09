@@ -8,6 +8,7 @@ use crate::agent_os::ResourceRequirement;
 use crate::agent_os::RuntimeCommandStatus;
 use crate::agent_os::RuntimeCommandType;
 use crate::agent_os::TaskCreateRequest;
+use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::InterAgentCommunication;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -55,6 +56,7 @@ pub(crate) struct AssignTaskArgs {
     #[serde(default)]
     pub(crate) message: Option<String>,
     pub(crate) objective: String,
+    #[serde(default)]
     pub(crate) scope: Vec<String>,
     #[serde(default)]
     pub(crate) constraints: Vec<String>,
@@ -81,6 +83,13 @@ pub(crate) struct AssignTaskArgs {
 pub(crate) struct MessageToolResult {
     submission_id: String,
     runtime_command_id: Option<String>,
+    target: String,
+    target_thread_id: ThreadId,
+    target_agent_base_name: Option<String>,
+    target_agent_title: Option<String>,
+    target_agent_display_name: Option<String>,
+    delivery_mode: String,
+    next_action: String,
 }
 
 impl ToolOutput for MessageToolResult {
@@ -196,6 +205,7 @@ async fn handle_message_submission(
         ..
     } = invocation;
     let _ = payload;
+    let requested_target = target.clone();
     let receiver_thread_id = resolve_agent_target(&session, &turn, &target).await?;
     let receiver_agent = session
         .services
@@ -203,6 +213,9 @@ async fn handle_message_submission(
         .get_live_agent_metadata(receiver_thread_id)
         .await
         .unwrap_or_default();
+    let receiver_agent_base_name = receiver_agent.agent_base_name.clone();
+    let receiver_agent_title = receiver_agent.agent_title.clone();
+    let receiver_agent_display_name = receiver_agent.agent_display_name.clone();
     if mode == MessageDeliveryMode::TriggerTurn
         && receiver_agent
             .agent_path
@@ -280,7 +293,7 @@ async fn handle_message_submission(
     } else {
         (None, None)
     };
-    let runtime_command = if let Some(payload) = runtime_command_payload {
+    let runtime_command = if let Some(payload) = runtime_command_payload.clone() {
         Some(
             session
                 .services
@@ -314,11 +327,10 @@ async fn handle_message_submission(
     let receiver_agent_path = receiver_agent.agent_path.clone().ok_or_else(|| {
         FunctionCallError::RespondToModel("target agent is missing an agent_path".to_string())
     })?;
-    let communication_content = if let Some(command) = runtime_command.as_ref() {
-        format!(
-            "AgentOS runtime command `{}` has been assigned. The structured command payload for this turn contains the full objective, prompt, scope, constraints, artifacts, resources, and budget.",
-            command.command_id
-        )
+    let communication_content = if let (Some(command), Some(payload)) =
+        (runtime_command.as_ref(), runtime_command_payload.as_ref())
+    {
+        format_assign_task_communication(command.command_id.as_str(), payload)
     } else {
         prompt.clone()
     };
@@ -350,9 +362,9 @@ async fn handle_message_submission(
                 sender_thread_id: session.conversation_id,
                 receiver_thread_id,
                 kind: mode.interaction_kind(),
-                receiver_agent_base_name: receiver_agent.agent_base_name,
-                receiver_agent_title: receiver_agent.agent_title,
-                receiver_agent_display_name: receiver_agent.agent_display_name,
+                receiver_agent_base_name: receiver_agent_base_name.clone(),
+                receiver_agent_title: receiver_agent_title.clone(),
+                receiver_agent_display_name: receiver_agent_display_name.clone(),
                 receiver_agent_role: receiver_agent.agent_role,
                 prompt,
                 status,
@@ -383,11 +395,80 @@ async fn handle_message_submission(
     if let Some(task_id) = task_id {
         tracing::debug!(%task_id, %receiver_thread_id, "AgentOS task assigned through multi-agent tool");
     }
+    let target_for_next_action = receiver_thread_id.to_string();
+    let (delivery_mode, next_action) = match mode {
+        MessageDeliveryMode::QueueOnly => (
+            "send_message",
+            "Message queued only. This does not wake the target; use assign_task if the target must run now.",
+        ),
+        MessageDeliveryMode::TriggerTurn => (
+            "assign_task",
+            "Call wait_agent with target set to the resolved target thread id to wait for this assigned turn.",
+        ),
+    };
+    let next_action = match mode {
+        MessageDeliveryMode::QueueOnly => next_action.to_string(),
+        MessageDeliveryMode::TriggerTurn => {
+            format!(
+                "Call wait_agent with target `{target_for_next_action}` to wait for this assigned turn."
+            )
+        }
+    };
 
     Ok(MessageToolResult {
         submission_id,
         runtime_command_id,
+        target: requested_target,
+        target_thread_id: receiver_thread_id,
+        target_agent_base_name: receiver_agent_base_name,
+        target_agent_title: receiver_agent_title,
+        target_agent_display_name: receiver_agent_display_name,
+        delivery_mode: delivery_mode.to_string(),
+        next_action,
     })
+}
+
+fn format_assign_task_communication(command_id: &str, payload: &serde_json::Value) -> String {
+    let objective = payload
+        .get("objective")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let prompt = payload
+        .get("prompt")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(objective);
+    let scope = json_string_array_summary(payload.get("scope"));
+    let constraints = json_string_array_summary(payload.get("constraints"));
+    let acceptance_criteria = json_string_array_summary(payload.get("acceptance_criteria"));
+    let artifact_refs = json_string_array_summary(payload.get("artifact_refs"));
+    let resources = json_string_array_summary(payload.get("required_resources"));
+    format!(
+        "AgentOS runtime command `{command_id}` has been assigned.\n\
+Treat this message as your active assigned task for this turn and produce a fresh final answer for it.\n\n\
+Objective:\n{objective}\n\n\
+Worker prompt:\n{prompt}\n\n\
+Scope: {scope}\n\
+Constraints: {constraints}\n\
+Acceptance criteria: {acceptance_criteria}\n\
+Artifact refs: {artifact_refs}\n\
+Required resources: {resources}"
+    )
+}
+
+fn json_string_array_summary(value: Option<&serde_json::Value>) -> String {
+    let Some(serde_json::Value::Array(items)) = value else {
+        return "none".to_string();
+    };
+    let items = items
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|item| !item.trim().is_empty())
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        "none".to_string()
+    } else {
+        items.join(", ")
+    }
 }
 
 fn parse_required_resources(

@@ -127,6 +127,35 @@
 - 不要把补丁包进 JSON 字符串，不要把补丁放进 Markdown 代码块再交给工具，不要调用 shell 去执行 `apply_patch`。
 - 不要用 `Set-Content -NoNewline`、`Out-File -NoNewline`、大文本 pipe 或整文件覆盖命令写源码文件来替代 `apply_patch`。
 
+## sub-agent coordination
+
+`spawn_agent` 是 Praxis 的子代理工具。它和 R0/R1/R2 rank thread control 不是一套东西：子代理属于当前 turn 的短期并行 worker；rank control 是长期线程指挥权。当前你使用子代理时，目标是让强模型 worker 快速完成窄任务，而不是把它们当作长期团队线程。
+
+调用 `spawn_agent` 时：
+
+- `task_name` 只用于工具路由，必须是 lowercase ASCII，只使用小写字母、数字、`_`、`-` 或 `/`，不要写中文、大写 `ROUND8`、空格或标点。UI 名称用 `title`，例如 `task_name: plane_war_round9_patch`、`title: 遥测补丁落盘`。`title` 是职责短标题，不是 agent 姓名；不要把 `title` 写成 `墨子`、`荀子` 这类纯名字。
+- 子代理中文姓名由 Praxis 在 `spawn_agent` 返回值中分配，不能预设；后续 `wait_agent`、`assign_task`、`close_agent` 必须优先使用工具返回的 `recommended_target`、`agent_id` 或 `list_agents.thread_id`。只有没有 thread id 时才用 `agent_display_name` 或 `agent_base_name`，不要凭你原先期待的名字寻址。
+- 需要 Codex/GPT worker 时，优先显式传 `agent_type=worker`、`model_provider=openai`、`model=gpt-5.5`、`reasoning_effort=xhigh`。`5.5`、`gpt5.5`、`codex5.5`、`gpt 5.5 xhigh` 这些自然写法可以被 Praxis 解析，但正式工具调用里仍优先写规范字段。
+- 给 worker 的 `message` 必须保留完整验收条件、允许/禁止路径、是否可写、是否可用工具、最终 marker。不要把用户或 harness 给你的验收句压缩成“按要求做”；压缩会丢证据。
+- 用户、外部 coordinator 或 harness 给出的精确字符串必须逐字复制到 worker `message` 中，尤其是 marker、文件路径、要追加到文件里的句子、命令片段、字段名和验收文本。不要把 `ROUND9 patched subagent telemetry marker through ...` 缩成 `ROUND9 patched`，也不要把长句改写成同义句；这会让外部验收失败。
+- 精确复制规则只适用于正向任务契约。若某个字符串、marker 或指令被标记为 forbidden、stale、错误指令、禁止发送、不要复述或不要输出，不得把该字面量写进 worker `message`、工具参数或最终总结；只用“forbidden marker”“stale instruction”这类描述指代。
+- 如果精确字符串较长，把它放进 worker `message` 的独立一行，使用引号包住也可以，但内容本身必须不增删、不改写、不翻译。
+- 每个 worker 都要有唯一 marker，最后一行要求它原样输出，例如 `WORKER_D_ROUND9_PATCH_DONE::<thread>::<date>`。marker 是验收契约的一部分，不是说明文字。
+- 复核/方案 worker 默认禁止工具、禁止命令、禁止文件写入，只输出短方案和 marker；除非用户明确要求完整长文，worker 输出应控制在 12-20 条要点或约 1200 中文字以内。写文件 worker 必须限定文件路径和编辑方式。
+- 写文件 worker 用 `apply_patch` 成功后，除非任务明确要求由它验证，否则立刻输出最终 marker 并停止。不要让写文件 worker 继续跑 Node、浏览器、Playwright、全文件语法检查、长测试或宽泛 shell 验证；这些由主线程、外部 coordinator 或单独 validation worker 负责。
+- 如果确实要委派验证，单独 spawn validation worker，给清晰 scope、短 timeout 和可观测证据；不要把“写补丁”和“长验证”混在同一个 worker turn 里。
+- `send_message` 只把文本排进目标 agent 的 mailbox，不会唤醒 idle worker，也不保证产生新输出。不要在 `send_message` 后调用 `wait_agent` 期待新的 worker marker。
+- 如果你需要同一个 worker 立刻执行新任务并返回新 marker，必须用 `assign_task`，然后再 `wait_agent`。纯文本复核任务可以用 `scope:["conversation"]`；探索任务可以设置 `exploratory:true`。
+- `assign_task` 不只是聊天转发。把硬约束放进 `constraints`，把验收点放进 `acceptance_criteria`，把资源/预算/权限需求放进 `required_resources`；`objective` 保持短目标。不要把结构化约束全部塞进 `objective` 或 `message`，否则 AgentOS 无法调度和验收。
+- `assign_task` 成功后，读取返回值里的 `target_thread_id` 和 `next_action`，通常下一步就是对该 `target_thread_id` 调用 `wait_agent`。不要重新猜中文名，也不要等待别的 worker。
+- `wait_agent` 只等待已经发生的 mailbox 或 AgentOS 状态变化，不会主动启动任何 worker。它可以接收可选 `target`；传入目标时会等待该目标 agent 到达 final status。当前工具 schema 永远优先于旧对话里的 schema 报错记忆。
+- `wait_agent` 后不要只相信 worker 的自然语言声明。可靠完成证据是：工具结果或 rollout 里对应 turn 的 `task_complete`，最后 assistant 消息包含指定 marker，且文件/命令证据符合验收条件。
+- 当用户、外部 coordinator 或 harness 明确列出 `spawn_agent`、`wait_agent`、`assign_task`、`list_agents`、`close_agent` 的步骤时，必须按步骤逐个调用对应工具。子代理通知、助手文本里的 marker、或你自己认为“已经够了”，都不能替代被明确要求的工具调用；如果要求等待多个 worker，就分别对每个目标调用 `wait_agent`。
+- 工具 schema 报错时按错误修正继续，例如 task_name 大写被拒就改成 lowercase；不要把 schema 错误当作能力不存在。
+- `list_agents` 只返回子代理，`/root` 主线程会被省略。优先看返回值的 `terminal_state.should_stop_listing`；它为 `true`，或 `agents` 为空且 `pending_worker_requests`、`pending_runtime_commands`、`leases` 为空时，不要继续循环调用 `list_agents`，立刻总结并输出最终 marker。
+- `close_agent` 只关闭任务明确要求关闭的目标；不要为了“清场”反复关闭无关 completed worker。
+- 子代理跨 turn 持久复用不是 Codex 原生 sub-agent 的核心能力；如果需要长期可控对象，使用 Praxis 的 rank thread control，而不是假设 `list_agents` 一定能找回上个 turn 的短期子代理。
+
 ## web_search
 
 使用 `web_search` 工具查询公共互联网。它是 Praxis 为 DeepSeek 路径提供的原生联网工具，不是浏览器闲逛，也不是让你用 shell、curl、PowerShell、Python 或包管理器去抓网页。你可以把它理解成一个高层搜索请求：你给出查询意图，Praxis 在后端用 Obscura 自动调度可用搜索入口和页面抓取，然后把成功返回的结果去重、排序并返回给你。

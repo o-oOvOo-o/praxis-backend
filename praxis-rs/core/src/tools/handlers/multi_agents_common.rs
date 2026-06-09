@@ -293,6 +293,8 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
     let requested_model = requested_model
         .map(str::trim)
         .filter(|model| !model.is_empty());
+    let requested_reasoning_effort = requested_reasoning_effort
+        .or_else(|| requested_model.and_then(spawn_agent_embedded_reasoning_effort));
 
     if requested_model_provider.is_none()
         && requested_model.is_none()
@@ -633,6 +635,28 @@ fn strip_embedded_reasoning_suffix(model: &str) -> Option<String> {
     None
 }
 
+fn spawn_agent_embedded_reasoning_effort(requested_model: &str) -> Option<ReasoningEffort> {
+    let normalized = requested_model
+        .split_whitespace()
+        .collect::<String>()
+        .replace('_', "-")
+        .to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if normalized.ends_with("-xhigh")
+        || normalized.ends_with("-x-high")
+        || normalized.ends_with("xhigh")
+        || normalized.ends_with("x-high")
+    {
+        return Some(ReasoningEffort::XHigh);
+    }
+    if normalized.ends_with("-high") || normalized.ends_with("high") {
+        return Some(ReasoningEffort::High);
+    }
+    None
+}
+
 fn push_spawn_agent_model_candidate(candidates: &mut Vec<String>, candidate: String) {
     if candidate.is_empty() || candidates.iter().any(|existing| existing == &candidate) {
         return;
@@ -643,6 +667,7 @@ fn push_spawn_agent_model_candidate(candidates: &mut Vec<String>, candidate: Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model_provider_info::WireApi;
 
     #[test]
     fn spawn_agent_model_candidates_accept_natural_codex_aliases() {
@@ -661,6 +686,14 @@ mod tests {
             spawn_agent_model_candidates("gpt 5.5 xhigh", &migrations)
                 .contains(&"gpt-5.5".to_string())
         );
+        assert_eq!(
+            spawn_agent_embedded_reasoning_effort("gpt 5.5 xhigh"),
+            Some(ReasoningEffort::XHigh)
+        );
+        assert_eq!(
+            spawn_agent_embedded_reasoning_effort("codex5.5-high"),
+            Some(ReasoningEffort::High)
+        );
     }
 
     #[test]
@@ -672,6 +705,51 @@ mod tests {
         assert!(
             spawn_agent_model_provider_candidates("codex/responses")
                 .contains(&OPENAI_PROVIDER_ID.to_string())
+        );
+    }
+
+    #[test]
+    fn spawn_agent_model_alias_can_switch_deepseek_thread_to_openai_gpt55() {
+        let mut config = crate::config::test_config();
+        let deepseek_provider = ModelProviderInfo {
+            name: "DeepSeek".to_string(),
+            base_url: Some("https://api.deepseek.com".to_string()),
+            env_key: None,
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            wire_api: WireApi::OpenAiCompat,
+            compat: None,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        };
+        config
+            .model_providers
+            .insert("deepseek".to_string(), deepseek_provider.clone());
+        config.model_provider_id = "deepseek".to_string();
+        config.model_provider = deepseek_provider;
+
+        let migrations = BTreeMap::new();
+        let candidates = spawn_agent_model_candidates("gpt 5.5 xhigh", &migrations);
+        infer_spawn_agent_model_provider(&mut config, &candidates);
+
+        assert_eq!(config.model_provider_id, OPENAI_PROVIDER_ID);
+        assert!(config.model_provider.is_openai());
+        assert_eq!(
+            resolve_spawn_agent_model_name(&[], "gpt 5.5 xhigh", &migrations, &config)
+                .expect("known GPT-5.5 alias should resolve after provider inference"),
+            "gpt-5.5"
+        );
+        assert_eq!(
+            spawn_agent_embedded_reasoning_effort("gpt 5.5 xhigh"),
+            Some(ReasoningEffort::XHigh)
         );
     }
 }

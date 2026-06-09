@@ -64,18 +64,46 @@ fn text_input(text: &str) -> Op {
 
 #[test]
 fn thread_spawn_agent_display_name_combines_chinese_name_and_short_title() {
-    assert_eq!(
-        format_thread_spawn_agent_display_name("墨子", Some("负责GUI")),
-        "墨子-负责GUI"
-    );
-    assert_eq!(
-        format_thread_spawn_agent_display_name("墨子", Some("墨子-负责GUI")),
-        "墨子-负责GUI"
-    );
-    assert_eq!(
-        format_thread_spawn_agent_display_name("庄子", Some("墨子-负责GUI")),
-        "庄子-负责GUI"
-    );
+    let identity = build_agent_display_identity("墨子".to_string(), Some("负责GUI"));
+    assert_eq!(identity.display_name, "墨子-负责GUI");
+    assert_eq!(identity.title.as_deref(), Some("负责GUI"));
+
+    let identity = build_agent_display_identity("墨子".to_string(), Some("墨子-负责GUI"));
+    assert_eq!(identity.display_name, "墨子-负责GUI");
+    assert_eq!(identity.title.as_deref(), Some("负责GUI"));
+
+    let identity = build_agent_display_identity("庄子".to_string(), Some("墨子-负责GUI"));
+    assert_eq!(identity.display_name, "庄子-负责GUI");
+    assert_eq!(identity.title.as_deref(), Some("负责GUI"));
+}
+
+#[test]
+fn thread_spawn_agent_display_name_drops_redundant_name_only_title() {
+    let identity = build_agent_display_identity("荀子".to_string(), Some("荀子"));
+    assert_eq!(identity.display_name, "荀子");
+    assert_eq!(identity.title, None);
+
+    let identity = build_agent_display_identity("荀子".to_string(), Some("荀子-荀子"));
+    assert_eq!(identity.display_name, "荀子");
+    assert_eq!(identity.title, None);
+
+    let identity = build_agent_display_identity("Atlas".to_string(), Some("atlas"));
+    assert_eq!(identity.display_name, "Atlas");
+    assert_eq!(identity.title, None);
+}
+
+#[test]
+fn listed_agent_next_action_uses_recommended_thread_target() {
+    let target = "019e72db-3096-7c42-b00d-61f63e0ac96c";
+
+    let action = listed_agent_next_action(target, &AgentStatus::Running);
+    assert!(action.contains(target));
+    assert!(action.contains("wait_agent"));
+
+    let action = listed_agent_next_action(target, &AgentStatus::Completed(Some("done".into())));
+    assert!(action.contains(target));
+    assert!(action.contains("assign_task"));
+    assert!(action.contains("close_agent"));
 }
 
 struct AgentControlHarness {
@@ -613,6 +641,8 @@ async fn spawn_agent_can_fork_parent_thread_history() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: None,
             })),
@@ -700,6 +730,8 @@ async fn spawn_agent_fork_injects_output_for_parent_spawn_call() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: None,
             })),
@@ -774,6 +806,8 @@ async fn spawn_agent_fork_flushes_parent_rollout_before_loading_history() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: None,
             })),
@@ -902,6 +936,8 @@ async fn spawn_agent_fork_last_n_turns_keeps_only_recent_turns() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: None,
             })),
@@ -1201,6 +1237,8 @@ async fn spawn_child_completion_notifies_parent_history() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -1237,6 +1275,8 @@ async fn multi_agent_completion_ignores_dead_direct_parent() {
                 parent_thread_id: root_thread_id,
                 depth: 1,
                 agent_path: Some(worker_path.clone()),
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -1253,6 +1293,8 @@ async fn multi_agent_completion_ignores_dead_direct_parent() {
                 parent_thread_id: worker_thread_id,
                 depth: 2,
                 agent_path: Some(tester_path.clone()),
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -1348,6 +1390,8 @@ async fn multi_agent_completion_queues_message_for_direct_parent() {
             parent_thread_id: worker_thread_id,
             depth: 2,
             agent_path: Some(tester_path.clone()),
+            agent_base_name: None,
+            agent_title: None,
             agent_display_name: None,
             agent_role: Some("explorer".to_string()),
         })),
@@ -1431,6 +1475,8 @@ async fn completion_watcher_notifies_parent_when_child_is_missing() {
             parent_thread_id,
             depth: 1,
             agent_path: None,
+            agent_base_name: None,
+            agent_title: None,
             agent_display_name: None,
             agent_role: Some("explorer".to_string()),
         })),
@@ -1474,6 +1520,8 @@ async fn spawn_thread_subagent_gets_stable_chinese_nickname_in_session_source() 
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -1526,6 +1574,8 @@ async fn spawn_thread_subagent_uses_role_specific_base_name_candidates() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("researcher".to_string()),
             })),
@@ -1540,8 +1590,9 @@ async fn spawn_thread_subagent_uses_role_specific_base_name_candidates() {
         .expect("child thread should be registered");
     let snapshot = child_thread.config_snapshot().await;
 
-    let SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_display_name, .. }) =
-        snapshot.session_source
+    let SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+        agent_display_name, ..
+    }) = snapshot.session_source
     else {
         panic!("expected thread-spawn sub-agent source");
     };
@@ -1583,6 +1634,8 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: Some(agent_path.clone()),
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -1652,6 +1705,8 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: Some(agent_path.clone()),
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: None,
             }),
@@ -1671,6 +1726,8 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
         parent_thread_id: resumed_parent_thread_id,
         depth: resumed_depth,
         agent_path: resumed_agent_path,
+        agent_base_name: None,
+        agent_title: None,
         agent_display_name: resumed_nickname,
         agent_role: resumed_role,
         ..
@@ -1771,6 +1828,8 @@ async fn shutdown_agent_tree_closes_live_descendants() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -1786,6 +1845,8 @@ async fn shutdown_agent_tree_closes_live_descendants() {
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
@@ -1856,6 +1917,8 @@ async fn shutdown_agent_tree_closes_descendants_when_started_at_child() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -1871,6 +1934,8 @@ async fn shutdown_agent_tree_closes_descendants_when_started_at_child() {
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
@@ -1947,6 +2012,8 @@ async fn resume_thread_from_rollout_does_not_reopen_closed_descendants() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -1962,6 +2029,8 @@ async fn resume_thread_from_rollout_does_not_reopen_closed_descendants() {
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
@@ -2042,6 +2111,8 @@ async fn resume_closed_child_reopens_open_descendants() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -2057,6 +2128,8 @@ async fn resume_closed_child_reopens_open_descendants() {
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
@@ -2097,6 +2170,8 @@ async fn resume_closed_child_reopens_open_descendants() {
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: None,
             }),
@@ -2139,6 +2214,8 @@ async fn resume_thread_from_rollout_reopens_open_descendants_after_manager_shutd
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -2154,6 +2231,8 @@ async fn resume_thread_from_rollout_reopens_open_descendants_after_manager_shutd
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
@@ -2230,6 +2309,8 @@ async fn resume_thread_from_rollout_uses_edge_data_when_descendant_metadata_sour
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -2245,6 +2326,8 @@ async fn resume_thread_from_rollout_uses_edge_data_when_descendant_metadata_sour
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),
@@ -2283,6 +2366,8 @@ async fn resume_thread_from_rollout_uses_edge_data_when_descendant_metadata_sour
             parent_thread_id: ThreadId::new(),
             depth: 99,
             agent_path: None,
+            agent_base_name: None,
+            agent_title: None,
             agent_display_name: None,
             agent_role: Some("worker".to_string()),
         }))
@@ -2361,6 +2446,8 @@ async fn resume_thread_from_rollout_skips_descendants_when_parent_resume_fails()
                 parent_thread_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("explorer".to_string()),
             })),
@@ -2376,6 +2463,8 @@ async fn resume_thread_from_rollout_skips_descendants_when_parent_resume_fails()
                 parent_thread_id: child_thread_id,
                 depth: 2,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: Some("worker".to_string()),
             })),

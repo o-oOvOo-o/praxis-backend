@@ -4,9 +4,13 @@ use std::sync::Arc;
 use praxis_app_gateway_protocol::Model;
 use praxis_app_gateway_protocol::ModelUpgradeInfo;
 use praxis_app_gateway_protocol::ReasoningEffortOption;
+use praxis_core::ModelProviderInfo;
+use praxis_core::OPENAI_PROVIDER_ID;
 use praxis_core::ThreadManager;
 use praxis_core::config::Config;
+use praxis_core::models_manager::manager::ModelsManager;
 use praxis_core::models_manager::manager::RefreshStrategy;
+use praxis_core::models_manager::model_presets::bundled_api_model_presets;
 use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelPreset;
@@ -18,38 +22,102 @@ pub async fn supported_models(
     include_hidden: bool,
 ) -> Vec<Model> {
     let models_manager = thread_manager.get_models_manager();
-    let presets = models_manager
+    let current_presets = models_manager
         .list_models_for_config(config, RefreshStrategy::OnlineIfUncached)
         .await
         .into_iter()
         .filter(|preset| include_hidden || preset.show_in_picker)
         .collect::<Vec<_>>();
-    let mut models = Vec::with_capacity(presets.len().saturating_add(1));
-    let mut seen_models = HashSet::with_capacity(presets.len().saturating_add(1));
-    for preset in presets {
-        seen_models.insert(preset.model.clone());
-        let model_info = models_manager
-            .get_model_info(preset.model.as_str(), config)
-            .await;
-        models.push(model_from_preset(preset, &model_info));
+    let mut models = Vec::with_capacity(current_presets.len().saturating_add(8));
+    let mut seen_models = HashSet::with_capacity(current_presets.len().saturating_add(8));
+    append_provider_models(
+        &models_manager,
+        config,
+        config.model_provider_id.as_str(),
+        &config.model_provider,
+        current_presets,
+        include_hidden,
+        &mut models,
+        &mut seen_models,
+    )
+    .await;
+
+    if config.model_provider_id != OPENAI_PROVIDER_ID
+        && let Some(openai_provider) = config.model_providers.get(OPENAI_PROVIDER_ID)
+    {
+        append_provider_models(
+            &models_manager,
+            config,
+            OPENAI_PROVIDER_ID,
+            openai_provider,
+            bundled_api_model_presets(),
+            include_hidden,
+            &mut models,
+            &mut seen_models,
+        )
+        .await;
     }
 
     if let Some(current_model) = config.model.as_deref()
-        && !seen_models.contains(current_model)
+        && seen_models.insert((config.model_provider_id.clone(), current_model.to_string()))
     {
         let model_info = models_manager.get_model_info(current_model, config).await;
         let mut preset = ModelPreset::from(model_info.clone());
         preset.show_in_picker = true;
         preset.is_default = models.is_empty();
-        models.push(model_from_preset(preset, &model_info));
+        models.push(model_from_preset(
+            preset,
+            &model_info,
+            Some(config.model_provider_id.as_str()),
+        ));
     }
 
     models
 }
 
-fn model_from_preset(preset: ModelPreset, model_info: &ModelInfo) -> Model {
+async fn append_provider_models(
+    models_manager: &Arc<ModelsManager>,
+    base_config: &Config,
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+    presets: Vec<ModelPreset>,
+    include_hidden: bool,
+    models: &mut Vec<Model>,
+    seen_models: &mut HashSet<(String, String)>,
+) {
+    let mut provider_config = base_config.clone();
+    provider_config.model_provider_id = provider_id.to_string();
+    provider_config.model_provider = provider.clone();
+
+    for preset in presets {
+        if !include_hidden && !preset.show_in_picker {
+            continue;
+        }
+        if !seen_models.insert((provider_id.to_string(), preset.model.clone())) {
+            continue;
+        }
+        let model_info = models_manager
+            .get_model_info(preset.model.as_str(), &provider_config)
+            .await;
+        models.push(model_from_preset(preset, &model_info, Some(provider_id)));
+    }
+}
+
+fn provider_scoped_model_id(provider_id: &str, model: &str) -> String {
+    format!("{provider_id}::{model}")
+}
+
+fn model_from_preset(
+    preset: ModelPreset,
+    model_info: &ModelInfo,
+    provider_id: Option<&str>,
+) -> Model {
+    let id = provider_id
+        .map(|provider_id| provider_scoped_model_id(provider_id, preset.model.as_str()))
+        .unwrap_or_else(|| preset.id.to_string());
     Model {
-        id: preset.id.to_string(),
+        id,
+        model_provider: provider_id.map(str::to_string),
         model: preset.model.to_string(),
         upgrade: preset.upgrade.as_ref().map(|upgrade| upgrade.id.clone()),
         upgrade_info: preset.upgrade.as_ref().map(|upgrade| ModelUpgradeInfo {

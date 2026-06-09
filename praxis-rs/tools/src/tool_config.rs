@@ -169,6 +169,12 @@ impl ToolsConfig {
             include_request_user_input && features.enabled(Feature::DefaultModeRequestUserInput);
         let include_search_tool =
             model_info.supports_search_tool && features.enabled(Feature::ToolSearch);
+        let default_web_search_backend = match web_search_mode {
+            Some(WebSearchMode::Cached | WebSearchMode::Live) => {
+                Some(ToolWebSearchBackend::Responses)
+            }
+            Some(WebSearchMode::Disabled) | None => None,
+        };
         let include_tool_suggest = features.enabled(Feature::ToolSuggest)
             && features.enabled(Feature::Apps)
             && features.enabled(Feature::Plugins);
@@ -228,7 +234,9 @@ impl ToolsConfig {
             web_search_mode: *web_search_mode,
             web_search_config: None,
             web_search_tool_type: model_info.web_search_tool_type,
-            tool_capabilities: ToolCapabilityConfig::default(),
+            tool_capabilities: ToolCapabilityConfig {
+                web_search_backend: default_web_search_backend,
+            },
             image_gen_tool: include_image_gen_tool,
             search_tool: include_search_tool,
             tool_suggest: include_tool_suggest,
@@ -288,7 +296,9 @@ impl ToolsConfig {
     }
 
     pub fn with_tool_capabilities(mut self, tool_capabilities: ToolCapabilityConfig) -> Self {
-        self.tool_capabilities = tool_capabilities;
+        if tool_capabilities.web_search_backend.is_some() {
+            self.tool_capabilities.web_search_backend = tool_capabilities.web_search_backend;
+        }
         self
     }
 

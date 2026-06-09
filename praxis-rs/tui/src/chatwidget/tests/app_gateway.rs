@@ -42,7 +42,7 @@ async fn collab_spawn_end_shows_requested_model_and_effort() {
         .join("\n");
 
     assert!(
-        rendered.contains("Spawned 墨子 - 巡检仓库 [explorer] (gpt-5 high)"),
+        rendered.contains("Spawned 墨子-巡检仓库 [explorer] (gpt-5 high)"),
         "expected spawn line to include agent metadata and requested model, got {rendered:?}"
     );
 }
@@ -96,6 +96,7 @@ async fn live_app_gateway_turn_completed_clears_working_status_after_answer_item
                 status: AppGatewayTurnStatus::InProgress,
                 error: None,
             },
+            model_context_window: None,
         }),
         /*replay_kind*/ None,
     );
@@ -141,6 +142,32 @@ async fn live_app_gateway_turn_completed_clears_working_status_after_answer_item
 
     assert!(!chat.bottom_pane.is_task_running());
     assert!(chat.bottom_pane.status_widget().is_none());
+}
+
+#[tokio::test]
+async fn live_app_gateway_turn_started_uses_runtime_context_window_before_token_usage() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.config.model_context_window = Some(1_000_000);
+
+    chat.handle_server_notification(
+        ServerNotification::TurnStarted(TurnStartedNotification {
+            thread_id: "thread-1".to_string(),
+            turn: AppGatewayTurn {
+                id: "turn-1".to_string(),
+                items: Vec::new(),
+                status: AppGatewayTurnStatus::InProgress,
+                error: None,
+            },
+            model_context_window: Some(950_000),
+        }),
+        /*replay_kind*/ None,
+    );
+
+    assert_eq!(
+        chat.status_line_value_for_item(&crate::bottom_pane::StatusLineItem::ContextWindowSize),
+        Some("950K window".to_string())
+    );
+    assert_eq!(chat.bottom_pane.context_window_percent(), Some(100));
 }
 
 #[tokio::test]
@@ -422,6 +449,7 @@ async fn live_app_gateway_failed_turn_does_not_duplicate_error_history() {
                 status: AppGatewayTurnStatus::InProgress,
                 error: None,
             },
+            model_context_window: None,
         }),
         /*replay_kind*/ None,
     );
@@ -478,6 +506,7 @@ async fn live_app_gateway_stream_recovery_restores_previous_status_header() {
                 status: AppGatewayTurnStatus::InProgress,
                 error: None,
             },
+            model_context_window: None,
         }),
         /*replay_kind*/ None,
     );
@@ -532,6 +561,7 @@ async fn live_app_gateway_server_overloaded_error_renders_warning() {
                 status: AppGatewayTurnStatus::InProgress,
                 error: None,
             },
+            model_context_window: None,
         }),
         /*replay_kind*/ None,
     );

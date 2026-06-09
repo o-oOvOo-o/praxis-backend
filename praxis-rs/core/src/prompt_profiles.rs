@@ -2,8 +2,8 @@ use crate::llm::ids::BehaviorProfileId;
 use crate::llm::ids::ProductProfileId;
 use crate::llm::profiles::plugin::ProfileDescriptor;
 use crate::llm::profiles::plugin::ProfileMatchContext;
+use crate::llm::prompts::LlmPromptPurpose;
 use crate::llm::registry::LlmProfileRegistry;
-use crate::llm::runtime::LlmPromptPurpose;
 use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::model_provider_info::ModelProviderInfo;
 use praxis_protocol::config_types::Personality;
@@ -89,26 +89,31 @@ fn resolve_behavior_model_instructions(
     ) {
         return plugin_instructions;
     }
-    let Some(profile_id) = PromptProfileId::from_behavior_id(profile.id) else {
-        return catalog_instructions.to_string();
+    let instructions = match PromptProfileId::from_behavior_id(profile.id) {
+        Some(profile_id)
+            if profile_id == PromptProfileId::CodexResponses
+                && !catalog_instructions.trim().is_empty() =>
+        {
+            catalog_instructions.to_string()
+        }
+        Some(profile_id) => {
+            let profile_instructions = profile.instructions.unwrap_or_default().trim();
+            if profile_instructions.is_empty() {
+                catalog_instructions.to_string()
+            } else {
+                tracing::debug!(
+                    model = %model_info.slug,
+                    provider_id,
+                    prompt_profile = profile_id.as_str(),
+                    "resolved model prompt profile"
+                );
+                profile_instructions.to_string()
+            }
+        }
+        None => catalog_instructions.to_string(),
     };
 
-    if profile_id == PromptProfileId::CodexResponses && !catalog_instructions.trim().is_empty() {
-        return catalog_instructions.to_string();
-    }
-
-    let profile_instructions = profile.instructions.unwrap_or_default().trim();
-    if profile_instructions.is_empty() {
-        return catalog_instructions.to_string();
-    }
-
-    tracing::debug!(
-        model = %model_info.slug,
-        provider_id,
-        prompt_profile = profile_id.as_str(),
-        "resolved model prompt profile"
-    );
-    profile_instructions.to_string()
+    join_profile_prompt_layers(instructions, profile, LlmPromptPurpose::ModelInstructions)
 }
 
 fn join_prompt_layers(base: &str, product: &str) -> String {
@@ -120,6 +125,31 @@ fn join_prompt_layers(base: &str, product: &str) -> String {
         (false, true) => base.to_string(),
         (false, false) => format!("{base}\n\n{product}"),
     }
+}
+
+fn join_profile_prompt_layers(
+    mut instructions: String,
+    profile: ProfileDescriptor,
+    purpose: LlmPromptPurpose,
+) -> String {
+    for layer in profile
+        .prompt_layers
+        .iter()
+        .filter(|layer| layer.purpose == purpose)
+    {
+        let content = layer.content.trim();
+        if content.is_empty() {
+            continue;
+        }
+        tracing::debug!(
+            prompt_profile = profile.id.as_str(),
+            prompt_layer = layer.id,
+            prompt_purpose = purpose.as_str(),
+            "applied internal LLM prompt layer"
+        );
+        instructions = join_prompt_layers(&instructions, content);
+    }
+    instructions
 }
 
 #[cfg(test)]
@@ -215,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn common_openai_compatible_profile_uses_deepseek_instructions_for_now() {
+    fn common_openai_compatible_profile_uses_common_instructions() {
         let (provider_id, provider) = provider(
             "custom-provider",
             "https://example.test/v1",
@@ -230,7 +260,68 @@ mod tests {
             None,
             &LlmRuntimeCatalog::default(),
         );
-        assert_eq!(instructions, crate::llm::profiles::deepseek::prompts::BASE);
+        assert_eq!(instructions, crate::llm::profiles::common::prompts::BASE);
+    }
+
+    #[test]
+    fn deepseek_profile_applies_internal_smarter_prompt_layer() {
+        let (provider_id, provider) = provider(
+            "deepseek",
+            "https://api.deepseek.com",
+            WireApi::OpenAiCompat,
+        );
+
+        let instructions = resolve_model_instructions(
+            &model("deepseek-v4-pro"),
+            &provider_id,
+            &provider,
+            None,
+            None,
+            &LlmRuntimeCatalog::default(),
+        );
+
+        assert!(instructions.starts_with("你是 Praxis"));
+        assert!(instructions.contains("# DeepSeek Smarter Orchestration"));
+        assert!(
+            instructions.contains("优先把实现层委派给 Praxis 暴露的 Codex/OpenAI worker subagent")
+        );
+        assert!(
+            instructions.contains("精确复制规则只适用于正向任务契约")
+        );
+        assert!(
+            instructions.contains("不得把该字面量传给 worker、写入工具参数或放进最终答复")
+        );
+        assert!(
+            instructions.contains("assign_task.constraints")
+                && instructions.contains("assign_task.acceptance_criteria")
+                && instructions.contains("assign_task.required_resources")
+        );
+        assert!(
+            instructions.find("你是 Praxis").unwrap()
+                < instructions
+                    .find("# DeepSeek Smarter Orchestration")
+                    .unwrap()
+        );
+    }
+
+    #[test]
+    fn deepseek_smarter_layer_does_not_apply_to_common_profile() {
+        let (provider_id, provider) = provider(
+            "custom-provider",
+            "https://example.test/v1",
+            WireApi::OpenAiCompat,
+        );
+
+        let instructions = resolve_model_instructions(
+            &model("custom-model"),
+            &provider_id,
+            &provider,
+            None,
+            None,
+            &LlmRuntimeCatalog::default(),
+        );
+
+        assert!(!instructions.contains("# DeepSeek Smarter Orchestration"));
     }
 
     #[test]

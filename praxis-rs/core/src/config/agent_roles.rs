@@ -144,7 +144,9 @@ fn read_declared_role(
         let parsed_file = read_resolved_agent_role_file(config_file, Some(declared_role_name))?;
         role_name = parsed_file.role_name;
         role.description = parsed_file.description.or(role.description);
-        role.base_name_candidates = parsed_file.base_name_candidates.or(role.base_name_candidates);
+        role.base_name_candidates = parsed_file
+            .base_name_candidates
+            .or(role.base_name_candidates);
     }
 
     Ok((role_name, role))

@@ -66,6 +66,9 @@ pub(crate) struct LiveAgent {
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub(crate) struct ListedAgent {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) recommended_target: String,
+    pub(crate) next_action: String,
     pub(crate) agent_name: String,
     pub(crate) agent_base_name: Option<String>,
     pub(crate) agent_title: Option<String>,
@@ -107,11 +110,15 @@ struct AgentDisplayIdentity {
     display_name: String,
 }
 
-fn build_agent_display_identity(base_name: String, agent_title: Option<&str>) -> AgentDisplayIdentity {
+fn build_agent_display_identity(
+    base_name: String,
+    agent_title: Option<&str>,
+) -> AgentDisplayIdentity {
     let title = agent_title
         .and_then(normalize_agent_title)
         .map(|title| strip_redundant_agent_prefix(base_name.as_str(), title.as_str()).to_string())
-        .filter(|title| !title.is_empty());
+        .filter(|title| !title.is_empty())
+        .filter(|title| !is_redundant_agent_title(base_name.as_str(), title.as_str()));
     let display_name = title
         .as_deref()
         .map(|title| format!("{base_name}-{title}"))
@@ -172,6 +179,10 @@ fn strip_redundant_agent_prefix<'a>(base_name: &str, title: &'a str) -> &'a str 
         }
     }
     title
+}
+
+fn is_redundant_agent_title(base_name: &str, title: &str) -> bool {
+    title == base_name || (base_name.is_ascii() && title.eq_ignore_ascii_case(base_name))
 }
 
 /// Control-plane handle for multi-agent operations.
@@ -516,24 +527,23 @@ impl AgentControl {
                     resumed_agent_title,
                     resumed_agent_display_name,
                     resumed_agent_role,
-                ) =
-                    if let Some(state_db_ctx) = state_db::get_state_db(&config).await {
-                        match state_db_ctx.get_thread(thread_id).await {
-                            Ok(Some(metadata)) => (
-                                metadata
-                                    .agent_path
-                                    .as_deref()
-                                    .and_then(|agent_path| AgentPath::try_from(agent_path).ok()),
-                                metadata.agent_base_name,
-                                metadata.agent_title,
-                                metadata.agent_display_name,
-                                metadata.agent_role,
-                            ),
-                            Ok(None) | Err(_) => (None, None, None, None, None),
-                        }
-                    } else {
-                        (None, None, None, None, None)
-                    };
+                ) = if let Some(state_db_ctx) = state_db::get_state_db(&config).await {
+                    match state_db_ctx.get_thread(thread_id).await {
+                        Ok(Some(metadata)) => (
+                            metadata
+                                .agent_path
+                                .as_deref()
+                                .and_then(|agent_path| AgentPath::try_from(agent_path).ok()),
+                            metadata.agent_base_name,
+                            metadata.agent_title,
+                            metadata.agent_display_name,
+                            metadata.agent_role,
+                        ),
+                        Ok(None) | Err(_) => (None, None, None, None, None),
+                    }
+                } else {
+                    (None, None, None, None, None)
+                };
                 self.prepare_thread_spawn(
                     &mut reservation,
                     &config,
@@ -853,18 +863,117 @@ impl AgentControl {
             }
         }
 
-        if let Some(thread_id) = self.state.agent_id_for_display_name(agent_reference)? {
+        if let Some(thread_id) = self.state.agent_id_for_human_name(agent_reference)? {
             return Ok(thread_id);
         }
 
+        let reference_hint = self.live_agent_reference_hint();
         match agent_path {
             Ok(agent_path) => Err(PraxisErr::UnsupportedOperation(format!(
-                "live agent path `{}` or display name `{}` not found",
+                "live agent path `{}` or human name `{}` not found. {}",
                 agent_path.as_str(),
-                agent_reference.trim()
+                agent_reference.trim(),
+                reference_hint
             ))),
-            Err(err) => Err(PraxisErr::UnsupportedOperation(err)),
+            Err(err) => Err(PraxisErr::UnsupportedOperation(format!(
+                "agent reference `{}` did not match a live human name and could not be parsed as an agent path: {}. {}",
+                agent_reference.trim(),
+                err,
+                reference_hint
+            ))),
         }
+    }
+
+    fn live_agent_reference_hint(&self) -> String {
+        let mut agents = self.state.live_agents();
+        agents.sort_by(|left, right| {
+            left.agent_display_name
+                .as_deref()
+                .or(left.agent_base_name.as_deref())
+                .unwrap_or_default()
+                .cmp(
+                    right
+                        .agent_display_name
+                        .as_deref()
+                        .or(right.agent_base_name.as_deref())
+                        .unwrap_or_default(),
+                )
+        });
+
+        if agents.is_empty() {
+            return "No live sub-agents are available.".to_string();
+        }
+
+        let entries = agents
+            .into_iter()
+            .take(8)
+            .map(|metadata| {
+                let mut parts = Vec::new();
+                if let Some(base_name) = metadata.agent_base_name.as_deref() {
+                    parts.push(format!("base `{base_name}`"));
+                }
+                if let Some(display_name) = metadata.agent_display_name.as_deref() {
+                    parts.push(format!("display `{display_name}`"));
+                }
+                if let Some(agent_path) = metadata.agent_path.as_ref() {
+                    parts.push(format!("path `{}`", agent_path.as_str()));
+                }
+                if let Some(task_preview) = metadata
+                    .last_task_message
+                    .as_deref()
+                    .and_then(Self::format_live_agent_task_preview)
+                {
+                    parts.push(format!("task `{task_preview}`"));
+                }
+                if parts.is_empty()
+                    && let Some(agent_id) = metadata.agent_id
+                {
+                    parts.push(format!("thread `{agent_id}`"));
+                }
+                parts.join(", ")
+            })
+            .filter(|entry| !entry.is_empty())
+            .collect::<Vec<_>>();
+
+        if entries.is_empty() {
+            return "No named live sub-agents are available.".to_string();
+        }
+        let suffix = if entries.len() == 8 { "; ..." } else { "" };
+        format!(
+            "Available live sub-agents: {}{}. Use an exact base name, display name, path, or thread id.",
+            entries.join("; "),
+            suffix
+        )
+    }
+
+    fn format_live_agent_task_preview(value: &str) -> Option<String> {
+        let collapsed = value
+            .chars()
+            .map(|ch| {
+                if ch.is_control() || ch.is_whitespace() {
+                    ' '
+                } else {
+                    ch
+                }
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let trimmed = collapsed.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let mut preview = String::new();
+        for (index, ch) in trimmed.chars().enumerate() {
+            if index >= 160 {
+                preview.push_str("...");
+                break;
+            }
+            preview.push(ch);
+        }
+        Some(preview)
     }
 
     /// Subscribe to status updates for `agent_id`, yielding the latest value and changes.
@@ -903,7 +1012,10 @@ impl AgentControl {
                     .as_ref()
                     .map(|agent_path| agent_path.name().to_string())
                     .unwrap_or_else(|| thread_id.to_string());
-                format_subagent_context_line(reference.as_str(), metadata.agent_display_name.as_deref())
+                format_subagent_context_line(
+                    reference.as_str(),
+                    metadata.agent_display_name.as_deref(),
+                )
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -938,6 +1050,7 @@ impl AgentControl {
             && let Ok(root_thread) = state.get_thread(root_thread_id).await
         {
             agents.push(ListedAgent {
+                thread_id: root_thread_id,
                 agent_name: root_path.to_string(),
                 agent_base_name: None,
                 agent_title: None,
@@ -945,6 +1058,10 @@ impl AgentControl {
                 agent_role: None,
                 agent_status: root_thread.agent_status().await,
                 last_task_message: Some(ROOT_LAST_TASK_MESSAGE.to_string()),
+                recommended_target: root_thread_id.to_string(),
+                next_action:
+                    "This is the root thread; list_agents omits it from tool output for subagent coordination."
+                        .to_string(),
             });
         }
 
@@ -968,14 +1085,20 @@ impl AgentControl {
                 .map(ToString::to_string)
                 .unwrap_or_else(|| thread_id.to_string());
             let last_task_message = metadata.last_task_message.clone();
+            let agent_status = thread.agent_status().await;
+            let recommended_target = thread_id.to_string();
+            let next_action = listed_agent_next_action(&recommended_target, &agent_status);
             agents.push(ListedAgent {
+                thread_id,
                 agent_name,
                 agent_base_name: metadata.agent_base_name.clone(),
                 agent_title: metadata.agent_title.clone(),
                 agent_display_name: metadata.agent_display_name.clone(),
                 agent_role: metadata.agent_role.clone(),
-                agent_status: thread.agent_status().await,
+                agent_status,
                 last_task_message,
+                recommended_target,
+                next_action,
             });
         }
 
@@ -1105,8 +1228,10 @@ impl AgentControl {
             .or_else(|| preferred_agent_display_name.as_deref())
             .map(str::trim)
             .filter(|name| !name.is_empty());
-        let base_name = reservation
-            .reserve_agent_base_name_with_preference(&candidate_name_refs, preferred_agent_base_name)?;
+        let base_name = reservation.reserve_agent_base_name_with_preference(
+            &candidate_name_refs,
+            preferred_agent_base_name,
+        )?;
         let requested_title = preferred_agent_title.as_deref().or(agent_title);
         let mut identity = build_agent_display_identity(base_name, requested_title);
         if identity.title.is_none()
@@ -1290,6 +1415,30 @@ impl AgentControl {
         descendants.sort_by_key(|thread_id| thread_id.to_string());
 
         Ok(descendants)
+    }
+}
+
+fn listed_agent_next_action(recommended_target: &str, status: &AgentStatus) -> String {
+    match status {
+        AgentStatus::PendingInit | AgentStatus::Running => {
+            format!(
+                "Call wait_agent with target `{recommended_target}` only if this worker result is on the critical path."
+            )
+        }
+        AgentStatus::Completed(_) | AgentStatus::Interrupted => {
+            format!(
+                "Inspect the result, then use assign_task with target `{recommended_target}` for another turn or close_agent when done."
+            )
+        }
+        AgentStatus::Errored(_) => {
+            format!(
+                "Inspect the error, then use assign_task with target `{recommended_target}` to retry with a narrower task or close_agent."
+            )
+        }
+        AgentStatus::Shutdown | AgentStatus::NotFound => {
+            "Do not target this worker for new work; spawn or resume another worker if needed."
+                .to_string()
+        }
     }
 }
 

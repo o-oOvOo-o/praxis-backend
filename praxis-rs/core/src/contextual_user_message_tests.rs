@@ -27,6 +27,16 @@ fn detects_subagent_notification_fragment_case_insensitively() {
 }
 
 #[test]
+fn detects_runtime_recovery_fragment_and_excludes_memory() {
+    let content = ContentItem::InputText {
+        text: RUNTIME_RECOVERY_FRAGMENT.wrap("retry the latest user request".to_string()),
+    };
+
+    assert!(is_contextual_user_fragment(&content));
+    assert!(is_memory_excluded_contextual_user_fragment(&content));
+}
+
+#[test]
 fn ignores_regular_user_text() {
     assert!(!is_contextual_user_fragment(&ContentItem::InputText {
         text: "hello".to_string(),

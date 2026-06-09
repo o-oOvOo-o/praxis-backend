@@ -1627,6 +1627,9 @@ const fn default_model_supports_streaming() -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct Model {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub model_provider: Option<String>,
     pub model: String,
     pub upgrade: Option<String>,
     pub upgrade_info: Option<ModelUpgradeInfo>,
@@ -4764,6 +4767,9 @@ pub struct ThreadNameUpdatedNotification {
 pub struct TurnStartedNotification {
     pub thread_id: String,
     pub turn: Turn,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number | null")]
+    pub model_context_window: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

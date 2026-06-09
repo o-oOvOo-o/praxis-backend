@@ -31,6 +31,7 @@ use praxis_protocol::config_types::CollaborationModeMask;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::ModelsResponse;
+use praxis_protocol::openai_models::known_openai_compatible_picker_model_infos;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -191,6 +192,29 @@ impl RefreshStrategy {
 impl fmt::Display for RefreshStrategy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+fn merge_known_picker_models(
+    remote_models: &mut Vec<ModelInfo>,
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+) {
+    for model in known_openai_compatible_picker_model_infos() {
+        if !crate::model_provider_info::provider_accepts_registered_model_catalog(
+            provider_id,
+            provider,
+            model.slug.as_str(),
+        ) {
+            continue;
+        }
+        if remote_models
+            .iter()
+            .any(|existing| existing.slug == model.slug)
+        {
+            continue;
+        }
+        remote_models.push(model);
     }
 }
 
@@ -671,6 +695,9 @@ impl ModelsManager {
         provider_id: &str,
         provider: &ModelProviderInfo,
     ) -> Vec<ModelPreset> {
+        if !matches!(self.catalog_mode, CatalogMode::Custom) {
+            merge_known_picker_models(&mut remote_models, provider_id, provider);
+        }
         remote_models.sort_by(|a, b| a.priority.cmp(&b.priority));
 
         let mut presets: Vec<ModelPreset> = remote_models

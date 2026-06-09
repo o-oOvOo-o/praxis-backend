@@ -1,1 +1,1 @@
-pub(crate) const BASE: &str = super::super::deepseek::prompts::BASE;
+pub(crate) const BASE: &str = include_str!("../../../../templates/prompt_profiles/common/base.md");

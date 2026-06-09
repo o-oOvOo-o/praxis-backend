@@ -48,6 +48,11 @@ impl LlmPlugin for DeepSeekLlmPlugin {
             "DeepSeek prompt layer",
         ));
         registry.add_extension(LlmExtensionDescriptor::new(
+            LlmExtensionKind::PromptLayer,
+            "deepseek/smarter",
+            "DeepSeek smarter orchestration prompt layer",
+        ));
+        registry.add_extension(LlmExtensionDescriptor::new(
             LlmExtensionKind::TaskPolicy,
             "deepseek/tasks",
             "DeepSeek task policy",

@@ -13,6 +13,7 @@ use praxis_app_gateway_protocol::ModelUpgradeInfo;
 use praxis_app_gateway_protocol::ReasoningEffortOption;
 use praxis_app_gateway_protocol::RequestId;
 use praxis_protocol::openai_models::ModelPreset;
+use praxis_protocol::openai_models::known_openai_compatible_model_info;
 use pretty_assertions::assert_eq;
 use std::fs;
 use tempfile::TempDir;
@@ -22,8 +23,10 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const INVALID_REQUEST_ERROR_CODE: i64 = -32600;
 
 fn model_from_preset(preset: &ModelPreset) -> Model {
+    let model_info = known_openai_compatible_model_info(preset.model.as_str());
     Model {
-        id: preset.id.clone(),
+        id: format!("openai::{}", preset.model),
+        model_provider: Some("openai".to_string()),
         model: preset.model.clone(),
         upgrade: preset.upgrade.as_ref().map(|upgrade| upgrade.id.clone()),
         upgrade_info: preset.upgrade.as_ref().map(|upgrade| ModelUpgradeInfo {
@@ -49,11 +52,12 @@ fn model_from_preset(preset: &ModelPreset) -> Model {
         // `write_models_cache()` round-trips through a simplified ModelInfo fixture that does not
         // preserve personality placeholders in base instructions, so app-gateway list results from
         // cache report `supports_personality = false`.
-        // todo(sayan): fix, maybe make roundtrip use ModelInfo only
         supports_personality: false,
         supports_tools: true,
         supports_streaming: true,
-        supports_parallel_tool_calls: false,
+        supports_parallel_tool_calls: model_info
+            .as_ref()
+            .is_some_and(|info| info.supports_parallel_tool_calls),
         context_window: Some(272_000),
         is_default: preset.is_default,
     }
@@ -261,12 +265,23 @@ supports_websockets = false
         next_cursor,
     } = to_response::<ModelListResponse>(response)?;
 
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].model, "glm-5.1");
-    assert_eq!(items[0].display_name, "glm-5.1");
-    assert!(!items[0].hidden);
-    assert!(items[0].is_default);
-    assert!(items[0].supported_reasoning_efforts.is_empty());
+    let glm = items
+        .iter()
+        .find(|item| {
+            item.model_provider.as_deref() == Some("glm_claude") && item.model == "glm-5.1"
+        })
+        .expect("current non-openai provider model should be listed");
+    assert_eq!(glm.id, "glm_claude::glm-5.1");
+    assert_eq!(glm.display_name, "glm-5.1");
+    assert!(!glm.hidden);
+
+    let gpt55 = items
+        .iter()
+        .find(|item| item.model_provider.as_deref() == Some("openai") && item.model == "gpt-5.5")
+        .expect("bundled OpenAI GPT-5.5 should be listed for cross-provider selection");
+    assert_eq!(gpt55.id, "openai::gpt-5.5");
+    assert_eq!(gpt55.display_name, "GPT-5.5");
+    assert!(!gpt55.hidden);
     assert!(next_cursor.is_none());
     Ok(())
 }

@@ -540,6 +540,7 @@ async fn replayed_retryable_app_gateway_error_keeps_turn_running() {
                 status: AppGatewayTurnStatus::InProgress,
                 error: None,
             },
+            model_context_window: None,
         }),
         Some(ReplayKind::ThreadSnapshot),
     );
@@ -690,6 +691,7 @@ async fn live_reasoning_summary_is_not_rendered_twice_when_item_completes() {
                 status: AppGatewayTurnStatus::InProgress,
                 error: None,
             },
+            model_context_window: None,
         }),
         /*replay_kind*/ None,
     );

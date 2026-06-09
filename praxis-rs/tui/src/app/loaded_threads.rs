@@ -26,6 +26,8 @@ use std::collections::HashSet;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LoadedSubagentThread {
     pub(crate) thread_id: ThreadId,
+    pub(crate) agent_base_name: Option<String>,
+    pub(crate) agent_title: Option<String>,
     pub(crate) agent_display_name: Option<String>,
     pub(crate) agent_role: Option<String>,
 }
@@ -87,6 +89,8 @@ pub(crate) fn find_loaded_subagent_threads_for_primary(
                 .remove(&thread_id)
                 .map(|thread| LoadedSubagentThread {
                     thread_id,
+                    agent_base_name: thread.agent_base_name,
+                    agent_title: thread.agent_title,
                     agent_display_name: thread.agent_display_name,
                     agent_role: thread.agent_role,
                 })
@@ -123,6 +127,8 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             cli_version: "0.0.0".to_string(),
             source,
+            agent_base_name: None,
+            agent_title: None,
             agent_display_name: None,
             agent_role: None,
             git_info: None,
@@ -201,11 +207,15 @@ mod tests {
             vec![
                 LoadedSubagentThread {
                     thread_id: child_thread_id,
+                    agent_base_name: None,
+                    agent_title: None,
                     agent_display_name: Some("Scout".to_string()),
                     agent_role: Some("explorer".to_string()),
                 },
                 LoadedSubagentThread {
                     thread_id: grandchild_thread_id,
+                    agent_base_name: None,
+                    agent_title: None,
                     agent_display_name: Some("Atlas".to_string()),
                     agent_role: Some("worker".to_string()),
                 },

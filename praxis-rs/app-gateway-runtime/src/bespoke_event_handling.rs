@@ -298,6 +298,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 let notification = TurnStartedNotification {
                     thread_id: conversation_id.to_string(),
                     turn,
+                    model_context_window: payload.model_context_window,
                 };
                 outgoing
                     .send_server_notification(ServerNotification::TurnStarted(notification))

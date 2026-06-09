@@ -21,15 +21,18 @@ use crate::praxis::TurnContext;
 use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolRouter;
 use futures::Future;
+use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::DeveloperInstructions;
 use praxis_protocol::models::FunctionCallOutputBody;
 use praxis_protocol::models::FunctionCallOutputPayload;
+use praxis_protocol::models::MessagePhase;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::models::ResponseItem;
 use praxis_rollout::state_db;
 use praxis_utils_stream_parser::strip_proposed_plan_blocks;
 use tracing::debug;
 use tracing::instrument;
+use tracing::warn;
 
 const GENERATED_IMAGE_ARTIFACTS_DIR: &str = "generated_images";
 
@@ -205,6 +208,42 @@ pub(crate) async fn handle_output_item_done(
     match ToolRouter::build_tool_call(ctx.sess.as_ref(), item.clone()).await {
         // The model emitted a tool call; log it, persist the item immediately, and queue the tool execution.
         Ok(Some(call)) => {
+            if ctx
+                .turn_context
+                .tool_loop_guard
+                .should_hide_tool(&call.tool_name)
+            {
+                warn!(
+                    tool_name = call.tool_name.as_str(),
+                    "hidden tool call suppressed after tool loop guard intervention"
+                );
+                let final_item = hidden_tool_loop_final_item(ctx, call.tool_name.as_str()).await;
+                if let Some(turn_item) = handle_non_tool_response_item(
+                    ctx.sess.as_ref(),
+                    ctx.turn_context.as_ref(),
+                    &final_item,
+                    plan_mode,
+                )
+                .await
+                {
+                    ctx.sess
+                        .emit_turn_item_started(&ctx.turn_context, &turn_item)
+                        .await;
+                    ctx.sess
+                        .emit_turn_item_completed(&ctx.turn_context, turn_item)
+                        .await;
+                }
+                record_completed_response_item(
+                    ctx.sess.as_ref(),
+                    ctx.turn_context.as_ref(),
+                    &final_item,
+                )
+                .await;
+                output.last_agent_message =
+                    last_assistant_message_from_item(&final_item, plan_mode);
+                return Ok(output);
+            }
+
             let payload_preview = call.payload.log_payload().into_owned();
             tracing::info!(
                 thread_id = %ctx.sess.conversation_id,
@@ -316,6 +355,123 @@ pub(crate) async fn handle_output_item_done(
     }
 
     Ok(output)
+}
+
+pub(crate) async fn tool_loop_guard_final_item(
+    sess: Arc<Session>,
+    tool_name: &str,
+) -> ResponseItem {
+    final_answer_item(
+        sess,
+        format!(
+            "Tool loop stopped: `{tool_name}` was no longer available after AgentOS reported no live sub-agents or pending work."
+        ),
+        true,
+    )
+    .await
+}
+
+pub(crate) async fn subagent_workflow_empty_final_item(sess: Arc<Session>) -> ResponseItem {
+    final_answer_item(
+        sess,
+        "Sub-agent workflow completed, but the model ended the turn without a final assistant message.".to_string(),
+        true,
+    )
+    .await
+}
+
+pub(crate) async fn subagent_workflow_incomplete_final_item(sess: Arc<Session>) -> ResponseItem {
+    final_answer_item(
+        sess,
+        "Sub-agent workflow ended without a final assistant message while live sub-agents still remain. Not emitting the requested completion marker.".to_string(),
+        false,
+    )
+    .await
+}
+
+pub(crate) async fn model_empty_final_item(sess: Arc<Session>) -> ResponseItem {
+    final_answer_item(
+        sess,
+        "Model completed the turn without a final assistant message. Not emitting any requested completion marker.".to_string(),
+        false,
+    )
+    .await
+}
+
+async fn final_answer_item(
+    sess: Arc<Session>,
+    mut text: String,
+    include_requested_marker: bool,
+) -> ResponseItem {
+    if include_requested_marker {
+        let marker = requested_final_line_marker(sess.clone_history().await.raw_items());
+        if let Some(marker) = marker {
+            text.push('\n');
+            text.push_str(marker.as_str());
+        }
+    }
+    ResponseItem::Message {
+        id: None,
+        role: "assistant".to_string(),
+        content: vec![ContentItem::OutputText { text }],
+        end_turn: Some(true),
+        phase: Some(MessagePhase::FinalAnswer),
+    }
+}
+
+async fn hidden_tool_loop_final_item(ctx: &HandleOutputCtx, tool_name: &str) -> ResponseItem {
+    tool_loop_guard_final_item(Arc::clone(&ctx.sess), tool_name).await
+}
+
+fn requested_final_line_marker(items: &[ResponseItem]) -> Option<String> {
+    const PREFIXES: &[&str] = &[
+        "最后一行必须精确输出：",
+        "最后一行必须精确输出:",
+        "最后一行必须输出：",
+        "最后一行必须输出:",
+        "last line must be exactly:",
+        "final line must be exactly:",
+    ];
+
+    items.iter().rev().find_map(|item| {
+        let ResponseItem::Message { role, content, .. } = item else {
+            return None;
+        };
+        if role != "user" {
+            return None;
+        }
+        let text = content_text(content);
+        PREFIXES.iter().find_map(|prefix| {
+            let haystack = if prefix.is_ascii() {
+                text.to_lowercase()
+            } else {
+                text.clone()
+            };
+            let index = haystack.rfind(prefix)?;
+            let value = text[index + prefix.len()..]
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .trim_matches('`')
+                .trim()
+                .to_string();
+            (!value.is_empty()).then_some(value)
+        })
+    })
+}
+
+fn content_text(content: &[ContentItem]) -> String {
+    content
+        .iter()
+        .filter_map(|item| match item {
+            ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                Some(text.as_str())
+            }
+            ContentItem::InputImage { .. } => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(crate) async fn handle_non_tool_response_item(

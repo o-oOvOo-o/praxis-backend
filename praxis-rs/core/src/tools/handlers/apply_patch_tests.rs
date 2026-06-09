@@ -78,3 +78,67 @@ fn write_permissions_for_paths_keep_dirs_outside_workspace_root() {
         Some(vec![expected_outside])
     );
 }
+
+#[test]
+fn absolute_patch_targets_retarget_execution_cwd_to_common_parent() {
+    let tmp = TempDir::new().expect("tmp");
+    let cwd = tmp.path().join("agent-cwd");
+    let target_dir = tmp.path().join("qwentest");
+    std::fs::create_dir_all(&cwd).expect("create cwd");
+    std::fs::create_dir_all(&target_dir).expect("create target dir");
+    let game = target_dir.join("game3d.html");
+    let progress = target_dir.join("progress.md");
+    std::fs::write(&game, "rockets:player.rockets,\nlocked:true,\n").expect("write game");
+    std::fs::write(&progress, "start\n").expect("write progress");
+
+    let patch = format!(
+        r#"*** Begin Patch
+*** Update File: {}
+@@
+ rockets:player.rockets,
++missileCount:player.rockets,
+ locked:true,
+*** Update File: {}
+@@
++Round4 patched deterministic advanceTime and missileCount telemetry through DeepSeek-controlled GPT-5.5 worker.
+*** End Patch"#,
+        game.display(),
+        progress.display()
+    );
+    let argv = vec!["apply_patch".to_string(), patch];
+    let action = match praxis_apply_patch::maybe_parse_apply_patch_verified(&argv, &cwd) {
+        MaybeApplyPatchVerified::Body(action) => action,
+        other => panic!("expected patch body, got: {other:?}"),
+    };
+
+    let action = retarget_absolute_patch_cwd(action);
+
+    assert_eq!(action.cwd, target_dir);
+}
+
+#[test]
+fn relative_patch_targets_keep_original_execution_cwd() {
+    let tmp = TempDir::new().expect("tmp");
+    let cwd = tmp.path();
+    std::fs::write(
+        cwd.join("game3d.html"),
+        "rockets:player.rockets,\nlocked:true,\n",
+    )
+    .expect("write game");
+    let patch = r#"*** Begin Patch
+*** Update File: game3d.html
+@@
+ rockets:player.rockets,
++missileCount:player.rockets,
+ locked:true,
+*** End Patch"#;
+    let argv = vec!["apply_patch".to_string(), patch.to_string()];
+    let action = match praxis_apply_patch::maybe_parse_apply_patch_verified(&argv, cwd) {
+        MaybeApplyPatchVerified::Body(action) => action,
+        other => panic!("expected patch body, got: {other:?}"),
+    };
+
+    let action = retarget_absolute_patch_cwd(action);
+
+    assert_eq!(action.cwd, cwd);
+}
