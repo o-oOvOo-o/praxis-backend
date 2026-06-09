@@ -29,11 +29,13 @@ use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use praxis_utils_approval_presets::ApprovalPreset;
 
+use crate::SessionLookupSource;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
 use crate::history_cell::HistoryCell;
 use crate::provider_setup::ProviderSetupKind;
+use crate::resume_picker::SessionPickerAction;
 
 use praxis_config::types::ApprovalsReviewer;
 use praxis_features::Feature;
@@ -117,6 +119,12 @@ pub(crate) enum AppEvent {
 
     /// Open the resume picker inside the running TUI session.
     OpenResumePicker,
+
+    /// Open the thread picker for a specific local history source and action.
+    OpenThreadPicker {
+        source: SessionLookupSource,
+        action: SessionPickerAction,
+    },
 
     /// Fork the current session into a new thread.
     ForkCurrentSession,

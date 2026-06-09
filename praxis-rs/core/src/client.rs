@@ -1631,6 +1631,21 @@ fn sanitize_input_for_responses_api(input: Vec<ResponseItem>) -> Vec<ResponseIte
                 encrypted_content: Some(encrypted_content),
             }),
             ResponseItem::Reasoning { .. } => None,
+            ResponseItem::FunctionCall {
+                id,
+                name,
+                namespace,
+                arguments,
+                call_id,
+                ..
+            } => Some(ResponseItem::FunctionCall {
+                id,
+                provider_metadata: None,
+                name,
+                namespace,
+                arguments,
+                call_id,
+            }),
             item => Some(item),
         })
         .collect()

@@ -609,6 +609,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
             timestamp: "2024-01-01T00:00:01.000Z".to_string(),
             item: RolloutItem::ResponseItem(ResponseItem::FunctionCall {
                 id: None,
+                provider_metadata: None,
                 name: "view_image".to_string(),
                 namespace: None,
                 arguments: "{\"path\":\"/tmp/example.webp\"}".to_string(),
@@ -2114,6 +2115,7 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
     });
     prompt.input.push(ResponseItem::FunctionCall {
         id: Some("function-id".into()),
+        provider_metadata: None,
         name: "do_thing".into(),
         namespace: None,
         arguments: "{}".into(),

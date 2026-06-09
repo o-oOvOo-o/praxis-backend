@@ -144,6 +144,7 @@ fn reserializes_shell_outputs_for_function_and_custom_tool_calls() {
     let mut items = vec![
         ResponseItem::FunctionCall {
             id: None,
+            provider_metadata: None,
             name: "shell".to_string(),
             namespace: None,
             arguments: "{}".to_string(),
@@ -174,6 +175,7 @@ fn reserializes_shell_outputs_for_function_and_custom_tool_calls() {
         vec![
             ResponseItem::FunctionCall {
                 id: None,
+                provider_metadata: None,
                 name: "shell".to_string(),
                 namespace: None,
                 arguments: "{}".to_string(),

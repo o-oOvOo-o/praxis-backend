@@ -701,6 +701,7 @@ fn behavior_profile_aliases(behavior_id: BehaviorProfileId) -> &'static [&'stati
         BehaviorProfileId::CodexResponses => &["codex/responses", "codex/responses/base"],
         BehaviorProfileId::Common => &["common", "common/base"],
         BehaviorProfileId::DeepSeek => &["deepseek", "deepseek/base"],
+        BehaviorProfileId::Gemini => &["gemini", "gemini/base"],
         BehaviorProfileId::Glm => &["glm", "glm/base"],
         BehaviorProfileId::Qwen => &["qwen", "qwen/base"],
         BehaviorProfileId::Claude => &["claude", "claude/base"],

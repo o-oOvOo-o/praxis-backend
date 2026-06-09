@@ -214,6 +214,25 @@ thinking_format = "openai"
 }
 
 #[test]
+fn test_deserialize_gemini_thinking_format() {
+    let provider_toml = r#"
+name = "Gemini"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+wire_api = "openai_compat"
+
+[compat]
+thinking_format = "gemini"
+"#;
+
+    let provider: ModelProviderInfo = toml::from_str(provider_toml).unwrap();
+    let compat = provider.compat.expect("compat should deserialize");
+    assert_eq!(
+        compat.thinking_format,
+        Some(ModelProviderThinkingFormat::Gemini)
+    );
+}
+
+#[test]
 fn test_deserialize_websocket_connect_timeout() {
     let provider_toml = r#"
 name = "OpenAI"

@@ -81,6 +81,7 @@ fn response_item_records_turn_ttft_for_first_output_signals() {
     assert!(response_item_records_turn_ttft(
         &ResponseItem::FunctionCall {
             id: None,
+            provider_metadata: None,
             name: "shell".to_string(),
             namespace: None,
             arguments: "{}".to_string(),

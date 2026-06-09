@@ -245,6 +245,7 @@ fn auto_local_compaction_does_not_orphan_tool_output_suffix() {
         user_message("x".repeat(90_000)),
         ResponseItem::FunctionCall {
             id: None,
+            provider_metadata: None,
             name: "shell_command".to_string(),
             namespace: None,
             arguments: "{\"command\":\"pwd\"}".to_string(),

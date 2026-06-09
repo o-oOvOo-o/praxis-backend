@@ -372,6 +372,7 @@ struct CommonRequestCompat {
     reasoning_effort_map: Option<ModelProviderReasoningEffortMap>,
     max_tokens_field: Option<ModelProviderMaxTokensField>,
     thinking_format: ModelProviderThinkingFormat,
+    preserve_tool_call_provider_metadata: bool,
     requires_tool_result_name: bool,
     requires_assistant_after_tool_result: bool,
     emit_parallel_tool_calls: bool,
@@ -419,6 +420,13 @@ impl CommonThinkingPolicy {
                 complete_on_message_idle: true,
                 complete_on_finish_reason: true,
             },
+            ModelProviderThinkingFormat::Gemini => Self {
+                request_style: CommonThinkingRequestStyle::ReasoningEffortField,
+                replay_field: Some("reasoning_content"),
+                response_fields: &["reasoning_content", "reasoning"],
+                complete_on_message_idle: false,
+                complete_on_finish_reason: false,
+            },
             ModelProviderThinkingFormat::Zai => Self {
                 request_style: CommonThinkingRequestStyle::ZaiThinkingObject,
                 replay_field: Some("reasoning_content"),
@@ -452,6 +460,7 @@ impl Default for CommonRequestCompat {
             reasoning_effort_map: None,
             max_tokens_field: None,
             thinking_format: ModelProviderThinkingFormat::Openai,
+            preserve_tool_call_provider_metadata: false,
             requires_tool_result_name: false,
             requires_assistant_after_tool_result: false,
             emit_parallel_tool_calls: true,
@@ -470,6 +479,9 @@ impl CommonRequestCompat {
             provider_info.compat.clone(),
         ));
         let compat = compat.as_ref();
+        let thinking_format = compat
+            .and_then(|compat| compat.thinking_format)
+            .unwrap_or(ModelProviderThinkingFormat::Openai);
         Self {
             supports_developer_role: compat
                 .and_then(|compat| compat.supports_developer_role)
@@ -479,9 +491,11 @@ impl CommonRequestCompat {
                 .unwrap_or(false),
             reasoning_effort_map: compat.and_then(|compat| compat.reasoning_effort_map.clone()),
             max_tokens_field: compat.and_then(|compat| compat.max_tokens_field),
-            thinking_format: compat
-                .and_then(|compat| compat.thinking_format)
-                .unwrap_or(ModelProviderThinkingFormat::Openai),
+            thinking_format,
+            preserve_tool_call_provider_metadata: matches!(
+                thinking_format,
+                ModelProviderThinkingFormat::Gemini
+            ),
             requires_tool_result_name: compat
                 .and_then(|compat| compat.requires_tool_result_name)
                 .unwrap_or(false),
@@ -513,6 +527,11 @@ fn infer_common_request_compat(
         if lower.contains("deepseek.com") {
             compat.thinking_format = Some(ModelProviderThinkingFormat::Deepseek);
         }
+        if lower.contains("generativelanguage.googleapis.com")
+            || lower.contains("aiplatform.googleapis.com")
+        {
+            compat.thinking_format = Some(ModelProviderThinkingFormat::Gemini);
+        }
         if lower.contains("api.x.ai") {
             compat.supports_reasoning_effort = Some(false);
         }
@@ -526,6 +545,9 @@ fn infer_common_request_compat(
     let model_slug = model_slug.trim().to_ascii_lowercase();
     if model_slug.starts_with("glm-") {
         compat.thinking_format = Some(ModelProviderThinkingFormat::Zai);
+    }
+    if model_slug.starts_with("gemini-") {
+        compat.thinking_format = Some(ModelProviderThinkingFormat::Gemini);
     }
     compat
 }
@@ -593,7 +615,8 @@ fn build_common_messages(
             continue;
         }
 
-        if let Some(tool_call) = response_item_to_common_tool_call(item, &mut tool_names_by_call_id)
+        if let Some(tool_call) =
+            response_item_to_common_tool_call(item, compat, &mut tool_names_by_call_id)
         {
             let message = ensure_common_assistant_message(&mut pending_assistant_message);
             attach_common_reasoning_content(message, &mut pending_reasoning_content, compat);
@@ -735,6 +758,75 @@ fn append_common_tool_call(message: &mut Value, tool_call: Value) {
         Some(Value::Array(tool_calls)) => tool_calls.push(tool_call),
         _ => {
             map.insert("tool_calls".to_string(), Value::Array(vec![tool_call]));
+        }
+    }
+}
+
+fn extract_common_tool_call_provider_metadata(tool_call: &Value) -> Option<Value> {
+    let Value::Object(root) = tool_call else {
+        return None;
+    };
+    let mut metadata = serde_json::Map::new();
+    for (key, value) in root {
+        if !matches!(key.as_str(), "id" | "type" | "function" | "index") {
+            metadata.insert(key.clone(), value.clone());
+        }
+    }
+    if let Some(Value::Object(function)) = root.get("function") {
+        let mut function_metadata = serde_json::Map::new();
+        for (key, value) in function {
+            if !matches!(key.as_str(), "name" | "arguments") {
+                function_metadata.insert(key.clone(), value.clone());
+            }
+        }
+        if !function_metadata.is_empty() {
+            metadata.insert("function".to_string(), Value::Object(function_metadata));
+        }
+    }
+    (!metadata.is_empty()).then_some(Value::Object(metadata))
+}
+
+fn merge_common_tool_call_provider_metadata(
+    tool_call: &mut Value,
+    provider_metadata: Option<&Value>,
+) {
+    let Some(Value::Object(metadata)) = provider_metadata else {
+        return;
+    };
+    let Value::Object(tool_call_map) = tool_call else {
+        return;
+    };
+    for (key, value) in metadata {
+        if key == "function" {
+            let Value::Object(function_metadata) = value else {
+                continue;
+            };
+            if let Some(Value::Object(function_map)) = tool_call_map.get_mut("function") {
+                for (function_key, function_value) in function_metadata {
+                    function_map.insert(function_key.clone(), function_value.clone());
+                }
+            }
+        } else {
+            tool_call_map.insert(key.clone(), value.clone());
+        }
+    }
+}
+
+fn merge_common_tool_call_state_provider_metadata(
+    tool_call: &mut CommonToolCallState,
+    metadata: Option<Value>,
+) {
+    let Some(metadata) = metadata else {
+        return;
+    };
+    match (&mut tool_call.provider_metadata, metadata) {
+        (Some(Value::Object(existing)), Value::Object(update)) => {
+            for (key, value) in update {
+                existing.insert(key, value);
+            }
+        }
+        (slot, metadata) => {
+            *slot = Some(metadata);
         }
     }
 }
@@ -909,21 +1001,29 @@ fn response_item_to_common_message(
             name,
             arguments,
             call_id,
+            provider_metadata,
             ..
         } => {
             tool_names_by_call_id.insert(call_id.clone(), name.clone());
+            let mut tool_call = json!({
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": normalize_function_arguments_string(arguments),
+                }
+            });
+            if compat.preserve_tool_call_provider_metadata {
+                merge_common_tool_call_provider_metadata(
+                    &mut tool_call,
+                    provider_metadata.as_ref(),
+                );
+            }
             Some((
                 json!({
                     "role": "assistant",
                     "content": "",
-                    "tool_calls": [{
-                        "id": call_id,
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": normalize_function_arguments_string(arguments),
-                        }
-                    }],
+                    "tool_calls": [tool_call],
                 }),
                 Some(CommonHistoryRole::Assistant),
             ))
@@ -1066,6 +1166,7 @@ fn response_item_is_common_tool_call(item: &ResponseItem) -> bool {
 
 fn response_item_to_common_tool_call(
     item: &ResponseItem,
+    compat: &CommonRequestCompat,
     tool_names_by_call_id: &mut BTreeMap<String, String>,
 ) -> Option<Value> {
     match item {
@@ -1073,17 +1174,25 @@ fn response_item_to_common_tool_call(
             name,
             arguments,
             call_id,
+            provider_metadata,
             ..
         } => {
             tool_names_by_call_id.insert(call_id.clone(), name.clone());
-            Some(json!({
+            let mut tool_call = json!({
                 "id": call_id,
                 "type": "function",
                 "function": {
                     "name": name,
                     "arguments": normalize_function_arguments_string(arguments),
                 }
-            }))
+            });
+            if compat.preserve_tool_call_provider_metadata {
+                merge_common_tool_call_provider_metadata(
+                    &mut tool_call,
+                    provider_metadata.as_ref(),
+                );
+            }
+            Some(tool_call)
         }
         ResponseItem::CustomToolCall {
             name,
@@ -1661,6 +1770,7 @@ struct CommonToolCallState {
     call_id: Option<String>,
     name: Option<String>,
     arguments: String,
+    provider_metadata: Option<Value>,
 }
 
 #[derive(Default)]
@@ -2192,6 +2302,10 @@ async fn process_common_stream_event(
                     {
                         entry.arguments.push_str(arguments);
                     }
+                    merge_common_tool_call_state_provider_metadata(
+                        entry,
+                        extract_common_tool_call_provider_metadata(tool_call),
+                    );
                 }
             }
 
@@ -2296,6 +2410,7 @@ async fn emit_claude_tool_done(
         tx_event,
         ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
             id: None,
+            provider_metadata: None,
             name,
             namespace: None,
             arguments: serde_json::to_string(&input)?,
@@ -2573,6 +2688,7 @@ async fn emit_common_tool_calls(
             tx_event,
             ResponseEvent::OutputItemDone(ResponseItem::FunctionCall {
                 id: None,
+                provider_metadata: tool_call.provider_metadata,
                 name,
                 namespace: None,
                 arguments,
@@ -2688,6 +2804,7 @@ fn parse_claude_response(response_json: Value) -> Result<ParsedProviderResponse>
                 let input = part.get("input").cloned().unwrap_or_else(|| json!({}));
                 items.push(ResponseItem::FunctionCall {
                     id: None,
+                    provider_metadata: None,
                     name,
                     namespace: None,
                     arguments: serde_json::to_string(&input)?,
@@ -2788,6 +2905,7 @@ fn parse_common_response(
                 .unwrap_or_else(|| format!("common-tool-{index}-{}", Uuid::new_v4()));
             items.push(ResponseItem::FunctionCall {
                 id: None,
+                provider_metadata: extract_common_tool_call_provider_metadata(tool_call),
                 name,
                 namespace: None,
                 arguments,
@@ -3171,12 +3289,22 @@ mod tests {
         }
     }
 
+    fn gemini_provider_info() -> ModelProviderInfo {
+        let mut provider = common_provider_info(None);
+        provider.name = "Gemini".to_string();
+        provider.base_url = Some(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".to_string(),
+        );
+        provider
+    }
+
     #[test]
     fn common_request_can_add_tool_result_name_and_bridge_assistant_message() {
         let prompt = Prompt {
             input: vec![
                 ResponseItem::FunctionCall {
                     id: None,
+                    provider_metadata: None,
                     name: "apply_patch".to_string(),
                     namespace: None,
                     arguments: "{\"input\":\"*** Begin Patch\\n*** End Patch\\n\"}".to_string(),
@@ -3237,6 +3365,7 @@ mod tests {
                 },
                 ResponseItem::FunctionCall {
                     id: None,
+                    provider_metadata: None,
                     name: "apply_patch".to_string(),
                     namespace: None,
                     arguments: "{\"patch\":\"*** Begin Patch\\n*** End Patch\\n\"}".to_string(),
@@ -3244,6 +3373,7 @@ mod tests {
                 },
                 ResponseItem::FunctionCall {
                     id: None,
+                    provider_metadata: None,
                     name: "shell".to_string(),
                     namespace: None,
                     arguments: "{\"command\":\"pwd\"}".to_string(),
@@ -3295,6 +3425,166 @@ mod tests {
     }
 
     #[test]
+    fn common_request_drops_provider_tool_call_metadata_for_non_gemini() {
+        let prompt = Prompt {
+            input: vec![ResponseItem::FunctionCall {
+                id: None,
+                provider_metadata: Some(json!({
+                    "extra_content": {
+                        "google": {
+                            "thought_signature": "gemini-signature"
+                        }
+                    }
+                })),
+                name: "local_shell".to_string(),
+                namespace: None,
+                arguments: "{\"command\":[\"pwd\"]}".to_string(),
+                call_id: "call_1".to_string(),
+            }],
+            ..Prompt::default()
+        };
+
+        let request = build_common_request(
+            &prompt,
+            &model_info(),
+            &common_provider_info(None),
+            None,
+            true,
+        )
+        .expect("common request should build");
+
+        let messages = request["messages"].as_array().expect("messages array");
+        let tool_calls = messages[1]["tool_calls"].as_array().expect("tool calls");
+        assert!(tool_calls[0].get("extra_content").is_none());
+    }
+
+    #[test]
+    fn gemini_request_preserves_provider_tool_call_metadata() {
+        let prompt = Prompt {
+            input: vec![ResponseItem::FunctionCall {
+                id: None,
+                provider_metadata: Some(json!({
+                    "extra_content": {
+                        "google": {
+                            "thought_signature": "gemini-signature"
+                        }
+                    }
+                })),
+                name: "local_shell".to_string(),
+                namespace: None,
+                arguments: "{\"command\":[\"pwd\"]}".to_string(),
+                call_id: "call_1".to_string(),
+            }],
+            ..Prompt::default()
+        };
+
+        let request = build_common_request(
+            &prompt,
+            &model_info_with_slug("gemini-3.1-pro-preview"),
+            &gemini_provider_info(),
+            None,
+            true,
+        )
+        .expect("common request should build");
+
+        let messages = request["messages"].as_array().expect("messages array");
+        let tool_calls = messages[1]["tool_calls"].as_array().expect("tool calls");
+        assert_eq!(
+            tool_calls[0]["extra_content"]["google"]["thought_signature"],
+            "gemini-signature"
+        );
+    }
+
+    #[test]
+    fn gemini_request_preserves_provider_tool_call_metadata_in_grouped_calls() {
+        let prompt = Prompt {
+            input: vec![
+                ResponseItem::FunctionCall {
+                    id: None,
+                    provider_metadata: Some(json!({
+                        "extra_content": {
+                            "google": {
+                                "thought_signature": "gemini-signature"
+                            }
+                        }
+                    })),
+                    name: "local_shell".to_string(),
+                    namespace: None,
+                    arguments: "{\"command\":[\"pwd\"]}".to_string(),
+                    call_id: "call_1".to_string(),
+                },
+                ResponseItem::FunctionCall {
+                    id: None,
+                    provider_metadata: None,
+                    name: "list_files".to_string(),
+                    namespace: None,
+                    arguments: "{\"path\":\".\"}".to_string(),
+                    call_id: "call_2".to_string(),
+                },
+            ],
+            ..Prompt::default()
+        };
+
+        let request = build_common_request(
+            &prompt,
+            &model_info_with_slug("gemini-3.1-pro-preview"),
+            &gemini_provider_info(),
+            None,
+            true,
+        )
+        .expect("common request should build");
+
+        let messages = request["messages"].as_array().expect("messages array");
+        let tool_calls = messages[1]["tool_calls"].as_array().expect("tool calls");
+        assert_eq!(
+            tool_calls[0]["extra_content"]["google"]["thought_signature"],
+            "gemini-signature"
+        );
+        assert!(tool_calls[1].get("extra_content").is_none());
+    }
+
+    #[test]
+    fn common_response_preserves_provider_tool_call_metadata() {
+        let parsed = parse_common_response(
+            json!({
+                "id": "chatcmpl_gemini",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "extra_content": {
+                                "google": {
+                                    "thought_signature": "gemini-signature"
+                                }
+                            },
+                            "function": {
+                                "name": "local_shell",
+                                "arguments": "{\"command\":[\"pwd\"]}"
+                            }
+                        }]
+                    }
+                }]
+            }),
+            CommonThinkingPolicy::from_format(ModelProviderThinkingFormat::Deepseek),
+        )
+        .expect("common response should parse");
+
+        let Some(ResponseItem::FunctionCall {
+            provider_metadata: Some(provider_metadata),
+            ..
+        }) = parsed.items.first()
+        else {
+            panic!("expected function call with provider metadata");
+        };
+        assert_eq!(
+            provider_metadata["extra_content"]["google"]["thought_signature"],
+            "gemini-signature"
+        );
+    }
+
+    #[test]
     fn common_request_does_not_replay_deepseek_reasoning_content() {
         let prompt = Prompt {
             input: vec![
@@ -3308,6 +3598,7 @@ mod tests {
                 },
                 ResponseItem::FunctionCall {
                     id: None,
+                    provider_metadata: None,
                     name: "apply_patch".to_string(),
                     namespace: None,
                     arguments: "{\"patch\":\"*** Begin Patch\\n*** End Patch\\n\"}".to_string(),
@@ -3364,6 +3655,7 @@ mod tests {
                 },
                 ResponseItem::FunctionCall {
                     id: None,
+                    provider_metadata: None,
                     name: "local_shell".to_string(),
                     namespace: None,
                     arguments: "{\"command\":[\"pwd\"]}".to_string(),

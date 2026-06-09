@@ -159,6 +159,7 @@ pub enum ModelProviderThinkingFormat {
     Openai,
     Openrouter,
     Deepseek,
+    Gemini,
     Zai,
     Qwen,
     QwenChatTemplate,

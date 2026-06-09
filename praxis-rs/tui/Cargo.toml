@@ -26,6 +26,7 @@ base64 = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 praxis-ansi-escape = { workspace = true }
+praxis-app-core = { workspace = true }
 praxis-app-gateway-client = { workspace = true }
 praxis-app-gateway-protocol = { workspace = true }
 praxis-arg0 = { workspace = true }

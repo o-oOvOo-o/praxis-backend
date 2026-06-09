@@ -615,6 +615,7 @@ async fn spawn_agent_can_fork_parent_thread_history() {
     let parent_spawn_call_id = "spawn-call-history".to_string();
     let parent_spawn_call = ResponseItem::FunctionCall {
         id: None,
+        provider_metadata: None,
         name: "spawn_agent".to_string(),
         namespace: None,
         arguments: "{}".to_string(),
@@ -704,6 +705,7 @@ async fn spawn_agent_fork_injects_output_for_parent_spawn_call() {
     let parent_spawn_call_id = "spawn-call-1".to_string();
     let parent_spawn_call = ResponseItem::FunctionCall {
         id: None,
+        provider_metadata: None,
         name: "spawn_agent".to_string(),
         namespace: None,
         arguments: "{}".to_string(),
@@ -786,6 +788,7 @@ async fn spawn_agent_fork_flushes_parent_rollout_before_loading_history() {
     let parent_spawn_call_id = "spawn-call-unflushed".to_string();
     let parent_spawn_call = ResponseItem::FunctionCall {
         id: None,
+        provider_metadata: None,
         name: "spawn_agent".to_string(),
         namespace: None,
         arguments: "{}".to_string(),
@@ -910,6 +913,7 @@ async fn spawn_agent_fork_last_n_turns_keeps_only_recent_turns() {
     let parent_spawn_call_id = "spawn-call-last-n".to_string();
     let parent_spawn_call = ResponseItem::FunctionCall {
         id: None,
+        provider_metadata: None,
         name: "spawn_agent".to_string(),
         namespace: None,
         arguments: "{}".to_string(),

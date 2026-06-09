@@ -746,18 +746,14 @@ pub(crate) async fn build_praxis_bridge_lookup_config(
     primary_config: &Config,
 ) -> std::io::Result<Config> {
     let codex_home = praxis_core::config::default_upstream_codex_home()?;
-    let mut bridge_config = ConfigBuilder::default()
-        .praxis_home(codex_home)
-        .fallback_cwd(Some(primary_config.cwd.to_path_buf()))
-        .build()
-        .await?;
+    let mut bridge_config = primary_config.clone();
 
     // The Codex source is a read-through lookup/fork bridge.  It may read
-    // ~/.codex/sessions, config, and auth, but all Praxis-generated indexes,
-    // logs, and bridge state must stay under the primary Praxis home.  Without
-    // this override, opening the Codex picker can migrate/write
-    // ~/.codex/state_*.sqlite and corrupt or age-skew upstream Codex state.
+    // ~/.codex/sessions and auth, but Codex runtime-only config keys must not
+    // block Praxis from listing threads. All Praxis-generated indexes, logs,
+    // and bridge state stay under the primary Praxis home.
     let bridge_state_home = primary_config.praxis_home.join("codex_bridge_state");
+    bridge_config.praxis_home = codex_home;
     bridge_config.sqlite_home = bridge_state_home.clone();
     bridge_config.log_dir = primary_config.log_dir.join("codex_bridge");
     Ok(bridge_config)

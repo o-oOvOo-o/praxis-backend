@@ -125,6 +125,7 @@ async fn build_arc_monitor_request_includes_relevant_history_and_null_policies()
         .record_into_history(
             &[ResponseItem::FunctionCall {
                 id: None,
+                provider_metadata: None,
                 name: "old_tool".to_string(),
                 namespace: None,
                 arguments: "{\"old\":true}".to_string(),

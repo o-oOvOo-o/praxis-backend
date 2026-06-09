@@ -47,6 +47,7 @@ use std::time::Instant;
 use url::Url;
 
 use self::realtime::PendingSteerCompareKey;
+use crate::SessionLookupSource;
 use crate::app_command::AppCommand;
 use crate::app_event::RealtimeAudioDeviceKind;
 use crate::app_event::ThreadGoalSetMode;
@@ -65,6 +66,7 @@ use crate::mention_codec::encode_history_mentions;
 use crate::model_catalog::ModelCatalog;
 use crate::model_discovery::ModelCatalogSelectionMetadata;
 use crate::multi_agents;
+use crate::resume_picker::SessionPickerAction;
 use crate::status::RateLimitWindowDisplay;
 use crate::status::StatusAccountDisplay;
 use crate::status::StatusHistoryHandle;
@@ -82,6 +84,9 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use praxis_app_core::thread_commands::CodexThreadCommandAction;
+use praxis_app_core::thread_commands::CodexThreadCommandIntent;
+use praxis_app_core::thread_commands::parse_codex_thread_command;
 use praxis_app_gateway_protocol::AppSummary;
 use praxis_app_gateway_protocol::CodexErrorInfo as AppGatewayCodexErrorInfo;
 use praxis_app_gateway_protocol::CollabAgentState as AppGatewayCollabAgentState;
@@ -5898,6 +5903,9 @@ impl ChatWidget {
                 InputResult::CommandWithArgs(cmd, args, text_elements) => {
                     self.dispatch_command_with_args(cmd, args, text_elements);
                 }
+                InputResult::ThreadCommand(intent) => {
+                    self.dispatch_codex_thread_command(intent);
+                }
                 InputResult::None => {}
             },
         }
@@ -6643,6 +6651,11 @@ impl ChatWidget {
             SlashCommand::Fork => {
                 self.app_event_tx.send(AppEvent::ForkCurrentSession);
             }
+            SlashCommand::Codex => {
+                self.dispatch_codex_thread_command(CodexThreadCommandIntent {
+                    action: CodexThreadCommandAction::Resume,
+                });
+            }
             SlashCommand::Init => {
                 let init_target = match self.config.cwd.join(DEFAULT_PROJECT_DOC_FILENAME) {
                     Ok(path) => path,
@@ -7018,6 +7031,17 @@ impl ChatWidget {
         }
     }
 
+    fn dispatch_codex_thread_command(&mut self, intent: CodexThreadCommandIntent) {
+        let action = match intent.action {
+            CodexThreadCommandAction::Resume => SessionPickerAction::Resume,
+            CodexThreadCommandAction::Fork => SessionPickerAction::Fork,
+        };
+        self.app_event_tx.send(AppEvent::OpenThreadPicker {
+            source: SessionLookupSource::Codex,
+            action,
+        });
+    }
+
     fn dispatch_command_with_args(
         &mut self,
         cmd: SlashCommand,
@@ -7040,6 +7064,18 @@ impl ChatWidget {
 
         let trimmed = args.trim();
         match cmd {
+            SlashCommand::Codex => {
+                let command = if trimmed.is_empty() {
+                    "/codex".to_owned()
+                } else {
+                    format!("/codex {trimmed}")
+                };
+                match parse_codex_thread_command(command.as_str()) {
+                    Some(intent) => self.dispatch_codex_thread_command(intent),
+                    None => self
+                        .add_error_message("Usage: /codex [resume|fork|threads|list]".to_string()),
+                }
+            }
             SlashCommand::Language => {
                 self.handle_language_command(trimmed);
             }
@@ -7279,6 +7315,10 @@ impl ChatWidget {
         else {
             return false;
         };
+        if let Some(intent) = parse_codex_thread_command(user_message.text.as_str()) {
+            self.dispatch_codex_thread_command(intent);
+            return true;
+        }
         let Ok(cmd) = SlashCommand::from_str(name) else {
             return false;
         };

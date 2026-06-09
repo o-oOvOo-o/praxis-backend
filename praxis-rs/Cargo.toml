@@ -104,6 +104,7 @@ license = "Apache-2.0"
 app_test_support = { path = "app-gateway-runtime/tests/common" }
 praxis-analytics = { path = "analytics" }
 praxis-ansi-escape = { path = "ansi-escape" }
+praxis-app-core = { path = "../../praxis-app-core" }
 praxis-api = { path = "praxis-api" }
 praxis-app-gateway-client = { path = "app-gateway-client" }
 praxis-app-gateway-core = { path = "app-gateway-core" }

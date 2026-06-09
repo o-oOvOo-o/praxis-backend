@@ -48,6 +48,7 @@ use crate::multi_agents::subagent_display_name;
 use crate::pager_overlay::Overlay;
 use crate::read_session_model;
 use crate::render::highlight::highlight_bash_to_lines;
+use crate::resume_picker::SessionPickerAction;
 use crate::resume_picker::SessionSelection;
 use crate::resume_picker::SessionTarget;
 use crate::status::format_tokens_compact;
@@ -8253,6 +8254,236 @@ impl App {
         }
     }
 
+    async fn open_thread_picker(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        source: crate::SessionLookupSource,
+        action: SessionPickerAction,
+    ) -> Result<Option<AppRunControl>> {
+        let picker_target = match self.remote_app_gateway_url.clone() {
+            Some(websocket_url) => crate::AppGatewayTarget::Remote {
+                websocket_url,
+                auth_token: self.remote_app_gateway_auth_token.clone(),
+            },
+            None => crate::AppGatewayTarget::Embedded,
+        };
+        let picker_config = match source {
+            crate::SessionLookupSource::Praxis => self.config.clone(),
+            crate::SessionLookupSource::Codex => {
+                match crate::build_praxis_bridge_lookup_config(&self.config).await {
+                    Ok(config) => config,
+                    Err(err) => {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to prepare Codex picker source: {err}"
+                        ));
+                        return Ok(None);
+                    }
+                }
+            }
+        };
+        let picker_app_gateway =
+            match crate::start_app_gateway_for_picker(&picker_config, &picker_target).await {
+                Ok(app_gateway) => app_gateway,
+                Err(err) => {
+                    self.chat_widget
+                        .add_error_message(format!("Failed to start TUI session picker: {err}"));
+                    return Ok(None);
+                }
+            };
+        let alternate_picker_source = if crate::picker_source_switch_enabled(&picker_target) {
+            let alternate_source = match source {
+                crate::SessionLookupSource::Praxis => crate::SessionLookupSource::Codex,
+                crate::SessionLookupSource::Codex => crate::SessionLookupSource::Praxis,
+            };
+            let alternate_config = match alternate_source {
+                crate::SessionLookupSource::Praxis => self.config.clone(),
+                crate::SessionLookupSource::Codex => {
+                    match crate::build_praxis_bridge_lookup_config(&self.config).await {
+                        Ok(config) => config,
+                        Err(err) => {
+                            self.chat_widget.add_error_message(format!(
+                                "Failed to prepare Codex picker source: {err}"
+                            ));
+                            return Ok(None);
+                        }
+                    }
+                }
+            };
+            match crate::start_app_gateway_for_picker(&alternate_config, &picker_target).await {
+                Ok(alternate_app_gateway) => Some(crate::resume_picker::AlternatePickerSource {
+                    source: alternate_source,
+                    config: alternate_config,
+                    app_gateway: alternate_app_gateway,
+                }),
+                Err(err) => {
+                    self.chat_widget.add_error_message(format!(
+                        "Failed to start alternate picker source: {err}"
+                    ));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let selection = match action {
+            SessionPickerAction::Resume => {
+                crate::resume_picker::run_resume_picker_with_app_gateway(
+                    tui,
+                    &picker_config,
+                    /*show_all*/ false,
+                    /*include_non_interactive*/ false,
+                    source,
+                    picker_app_gateway,
+                    alternate_picker_source,
+                )
+                .await?
+            }
+            SessionPickerAction::Fork => {
+                crate::resume_picker::run_fork_picker_with_app_gateway(
+                    tui,
+                    &picker_config,
+                    /*show_all*/ false,
+                    source,
+                    picker_app_gateway,
+                    alternate_picker_source,
+                )
+                .await?
+            }
+        };
+        let selection = match selection {
+            SessionSelection::Resume(target_session)
+                if matches!(source, crate::SessionLookupSource::Codex) =>
+            {
+                SessionSelection::Fork(target_session)
+            }
+            other => other,
+        };
+        match selection {
+            SessionSelection::Resume(target_session) => {
+                if let Some(control) = self
+                    .resume_session_target(tui, app_gateway, target_session)
+                    .await?
+                {
+                    return Ok(Some(control));
+                }
+            }
+            SessionSelection::Fork(target_session) => {
+                let current_cwd = self.config.cwd.to_path_buf();
+                let fork_cwd = if self.remote_app_gateway_url.is_some() {
+                    current_cwd.clone()
+                } else {
+                    match crate::resolve_cwd_for_resume_or_fork(
+                        tui,
+                        &self.config,
+                        &current_cwd,
+                        target_session.thread_id,
+                        target_session.path.as_deref(),
+                        CwdPromptAction::Fork,
+                        /*allow_prompt*/ true,
+                    )
+                    .await?
+                    {
+                        crate::ResolveCwdOutcome::Continue(Some(cwd)) => cwd,
+                        crate::ResolveCwdOutcome::Continue(None) => current_cwd.clone(),
+                        crate::ResolveCwdOutcome::Exit => {
+                            return Ok(Some(AppRunControl::Exit(ExitReason::UserRequested)));
+                        }
+                    }
+                };
+                let (mut fork_config, fork_tui_config) = match self
+                    .rebuild_config_for_resume_or_fallback(&current_cwd, fork_cwd)
+                    .await
+                {
+                    Ok(cfg) => cfg,
+                    Err(err) => {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to rebuild configuration for fork: {err}"
+                        ));
+                        return Ok(None);
+                    }
+                };
+                self.apply_runtime_policy_overrides(&mut fork_config);
+                let summary = session_summary(
+                    self.chat_widget.token_usage(),
+                    self.chat_widget.thread_id(),
+                    self.chat_widget.thread_name(),
+                );
+                match app_gateway
+                    .fork_thread(
+                        fork_config.clone(),
+                        target_session.thread_id,
+                        target_session.path.clone(),
+                    )
+                    .await
+                {
+                    Ok(mut forked) => {
+                        if forked.session.thread_name.is_none()
+                            && let Some(source_name) = target_session.thread_name.as_deref()
+                        {
+                            match app_gateway
+                                .thread_set_name(forked.session.thread_id, source_name.to_string())
+                                .await
+                            {
+                                Ok(()) => {
+                                    forked.session.thread_name = Some(source_name.to_string());
+                                }
+                                Err(err) => {
+                                    tracing::warn!(
+                                        thread_id = %forked.session.thread_id,
+                                        %err,
+                                        "Failed to preserve source thread name on in-app fork"
+                                    );
+                                }
+                            }
+                        }
+
+                        self.shutdown_current_thread(app_gateway).await;
+                        self.config = fork_config;
+                        self.tui_config = fork_tui_config;
+                        tui.set_notification_method(self.tui_config.notification_method);
+                        self.file_search
+                            .update_search_dir(self.config.cwd.to_path_buf());
+                        match self
+                            .replace_chat_widget_with_app_gateway_thread(tui, app_gateway, forked)
+                            .await
+                        {
+                            Ok(()) => {
+                                if let Some(summary) = summary {
+                                    let mut lines: Vec<Line<'static>> =
+                                        vec![summary.usage_line.clone().into()];
+                                    if let Some(command) = summary.resume_command {
+                                        let spans = vec![
+                                            "To continue this session, run ".into(),
+                                            command.cyan(),
+                                        ];
+                                        lines.push(spans.into());
+                                    }
+                                    self.chat_widget.add_plain_history_lines(lines);
+                                }
+                            }
+                            Err(err) => {
+                                self.chat_widget.add_error_message(format!(
+                                    "Failed to attach to forked app-gateway thread: {err}"
+                                ));
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        let path_display = target_session.display_label();
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to fork session from {path_display}: {err}"
+                        ));
+                    }
+                }
+            }
+            SessionSelection::Exit | SessionSelection::StartFresh => {}
+        }
+
+        tui.frame_requester().schedule_frame();
+        Ok(None)
+    }
+
     async fn handle_event(
         &mut self,
         tui: &mut tui::Tui,
@@ -8272,199 +8503,25 @@ impl App {
                     .await;
             }
             AppEvent::OpenResumePicker => {
-                let picker_target = match self.remote_app_gateway_url.clone() {
-                    Some(websocket_url) => crate::AppGatewayTarget::Remote {
-                        websocket_url,
-                        auth_token: self.remote_app_gateway_auth_token.clone(),
-                    },
-                    None => crate::AppGatewayTarget::Embedded,
-                };
-                let picker_app_gateway =
-                    match crate::start_app_gateway_for_picker(&self.config, &picker_target).await {
-                        Ok(app_gateway) => app_gateway,
-                        Err(err) => {
-                            self.chat_widget.add_error_message(format!(
-                                "Failed to start TUI session picker: {err}"
-                            ));
-                            return Ok(AppRunControl::Continue);
-                        }
-                    };
-                let alternate_picker_source = if crate::picker_source_switch_enabled(&picker_target)
+                if let Some(control) = self
+                    .open_thread_picker(
+                        tui,
+                        app_gateway,
+                        crate::SessionLookupSource::Praxis,
+                        SessionPickerAction::Resume,
+                    )
+                    .await?
                 {
-                    match crate::build_praxis_bridge_lookup_config(&self.config).await {
-                        Ok(alternate_config) => {
-                            match crate::start_app_gateway_for_picker(
-                                &alternate_config,
-                                &picker_target,
-                            )
-                            .await
-                            {
-                                Ok(alternate_app_gateway) => {
-                                    Some(crate::resume_picker::AlternatePickerSource {
-                                        source: crate::SessionLookupSource::Codex,
-                                        config: alternate_config,
-                                        app_gateway: alternate_app_gateway,
-                                    })
-                                }
-                                Err(err) => {
-                                    self.chat_widget.add_error_message(format!(
-                                        "Failed to start Codex picker source: {err}"
-                                    ));
-                                    None
-                                }
-                            }
-                        }
-                        Err(err) => {
-                            self.chat_widget.add_error_message(format!(
-                                "Failed to prepare Codex picker source: {err}"
-                            ));
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-                match crate::resume_picker::run_resume_picker_with_app_gateway(
-                    tui,
-                    &self.config,
-                    /*show_all*/ false,
-                    /*include_non_interactive*/ false,
-                    crate::SessionLookupSource::Praxis,
-                    picker_app_gateway,
-                    alternate_picker_source,
-                )
-                .await?
-                {
-                    SessionSelection::Resume(target_session) => {
-                        if let Some(control) = self
-                            .resume_session_target(tui, app_gateway, target_session)
-                            .await?
-                        {
-                            return Ok(control);
-                        }
-                    }
-                    SessionSelection::Fork(target_session) => {
-                        let current_cwd = self.config.cwd.to_path_buf();
-                        let fork_cwd = if self.remote_app_gateway_url.is_some() {
-                            current_cwd.clone()
-                        } else {
-                            match crate::resolve_cwd_for_resume_or_fork(
-                                tui,
-                                &self.config,
-                                &current_cwd,
-                                target_session.thread_id,
-                                target_session.path.as_deref(),
-                                CwdPromptAction::Fork,
-                                /*allow_prompt*/ true,
-                            )
-                            .await?
-                            {
-                                crate::ResolveCwdOutcome::Continue(Some(cwd)) => cwd,
-                                crate::ResolveCwdOutcome::Continue(None) => current_cwd.clone(),
-                                crate::ResolveCwdOutcome::Exit => {
-                                    return Ok(AppRunControl::Exit(ExitReason::UserRequested));
-                                }
-                            }
-                        };
-                        let (mut fork_config, fork_tui_config) = match self
-                            .rebuild_config_for_resume_or_fallback(&current_cwd, fork_cwd)
-                            .await
-                        {
-                            Ok(cfg) => cfg,
-                            Err(err) => {
-                                self.chat_widget.add_error_message(format!(
-                                    "Failed to rebuild configuration for fork: {err}"
-                                ));
-                                return Ok(AppRunControl::Continue);
-                            }
-                        };
-                        self.apply_runtime_policy_overrides(&mut fork_config);
-                        let summary = session_summary(
-                            self.chat_widget.token_usage(),
-                            self.chat_widget.thread_id(),
-                            self.chat_widget.thread_name(),
-                        );
-                        match app_gateway
-                            .fork_thread(
-                                fork_config.clone(),
-                                target_session.thread_id,
-                                target_session.path.clone(),
-                            )
-                            .await
-                        {
-                            Ok(mut forked) => {
-                                if forked.session.thread_name.is_none()
-                                    && let Some(source_name) = target_session.thread_name.as_deref()
-                                {
-                                    match app_gateway
-                                        .thread_set_name(
-                                            forked.session.thread_id,
-                                            source_name.to_string(),
-                                        )
-                                        .await
-                                    {
-                                        Ok(()) => {
-                                            forked.session.thread_name =
-                                                Some(source_name.to_string());
-                                        }
-                                        Err(err) => {
-                                            tracing::warn!(
-                                                thread_id = %forked.session.thread_id,
-                                                %err,
-                                                "Failed to preserve source thread name on in-app fork"
-                                            );
-                                        }
-                                    }
-                                }
-
-                                self.shutdown_current_thread(app_gateway).await;
-                                self.config = fork_config;
-                                self.tui_config = fork_tui_config;
-                                tui.set_notification_method(self.tui_config.notification_method);
-                                self.file_search
-                                    .update_search_dir(self.config.cwd.to_path_buf());
-                                match self
-                                    .replace_chat_widget_with_app_gateway_thread(
-                                        tui,
-                                        app_gateway,
-                                        forked,
-                                    )
-                                    .await
-                                {
-                                    Ok(()) => {
-                                        if let Some(summary) = summary {
-                                            let mut lines: Vec<Line<'static>> =
-                                                vec![summary.usage_line.clone().into()];
-                                            if let Some(command) = summary.resume_command {
-                                                let spans = vec![
-                                                    "To continue this session, run ".into(),
-                                                    command.cyan(),
-                                                ];
-                                                lines.push(spans.into());
-                                            }
-                                            self.chat_widget.add_plain_history_lines(lines);
-                                        }
-                                    }
-                                    Err(err) => {
-                                        self.chat_widget.add_error_message(format!(
-                                            "Failed to attach to forked app-gateway thread: {err}"
-                                        ));
-                                    }
-                                }
-                            }
-                            Err(err) => {
-                                let path_display = target_session.display_label();
-                                self.chat_widget.add_error_message(format!(
-                                    "Failed to fork session from {path_display}: {err}"
-                                ));
-                            }
-                        }
-                    }
-                    SessionSelection::Exit | SessionSelection::StartFresh => {}
+                    return Ok(control);
                 }
-
-                // Leaving alt-screen may blank the inline viewport; force a redraw either way.
-                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::OpenThreadPicker { source, action } => {
+                if let Some(control) = self
+                    .open_thread_picker(tui, app_gateway, source, action)
+                    .await?
+                {
+                    return Ok(control);
+                }
             }
             AppEvent::ForkCurrentSession => {
                 self.session_telemetry.counter(

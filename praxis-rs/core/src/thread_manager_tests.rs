@@ -60,6 +60,7 @@ fn truncates_before_requested_user_message() {
         },
         ResponseItem::FunctionCall {
             id: None,
+            provider_metadata: None,
             call_id: "c1".to_string(),
             name: "tool".to_string(),
             namespace: None,

@@ -228,6 +228,9 @@ pub enum ResponseItem {
         #[serde(default, skip_serializing)]
         #[ts(skip)]
         id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional, type = "unknown")]
+        provider_metadata: Option<serde_json::Value>,
         name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -1712,6 +1715,7 @@ mod tests {
             item,
             ResponseItem::FunctionCall {
                 id: None,
+                provider_metadata: None,
                 name: "mcp__praxis_apps__gmail_get_recent_emails".to_string(),
                 namespace: Some("mcp__praxis_apps__gmail".to_string()),
                 arguments: "{\"top_k\":5}".to_string(),

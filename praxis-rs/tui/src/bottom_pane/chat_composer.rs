@@ -124,6 +124,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use praxis_app_core::thread_commands::CodexThreadCommandIntent;
+use praxis_app_core::thread_commands::parse_codex_thread_command;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
@@ -234,6 +236,7 @@ pub enum InputResult {
     },
     Command(SlashCommand),
     CommandWithArgs(SlashCommand, String, Vec<TextElement>),
+    ThreadCommand(CodexThreadCommandIntent),
     None,
 }
 
@@ -2099,8 +2102,8 @@ impl ChatComposer {
         {
             let treat_as_plain_text = input_starts_with_space || name.contains('/');
             if !treat_as_plain_text {
-                let is_builtin =
-                    slash_commands::find_builtin_command(name, self.builtin_command_flags())
+                let is_builtin = parse_codex_thread_command(text.as_str()).is_some()
+                    || slash_commands::find_builtin_command(name, self.builtin_command_flags())
                         .is_some();
                 if !is_builtin {
                     let message = format!(
@@ -2280,6 +2283,10 @@ impl ChatComposer {
             .next()
             .unwrap_or("")
             .to_string();
+        if let Some(intent) = parse_codex_thread_command(first_line.as_str()) {
+            self.textarea.set_text_clearing_elements("");
+            return Some(InputResult::ThreadCommand(intent));
+        }
         if let Some((name, rest, _rest_offset)) = parse_slash_name(&first_line)
             && rest.is_empty()
             && let Some((cmd, inline_suffix)) =
@@ -2314,6 +2321,10 @@ impl ChatComposer {
         let text = self.textarea.text().to_string();
         if text.starts_with(' ') {
             return None;
+        }
+        if let Some(intent) = parse_codex_thread_command(text.as_str()) {
+            self.textarea.set_text_clearing_elements("");
+            return Some(InputResult::ThreadCommand(intent));
         }
 
         let (name, rest, rest_offset) = parse_slash_name(&text)?;
@@ -6145,6 +6156,53 @@ mod tests {
             InputResult::None => panic!("expected Command result for '/init'"),
         }
         assert!(composer.textarea.is_empty(), "composer should be cleared");
+    }
+
+    #[test]
+    fn slash_codex_dispatches_thread_command_and_does_not_submit_literal_text() {
+        use crossterm::event::KeyCode;
+        use crossterm::event::KeyEvent;
+        use crossterm::event::KeyModifiers;
+        use praxis_app_core::thread_commands::CodexThreadCommandAction;
+
+        let (tx, mut rx) = unbounded_channel::<AppEvent>();
+        let sender = AppEventSender::new(tx);
+        let mut composer = ChatComposer::new(
+            /*has_input_focus*/ true,
+            sender,
+            /*enhanced_keys_supported*/ false,
+            "Ask Praxis to do anything".to_string(),
+            /*disable_paste_burst*/ false,
+        );
+        composer.textarea.insert_str("/codex fork");
+
+        let (result, _needs_redraw) =
+            composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        match result {
+            InputResult::ThreadCommand(intent) => {
+                assert_eq!(intent.action, CodexThreadCommandAction::Fork);
+            }
+            InputResult::Submitted { text, .. } => {
+                panic!(
+                    "expected thread command dispatch, but composer submitted literal text: {text}"
+                )
+            }
+            other => panic!("expected ThreadCommand result for '/codex fork', got {other:?}"),
+        }
+        assert!(composer.textarea.is_empty(), "composer should be cleared");
+        while let Ok(event) = rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                assert!(
+                    !cell
+                        .display_lines(/*width*/ 80)
+                        .into_iter()
+                        .map(|line| line.to_string())
+                        .any(|line| line.contains("Unrecognized command")),
+                    "composer emitted an unrecognized-command history cell"
+                );
+            }
+        }
     }
 
     #[test]

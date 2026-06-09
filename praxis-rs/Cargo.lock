@@ -6083,6 +6083,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "praxis-app-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "praxis-app-gateway-client"
 version = "0.0.0"
 dependencies = [
@@ -7422,6 +7432,7 @@ dependencies = [
  "libc",
  "pathdiff",
  "praxis-ansi-escape",
+ "praxis-app-core",
  "praxis-app-gateway-client",
  "praxis-app-gateway-protocol",
  "praxis-arg0",

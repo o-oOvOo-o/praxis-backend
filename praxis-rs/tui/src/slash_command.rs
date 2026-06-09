@@ -30,6 +30,7 @@ pub enum SlashCommand {
     New,
     Resume,
     Fork,
+    Codex,
     Init,
     Compact,
     Plan,
@@ -91,6 +92,7 @@ impl SlashCommand {
             SlashCommand::Resume => "resume a saved chat",
             SlashCommand::Clear => "clear the terminal and start a new chat",
             SlashCommand::Fork => "fork the current chat",
+            SlashCommand::Codex => "list Codex threads to fork into Praxis",
             // SlashCommand::Undo => "ask Praxis to undo a turn",
             SlashCommand::Quit | SlashCommand::Exit => "exit Praxis",
             SlashCommand::Diff => "show git diff (including untracked files)",
@@ -156,6 +158,7 @@ impl SlashCommand {
                 | SlashCommand::Token
                 | SlashCommand::SandboxReadRoot
                 | SlashCommand::Selfwork
+                | SlashCommand::Codex
         )
     }
 
@@ -165,6 +168,7 @@ impl SlashCommand {
             SlashCommand::New
             | SlashCommand::Resume
             | SlashCommand::Fork
+            | SlashCommand::Codex
             | SlashCommand::Init
             | SlashCommand::Compact
             // | SlashCommand::Undo
@@ -259,5 +263,10 @@ mod tests {
     #[test]
     fn loop_alias_parses_to_selfwork_command() {
         assert_eq!(SlashCommand::from_str("loop"), Ok(SlashCommand::Selfwork));
+    }
+
+    #[test]
+    fn codex_command_parses_for_shared_thread_picker_dispatch() {
+        assert_eq!(SlashCommand::from_str("codex"), Ok(SlashCommand::Codex));
     }
 }

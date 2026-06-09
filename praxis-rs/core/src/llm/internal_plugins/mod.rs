@@ -2,6 +2,7 @@ pub(crate) mod codex;
 pub(crate) mod common;
 pub(crate) mod common_branches;
 pub(crate) mod deepseek;
+pub(crate) mod gemini;
 pub(crate) mod glm;
 pub(crate) mod qwen;
 pub(crate) mod web_search;
@@ -226,6 +227,7 @@ pub(crate) fn builtin_registry() -> LlmPluginRegistry {
     builder.add_plugin(codex::CodexLlmPlugin);
     builder.add_plugin(common::CommonOpenAiCompatLlmPlugin);
     builder.add_plugin(deepseek::DeepSeekLlmPlugin);
+    builder.add_plugin(gemini::GeminiLlmPlugin);
     builder.add_plugin(glm::GlmLlmPlugin);
     builder.add_plugin(qwen::QwenLlmPlugin);
     builder.build()
@@ -275,6 +277,7 @@ mod tests {
                 "codex",
                 "openai_compat",
                 "deepseek",
+                "gemini",
                 "glm",
                 "qwen"
             ]
@@ -302,6 +305,12 @@ mod tests {
                 .profiles()
                 .iter()
                 .any(|profile| profile.id == BehaviorProfileId::Qwen)
+        );
+        assert!(
+            registry
+                .profiles()
+                .iter()
+                .any(|profile| profile.id == BehaviorProfileId::Gemini)
         );
         assert!(
             registry

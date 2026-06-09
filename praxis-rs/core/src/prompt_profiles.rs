@@ -14,6 +14,7 @@ pub(crate) enum PromptProfileId {
     CodexResponses,
     CommonBase,
     DeepSeek,
+    Gemini,
     Glm,
     Qwen,
 }
@@ -24,6 +25,7 @@ impl PromptProfileId {
             Self::CodexResponses => "codex/responses",
             Self::CommonBase => "common/base",
             Self::DeepSeek => "deepseek/base",
+            Self::Gemini => "gemini/base",
             Self::Glm => "glm/base",
             Self::Qwen => "qwen/base",
         }
@@ -34,6 +36,7 @@ impl PromptProfileId {
             BehaviorProfileId::CodexResponses => Some(Self::CodexResponses),
             BehaviorProfileId::Common => Some(Self::CommonBase),
             BehaviorProfileId::DeepSeek => Some(Self::DeepSeek),
+            BehaviorProfileId::Gemini => Some(Self::Gemini),
             BehaviorProfileId::Glm => Some(Self::Glm),
             BehaviorProfileId::Qwen => Some(Self::Qwen),
             BehaviorProfileId::Claude | BehaviorProfileId::OpenRouter => None,
@@ -223,6 +226,18 @@ mod tests {
     }
 
     #[test]
+    fn gemini_provider_resolves_gemini_profile() {
+        let (provider_id, provider) = provider(
+            "gemini",
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            WireApi::OpenAiCompat,
+        );
+        let profile =
+            infer_prompt_profile_id(&model("gemini-3.1-pro-preview"), &provider_id, &provider);
+        assert_eq!(profile, Some(PromptProfileId::Gemini));
+    }
+
+    #[test]
     fn unknown_openai_compatible_provider_resolves_common_profile() {
         let (provider_id, provider) = provider(
             "custom-provider",
@@ -285,12 +300,8 @@ mod tests {
         assert!(
             instructions.contains("优先把实现层委派给 Praxis 暴露的 Codex/OpenAI worker subagent")
         );
-        assert!(
-            instructions.contains("精确复制规则只适用于正向任务契约")
-        );
-        assert!(
-            instructions.contains("不得把该字面量传给 worker、写入工具参数或放进最终答复")
-        );
+        assert!(instructions.contains("精确复制规则只适用于正向任务契约"));
+        assert!(instructions.contains("不得把该字面量传给 worker、写入工具参数或放进最终答复"));
         assert!(
             instructions.contains("assign_task.constraints")
                 && instructions.contains("assign_task.acceptance_criteria")

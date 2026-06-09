@@ -188,6 +188,7 @@ async fn build_tool_call_uses_namespace_for_registry_name() -> anyhow::Result<()
         &session,
         ResponseItem::FunctionCall {
             id: None,
+            provider_metadata: None,
             name: tool_name.clone(),
             namespace: Some("mcp__praxis_apps__calendar".to_string()),
             arguments: "{}".to_string(),
