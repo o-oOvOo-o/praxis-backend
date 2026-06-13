@@ -182,6 +182,7 @@ fn render_non_file_layer_details(layer: &ConfigLayerEntry) -> Vec<Line<'static>>
         ConfigLayerSource::Mdm { .. } | ConfigLayerSource::LegacyManagedConfigTomlFromMdm => {
             render_mdm_layer_details(layer)
         }
+        ConfigLayerSource::EnterpriseManaged { .. } => render_cloud_managed_layer_details(layer),
         ConfigLayerSource::System { .. }
         | ConfigLayerSource::User { .. }
         | ConfigLayerSource::Project { .. }
@@ -204,20 +205,31 @@ fn render_session_flag_details(config: &TomlValue) -> Vec<Line<'static>> {
 }
 
 fn render_mdm_layer_details(layer: &ConfigLayerEntry) -> Vec<Line<'static>> {
+    render_raw_managed_layer_details(layer, "MDM value")
+}
+
+fn render_cloud_managed_layer_details(layer: &ConfigLayerEntry) -> Vec<Line<'static>> {
+    render_raw_managed_layer_details(layer, "Cloud managed value")
+}
+
+fn render_raw_managed_layer_details(
+    layer: &ConfigLayerEntry,
+    label: &'static str,
+) -> Vec<Line<'static>> {
     let value = layer
         .raw_toml()
         .map(ToString::to_string)
         .unwrap_or_else(|| format_toml_value(&layer.config));
     if value.is_empty() {
-        return vec!["     MDM value: <empty>".dim().into()];
+        return vec![format!("     {label}: <empty>").dim().into()];
     }
 
     if value.contains('\n') {
-        let mut lines = vec!["     MDM value:".into()];
+        let mut lines = vec![format!("     {label}:").into()];
         lines.extend(value.lines().map(|line| format!("       {line}").into()));
         lines
     } else {
-        vec![format!("     MDM value: {value}").into()]
+        vec![format!("     {label}: {value}").into()]
     }
 }
 
@@ -306,6 +318,9 @@ fn format_config_layer_source(source: &ConfigLayerSource) -> String {
         }
         ConfigLayerSource::LegacyManagedConfigTomlFromMdm => {
             "legacy managed_config.toml (MDM)".to_string()
+        }
+        ConfigLayerSource::EnterpriseManaged { id, name } => {
+            format!("cloud managed config {name} ({id})")
         }
     }
 }

@@ -25,6 +25,7 @@ use crate::key_hint::KeyBinding;
 use crate::render::renderable::FlexRenderable;
 use crate::render::renderable::Renderable;
 use crate::render::renderable::RenderableItem;
+use crate::surface::SurfaceTheme;
 use crate::thinking_persona::ThinkingPersona;
 use crate::tui::FrameRequester;
 use bottom_pane_view::BottomPaneView;
@@ -256,6 +257,11 @@ impl BottomPane {
 
     pub fn set_animations_enabled(&mut self, enabled: bool) {
         self.animations_enabled = enabled;
+        self.request_redraw();
+    }
+
+    pub(crate) fn set_surface_theme(&mut self, theme: SurfaceTheme) {
+        self.composer.set_surface_theme(theme);
         self.request_redraw();
     }
 

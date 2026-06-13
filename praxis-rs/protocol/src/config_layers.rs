@@ -25,6 +25,16 @@ pub enum ConfigLayerSource {
         file: AbsolutePathBuf,
     },
 
+    /// Enterprise-managed config layer delivered by an account-backed cloud config bundle.
+    #[serde(rename_all = "camelCase")]
+    #[ts(rename_all = "camelCase")]
+    EnterpriseManaged {
+        /// Stable identifier for the delivered layer.
+        id: String,
+        /// Admin-facing name for diagnostics and config UI.
+        name: String,
+    },
+
     /// User config layer from $PRAXIS_HOME/config.toml.
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
@@ -59,6 +69,7 @@ impl ConfigLayerSource {
         match self {
             ConfigLayerSource::Mdm { .. } => 0,
             ConfigLayerSource::System { .. } => 10,
+            ConfigLayerSource::EnterpriseManaged { .. } => 15,
             ConfigLayerSource::User { .. } => 20,
             ConfigLayerSource::Project { .. } => 25,
             ConfigLayerSource::SessionFlags => 30,

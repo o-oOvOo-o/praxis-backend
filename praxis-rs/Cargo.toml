@@ -275,12 +275,12 @@ pretty_assertions = "1.4.1"
 pulldown-cmark = "0.10"
 quick-xml = "0.38.4"
 rand = "0.9"
-ratatui = { version = "0.30.0", default-features = false, features = [
+ratatui = { version = "0.30.1", default-features = false, features = [
     "layout-cache",
     "std",
     "underline-color",
 ] }
-ratatui-macros = "0.7.0"
+ratatui-macros = "0.7.1"
 regex = "1.12.3"
 regex-lite = "0.1.8"
 reqwest = "0.12"
@@ -431,8 +431,13 @@ inherits = "test"
 opt-level = 0
 
 [patch.crates-io]
-# Uncomment to debug local changes.
-# ratatui = { path = "../../ratatui" }
+ratatui = { path = "../../ratatui" }
+ratatui-core = { path = "../../ratatui-core" }
+ratatui-crossterm = { path = "../../ratatui-crossterm" }
+ratatui-macros = { path = "../../ratatui-macros" }
+ratatui-termion = { path = "../../ratatui-termion" }
+ratatui-termwiz = { path = "../../ratatui-termwiz" }
+ratatui-widgets = { path = "../../ratatui-widgets" }
 crossterm = { git = "https://github.com/nornagon/crossterm", branch = "nornagon/color-query" }
 tokio-tungstenite = { git = "https://github.com/openai-oss-forks/tokio-tungstenite", rev = "132f5b39c862e3a970f731d709608b3e6276d5f6" }
 tungstenite = { git = "https://github.com/openai-oss-forks/tungstenite-rs", rev = "9200079d3b54a1ff51072e24d81fd354f085156f" }

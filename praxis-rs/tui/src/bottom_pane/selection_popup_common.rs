@@ -6,7 +6,6 @@ use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use ratatui::widgets::Block;
 use ratatui::widgets::Widget;
 use std::borrow::Cow;
 use unicode_width::UnicodeWidthChar;
@@ -18,7 +17,7 @@ use crate::render::Insets;
 use crate::render::RectExt as _;
 use crate::style::search_highlight_overlay;
 use crate::style::selection_overlay;
-use crate::style::user_message_style;
+use crate::surface;
 
 use super::scroll_state::ScrollState;
 
@@ -87,10 +86,7 @@ pub(crate) fn render_menu_surface(area: Rect, buf: &mut Buffer) -> Rect {
     if area.is_empty() {
         return area;
     }
-    Block::default()
-        .style(user_message_style())
-        .render(area, buf);
-    menu_surface_inset(area)
+    surface::render_menu_surface(area, buf)
 }
 
 /// Wrap a styled line while preserving span styles.

@@ -685,6 +685,15 @@ pub(crate) enum AppEvent {
     SyntaxThemeSelected {
         name: String,
     },
+    /// Apply a temporary surface theme preview while the picker is open.
+    SurfaceThemePreview {
+        name: Option<String>,
+    },
+    /// Apply a user-confirmed surface theme selection.
+    SurfaceThemeSelected {
+        name: String,
+        previous_name: Option<String>,
+    },
 }
 
 /// The exit strategy requested by the UI layer.

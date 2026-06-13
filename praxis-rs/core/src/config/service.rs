@@ -15,7 +15,7 @@ use crate::config::service_types::MergeStrategy;
 use crate::config::service_types::OverriddenMetadata;
 use crate::config::service_types::UserSavedConfig;
 use crate::config::service_types::WriteStatus;
-use crate::config_loader::CloudRequirementsLoader;
+use crate::config_loader::CloudConfigBundleLoader;
 use crate::config_loader::ConfigLayerEntry;
 use crate::config_loader::ConfigLayerStack;
 use crate::config_loader::ConfigLayerStackOrdering;
@@ -114,7 +114,7 @@ pub struct ConfigService {
     praxis_home: PathBuf,
     cli_overrides: Vec<(String, TomlValue)>,
     loader_overrides: LoaderOverrides,
-    cloud_requirements: CloudRequirementsLoader,
+    cloud_config_bundle: CloudConfigBundleLoader,
 }
 
 impl ConfigService {
@@ -122,13 +122,13 @@ impl ConfigService {
         praxis_home: PathBuf,
         cli_overrides: Vec<(String, TomlValue)>,
         loader_overrides: LoaderOverrides,
-        cloud_requirements: CloudRequirementsLoader,
+        cloud_config_bundle: impl Into<CloudConfigBundleLoader>,
     ) -> Self {
         Self {
             praxis_home,
             cli_overrides,
             loader_overrides,
-            cloud_requirements,
+            cloud_config_bundle: cloud_config_bundle.into(),
         }
     }
 
@@ -137,7 +137,7 @@ impl ConfigService {
             praxis_home,
             cli_overrides: Vec::new(),
             loader_overrides: LoaderOverrides::default(),
-            cloud_requirements: CloudRequirementsLoader::default(),
+            cloud_config_bundle: CloudConfigBundleLoader::default(),
         }
     }
 
@@ -155,7 +155,7 @@ impl ConfigService {
                     .cli_overrides(self.cli_overrides.clone())
                     .loader_overrides(self.loader_overrides.clone())
                     .fallback_cwd(Some(cwd.to_path_buf()))
-                    .cloud_requirements(self.cloud_requirements.clone())
+                    .cloud_config_bundle(self.cloud_config_bundle.clone())
                     .build()
                     .await
                     .map_err(|err| {
@@ -418,7 +418,7 @@ impl ConfigService {
             cwd,
             &self.cli_overrides,
             self.loader_overrides.clone(),
-            self.cloud_requirements.clone(),
+            self.cloud_config_bundle.clone(),
         )
         .await
     }
@@ -633,6 +633,9 @@ fn override_message(layer: &ConfigLayerSource) -> String {
         }
         ConfigLayerSource::LegacyManagedConfigTomlFromMdm => {
             "Overridden by legacy managed configuration from MDM".to_string()
+        }
+        ConfigLayerSource::EnterpriseManaged { id, name } => {
+            format!("Overridden by cloud managed config: {name} ({id})")
         }
     }
 }

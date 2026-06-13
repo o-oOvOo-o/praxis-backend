@@ -3,7 +3,7 @@ use crate::config::PermissionsToml;
 use crate::config::find_praxis_home;
 use crate::config::overlay_network_domain_permissions;
 use crate::config::resolve_permission_profile;
-use crate::config_loader::CloudRequirementsLoader;
+use crate::config_loader::CloudConfigBundleLoader;
 use crate::config_loader::ConfigLayerStack;
 use crate::config_loader::ConfigLayerStackOrdering;
 use crate::config_loader::LoaderOverrides;
@@ -50,7 +50,7 @@ async fn build_config_state_with_mtimes() -> Result<(ConfigState, Vec<LayerMtime
         /*cwd*/ None,
         &cli_overrides,
         overrides,
-        CloudRequirementsLoader::default(),
+        CloudConfigBundleLoader::default(),
     )
     .await
     .context("failed to load Praxis config")?;

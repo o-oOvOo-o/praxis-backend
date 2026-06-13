@@ -1,4 +1,8 @@
 use crate::config_requirements::ConfigRequirementsToml;
+use crate::{
+    CloudConfigBundle, CloudConfigBundleLoadError, CloudConfigBundleLoadErrorCode,
+    CloudConfigBundleLoader,
+};
 use futures::future::BoxFuture;
 use futures::future::FutureExt;
 use futures::future::Shared;
@@ -45,6 +49,21 @@ impl CloudRequirementsLoadError {
     }
 }
 
+impl From<CloudRequirementsLoadError> for CloudConfigBundleLoadError {
+    fn from(err: CloudRequirementsLoadError) -> Self {
+        let code = match err.code {
+            CloudRequirementsLoadErrorCode::Auth => CloudConfigBundleLoadErrorCode::Auth,
+            CloudRequirementsLoadErrorCode::Timeout => CloudConfigBundleLoadErrorCode::Timeout,
+            CloudRequirementsLoadErrorCode::Parse => CloudConfigBundleLoadErrorCode::InvalidBundle,
+            CloudRequirementsLoadErrorCode::RequestFailed => {
+                CloudConfigBundleLoadErrorCode::RequestFailed
+            }
+            CloudRequirementsLoadErrorCode::Internal => CloudConfigBundleLoadErrorCode::Internal,
+        };
+        CloudConfigBundleLoadError::new(code, err.status_code, err.message)
+    }
+}
+
 #[derive(Clone)]
 pub struct CloudRequirementsLoader {
     fut: Shared<
@@ -66,6 +85,21 @@ impl CloudRequirementsLoader {
 
     pub async fn get(&self) -> Result<Option<ConfigRequirementsToml>, CloudRequirementsLoadError> {
         self.fut.clone().await
+    }
+
+    pub fn into_bundle_loader(self) -> CloudConfigBundleLoader {
+        CloudConfigBundleLoader::new(async move {
+            self.get()
+                .await
+                .map(|requirements| requirements.map(CloudConfigBundle::from_legacy_requirements))
+                .map_err(Into::into)
+        })
+    }
+}
+
+impl From<CloudRequirementsLoader> for CloudConfigBundleLoader {
+    fn from(loader: CloudRequirementsLoader) -> Self {
+        loader.into_bundle_loader()
     }
 }
 

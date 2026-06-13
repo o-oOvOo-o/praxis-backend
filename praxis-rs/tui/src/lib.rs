@@ -25,7 +25,7 @@ use praxis_app_gateway_protocol::Thread as AppGatewayThread;
 use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadSortKey as AppGatewayThreadSortKey;
 use praxis_app_gateway_protocol::ThreadSourceKind;
-use praxis_cloud_requirements::cloud_requirements_loader_for_storage;
+use praxis_cloud_requirements::cloud_config_bundle_loader_for_storage;
 use praxis_core::LMSTUDIO_OSS_PROVIDER_ID;
 use praxis_core::ModelProviderInfo;
 use praxis_core::OLLAMA_OSS_PROVIDER_ID;
@@ -39,7 +39,7 @@ use praxis_core::config::edit::ConfigEditsBuilder;
 use praxis_core::config::find_praxis_home;
 use praxis_core::config::load_config_as_toml_with_cli_overrides;
 use praxis_core::config::resolve_oss_provider;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::ConfigLoadError;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_core::config_loader::format_config_error_with_source;
@@ -171,6 +171,8 @@ mod status_indicator_widget;
 mod status_runtime;
 mod streaming;
 mod style;
+mod surface;
+mod surface_theme_picker;
 mod terminal_palette;
 mod terminal_title;
 mod text_formatting;
@@ -180,6 +182,7 @@ mod toast_queue;
 mod token_usage_summary;
 mod transcript_search;
 mod tui;
+mod tui2;
 mod tui_config;
 mod turn_runtime;
 mod ui_consts;
@@ -270,7 +273,7 @@ async fn start_embedded_app_gateway(
     config: Config,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
-    cloud_requirements: CloudRequirementsLoader,
+    cloud_requirements: CloudConfigBundleLoader,
     feedback: praxis_feedback::CodexFeedback,
 ) -> color_eyre::Result<NativeAppGatewayClient> {
     start_embedded_app_gateway_with(
@@ -489,7 +492,7 @@ async fn start_app_gateway(
     config: Config,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
-    cloud_requirements: CloudRequirementsLoader,
+    cloud_requirements: CloudConfigBundleLoader,
     feedback: praxis_feedback::CodexFeedback,
 ) -> color_eyre::Result<AppGatewayClient> {
     match target {
@@ -520,7 +523,7 @@ pub(crate) async fn start_app_gateway_for_picker(
         config.clone(),
         Vec::new(),
         LoaderOverrides::default(),
-        CloudRequirementsLoader::default(),
+        CloudConfigBundleLoader::default(),
         praxis_feedback::CodexFeedback::new(),
     )
     .await?;
@@ -539,7 +542,7 @@ async fn start_embedded_app_gateway_with<F, Fut>(
     config: Config,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
-    cloud_requirements: CloudRequirementsLoader,
+    cloud_requirements: CloudConfigBundleLoader,
     feedback: praxis_feedback::CodexFeedback,
     start_client: F,
 ) -> color_eyre::Result<NativeAppGatewayClient>
@@ -784,7 +787,7 @@ async fn start_session_lookup_context(
         lookup_config.clone(),
         Vec::new(),
         loader_overrides,
-        CloudRequirementsLoader::default(),
+        CloudConfigBundleLoader::default(),
         feedback,
     )
     .await?;
@@ -920,7 +923,7 @@ pub async fn run_main(
         .chatgpt_base_url
         .clone()
         .unwrap_or_else(|| "https://chatgpt.com/backend-api/".to_string());
-    let cloud_requirements = cloud_requirements_loader_for_storage(
+    let cloud_requirements = cloud_config_bundle_loader_for_storage(
         praxis_home.to_path_buf(),
         /*enable_praxis_api_key_env*/ false,
         config_toml.cli_auth_credentials_store.unwrap_or_default(),
@@ -1155,7 +1158,7 @@ async fn run_ratatui_app(
     initial_tui_config: TuiRuntimeConfig,
     overrides: ConfigOverrides,
     cli_kv_overrides: Vec<(String, toml::Value)>,
-    mut cloud_requirements: CloudRequirementsLoader,
+    mut cloud_requirements: CloudConfigBundleLoader,
     feedback: praxis_feedback::CodexFeedback,
     remote_url: Option<String>,
     remote_auth_token: Option<String>,
@@ -1273,7 +1276,7 @@ async fn run_ratatui_app(
         // rebuild config. This avoids missing newly available cloud requirements due to login
         // status detection edge cases.
         if show_login_screen && !remote_mode {
-            cloud_requirements = cloud_requirements_loader_for_storage(
+            cloud_requirements = cloud_config_bundle_loader_for_storage(
                 initial_config.praxis_home.clone(),
                 /*enable_praxis_api_key_env*/ false,
                 initial_config.cli_auth_credentials_store_mode,
@@ -1954,7 +1957,7 @@ async fn get_login_status(
 async fn load_config_or_exit(
     cli_kv_overrides: Vec<(String, toml::Value)>,
     overrides: ConfigOverrides,
-    cloud_requirements: CloudRequirementsLoader,
+    cloud_requirements: CloudConfigBundleLoader,
 ) -> LoadedTuiConfig {
     load_config_or_exit_with_fallback_cwd(
         cli_kv_overrides,
@@ -1968,14 +1971,14 @@ async fn load_config_or_exit(
 async fn load_config_or_exit_with_fallback_cwd(
     cli_kv_overrides: Vec<(String, toml::Value)>,
     overrides: ConfigOverrides,
-    cloud_requirements: CloudRequirementsLoader,
+    cloud_requirements: CloudConfigBundleLoader,
     fallback_cwd: Option<PathBuf>,
 ) -> LoadedTuiConfig {
     #[allow(clippy::print_stderr)]
     match ConfigBuilder::default()
         .cli_overrides(cli_kv_overrides)
         .harness_overrides(overrides)
-        .cloud_requirements(cloud_requirements)
+        .cloud_config_bundle(cloud_requirements)
         .fallback_cwd(fallback_cwd)
         .build()
         .await
@@ -2214,7 +2217,7 @@ mod tests {
             config,
             Vec::new(),
             LoaderOverrides::default(),
-            CloudRequirementsLoader::default(),
+            CloudConfigBundleLoader::default(),
             praxis_feedback::CodexFeedback::new(),
         )
         .await
@@ -2458,7 +2461,7 @@ mod tests {
             config,
             Vec::new(),
             LoaderOverrides::default(),
-            CloudRequirementsLoader::default(),
+            CloudConfigBundleLoader::default(),
             praxis_feedback::CodexFeedback::new(),
             |_args| async { Err(std::io::Error::other("boom")) },
         )

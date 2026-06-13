@@ -21,8 +21,8 @@ use praxis_app_gateway_protocol::LoginAccountResponse;
 use praxis_app_gateway_protocol::LogoutAccountResponse;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_backend_client::Client as BackendClient;
-use praxis_cloud_requirements::cloud_requirements_loader;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_cloud_requirements::cloud_config_bundle_loader;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_login::AuthManager;
 use praxis_login::AuthMode as CoreAuthMode;
 use praxis_login::CLIENT_ID;
@@ -327,7 +327,7 @@ impl PraxisMessageProcessor {
 
                         if success {
                             auth_manager.reload();
-                            replace_cloud_requirements_loader(
+                            replace_cloud_config_bundle_loader(
                                 cloud_requirements.as_ref(),
                                 auth_manager.clone(),
                                 chatgpt_base_url,
@@ -438,7 +438,7 @@ impl PraxisMessageProcessor {
 
                         if success {
                             auth_manager.reload();
-                            replace_cloud_requirements_loader(
+                            replace_cloud_config_bundle_loader(
                                 cloud_requirements.as_ref(),
                                 auth_manager.clone(),
                                 chatgpt_base_url,
@@ -577,7 +577,7 @@ impl PraxisMessageProcessor {
             return;
         }
         self.auth_manager.reload();
-        replace_cloud_requirements_loader(
+        replace_cloud_config_bundle_loader(
             self.cloud_requirements.as_ref(),
             self.auth_manager.clone(),
             self.config.chatgpt_base_url.clone(),
@@ -798,13 +798,13 @@ impl PraxisMessageProcessor {
     }
 }
 
-fn replace_cloud_requirements_loader(
-    cloud_requirements: &RwLock<CloudRequirementsLoader>,
+fn replace_cloud_config_bundle_loader(
+    cloud_requirements: &RwLock<CloudConfigBundleLoader>,
     auth_manager: Arc<AuthManager>,
     chatgpt_base_url: String,
     praxis_home: PathBuf,
 ) {
-    let loader = cloud_requirements_loader(auth_manager, chatgpt_base_url, praxis_home);
+    let loader = cloud_config_bundle_loader(auth_manager, chatgpt_base_url, praxis_home);
     if let Ok(mut guard) = cloud_requirements.write() {
         *guard = loader;
     } else {
@@ -814,7 +814,7 @@ fn replace_cloud_requirements_loader(
 
 async fn sync_default_client_residency_requirement(
     cli_overrides: &[(String, TomlValue)],
-    cloud_requirements: &RwLock<CloudRequirementsLoader>,
+    cloud_requirements: &RwLock<CloudConfigBundleLoader>,
 ) {
     let loader = cloud_requirements
         .read()
@@ -822,7 +822,7 @@ async fn sync_default_client_residency_requirement(
         .unwrap_or_default();
     match praxis_core::config::ConfigBuilder::default()
         .cli_overrides(cli_overrides.to_vec())
-        .cloud_requirements(loader)
+        .cloud_config_bundle(loader)
         .build()
         .await
     {

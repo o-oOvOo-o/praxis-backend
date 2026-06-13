@@ -50,7 +50,7 @@ impl PraxisMessageProcessor {
         let mut config = praxis_core::config::ConfigBuilder::default()
             .cli_overrides(self.current_cli_overrides())
             .fallback_cwd(fallback_cwd)
-            .cloud_requirements(cloud_requirements)
+            .cloud_config_bundle(cloud_requirements)
             .build()
             .await
             .map_err(|err| JSONRPCErrorError {
@@ -65,7 +65,7 @@ impl PraxisMessageProcessor {
         Ok(config)
     }
 
-    pub(crate) fn current_cloud_requirements(&self) -> CloudRequirementsLoader {
+    pub(crate) fn current_cloud_requirements(&self) -> CloudConfigBundleLoader {
         self.cloud_requirements
             .read()
             .map(|guard| guard.clone())

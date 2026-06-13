@@ -99,6 +99,7 @@ impl ConfigLayerEntry {
         match &self.name {
             ConfigLayerSource::Mdm { .. } => None,
             ConfigLayerSource::System { file } => file.parent(),
+            ConfigLayerSource::EnterpriseManaged { .. } => None,
             ConfigLayerSource::User { file } => file.parent(),
             ConfigLayerSource::Project { dot_praxis_folder } => Some(dot_praxis_folder.clone()),
             ConfigLayerSource::SessionFlags => None,

@@ -116,7 +116,7 @@ impl PraxisMessageProcessor {
         listener_task_context: ListenerTaskContext,
         cli_overrides: Vec<(String, TomlValue)>,
         runtime_feature_enablement: BTreeMap<String, bool>,
-        cloud_requirements: CloudRequirementsLoader,
+        cloud_requirements: CloudConfigBundleLoader,
         request_id: ConnectionRequestId,
         config_overrides: Option<HashMap<String, serde_json::Value>>,
         typesafe_overrides: ConfigOverrides,

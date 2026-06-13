@@ -61,7 +61,7 @@ use praxis_arg0::Arg0DispatchPaths;
 use praxis_chatgpt::connectors;
 use praxis_core::ThreadManager;
 use praxis_core::config::Config;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_core::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use praxis_exec_server::EnvironmentManager;
@@ -189,7 +189,7 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) environment_manager: Arc<EnvironmentManager>,
     pub(crate) cli_overrides: Vec<(String, TomlValue)>,
     pub(crate) loader_overrides: LoaderOverrides,
-    pub(crate) cloud_requirements: CloudRequirementsLoader,
+    pub(crate) cloud_requirements: CloudConfigBundleLoader,
     pub(crate) feedback: CodexFeedback,
     pub(crate) log_db: Option<LogDbLayer>,
     pub(crate) config_warnings: Vec<ConfigWarningNotification>,

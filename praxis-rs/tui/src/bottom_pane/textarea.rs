@@ -31,8 +31,8 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 const WORD_SEPARATORS: &str = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?";
-const INPUT_TEXT_STYLE: Style = Style::new().fg(Color::White);
-const INPUT_ELEMENT_STYLE: Style = Style::new().fg(Color::LightCyan);
+const INPUT_TEXT_STYLE: Style = Style::new().fg(Color::Rgb(226, 229, 234));
+const INPUT_ELEMENT_STYLE: Style = Style::new().fg(Color::Rgb(111, 184, 178));
 
 fn is_word_separator(ch: char) -> bool {
     WORD_SEPARATORS.contains(ch)

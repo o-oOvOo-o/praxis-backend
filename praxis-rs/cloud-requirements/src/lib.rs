@@ -17,9 +17,16 @@ use chrono::Utc;
 use hmac::Hmac;
 use hmac::Mac;
 use praxis_backend_client::Client as BackendClient;
+use praxis_core::config_loader::CloudConfigBundle;
+use praxis_core::config_loader::CloudConfigBundleLoadError;
+use praxis_core::config_loader::CloudConfigBundleLoadErrorCode;
+use praxis_core::config_loader::CloudConfigBundleLoader;
+use praxis_core::config_loader::CloudConfigTomlBundle;
+use praxis_core::config_loader::CloudRequirementsFragment;
 use praxis_core::config_loader::CloudRequirementsLoadError;
 use praxis_core::config_loader::CloudRequirementsLoadErrorCode;
 use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudRequirementsTomlBundle;
 use praxis_core::config_loader::ConfigRequirementsToml;
 use praxis_core::util::backoff;
 use praxis_login::AuthCredentialsStoreMode;
@@ -52,12 +59,123 @@ const CLOUD_REQUIREMENTS_FETCH_FINAL_METRIC: &str = "codex.cloud_requirements.fe
 const CLOUD_REQUIREMENTS_LOAD_METRIC: &str = "codex.cloud_requirements.load";
 const CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE: &str = "failed to load your workspace-managed config";
 const CLOUD_REQUIREMENTS_AUTH_RECOVERY_FAILED_MESSAGE: &str = "Your authentication session could not be refreshed automatically. Please log out and sign in again.";
+const OPENAI_CODEX_REQUIREMENTS_FRAGMENT_ID: &str = "openai-codex-cloud-requirements";
+const OPENAI_CODEX_REQUIREMENTS_FRAGMENT_NAME: &str = "OpenAI Codex cloud requirements";
 const CLOUD_REQUIREMENTS_CACHE_WRITE_HMAC_KEY: &[u8] =
     b"praxis-cloud-requirements-cache-v3-064f8542-75b4-494c-a294-97d3ce597271";
 const CLOUD_REQUIREMENTS_CACHE_READ_HMAC_KEYS: &[&[u8]] =
     &[CLOUD_REQUIREMENTS_CACHE_WRITE_HMAC_KEY];
 
 type HmacSha256 = Hmac<Sha256>;
+
+#[async_trait]
+pub trait ConfigBundleProvider: Send + Sync {
+    async fn load_bundle(&self) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError>;
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct NoopConfigBundleProvider;
+
+#[async_trait]
+impl ConfigBundleProvider for NoopConfigBundleProvider {
+    async fn load_bundle(&self) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError> {
+        Ok(None)
+    }
+}
+
+#[derive(Clone)]
+pub struct OpenAiCodexConfigBundleProvider {
+    service: CloudRequirementsService,
+}
+
+impl OpenAiCodexConfigBundleProvider {
+    pub fn new(
+        auth_manager: Arc<AuthManager>,
+        chatgpt_base_url: String,
+        praxis_home: PathBuf,
+    ) -> Self {
+        Self {
+            service: CloudRequirementsService::new(
+                auth_manager,
+                Arc::new(BackendRequirementsFetcher::new(chatgpt_base_url)),
+                praxis_home,
+                CLOUD_REQUIREMENTS_TIMEOUT,
+            ),
+        }
+    }
+}
+
+#[async_trait]
+impl ConfigBundleProvider for OpenAiCodexConfigBundleProvider {
+    async fn load_bundle(&self) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError> {
+        self.service.fetch_bundle_with_timeout().await
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LocalFileConfigBundleProvider {
+    path: PathBuf,
+}
+
+impl LocalFileConfigBundleProvider {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+#[async_trait]
+impl ConfigBundleProvider for LocalFileConfigBundleProvider {
+    async fn load_bundle(&self) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError> {
+        let contents = match fs::read_to_string(&self.path).await {
+            Ok(contents) => contents,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
+                return Err(CloudConfigBundleLoadError::new(
+                    CloudConfigBundleLoadErrorCode::RequestFailed,
+                    None,
+                    format!(
+                        "failed to read local cloud config bundle {}: {err}",
+                        self.path.display()
+                    ),
+                ));
+            }
+        };
+        if contents.trim().is_empty() {
+            return Ok(None);
+        }
+
+        let bundle: CloudConfigBundle = if self
+            .path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        {
+            serde_json::from_str(&contents).map_err(|err| {
+                CloudConfigBundleLoadError::new(
+                    CloudConfigBundleLoadErrorCode::InvalidBundle,
+                    None,
+                    format!(
+                        "failed to parse local cloud config bundle {}: {err}",
+                        self.path.display()
+                    ),
+                )
+            })?
+        } else {
+            toml::from_str(&contents).map_err(|err| {
+                CloudConfigBundleLoadError::new(
+                    CloudConfigBundleLoadErrorCode::InvalidBundle,
+                    None,
+                    format!(
+                        "failed to parse local cloud config bundle {}: {err}",
+                        self.path.display()
+                    ),
+                )
+            })?
+        };
+
+        Ok(Some(bundle).filter(|bundle| !bundle.is_empty()))
+    }
+}
 
 fn refresher_task_slot() -> &'static Mutex<Option<JoinHandle<()>>> {
     static REFRESHER_TASK: OnceLock<Mutex<Option<JoinHandle<()>>>> = OnceLock::new();
@@ -130,10 +248,16 @@ struct CloudRequirementsCacheSignedPayload {
 }
 
 impl CloudRequirementsCacheSignedPayload {
+    fn bundle(&self) -> Result<Option<CloudConfigBundle>, toml::de::Error> {
+        bundle_from_requirements_contents(self.contents.clone())
+    }
+
+    #[cfg(test)]
     fn requirements(&self) -> Option<ConfigRequirementsToml> {
-        self.contents
-            .as_deref()
-            .and_then(|contents| parse_cloud_requirements(contents).ok().flatten())
+        self.bundle()
+            .ok()
+            .flatten()
+            .and_then(|bundle| requirements_from_bundle(&bundle).ok().flatten())
     }
 }
 fn sign_cache_payload(payload_bytes: &[u8]) -> Option<String> {
@@ -267,13 +391,31 @@ impl CloudRequirementsService {
         }
     }
 
+    #[cfg(test)]
     async fn fetch_with_timeout(
         &self,
     ) -> Result<Option<ConfigRequirementsToml>, CloudRequirementsLoadError> {
+        let bundle = self
+            .fetch_bundle_with_timeout()
+            .await
+            .map_err(cloud_bundle_error_to_requirements_error)?;
+        requirements_from_bundle_option(bundle).map_err(|err| {
+            tracing::error!(error = %err, "Failed to parse cloud requirements bundle");
+            CloudRequirementsLoadError::new(
+                CloudRequirementsLoadErrorCode::Parse,
+                None,
+                CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE,
+            )
+        })
+    }
+
+    async fn fetch_bundle_with_timeout(
+        &self,
+    ) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError> {
         let _timer =
             praxis_otel::start_global_timer("codex.cloud_requirements.fetch.duration_ms", &[]);
         let started_at = Instant::now();
-        let fetch_result = timeout(self.timeout, self.fetch())
+        let fetch_result = timeout(self.timeout, self.fetch_bundle())
             .await
             .inspect_err(|_| {
                 let message = format!(
@@ -284,8 +426,8 @@ impl CloudRequirementsService {
                 emit_load_metric("startup", "error");
             })
             .map_err(|_| {
-                CloudRequirementsLoadError::new(
-                    CloudRequirementsLoadErrorCode::Timeout,
+                CloudConfigBundleLoadError::new(
+                    CloudConfigBundleLoadErrorCode::Timeout,
                     /*status_code*/ None,
                     format!(
                         "timed out waiting for cloud requirements after {}s",
@@ -323,7 +465,23 @@ impl CloudRequirementsService {
         Ok(result)
     }
 
+    #[cfg(test)]
     async fn fetch(&self) -> Result<Option<ConfigRequirementsToml>, CloudRequirementsLoadError> {
+        let bundle = self
+            .fetch_bundle()
+            .await
+            .map_err(cloud_bundle_error_to_requirements_error)?;
+        requirements_from_bundle_option(bundle).map_err(|err| {
+            tracing::error!(error = %err, "Failed to parse cloud requirements bundle");
+            CloudRequirementsLoadError::new(
+                CloudRequirementsLoadErrorCode::Parse,
+                None,
+                CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE,
+            )
+        })
+    }
+
+    async fn fetch_bundle(&self) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError> {
         let Some(auth) = self.auth_manager.auth().await else {
             return Ok(None);
         };
@@ -346,21 +504,30 @@ impl CloudRequirementsService {
                     path = %self.cache_path.display(),
                     "Using cached cloud requirements"
                 );
-                return Ok(signed_payload.requirements());
+                match signed_payload.bundle() {
+                    Ok(bundle) => return Ok(bundle),
+                    Err(err) => {
+                        tracing::warn!(
+                            error = %err,
+                            path = %self.cache_path.display(),
+                            "Ignoring cached cloud requirements because cached bundle is invalid"
+                        );
+                    }
+                }
             }
             Err(cache_load_status) => {
                 self.log_cache_load_status(&cache_load_status);
             }
         }
 
-        self.fetch_with_retries(auth, "startup").await
+        self.fetch_bundle_with_retries(auth, "startup").await
     }
 
-    async fn fetch_with_retries(
+    async fn fetch_bundle_with_retries(
         &self,
         mut auth: CodexAuth,
         trigger: &'static str,
-    ) -> Result<Option<ConfigRequirementsToml>, CloudRequirementsLoadError> {
+    ) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError> {
         let mut attempt = 1;
         let mut last_status_code: Option<u16> = None;
         let mut auth_recovery = self.auth_manager.unauthorized_recovery();
@@ -414,8 +581,8 @@ impl CloudRequirementsService {
                                         attempt,
                                         status_code,
                                     );
-                                    return Err(CloudRequirementsLoadError::new(
-                                        CloudRequirementsLoadErrorCode::Auth,
+                                    return Err(CloudConfigBundleLoadError::new(
+                                        CloudConfigBundleLoadErrorCode::Auth,
                                         status_code,
                                         CLOUD_REQUIREMENTS_AUTH_RECOVERY_FAILED_MESSAGE,
                                     ));
@@ -435,8 +602,8 @@ impl CloudRequirementsService {
                                     attempt,
                                     status_code,
                                 );
-                                return Err(CloudRequirementsLoadError::new(
-                                    CloudRequirementsLoadErrorCode::Auth,
+                                return Err(CloudConfigBundleLoadError::new(
+                                    CloudConfigBundleLoadErrorCode::Auth,
                                     status_code,
                                     failed.message,
                                 ));
@@ -468,34 +635,31 @@ impl CloudRequirementsService {
                         attempt,
                         status_code,
                     );
-                    return Err(CloudRequirementsLoadError::new(
-                        CloudRequirementsLoadErrorCode::Auth,
+                    return Err(CloudConfigBundleLoadError::new(
+                        CloudConfigBundleLoadErrorCode::Auth,
                         status_code,
                         CLOUD_REQUIREMENTS_AUTH_RECOVERY_FAILED_MESSAGE,
                     ));
                 }
             };
 
-            let requirements = match contents.as_deref() {
-                Some(contents) => match parse_cloud_requirements(contents) {
-                    Ok(requirements) => requirements,
-                    Err(err) => {
-                        tracing::error!(error = %err, "Failed to parse cloud requirements");
-                        emit_fetch_final_metric(
-                            trigger,
-                            "error",
-                            "parse_error",
-                            attempt,
-                            last_status_code,
-                        );
-                        return Err(CloudRequirementsLoadError::new(
-                            CloudRequirementsLoadErrorCode::Parse,
-                            /*status_code*/ None,
-                            CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE,
-                        ));
-                    }
-                },
-                None => None,
+            let bundle = match bundle_from_requirements_contents(contents.clone()) {
+                Ok(bundle) => bundle,
+                Err(err) => {
+                    tracing::error!(error = %err, "Failed to parse cloud requirements");
+                    emit_fetch_final_metric(
+                        trigger,
+                        "error",
+                        "parse_error",
+                        attempt,
+                        last_status_code,
+                    );
+                    return Err(CloudConfigBundleLoadError::new(
+                        CloudConfigBundleLoadErrorCode::InvalidBundle,
+                        /*status_code*/ None,
+                        CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE,
+                    ));
+                }
             };
 
             let (chatgpt_user_id, account_id) = auth_identity(&auth);
@@ -506,7 +670,7 @@ impl CloudRequirementsService {
             emit_fetch_final_metric(
                 trigger, "success", "none", attempt, /*status_code*/ None,
             );
-            return Ok(requirements);
+            return Ok(bundle);
         }
 
         emit_fetch_final_metric(
@@ -520,8 +684,8 @@ impl CloudRequirementsService {
             path = %self.cache_path.display(),
             "{CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE}"
         );
-        Err(CloudRequirementsLoadError::new(
-            CloudRequirementsLoadErrorCode::RequestFailed,
+        Err(CloudConfigBundleLoadError::new(
+            CloudConfigBundleLoadErrorCode::RequestFailed,
             last_status_code,
             CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE,
         ))
@@ -556,7 +720,7 @@ impl CloudRequirementsService {
             return false;
         }
 
-        match self.fetch_with_retries(auth, "refresh").await {
+        match self.fetch_bundle_with_retries(auth, "refresh").await {
             Ok(_) => emit_load_metric("refresh", "success"),
             Err(err) => {
                 tracing::error!(
@@ -691,32 +855,20 @@ pub fn cloud_requirements_loader(
     chatgpt_base_url: String,
     praxis_home: PathBuf,
 ) -> CloudRequirementsLoader {
-    let service = CloudRequirementsService::new(
-        auth_manager,
-        Arc::new(BackendRequirementsFetcher::new(chatgpt_base_url)),
-        praxis_home,
-        CLOUD_REQUIREMENTS_TIMEOUT,
-    );
-    let refresh_service = service.clone();
-    let task = tokio::spawn(async move { service.fetch_with_timeout().await });
-    let refresh_task =
-        tokio::spawn(async move { refresh_service.refresh_cache_in_background().await });
-    let mut refresher_guard = refresher_task_slot().lock().unwrap_or_else(|err| {
-        tracing::warn!("cloud requirements refresher task slot was poisoned");
-        err.into_inner()
-    });
-    if let Some(existing_task) = refresher_guard.replace(refresh_task) {
-        existing_task.abort();
-    }
+    let loader = cloud_config_bundle_loader(auth_manager, chatgpt_base_url, praxis_home);
     CloudRequirementsLoader::new(async move {
-        task.await.map_err(|err| {
-            tracing::error!(error = %err, "Cloud requirements task failed");
+        let bundle = loader
+            .get()
+            .await
+            .map_err(cloud_bundle_error_to_requirements_error)?;
+        requirements_from_bundle_option(bundle).map_err(|err| {
+            tracing::error!(error = %err, "Failed to parse cloud requirements bundle");
             CloudRequirementsLoadError::new(
-                CloudRequirementsLoadErrorCode::Internal,
-                /*status_code*/ None,
-                format!("cloud requirements load failed: {err}"),
+                CloudRequirementsLoadErrorCode::Parse,
+                None,
+                CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE,
             )
-        })?
+        })
     })
 }
 
@@ -734,6 +886,56 @@ pub fn cloud_requirements_loader_for_storage(
     cloud_requirements_loader(auth_manager, chatgpt_base_url, praxis_home)
 }
 
+pub fn cloud_config_bundle_loader(
+    auth_manager: Arc<AuthManager>,
+    chatgpt_base_url: String,
+    praxis_home: PathBuf,
+) -> CloudConfigBundleLoader {
+    let provider =
+        OpenAiCodexConfigBundleProvider::new(auth_manager, chatgpt_base_url, praxis_home);
+    let refresh_service = provider.service.clone();
+    let refresh_task =
+        tokio::spawn(async move { refresh_service.refresh_cache_in_background().await });
+    let mut refresher_guard = refresher_task_slot().lock().unwrap_or_else(|err| {
+        tracing::warn!("cloud requirements refresher task slot was poisoned");
+        err.into_inner()
+    });
+    if let Some(existing_task) = refresher_guard.replace(refresh_task) {
+        existing_task.abort();
+    }
+    cloud_config_bundle_loader_from_provider(Arc::new(provider))
+}
+
+pub fn cloud_config_bundle_loader_for_storage(
+    praxis_home: PathBuf,
+    enable_praxis_api_key_env: bool,
+    credentials_store_mode: AuthCredentialsStoreMode,
+    chatgpt_base_url: String,
+) -> CloudConfigBundleLoader {
+    let auth_manager = AuthManager::shared(
+        praxis_home.clone(),
+        enable_praxis_api_key_env,
+        credentials_store_mode,
+    );
+    cloud_config_bundle_loader(auth_manager, chatgpt_base_url, praxis_home)
+}
+
+pub fn cloud_config_bundle_loader_from_provider(
+    provider: Arc<dyn ConfigBundleProvider>,
+) -> CloudConfigBundleLoader {
+    let task = tokio::spawn(async move { provider.load_bundle().await });
+    CloudConfigBundleLoader::new(async move {
+        task.await.map_err(|err| {
+            tracing::error!(error = %err, "Cloud config bundle task failed");
+            CloudConfigBundleLoadError::new(
+                CloudConfigBundleLoadErrorCode::Internal,
+                /*status_code*/ None,
+                format!("cloud config bundle load failed: {err}"),
+            )
+        })?
+    })
+}
+
 fn parse_cloud_requirements(
     contents: &str,
 ) -> Result<Option<ConfigRequirementsToml>, toml::de::Error> {
@@ -747,6 +949,69 @@ fn parse_cloud_requirements(
     } else {
         Ok(Some(requirements))
     }
+}
+
+fn bundle_from_requirements_contents(
+    contents: Option<String>,
+) -> Result<Option<CloudConfigBundle>, toml::de::Error> {
+    let Some(contents) = contents else {
+        return Ok(None);
+    };
+    if parse_cloud_requirements(&contents)?.is_none() {
+        return Ok(None);
+    }
+
+    Ok(Some(CloudConfigBundle {
+        config_toml: CloudConfigTomlBundle::default(),
+        requirements_toml: CloudRequirementsTomlBundle {
+            enterprise_managed: vec![CloudRequirementsFragment {
+                id: OPENAI_CODEX_REQUIREMENTS_FRAGMENT_ID.to_string(),
+                name: OPENAI_CODEX_REQUIREMENTS_FRAGMENT_NAME.to_string(),
+                contents,
+            }],
+            ..Default::default()
+        },
+    }))
+}
+
+fn requirements_from_bundle_option(
+    bundle: Option<CloudConfigBundle>,
+) -> Result<Option<ConfigRequirementsToml>, toml::de::Error> {
+    match bundle {
+        Some(bundle) => requirements_from_bundle(&bundle),
+        None => Ok(None),
+    }
+}
+
+fn requirements_from_bundle(
+    bundle: &CloudConfigBundle,
+) -> Result<Option<ConfigRequirementsToml>, toml::de::Error> {
+    if let Some(fragment) = bundle.requirements_toml.parsed_enterprise_managed.first() {
+        return Ok(Some(fragment.requirements.clone()));
+    }
+
+    bundle
+        .requirements_toml
+        .enterprise_managed
+        .first()
+        .map(|fragment| parse_cloud_requirements(&fragment.contents))
+        .transpose()
+        .map(Option::flatten)
+}
+
+fn cloud_bundle_error_to_requirements_error(
+    err: CloudConfigBundleLoadError,
+) -> CloudRequirementsLoadError {
+    let code = match err.code() {
+        CloudConfigBundleLoadErrorCode::Auth => CloudRequirementsLoadErrorCode::Auth,
+        CloudConfigBundleLoadErrorCode::Timeout => CloudRequirementsLoadErrorCode::Timeout,
+        CloudConfigBundleLoadErrorCode::RequestFailed => {
+            CloudRequirementsLoadErrorCode::RequestFailed
+        }
+        CloudConfigBundleLoadErrorCode::InvalidBundle => CloudRequirementsLoadErrorCode::Parse,
+        CloudConfigBundleLoadErrorCode::Internal => CloudRequirementsLoadErrorCode::Internal,
+    };
+    CloudRequirementsLoadError::new(code, err.status_code(), err.to_string())
 }
 
 fn emit_fetch_attempt_metric(

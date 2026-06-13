@@ -1,5 +1,6 @@
 use crate::color::blend;
 use crate::color::is_light;
+use crate::surface;
 use crate::terminal_palette::TerminalAppearance;
 use crate::terminal_palette::TerminalTheme;
 use crate::terminal_palette::best_color;
@@ -46,7 +47,7 @@ pub(crate) fn semantic_theme_for(appearance: TerminalAppearance) -> SemanticThem
 }
 
 pub fn user_message_style() -> Style {
-    user_message_style_for(default_bg())
+    surface::user_message_style()
 }
 
 pub(crate) fn user_message_rule_style() -> Style {
@@ -80,13 +81,8 @@ pub fn proposed_plan_style_for(terminal_bg: Option<(u8, u8, u8)>) -> Style {
 }
 
 pub(crate) fn interactive_surface_style() -> Style {
-    match semantic_theme()
-        .interactive_surface_bg_rgb
-        .map(surface_bg_color)
-    {
-        Some(bg) => Style::default().bg(bg),
-        None => Style::default(),
-    }
+    let theme = surface::runtime_theme();
+    Style::default().fg(theme.text).bg(theme.panel_raised_bg)
 }
 
 pub(crate) fn interactive_badge_style() -> Style {
@@ -94,15 +90,11 @@ pub(crate) fn interactive_badge_style() -> Style {
 }
 
 pub(crate) fn selection_style() -> Style {
-    let theme = semantic_theme();
-    Style::default()
-        .bg(selection_bg_color(&theme))
-        .add_modifier(Modifier::BOLD)
+    surface::selection_style(Style::default())
 }
 
 pub(crate) fn selection_overlay(style: Style) -> Style {
-    let theme = semantic_theme();
-    overlay_with_bg(style, selection_bg_color(&theme), /*bold*/ true)
+    surface::selection_style(style)
 }
 
 pub(crate) fn search_highlight_style() -> Style {

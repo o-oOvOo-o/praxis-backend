@@ -507,6 +507,13 @@ pub struct Tui {
     #[serde(default)]
     pub theme: Option<String>,
 
+    /// Praxis TUI surface theme (`auto`, `dark`, `classic`, or `deepseek`).
+    ///
+    /// This controls application chrome only. Syntax highlighting remains
+    /// controlled by `theme` and `/theme`.
+    #[serde(default)]
+    pub surface_theme: Option<String>,
+
     /// Startup tooltip availability NUX state persisted by the TUI.
     #[serde(default)]
     pub model_availability_nux: ModelAvailabilityNuxConfig,

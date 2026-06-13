@@ -1763,6 +1763,11 @@
           },
           "type": "array"
         },
+        "surface_theme": {
+          "default": null,
+          "description": "Praxis TUI surface theme (`auto`, `dark`, `classic`, or `deepseek`).\n\nThis controls application chrome only. Syntax highlighting remains controlled by `theme` and `/theme`.",
+          "type": "string"
+        },
         "terminal_title": {
           "default": null,
           "description": "Ordered list of terminal title item identifiers.\n\nWhen set, the TUI renders the selected items into the terminal window/tab title. When unset, the TUI defaults to: `spinner` and `project`.",

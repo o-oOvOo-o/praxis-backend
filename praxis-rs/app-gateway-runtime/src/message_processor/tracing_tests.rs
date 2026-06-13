@@ -32,7 +32,7 @@ use praxis_app_gateway_protocol::UserInput;
 use praxis_arg0::Arg0DispatchPaths;
 use praxis_core::config::Config;
 use praxis_core::config::ConfigBuilder;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_exec_server::EnvironmentManager;
 use praxis_feedback::CodexFeedback;
@@ -241,7 +241,7 @@ fn build_test_processor(
         environment_manager: Arc::new(EnvironmentManager::new(/*exec_server_url*/ None)),
         cli_overrides: Vec::new(),
         loader_overrides: LoaderOverrides::default(),
-        cloud_requirements: CloudRequirementsLoader::default(),
+        cloud_requirements: CloudConfigBundleLoader::default(),
         feedback: CodexFeedback::new(),
         log_db: None,
         config_warnings: Vec::new(),

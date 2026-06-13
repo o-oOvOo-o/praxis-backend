@@ -192,12 +192,12 @@ pub(crate) fn thread_initialized_fact(
     }
 }
 
-fn cloud_requirements_load_error(err: &std::io::Error) -> Option<&CloudRequirementsLoadError> {
+fn cloud_requirements_load_error(err: &std::io::Error) -> Option<&CloudConfigBundleLoadError> {
     let mut current: Option<&(dyn std::error::Error + 'static)> = err
         .get_ref()
         .map(|source| source as &(dyn std::error::Error + 'static));
     while let Some(source) = current {
-        if let Some(cloud_error) = source.downcast_ref::<CloudRequirementsLoadError>() {
+        if let Some(cloud_error) = source.downcast_ref::<CloudConfigBundleLoadError>() {
             return Some(cloud_error);
         }
         current = source.source();
@@ -215,7 +215,7 @@ pub(crate) fn config_load_error(err: &std::io::Error) -> JSONRPCErrorError {
         if let Some(status_code) = cloud_error.status_code() {
             data["statusCode"] = serde_json::json!(status_code);
         }
-        if cloud_error.code() == CloudRequirementsLoadErrorCode::Auth {
+        if cloud_error.code() == CloudConfigBundleLoadErrorCode::Auth {
             data["action"] = serde_json::json!("relogin");
         }
         data
@@ -271,7 +271,7 @@ pub(crate) async fn derive_config_from_params(
     cli_overrides: &[(String, TomlValue)],
     request_overrides: Option<HashMap<String, serde_json::Value>>,
     typesafe_overrides: ConfigOverrides,
-    cloud_requirements: &CloudRequirementsLoader,
+    cloud_requirements: &CloudConfigBundleLoader,
     praxis_home: &Path,
     runtime_feature_enablement: &BTreeMap<String, bool>,
 ) -> std::io::Result<Config> {
@@ -290,7 +290,7 @@ pub(crate) async fn derive_config_from_params(
         .praxis_home(praxis_home.to_path_buf())
         .cli_overrides(merged_cli_overrides)
         .harness_overrides(typesafe_overrides)
-        .cloud_requirements(cloud_requirements.clone())
+        .cloud_config_bundle(cloud_requirements.clone())
         .build()
         .await?;
     apply_runtime_feature_enablement(&mut config, runtime_feature_enablement);
@@ -302,7 +302,7 @@ pub(crate) async fn derive_config_for_cwd(
     request_overrides: Option<HashMap<String, serde_json::Value>>,
     typesafe_overrides: ConfigOverrides,
     cwd: Option<PathBuf>,
-    cloud_requirements: &CloudRequirementsLoader,
+    cloud_requirements: &CloudConfigBundleLoader,
     praxis_home: &Path,
     runtime_feature_enablement: &BTreeMap<String, bool>,
 ) -> std::io::Result<Config> {
@@ -322,7 +322,7 @@ pub(crate) async fn derive_config_for_cwd(
         .cli_overrides(merged_cli_overrides)
         .harness_overrides(typesafe_overrides)
         .fallback_cwd(cwd)
-        .cloud_requirements(cloud_requirements.clone())
+        .cloud_config_bundle(cloud_requirements.clone())
         .build()
         .await?;
     apply_runtime_feature_enablement(&mut config, runtime_feature_enablement);

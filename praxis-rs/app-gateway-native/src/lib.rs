@@ -16,7 +16,7 @@ use praxis_app_gateway_protocol::GatewayTransport;
 use praxis_app_gateway_protocol::HostExtensionInfo;
 use praxis_arg0::Arg0DispatchPaths;
 use praxis_core::config::Config;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_feedback::CodexFeedback;
 use praxis_protocol::protocol::SessionSource;
@@ -78,7 +78,7 @@ pub struct NativeRuntimeStartArgs {
     pub config: Arc<Config>,
     pub cli_overrides: Vec<(String, TomlValue)>,
     pub loader_overrides: LoaderOverrides,
-    pub cloud_requirements: CloudRequirementsLoader,
+    pub cloud_requirements: CloudConfigBundleLoader,
     pub feedback: CodexFeedback,
     pub config_warnings: Vec<praxis_app_gateway_protocol::ConfigWarningNotification>,
     pub session_source: SessionSource,

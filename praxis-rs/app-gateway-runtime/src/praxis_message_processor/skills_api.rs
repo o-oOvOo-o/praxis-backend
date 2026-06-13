@@ -15,7 +15,7 @@ use praxis_app_gateway_protocol::SkillsListParams;
 use praxis_app_gateway_protocol::SkillsListResponse;
 use praxis_core::config::edit::ConfigEdit;
 use praxis_core::config::edit::ConfigEditsBuilder;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_core::config_loader::load_config_layers_state;
 use praxis_features::Feature;
@@ -111,7 +111,7 @@ impl PraxisMessageProcessor {
                 Some(cwd_abs),
                 &cli_overrides,
                 LoaderOverrides::default(),
-                CloudRequirementsLoader::default(),
+                CloudConfigBundleLoader::default(),
             )
             .await
             {

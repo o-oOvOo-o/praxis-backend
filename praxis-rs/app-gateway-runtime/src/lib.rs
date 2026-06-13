@@ -1,10 +1,10 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 use praxis_arg0::Arg0DispatchPaths;
-use praxis_cloud_requirements::cloud_requirements_loader;
+use praxis_cloud_requirements::cloud_config_bundle_loader;
 use praxis_core::config::Config;
 use praxis_core::config::ConfigBuilder;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::ConfigLayerStackOrdering;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_utils_cli::CliConfigOverrides;
@@ -400,7 +400,7 @@ pub async fn run_main_with_transport(
                 /*enable_praxis_api_key_env*/ false,
                 config.cli_auth_credentials_store_mode,
             );
-            cloud_requirements_loader(
+            cloud_config_bundle_loader(
                 auth_manager,
                 config.chatgpt_base_url,
                 config.praxis_home.clone(),
@@ -409,7 +409,7 @@ pub async fn run_main_with_transport(
         Err(err) => {
             warn!(error = %err, "Failed to preload config for cloud requirements");
             // TODO(gt): Make cloud requirements preload failures blocking once we can fail-closed.
-            CloudRequirementsLoader::default()
+            CloudConfigBundleLoader::default()
         }
     };
     let loader_overrides_for_config_api = loader_overrides.clone();
@@ -417,7 +417,7 @@ pub async fn run_main_with_transport(
     let config = match ConfigBuilder::default()
         .cli_overrides(cli_kv_overrides.clone())
         .loader_overrides(loader_overrides)
-        .cloud_requirements(cloud_requirements.clone())
+        .cloud_config_bundle(cloud_requirements.clone())
         .build()
         .await
     {

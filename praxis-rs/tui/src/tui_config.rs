@@ -20,6 +20,7 @@ pub(crate) struct TuiRuntimeConfig {
     pub(crate) status_line: Option<Vec<String>>,
     pub(crate) terminal_title: Option<Vec<String>>,
     pub(crate) theme: Option<String>,
+    pub(crate) surface_theme: Option<String>,
 }
 
 impl Default for TuiRuntimeConfig {
@@ -34,6 +35,7 @@ impl Default for TuiRuntimeConfig {
             status_line: None,
             terminal_title: None,
             theme: None,
+            surface_theme: None,
         }
     }
 }
@@ -50,6 +52,7 @@ impl From<Tui> for TuiRuntimeConfig {
             status_line: tui.status_line,
             terminal_title: tui.terminal_title,
             theme: tui.theme,
+            surface_theme: tui.surface_theme,
         }
     }
 }
@@ -73,6 +76,13 @@ impl TuiRuntimeConfig {
 pub(crate) fn syntax_theme_edit(name: &str) -> ConfigEdit {
     ConfigEdit::SetPath {
         segments: vec!["tui".to_string(), "theme".to_string()],
+        value: value(name.to_string()),
+    }
+}
+
+pub(crate) fn surface_theme_edit(name: &str) -> ConfigEdit {
+    ConfigEdit::SetPath {
+        segments: vec!["tui".to_string(), "surface_theme".to_string()],
         value: value(name.to_string()),
     }
 }

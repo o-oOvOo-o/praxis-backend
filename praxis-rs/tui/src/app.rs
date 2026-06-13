@@ -21,6 +21,7 @@ use crate::bottom_pane::McpServerElicitationFormRequest;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
+use crate::center_theme::CenterTheme;
 use crate::chatwidget::ChatWidget;
 use crate::chatwidget::ExternalEditorState;
 use crate::chatwidget::ReplayKind;
@@ -58,6 +59,7 @@ use crate::tui;
 use crate::tui::TuiEvent;
 use crate::tui_config;
 use crate::tui_config::TuiRuntimeConfig;
+use crate::tui2::InputVisual;
 use crate::ui_language::UiLanguage;
 use crate::update_action::UpdateAction;
 use crate::version::PRAXIS_CLI_VERSION;
@@ -154,11 +156,14 @@ use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_terminal_detection::user_agent;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use ratatui::layout::Rect;
+use ratatui::style::Color;
 use ratatui::style::Modifier;
 use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
+use ratatui::visual::InteractiveState;
+use ratatui::visual::render_accent_bar;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
@@ -1049,11 +1054,13 @@ pub(crate) struct App {
     center: CenterState,
     center_observed_thread_ids: HashSet<ThreadId>,
     mouse: MouseInteractionState,
+    mouse_capture_resume_at: Option<Instant>,
 }
 
 pub(crate) const TRANSCRIPT_SCROLLBACK_BACKFILL_CELL_BUDGET: usize = 64;
 pub(crate) const TRANSCRIPT_SCROLLBACK_BACKFILL_LINE_BUDGET: usize = 512;
 const APP_GATEWAY_RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
+const TERMINAL_ZOOM_MOUSE_RELEASE: Duration = Duration::from_millis(900);
 
 #[derive(Debug, Clone)]
 pub(crate) struct TranscriptScrollbackBackfill {
@@ -1824,9 +1831,9 @@ const CENTER_LIST_TOP_PADDING: u16 = 4;
 const CENTER_ROW_HEIGHT: u16 = 3;
 const CENTER_SUBAGENT_INDENT_STEP: u16 = 3;
 const CENTER_SUBAGENT_INDENT_MAX: u16 = 9;
-const CENTER_SPLIT_GAP: u16 = 1;
+const CENTER_SPLIT_GAP: u16 = 2;
 const CENTER_LIST_MIN_WIDTH: u16 = 32;
-const CENTER_LIST_MAX_WIDTH: u16 = 52;
+const CENTER_LIST_MAX_WIDTH: u16 = 58;
 const CENTER_CHAT_MIN_WIDTH: u16 = 48;
 const CENTER_CONTEXT_MENU_WIDTH: u16 = 36;
 const CENTER_RENAME_POPUP_WIDTH: u16 = 34;
@@ -1889,6 +1896,18 @@ fn center_list_width(total_width: u16) -> u16 {
         .max(1)
 }
 
+fn center_desktop_area(area: Rect) -> Rect {
+    if area.width <= 4 || area.height <= 4 {
+        return area;
+    }
+    Rect::new(
+        area.x.saturating_add(1),
+        area.y.saturating_add(1),
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(2),
+    )
+}
+
 fn center_toolbar_areas(area: Rect) -> (Rect, Rect) {
     if area.width <= 4 || area.height <= 2 {
         return (Rect::default(), Rect::default());
@@ -1896,12 +1915,65 @@ fn center_toolbar_areas(area: Rect) -> (Rect, Rect) {
     let inner_x = area.x.saturating_add(1);
     let inner_width = area.width.saturating_sub(2);
     let y = area.y.saturating_add(1);
-    let new_width = inner_width.min(7);
+    let new_width = inner_width.min(12);
     let new_area = Rect::new(inner_x, y, new_width, 1);
     let search_x = inner_x.saturating_add(new_width).saturating_add(1);
     let search_width = area.right().saturating_sub(1).saturating_sub(search_x);
     let search_area = Rect::new(search_x, y, search_width, 1);
     (new_area, search_area)
+}
+
+fn center_row_style(
+    theme: CenterTheme,
+    is_active: bool,
+    is_selected: bool,
+    is_hovered: bool,
+    is_controlled: bool,
+) -> Style {
+    let style = theme.visual_palette().row_style(InteractiveState::new(
+        is_active,
+        is_selected,
+        is_hovered,
+        is_controlled,
+    ));
+    if matches!(theme.kind, crate::center_theme::CenterThemeKind::Classic)
+        && (is_selected || is_active)
+    {
+        style.fg(theme.panel_bg).add_modifier(Modifier::BOLD)
+    } else {
+        style
+    }
+}
+
+fn center_row_accent(
+    theme: CenterTheme,
+    is_active: bool,
+    is_selected: bool,
+    is_hovered: bool,
+    is_controlled: bool,
+) -> Option<Color> {
+    theme.visual_palette().row_accent(InteractiveState::new(
+        is_active,
+        is_selected,
+        is_hovered,
+        is_controlled,
+    ))
+}
+
+fn render_center_row_accent(
+    buf: &mut ratatui::buffer::Buffer,
+    area: Rect,
+    style: Style,
+    color: Option<Color>,
+) {
+    render_accent_bar(buf, area, style, color);
+}
+
+fn center_status_style(theme: CenterTheme, color: Color, controlled: bool) -> Style {
+    theme.visual_palette().status_style(
+        InteractiveState::new(false, false, false, controlled),
+        color,
+    )
 }
 
 fn center_popup_area(
@@ -5503,6 +5575,7 @@ impl App {
             center: CenterState::new(center_mode),
             center_observed_thread_ids: HashSet::new(),
             mouse: MouseInteractionState::default(),
+            mouse_capture_resume_at: None,
         };
         if let Some(started) = initial_started_thread {
             app.enqueue_primary_thread_session(started.session, started.turns)
@@ -5665,6 +5738,7 @@ impl App {
         app_gateway: &mut AppGatewaySession,
         event: TuiEvent,
     ) -> Result<AppRunControl> {
+        self.restore_mouse_capture_after_terminal_zoom(tui);
         if matches!(event, TuiEvent::Draw) {
             let size = tui.terminal.size()?;
             if size != tui.terminal.last_known_screen_size {
@@ -5780,6 +5854,9 @@ impl App {
         app_gateway: &mut AppGatewaySession,
         mouse_event: MouseEvent,
     ) -> Result<Option<AppRunControl>> {
+        if self.handle_terminal_zoom_wheel(tui, &mouse_event) {
+            return Ok(None);
+        }
         match mouse_event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.handle_mouse_down(mouse_event.column, mouse_event.row);
@@ -5819,6 +5896,45 @@ impl App {
                 Ok(None)
             }
             _ => Ok(None),
+        }
+    }
+
+    fn handle_terminal_zoom_wheel(&mut self, tui: &mut tui::Tui, mouse_event: &MouseEvent) -> bool {
+        if !matches!(
+            mouse_event.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) || !mouse_event.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            return false;
+        }
+
+        let resume_at = Instant::now() + TERMINAL_ZOOM_MOUSE_RELEASE;
+        self.mouse_capture_resume_at = Some(
+            self.mouse_capture_resume_at
+                .map_or(resume_at, |current| current.max(resume_at)),
+        );
+        if let Err(err) = tui.set_mouse_capture_enabled(false) {
+            tracing::warn!(error = %err, "failed to release mouse capture for terminal zoom");
+        }
+        tui.frame_requester()
+            .schedule_frame_in(TERMINAL_ZOOM_MOUSE_RELEASE);
+        true
+    }
+
+    fn restore_mouse_capture_after_terminal_zoom(&mut self, tui: &mut tui::Tui) {
+        let Some(resume_at) = self.mouse_capture_resume_at else {
+            return;
+        };
+        let now = Instant::now();
+        if now < resume_at {
+            tui.frame_requester()
+                .schedule_frame_in(resume_at.saturating_duration_since(now));
+            return;
+        }
+
+        self.mouse_capture_resume_at = None;
+        if let Err(err) = tui.set_mouse_capture_enabled(self.center.enabled) {
+            tracing::warn!(error = %err, "failed to restore mouse capture after terminal zoom");
         }
     }
 
@@ -7153,22 +7269,30 @@ impl App {
             return area;
         }
 
-        let list_width = center_list_width(area.width);
-        let gap_width = if list_width < area.width {
-            CENTER_SPLIT_GAP.min(area.width.saturating_sub(list_width))
+        let theme = self.chat_widget.center_theme();
+        crate::surface::render_app_background(area, buf, theme);
+        let desktop_area = center_desktop_area(area);
+        let frame_height = desktop_area.height.saturating_sub(1).max(1);
+        let layout_width = desktop_area.width.saturating_sub(1).max(1);
+        let list_width = center_list_width(layout_width);
+        let gap_width = if list_width < layout_width {
+            CENTER_SPLIT_GAP.min(layout_width.saturating_sub(list_width))
         } else {
             0
         };
-        let list_area = Rect::new(area.x, area.y, list_width, area.height);
-        let gap_x = area.x.saturating_add(list_width);
+        let list_area = Rect::new(desktop_area.x, desktop_area.y, list_width, frame_height);
+        let gap_x = desktop_area.x.saturating_add(list_width);
         let chat_x = gap_x.saturating_add(gap_width);
         let chat_area = Rect::new(
             chat_x,
-            area.y,
-            area.right().saturating_sub(chat_x),
-            area.height,
+            desktop_area.y,
+            desktop_area
+                .right()
+                .saturating_sub(chat_x)
+                .saturating_sub(1),
+            frame_height,
         );
-        let gap_area = Rect::new(gap_x, area.y, gap_width, area.height);
+        let gap_area = Rect::new(gap_x, desktop_area.y, gap_width, frame_height);
         self.center.list_area = Some(list_area);
         self.center.chat_area = (!chat_area.is_empty()).then_some(chat_area);
         self.center
@@ -7184,11 +7308,10 @@ impl App {
         };
         self.center.chat_scroll_from_bottom =
             self.center.chat_scroll_from_bottom.min(max_chat_scroll);
-        self.render_center_list(list_area, buf);
-        let theme = self.chat_widget.center_theme();
         if !gap_area.is_empty() {
             buf.set_style(gap_area, Style::default().bg(theme.gap_bg).fg(theme.gap_fg));
         }
+        self.render_center_list(list_area, buf);
         if !chat_area.is_empty() {
             self.chat_widget.render_center_chat(
                 chat_area,
@@ -7209,32 +7332,27 @@ impl App {
         refresh_center_subagent_summaries(&mut self.center.rows);
         let theme = self.chat_widget.center_theme();
         let bg = theme.base_bg;
-        let panel = theme.panel_bg;
         let text = theme.text;
         let muted = theme.muted;
         let green = theme.accent;
-        let active_bg = theme.active_bg;
-        let selected_bg = theme.selected_bg;
-        let hover_bg = theme.hover_bg;
-        let controlled_bg = theme.control_bg;
-        let controlled_active_bg = theme.control_active_bg;
-        let controlled_selected_bg = theme.control_selected_bg;
-        let controlled_hover_bg = theme.control_hover_bg;
         let controlled_accent = theme.control_accent;
         let controlled_muted = theme.control_muted;
+        let ui_palette = theme.ui_palette();
         let language = self.chat_widget.ui_language();
         buf.set_style(area, Style::default().bg(bg).fg(text));
 
-        let block = Block::new()
-            .style(Style::default().bg(panel).fg(text))
-            .title(Line::from(vec![
+        crate::surface::render_panel_surface(
+            area,
+            buf,
+            theme,
+            Some(Line::from(vec![
                 Span::styled(language.center_title(), Style::default().fg(green)),
                 Span::styled(
                     language.center_thread_count(self.center.rows.len()),
                     Style::default().fg(muted),
                 ),
-            ]));
-        block.render(area, buf);
+            ])),
+        );
 
         if area.height < CENTER_LIST_TOP_PADDING + 1 {
             self.center.toolbar_new_area = None;
@@ -7247,40 +7365,56 @@ impl App {
         self.center.toolbar_search_area = (!search_area.is_empty()).then_some(search_area);
         let new_hovered = self.mouse.hover_center_target == Some(CenterMouseTarget::NewThread);
         let search_hovered = self.mouse.hover_center_target == Some(CenterMouseTarget::Search);
-        let new_style = if new_hovered {
-            Style::default().bg(hover_bg).fg(green)
-        } else {
-            Style::default().bg(theme.panel_raised_bg).fg(green)
-        };
-        let search_style = if self.center.search_focused {
-            Style::default().bg(active_bg).fg(theme.text_strong)
-        } else if search_hovered {
-            Style::default().bg(hover_bg).fg(text)
-        } else {
-            Style::default().bg(theme.panel_raised_bg).fg(muted)
-        };
+        let visual_palette = theme.visual_palette();
+        let new_style = visual_palette.button_style(new_hovered, false);
         if !new_area.is_empty() {
-            Paragraph::new(language.center_new_thread())
-                .style(new_style)
-                .render(new_area, buf);
+            buf.set_style(new_area, new_style);
+            Paragraph::new(Line::from(vec![Span::styled(
+                center_truncate(language.center_new_thread(), new_area.width as usize),
+                new_style.add_modifier(Modifier::BOLD),
+            )]))
+            .style(new_style)
+            .render(new_area, buf);
         }
         if !search_area.is_empty() {
-            let search_text = if self.center.search_query.is_empty() {
-                language.center_search_placeholder().to_string()
-            } else {
-                self.center.search_query.clone()
-            };
             let prefix = if self.center.search_focused {
                 "> "
             } else {
                 "/ "
             };
-            Paragraph::new(center_truncate(
-                &format!("{prefix}{search_text}"),
-                search_area.width as usize,
-            ))
-            .style(search_style)
-            .render(search_area, buf);
+            let mut search_palette = ui_palette.clone();
+            search_palette.surface_input =
+                visual_palette.input_surface(self.center.search_focused, search_hovered);
+            search_palette.accent_soft = if self.center.search_focused {
+                visual_palette.control_accent
+            } else {
+                visual_palette.text_muted
+            };
+            search_palette.text = if self.center.search_focused {
+                visual_palette.text_strong
+            } else {
+                visual_palette.text
+            };
+            search_palette.text_inactive = if self.center.search_focused {
+                visual_palette.text_inactive
+            } else {
+                visual_palette.text_inactive
+            };
+            let cursor = InputVisual::new(self.center.search_query.as_str())
+                .placeholder(language.center_search_placeholder())
+                .prefix(prefix)
+                .cursor_byte(self.center.search_query.len())
+                .focused(self.center.search_focused)
+                .render(search_area, buf, &search_palette);
+            if let Some(cursor) = cursor
+                && cursor.x < search_area.right()
+            {
+                buf[(cursor.x, cursor.y)].set_style(
+                    Style::default()
+                        .bg(search_palette.border_focused)
+                        .fg(search_palette.text_inverse),
+                );
+            }
         }
 
         let active_thread_id = self.chat_widget.thread_id().or(self.active_thread_id);
@@ -7299,14 +7433,14 @@ impl App {
                 let is_selected = visible_item_index == self.center.selected;
                 let is_hovered =
                     self.mouse.hover_center_target == Some(CenterMouseTarget::LoadMore);
-                let row_style = if is_hovered {
-                    Style::default().bg(hover_bg).fg(text)
-                } else if is_selected {
-                    Style::default().bg(selected_bg).fg(text)
-                } else {
-                    Style::default().bg(panel).fg(text)
-                };
+                let row_style = center_row_style(theme, false, is_selected, is_hovered, false);
                 buf.set_style(row_area, row_style);
+                render_center_row_accent(
+                    buf,
+                    row_area,
+                    row_style,
+                    center_row_accent(theme, false, is_selected, is_hovered, false),
+                );
                 let label = if self.center.is_loading_more() {
                     language.center_loading_more_threads()
                 } else {
@@ -7358,14 +7492,14 @@ impl App {
                     Some(CenterMouseTarget::ClosedSubagentsToggle(target))
                         if target == parent_index
                 );
-                let row_style = if is_hovered {
-                    Style::default().bg(hover_bg).fg(text)
-                } else if is_selected {
-                    Style::default().bg(selected_bg).fg(text)
-                } else {
-                    Style::default().bg(panel).fg(text)
-                };
+                let row_style = center_row_style(theme, false, is_selected, is_hovered, false);
                 buf.set_style(row_area, row_style);
+                render_center_row_accent(
+                    buf,
+                    row_area,
+                    row_style,
+                    center_row_accent(theme, false, is_selected, is_hovered, false),
+                );
                 let expanded = self
                     .center
                     .expanded_closed_subagent_parent_ids
@@ -7396,7 +7530,7 @@ impl App {
                             center_truncate("CLOSED", CENTER_STATUS_LABEL_WIDTH),
                             width = CENTER_STATUS_LABEL_WIDTH
                         ),
-                        Style::default().fg(muted).add_modifier(Modifier::BOLD),
+                        center_status_style(theme, muted, false),
                     ),
                     Span::raw(" "),
                     Span::styled(title, row_style.fg(muted).add_modifier(Modifier::BOLD)),
@@ -7432,31 +7566,15 @@ impl App {
                         | CenterMouseTarget::SubagentsToggle(target)) if target == index
                 );
             let is_controlled = center_row_is_controlled(row);
-            let row_style = if is_controlled && is_active {
-                Style::default().bg(controlled_active_bg).fg(text)
-            } else if is_controlled && is_hovered {
-                Style::default().bg(controlled_hover_bg).fg(text)
-            } else if is_controlled && is_selected {
-                Style::default().bg(controlled_selected_bg).fg(text)
-            } else if is_controlled {
-                Style::default().bg(controlled_bg).fg(text)
-            } else if is_active {
-                Style::default().bg(active_bg).fg(text)
-            } else if is_hovered {
-                Style::default().bg(hover_bg).fg(text)
-            } else if is_selected {
-                Style::default().bg(selected_bg).fg(text)
-            } else {
-                Style::default().bg(panel).fg(text)
-            };
+            let row_style =
+                center_row_style(theme, is_active, is_selected, is_hovered, is_controlled);
             buf.set_style(row_area, row_style);
-            if is_controlled {
-                for line in 0..row_area.height {
-                    buf[(row_area.x, row_area.y + line)]
-                        .set_symbol("┃")
-                        .set_style(row_style.fg(controlled_accent).add_modifier(Modifier::BOLD));
-                }
-            }
+            render_center_row_accent(
+                buf,
+                row_area,
+                row_style,
+                center_row_accent(theme, is_active, is_selected, is_hovered, is_controlled),
+            );
 
             let status_color = if is_controlled {
                 controlled_accent
@@ -7529,9 +7647,7 @@ impl App {
                         center_truncate(&center_row_status_label(row), CENTER_STATUS_LABEL_WIDTH,),
                         width = CENTER_STATUS_LABEL_WIDTH
                     ),
-                    Style::default()
-                        .fg(status_color)
-                        .add_modifier(Modifier::BOLD),
+                    center_status_style(theme, status_color, is_controlled),
                 ),
                 Span::raw(" "),
                 Span::styled(title, row_style),
@@ -10015,6 +10131,32 @@ impl App {
                     }
                 }
             }
+            AppEvent::SurfaceThemePreview { name } => {
+                self.sync_tui_surface_theme_selection(name);
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::SurfaceThemeSelected {
+                name,
+                previous_name,
+            } => {
+                let edit = tui_config::surface_theme_edit(&name);
+                let apply_result = ConfigEditsBuilder::new(&self.config.praxis_home)
+                    .with_edits([edit])
+                    .apply()
+                    .await;
+                match apply_result {
+                    Ok(()) => {
+                        self.sync_tui_surface_theme_selection(Some(name));
+                        tui.frame_requester().schedule_frame();
+                    }
+                    Err(err) => {
+                        self.sync_tui_surface_theme_selection(previous_name);
+                        tracing::error!(error = %err, "failed to persist surface theme selection");
+                        self.chat_widget
+                            .add_error_message(format!("Failed to save surface theme: {err}"));
+                    }
+                }
+            }
         }
         Ok(AppRunControl::Continue)
     }
@@ -10255,6 +10397,11 @@ impl App {
     fn sync_tui_theme_selection(&mut self, name: String) {
         self.tui_config.theme = Some(name.clone());
         self.chat_widget.set_tui_theme(Some(name));
+    }
+
+    fn sync_tui_surface_theme_selection(&mut self, name: Option<String>) {
+        self.tui_config.surface_theme = name;
+        self.chat_widget.set_tui_config(self.tui_config.clone());
     }
 
     fn restore_runtime_theme_from_config(&self) {

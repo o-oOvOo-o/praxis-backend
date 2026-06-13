@@ -256,6 +256,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
+use ratatui::visual::OpenFrame;
 use ratatui::widgets::Block;
 use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
@@ -304,8 +305,8 @@ const CHAT_TIMELINE_SIDE_PADDING: u16 = 2;
 const CHAT_SURFACE_CONTENT_MAX_WIDTH: u16 = 96;
 const CHAT_TIMELINE_USER_MAX_WIDTH: u16 = 56;
 const CHAT_TIMELINE_ASSISTANT_MAX_WIDTH: u16 = 96;
-const CHAT_TIMELINE_USER_WIDTH_PERCENT: u16 = 62;
-const CENTER_INPUT_BORDER_ROWS: u16 = 2;
+const CHAT_TIMELINE_USER_WIDTH_PERCENT: u16 = 58;
+const CENTER_INPUT_BORDER_ROWS: u16 = 1;
 const CENTER_INPUT_BORDER_COLS: u16 = 2;
 const CENTER_INPUT_STRIP_ROWS: u16 = 1;
 
@@ -5687,6 +5688,7 @@ impl ChatWidget {
         widget
             .bottom_pane
             .set_connectors_enabled(widget.connectors_enabled());
+        widget.sync_surface_theme();
         widget.refresh_status_surfaces();
 
         widget
@@ -6956,6 +6958,9 @@ impl ChatWidget {
             }
             SlashCommand::Theme => {
                 self.open_theme_picker();
+            }
+            SlashCommand::SurfaceTheme => {
+                self.open_surface_theme_picker();
             }
             SlashCommand::Language => {
                 self.handle_language_command("");
@@ -9386,6 +9391,15 @@ impl ChatWidget {
             self.tui_config.theme.as_deref(),
             praxis_home.as_deref(),
             terminal_width,
+        );
+        self.bottom_pane.show_selection_view(params);
+    }
+
+    fn open_surface_theme_picker(&mut self) {
+        let params = crate::surface_theme_picker::build_surface_theme_picker_params(
+            self.tui_config.surface_theme.as_deref(),
+            self.current_model_provider_id(),
+            self.model_display_name(),
         );
         self.bottom_pane.show_selection_view(params);
     }
@@ -11852,11 +11866,25 @@ impl ChatWidget {
     }
 
     pub(crate) fn center_theme(&self) -> center_theme::CenterTheme {
-        center_theme::for_model(self.current_model_provider_id(), self.model_display_name())
+        center_theme::for_preference(
+            self.tui_config.surface_theme.as_deref(),
+            self.current_model_provider_id(),
+            self.model_display_name(),
+        )
     }
 
     fn center_theme_kind(&self) -> center_theme::CenterThemeKind {
-        center_theme::kind_for_model(self.current_model_provider_id(), self.model_display_name())
+        center_theme::kind_for_preference(
+            self.tui_config.surface_theme.as_deref(),
+            self.current_model_provider_id(),
+            self.model_display_name(),
+        )
+    }
+
+    fn sync_surface_theme(&mut self) {
+        let theme = self.center_theme();
+        crate::surface::set_runtime_theme_kind(theme.kind);
+        self.bottom_pane.set_surface_theme(theme);
     }
 
     pub(crate) fn realtime_conversation_is_live(&self) -> bool {
@@ -12013,6 +12041,7 @@ impl ChatWidget {
     /// header/title (`refresh_model_display`) but forget the footer status line
     /// (`refresh_status_line`).
     fn refresh_model_dependent_surfaces(&mut self) {
+        self.sync_surface_theme();
         self.refresh_model_display();
         self.refresh_status_line();
     }
@@ -13819,6 +13848,7 @@ impl ChatWidget {
         self.tui_config = tui_config;
         self.bottom_pane
             .set_animations_enabled(self.tui_config.animations);
+        self.sync_surface_theme();
         self.refresh_status_surfaces();
     }
 
@@ -13947,6 +13977,25 @@ impl ChatWidget {
         if let Some(footer_area) = footer_area {
             self.render_deepseek_footer(footer_area, buf);
         }
+        let theme = self.center_theme();
+        crate::surface::render_panel_outline(
+            area,
+            buf,
+            theme,
+            Some(Line::from(vec![
+                Span::styled(
+                    " Praxis ",
+                    Style::default()
+                        .fg(theme.title_fg)
+                        .bg(theme.panel_bg)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    self.model_display_name().to_string(),
+                    Style::default().fg(theme.muted).bg(theme.panel_bg),
+                ),
+            ])),
+        );
         self.last_rendered_width.set(Some(area.width as usize));
     }
 
@@ -14096,32 +14145,36 @@ impl ChatWidget {
     }
 
     fn deepseek_header_area(&self, area: Rect) -> Option<Rect> {
-        Self::deepseek_chrome_enabled(area).then_some(Rect::new(
-            area.x,
-            area.y,
-            area.width,
-            DEEPSEEK_HEADER_HEIGHT.min(area.height),
+        let inner = Self::center_surface_inner_area(area);
+        (Self::deepseek_chrome_enabled(area) && !inner.is_empty()).then_some(Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            DEEPSEEK_HEADER_HEIGHT.min(inner.height),
         ))
     }
 
     fn deepseek_footer_area(&self, area: Rect) -> Option<Rect> {
-        Self::deepseek_chrome_enabled(area).then_some(Rect::new(
-            area.x,
-            area.bottom().saturating_sub(DEEPSEEK_FOOTER_HEIGHT),
-            area.width,
-            DEEPSEEK_FOOTER_HEIGHT.min(area.height),
+        let inner = Self::center_surface_inner_area(area);
+        (Self::deepseek_chrome_enabled(area) && !inner.is_empty()).then_some(Rect::new(
+            inner.x,
+            inner.bottom().saturating_sub(DEEPSEEK_FOOTER_HEIGHT),
+            inner.width,
+            DEEPSEEK_FOOTER_HEIGHT.min(inner.height),
         ))
     }
 
     fn deepseek_body_area(&self, area: Rect) -> Rect {
+        let inner = Self::center_surface_inner_area(area);
         if !Self::deepseek_chrome_enabled(area) {
-            return area;
+            return inner;
         }
         Rect::new(
-            area.x,
-            area.y.saturating_add(DEEPSEEK_HEADER_HEIGHT),
-            area.width,
-            area.height
+            inner.x,
+            inner.y.saturating_add(DEEPSEEK_HEADER_HEIGHT),
+            inner.width,
+            inner
+                .height
                 .saturating_sub(DEEPSEEK_HEADER_HEIGHT)
                 .saturating_sub(DEEPSEEK_FOOTER_HEIGHT),
         )
@@ -14132,9 +14185,19 @@ impl ChatWidget {
             return;
         }
         let theme = self.center_theme();
-        Block::default()
-            .style(Style::default().bg(theme.base_bg).fg(theme.text))
-            .render(area, buf);
+        crate::surface::render_panel_surface(area, buf, theme, None);
+    }
+
+    fn center_surface_inner_area(area: Rect) -> Rect {
+        if area.width <= 2 || area.height <= 2 {
+            return area;
+        }
+        Rect::new(
+            area.x.saturating_add(1),
+            area.y.saturating_add(1),
+            area.width.saturating_sub(2),
+            area.height.saturating_sub(2),
+        )
     }
 
     fn render_deepseek_header(&self, area: Rect, buf: &mut Buffer) {
@@ -14527,11 +14590,11 @@ impl ChatWidget {
         }
 
         let row = Rect::new(area.x, area.y, area.width, 1);
+        let theme = self.center_theme();
         let left_pad = 2.min(row.width.saturating_sub(1));
         let mut cursor_x = row.x.saturating_add(left_pad);
         let mut spans: Vec<Span<'static>> = vec![Span::raw(" ".repeat(left_pad as usize))];
         let mut has_chip = false;
-        let theme = self.center_theme();
         let mut push_chip = |chip: String, style: Style, target: &Cell<Option<Rect>>| {
             if cursor_x >= row.right() {
                 return;
@@ -15080,7 +15143,7 @@ impl ChatWidget {
         }
 
         let bubble_bg = theme.user_bubble_bg;
-        let bubble_fg = theme.text;
+        let bubble_fg = theme.text_strong;
         let (frame_left, frame_width) = Self::chat_timeline_frame(width);
         let padded_bubble = frame_width > 2;
         let inner_width = if padded_bubble {
@@ -15304,11 +15367,14 @@ impl ChatWidget {
             return;
         }
         let theme = self.center_theme();
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border_muted))
-            .style(Style::default().bg(theme.input_bg))
-            .render(area, buf);
+        let palette = theme.visual_palette();
+        OpenFrame::horizontal(
+            theme.input_bg,
+            palette.border_muted,
+            /*top*/ true,
+            /*bottom*/ false,
+        )
+        .render(area, buf);
     }
 
     fn render_in_app_toast_overlay(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {

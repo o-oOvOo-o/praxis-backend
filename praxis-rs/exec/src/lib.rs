@@ -55,7 +55,7 @@ use praxis_app_gateway_protocol::TurnStartParams;
 use praxis_app_gateway_protocol::TurnStartResponse;
 use praxis_app_gateway_protocol::TurnStartedNotification;
 use praxis_arg0::Arg0DispatchPaths;
-use praxis_cloud_requirements::cloud_requirements_loader_for_storage;
+use praxis_cloud_requirements::cloud_config_bundle_loader_for_storage;
 use praxis_core::LMSTUDIO_OSS_PROVIDER_ID;
 use praxis_core::OLLAMA_OSS_PROVIDER_ID;
 use praxis_core::check_execpolicy_for_warnings;
@@ -371,7 +371,7 @@ pub async fn run_main(
         .clone()
         .unwrap_or_else(|| "https://chatgpt.com/backend-api/".to_string());
     // TODO(gt): Make cloud requirements failures blocking once we can fail-closed.
-    let cloud_requirements = cloud_requirements_loader_for_storage(
+    let cloud_requirements = cloud_config_bundle_loader_for_storage(
         praxis_home.clone(),
         /*enable_praxis_api_key_env*/ false,
         config_toml.cli_auth_credentials_store.unwrap_or_default(),
@@ -443,7 +443,7 @@ pub async fn run_main(
     let config = ConfigBuilder::default()
         .cli_overrides(cli_kv_overrides)
         .harness_overrides(overrides)
-        .cloud_requirements(cloud_requirements)
+        .cloud_config_bundle(cloud_requirements)
         .build()
         .await?;
 
@@ -519,7 +519,7 @@ pub async fn run_main(
         config: std::sync::Arc::new(config.clone()),
         cli_overrides: run_cli_overrides,
         loader_overrides: run_loader_overrides,
-        cloud_requirements: run_cloud_requirements,
+        cloud_requirements: run_cloud_requirements.into(),
         feedback: CodexFeedback::new(),
         config_warnings,
         session_source: SessionSource::Exec,

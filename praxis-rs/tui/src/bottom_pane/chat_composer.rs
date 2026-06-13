@@ -131,10 +131,11 @@ use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Margin;
 use ratatui::layout::Rect;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use ratatui::widgets::Block;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::StatefulWidgetRef;
 use ratatui::widgets::Widget;
@@ -181,8 +182,7 @@ use crate::render::Insets;
 use crate::render::RectExt;
 use crate::render::renderable::Renderable;
 use crate::slash_command::SlashCommand;
-use crate::style::user_message_rule_style;
-use crate::style::user_message_style;
+use crate::surface::SurfaceTheme;
 use praxis_protocol::models::local_image_label_text;
 use praxis_protocol::user_input::ByteRange;
 use praxis_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
@@ -345,6 +345,7 @@ pub(crate) struct ChatComposer {
     // Agent label injected into the footer's contextual row when multi-agent mode is active.
     active_agent_label: Option<String>,
     footer_right_badge: Option<Line<'static>>,
+    surface_theme: SurfaceTheme,
 }
 
 #[derive(Clone, Debug)]
@@ -466,6 +467,7 @@ impl ChatComposer {
             status_line_enabled: false,
             active_agent_label: None,
             footer_right_badge: None,
+            surface_theme: crate::surface::runtime_theme(),
         };
         // Apply configuration via the setter to keep side-effects centralized.
         this.set_disable_paste_burst(disable_paste_burst);
@@ -481,6 +483,10 @@ impl ChatComposer {
 
     pub(crate) fn set_frame_requester(&mut self, frame_requester: FrameRequester) {
         self.frame_requester = Some(frame_requester);
+    }
+
+    pub(crate) fn set_surface_theme(&mut self, theme: SurfaceTheme) {
+        self.surface_theme = theme;
     }
 
     pub fn set_skill_mentions(&mut self, skills: Option<Vec<SkillMetadata>>) {
@@ -604,9 +610,9 @@ impl ChatComposer {
             Layout::vertical([Constraint::Min(3), popup_constraint]).areas(area);
         let mut textarea_rect = composer_rect.inset(Insets::tlbr(
             /*top*/ 1,
-            LIVE_PREFIX_COLS,
+            LIVE_PREFIX_COLS + 1,
             /*bottom*/ 1,
-            /*right*/ 1,
+            /*right*/ 2,
         ));
         let remote_images_height = self
             .remote_images_lines(textarea_rect.width)
@@ -3523,7 +3529,7 @@ impl Renderable for ChatComposer {
             .saturating_add(u16::from(stacked_status_line.is_some()));
         let footer_spacing = Self::footer_spacing(footer_hint_height);
         let footer_total_height = footer_hint_height + footer_spacing;
-        const COLS_WITH_MARGIN: u16 = LIVE_PREFIX_COLS + 1;
+        const COLS_WITH_MARGIN: u16 = LIVE_PREFIX_COLS + 3;
         let inner_width = width.saturating_sub(COLS_WITH_MARGIN);
         let remote_images_height: u16 = self
             .remote_images_lines(inner_width)
@@ -3754,40 +3760,29 @@ impl ChatComposer {
                 }
             }
         }
-        let style = user_message_style();
-        Block::default().style(style).render(composer_rect, buf);
-        if composer_rect.width > 0 {
-            let separator = Span::styled(
-                "─".repeat(composer_rect.width as usize),
-                user_message_rule_style(),
-            );
-            buf.set_span(
-                composer_rect.x,
-                composer_rect.y,
-                &separator,
-                composer_rect.width,
-            );
-            let bottom_y = composer_rect.y + composer_rect.height.saturating_sub(1);
-            if bottom_y != composer_rect.y {
-                buf.set_span(composer_rect.x, bottom_y, &separator, composer_rect.width);
-            }
-        }
+        let palette = self.surface_theme.visual_palette();
+        let style = Style::default().fg(palette.text).bg(palette.input);
+        crate::surface::render_input_surface(composer_rect, buf, self.surface_theme);
         if !remote_images_rect.is_empty() {
             Paragraph::new(self.remote_images_lines(remote_images_rect.width))
                 .style(style)
                 .render(remote_images_rect, buf);
         }
         if !textarea_rect.is_empty() {
-            let prompt = if self.input_enabled {
-                "❯".white().bold()
+            let prompt_style = if self.input_enabled {
+                Style::default()
+                    .fg(palette.accent_soft)
+                    .bg(palette.input)
+                    .add_modifier(Modifier::BOLD)
             } else {
-                "❯".dim()
+                Style::default().fg(palette.text_inactive).bg(palette.input)
             };
+            let prompt = Span::styled("❯", prompt_style);
             buf.set_span(
                 textarea_rect.x - LIVE_PREFIX_COLS,
                 textarea_rect.y,
                 &prompt,
-                textarea_rect.width,
+                LIVE_PREFIX_COLS,
             );
         }
 
@@ -3808,7 +3803,10 @@ impl ChatComposer {
                     .to_string()
             };
             if !textarea_rect.is_empty() && !text.is_empty() {
-                let placeholder = Span::from(text).dim();
+                let placeholder = Span::styled(
+                    text,
+                    Style::default().fg(palette.text_inactive).bg(palette.input),
+                );
                 Line::from(vec![placeholder]).render(textarea_rect.inner(Margin::new(0, 0)), buf);
             }
         }

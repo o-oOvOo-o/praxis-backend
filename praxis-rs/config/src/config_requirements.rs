@@ -19,6 +19,7 @@ use crate::ConstraintError;
 pub enum RequirementSource {
     Unknown,
     MdmManagedPreferences { domain: String, key: String },
+    EnterpriseManaged { id: String, name: String },
     CloudRequirements,
     SystemRequirementsToml { file: AbsolutePathBuf },
     LegacyManagedConfigTomlFromFile { file: AbsolutePathBuf },
@@ -31,6 +32,9 @@ impl fmt::Display for RequirementSource {
             RequirementSource::Unknown => write!(f, "<unspecified>"),
             RequirementSource::MdmManagedPreferences { domain, key } => {
                 write!(f, "MDM {domain}:{key}")
+            }
+            RequirementSource::EnterpriseManaged { id, name } => {
+                write!(f, "cloud managed requirements {name} ({id})")
             }
             RequirementSource::CloudRequirements => {
                 write!(f, "cloud requirements")

@@ -57,7 +57,7 @@ use praxis_core::config::OverriddenMetadata as CoreOverriddenMetadata;
 use praxis_core::config::ServiceProfile as CoreProfile;
 use praxis_core::config::Tools as CoreTools;
 use praxis_core::config::WriteStatus as CoreWriteStatus;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::ConfigRequirementsToml;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_core::config_loader::ResidencyRequirement as CoreResidencyRequirement;
@@ -112,7 +112,7 @@ pub(crate) struct ConfigApi {
     cli_overrides: Arc<RwLock<Vec<(String, TomlValue)>>>,
     runtime_feature_enablement: Arc<RwLock<BTreeMap<String, bool>>>,
     loader_overrides: LoaderOverrides,
-    cloud_requirements: Arc<RwLock<CloudRequirementsLoader>>,
+    cloud_requirements: Arc<RwLock<CloudConfigBundleLoader>>,
     user_config_reloader: Arc<dyn UserConfigReloader>,
     analytics_events_client: AnalyticsEventsClient,
 }
@@ -123,7 +123,7 @@ impl ConfigApi {
         cli_overrides: Arc<RwLock<Vec<(String, TomlValue)>>>,
         runtime_feature_enablement: Arc<RwLock<BTreeMap<String, bool>>>,
         loader_overrides: LoaderOverrides,
-        cloud_requirements: Arc<RwLock<CloudRequirementsLoader>>,
+        cloud_requirements: Arc<RwLock<CloudConfigBundleLoader>>,
         user_config_reloader: Arc<dyn UserConfigReloader>,
         analytics_events_client: AnalyticsEventsClient,
     ) -> Self {
@@ -161,7 +161,7 @@ impl ConfigApi {
             .unwrap_or_default()
     }
 
-    fn current_cloud_requirements(&self) -> CloudRequirementsLoader {
+    fn current_cloud_requirements(&self) -> CloudConfigBundleLoader {
         self.cloud_requirements
             .read()
             .map(|guard| guard.clone())
@@ -177,7 +177,7 @@ impl ConfigApi {
             .cli_overrides(self.current_cli_overrides())
             .loader_overrides(self.loader_overrides.clone())
             .fallback_cwd(fallback_cwd)
-            .cloud_requirements(self.current_cloud_requirements())
+            .cloud_config_bundle(self.current_cloud_requirements())
             .build()
             .await
             .map_err(|err| JSONRPCErrorError {
@@ -1010,7 +1010,7 @@ mod tests {
                 "features.apps".to_string(),
                 TomlValue::Boolean(true),
             )])
-            .cloud_requirements(CloudRequirementsLoader::new(async {
+            .cloud_config_bundle(CloudConfigBundleLoader::new(async {
                 Ok(Some(ConfigRequirementsToml {
                     feature_requirements: Some(
                         praxis_core::config_loader::FeatureRequirementsToml {
@@ -1050,7 +1050,7 @@ mod tests {
             Arc::new(RwLock::new(Vec::new())),
             Arc::new(RwLock::new(BTreeMap::new())),
             LoaderOverrides::default(),
-            Arc::new(RwLock::new(CloudRequirementsLoader::default())),
+            Arc::new(RwLock::new(CloudConfigBundleLoader::default())),
             reloader.clone(),
             AnalyticsEventsClient::new(
                 auth_manager,

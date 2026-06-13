@@ -27,9 +27,18 @@ use toml::Value as TomlValue;
 
 pub use praxis_config::AppRequirementToml;
 pub use praxis_config::AppsRequirementsToml;
+pub use praxis_config::CloudConfigBundle;
+pub use praxis_config::CloudConfigBundleLoadError;
+pub use praxis_config::CloudConfigBundleLoadErrorCode;
+pub use praxis_config::CloudConfigBundleLoader;
+pub use praxis_config::CloudConfigFragment;
+pub use praxis_config::CloudConfigTomlBundle;
+pub use praxis_config::CloudRequirementsFragment;
 pub use praxis_config::CloudRequirementsLoadError;
 pub use praxis_config::CloudRequirementsLoadErrorCode;
 pub use praxis_config::CloudRequirementsLoader;
+pub use praxis_config::CloudRequirementsParsedFragment;
+pub use praxis_config::CloudRequirementsTomlBundle;
 pub use praxis_config::ConfigError;
 pub use praxis_config::ConfigLayerEntry;
 pub use praxis_config::ConfigLayerStack;
@@ -121,13 +130,46 @@ pub async fn load_config_layers_state(
     cwd: Option<AbsolutePathBuf>,
     cli_overrides: &[(String, TomlValue)],
     overrides: LoaderOverrides,
-    cloud_requirements: CloudRequirementsLoader,
+    cloud_config_bundle: impl Into<CloudConfigBundleLoader>,
 ) -> io::Result<ConfigLayerStack> {
     let mut config_requirements_toml = ConfigRequirementsWithSources::default();
+    let mut cloud_config_layers = Vec::<ConfigLayerEntry>::new();
 
-    if let Some(requirements) = cloud_requirements.get().await.map_err(io::Error::other)? {
-        config_requirements_toml
-            .merge_unset_fields(RequirementSource::CloudRequirements, requirements);
+    if let Some(bundle) = cloud_config_bundle
+        .into()
+        .get()
+        .await
+        .map_err(io::Error::other)?
+    {
+        let cloud_base_dir = AbsolutePathBuf::from_absolute_path(praxis_home)?;
+        cloud_config_layers =
+            cloud_config_layers_from_fragments(bundle.config_toml.enterprise_managed, praxis_home)?;
+        let requirements_bundle = bundle.requirements_toml;
+        let mut parsed_requirements_fragments = requirements_bundle.parsed_enterprise_managed;
+        parsed_requirements_fragments.reverse();
+        for fragment in parsed_requirements_fragments {
+            config_requirements_toml.merge_unset_fields(
+                RequirementSource::EnterpriseManaged {
+                    id: fragment.id,
+                    name: fragment.name,
+                },
+                fragment.requirements,
+            );
+        }
+
+        let mut requirements_fragments = requirements_bundle.enterprise_managed;
+        requirements_fragments.reverse();
+        for fragment in requirements_fragments {
+            let requirements =
+                parse_cloud_requirements_fragment(&fragment.contents, &cloud_base_dir)?;
+            config_requirements_toml.merge_unset_fields(
+                RequirementSource::EnterpriseManaged {
+                    id: fragment.id,
+                    name: fragment.name,
+                },
+                requirements,
+            );
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -183,6 +225,7 @@ pub async fn load_config_layers_state(
         })
         .await?;
     layers.push(system_layer);
+    layers.extend(cloud_config_layers);
 
     // Add a layer for $PRAXIS_HOME/config.toml if it exists. Note if the file
     // exists, but is malformed, then this error should be propagated to the
@@ -310,6 +353,60 @@ pub async fn load_config_layers_state(
         config_requirements_toml.clone().try_into()?,
         config_requirements_toml.into_toml(),
     )
+}
+
+fn cloud_config_layers_from_fragments(
+    fragments: impl IntoIterator<Item = CloudConfigFragment>,
+    base_dir: &Path,
+) -> io::Result<Vec<ConfigLayerEntry>> {
+    let mut layers = Vec::new();
+    for fragment in fragments {
+        let raw_toml = fragment.contents;
+        let config: TomlValue = toml::from_str(&raw_toml).map_err(|err| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "failed to parse cloud config fragment {} ({}): {err}",
+                    fragment.name, fragment.id
+                ),
+            )
+        })?;
+        let resolved = resolve_relative_paths_in_config_toml(config, base_dir).map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!(
+                    "invalid cloud config fragment {} ({}): {err}",
+                    fragment.name, fragment.id
+                ),
+            )
+        })?;
+        layers.push(ConfigLayerEntry::new_with_raw_toml(
+            ConfigLayerSource::EnterpriseManaged {
+                id: fragment.id,
+                name: fragment.name,
+            },
+            resolved,
+            raw_toml,
+        ));
+    }
+
+    // Bundle fragments are delivered highest-priority first; ConfigLayerStack
+    // stores layers lowest-priority first.
+    layers.reverse();
+    Ok(layers)
+}
+
+fn parse_cloud_requirements_fragment(
+    contents: &str,
+    base_dir: &AbsolutePathBuf,
+) -> io::Result<ConfigRequirementsToml> {
+    let _guard = AbsolutePathBufGuard::new(base_dir.as_path());
+    toml::from_str(contents).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("failed to parse cloud requirements fragment: {err}"),
+        )
+    })
 }
 
 async fn resolve_user_config_toml_file(praxis_home: &Path) -> io::Result<AbsolutePathBuf> {

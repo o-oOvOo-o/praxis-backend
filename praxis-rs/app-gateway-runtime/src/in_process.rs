@@ -76,7 +76,7 @@ use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_arg0::Arg0DispatchPaths;
 use praxis_core::config::Config;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_exec_server::EnvironmentManager;
 use praxis_feedback::CodexFeedback;
@@ -127,7 +127,7 @@ pub struct InProcessStartArgs {
     /// Loader override knobs used by config API paths.
     pub loader_overrides: LoaderOverrides,
     /// Preloaded cloud requirements provider.
-    pub cloud_requirements: CloudRequirementsLoader,
+    pub cloud_requirements: CloudConfigBundleLoader,
     /// Feedback sink used by app-gateway/core telemetry and logs.
     pub feedback: CodexFeedback,
     /// Startup warnings emitted after initialize succeeds.
@@ -729,7 +729,7 @@ mod tests {
             config: Arc::new(build_test_config().await),
             cli_overrides: Vec::new(),
             loader_overrides: LoaderOverrides::default(),
-            cloud_requirements: CloudRequirementsLoader::default(),
+            cloud_requirements: CloudConfigBundleLoader::default(),
             feedback: CodexFeedback::new(),
             config_warnings: Vec::new(),
             session_source,

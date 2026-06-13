@@ -1,3 +1,4 @@
+mod cloud_bundle;
 mod cloud_requirements;
 mod config_requirements;
 mod constraint;
@@ -16,6 +17,15 @@ pub mod types;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
 
+pub use cloud_bundle::CloudConfigBundle;
+pub use cloud_bundle::CloudConfigBundleLoadError;
+pub use cloud_bundle::CloudConfigBundleLoadErrorCode;
+pub use cloud_bundle::CloudConfigBundleLoader;
+pub use cloud_bundle::CloudConfigFragment;
+pub use cloud_bundle::CloudConfigTomlBundle;
+pub use cloud_bundle::CloudRequirementsFragment;
+pub use cloud_bundle::CloudRequirementsParsedFragment;
+pub use cloud_bundle::CloudRequirementsTomlBundle;
 pub use cloud_requirements::CloudRequirementsLoadError;
 pub use cloud_requirements::CloudRequirementsLoadErrorCode;
 pub use cloud_requirements::CloudRequirementsLoader;

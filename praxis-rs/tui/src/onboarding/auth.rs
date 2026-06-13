@@ -1081,7 +1081,7 @@ mod tests {
     use praxis_app_gateway_client::NativeAppGatewayClient;
     use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
     use praxis_arg0::Arg0DispatchPaths;
-    use praxis_cloud_requirements::cloud_requirements_loader_for_storage;
+    use praxis_cloud_requirements::cloud_config_bundle_loader_for_storage;
     use praxis_core::config::ConfigBuilder;
 
     use praxis_protocol::protocol::SessionSource;
@@ -1102,7 +1102,7 @@ mod tests {
             config: Arc::new(config),
             cli_overrides: Vec::new(),
             loader_overrides: Default::default(),
-            cloud_requirements: cloud_requirements_loader_for_storage(
+            cloud_requirements: cloud_config_bundle_loader_for_storage(
                 praxis_home_path.clone(),
                 /*enable_praxis_api_key_env*/ false,
                 AuthCredentialsStoreMode::File,

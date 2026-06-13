@@ -1,5 +1,6 @@
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
+use crate::config_loader::CloudConfigBundleLoader;
 use crate::config_loader::CloudRequirementsLoader;
 use crate::config_loader::ConfigLayerStack;
 use crate::config_loader::ConfigLayerStackOrdering;
@@ -563,7 +564,7 @@ pub struct ConfigBuilder {
     cli_overrides: Option<Vec<(String, TomlValue)>>,
     harness_overrides: Option<ConfigOverrides>,
     loader_overrides: Option<LoaderOverrides>,
-    cloud_requirements: CloudRequirementsLoader,
+    cloud_config_bundle: CloudConfigBundleLoader,
     fallback_cwd: Option<PathBuf>,
 }
 
@@ -588,8 +589,13 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn cloud_config_bundle(mut self, cloud_config_bundle: CloudConfigBundleLoader) -> Self {
+        self.cloud_config_bundle = cloud_config_bundle;
+        self
+    }
+
     pub fn cloud_requirements(mut self, cloud_requirements: CloudRequirementsLoader) -> Self {
-        self.cloud_requirements = cloud_requirements;
+        self.cloud_config_bundle = cloud_requirements.into();
         self
     }
 
@@ -604,7 +610,7 @@ impl ConfigBuilder {
             cli_overrides,
             harness_overrides,
             loader_overrides,
-            cloud_requirements,
+            cloud_config_bundle,
             fallback_cwd,
         } = self;
         let praxis_home = praxis_home.map_or_else(find_praxis_home, std::io::Result::Ok)?;
@@ -622,7 +628,7 @@ impl ConfigBuilder {
             Some(cwd),
             &cli_overrides,
             loader_overrides,
-            cloud_requirements,
+            cloud_config_bundle,
         )
         .await?;
         let merged_toml = config_layer_stack.effective_config();
@@ -755,7 +761,7 @@ pub async fn load_config_as_toml_with_cli_overrides(
         Some(cwd.clone()),
         &cli_overrides,
         LoaderOverrides::default(),
-        CloudRequirementsLoader::default(),
+        CloudConfigBundleLoader::default(),
     )
     .await?;
 
@@ -925,7 +931,7 @@ pub async fn load_global_mcp_servers(
         cwd,
         &cli_overrides,
         LoaderOverrides::default(),
-        CloudRequirementsLoader::default(),
+        CloudConfigBundleLoader::default(),
     )
     .await?;
     let merged_toml = config_layer_stack.effective_config();

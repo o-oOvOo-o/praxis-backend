@@ -49,6 +49,7 @@ pub enum SlashCommand {
     Title,
     Statusline,
     Theme,
+    SurfaceTheme,
     Language,
     Mcp,
     Apps,
@@ -105,6 +106,7 @@ impl SlashCommand {
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
             SlashCommand::Theme => "choose a syntax highlighting theme",
+            SlashCommand::SurfaceTheme => "choose the TUI surface theme",
             SlashCommand::Language => "switch TUI language: /language [en|cn]",
             SlashCommand::Ps => "list background terminals",
             SlashCommand::Stop => "stop all background terminals",
@@ -216,6 +218,7 @@ impl SlashCommand {
             SlashCommand::Agent | SlashCommand::MultiAgents => true,
             SlashCommand::Statusline => false,
             SlashCommand::Theme => false,
+            SlashCommand::SurfaceTheme => false,
             SlashCommand::Title => false,
         }
     }

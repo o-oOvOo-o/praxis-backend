@@ -109,9 +109,9 @@ use praxis_core::ThreadManager;
 use praxis_core::ThreadSortKey as CoreThreadSortKey;
 use praxis_core::config::Config;
 use praxis_core::config::ConfigOverrides;
-use praxis_core::config_loader::CloudRequirementsLoadError;
-use praxis_core::config_loader::CloudRequirementsLoadErrorCode;
-use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_core::config_loader::CloudConfigBundleLoadError;
+use praxis_core::config_loader::CloudConfigBundleLoadErrorCode;
+use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_core::error::PraxisErr;
 use praxis_core::error::Result as PraxisResult;
@@ -235,7 +235,7 @@ pub(crate) struct PraxisMessageProcessor {
     config: Arc<Config>,
     cli_overrides: Arc<RwLock<Vec<(String, TomlValue)>>>,
     runtime_feature_enablement: Arc<RwLock<BTreeMap<String, bool>>>,
-    cloud_requirements: Arc<RwLock<CloudRequirementsLoader>>,
+    cloud_requirements: Arc<RwLock<CloudConfigBundleLoader>>,
     active_login: Arc<Mutex<Option<ActiveLogin>>>,
     pending_thread_unloads: Arc<Mutex<HashSet<ThreadId>>>,
     thread_state_manager: ThreadStateManager,
@@ -257,7 +257,7 @@ pub(crate) struct PraxisMessageProcessorArgs {
     pub(crate) config: Arc<Config>,
     pub(crate) cli_overrides: Arc<RwLock<Vec<(String, TomlValue)>>>,
     pub(crate) runtime_feature_enablement: Arc<RwLock<BTreeMap<String, bool>>>,
-    pub(crate) cloud_requirements: Arc<RwLock<CloudRequirementsLoader>>,
+    pub(crate) cloud_requirements: Arc<RwLock<CloudConfigBundleLoader>>,
     pub(crate) feedback: CodexFeedback,
     pub(crate) log_db: Option<LogDbLayer>,
 }
