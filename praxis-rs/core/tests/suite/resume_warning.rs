@@ -3,7 +3,7 @@
 use core::time::Duration;
 use core_test_support::load_default_config_for_test;
 use core_test_support::wait_for_event;
-use praxis_core::NewThread;
+use praxis_core::ThreadSpawnResult;
 use praxis_login::CodexAuth;
 use praxis_protocol::ThreadId;
 use praxis_protocol::config_types::ModeKind;
@@ -94,7 +94,7 @@ async fn emits_warning_when_resumed_model_differs() {
         praxis_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("test"));
 
     // Act: resume the conversation.
-    let NewThread {
+    let ThreadSpawnResult {
         thread: conversation,
         ..
     } = thread_manager

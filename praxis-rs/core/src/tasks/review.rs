@@ -24,13 +24,13 @@ use crate::praxis::TurnContext;
 use crate::praxis_delegate::run_praxis_thread_one_shot;
 use crate::review_format::format_review_findings_block;
 use crate::review_format::render_review_output_text;
-use crate::state::TaskKind;
+use crate::state::AgentTaskKind;
 use praxis_features::Feature;
 use praxis_protocol::user_input::UserInput;
 use std::sync::LazyLock;
 
-use super::SessionTask;
-use super::SessionTaskContext;
+use super::AgentTask;
+use super::AgentTaskContext;
 
 static REVIEW_EXIT_SUCCESS_TEMPLATE: LazyLock<Template> = LazyLock::new(|| {
     let normalized =
@@ -49,18 +49,18 @@ impl ReviewTask {
 }
 
 #[async_trait]
-impl SessionTask for ReviewTask {
-    fn kind(&self) -> TaskKind {
-        TaskKind::Review
+impl AgentTask for ReviewTask {
+    fn kind(&self) -> AgentTaskKind {
+        AgentTaskKind::Review
     }
 
     fn span_name(&self) -> &'static str {
-        "session_task.review"
+        "agent_task.review"
     }
 
     async fn run(
         self: Arc<Self>,
-        session: Arc<SessionTaskContext>,
+        session: Arc<AgentTaskContext>,
         ctx: Arc<TurnContext>,
         input: Vec<UserInput>,
         cancellation_token: CancellationToken,
@@ -89,13 +89,13 @@ impl SessionTask for ReviewTask {
         None
     }
 
-    async fn abort(&self, session: Arc<SessionTaskContext>, ctx: Arc<TurnContext>) {
+    async fn abort(&self, session: Arc<AgentTaskContext>, ctx: Arc<TurnContext>) {
         exit_review_mode(session.clone_session(), /*review_output*/ None, ctx).await;
     }
 }
 
 async fn start_review_conversation(
-    session: Arc<SessionTaskContext>,
+    session: Arc<AgentTaskContext>,
     ctx: Arc<TurnContext>,
     input: Vec<UserInput>,
     cancellation_token: CancellationToken,
@@ -140,7 +140,7 @@ async fn start_review_conversation(
 }
 
 async fn process_review_events(
-    session: Arc<SessionTaskContext>,
+    session: Arc<AgentTaskContext>,
     ctx: Arc<TurnContext>,
     receiver: async_channel::Receiver<Event>,
 ) -> Option<ReviewOutputEvent> {

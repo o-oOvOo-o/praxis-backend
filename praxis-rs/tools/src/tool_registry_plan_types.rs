@@ -20,8 +20,6 @@ pub enum ToolHandlerKind {
     CreateGoal,
     GetGoal,
     UpdateGoal,
-    JsRepl,
-    JsReplReset,
     ListAgents,
     ListDir,
     Mcp,

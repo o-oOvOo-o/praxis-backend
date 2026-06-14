@@ -25,5 +25,5 @@ test-group = 'app_gateway_protocol_codegen'
 [[profile.default.overrides]]
 # These integration tests spawn a fresh app-gateway subprocess per case.
 # Keep the library unit tests parallel.
-filter = 'package(praxis-app-gateway-runtime) & kind(test)'
+filter = 'package(praxis-app-gateway) & kind(test)'
 test-group = 'app_gateway_integration'

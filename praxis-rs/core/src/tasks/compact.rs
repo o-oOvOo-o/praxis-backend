@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use super::SessionTask;
-use super::SessionTaskContext;
+use super::AgentTask;
+use super::AgentTaskContext;
 use crate::praxis::TurnContext;
-use crate::state::TaskKind;
+use crate::state::AgentTaskKind;
 use async_trait::async_trait;
 use praxis_protocol::user_input::UserInput;
 use tokio_util::sync::CancellationToken;
@@ -12,18 +12,18 @@ use tokio_util::sync::CancellationToken;
 pub(crate) struct CompactTask;
 
 #[async_trait]
-impl SessionTask for CompactTask {
-    fn kind(&self) -> TaskKind {
-        TaskKind::Compact
+impl AgentTask for CompactTask {
+    fn kind(&self) -> AgentTaskKind {
+        AgentTaskKind::Compact
     }
 
     fn span_name(&self) -> &'static str {
-        "session_task.compact"
+        "agent_task.compact"
     }
 
     async fn run(
         self: Arc<Self>,
-        session: Arc<SessionTaskContext>,
+        session: Arc<AgentTaskContext>,
         ctx: Arc<TurnContext>,
         input: Vec<UserInput>,
         _cancellation_token: CancellationToken,

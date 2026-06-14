@@ -1,16 +1,21 @@
+use super::ActionIntent;
+use super::ActionIntentKind;
+use super::ArtifactType;
+use super::CapabilityProfile;
+use super::ResourceRequirement;
+use super::ScopedIntents;
+use super::ScopedPaths;
+use super::TaskRecord;
 use super::paths::repo_scope_for_cwd;
 use super::policy::COORDINATOR_RANK;
 use super::process::process_runtime_kind;
-use super::{
-    ActionIntent, ActionIntentKind, ArtifactType, CapabilityProfile, ResourceRequirement,
-    ScopedIntents, ScopedPaths, TaskRecord,
-};
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
 use crate::path_scope::wildcard_match;
 use crate::util::truncate_to_char_boundary;
 use praxis_protocol::ThreadId;
-use praxis_protocol::protocol::{SessionSource, SubAgentSource};
+use praxis_protocol::protocol::SessionSource;
+use praxis_protocol::protocol::SubAgentSource;
 use std::collections::HashSet;
 use std::path::Path;
 

@@ -1,11 +1,13 @@
 use super::*;
 
 mod streaming;
-use streaming::{
-    AssistantMessageStreamParsers, ParsedAssistantTextDelta, PlanModeStreamState,
-    emit_streamed_assistant_text_delta, flush_assistant_text_segments_all,
-    flush_assistant_text_segments_for_item, handle_assistant_item_done_in_plan_mode,
-};
+use streaming::AssistantMessageStreamParsers;
+use streaming::ParsedAssistantTextDelta;
+use streaming::PlanModeStreamState;
+use streaming::emit_streamed_assistant_text_delta;
+use streaming::flush_assistant_text_segments_all;
+use streaming::flush_assistant_text_segments_for_item;
+use streaming::handle_assistant_item_done_in_plan_mode;
 
 pub(super) use streaming::realtime_text_for_event;
 
@@ -296,13 +298,11 @@ pub(super) async fn run_sampling_request(
                 &turn_context.model_info,
             )
         {
-            sess.send_event(
-                &turn_context,
-                EventMsg::Warning(WarningEvent {
-                    message: format!("Falling back from WebSockets to HTTPS transport. {err:#}"),
-                }),
-            )
-            .await;
+            sess.turn_event_emitter(&turn_context)
+                .warning(format!(
+                    "Falling back from WebSockets to HTTPS transport. {err:#}"
+                ))
+                .await;
             retries = 0;
             continue;
         }

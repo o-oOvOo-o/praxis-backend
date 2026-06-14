@@ -2,8 +2,10 @@ use std::borrow::Cow;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 
 use super::style::TextStyle;
 use super::tokens::UiPalette;
@@ -54,8 +56,11 @@ mod tests {
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
 
-    use super::{TextAtom, TextLineVisual};
-    use crate::tui2::{TextStyle, Tone, UiPalette};
+    use super::TextAtom;
+    use super::TextLineVisual;
+    use crate::tui2::TextStyle;
+    use crate::tui2::Tone;
+    use crate::tui2::UiPalette;
 
     #[test]
     fn renders_semantic_foreground() {

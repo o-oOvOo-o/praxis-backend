@@ -29,12 +29,12 @@ pub(crate) struct HookRuntimeOutcome {
     pub additional_contexts: Vec<String>,
 }
 
-pub(crate) enum PendingInputHookDisposition {
+enum PendingInputHookDisposition {
     Accepted(Box<PendingInputRecord>),
     Blocked { additional_contexts: Vec<String> },
 }
 
-pub(crate) enum PendingInputRecord {
+enum PendingInputRecord {
     UserMessage {
         content: Vec<UserInput>,
         response_item: ResponseItem,
@@ -43,6 +43,22 @@ pub(crate) enum PendingInputRecord {
     ConversationItem {
         response_item: ResponseItem,
     },
+}
+
+pub(crate) struct PendingInputSamplingOutcome {
+    accepted_any: bool,
+    blocked: bool,
+    requeued_remaining: bool,
+}
+
+impl PendingInputSamplingOutcome {
+    pub(crate) fn should_retry_without_sampling(&self) -> bool {
+        self.blocked && !self.accepted_any && self.requeued_remaining
+    }
+
+    pub(crate) fn should_stop_without_sampling(&self) -> bool {
+        self.blocked && !self.accepted_any && !self.requeued_remaining
+    }
 }
 
 struct ContextInjectingHookOutcome {
@@ -196,7 +212,7 @@ pub(crate) async fn run_user_prompt_submit_hooks(
     .await
 }
 
-pub(crate) async fn inspect_pending_input(
+async fn inspect_pending_input(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     pending_input_item: ResponseInputItem,
@@ -223,7 +239,7 @@ pub(crate) async fn inspect_pending_input(
     }
 }
 
-pub(crate) async fn record_pending_input(
+async fn record_pending_input(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     pending_input: PendingInputRecord,
@@ -246,6 +262,69 @@ pub(crate) async fn record_pending_input(
             sess.record_conversation_items(turn_context, std::slice::from_ref(&response_item))
                 .await;
         }
+    }
+}
+
+pub(crate) async fn record_pending_inputs(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    pending_input: Vec<ResponseInputItem>,
+) {
+    for pending_input_item in pending_input {
+        match inspect_pending_input(sess, turn_context, pending_input_item).await {
+            PendingInputHookDisposition::Accepted(pending_input) => {
+                record_pending_input(sess, turn_context, *pending_input).await;
+            }
+            PendingInputHookDisposition::Blocked {
+                additional_contexts,
+            } => {
+                record_additional_contexts(sess, turn_context, additional_contexts).await;
+            }
+        }
+    }
+}
+
+pub(crate) async fn process_pending_input_for_sampling(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    pending_input: Vec<ResponseInputItem>,
+) -> PendingInputSamplingOutcome {
+    let mut blocked = false;
+    let mut requeued_remaining = false;
+    let mut accepted_pending_input = Vec::new();
+    let mut blocked_contexts = Vec::new();
+
+    let mut pending_input_iter = pending_input.into_iter();
+    while let Some(pending_input_item) = pending_input_iter.next() {
+        match inspect_pending_input(sess, turn_context, pending_input_item).await {
+            PendingInputHookDisposition::Accepted(pending_input) => {
+                accepted_pending_input.push(*pending_input);
+            }
+            PendingInputHookDisposition::Blocked {
+                additional_contexts,
+            } => {
+                let remaining_pending_input = pending_input_iter.collect::<Vec<_>>();
+                if !remaining_pending_input.is_empty() {
+                    let _ = sess.prepend_pending_input(remaining_pending_input).await;
+                    requeued_remaining = true;
+                }
+                blocked_contexts = additional_contexts;
+                blocked = true;
+                break;
+            }
+        }
+    }
+
+    let accepted_any = !accepted_pending_input.is_empty();
+    for pending_input in accepted_pending_input {
+        record_pending_input(sess, turn_context, pending_input).await;
+    }
+    record_additional_contexts(sess, turn_context, blocked_contexts).await;
+
+    PendingInputSamplingOutcome {
+        accepted_any,
+        blocked,
+        requeued_remaining,
     }
 }
 

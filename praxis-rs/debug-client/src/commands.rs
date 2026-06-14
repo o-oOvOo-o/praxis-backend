@@ -8,7 +8,7 @@ pub enum InputAction {
 pub enum UserCommand {
     Help,
     Quit,
-    NewThread,
+    StartThread,
     Resume(String),
     Use(String),
     RefreshThread,
@@ -51,7 +51,7 @@ pub fn parse_input(line: &str) -> Result<Option<InputAction>, ParseError> {
     match command {
         "help" | "h" => Ok(Some(InputAction::Command(UserCommand::Help))),
         "quit" | "q" | "exit" => Ok(Some(InputAction::Command(UserCommand::Quit))),
-        "new" => Ok(Some(InputAction::Command(UserCommand::NewThread))),
+        "new" => Ok(Some(InputAction::Command(UserCommand::StartThread))),
         "resume" => {
             let thread_id = parts
                 .next()
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn parses_new_thread() {
         let result = parse_input(":new").unwrap();
-        assert_eq!(result, Some(InputAction::Command(UserCommand::NewThread)));
+        assert_eq!(result, Some(InputAction::Command(UserCommand::StartThread)));
     }
 
     #[test]

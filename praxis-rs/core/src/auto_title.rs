@@ -20,6 +20,8 @@ use tracing::debug;
 use crate::auto_title_profile::AutoTitleProfile;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
+use crate::history_preview::HistoryPreview;
+use crate::history_preview::is_bootstrap_context_message;
 use crate::praxis::Session;
 
 const MANUAL_TITLE_PREVIEW_MAX_MESSAGES: usize = 16;
@@ -41,8 +43,10 @@ pub(crate) async fn maybe_apply_provisional_title(sess: &Arc<Session>, input: &[
     }
 
     let has_existing_user_message = {
-        let history = sess.clone_history().await;
-        extract_first_user_text(history.raw_items()).is_some()
+        HistoryPreview::for_session(sess.as_ref())
+            .await
+            .first_user_text()
+            .is_some()
     };
     if has_existing_user_message {
         return;
@@ -68,8 +72,9 @@ pub(crate) async fn maybe_auto_generate_title(
     }
 
     let first_user_msg = {
-        let history = sess.clone_history().await;
-        extract_first_user_text(history.raw_items())
+        HistoryPreview::for_session(sess.as_ref())
+            .await
+            .first_user_text()
     };
     let Some(first_user_msg) = first_user_msg else {
         return;
@@ -117,8 +122,12 @@ pub(crate) async fn regenerate_thread_title(sess: &Arc<Session>) -> anyhow::Resu
     }
 
     let conversation_preview = {
-        let history = sess.clone_history().await;
-        title_preview_from_response_items(history.raw_items())
+        HistoryPreview::for_session(sess.as_ref())
+            .await
+            .title_preview(
+                MANUAL_TITLE_PREVIEW_MAX_MESSAGES,
+                MANUAL_TITLE_PREVIEW_MAX_CHARS,
+            )
     }
     .ok_or_else(|| anyhow::anyhow!("thread has no user or assistant messages to title"))?;
 
@@ -145,82 +154,11 @@ fn provisional_title_from_input(items: &[UserInput]) -> Option<String> {
     crate::util::normalize_thread_name(&heuristic_title(first_text))
 }
 
-fn extract_first_user_text(items: &[ResponseItem]) -> Option<String> {
-    for item in items {
-        if let ResponseItem::Message { role, content, .. } = item {
-            if role == "user" {
-                for c in content {
-                    if let ContentItem::InputText { text } = c {
-                        let trimmed = text.trim();
-                        if !trimmed.is_empty() {
-                            if is_bootstrap_context_message(trimmed) {
-                                continue;
-                            }
-                            return Some(trimmed.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
 pub(crate) fn title_preview_from_response_items(items: &[ResponseItem]) -> Option<String> {
-    let mut entries = Vec::new();
-    for item in items {
-        let ResponseItem::Message { role, content, .. } = item else {
-            continue;
-        };
-        let role_label = match role.as_str() {
-            "user" => "User",
-            "assistant" => "Assistant",
-            _ => continue,
-        };
-        let Some(text) = crate::compact::content_items_to_text(content) else {
-            continue;
-        };
-        let trimmed = text.trim();
-        if trimmed.is_empty() || (role == "user" && is_bootstrap_context_message(trimmed)) {
-            continue;
-        }
-        entries.push(format!(
-            "{role_label}: {}",
-            truncate_title_preview_text(trimmed, 480)
-        ));
-    }
-
-    if entries.is_empty() {
-        return None;
-    }
-
-    let keep_from = entries
-        .len()
-        .saturating_sub(MANUAL_TITLE_PREVIEW_MAX_MESSAGES);
-    let mut preview = entries[keep_from..].join("\n\n");
-    if preview.chars().count() > MANUAL_TITLE_PREVIEW_MAX_CHARS {
-        preview = preview
-            .chars()
-            .take(MANUAL_TITLE_PREVIEW_MAX_CHARS)
-            .collect();
-    }
-    Some(preview)
-}
-
-fn truncate_title_preview_text(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    let mut truncated: String = text.chars().take(max_chars.saturating_sub(3)).collect();
-    truncated.push_str("...");
-    truncated
-}
-
-fn is_bootstrap_context_message(text: &str) -> bool {
-    let trimmed = text.trim_start();
-    trimmed.starts_with("<environment_context>")
-        || trimmed.starts_with("<skills_instructions>")
-        || trimmed.starts_with("# AGENTS.md instructions for ")
+    HistoryPreview::from_items(items).title_preview(
+        MANUAL_TITLE_PREVIEW_MAX_MESSAGES,
+        MANUAL_TITLE_PREVIEW_MAX_CHARS,
+    )
 }
 
 fn heuristic_title(user_msg: &str) -> String {
@@ -413,7 +351,7 @@ mod tests {
         ];
 
         assert_eq!(
-            extract_first_user_text(&items),
+            HistoryPreview::from_items(&items).first_user_text(),
             Some("Fix DeepSeek title generation".to_string())
         );
     }
@@ -428,7 +366,7 @@ mod tests {
         ];
 
         assert_eq!(
-            extract_first_user_text(&items),
+            HistoryPreview::from_items(&items).first_user_text(),
             Some("Review the Praxis workspace layout".to_string())
         );
     }
@@ -442,7 +380,7 @@ mod tests {
         ];
 
         assert_eq!(
-            extract_first_user_text(&items),
+            HistoryPreview::from_items(&items).first_user_text(),
             Some("Explain why DeepSeek title generation was skipped".to_string())
         );
     }

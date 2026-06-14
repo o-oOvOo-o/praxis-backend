@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 
 /// Relative path from a plugin root to its manifest file.
-pub const PLUGIN_MANIFEST_PATH: &str = ".codex-plugin/plugin.json";
+pub const PLUGIN_MANIFEST_PATH: &str = ".praxis-plugin/plugin.json";
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,9 +54,9 @@ mod tests {
         let skill_path = plugin_root.join("skills/search/SKILL.md");
 
         fs::create_dir_all(skill_path.parent().expect("parent")).expect("mkdir");
-        fs::create_dir_all(plugin_root.join(".codex-plugin")).expect("mkdir manifest");
+        fs::create_dir_all(plugin_root.join(".praxis-plugin")).expect("mkdir manifest");
         fs::write(
-            plugin_root.join(".codex-plugin/plugin.json"),
+            plugin_root.join(".praxis-plugin/plugin.json"),
             r#"{"name":"sample"}"#,
         )
         .expect("write manifest");

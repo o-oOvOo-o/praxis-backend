@@ -42,7 +42,7 @@ impl SurfaceThemeKind {
     pub(crate) fn description(self) -> &'static str {
         match self {
             Self::Dark => "Default dark Cursive-like Praxis surface",
-            Self::Classic => "Blue and light Cursive retro surface",
+            Self::Classic => "Dark IDE gray Cursive-like Praxis surface",
             Self::DeepSeek => "DeepSeek blue Cursive-like surface",
         }
     }
@@ -136,40 +136,40 @@ pub(crate) const DARK: SurfaceTheme = SurfaceTheme {
 
 pub(crate) const CLASSIC: SurfaceTheme = SurfaceTheme {
     kind: SurfaceThemeKind::Classic,
-    base_bg: Color::Rgb(54, 103, 166),
-    panel_bg: Color::Rgb(214, 220, 211),
-    panel_raised_bg: Color::Rgb(232, 236, 228),
-    header_bg: Color::Rgb(214, 220, 211),
-    footer_bg: Color::Rgb(214, 220, 211),
-    input_bg: Color::Rgb(232, 236, 228),
-    border_muted: Color::Rgb(16, 16, 16),
-    gap_bg: Color::Rgb(54, 103, 166),
-    gap_fg: Color::Rgb(54, 103, 166),
-    text: Color::Rgb(0, 0, 0),
-    text_strong: Color::Rgb(0, 0, 0),
-    muted: Color::Rgb(54, 54, 54),
-    dim: Color::Rgb(96, 96, 96),
-    disabled: Color::Rgb(126, 126, 126),
-    accent: Color::Rgb(214, 0, 0),
-    active_bg: Color::Rgb(190, 196, 188),
-    selected_bg: Color::Rgb(214, 0, 0),
-    hover_bg: Color::Rgb(196, 204, 194),
-    danger: Color::Rgb(214, 0, 0),
-    control_bg: Color::Rgb(196, 204, 194),
-    control_active_bg: Color::Rgb(180, 188, 178),
-    control_selected_bg: Color::Rgb(214, 0, 0),
-    control_hover_bg: Color::Rgb(188, 196, 186),
-    control_accent: Color::Rgb(24, 70, 140),
-    control_muted: Color::Rgb(48, 74, 116),
-    chip_model_bg: Color::Rgb(196, 204, 194),
-    chip_reasoning_bg: Color::Rgb(196, 204, 194),
-    chip_rank_bg: Color::Rgb(196, 204, 194),
-    chip_permission_bg: Color::Rgb(196, 204, 194),
-    dropdown_bg: Color::Rgb(214, 220, 211),
-    dropdown_current_bg: Color::Rgb(214, 0, 0),
-    user_bubble_bg: Color::Rgb(232, 236, 228),
-    shadow_bg: Color::Rgb(0, 0, 0),
-    title_fg: Color::Rgb(214, 0, 0),
+    base_bg: Color::Rgb(18, 20, 23),
+    panel_bg: Color::Rgb(25, 28, 32),
+    panel_raised_bg: Color::Rgb(32, 35, 40),
+    header_bg: Color::Rgb(32, 35, 40),
+    footer_bg: Color::Rgb(32, 35, 40),
+    input_bg: Color::Rgb(27, 30, 34),
+    border_muted: Color::Rgb(88, 94, 103),
+    gap_bg: Color::Rgb(25, 28, 32),
+    gap_fg: Color::Rgb(92, 98, 108),
+    text: Color::Rgb(226, 229, 234),
+    text_strong: Color::Rgb(250, 251, 253),
+    muted: Color::Rgb(170, 176, 185),
+    dim: Color::Rgb(116, 123, 134),
+    disabled: Color::Rgb(82, 88, 97),
+    accent: Color::Rgb(142, 181, 235),
+    active_bg: Color::Rgb(39, 44, 51),
+    selected_bg: Color::Rgb(47, 76, 111),
+    hover_bg: Color::Rgb(37, 41, 47),
+    danger: Color::Rgb(228, 116, 112),
+    control_bg: Color::Rgb(29, 32, 36),
+    control_active_bg: Color::Rgb(39, 44, 51),
+    control_selected_bg: Color::Rgb(47, 76, 111),
+    control_hover_bg: Color::Rgb(38, 42, 48),
+    control_accent: Color::Rgb(142, 181, 235),
+    control_muted: Color::Rgb(141, 158, 181),
+    chip_model_bg: Color::Rgb(29, 32, 36),
+    chip_reasoning_bg: Color::Rgb(30, 33, 38),
+    chip_rank_bg: Color::Rgb(34, 39, 45),
+    chip_permission_bg: Color::Rgb(29, 32, 36),
+    dropdown_bg: Color::Rgb(30, 33, 38),
+    dropdown_current_bg: Color::Rgb(52, 82, 118),
+    user_bubble_bg: Color::Rgb(32, 35, 40),
+    shadow_bg: Color::Rgb(8, 9, 11),
+    title_fg: Color::Rgb(142, 181, 235),
 };
 
 pub(crate) const DEEPSEEK: SurfaceTheme = SurfaceTheme {
@@ -329,14 +329,13 @@ pub(crate) fn runtime_theme() -> SurfaceTheme {
 
 pub(crate) fn render_menu_surface(area: Rect, buf: &mut Buffer) -> Rect {
     let theme = runtime_theme();
-    render_shadow(area, buf, theme);
     let frame_area = Rect {
         x: area.x,
         y: area.y,
         width: area.width.saturating_sub(1).max(1),
         height: area.height.saturating_sub(1).max(1),
     };
-    render_frame(frame_area, buf, theme);
+    render_popup_surface(frame_area, buf, theme, None);
     frame_area.inset(Insets::vh(1, 2))
 }
 
@@ -346,20 +345,34 @@ pub(crate) fn render_panel_surface(
     theme: SurfaceTheme,
     title: Option<Line<'static>>,
 ) {
-    render_frame_shadow(area, buf, theme);
+    render_surface_shadow(area, buf.area, buf, theme);
     render_frame(area, buf, theme);
     render_title(area, buf, theme, title);
 }
 
-pub(crate) fn render_input_surface(area: Rect, buf: &mut Buffer, theme: SurfaceTheme) {
-    render_box(area, buf, theme.input_bg, theme.text, theme.border_muted);
+pub(crate) fn render_main_surface(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: SurfaceTheme,
+    title: Option<Line<'static>>,
+) {
+    render_frame(area, buf, theme);
+    render_title(area, buf, theme, title);
 }
 
-pub(crate) fn render_app_background(area: Rect, buf: &mut Buffer, theme: SurfaceTheme) {
-    if area.is_empty() {
-        return;
-    }
-    buf.set_style(area, Style::default().bg(theme.base_bg).fg(theme.text));
+pub(crate) fn render_popup_surface(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: SurfaceTheme,
+    title: Option<Line<'static>>,
+) {
+    render_surface_shadow(area, buf.area, buf, theme);
+    render_box(area, buf, theme.dropdown_bg, theme.text, theme.border_muted);
+    render_title_with_bg(area, buf, theme, theme.dropdown_bg, title);
+}
+
+pub(crate) fn render_input_surface(area: Rect, buf: &mut Buffer, theme: SurfaceTheme) {
+    render_box(area, buf, theme.input_bg, theme.text, theme.border_muted);
 }
 
 pub(crate) fn render_panel_outline(
@@ -384,38 +397,30 @@ pub(crate) fn user_message_style() -> Style {
     Style::default().fg(theme.text).bg(theme.user_bubble_bg)
 }
 
-fn render_shadow(area: Rect, buf: &mut Buffer, theme: SurfaceTheme) {
+fn render_surface_shadow(area: Rect, clip_area: Rect, buf: &mut Buffer, theme: SurfaceTheme) {
     if area.width < 2 || area.height < 2 {
         return;
     }
-    let style = Style::default().bg(theme.shadow_bg).fg(theme.shadow_bg);
-    let right = area.right().saturating_sub(1);
-    let bottom = area.bottom().saturating_sub(1);
-    for y in area.y.saturating_add(1)..area.bottom() {
-        buf[(right, y)].set_symbol(" ").set_style(style);
-    }
-    for x in area.x.saturating_add(1)..area.right() {
-        buf[(x, bottom)].set_symbol(" ").set_style(style);
-    }
+    render_hard_shadow_edge(area, clip_area, buf, theme);
 }
 
-fn render_frame_shadow(area: Rect, buf: &mut Buffer, theme: SurfaceTheme) {
-    if area.width < 2 || area.height < 2 {
-        return;
-    }
+fn render_hard_shadow_edge(area: Rect, clip_area: Rect, buf: &mut Buffer, theme: SurfaceTheme) {
     let style = Style::default().bg(theme.shadow_bg).fg(theme.shadow_bg);
     let right = area.right();
     let bottom = area.bottom();
     for y in area.y.saturating_add(1)..bottom.saturating_add(1) {
-        set_shadow_cell(buf, right, y, style);
+        set_shadow_cell(buf, right, y, clip_area, style);
     }
     for x in area.x.saturating_add(1)..right.saturating_add(1) {
-        set_shadow_cell(buf, x, bottom, style);
+        set_shadow_cell(buf, x, bottom, clip_area, style);
     }
 }
 
-fn set_shadow_cell(buf: &mut Buffer, x: u16, y: u16, style: Style) {
+fn set_shadow_cell(buf: &mut Buffer, x: u16, y: u16, clip_area: Rect, style: Style) {
     if x < buf.area.x || y < buf.area.y || x >= buf.area.right() || y >= buf.area.bottom() {
+        return;
+    }
+    if x < clip_area.x || y < clip_area.y || x >= clip_area.right() || y >= clip_area.bottom() {
         return;
     }
     buf[(x, y)].set_symbol(" ").set_style(style);
@@ -446,10 +451,10 @@ fn render_box(area: Rect, buf: &mut Buffer, background: Color, foreground: Color
     let right = area.right().saturating_sub(1);
     let top = area.y;
     let bottom = area.bottom().saturating_sub(1);
-    buf[(left, top)].set_symbol("┌").set_style(border);
-    buf[(right, top)].set_symbol("┐").set_style(border);
-    buf[(left, bottom)].set_symbol("└").set_style(border);
-    buf[(right, bottom)].set_symbol("┘").set_style(border);
+    buf[(left, top)].set_symbol("╭").set_style(border);
+    buf[(right, top)].set_symbol("╮").set_style(border);
+    buf[(left, bottom)].set_symbol("╰").set_style(border);
+    buf[(right, bottom)].set_symbol("╯").set_style(border);
     for x in left.saturating_add(1)..right {
         buf[(x, top)].set_symbol("─").set_style(border);
         buf[(x, bottom)].set_symbol("─").set_style(border);
@@ -472,10 +477,10 @@ fn render_frame_outline(area: Rect, buf: &mut Buffer, theme: SurfaceTheme) {
     let right = area.right().saturating_sub(1);
     let top = area.y;
     let bottom = area.bottom().saturating_sub(1);
-    buf[(left, top)].set_symbol("┌").set_style(border);
-    buf[(right, top)].set_symbol("┐").set_style(border);
-    buf[(left, bottom)].set_symbol("└").set_style(border);
-    buf[(right, bottom)].set_symbol("┘").set_style(border);
+    buf[(left, top)].set_symbol("╭").set_style(border);
+    buf[(right, top)].set_symbol("╮").set_style(border);
+    buf[(left, bottom)].set_symbol("╰").set_style(border);
+    buf[(right, bottom)].set_symbol("╯").set_style(border);
     for x in left.saturating_add(1)..right {
         buf[(x, top)].set_symbol("─").set_style(border);
         buf[(x, bottom)].set_symbol("─").set_style(border);
@@ -487,6 +492,16 @@ fn render_frame_outline(area: Rect, buf: &mut Buffer, theme: SurfaceTheme) {
 }
 
 fn render_title(area: Rect, buf: &mut Buffer, theme: SurfaceTheme, title: Option<Line<'static>>) {
+    render_title_with_bg(area, buf, theme, theme.panel_bg, title);
+}
+
+fn render_title_with_bg(
+    area: Rect,
+    buf: &mut Buffer,
+    theme: SurfaceTheme,
+    background: Color,
+    title: Option<Line<'static>>,
+) {
     let Some(title) = title else {
         return;
     };
@@ -500,7 +515,7 @@ fn render_title(area: Rect, buf: &mut Buffer, theme: SurfaceTheme, title: Option
         1,
     );
     Paragraph::new(title)
-        .style(Style::default().fg(theme.title_fg).bg(theme.panel_bg))
+        .style(Style::default().fg(theme.title_fg).bg(background))
         .render(title_area, buf);
 }
 

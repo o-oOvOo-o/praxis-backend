@@ -10,6 +10,7 @@ mod migrations;
 mod model;
 mod paths;
 mod runtime;
+pub mod thread_preview;
 
 pub use model::LogEntry;
 pub use model::LogQuery;

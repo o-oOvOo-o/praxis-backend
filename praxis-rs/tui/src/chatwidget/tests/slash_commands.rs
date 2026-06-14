@@ -28,7 +28,7 @@ async fn slash_compact_eagerly_queues_follow_up_before_turn_start() {
 
     assert!(chat.bottom_pane.is_task_running());
     match rx.try_recv() {
-        Ok(AppEvent::CodexOp(Op::Compact)) => {}
+        Ok(AppEvent::AgentOp(Op::Compact)) => {}
         other => panic!("expected compact op to be submitted, got {other:?}"),
     }
 
@@ -49,8 +49,12 @@ async fn slash_compact_eagerly_queues_follow_up_before_turn_start() {
 }
 
 #[tokio::test]
-async fn ctrl_d_quits_without_prompt() {
+async fn ctrl_d_quits_after_second_press() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+    assert!(chat.bottom_pane.quit_shortcut_hint_visible());
+    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
     assert_matches!(rx.try_recv(), Ok(AppEvent::Exit(ExitMode::ShutdownFirst)));
@@ -63,6 +67,17 @@ async fn ctrl_d_with_modal_open_does_not_quit() {
     chat.open_approvals_popup();
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
 
+    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
+}
+
+#[tokio::test]
+async fn ctrl_d_running_work_does_not_quit() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.is_review_mode = true;
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
+
+    assert!(!chat.bottom_pane.quit_shortcut_hint_visible());
     assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 }
 
@@ -597,7 +612,7 @@ async fn fast_slash_command_updates_and_persists_local_service_tier() {
     assert!(
         events.iter().any(|event| matches!(
             event,
-            AppEvent::CodexOp(Op::OverrideTurnContext {
+            AppEvent::AgentOp(Op::OverrideTurnContext {
                 service_tier: Some(Some(ServiceTier::Fast)),
                 ..
             })

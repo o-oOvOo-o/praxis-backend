@@ -17,7 +17,7 @@ use crate::exec::execute_exec_request;
 use crate::exec_env::create_env;
 use crate::praxis::TurnContext;
 use crate::sandboxing::ExecRequest;
-use crate::state::TaskKind;
+use crate::state::AgentTaskKind;
 use crate::tools::format_exec_output_str;
 use crate::tools::runtimes::maybe_wrap_shell_lc_with_snapshot;
 use crate::user_shell_command::user_shell_command_record_item;
@@ -31,8 +31,8 @@ use praxis_protocol::protocol::TurnStartedEvent;
 use praxis_sandboxing::SandboxType;
 use praxis_shell_command::parse_command::parse_command;
 
-use super::SessionTask;
-use super::SessionTaskContext;
+use super::AgentTask;
+use super::AgentTaskContext;
 use crate::praxis::Session;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::models::ResponseItem;
@@ -63,18 +63,18 @@ impl UserShellCommandTask {
 }
 
 #[async_trait]
-impl SessionTask for UserShellCommandTask {
-    fn kind(&self) -> TaskKind {
-        TaskKind::Regular
+impl AgentTask for UserShellCommandTask {
+    fn kind(&self) -> AgentTaskKind {
+        AgentTaskKind::Regular
     }
 
     fn span_name(&self) -> &'static str {
-        "session_task.user_shell"
+        "agent_task.user_shell"
     }
 
     async fn run(
         self: Arc<Self>,
-        session: Arc<SessionTaskContext>,
+        session: Arc<AgentTaskContext>,
         turn_context: Arc<TurnContext>,
         _input: Vec<UserInput>,
         cancellation_token: CancellationToken,

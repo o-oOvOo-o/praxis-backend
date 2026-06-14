@@ -9,7 +9,9 @@ use crate::app_event::ThreadGoalSetMode;
 #[cfg(target_os = "windows")]
 use crate::app_event::WindowsSandboxEnableMode;
 use crate::app_event_sender::AppEventSender;
-use crate::app_gateway_approval_conversions::network_approval_context_to_core;
+use crate::app_gateway_core_conversions::app_gateway_request_id_to_mcp_request_id;
+use crate::app_gateway_core_conversions::command_execution_decision_to_review_decision;
+use crate::app_gateway_core_conversions::network_approval_context_to_core;
 use crate::app_gateway_session::AppGatewaySession;
 use crate::app_gateway_session::AppGatewayStartedThread;
 use crate::app_gateway_session::ThreadSessionState;
@@ -18,10 +20,6 @@ use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::FeedbackAudience;
 use crate::bottom_pane::McpServerElicitationFormRequest;
-use crate::bottom_pane::SelectionItem;
-use crate::bottom_pane::SelectionViewParams;
-use crate::bottom_pane::popup_consts::standard_popup_hint_line;
-use crate::center_theme::CenterTheme;
 use crate::chatwidget::ChatWidget;
 use crate::chatwidget::ExternalEditorState;
 use crate::chatwidget::ReplayKind;
@@ -41,7 +39,6 @@ use crate::model_discovery::build_model_catalog;
 use crate::model_migration::ModelMigrationOutcome;
 use crate::model_migration::migration_copy_for_models;
 use crate::model_migration::run_model_migration_prompt;
-use crate::multi_agents::agent_picker_status_dot_spans;
 use crate::multi_agents::format_agent_picker_item_name_for_thread;
 use crate::multi_agents::next_agent_shortcut_matches;
 use crate::multi_agents::previous_agent_shortcut_matches;
@@ -55,6 +52,10 @@ use crate::resume_picker::SessionTarget;
 use crate::status::format_tokens_compact;
 #[cfg(test)]
 use crate::test_support::PathBufExt;
+use crate::thread_pagination::all_thread_source_kinds;
+use crate::thread_pagination::loaded_thread_list_params;
+use crate::thread_pagination::thread_list_params;
+use crate::thread_replay_policy::compact_visible_replay_turns;
 use crate::tui;
 use crate::tui::TuiEvent;
 use crate::tui_config;
@@ -63,6 +64,59 @@ use crate::tui2::InputVisual;
 use crate::ui_language::UiLanguage;
 use crate::update_action::UpdateAction;
 use crate::version::PRAXIS_CLI_VERSION;
+use crate::workspace::AgentPickerEffect;
+use crate::workspace::AgentPickerRow;
+use crate::workspace::AgentPickerState;
+use crate::workspace::SessionPickerEffect;
+use crate::workspace::SessionPickerOpenRequest;
+use crate::workspace::SessionPickerPageRequest;
+use crate::workspace::SessionPickerState;
+use crate::workspace::ThreadListRow;
+use crate::workspace::WORKSPACE_CHROME_HEIGHT;
+use crate::workspace::WORKSPACE_SUBAGENT_INDENT_STEP;
+use crate::workspace::WorkspaceArchiveConfirmState;
+use crate::workspace::WorkspaceChromeAction;
+use crate::workspace::WorkspaceChromeBarAreas;
+use crate::workspace::WorkspaceChromeMenu;
+use crate::workspace::WorkspaceChromeMenuState;
+use crate::workspace::WorkspaceContextMenuState;
+use crate::workspace::WorkspaceDeleteConfirmState;
+use crate::workspace::WorkspaceMenuAction;
+use crate::workspace::WorkspaceOpenFolderState;
+use crate::workspace::WorkspaceOverlay;
+use crate::workspace::WorkspacePane;
+use crate::workspace::WorkspaceRenameState;
+use crate::workspace::WorkspaceState;
+use crate::workspace::WorkspaceTheme;
+use crate::workspace::WorkspaceVisibleItem;
+use crate::workspace::parse_workspace_thread_id;
+use crate::workspace::refresh_workspace_subagent_summaries;
+use crate::workspace::render_agent_picker;
+use crate::workspace::render_session_picker;
+use crate::workspace::session_picker_thread_list_params;
+use crate::workspace::sort_workspace_thread_rows;
+use crate::workspace::workspace_chrome_action_at;
+use crate::workspace::workspace_chrome_action_label;
+use crate::workspace::workspace_chrome_action_shortcut;
+use crate::workspace::workspace_chrome_menu_actions;
+use crate::workspace::workspace_chrome_menu_at;
+use crate::workspace::workspace_chrome_menu_bar_areas;
+use crate::workspace::workspace_chrome_menu_popup_area;
+use crate::workspace::workspace_chrome_menu_title;
+use crate::workspace::workspace_closed_subagents_detail;
+use crate::workspace::workspace_closed_subagents_label;
+use crate::workspace::workspace_context_subagent_lines;
+use crate::workspace::workspace_control_detail;
+use crate::workspace::workspace_row_control_marker;
+use crate::workspace::workspace_row_is_controlled;
+use crate::workspace::workspace_row_should_auto_observe;
+use crate::workspace::workspace_row_status_label;
+use crate::workspace::workspace_row_subagent_marker;
+use crate::workspace::workspace_row_tree_indent;
+use crate::workspace::workspace_row_tree_prefix;
+use crate::workspace::workspace_single_line;
+use crate::workspace::workspace_status_without_control;
+use crate::workspace::workspace_thread_display_name;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
 use crossterm::event::KeyCode;
@@ -94,20 +148,13 @@ use praxis_app_gateway_protocol::PluginUninstallResponse;
 use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
-use praxis_app_gateway_protocol::SessionSource as AppGatewaySessionSource;
 use praxis_app_gateway_protocol::SkillsListResponse;
-use praxis_app_gateway_protocol::Thread;
-use praxis_app_gateway_protocol::ThreadActiveFlag;
-use praxis_app_gateway_protocol::ThreadControlState;
-use praxis_app_gateway_protocol::ThreadControllerKind;
 use praxis_app_gateway_protocol::ThreadGoalStatus;
 use praxis_app_gateway_protocol::ThreadItem;
 use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadListResponse;
-use praxis_app_gateway_protocol::ThreadLoadedListParams;
 use praxis_app_gateway_protocol::ThreadRollbackResponse;
 use praxis_app_gateway_protocol::ThreadSortKey;
-use praxis_app_gateway_protocol::ThreadSourceKind;
 use praxis_app_gateway_protocol::ThreadStatus;
 use praxis_app_gateway_protocol::Turn;
 use praxis_app_gateway_protocol::TurnError as AppGatewayTurnError;
@@ -150,7 +197,6 @@ use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SkillErrorInfo;
-use praxis_protocol::protocol::SubAgentSource;
 use praxis_protocol::protocol::TokenUsage;
 use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_terminal_detection::user_agent;
@@ -164,8 +210,6 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::visual::InteractiveState;
 use ratatui::visual::render_accent_bar;
-use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use ratatui::widgets::Wrap;
@@ -211,48 +255,6 @@ const APP_GATEWAY_EVENT_DRAIN_BUDGET: usize = 512;
 enum ThreadInteractiveRequest {
     Approval(ApprovalRequest),
     McpServerElicitation(McpServerElicitationFormRequest),
-}
-
-fn app_gateway_request_id_to_mcp_request_id(
-    request_id: &praxis_app_gateway_protocol::RequestId,
-) -> praxis_protocol::mcp::RequestId {
-    match request_id {
-        praxis_app_gateway_protocol::RequestId::String(value) => {
-            praxis_protocol::mcp::RequestId::String(value.clone())
-        }
-        praxis_app_gateway_protocol::RequestId::Integer(value) => {
-            praxis_protocol::mcp::RequestId::Integer(*value)
-        }
-    }
-}
-
-fn command_execution_decision_to_review_decision(
-    decision: praxis_app_gateway_protocol::CommandExecutionApprovalDecision,
-) -> praxis_protocol::protocol::ReviewDecision {
-    match decision {
-        praxis_app_gateway_protocol::CommandExecutionApprovalDecision::Accept => {
-            praxis_protocol::protocol::ReviewDecision::Approved
-        }
-        praxis_app_gateway_protocol::CommandExecutionApprovalDecision::AcceptForSession => {
-            praxis_protocol::protocol::ReviewDecision::ApprovedForSession
-        }
-        praxis_app_gateway_protocol::CommandExecutionApprovalDecision::AcceptWithExecpolicyAmendment {
-            execpolicy_amendment,
-        } => praxis_protocol::protocol::ReviewDecision::ApprovedExecpolicyAmendment {
-            proposed_execpolicy_amendment: execpolicy_amendment.into_core(),
-        },
-        praxis_app_gateway_protocol::CommandExecutionApprovalDecision::ApplyNetworkPolicyAmendment {
-            network_policy_amendment,
-        } => praxis_protocol::protocol::ReviewDecision::NetworkPolicyAmendment {
-            network_policy_amendment: network_policy_amendment.into_core(),
-        },
-        praxis_app_gateway_protocol::CommandExecutionApprovalDecision::Decline => {
-            praxis_protocol::protocol::ReviewDecision::Denied
-        }
-        praxis_app_gateway_protocol::CommandExecutionApprovalDecision::Cancel => {
-            praxis_protocol::protocol::ReviewDecision::Abort
-        }
-    }
 }
 
 /// Extracts `receiver_thread_ids` from collab agent tool-call notifications.
@@ -1020,7 +1022,7 @@ pub(crate) struct App {
     /// transcript cells.
     pub(crate) backtrack_render_pending: bool,
     pub(crate) transcript_scrollback_backfill: Option<TranscriptScrollbackBackfill>,
-    pub(crate) feedback: praxis_feedback::CodexFeedback,
+    pub(crate) feedback: praxis_feedback::PraxisFeedback,
     feedback_audience: FeedbackAudience,
     remote_app_gateway_url: Option<String>,
     remote_app_gateway_auth_token: Option<String>,
@@ -1051,8 +1053,10 @@ pub(crate) struct App {
     primary_session_configured: Option<ThreadSessionState>,
     pending_primary_events: VecDeque<ThreadBufferedEvent>,
     pending_app_gateway_requests: PendingAppGatewayRequests,
-    center: CenterState,
-    center_observed_thread_ids: HashSet<ThreadId>,
+    workspace: WorkspaceState,
+    workspace_observed_thread_ids: HashSet<ThreadId>,
+    workspace_session_picker_loaders:
+        HashMap<crate::SessionLookupSource, mpsc::UnboundedSender<SessionPickerPageRequest>>,
     mouse: MouseInteractionState,
     mouse_capture_resume_at: Option<Instant>,
 }
@@ -1077,106 +1081,36 @@ struct WindowsSandboxState {
 }
 
 #[derive(Debug, Default)]
-struct CenterState {
-    enabled: bool,
-    rows: Vec<CenterThreadRow>,
-    usage_by_thread: HashMap<ThreadId, TokenUsageInfo>,
-    pinned_thread_ids: HashSet<ThreadId>,
-    expanded_subagent_parent_ids: HashSet<ThreadId>,
-    expanded_closed_subagent_parent_ids: HashSet<ThreadId>,
-    search_query: String,
-    search_focused: bool,
-    selected: usize,
-    list_scroll: usize,
-    chat_scroll_from_bottom: usize,
-    last_refresh_at: Option<Instant>,
-    refresh_in_flight: bool,
-    refresh_request_id: u64,
-    pending_refresh_cursor: Option<String>,
-    next_cursor: Option<String>,
-    list_area: Option<Rect>,
-    chat_area: Option<Rect>,
-    toolbar_new_area: Option<Rect>,
-    toolbar_search_area: Option<Rect>,
-    overlay: CenterOverlayState,
-}
-
-#[derive(Debug, Clone)]
-struct CenterThreadRow {
-    thread_id: ThreadId,
-    path: Option<PathBuf>,
-    name: String,
-    preview: String,
-    cwd: PathBuf,
-    status: ThreadStatus,
-    control_state: Option<ThreadControlState>,
-    source: String,
-    source_kind: AppGatewaySessionSource,
-    agent_base_name: Option<String>,
-    agent_title: Option<String>,
-    agent_display_name: Option<String>,
-    subagent_parent_thread_id: Option<ThreadId>,
-    subagent_depth: Option<i32>,
-    subagents: CenterSubagentSummary,
-    updated_at: i64,
-    token_usage: Option<TokenUsageInfo>,
-}
-
-#[derive(Debug, Clone, Default)]
-struct CenterSubagentSummary {
-    total: usize,
-    open: usize,
-    closed: usize,
-    running: usize,
-    labels: Vec<String>,
-}
-
-impl CenterSubagentSummary {
-    fn is_empty(&self) -> bool {
-        self.total == 0
-    }
-}
-
-#[derive(Debug, Clone)]
-struct CenterSubagentChildSummary {
-    parent_thread_id: ThreadId,
-    label: String,
-    is_open: bool,
-    is_running: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CenterVisibleItem {
-    Thread(usize),
-    ClosedSubagents { parent_index: usize },
-}
-
-#[derive(Debug, Default)]
 struct MouseInteractionState {
     down: Option<MouseDownState>,
     drag: Option<MouseDragSelection>,
     selection: Option<MouseDragSelection>,
-    hover_center_thread_index: Option<usize>,
-    hover_center_target: Option<CenterMouseTarget>,
-    center_list_snapshot: Option<PaneTextSnapshot>,
+    hover_workspace_thread_index: Option<usize>,
+    hover_workspace_target: Option<WorkspaceMouseTarget>,
+    workspace_list_snapshot: Option<PaneTextSnapshot>,
     chat_snapshot: Option<PaneTextSnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MousePane {
-    CenterList,
+    WorkspaceChrome,
+    WorkspaceList,
     Chat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CenterMouseTarget {
-    NewThread,
+enum WorkspaceMouseTarget {
+    ChromeMenu(WorkspaceChromeMenu),
+    ChromeAction(WorkspaceChromeAction),
+    OpenFolderConfirm,
+    OpenFolderCancel,
+    StartThread,
     Search,
     Thread(usize),
     SubagentsToggle(usize),
     ClosedSubagentsToggle(usize),
     LoadMore,
-    ContextMenu(CenterMenuAction),
+    ContextMenu(WorkspaceMenuAction),
     RenameSave,
     RenameCancel,
     ArchiveConfirm,
@@ -1185,54 +1119,16 @@ enum CenterMouseTarget {
     DeleteCancel,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CenterMenuAction {
-    Open,
-    TogglePin,
-    Rename,
-    Archive,
-    Delete,
-    ForkLocal,
-    CopyThreadId,
-}
-
-#[derive(Debug, Clone)]
-struct CenterContextMenuState {
-    thread_id: ThreadId,
-    anchor_column: u16,
-    anchor_row: u16,
-    selected: usize,
-    area: Option<Rect>,
-}
-
-#[derive(Debug, Clone)]
-struct CenterRenameState {
-    thread_id: ThreadId,
-    value: String,
-    cursor: usize,
-    area: Option<Rect>,
-}
-
-#[derive(Debug, Clone)]
-struct CenterArchiveConfirmState {
-    thread_id: ThreadId,
-    area: Option<Rect>,
-}
-
-#[derive(Debug, Clone)]
-struct CenterDeleteConfirmState {
-    thread_id: ThreadId,
-    area: Option<Rect>,
-}
-
-#[derive(Debug, Clone, Default)]
-enum CenterOverlayState {
-    #[default]
-    None,
-    ContextMenu(CenterContextMenuState),
-    Rename(CenterRenameState),
-    ConfirmArchive(CenterArchiveConfirmState),
-    ConfirmDelete(CenterDeleteConfirmState),
+impl WorkspaceMouseTarget {
+    fn is_chrome(self) -> bool {
+        matches!(
+            self,
+            WorkspaceMouseTarget::ChromeMenu(_)
+                | WorkspaceMouseTarget::ChromeAction(_)
+                | WorkspaceMouseTarget::OpenFolderConfirm
+                | WorkspaceMouseTarget::OpenFolderCancel
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1240,8 +1136,8 @@ struct MouseDownState {
     pane: MousePane,
     column: u16,
     row: u16,
-    center_thread_index: Option<usize>,
-    center_target: Option<CenterMouseTarget>,
+    workspace_thread_index: Option<usize>,
+    workspace_target: Option<WorkspaceMouseTarget>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1257,213 +1153,6 @@ struct MouseDragSelection {
 struct PaneTextSnapshot {
     area: Rect,
     lines: Vec<String>,
-}
-
-impl CenterThreadRow {
-    fn from_thread(thread: Thread) -> Option<Self> {
-        let thread_id = ThreadId::from_string(&thread.id).ok()?;
-        let (subagent_parent_thread_id, subagent_depth) =
-            center_subagent_parent(&thread.source).unwrap_or((None, None));
-        let agent_display_name = thread
-            .agent_display_name
-            .clone()
-            .or_else(|| center_subagent_display_name(&thread.source));
-        let agent_base_name = thread
-            .agent_base_name
-            .clone()
-            .or_else(|| center_subagent_base_name(&thread.source));
-        let agent_title = thread
-            .agent_title
-            .clone()
-            .or_else(|| center_subagent_title(&thread.source));
-        let mut name = thread
-            .name
-            .clone()
-            .or_else(|| agent_display_name.clone())
-            .or_else(|| thread.summary.clone())
-            .or_else(|| {
-                let preview = thread.preview.trim();
-                (!preview.is_empty()).then(|| preview.to_string())
-            })
-            .unwrap_or_else(|| center_fallback_thread_name(&thread.id));
-        name = center_single_line(&name);
-        let preview = if let Some(title) = agent_title
-            .as_deref()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-        {
-            title.to_string()
-        } else if thread.preview.trim().is_empty() {
-            thread
-                .agent_role
-                .clone()
-                .unwrap_or_else(|| thread.model_provider.clone())
-        } else {
-            thread.preview.clone()
-        };
-
-        Some(Self {
-            thread_id,
-            path: thread.path,
-            name,
-            preview,
-            cwd: thread.cwd,
-            status: thread.status,
-            control_state: thread.control_state,
-            source: center_source_label(&thread.source),
-            source_kind: thread.source,
-            agent_base_name,
-            agent_title,
-            agent_display_name,
-            subagent_parent_thread_id,
-            subagent_depth,
-            subagents: CenterSubagentSummary::default(),
-            updated_at: thread.updated_at,
-            token_usage: thread.token_usage.map(token_usage_info_from_app_gateway),
-        })
-    }
-}
-
-fn center_subagent_display_name(source: &AppGatewaySessionSource) -> Option<String> {
-    match source {
-        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            agent_display_name,
-            ..
-        }) => agent_display_name.clone(),
-        _ => None,
-    }
-}
-
-fn center_subagent_base_name(source: &AppGatewaySessionSource) -> Option<String> {
-    match source {
-        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            agent_base_name, ..
-        }) => agent_base_name.clone(),
-        _ => None,
-    }
-}
-
-fn center_subagent_title(source: &AppGatewaySessionSource) -> Option<String> {
-    match source {
-        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_title, .. }) => {
-            agent_title.clone()
-        }
-        _ => None,
-    }
-}
-
-fn center_subagent_parent(
-    source: &AppGatewaySessionSource,
-) -> Option<(Option<ThreadId>, Option<i32>)> {
-    match source {
-        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            parent_thread_id,
-            depth,
-            ..
-        }) => Some((Some(*parent_thread_id), Some(*depth))),
-        AppGatewaySessionSource::SubAgent(_) => Some((None, None)),
-        _ => None,
-    }
-}
-
-fn center_source_label(source: &AppGatewaySessionSource) -> String {
-    match source {
-        AppGatewaySessionSource::Cli => "cli".to_string(),
-        AppGatewaySessionSource::VsCode => "vscode".to_string(),
-        AppGatewaySessionSource::Exec => "exec".to_string(),
-        AppGatewaySessionSource::AppGateway => "gateway".to_string(),
-        AppGatewaySessionSource::Custom(value) => center_single_line(value),
-        AppGatewaySessionSource::SubAgent(SubAgentSource::ThreadSpawn { .. }) => {
-            "subagent".to_string()
-        }
-        AppGatewaySessionSource::SubAgent(source) => format!("subagent {source}"),
-        AppGatewaySessionSource::Unknown => "unknown".to_string(),
-    }
-}
-
-fn refresh_center_subagent_summaries(rows: &mut [CenterThreadRow]) {
-    let children: Vec<CenterSubagentChildSummary> = rows
-        .iter()
-        .filter_map(center_subagent_child_summary)
-        .collect();
-    let parent_indices: HashMap<ThreadId, usize> = rows
-        .iter()
-        .enumerate()
-        .map(|(index, row)| (row.thread_id, index))
-        .collect();
-    for row in rows.iter_mut() {
-        row.subagents = CenterSubagentSummary::default();
-    }
-    for child in children {
-        let Some(parent_index) = parent_indices.get(&child.parent_thread_id).copied() else {
-            continue;
-        };
-        let parent = &mut rows[parent_index];
-        parent.subagents.total = parent.subagents.total.saturating_add(1);
-        if child.is_open {
-            parent.subagents.open = parent.subagents.open.saturating_add(1);
-            if parent.subagents.labels.len() < 4 {
-                parent.subagents.labels.push(child.label);
-            }
-        } else {
-            parent.subagents.closed = parent.subagents.closed.saturating_add(1);
-        }
-        if child.is_running {
-            parent.subagents.running = parent.subagents.running.saturating_add(1);
-        }
-    }
-}
-
-fn center_subagent_child_summary(row: &CenterThreadRow) -> Option<CenterSubagentChildSummary> {
-    let parent_thread_id = row.subagent_parent_thread_id?;
-    let status = center_subagent_status_label(row);
-    let label = format!("{}  {status}", center_thread_display_name(row));
-    Some(CenterSubagentChildSummary {
-        parent_thread_id,
-        label: center_single_line(&label),
-        is_open: !matches!(row.status, ThreadStatus::NotLoaded),
-        is_running: center_status_has_running_flag(&row.status),
-    })
-}
-
-fn center_subagent_status_label(row: &CenterThreadRow) -> &'static str {
-    match &row.status {
-        ThreadStatus::Active { .. } if center_status_has_running_flag(&row.status) => "运行",
-        ThreadStatus::Active { .. } => "活动",
-        ThreadStatus::Idle => "空闲",
-        ThreadStatus::SystemError => "错误",
-        ThreadStatus::NotLoaded => "关闭",
-    }
-}
-
-fn center_thread_display_name(row: &CenterThreadRow) -> String {
-    if matches!(row.source_kind, AppGatewaySessionSource::SubAgent(_)) {
-        return subagent_display_name(
-            row.thread_id,
-            row.agent_base_name.as_deref(),
-            row.agent_title.as_deref(),
-            row.agent_display_name.as_deref(),
-        );
-    }
-    row.name.clone()
-}
-
-fn sort_center_thread_rows(
-    rows: &mut [CenterThreadRow],
-    active_thread_id: Option<ThreadId>,
-    pinned_thread_ids: &HashSet<ThreadId>,
-) {
-    rows.sort_by(|a, b| {
-        let a_active = Some(a.thread_id) == active_thread_id;
-        let b_active = Some(b.thread_id) == active_thread_id;
-        let a_pinned = pinned_thread_ids.contains(&a.thread_id);
-        let b_pinned = pinned_thread_ids.contains(&b.thread_id);
-        b_active
-            .cmp(&a_active)
-            .then_with(|| b_pinned.cmp(&a_pinned))
-            .then_with(|| center_row_priority(b).cmp(&center_row_priority(a)))
-            .then_with(|| b.updated_at.cmp(&a.updated_at))
-    });
 }
 
 fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
@@ -1581,280 +1270,29 @@ fn extract_pane_selection(snapshot: &PaneTextSnapshot, selection: MouseDragSelec
     selected.join("\n").trim_end().to_string()
 }
 
-impl CenterState {
-    fn new(enabled: bool) -> Self {
-        Self {
-            enabled,
-            ..Self::default()
-        }
-    }
+const WORKSPACE_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+const WORKSPACE_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
+const WORKSPACE_LIST_TOP_PADDING: u16 = 4;
+const WORKSPACE_ROW_HEIGHT: u16 = 3;
+const WORKSPACE_SPLIT_GAP: u16 = 1;
+const WORKSPACE_LIST_MIN_WIDTH: u16 = 32;
+const WORKSPACE_LIST_MAX_WIDTH: u16 = 58;
+const WORKSPACE_CHAT_MIN_WIDTH: u16 = 48;
+const WORKSPACE_CONTEXT_MENU_WIDTH: u16 = 36;
+const WORKSPACE_RENAME_POPUP_WIDTH: u16 = 34;
+const WORKSPACE_CONFIRM_POPUP_WIDTH: u16 = 30;
+const WORKSPACE_STATUS_LABEL_WIDTH: usize = 10;
 
-    fn clamp_list_scroll(&mut self, visible_rows: usize) {
-        self.list_scroll = self
-            .list_scroll
-            .min(self.list_item_count().saturating_sub(visible_rows));
-    }
-
-    fn top_visible_thread_id(&self) -> Option<ThreadId> {
-        self.actual_row_index_for_visible(self.list_scroll)
-            .and_then(|index| self.rows.get(index))
-            .map(|row| row.thread_id)
-    }
-
-    fn row_index(&self, thread_id: ThreadId) -> Option<usize> {
-        self.rows.iter().position(|row| row.thread_id == thread_id)
-    }
-
-    fn actual_row_index_for_visible(&self, visible_index: usize) -> Option<usize> {
-        match self.visible_items().get(visible_index).copied()? {
-            CenterVisibleItem::Thread(index) => Some(index),
-            CenterVisibleItem::ClosedSubagents { .. } => None,
-        }
-    }
-
-    fn visible_item_at(&self, visible_index: usize) -> Option<CenterVisibleItem> {
-        self.visible_items().get(visible_index).copied()
-    }
-
-    fn visible_index_for_row(&self, row_index: usize) -> Option<usize> {
-        self.visible_items()
-            .into_iter()
-            .position(|item| item == CenterVisibleItem::Thread(row_index))
-    }
-
-    fn visible_index_for_closed_subagents(&self, parent_index: usize) -> Option<usize> {
-        self.visible_items()
-            .into_iter()
-            .position(|item| item == CenterVisibleItem::ClosedSubagents { parent_index })
-    }
-
-    fn visible_index_for_thread(&self, thread_id: ThreadId) -> Option<usize> {
-        self.visible_items().into_iter().position(|item| {
-            let CenterVisibleItem::Thread(index) = item else {
-                return false;
-            };
-            self.rows
-                .get(index)
-                .is_some_and(|row| row.thread_id == thread_id)
-        })
-    }
-
-    fn clamp_selection(&mut self, visible_rows: usize) {
-        self.selected = self.selected.min(self.list_item_count().saturating_sub(1));
-        self.clamp_list_scroll(visible_rows);
-        self.ensure_selected_visible(visible_rows);
-    }
-
-    fn keep_top_visible_thread(
-        &mut self,
-        thread_id: Option<ThreadId>,
-        visible_rows: usize,
-    ) -> bool {
-        let Some(thread_id) = thread_id else {
-            return false;
-        };
-        let Some(index) = self.visible_index_for_thread(thread_id) else {
-            return false;
-        };
-        self.list_scroll = index;
-        self.clamp_list_scroll(visible_rows);
-        true
-    }
-
-    fn ensure_selected_visible(&mut self, visible_rows: usize) {
-        if visible_rows == 0 {
-            return;
-        }
-        if self.selected < self.list_scroll {
-            self.list_scroll = self.selected;
-        } else if self.selected >= self.list_scroll.saturating_add(visible_rows) {
-            self.list_scroll = self.selected.saturating_add(1).saturating_sub(visible_rows);
-        }
-        self.clamp_list_scroll(visible_rows);
-    }
-
-    fn clear_overlay(&mut self) {
-        self.overlay = CenterOverlayState::None;
-    }
-
-    fn clear_search_focus(&mut self) {
-        self.search_focused = false;
-    }
-
-    fn has_load_more_row(&self) -> bool {
-        self.next_cursor.is_some()
-    }
-
-    fn list_item_count(&self) -> usize {
-        self.visible_row_count() + usize::from(self.has_load_more_row())
-    }
-
-    fn is_load_more_index(&self, index: usize) -> bool {
-        self.has_load_more_row() && index == self.visible_row_count()
-    }
-
-    fn is_loading_more(&self) -> bool {
-        self.refresh_in_flight && self.pending_refresh_cursor.is_some()
-    }
-
-    fn visible_row_count(&self) -> usize {
-        self.visible_items().len()
-    }
-
-    fn visible_items(&self) -> Vec<CenterVisibleItem> {
-        if !self.search_query.trim().is_empty() {
-            return (0..self.rows.len())
-                .map(CenterVisibleItem::Thread)
-                .collect();
-        }
-
-        let mut row_indices_by_thread_id = HashMap::with_capacity(self.rows.len());
-        let mut child_indices_by_parent_id: HashMap<ThreadId, Vec<usize>> = HashMap::new();
-        for (index, row) in self.rows.iter().enumerate() {
-            row_indices_by_thread_id.insert(row.thread_id, index);
-            if let Some(parent_thread_id) = row.subagent_parent_thread_id {
-                child_indices_by_parent_id
-                    .entry(parent_thread_id)
-                    .or_default()
-                    .push(index);
-            }
-        }
-
-        let mut items = Vec::with_capacity(self.rows.len());
-        let mut emitted = HashSet::new();
-        for (index, row) in self.rows.iter().enumerate() {
-            if row.subagent_parent_thread_id.is_none()
-                || row
-                    .subagent_parent_thread_id
-                    .is_some_and(|parent_id| !row_indices_by_thread_id.contains_key(&parent_id))
-            {
-                self.push_visible_row_tree(
-                    index,
-                    &child_indices_by_parent_id,
-                    &mut emitted,
-                    &mut items,
-                );
-            }
-        }
-        items
-    }
-
-    fn push_visible_row_tree(
-        &self,
-        index: usize,
-        child_indices_by_parent_id: &HashMap<ThreadId, Vec<usize>>,
-        emitted: &mut HashSet<usize>,
-        items: &mut Vec<CenterVisibleItem>,
-    ) {
-        if !emitted.insert(index) {
-            return;
-        }
-        items.push(CenterVisibleItem::Thread(index));
-        let Some(parent_id) = self.rows.get(index).map(|row| row.thread_id) else {
-            return;
-        };
-        if !self.expanded_subagent_parent_ids.contains(&parent_id) {
-            return;
-        }
-        let child_indices = child_indices_by_parent_id
-            .get(&parent_id)
-            .cloned()
-            .unwrap_or_default();
-
-        for child_index in child_indices.iter().copied() {
-            if self
-                .rows
-                .get(child_index)
-                .is_some_and(|child| !center_row_is_closed(child))
-            {
-                self.push_visible_row_tree(child_index, child_indices_by_parent_id, emitted, items);
-            }
-        }
-
-        let has_closed_children = child_indices.iter().any(|child_index| {
-            self.rows
-                .get(*child_index)
-                .is_some_and(center_row_is_closed)
-        });
-        if !has_closed_children {
-            return;
-        }
-        items.push(CenterVisibleItem::ClosedSubagents {
-            parent_index: index,
-        });
-        if !self
-            .expanded_closed_subagent_parent_ids
-            .contains(&parent_id)
-        {
-            return;
-        }
-        for child_index in child_indices {
-            if self.rows.get(child_index).is_some_and(center_row_is_closed) {
-                self.push_visible_row_tree(child_index, child_indices_by_parent_id, emitted, items);
-            }
-        }
-    }
-
-    fn toggle_subagents(&mut self, row_index: usize) {
-        let Some(row) = self.rows.get(row_index) else {
-            return;
-        };
-        if row.subagents.is_empty() {
-            return;
-        }
-        if !self.expanded_subagent_parent_ids.insert(row.thread_id) {
-            self.expanded_subagent_parent_ids.remove(&row.thread_id);
-        }
-    }
-
-    fn toggle_closed_subagents(&mut self, parent_row_index: usize) {
-        let Some(row) = self.rows.get(parent_row_index) else {
-            return;
-        };
-        if row.subagents.closed == 0 {
-            return;
-        }
-        if !self
-            .expanded_closed_subagent_parent_ids
-            .insert(row.thread_id)
-        {
-            self.expanded_closed_subagent_parent_ids
-                .remove(&row.thread_id);
-        }
-    }
-}
-
-const CENTER_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
-const CENTER_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
-const CENTER_REPLAY_TURN_LIMIT: usize = 64;
-const CENTER_LIST_TOP_PADDING: u16 = 4;
-const CENTER_ROW_HEIGHT: u16 = 3;
-const CENTER_SUBAGENT_INDENT_STEP: u16 = 3;
-const CENTER_SUBAGENT_INDENT_MAX: u16 = 9;
-const CENTER_SPLIT_GAP: u16 = 2;
-const CENTER_LIST_MIN_WIDTH: u16 = 32;
-const CENTER_LIST_MAX_WIDTH: u16 = 58;
-const CENTER_CHAT_MIN_WIDTH: u16 = 48;
-const CENTER_CONTEXT_MENU_WIDTH: u16 = 36;
-const CENTER_RENAME_POPUP_WIDTH: u16 = 34;
-const CENTER_CONFIRM_POPUP_WIDTH: u16 = 30;
-const CENTER_STATUS_LABEL_WIDTH: usize = 10;
-const CENTER_THREAD_PAGE_LIMIT: u32 = 20;
-
-fn center_thread_list_params(
+fn workspace_thread_list_params(
     search_term: Option<String>,
     cursor: Option<String>,
 ) -> ThreadListParams {
-    ThreadListParams {
+    thread_list_params(
         cursor,
-        limit: Some(CENTER_THREAD_PAGE_LIMIT),
-        sort_key: Some(ThreadSortKey::UpdatedAt),
-        model_providers: None,
-        source_kinds: Some(center_thread_source_kinds()),
-        archived: Some(false),
-        cwd: None,
+        ThreadSortKey::UpdatedAt,
+        Some(all_thread_source_kinds()),
         search_term,
-    }
+    )
 }
 
 fn token_usage_thread_list_params(limit: usize) -> ThreadListParams {
@@ -1863,42 +1301,27 @@ fn token_usage_thread_list_params(limit: usize) -> ThreadListParams {
         limit: Some(limit as u32),
         sort_key: Some(ThreadSortKey::UpdatedAt),
         model_providers: None,
-        source_kinds: Some(center_thread_source_kinds()),
+        source_kinds: Some(all_thread_source_kinds()),
         archived: Some(false),
         cwd: None,
         search_term: None,
     }
 }
 
-fn center_thread_source_kinds() -> Vec<ThreadSourceKind> {
-    vec![
-        ThreadSourceKind::Cli,
-        ThreadSourceKind::VsCode,
-        ThreadSourceKind::Exec,
-        ThreadSourceKind::AppGateway,
-        ThreadSourceKind::SubAgent,
-        ThreadSourceKind::SubAgentReview,
-        ThreadSourceKind::SubAgentCompact,
-        ThreadSourceKind::SubAgentThreadSpawn,
-        ThreadSourceKind::SubAgentOther,
-        ThreadSourceKind::Unknown,
-    ]
-}
-
-fn center_list_width(total_width: u16) -> u16 {
-    if total_width <= CENTER_SPLIT_GAP.saturating_add(1) {
+fn workspace_list_width(total_width: u16) -> u16 {
+    if total_width <= WORKSPACE_SPLIT_GAP.saturating_add(1) {
         return total_width;
     }
-    let desired = (total_width / 4).clamp(CENTER_LIST_MIN_WIDTH, CENTER_LIST_MAX_WIDTH);
-    let chat_floor = CENTER_CHAT_MIN_WIDTH.min(total_width / 2).max(1);
+    let desired = (total_width / 4).clamp(WORKSPACE_LIST_MIN_WIDTH, WORKSPACE_LIST_MAX_WIDTH);
+    let chat_floor = WORKSPACE_CHAT_MIN_WIDTH.min(total_width / 2).max(1);
     desired
-        .min(total_width.saturating_sub(CENTER_SPLIT_GAP + chat_floor))
+        .min(total_width.saturating_sub(WORKSPACE_SPLIT_GAP + chat_floor))
         .max(1)
 }
 
-fn center_desktop_area(area: Rect) -> Rect {
-    if area.width <= 4 || area.height <= 4 {
-        return area;
+fn workspace_window_inner_area(area: Rect) -> Rect {
+    if area.width <= 2 || area.height <= 2 {
+        return Rect::new(area.x, area.y, 0, 0);
     }
     Rect::new(
         area.x.saturating_add(1),
@@ -1908,7 +1331,7 @@ fn center_desktop_area(area: Rect) -> Rect {
     )
 }
 
-fn center_toolbar_areas(area: Rect) -> (Rect, Rect) {
+fn workspace_toolbar_areas(area: Rect) -> (Rect, Rect) {
     if area.width <= 4 || area.height <= 2 {
         return (Rect::default(), Rect::default());
     }
@@ -1923,8 +1346,8 @@ fn center_toolbar_areas(area: Rect) -> (Rect, Rect) {
     (new_area, search_area)
 }
 
-fn center_row_style(
-    theme: CenterTheme,
+fn workspace_row_style(
+    theme: WorkspaceTheme,
     is_active: bool,
     is_selected: bool,
     is_hovered: bool,
@@ -1936,7 +1359,7 @@ fn center_row_style(
         is_hovered,
         is_controlled,
     ));
-    if matches!(theme.kind, crate::center_theme::CenterThemeKind::Classic)
+    if matches!(theme.kind, crate::workspace::WorkspaceThemeKind::Classic)
         && (is_selected || is_active)
     {
         style.fg(theme.panel_bg).add_modifier(Modifier::BOLD)
@@ -1945,8 +1368,8 @@ fn center_row_style(
     }
 }
 
-fn center_row_accent(
-    theme: CenterTheme,
+fn workspace_row_accent(
+    theme: WorkspaceTheme,
     is_active: bool,
     is_selected: bool,
     is_hovered: bool,
@@ -1960,7 +1383,7 @@ fn center_row_accent(
     ))
 }
 
-fn render_center_row_accent(
+fn render_workspace_row_accent(
     buf: &mut ratatui::buffer::Buffer,
     area: Rect,
     style: Style,
@@ -1969,14 +1392,14 @@ fn render_center_row_accent(
     render_accent_bar(buf, area, style, color);
 }
 
-fn center_status_style(theme: CenterTheme, color: Color, controlled: bool) -> Style {
+fn workspace_status_style(theme: WorkspaceTheme, color: Color, controlled: bool) -> Style {
     theme.visual_palette().status_style(
         InteractiveState::new(false, false, false, controlled),
         color,
     )
 }
 
-fn center_popup_area(
+fn workspace_popup_area(
     list_area: Rect,
     anchor_column: u16,
     anchor_row: u16,
@@ -2005,7 +1428,7 @@ fn center_popup_area(
     Rect::new(x, y, width, height)
 }
 
-fn center_dialog_area(list_area: Rect, width: u16, height: u16) -> Rect {
+fn workspace_dialog_area(list_area: Rect, width: u16, height: u16) -> Rect {
     if list_area.is_empty() || width == 0 || height == 0 {
         return Rect::default();
     }
@@ -2016,88 +1439,116 @@ fn center_dialog_area(list_area: Rect, width: u16, height: u16) -> Rect {
     Rect::new(x, y, width, height)
 }
 
-fn center_fallback_thread_name(id: &str) -> String {
-    format!("thread {}", id.chars().take(8).collect::<String>())
-}
-
-fn center_search_term(query: &str) -> Option<String> {
+fn workspace_search_term(query: &str) -> Option<String> {
     let query = query.trim();
     (!query.is_empty()).then(|| query.to_string())
 }
 
-fn center_menu_actions() -> &'static [CenterMenuAction] {
+fn workspace_menu_actions() -> &'static [WorkspaceMenuAction] {
     &[
-        CenterMenuAction::Open,
-        CenterMenuAction::TogglePin,
-        CenterMenuAction::Rename,
-        CenterMenuAction::Archive,
-        CenterMenuAction::Delete,
-        CenterMenuAction::ForkLocal,
-        CenterMenuAction::CopyThreadId,
+        WorkspaceMenuAction::Open,
+        WorkspaceMenuAction::TogglePin,
+        WorkspaceMenuAction::Rename,
+        WorkspaceMenuAction::Archive,
+        WorkspaceMenuAction::Delete,
+        WorkspaceMenuAction::ForkLocal,
+        WorkspaceMenuAction::CopyThreadId,
     ]
 }
 
-fn center_menu_action_label(
-    action: CenterMenuAction,
+fn workspace_menu_action_label(
+    action: WorkspaceMenuAction,
     pinned: bool,
     locked: bool,
     language: UiLanguage,
 ) -> &'static str {
     match language {
         UiLanguage::En => match action {
-            CenterMenuAction::Open if locked => "View locked",
-            CenterMenuAction::Open => "Open",
-            CenterMenuAction::TogglePin if pinned => "Unpin",
-            CenterMenuAction::TogglePin => "Pin",
-            CenterMenuAction::Rename if locked => "Rename locked",
-            CenterMenuAction::Rename => "Rename...",
-            CenterMenuAction::Archive if locked => "Archive locked",
-            CenterMenuAction::Archive => "Archive",
-            CenterMenuAction::Delete if locked => "Delete locked",
-            CenterMenuAction::Delete => "Delete...",
-            CenterMenuAction::ForkLocal if locked => "Fork locked",
-            CenterMenuAction::ForkLocal => "Fork local",
-            CenterMenuAction::CopyThreadId => "Copy thread id",
+            WorkspaceMenuAction::Open if locked => "View locked",
+            WorkspaceMenuAction::Open => "Open",
+            WorkspaceMenuAction::TogglePin if pinned => "Unpin",
+            WorkspaceMenuAction::TogglePin => "Pin",
+            WorkspaceMenuAction::Rename if locked => "Rename locked",
+            WorkspaceMenuAction::Rename => "Rename...",
+            WorkspaceMenuAction::Archive if locked => "Archive locked",
+            WorkspaceMenuAction::Archive => "Archive",
+            WorkspaceMenuAction::Delete if locked => "Delete locked",
+            WorkspaceMenuAction::Delete => "Delete...",
+            WorkspaceMenuAction::ForkLocal if locked => "Fork locked",
+            WorkspaceMenuAction::ForkLocal => "Fork local",
+            WorkspaceMenuAction::CopyThreadId => "Copy thread id",
         },
         UiLanguage::Cn => match action {
-            CenterMenuAction::Open if locked => "查看锁定线程",
-            CenterMenuAction::Open => "打开",
-            CenterMenuAction::TogglePin if pinned => "取消置顶",
-            CenterMenuAction::TogglePin => "置顶",
-            CenterMenuAction::Rename if locked => "重命名被锁定",
-            CenterMenuAction::Rename => "重命名...",
-            CenterMenuAction::Archive if locked => "归档被锁定",
-            CenterMenuAction::Archive => "归档",
-            CenterMenuAction::Delete if locked => "删除被锁定",
-            CenterMenuAction::Delete => "删除...",
-            CenterMenuAction::ForkLocal if locked => "派生被锁定",
-            CenterMenuAction::ForkLocal => "派生到本地",
-            CenterMenuAction::CopyThreadId => "复制线程 id",
+            WorkspaceMenuAction::Open if locked => "查看锁定线程",
+            WorkspaceMenuAction::Open => "打开",
+            WorkspaceMenuAction::TogglePin if pinned => "取消置顶",
+            WorkspaceMenuAction::TogglePin => "置顶",
+            WorkspaceMenuAction::Rename if locked => "重命名被锁定",
+            WorkspaceMenuAction::Rename => "重命名...",
+            WorkspaceMenuAction::Archive if locked => "归档被锁定",
+            WorkspaceMenuAction::Archive => "归档",
+            WorkspaceMenuAction::Delete if locked => "删除被锁定",
+            WorkspaceMenuAction::Delete => "删除...",
+            WorkspaceMenuAction::ForkLocal if locked => "派生被锁定",
+            WorkspaceMenuAction::ForkLocal => "派生到本地",
+            WorkspaceMenuAction::CopyThreadId => "复制线程 id",
         },
     }
 }
 
-fn center_menu_action_disabled(action: CenterMenuAction, locked: bool) -> bool {
+fn workspace_menu_action_disabled(action: WorkspaceMenuAction, locked: bool) -> bool {
     locked
         && matches!(
             action,
-            CenterMenuAction::Rename
-                | CenterMenuAction::Archive
-                | CenterMenuAction::Delete
-                | CenterMenuAction::ForkLocal
+            WorkspaceMenuAction::Rename
+                | WorkspaceMenuAction::Archive
+                | WorkspaceMenuAction::Delete
+                | WorkspaceMenuAction::ForkLocal
         )
 }
 
-fn center_menu_action_at(area: Option<Rect>, column: u16, row: u16) -> Option<CenterMenuAction> {
+fn workspace_menu_action_at(
+    area: Option<Rect>,
+    column: u16,
+    row: u16,
+) -> Option<WorkspaceMenuAction> {
     let area = area?;
     if !rect_contains(area, column, row) {
         return None;
     }
     let line_index = row.checked_sub(area.y.saturating_add(1))?;
-    center_menu_actions().get(line_index as usize).copied()
+    workspace_menu_actions().get(line_index as usize).copied()
 }
 
-fn center_rename_target_at(area: Option<Rect>, column: u16, row: u16) -> Option<CenterMouseTarget> {
+fn workspace_open_folder_target_at(
+    area: Option<Rect>,
+    column: u16,
+    row: u16,
+) -> Option<WorkspaceMouseTarget> {
+    let area = area?;
+    if !rect_contains(area, column, row) {
+        return None;
+    }
+    let action_y = area.bottom().saturating_sub(2);
+    if row != action_y {
+        return None;
+    }
+    let open_area = Rect::new(area.x.saturating_add(2), action_y, 10, 1);
+    let cancel_area = Rect::new(area.x.saturating_add(14), action_y, 12, 1);
+    if rect_contains(open_area, column, row) {
+        Some(WorkspaceMouseTarget::OpenFolderConfirm)
+    } else if rect_contains(cancel_area, column, row) {
+        Some(WorkspaceMouseTarget::OpenFolderCancel)
+    } else {
+        None
+    }
+}
+
+fn workspace_rename_target_at(
+    area: Option<Rect>,
+    column: u16,
+    row: u16,
+) -> Option<WorkspaceMouseTarget> {
     let area = area?;
     if !rect_contains(area, column, row) {
         return None;
@@ -2109,19 +1560,19 @@ fn center_rename_target_at(area: Option<Rect>, column: u16, row: u16) -> Option<
     let save_area = Rect::new(area.x.saturating_add(2), action_y, 8, 1);
     let cancel_area = Rect::new(area.x.saturating_add(12), action_y, 10, 1);
     if rect_contains(save_area, column, row) {
-        Some(CenterMouseTarget::RenameSave)
+        Some(WorkspaceMouseTarget::RenameSave)
     } else if rect_contains(cancel_area, column, row) {
-        Some(CenterMouseTarget::RenameCancel)
+        Some(WorkspaceMouseTarget::RenameCancel)
     } else {
         None
     }
 }
 
-fn center_archive_target_at(
+fn workspace_archive_target_at(
     area: Option<Rect>,
     column: u16,
     row: u16,
-) -> Option<CenterMouseTarget> {
+) -> Option<WorkspaceMouseTarget> {
     let area = area?;
     if !rect_contains(area, column, row) {
         return None;
@@ -2133,15 +1584,19 @@ fn center_archive_target_at(
     let confirm_area = Rect::new(area.x.saturating_add(2), action_y, 10, 1);
     let cancel_area = Rect::new(area.x.saturating_add(14), action_y, 10, 1);
     if rect_contains(confirm_area, column, row) {
-        Some(CenterMouseTarget::ArchiveConfirm)
+        Some(WorkspaceMouseTarget::ArchiveConfirm)
     } else if rect_contains(cancel_area, column, row) {
-        Some(CenterMouseTarget::ArchiveCancel)
+        Some(WorkspaceMouseTarget::ArchiveCancel)
     } else {
         None
     }
 }
 
-fn center_delete_target_at(area: Option<Rect>, column: u16, row: u16) -> Option<CenterMouseTarget> {
+fn workspace_delete_target_at(
+    area: Option<Rect>,
+    column: u16,
+    row: u16,
+) -> Option<WorkspaceMouseTarget> {
     let area = area?;
     if !rect_contains(area, column, row) {
         return None;
@@ -2149,9 +1604,9 @@ fn center_delete_target_at(area: Option<Rect>, column: u16, row: u16) -> Option<
     let confirm_area = Rect::new(area.x + 2, area.y + 3, 10, 1);
     let cancel_area = Rect::new(area.x + 14, area.y + 3, 10, 1);
     if rect_contains(confirm_area, column, row) {
-        Some(CenterMouseTarget::DeleteConfirm)
+        Some(WorkspaceMouseTarget::DeleteConfirm)
     } else if rect_contains(cancel_area, column, row) {
-        Some(CenterMouseTarget::DeleteCancel)
+        Some(WorkspaceMouseTarget::DeleteCancel)
     } else {
         None
     }
@@ -2173,272 +1628,19 @@ fn next_char_boundary(value: &str, cursor: usize) -> usize {
         .unwrap_or(value.len())
 }
 
-fn center_status_priority(status: &ThreadStatus) -> u8 {
-    match status {
-        ThreadStatus::Active { .. } => 2,
-        ThreadStatus::Idle => 1,
-        ThreadStatus::SystemError | ThreadStatus::NotLoaded => 0,
-    }
-}
-
-fn center_row_priority(row: &CenterThreadRow) -> u8 {
-    if center_row_is_controlled(row) {
-        return 3;
-    }
-    center_status_priority(&row.status)
-}
-
-fn center_row_is_controlled(row: &CenterThreadRow) -> bool {
-    row.control_state.is_some() || center_status_has_controlled_flag(&row.status)
-}
-
-fn center_row_is_closed(row: &CenterThreadRow) -> bool {
-    matches!(row.status, ThreadStatus::NotLoaded)
-}
-
-fn center_status_has_controlled_flag(status: &ThreadStatus) -> bool {
-    matches!(
-        status,
-        ThreadStatus::Active { active_flags }
-            if active_flags.contains(&ThreadActiveFlag::Controlled)
-    )
-}
-
-fn center_status_has_running_flag(status: &ThreadStatus) -> bool {
-    matches!(
-        status,
-        ThreadStatus::Active { active_flags }
-            if active_flags.contains(&ThreadActiveFlag::Running)
-    )
-}
-
-fn center_status_without_control(status: &ThreadStatus) -> ThreadStatus {
-    match status {
-        ThreadStatus::Active { active_flags } => {
-            let active_flags: Vec<ThreadActiveFlag> = active_flags
-                .iter()
-                .copied()
-                .filter(|flag| *flag != ThreadActiveFlag::Controlled)
-                .collect();
-            if active_flags.is_empty() {
-                ThreadStatus::Idle
-            } else {
-                ThreadStatus::Active { active_flags }
-            }
-        }
-        status => status.clone(),
-    }
-}
-
-fn center_row_should_auto_observe(row: &CenterThreadRow) -> bool {
-    center_row_is_controlled(row) || matches!(row.status, ThreadStatus::Active { .. })
-}
-
-fn center_row_status_label(row: &CenterThreadRow) -> String {
-    let activity = match &row.status {
-        ThreadStatus::Active { active_flags }
-            if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval)
-                || active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) =>
-        {
-            "WAIT"
-        }
-        ThreadStatus::Active { .. } if center_status_has_running_flag(&row.status) => "RUN",
-        ThreadStatus::Active { .. } if center_row_is_controlled(row) => "LOCK",
-        ThreadStatus::Active { .. } => "RUN",
-        ThreadStatus::Idle if center_row_is_controlled(row) => "LOCK",
-        ThreadStatus::Idle => "IDLE",
-        ThreadStatus::SystemError => "ERR",
-        ThreadStatus::NotLoaded if center_row_is_controlled(row) => "LOCK",
-        ThreadStatus::NotLoaded => "COLD",
-    };
-    let Some(control_label) = center_row_control_label(row) else {
-        return activity.to_string();
-    };
-    format!("{activity} {control_label}")
-}
-
-fn center_row_subagent_marker(row: &CenterThreadRow) -> Option<String> {
-    if row.subagents.is_empty() {
-        return None;
-    }
-    if row.subagents.closed > 0 {
-        return Some(format!(
-            "子代理 {} · 关闭 {}",
-            row.subagents.open, row.subagents.closed
-        ));
-    }
-    Some(format!("子代理 {}", row.subagents.open))
-}
-
-fn center_closed_subagents_label(count: usize, language: UiLanguage) -> String {
-    match language {
-        UiLanguage::En => format!("Closed subagents {count}"),
-        UiLanguage::Cn => format!("已关闭子代理 {count}"),
-    }
-}
-
-fn center_closed_subagents_detail(count: usize, language: UiLanguage) -> String {
-    match language {
-        UiLanguage::En => format!("{count} inactive subagent thread(s)"),
-        UiLanguage::Cn => format!("{count} 条已关闭子代理线程"),
-    }
-}
-
-fn center_row_tree_prefix(row: &CenterThreadRow, expanded: bool) -> &'static str {
-    if row.subagent_parent_thread_id.is_some() {
-        return "└";
-    }
-    if row.subagents.is_empty() {
-        " "
-    } else if expanded {
-        "▾"
-    } else {
-        "▸"
-    }
-}
-
-fn center_row_tree_depth(row: &CenterThreadRow) -> u16 {
-    match row.subagent_depth {
-        Some(depth) if depth > 0 => depth as u16,
-        _ if row.subagent_parent_thread_id.is_some() => 1,
-        _ => 0,
-    }
-}
-
-fn center_row_tree_indent(row: &CenterThreadRow) -> u16 {
-    center_row_tree_depth(row)
-        .saturating_mul(CENTER_SUBAGENT_INDENT_STEP)
-        .min(CENTER_SUBAGENT_INDENT_MAX)
-}
-
-fn center_context_subagent_lines(
-    row: Option<&CenterThreadRow>,
-    language: UiLanguage,
-) -> Vec<String> {
-    let Some(row) = row else {
-        return Vec::new();
-    };
-    let mut lines = Vec::new();
-    if !row.subagents.is_empty() {
-        let closed = row.subagents.closed;
-        let header = match language {
-            UiLanguage::En => format!(
-                "Subagents {}  open {}  running {}",
-                row.subagents.total, row.subagents.open, row.subagents.running
-            ),
-            UiLanguage::Cn => format!(
-                "子代理 {}  打开 {}  运行 {}",
-                row.subagents.total, row.subagents.open, row.subagents.running
-            ),
-        };
-        lines.push(if closed > 0 {
-            match language {
-                UiLanguage::En => format!("{header}  closed {closed}"),
-                UiLanguage::Cn => format!("{header}  关闭 {closed}"),
-            }
-        } else {
-            header
-        });
-        for label in &row.subagents.labels {
-            lines.push(format!("  - {label}"));
-        }
-        if row.subagents.open > row.subagents.labels.len() {
-            let remaining = row.subagents.open - row.subagents.labels.len();
-            lines.push(match language {
-                UiLanguage::En => format!("  + {remaining} more"),
-                UiLanguage::Cn => format!("  + 还有 {remaining} 个"),
-            });
-        }
-    }
-    if let Some(depth) = row.subagent_depth {
-        let parent = row
-            .subagent_parent_thread_id
-            .map(|thread_id| thread_id.to_string())
-            .map(|thread_id| thread_id.chars().take(8).collect::<String>())
-            .unwrap_or_else(|| "unknown".to_string());
-        lines.push(match language {
-            UiLanguage::En => format!("Subagent  depth {depth}  parent {parent}"),
-            UiLanguage::Cn => format!("子代理  深度 {depth}  父线程 {parent}"),
-        });
-    }
-    lines
-}
-
-fn center_row_control_label(row: &CenterThreadRow) -> Option<String> {
-    if let Some(control_state) = row.control_state.as_ref() {
-        let label = match (control_state.controller.kind, control_state.controller.rank) {
-            (ThreadControllerKind::External, _) => "EXT".to_string(),
-            (ThreadControllerKind::Thread, Some(rank)) => format!("R{rank}"),
-            (ThreadControllerKind::Thread, None) => "CTRL".to_string(),
-        };
-        return Some(if control_state.read_only {
-            format!("{label}*")
-        } else {
-            label
-        });
-    }
-    center_status_has_controlled_flag(&row.status).then(|| "CTRL".to_string())
-}
-
-fn center_row_control_marker(row: &CenterThreadRow) -> &'static str {
-    if let Some(control_state) = row.control_state.as_ref() {
-        return match control_state.controller.kind {
-            ThreadControllerKind::External => "E",
-            ThreadControllerKind::Thread => "R",
-        };
-    }
-    if center_status_has_controlled_flag(&row.status) {
-        "C"
-    } else {
-        " "
-    }
-}
-
-fn center_control_detail(control_state: &ThreadControlState, language: UiLanguage) -> String {
-    let controller_kind = match control_state.controller.kind {
-        ThreadControllerKind::Thread => language.center_controller_kind(true),
-        ThreadControllerKind::External => language.center_controller_kind(false),
-    };
-    let rank = control_state
-        .controller
-        .rank
-        .map(|rank| format!("R{rank} "))
-        .unwrap_or_default();
-    let label = control_state
-        .controller
-        .label
-        .as_deref()
-        .unwrap_or(control_state.controller.id.as_str());
-    let mode = language.center_control_mode(control_state.read_only);
-    let reason = control_state
-        .reason
-        .as_deref()
-        .map(center_single_line)
-        .filter(|reason| !reason.is_empty())
-        .map(|reason| format!("  {reason}"))
-        .unwrap_or_default();
-    match language {
-        UiLanguage::En => format!("{mode} by {rank}{controller_kind}:{label}{reason}"),
-        UiLanguage::Cn => format!(
-            "{mode}{} {rank}{controller_kind}:{label}{reason}",
-            language.center_control_by()
-        ),
-    }
-}
-
-fn center_cache_label(info: Option<&TokenUsageInfo>, expanded: bool) -> Option<String> {
+fn workspace_cache_label(info: Option<&TokenUsageInfo>, expanded: bool) -> Option<String> {
     let info = info?;
     let mut parts = Vec::new();
-    if let Some(part) = center_cache_segment("L", &info.last_token_usage, expanded) {
+    if let Some(part) = workspace_cache_segment("L", &info.last_token_usage, expanded) {
         parts.push(part);
     }
-    if let Some(part) = center_cache_segment("T", &info.total_token_usage, expanded) {
+    if let Some(part) = workspace_cache_segment("T", &info.total_token_usage, expanded) {
         parts.push(part);
     }
     (!parts.is_empty()).then(|| format!("cache {}", parts.join("/")))
 }
 
-fn center_cache_segment(
+fn workspace_cache_segment(
     prefix: &str,
     usage: &praxis_protocol::protocol::TokenUsage,
     expanded: bool,
@@ -2456,12 +1658,12 @@ fn center_cache_segment(
     ))
 }
 
-fn center_truncate(text: &str, max_chars: usize) -> String {
+fn workspace_truncate(text: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
     }
 
-    let text = center_single_line(text);
+    let text = workspace_single_line(text);
     if UnicodeWidthStr::width(text.as_str()) <= max_chars {
         return text;
     }
@@ -2483,12 +1685,8 @@ fn center_truncate(text: &str, max_chars: usize) -> String {
     out
 }
 
-fn center_single_line(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 fn truncate_for_goal_notice(text: &str) -> String {
-    let normalized = center_single_line(text);
+    let normalized = workspace_single_line(text);
     if normalized.chars().count() <= 96 {
         return normalized;
     }
@@ -2824,12 +2022,6 @@ impl App {
                 vec![key.to_string()]
             }
         };
-        let windows_sandbox_changed = updates.iter().any(|(feature, _)| {
-            matches!(
-                feature,
-                Feature::WindowsSandbox | Feature::WindowsSandboxElevated
-            )
-        });
         let mut approval_policy_override = None;
         let mut approvals_reviewer_override = None;
         let mut sandbox_policy_override = None;
@@ -3020,31 +2212,6 @@ impl App {
             if submitted && let Some(op) = replay_state_op.as_ref() {
                 self.note_active_thread_outbound_op(op).await;
                 self.refresh_pending_thread_approvals().await;
-            }
-        }
-
-        if windows_sandbox_changed {
-            #[cfg(target_os = "windows")]
-            {
-                let windows_sandbox_level = WindowsSandboxLevel::from_config(&self.config);
-                self.app_event_tx.send(AppEvent::CodexOp(
-                    AppCommand::override_turn_context(
-                        /*cwd*/ None,
-                        /*approval_policy*/ None,
-                        /*approvals_reviewer*/ None,
-                        /*sandbox_policy*/ None,
-                        #[cfg(target_os = "windows")]
-                        Some(windows_sandbox_level),
-                        /*model_provider*/ None,
-                        /*model*/ None,
-                        /*effort*/ None,
-                        /*summary*/ None,
-                        /*service_tier*/ None,
-                        /*collaboration_mode*/ None,
-                        /*personality*/ None,
-                    )
-                    .into_core(),
-                ));
             }
         }
 
@@ -3432,13 +2599,29 @@ impl App {
         app_gateway: &mut AppGatewaySession,
         op: AppCommand,
     ) -> Result<()> {
-        let Some(thread_id) = self.active_thread_id else {
+        let Some(thread_id) = self.active_thread_id.or(self.chat_widget.thread_id()) else {
             self.chat_widget
                 .add_error_message("No active thread is available.".to_string());
             return Ok(());
         };
 
         self.submit_thread_op(app_gateway, thread_id, op).await
+    }
+
+    async fn submit_active_thread_op_or_start(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        op: AppCommand,
+    ) -> Result<()> {
+        if op.is_user_turn()
+            && self.active_thread_id.is_none()
+            && self.chat_widget.thread_id().is_none()
+        {
+            self.start_fresh_session_with_summary_hint(tui, app_gateway)
+                .await;
+        }
+        self.submit_active_thread_op(app_gateway, op).await
     }
 
     async fn submit_thread_op(
@@ -4289,7 +3472,7 @@ impl App {
         self.chat_widget
             .set_initial_user_message_submit_suppressed(/*suppressed*/ true);
         self.chat_widget.handle_thread_session(session);
-        let turns = self.turns_for_visible_replay(turns);
+        let turns = compact_visible_replay_turns(turns);
         self.chat_widget
             .replay_thread_turns(turns, ReplayKind::ResumeInitialMessages);
         let pending = std::mem::take(&mut self.pending_primary_events);
@@ -4435,7 +3618,7 @@ impl App {
         }
 
         let mut initial_selected_idx = None;
-        let items: Vec<SelectionItem> = self
+        let rows: Vec<AgentPickerRow> = self
             .agent_navigation
             .ordered_threads()
             .iter()
@@ -4455,29 +3638,22 @@ impl App {
                     is_primary,
                 );
                 let uuid = thread_id.to_string();
-                SelectionItem {
+                AgentPickerRow {
+                    thread_id: id,
                     name: name.clone(),
-                    name_prefix_spans: agent_picker_status_dot_spans(entry.is_closed),
-                    description: Some(uuid.clone()),
+                    description: uuid.clone(),
                     is_current: self.active_thread_id == Some(*thread_id),
-                    actions: vec![Box::new(move |tx| {
-                        tx.send(AppEvent::SelectAgentThread(id));
-                    })],
-                    dismiss_on_select: true,
-                    search_value: Some(format!("{name} {uuid}")),
-                    ..Default::default()
+                    is_closed: entry.is_closed,
+                    search_value: format!("{name} {uuid}"),
                 }
             })
             .collect();
 
-        self.chat_widget.show_selection_view(SelectionViewParams {
-            title: Some("Subagents".to_string()),
-            subtitle: Some(AgentNavigationState::picker_subtitle()),
-            footer_hint: Some(standard_popup_hint_line()),
-            items,
+        self.workspace.open_agent_picker(AgentPickerState::new(
+            rows,
             initial_selected_idx,
-            ..Default::default()
-        });
+            AgentNavigationState::picker_subtitle(),
+        ));
     }
 
     fn is_terminal_thread_read_error(err: &color_eyre::Report) -> bool {
@@ -4875,7 +4051,7 @@ impl App {
     fn reset_for_thread_switch(&mut self, tui: &mut tui::Tui) -> Result<()> {
         tui.clear_pending_history_lines();
         self.reset_thread_view_state();
-        if self.center.enabled {
+        if self.workspace.enabled {
             return Ok(());
         }
         tui.terminal.clear_scrollback()?;
@@ -4894,7 +4070,7 @@ impl App {
         self.primary_session_configured = None;
         self.pending_primary_events.clear();
         self.pending_app_gateway_requests.clear();
-        self.center_observed_thread_ids.clear();
+        self.workspace_observed_thread_ids.clear();
         self.chat_widget.set_pending_thread_approvals(Vec::new());
         self.sync_active_agent_label();
     }
@@ -4999,8 +4175,8 @@ impl App {
     /// thread creation so that the `/agent` picker and keyboard navigation are pre-populated even
     /// if the TUI did not witness the original spawn events.
     ///
-    /// The loaded-thread list is fetched in full (no pagination) and the spawn tree is walked
-    /// by `find_loaded_subagent_threads_for_primary`. Each discovered subagent is registered via
+    /// The loaded-thread list is fetched page-by-page and the spawn tree is walked by
+    /// `find_loaded_subagent_threads_for_primary`. Each discovered subagent is registered via
     /// `upsert_agent_picker_thread`, which writes to both `AgentNavigationState` and the
     /// `ChatWidget` metadata map.
     async fn backfill_loaded_subagent_threads(
@@ -5011,19 +4187,25 @@ impl App {
             return false;
         };
 
-        let loaded_thread_ids = match app_gateway
-            .thread_loaded_list(ThreadLoadedListParams {
-                cursor: None,
-                limit: None,
-            })
-            .await
-        {
-            Ok(response) => response.data,
-            Err(err) => {
-                tracing::warn!(%err, "failed to list loaded threads for subagent backfill");
-                return false;
-            }
-        };
+        let mut loaded_thread_ids = Vec::new();
+        let mut cursor = None;
+        loop {
+            let response = match app_gateway
+                .thread_loaded_list(loaded_thread_list_params(cursor.clone()))
+                .await
+            {
+                Ok(response) => response,
+                Err(err) => {
+                    tracing::warn!(%err, "failed to list loaded threads for subagent backfill");
+                    return false;
+                }
+            };
+            loaded_thread_ids.extend(response.data);
+            let Some(next_cursor) = response.next_cursor else {
+                break;
+            };
+            cursor = Some(next_cursor);
+        }
 
         let mut threads = Vec::new();
         let mut had_read_error = false;
@@ -5170,7 +4352,7 @@ impl App {
         self.chat_widget
             .restore_thread_input_state(snapshot.input_state);
         if !snapshot.turns.is_empty() {
-            let turns = self.turns_for_visible_replay(snapshot.turns);
+            let turns = compact_visible_replay_turns(snapshot.turns);
             self.chat_widget
                 .replay_thread_turns(turns, ReplayKind::ThreadSnapshot);
         }
@@ -5210,14 +4392,6 @@ impl App {
         waiting_for_initial_session_configured && primary_thread_id.is_some()
     }
 
-    fn turns_for_visible_replay(&self, turns: Vec<Turn>) -> Vec<Turn> {
-        if !self.center.enabled || turns.len() <= CENTER_REPLAY_TURN_LIMIT {
-            return turns;
-        }
-        let skip = turns.len().saturating_sub(CENTER_REPLAY_TURN_LIMIT);
-        turns.into_iter().skip(skip).collect()
-    }
-
     async fn drain_app_gateway_events(&mut self, app_gateway: &mut AppGatewaySession) {
         for _ in 0..APP_GATEWAY_EVENT_DRAIN_BUDGET {
             let Some(event) = app_gateway.try_next_event() else {
@@ -5247,6 +4421,50 @@ impl App {
                 .is_none_or(|last| last.elapsed() >= APP_GATEWAY_RECONNECT_INTERVAL)
     }
 
+    fn app_gateway_reconnect_delay(&self) -> Option<Duration> {
+        if !self.app_gateway_reconnect_pending {
+            return None;
+        }
+        Some(
+            self.last_app_gateway_reconnect_attempt
+                .map_or(Duration::ZERO, |last| {
+                    APP_GATEWAY_RECONNECT_INTERVAL.saturating_sub(last.elapsed())
+                }),
+        )
+    }
+
+    fn is_app_gateway_transport_error(err: &color_eyre::Report) -> bool {
+        err.chain().any(|cause| {
+            matches!(
+                cause.downcast_ref::<TypedRequestError>(),
+                Some(TypedRequestError::Transport { .. })
+            ) || cause.downcast_ref::<std::io::Error>().is_some_and(|io| {
+                matches!(
+                    io.kind(),
+                    std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::NotConnected
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::UnexpectedEof
+                )
+            })
+        })
+    }
+
+    fn handle_app_gateway_loop_error(
+        &mut self,
+        app_gateway: &AppGatewaySession,
+        err: color_eyre::Report,
+    ) -> color_eyre::Result<AppRunControl> {
+        if app_gateway.is_remote() && Self::is_app_gateway_transport_error(&err) {
+            self.mark_app_gateway_disconnected(err.to_string());
+            Ok(AppRunControl::Continue)
+        } else {
+            Err(err)
+        }
+    }
+
     async fn try_reconnect_app_gateway(&mut self, app_gateway: &mut AppGatewaySession) -> bool {
         if !self.should_retry_app_gateway_reconnect() {
             return false;
@@ -5262,11 +4480,11 @@ impl App {
             Ok(()) => {
                 self.app_gateway_reconnect_pending = false;
                 self.last_app_gateway_reconnect_attempt = None;
-                self.center_observed_thread_ids.clear();
+                self.workspace_observed_thread_ids.clear();
                 self.chat_widget
                     .add_info_message("Reconnected to Praxis gateway.".to_string(), None);
-                self.refresh_center_threads(app_gateway, true);
-                self.observe_existing_center_threads_if_needed(app_gateway)
+                self.refresh_workspace_threads(app_gateway, true);
+                self.observe_existing_workspace_threads_if_needed(app_gateway)
                     .await;
                 true
             }
@@ -5289,12 +4507,12 @@ impl App {
         initial_prompt: Option<String>,
         initial_images: Vec<PathBuf>,
         session_selection: SessionSelection,
-        feedback: praxis_feedback::CodexFeedback,
+        feedback: praxis_feedback::PraxisFeedback,
         is_first_run: bool,
         should_prompt_windows_sandbox_nux_at_startup: bool,
         remote_app_gateway_url: Option<String>,
         remote_app_gateway_auth_token: Option<String>,
-        center_mode: bool,
+        workspace_mode: bool,
     ) -> Result<AppExitInfo> {
         use tokio_stream::StreamExt;
         let (app_event_tx, mut app_event_rx) = unbounded_channel();
@@ -5371,7 +4589,7 @@ impl App {
         let enhanced_keys_supported = tui.enhanced_keys_supported();
         let wait_for_initial_session_configured =
             Self::should_wait_for_initial_session(&session_selection);
-        let defer_empty_center_session = center_mode
+        let defer_empty_workspace_session = workspace_mode
             && matches!(
                 session_selection,
                 SessionSelection::StartFresh | SessionSelection::Exit
@@ -5387,7 +4605,7 @@ impl App {
                     is_first_run,
                 )
                 .await;
-                let started = if defer_empty_center_session {
+                let started = if defer_empty_workspace_session {
                     None
                 } else {
                     Some(app_gateway.start_thread(&config).await?)
@@ -5572,8 +4790,9 @@ impl App {
             primary_session_configured: None,
             pending_primary_events: VecDeque::new(),
             pending_app_gateway_requests: PendingAppGatewayRequests::default(),
-            center: CenterState::new(center_mode),
-            center_observed_thread_ids: HashSet::new(),
+            workspace: WorkspaceState::new(workspace_mode),
+            workspace_observed_thread_ids: HashSet::new(),
+            workspace_session_picker_loaders: HashMap::new(),
             mouse: MouseInteractionState::default(),
             mouse_capture_resume_at: None,
         };
@@ -5581,7 +4800,7 @@ impl App {
             app.enqueue_primary_thread_session(started.session, started.turns)
                 .await?;
         }
-        app.refresh_center_threads(&app_gateway, true);
+        app.refresh_workspace_threads(&app_gateway, true);
 
         // On startup, if Agent mode (workspace-write) or ReadOnly is active, warn about world-writable dirs on Windows.
         #[cfg(target_os = "windows")]
@@ -5648,11 +4867,22 @@ impl App {
             Ok(exit_reason)
         } else {
             loop {
+                let app_gateway_reconnect_delay = app.app_gateway_reconnect_delay();
                 let control = select! {
+                    _ = tokio::time::sleep(app_gateway_reconnect_delay.unwrap_or(APP_GATEWAY_RECONNECT_INTERVAL)), if app_gateway_reconnect_delay.is_some() => {
+                        if app.try_reconnect_app_gateway(&mut app_gateway).await {
+                            listen_for_app_gateway_events = true;
+                            tui.frame_requester().schedule_frame();
+                        }
+                        AppRunControl::Continue
+                    }
                     Some(event) = app_event_rx.recv() => {
                         match app.handle_event(tui, &mut app_gateway, event).await {
                             Ok(control) => control,
-                            Err(err) => break Err(err),
+                            Err(err) => match app.handle_app_gateway_loop_error(&app_gateway, err) {
+                                Ok(control) => control,
+                                Err(err) => break Err(err),
+                            },
                         }
                     }
                     active = async {
@@ -5667,17 +4897,25 @@ impl App {
                     ) => {
                         if let Some(event) = active {
                             if let Err(err) = app.handle_active_thread_event(tui, &mut app_gateway, event).await {
-                                break Err(err);
+                                match app.handle_app_gateway_loop_error(&app_gateway, err) {
+                                    Ok(control) => control,
+                                    Err(err) => break Err(err),
+                                }
+                            } else {
+                                AppRunControl::Continue
                             }
                         } else {
                             app.clear_active_thread().await;
+                            AppRunControl::Continue
                         }
-                        AppRunControl::Continue
                     }
                     Some(event) = tui_events.next() => {
                         match app.handle_tui_event(tui, &mut app_gateway, event).await {
                             Ok(control) => control,
-                            Err(err) => break Err(err),
+                            Err(err) => match app.handle_app_gateway_loop_error(&app_gateway, err) {
+                                Ok(control) => control,
+                                Err(err) => break Err(err),
+                            },
                         }
                     }
                     app_gateway_event = app_gateway.next_event(), if listen_for_app_gateway_events => {
@@ -5689,6 +4927,11 @@ impl App {
                             }
                             None => {
                                 listen_for_app_gateway_events = false;
+                                if app_gateway.is_remote() {
+                                    app.mark_app_gateway_disconnected(
+                                        "remote app-gateway event stream closed".to_string(),
+                                    );
+                                }
                                 tracing::warn!("app-gateway event stream closed");
                             }
                         }
@@ -5776,7 +5019,7 @@ impl App {
                     self.chat_widget.handle_paste(pasted);
                 }
                 TuiEvent::Draw => {
-                    self.refresh_center_threads(app_gateway, false);
+                    self.refresh_workspace_threads(app_gateway, false);
                     if self.backtrack_render_pending {
                         self.start_transcript_scrollback_backfill(tui);
                     }
@@ -5795,8 +5038,12 @@ impl App {
                     let terminal_size = tui.terminal.size()?;
                     let draw_height = terminal_size.height;
                     tui.draw(draw_height, |frame| {
-                        let chat_area = self.render_center_or_chat(frame.area(), frame.buffer);
-                        let cursor_pos = self.chat_widget.center_cursor_pos(chat_area);
+                        let chat_area = self.render_workspace_or_chat(frame.area(), frame.buffer);
+                        let cursor_pos = if self.workspace.enabled {
+                            self.chat_widget.workspace_cursor_pos_embedded(chat_area)
+                        } else {
+                            self.chat_widget.workspace_cursor_pos(chat_area)
+                        };
                         if let Some((x, y)) = cursor_pos {
                             frame.set_cursor_position((x, y));
                         }
@@ -5886,13 +5133,15 @@ impl App {
                 Ok(None)
             }
             MouseEventKind::ScrollUp => {
-                self.handle_center_mouse_scroll(mouse_event.column, mouse_event.row, -3);
-                tui.frame_requester().schedule_frame();
+                if self.handle_workspace_mouse_scroll(mouse_event.column, mouse_event.row, -3) {
+                    tui.frame_requester().schedule_scroll_frame();
+                }
                 Ok(None)
             }
             MouseEventKind::ScrollDown => {
-                self.handle_center_mouse_scroll(mouse_event.column, mouse_event.row, 3);
-                tui.frame_requester().schedule_frame();
+                if self.handle_workspace_mouse_scroll(mouse_event.column, mouse_event.row, 3) {
+                    tui.frame_requester().schedule_scroll_frame();
+                }
                 Ok(None)
             }
             _ => Ok(None),
@@ -5933,7 +5182,7 @@ impl App {
         }
 
         self.mouse_capture_resume_at = None;
-        if let Err(err) = tui.set_mouse_capture_enabled(self.center.enabled) {
+        if let Err(err) = tui.set_mouse_capture_enabled(self.workspace.enabled) {
             tracing::warn!(error = %err, "failed to restore mouse capture after terminal zoom");
         }
     }
@@ -5945,22 +5194,23 @@ impl App {
             self.mouse.selection = None;
             return;
         };
-        let center_target = (pane == MousePane::CenterList)
-            .then(|| self.center_mouse_target_at(column, row))
-            .flatten();
+        let workspace_target =
+            matches!(pane, MousePane::WorkspaceChrome | MousePane::WorkspaceList)
+                .then(|| self.workspace_mouse_target_at(column, row))
+                .flatten();
         if pane == MousePane::Chat {
-            self.center.clear_search_focus();
-            self.center.clear_overlay();
+            self.workspace.clear_search_focus();
+            self.workspace.clear_overlay();
         }
         self.mouse.down = Some(MouseDownState {
             pane,
             column,
             row,
-            center_thread_index: self.center_thread_index_at(column, row),
-            center_target,
+            workspace_thread_index: self.workspace_thread_index_at(column, row),
+            workspace_target,
         });
-        self.mouse.hover_center_thread_index = self.center_thread_index_at(column, row);
-        self.mouse.hover_center_target = center_target;
+        self.mouse.hover_workspace_thread_index = self.workspace_thread_index_at(column, row);
+        self.mouse.hover_workspace_target = workspace_target;
         self.mouse.drag = None;
         self.mouse.selection = None;
     }
@@ -5968,30 +5218,30 @@ impl App {
     fn handle_mouse_right_down(&mut self, column: u16, row: u16) {
         self.mouse.selection = None;
         if self.mouse_pane_at(column, row) == Some(MousePane::Chat) {
-            self.center.clear_overlay();
-            self.center.clear_search_focus();
+            self.workspace.clear_overlay();
+            self.workspace.clear_search_focus();
             self.paste_clipboard_into_chat();
             return;
         }
-        if !self.center.enabled {
+        if !self.workspace.enabled {
             return;
         }
-        let Some(index) = self.center_thread_index_at(column, row) else {
-            self.center.clear_overlay();
-            self.center.clear_search_focus();
+        let Some(index) = self.workspace_thread_index_at(column, row) else {
+            self.workspace.clear_overlay();
+            self.workspace.clear_search_focus();
             return;
         };
-        let Some(visible_index) = self.center_visible_index_at(column, row) else {
+        let Some(visible_index) = self.workspace_visible_index_at(column, row) else {
             return;
         };
-        let Some(thread_id) = self.center.rows.get(index).map(|row| row.thread_id) else {
+        let Some(thread_id) = self.workspace.rows.get(index).map(|row| row.thread_id) else {
             return;
         };
-        self.center.selected = visible_index;
-        let visible_rows = self.center_visible_row_capacity();
-        self.center.ensure_selected_visible(visible_rows);
-        self.center.clear_search_focus();
-        self.center.overlay = CenterOverlayState::ContextMenu(CenterContextMenuState {
+        self.workspace.selected = visible_index;
+        let visible_rows = self.workspace_visible_row_capacity();
+        self.workspace.ensure_selected_visible(visible_rows);
+        self.workspace.clear_search_focus();
+        self.workspace.overlay = WorkspaceOverlay::ContextMenu(WorkspaceContextMenuState {
             thread_id,
             anchor_column: column,
             anchor_row: row,
@@ -6004,8 +5254,8 @@ impl App {
         if self.mouse.drag.is_some() {
             return;
         }
-        self.mouse.hover_center_thread_index = self.center_thread_index_at(column, row);
-        self.mouse.hover_center_target = self.center_mouse_target_at(column, row);
+        self.mouse.hover_workspace_thread_index = self.workspace_thread_index_at(column, row);
+        self.mouse.hover_workspace_target = self.workspace_mouse_target_at(column, row);
     }
 
     fn handle_mouse_drag(&mut self, column: u16, row: u16) {
@@ -6048,20 +5298,43 @@ impl App {
             return Ok(None);
         }
 
-        if down.pane == MousePane::CenterList {
+        if down.pane == MousePane::WorkspaceChrome {
             return self
-                .handle_center_list_mouse_up(tui, app_gateway, down, column, row)
+                .handle_workspace_chrome_mouse_up(tui, app_gateway, down, column, row)
                 .await;
         }
 
-        if self.center.enabled {
+        if down.pane == MousePane::WorkspaceList {
+            return self
+                .handle_workspace_list_mouse_up(tui, app_gateway, down, column, row)
+                .await;
+        }
+
+        if self.workspace.enabled {
             if down.pane == MousePane::Chat
                 && self.mouse_pane_at(column, row) == Some(MousePane::Chat)
-                && let Some(action) = self.chat_widget.center_chat_mouse_action(column, row)
+                && self.workspace.session_picker().is_some()
             {
-                self.center.clear_overlay();
-                self.center.clear_search_focus();
-                self.chat_widget.handle_center_chat_mouse_action(action);
+                return self
+                    .handle_workspace_session_picker_mouse_up(tui, app_gateway, column, row)
+                    .await;
+            }
+            if down.pane == MousePane::Chat
+                && self.mouse_pane_at(column, row) == Some(MousePane::Chat)
+                && self.workspace.agent_picker().is_some()
+            {
+                return self
+                    .handle_workspace_agent_picker_mouse_up(tui, app_gateway, column, row)
+                    .await;
+            }
+            if down.pane == MousePane::Chat
+                && self.mouse_pane_at(column, row) == Some(MousePane::Chat)
+                && let Some(action) = self.workspace.launch.mouse_action(column, row)
+            {
+                self.workspace.clear_overlay();
+                self.workspace.clear_search_focus();
+                self.chat_widget
+                    .handle_workspace_chat_mouse_action(&mut self.workspace.launch, action);
             }
             return Ok(None);
         }
@@ -6091,7 +5364,69 @@ impl App {
         }
     }
 
-    async fn handle_center_list_mouse_up(
+    async fn handle_workspace_session_picker_mouse_up(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        column: u16,
+        row: u16,
+    ) -> Result<Option<AppRunControl>> {
+        let Some(chat_area) = self.workspace.chat_area else {
+            return Ok(None);
+        };
+        if !rect_contains(chat_area, column, row) {
+            return Ok(None);
+        }
+        let list_y = chat_area.y.saturating_add(4);
+        if row < list_y {
+            return Ok(None);
+        }
+        let effect = {
+            let Some(picker) = self.workspace.session_picker_mut() else {
+                return Ok(None);
+            };
+            let Some(index) = picker.selected_index_at_row(row.saturating_sub(list_y)) else {
+                return Ok(None);
+            };
+            picker.set_selected(index);
+            picker.activate_selected()
+        };
+        self.handle_workspace_session_picker_effect(tui, app_gateway, effect)
+            .await
+    }
+
+    async fn handle_workspace_agent_picker_mouse_up(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        column: u16,
+        row: u16,
+    ) -> Result<Option<AppRunControl>> {
+        let Some(chat_area) = self.workspace.chat_area else {
+            return Ok(None);
+        };
+        if !rect_contains(chat_area, column, row) {
+            return Ok(None);
+        }
+        let list_y = chat_area.y.saturating_add(4);
+        if row < list_y {
+            return Ok(None);
+        }
+        let effect = {
+            let Some(picker) = self.workspace.agent_picker_mut() else {
+                return Ok(None);
+            };
+            let Some(index) = picker.selected_index_at_row(row.saturating_sub(list_y)) else {
+                return Ok(None);
+            };
+            picker.set_selected(index);
+            picker.activate_selected()
+        };
+        self.handle_workspace_agent_picker_effect(tui, app_gateway, effect)
+            .await
+    }
+
+    async fn handle_workspace_chrome_mouse_up(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
@@ -6099,101 +5434,285 @@ impl App {
         column: u16,
         row: u16,
     ) -> Result<Option<AppRunControl>> {
-        let up_target = self.center_mouse_target_at(column, row);
-        match (down.center_target, up_target) {
-            (Some(CenterMouseTarget::NewThread), Some(CenterMouseTarget::NewThread)) => {
-                self.center.clear_overlay();
-                self.center.clear_search_focus();
-                self.start_fresh_session_with_summary_hint(tui, app_gateway)
-                    .await;
-                self.refresh_center_threads(app_gateway, true);
-                Ok(None)
-            }
-            (Some(CenterMouseTarget::Search), Some(CenterMouseTarget::Search)) => {
-                self.center.clear_overlay();
-                self.center.search_focused = true;
-                Ok(None)
-            }
-            (Some(CenterMouseTarget::LoadMore), Some(CenterMouseTarget::LoadMore)) => {
-                self.center.clear_overlay();
-                self.center.clear_search_focus();
-                self.load_more_center_threads(app_gateway);
+        let up_target = self.workspace_mouse_target_at(column, row);
+        match (down.workspace_target, up_target) {
+            (
+                Some(WorkspaceMouseTarget::ChromeMenu(menu)),
+                Some(WorkspaceMouseTarget::ChromeMenu(up_menu)),
+            ) if menu == up_menu => {
+                self.open_workspace_chrome_menu(menu);
                 Ok(None)
             }
             (
-                Some(CenterMouseTarget::SubagentsToggle(index)),
-                Some(CenterMouseTarget::SubagentsToggle(up_index)),
-            ) if index == up_index => {
-                self.center.clear_overlay();
-                self.center.clear_search_focus();
-                let visible_index = self.center.visible_index_for_row(index).unwrap_or(0);
-                self.center.toggle_subagents(index);
-                self.center.selected = visible_index;
-                self.center
-                    .ensure_selected_visible(self.center_visible_row_capacity());
-                Ok(None)
-            }
-            (
-                Some(CenterMouseTarget::ClosedSubagentsToggle(index)),
-                Some(CenterMouseTarget::ClosedSubagentsToggle(up_index)),
-            ) if index == up_index => {
-                self.center.clear_overlay();
-                self.center.clear_search_focus();
-                let visible_index = self
-                    .center
-                    .visible_index_for_closed_subagents(index)
-                    .unwrap_or(0);
-                self.center.toggle_closed_subagents(index);
-                self.center.selected = visible_index;
-                self.center
-                    .ensure_selected_visible(self.center_visible_row_capacity());
-                Ok(None)
-            }
-            (
-                Some(CenterMouseTarget::ContextMenu(action)),
-                Some(CenterMouseTarget::ContextMenu(up_action)),
+                Some(WorkspaceMouseTarget::ChromeAction(action)),
+                Some(WorkspaceMouseTarget::ChromeAction(up_action)),
             ) if action == up_action => {
-                self.execute_center_menu_action(tui, app_gateway, action)
+                self.execute_workspace_chrome_action(tui, app_gateway, action)
                     .await
             }
-            (Some(CenterMouseTarget::RenameSave), Some(CenterMouseTarget::RenameSave)) => {
-                self.commit_center_rename(app_gateway).await;
+            (
+                Some(WorkspaceMouseTarget::OpenFolderConfirm),
+                Some(WorkspaceMouseTarget::OpenFolderConfirm),
+            ) => self.commit_workspace_open_folder(tui, app_gateway).await,
+            (
+                Some(WorkspaceMouseTarget::OpenFolderCancel),
+                Some(WorkspaceMouseTarget::OpenFolderCancel),
+            ) => {
+                self.workspace.clear_overlay();
                 Ok(None)
             }
-            (Some(CenterMouseTarget::RenameCancel), Some(CenterMouseTarget::RenameCancel)) => {
-                self.center.clear_overlay();
+            _ if matches!(self.workspace.overlay, WorkspaceOverlay::ChromeMenu(_)) => {
+                self.workspace.clear_overlay();
                 Ok(None)
             }
-            (Some(CenterMouseTarget::ArchiveConfirm), Some(CenterMouseTarget::ArchiveConfirm)) => {
-                self.confirm_center_archive(tui, app_gateway).await;
+            _ => Ok(None),
+        }
+    }
+
+    fn open_workspace_chrome_menu(&mut self, menu: WorkspaceChromeMenu) {
+        self.workspace.clear_search_focus();
+        let selected = match &self.workspace.overlay {
+            WorkspaceOverlay::ChromeMenu(current) if current.menu == menu => {
+                self.workspace.clear_overlay();
+                return;
+            }
+            _ => 0,
+        };
+        self.workspace.overlay = WorkspaceOverlay::ChromeMenu(WorkspaceChromeMenuState {
+            menu,
+            selected,
+            area: None,
+        });
+    }
+
+    async fn execute_workspace_chrome_action(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        action: WorkspaceChromeAction,
+    ) -> Result<Option<AppRunControl>> {
+        match action {
+            WorkspaceChromeAction::NewChat => {
+                self.workspace.clear_overlay();
+                self.workspace.clear_search_focus();
+                self.start_fresh_session_with_summary_hint(tui, app_gateway)
+                    .await;
+                self.refresh_workspace_threads(app_gateway, true);
                 Ok(None)
             }
-            (Some(CenterMouseTarget::ArchiveCancel), Some(CenterMouseTarget::ArchiveCancel)) => {
-                self.center.clear_overlay();
+            WorkspaceChromeAction::OpenFolder => {
+                self.workspace.clear_search_focus();
+                let value = self.config.cwd.display().to_string();
+                let cursor = value.len();
+                self.workspace.overlay = WorkspaceOverlay::OpenFolder(WorkspaceOpenFolderState {
+                    value,
+                    cursor,
+                    message: None,
+                    area: None,
+                });
                 Ok(None)
             }
-            (Some(CenterMouseTarget::DeleteConfirm), Some(CenterMouseTarget::DeleteConfirm)) => {
-                self.confirm_center_delete(tui, app_gateway).await;
+            WorkspaceChromeAction::HelpWebsite => {
+                self.workspace.clear_overlay();
+                let language = self.chat_widget.ui_language();
+                let message = match language {
+                    UiLanguage::En => "Cunning3D website is not configured yet.",
+                    UiLanguage::Cn => "Cunning3D 官网入口还没有配置。",
+                };
+                self.chat_widget.add_info_message(message.to_string(), None);
                 Ok(None)
             }
-            (Some(CenterMouseTarget::DeleteCancel), Some(CenterMouseTarget::DeleteCancel)) => {
-                self.center.clear_overlay();
+        }
+    }
+
+    async fn commit_workspace_open_folder(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+    ) -> Result<Option<AppRunControl>> {
+        let value = match self.workspace.overlay.clone() {
+            WorkspaceOverlay::OpenFolder(prompt) => prompt.value,
+            _ => return Ok(None),
+        };
+        let raw = value.trim();
+        if raw.is_empty() {
+            self.set_workspace_open_folder_message("Path cannot be empty.".to_string());
+            return Ok(None);
+        }
+        let path = PathBuf::from(raw);
+        let resolved = if path.is_absolute() {
+            path
+        } else {
+            self.config.cwd.as_path().join(path)
+        };
+        let cwd = match std::fs::canonicalize(&resolved) {
+            Ok(path) => path,
+            Err(err) => {
+                self.set_workspace_open_folder_message(format!("Cannot open folder: {err}"));
+                return Ok(None);
+            }
+        };
+        if !cwd.is_dir() {
+            self.set_workspace_open_folder_message("Path is not a folder.".to_string());
+            return Ok(None);
+        }
+        let (mut config, tui_config) = match self.rebuild_config_for_cwd(cwd.clone()).await {
+            Ok(config) => config,
+            Err(err) => {
+                self.set_workspace_open_folder_message(format!("Failed to load workspace: {err}"));
+                return Ok(None);
+            }
+        };
+        self.apply_runtime_policy_overrides(&mut config);
+        self.config = config;
+        self.tui_config = tui_config;
+        tui.set_notification_method(self.tui_config.notification_method);
+        self.chat_widget.sync_plugin_mentions_config(&self.config);
+        self.chat_widget.set_tui_config(self.tui_config.clone());
+        self.file_search
+            .update_search_dir(self.config.cwd.to_path_buf());
+        self.workspace.clear_overlay();
+        self.start_fresh_session_with_summary_hint(tui, app_gateway)
+            .await;
+        self.refresh_workspace_threads(app_gateway, true);
+        Ok(None)
+    }
+
+    fn set_workspace_open_folder_message(&mut self, message: String) {
+        if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay {
+            prompt.message = Some(message);
+        }
+    }
+
+    async fn handle_workspace_list_mouse_up(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        down: MouseDownState,
+        column: u16,
+        row: u16,
+    ) -> Result<Option<AppRunControl>> {
+        let up_target = self.workspace_mouse_target_at(column, row);
+        match (down.workspace_target, up_target) {
+            (Some(WorkspaceMouseTarget::StartThread), Some(WorkspaceMouseTarget::StartThread)) => {
+                self.workspace.clear_overlay();
+                self.workspace.clear_search_focus();
+                self.start_fresh_session_with_summary_hint(tui, app_gateway)
+                    .await;
+                self.refresh_workspace_threads(app_gateway, true);
                 Ok(None)
             }
-            _ if matches!(self.center.overlay, CenterOverlayState::ContextMenu(_))
-                && !matches!(up_target, Some(CenterMouseTarget::ContextMenu(_))) =>
+            (Some(WorkspaceMouseTarget::Search), Some(WorkspaceMouseTarget::Search)) => {
+                self.workspace.clear_overlay();
+                self.workspace.search_focused = true;
+                Ok(None)
+            }
+            (Some(WorkspaceMouseTarget::LoadMore), Some(WorkspaceMouseTarget::LoadMore)) => {
+                self.workspace.clear_overlay();
+                self.workspace.clear_search_focus();
+                self.load_more_workspace_threads(app_gateway);
+                Ok(None)
+            }
+            (
+                Some(WorkspaceMouseTarget::SubagentsToggle(index)),
+                Some(WorkspaceMouseTarget::SubagentsToggle(up_index)),
+            ) if index == up_index => {
+                self.workspace.clear_overlay();
+                self.workspace.clear_search_focus();
+                let visible_index = self.workspace.visible_index_for_row(index).unwrap_or(0);
+                self.workspace.toggle_subagents(index);
+                self.workspace.selected = visible_index;
+                self.workspace
+                    .ensure_selected_visible(self.workspace_visible_row_capacity());
+                Ok(None)
+            }
+            (
+                Some(WorkspaceMouseTarget::ClosedSubagentsToggle(index)),
+                Some(WorkspaceMouseTarget::ClosedSubagentsToggle(up_index)),
+            ) if index == up_index => {
+                self.workspace.clear_overlay();
+                self.workspace.clear_search_focus();
+                let visible_index = self
+                    .workspace
+                    .visible_index_for_closed_subagents(index)
+                    .unwrap_or(0);
+                self.workspace.toggle_closed_subagents(index);
+                self.workspace.selected = visible_index;
+                self.workspace
+                    .ensure_selected_visible(self.workspace_visible_row_capacity());
+                Ok(None)
+            }
+            (
+                Some(WorkspaceMouseTarget::ContextMenu(action)),
+                Some(WorkspaceMouseTarget::ContextMenu(up_action)),
+            ) if action == up_action => {
+                self.execute_workspace_menu_action(tui, app_gateway, action)
+                    .await
+            }
+            (Some(WorkspaceMouseTarget::RenameSave), Some(WorkspaceMouseTarget::RenameSave)) => {
+                self.commit_workspace_rename(app_gateway).await;
+                Ok(None)
+            }
+            (
+                Some(WorkspaceMouseTarget::RenameCancel),
+                Some(WorkspaceMouseTarget::RenameCancel),
+            ) => {
+                self.workspace.clear_overlay();
+                Ok(None)
+            }
+            (
+                Some(WorkspaceMouseTarget::ArchiveConfirm),
+                Some(WorkspaceMouseTarget::ArchiveConfirm),
+            ) => {
+                self.confirm_workspace_archive(tui, app_gateway).await;
+                Ok(None)
+            }
+            (
+                Some(WorkspaceMouseTarget::ArchiveCancel),
+                Some(WorkspaceMouseTarget::ArchiveCancel),
+            ) => {
+                self.workspace.clear_overlay();
+                Ok(None)
+            }
+            (
+                Some(WorkspaceMouseTarget::DeleteConfirm),
+                Some(WorkspaceMouseTarget::DeleteConfirm),
+            ) => {
+                self.confirm_workspace_delete(tui, app_gateway).await;
+                Ok(None)
+            }
+            (
+                Some(WorkspaceMouseTarget::DeleteCancel),
+                Some(WorkspaceMouseTarget::DeleteCancel),
+            ) => {
+                self.workspace.clear_overlay();
+                Ok(None)
+            }
+            _ if matches!(self.workspace.overlay, WorkspaceOverlay::ChromeMenu(_))
+                && !matches!(
+                    up_target,
+                    Some(
+                        WorkspaceMouseTarget::ChromeAction(_) | WorkspaceMouseTarget::ChromeMenu(_)
+                    )
+                ) =>
             {
-                self.center.clear_overlay();
+                self.workspace.clear_overlay();
+                Ok(None)
+            }
+            _ if matches!(self.workspace.overlay, WorkspaceOverlay::ContextMenu(_))
+                && !matches!(up_target, Some(WorkspaceMouseTarget::ContextMenu(_))) =>
+            {
+                self.workspace.clear_overlay();
                 Ok(None)
             }
             _ => {
-                self.open_center_thread_from_click(tui, app_gateway, down, column, row)
+                self.open_workspace_thread_from_click(tui, app_gateway, down, column, row)
                     .await
             }
         }
     }
 
-    async fn open_center_thread_from_click(
+    async fn open_workspace_thread_from_click(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
@@ -6201,21 +5720,21 @@ impl App {
         column: u16,
         row: u16,
     ) -> Result<Option<AppRunControl>> {
-        let Some(up_index) = self.center_thread_index_at(column, row) else {
+        let Some(up_index) = self.workspace_thread_index_at(column, row) else {
             return Ok(None);
         };
-        if down.center_thread_index != Some(up_index) {
-            self.center.selected = self.center_visible_index_at(column, row).unwrap_or(0);
-            self.center
-                .ensure_selected_visible(self.center_visible_row_capacity());
+        if down.workspace_thread_index != Some(up_index) {
+            self.workspace.selected = self.workspace_visible_index_at(column, row).unwrap_or(0);
+            self.workspace
+                .ensure_selected_visible(self.workspace_visible_row_capacity());
             return Ok(None);
         }
-        self.center.selected = self.center_visible_index_at(column, row).unwrap_or(0);
-        self.center
-            .ensure_selected_visible(self.center_visible_row_capacity());
-        self.center.clear_search_focus();
-        self.center.clear_overlay();
-        let Some(row) = self.center.rows.get(up_index).cloned() else {
+        self.workspace.selected = self.workspace_visible_index_at(column, row).unwrap_or(0);
+        self.workspace
+            .ensure_selected_visible(self.workspace_visible_row_capacity());
+        self.workspace.clear_search_focus();
+        self.workspace.clear_overlay();
+        let Some(row) = self.workspace.rows.get(up_index).cloned() else {
             return Ok(None);
         };
         self.resume_session_target(
@@ -6230,24 +5749,24 @@ impl App {
         .await
     }
 
-    async fn execute_center_menu_action(
+    async fn execute_workspace_menu_action(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
-        action: CenterMenuAction,
+        action: WorkspaceMenuAction,
     ) -> Result<Option<AppRunControl>> {
-        let thread_id = match self.center.overlay.clone() {
-            CenterOverlayState::ContextMenu(menu) => menu.thread_id,
+        let thread_id = match self.workspace.overlay.clone() {
+            WorkspaceOverlay::ContextMenu(menu) => menu.thread_id,
             _ => return Ok(None),
         };
         let locked = self
-            .center
+            .workspace
             .rows
             .iter()
             .find(|row| row.thread_id == thread_id)
-            .is_some_and(center_row_is_controlled);
-        if center_menu_action_disabled(action, locked) {
-            self.center.clear_overlay();
+            .is_some_and(workspace_row_is_controlled);
+        if workspace_menu_action_disabled(action, locked) {
+            self.workspace.clear_overlay();
             self.chat_widget.add_info_message(
                 "This thread is controlled by another agent.".to_string(),
                 Some("Open it and type /release-thread before changing it.".to_string()),
@@ -6255,10 +5774,10 @@ impl App {
             return Ok(None);
         }
         match action {
-            CenterMenuAction::Open => {
-                self.center.clear_overlay();
+            WorkspaceMenuAction::Open => {
+                self.workspace.clear_overlay();
                 let Some(row) = self
-                    .center
+                    .workspace
                     .rows
                     .iter()
                     .find(|row| row.thread_id == thread_id)
@@ -6277,31 +5796,24 @@ impl App {
                 )
                 .await
             }
-            CenterMenuAction::TogglePin => {
-                if !self.center.pinned_thread_ids.insert(thread_id) {
-                    self.center.pinned_thread_ids.remove(&thread_id);
+            WorkspaceMenuAction::TogglePin => {
+                if !self.workspace.pinned_thread_ids.insert(thread_id) {
+                    self.workspace.pinned_thread_ids.remove(&thread_id);
                 }
-                self.center.clear_overlay();
-                let active_thread_id = self.center_active_thread_id();
-                sort_center_thread_rows(
-                    &mut self.center.rows,
-                    active_thread_id,
-                    &self.center.pinned_thread_ids,
-                );
-                self.center
-                    .ensure_selected_visible(self.center_visible_row_capacity());
+                self.workspace.clear_overlay();
+                self.resort_workspace_thread_rows();
                 Ok(None)
             }
-            CenterMenuAction::Rename => {
+            WorkspaceMenuAction::Rename => {
                 let name = self
-                    .center
+                    .workspace
                     .rows
                     .iter()
                     .find(|row| row.thread_id == thread_id)
                     .map(|row| row.name.clone())
                     .unwrap_or_default();
                 let cursor = name.len();
-                self.center.overlay = CenterOverlayState::Rename(CenterRenameState {
+                self.workspace.overlay = WorkspaceOverlay::Rename(WorkspaceRenameState {
                     thread_id,
                     value: name,
                     cursor,
@@ -6309,29 +5821,30 @@ impl App {
                 });
                 Ok(None)
             }
-            CenterMenuAction::Archive => {
-                self.center.overlay =
-                    CenterOverlayState::ConfirmArchive(CenterArchiveConfirmState {
+            WorkspaceMenuAction::Archive => {
+                self.workspace.overlay =
+                    WorkspaceOverlay::ConfirmArchive(WorkspaceArchiveConfirmState {
                         thread_id,
                         area: None,
                     });
                 Ok(None)
             }
-            CenterMenuAction::Delete => {
-                self.center.overlay = CenterOverlayState::ConfirmDelete(CenterDeleteConfirmState {
-                    thread_id,
-                    area: None,
-                });
+            WorkspaceMenuAction::Delete => {
+                self.workspace.overlay =
+                    WorkspaceOverlay::ConfirmDelete(WorkspaceDeleteConfirmState {
+                        thread_id,
+                        area: None,
+                    });
                 Ok(None)
             }
-            CenterMenuAction::ForkLocal => {
-                self.center.clear_overlay();
-                self.fork_center_thread_to_local(tui, app_gateway, thread_id)
+            WorkspaceMenuAction::ForkLocal => {
+                self.workspace.clear_overlay();
+                self.fork_workspace_thread_to_local(tui, app_gateway, thread_id)
                     .await;
                 Ok(None)
             }
-            CenterMenuAction::CopyThreadId => {
-                self.center.clear_overlay();
+            WorkspaceMenuAction::CopyThreadId => {
+                self.workspace.clear_overlay();
                 let text = thread_id.to_string();
                 match crate::clipboard_text::copy_text_to_clipboard(&text) {
                     Ok(()) => self
@@ -6346,15 +5859,15 @@ impl App {
         }
     }
 
-    async fn release_center_thread_control(
+    async fn release_workspace_thread_control(
         &mut self,
         app_gateway: &mut AppGatewaySession,
         thread_id: ThreadId,
     ) {
-        let row_index = self.center.row_index(thread_id);
+        let row_index = self.workspace.row_index(thread_id);
         if row_index
-            .and_then(|index| self.center.rows.get(index))
-            .is_some_and(|row| !center_row_is_controlled(row))
+            .and_then(|index| self.workspace.rows.get(index))
+            .is_some_and(|row| !workspace_row_is_controlled(row))
         {
             self.chat_widget
                 .add_info_message("This thread is not locked.".to_string(), /*hint*/ None);
@@ -6366,20 +5879,15 @@ impl App {
                 if self.chat_widget.thread_id() == Some(thread_id) {
                     self.chat_widget.set_thread_control_state(None);
                 }
-                if let Some(index) = self.center.row_index(thread_id) {
-                    let row = &mut self.center.rows[index];
-                    row.control_state = None;
-                    row.status = center_status_without_control(&row.status);
-                    let active_thread_id = self.center_active_thread_id();
-                    let visible_rows = self.center_visible_row_capacity();
-                    sort_center_thread_rows(
-                        &mut self.center.rows,
-                        active_thread_id,
-                        &self.center.pinned_thread_ids,
-                    );
-                    self.center.clamp_selection(visible_rows);
-                }
-                self.refresh_center_threads(app_gateway, true);
+                self.update_workspace_thread_row(
+                    thread_id,
+                    /*resort_after_update*/ true,
+                    |row| {
+                        row.control_state = None;
+                        row.status = workspace_status_without_control(&row.status);
+                    },
+                );
+                self.refresh_workspace_threads(app_gateway, true);
                 self.chat_widget.add_info_message(
                     "Released the thread lock.".to_string(),
                     Some(
@@ -6399,49 +5907,51 @@ impl App {
         }
     }
 
-    async fn commit_center_rename(&mut self, app_gateway: &mut AppGatewaySession) {
-        let (thread_id, name) = match self.center.overlay.clone() {
-            CenterOverlayState::Rename(rename) => {
-                (rename.thread_id, center_single_line(rename.value.trim()))
+    async fn commit_workspace_rename(&mut self, app_gateway: &mut AppGatewaySession) {
+        let (thread_id, name) = match self.workspace.overlay.clone() {
+            WorkspaceOverlay::Rename(rename) => {
+                (rename.thread_id, workspace_single_line(rename.value.trim()))
             }
             _ => return,
         };
         if name.is_empty() {
-            self.center.clear_overlay();
+            self.workspace.clear_overlay();
             return;
         }
         match app_gateway.thread_set_name(thread_id, name.clone()).await {
             Ok(()) => {
-                if let Some(index) = self.center.row_index(thread_id) {
-                    self.center.rows[index].name = name;
-                }
-                self.center.clear_overlay();
+                self.update_workspace_thread_row(
+                    thread_id,
+                    /*resort_after_update*/ false,
+                    |row| {
+                        row.name = name;
+                    },
+                );
+                self.workspace.clear_overlay();
             }
             Err(err) => {
                 self.chat_widget
                     .add_error_message(format!("Failed to rename thread: {err}"));
             }
         }
-        self.refresh_center_threads(app_gateway, true);
+        self.refresh_workspace_threads(app_gateway, true);
     }
 
-    async fn confirm_center_archive(
+    async fn confirm_workspace_archive(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
     ) {
-        let thread_id = match self.center.overlay.clone() {
-            CenterOverlayState::ConfirmArchive(confirm) => confirm.thread_id,
+        let thread_id = match self.workspace.overlay.clone() {
+            WorkspaceOverlay::ConfirmArchive(confirm) => confirm.thread_id,
             _ => return,
         };
-        self.center.clear_overlay();
+        self.workspace.clear_overlay();
         match app_gateway.thread_archive(thread_id).await {
             Ok(()) => {
-                self.center.pinned_thread_ids.remove(&thread_id);
-                self.center.rows.retain(|row| row.thread_id != thread_id);
-                let visible_rows = self.center_visible_row_capacity();
-                self.center.clamp_selection(visible_rows);
-                if self.center_active_thread_id() == Some(thread_id) {
+                self.workspace.pinned_thread_ids.remove(&thread_id);
+                self.remove_workspace_thread_row(thread_id);
+                if self.workspace_active_thread_id() == Some(thread_id) {
                     self.start_fresh_session_with_summary_hint(tui, app_gateway)
                         .await;
                 }
@@ -6451,28 +5961,26 @@ impl App {
                     .add_error_message(format!("Failed to archive thread: {err}"));
             }
         }
-        self.refresh_center_threads(app_gateway, true);
+        self.refresh_workspace_threads(app_gateway, true);
     }
 
-    async fn confirm_center_delete(
+    async fn confirm_workspace_delete(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
     ) {
-        let thread_id = match self.center.overlay.clone() {
-            CenterOverlayState::ConfirmDelete(confirm) => confirm.thread_id,
+        let thread_id = match self.workspace.overlay.clone() {
+            WorkspaceOverlay::ConfirmDelete(confirm) => confirm.thread_id,
             _ => return,
         };
-        self.center.clear_overlay();
+        self.workspace.clear_overlay();
         match app_gateway.thread_delete(thread_id).await {
             Ok(()) => {
-                self.center.pinned_thread_ids.remove(&thread_id);
-                self.center.usage_by_thread.remove(&thread_id);
-                self.center_observed_thread_ids.remove(&thread_id);
-                self.center.rows.retain(|row| row.thread_id != thread_id);
-                let visible_rows = self.center_visible_row_capacity();
-                self.center.clamp_selection(visible_rows);
-                if self.center_active_thread_id() == Some(thread_id) {
+                self.workspace.pinned_thread_ids.remove(&thread_id);
+                self.workspace.usage_by_thread.remove(&thread_id);
+                self.workspace_observed_thread_ids.remove(&thread_id);
+                self.remove_workspace_thread_row(thread_id);
+                if self.workspace_active_thread_id() == Some(thread_id) {
                     self.start_fresh_session_with_summary_hint(tui, app_gateway)
                         .await;
                 }
@@ -6482,17 +5990,17 @@ impl App {
                     .add_error_message(format!("Failed to delete thread: {err}"));
             }
         }
-        self.refresh_center_threads(app_gateway, true);
+        self.refresh_workspace_threads(app_gateway, true);
     }
 
-    async fn fork_center_thread_to_local(
+    async fn fork_workspace_thread_to_local(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
         thread_id: ThreadId,
     ) {
         let Some(source) = self
-            .center
+            .workspace
             .rows
             .iter()
             .find(|row| row.thread_id == thread_id)
@@ -6557,68 +6065,108 @@ impl App {
                     .add_error_message(format!("Failed to fork Praxis thread: {err}"));
             }
         }
-        self.refresh_center_threads(app_gateway, true);
+        self.refresh_workspace_threads(app_gateway, true);
         tui.frame_requester().schedule_frame();
     }
 
-    fn handle_center_mouse_scroll(&mut self, column: u16, row: u16, delta_rows: isize) {
-        if !self.center.enabled {
+    fn handle_workspace_mouse_scroll(&mut self, column: u16, row: u16, delta_rows: isize) -> bool {
+        if !self.workspace.enabled {
             if self
-                .center
+                .workspace
                 .chat_area
                 .is_some_and(|area| rect_contains(area, column, row))
             {
                 let amount = delta_rows.unsigned_abs();
+                let previous = self.workspace.chat_scroll_from_bottom;
                 if delta_rows < 0 {
-                    self.center.chat_scroll_from_bottom =
-                        self.center.chat_scroll_from_bottom.saturating_add(amount);
+                    self.workspace.chat_scroll_from_bottom = self
+                        .workspace
+                        .chat_scroll_from_bottom
+                        .saturating_add(amount);
                 } else {
-                    self.center.chat_scroll_from_bottom =
-                        self.center.chat_scroll_from_bottom.saturating_sub(amount);
+                    self.workspace.chat_scroll_from_bottom = self
+                        .workspace
+                        .chat_scroll_from_bottom
+                        .saturating_sub(amount);
                 }
+                return self.workspace.chat_scroll_from_bottom != previous;
             }
-            return;
+            return false;
         }
         if self
-            .center
+            .workspace
             .list_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
-            let visible_rows = self.center_visible_row_capacity();
-            let max_scroll = self.center.list_item_count().saturating_sub(visible_rows);
-            self.center.list_scroll =
-                offset_usize(self.center.list_scroll, delta_rows).min(max_scroll);
-            self.center.clamp_list_scroll(visible_rows);
-            self.mouse.hover_center_thread_index = self.center_thread_index_at(column, row);
-            self.mouse.hover_center_target = self.center_mouse_target_at(column, row);
-            return;
+            let visible_rows = self.workspace_visible_row_capacity();
+            let max_scroll = self
+                .workspace
+                .list_item_count()
+                .saturating_sub(visible_rows);
+            let previous_scroll = self.workspace.list_scroll;
+            let previous_hover_thread = self.mouse.hover_workspace_thread_index;
+            let previous_hover_target = self.mouse.hover_workspace_target;
+            self.workspace.list_scroll =
+                offset_usize(self.workspace.list_scroll, delta_rows).min(max_scroll);
+            self.workspace.clamp_list_scroll(visible_rows);
+            self.mouse.hover_workspace_thread_index = self.workspace_thread_index_at(column, row);
+            self.mouse.hover_workspace_target = self.workspace_mouse_target_at(column, row);
+            return self.workspace.list_scroll != previous_scroll
+                || self.mouse.hover_workspace_thread_index != previous_hover_thread
+                || self.mouse.hover_workspace_target != previous_hover_target;
         }
         if self
-            .center
+            .workspace
             .chat_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
-            let amount = delta_rows.unsigned_abs();
-            if delta_rows < 0 {
-                self.center.chat_scroll_from_bottom =
-                    self.center.chat_scroll_from_bottom.saturating_add(amount);
-            } else {
-                self.center.chat_scroll_from_bottom =
-                    self.center.chat_scroll_from_bottom.saturating_sub(amount);
+            if let Some(picker) = self.workspace.session_picker_mut() {
+                return picker.scroll_by(delta_rows);
             }
+            if let Some(picker) = self.workspace.agent_picker_mut() {
+                return picker.scroll_by(delta_rows);
+            }
+            let amount = delta_rows.unsigned_abs();
+            let previous = self.workspace.chat_scroll_from_bottom;
+            if delta_rows < 0 {
+                self.workspace.chat_scroll_from_bottom = self
+                    .workspace
+                    .chat_scroll_from_bottom
+                    .saturating_add(amount);
+            } else {
+                self.workspace.chat_scroll_from_bottom = self
+                    .workspace
+                    .chat_scroll_from_bottom
+                    .saturating_sub(amount);
+            }
+            return self.workspace.chat_scroll_from_bottom != previous;
         }
+        false
     }
 
     fn mouse_pane_at(&self, column: u16, row: u16) -> Option<MousePane> {
         if self
-            .center
+            .workspace_mouse_target_at(column, row)
+            .is_some_and(WorkspaceMouseTarget::is_chrome)
+        {
+            return Some(MousePane::WorkspaceChrome);
+        }
+        if self
+            .workspace
+            .chrome_bar_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            return Some(MousePane::WorkspaceChrome);
+        }
+        if self
+            .workspace
             .list_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
-            return Some(MousePane::CenterList);
+            return Some(MousePane::WorkspaceList);
         }
         if self
-            .center
+            .workspace
             .chat_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
@@ -6627,115 +6175,136 @@ impl App {
         None
     }
 
-    fn center_mouse_target_at(&self, column: u16, row: u16) -> Option<CenterMouseTarget> {
-        if !self.center.enabled {
+    fn workspace_mouse_target_at(&self, column: u16, row: u16) -> Option<WorkspaceMouseTarget> {
+        if !self.workspace.enabled {
             return None;
         }
 
-        match &self.center.overlay {
-            CenterOverlayState::ContextMenu(menu) => {
-                if let Some(action) = center_menu_action_at(menu.area, column, row) {
-                    return Some(CenterMouseTarget::ContextMenu(action));
+        match &self.workspace.overlay {
+            WorkspaceOverlay::ChromeMenu(menu) => {
+                if let Some(action) = workspace_chrome_action_at(menu.area, menu.menu, column, row)
+                {
+                    return Some(WorkspaceMouseTarget::ChromeAction(action));
                 }
             }
-            CenterOverlayState::Rename(rename) => {
-                if let Some(target) = center_rename_target_at(rename.area, column, row) {
+            WorkspaceOverlay::OpenFolder(prompt) => {
+                if let Some(target) = workspace_open_folder_target_at(prompt.area, column, row) {
                     return Some(target);
                 }
             }
-            CenterOverlayState::ConfirmArchive(confirm) => {
-                if let Some(target) = center_archive_target_at(confirm.area, column, row) {
+            WorkspaceOverlay::ContextMenu(menu) => {
+                if let Some(action) = workspace_menu_action_at(menu.area, column, row) {
+                    return Some(WorkspaceMouseTarget::ContextMenu(action));
+                }
+            }
+            WorkspaceOverlay::Rename(rename) => {
+                if let Some(target) = workspace_rename_target_at(rename.area, column, row) {
                     return Some(target);
                 }
             }
-            CenterOverlayState::ConfirmDelete(confirm) => {
-                if let Some(target) = center_delete_target_at(confirm.area, column, row) {
+            WorkspaceOverlay::ConfirmArchive(confirm) => {
+                if let Some(target) = workspace_archive_target_at(confirm.area, column, row) {
                     return Some(target);
                 }
             }
-            CenterOverlayState::None => {}
+            WorkspaceOverlay::ConfirmDelete(confirm) => {
+                if let Some(target) = workspace_delete_target_at(confirm.area, column, row) {
+                    return Some(target);
+                }
+            }
+            WorkspaceOverlay::None => {}
+        }
+
+        if let Some(menu) = workspace_chrome_menu_at(self.workspace.chrome_bar_areas, column, row) {
+            return Some(WorkspaceMouseTarget::ChromeMenu(menu));
         }
 
         if self
-            .center
+            .workspace
             .toolbar_new_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
-            return Some(CenterMouseTarget::NewThread);
+            return Some(WorkspaceMouseTarget::StartThread);
         }
         if self
-            .center
+            .workspace
             .toolbar_search_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
-            return Some(CenterMouseTarget::Search);
+            return Some(WorkspaceMouseTarget::Search);
         }
-        let Some(index) = self.center_list_item_index_at(column, row) else {
+        let Some(index) = self.workspace_list_item_index_at(column, row) else {
             return None;
         };
-        match self.center.visible_item_at(index) {
-            Some(CenterVisibleItem::Thread(row_index)) => {
-                if self.center_subagent_toggle_hit(index, row_index, column, row) {
-                    Some(CenterMouseTarget::SubagentsToggle(row_index))
+        match self.workspace.visible_item_at(index) {
+            Some(WorkspaceVisibleItem::Thread(row_index)) => {
+                if self.workspace_subagent_toggle_hit(index, row_index, column, row) {
+                    Some(WorkspaceMouseTarget::SubagentsToggle(row_index))
                 } else {
-                    Some(CenterMouseTarget::Thread(row_index))
+                    Some(WorkspaceMouseTarget::Thread(row_index))
                 }
             }
-            Some(CenterVisibleItem::ClosedSubagents { parent_index }) => {
-                Some(CenterMouseTarget::ClosedSubagentsToggle(parent_index))
+            Some(WorkspaceVisibleItem::ClosedSubagents { parent_index }) => {
+                Some(WorkspaceMouseTarget::ClosedSubagentsToggle(parent_index))
             }
-            None if self.center.is_load_more_index(index) => Some(CenterMouseTarget::LoadMore),
+            None if self.workspace.is_load_more_index(index) => {
+                Some(WorkspaceMouseTarget::LoadMore)
+            }
             None => None,
         }
     }
 
-    fn center_thread_index_at(&self, column: u16, row: u16) -> Option<usize> {
-        self.center_list_item_index_at(column, row)
-            .and_then(|index| self.center.actual_row_index_for_visible(index))
+    fn workspace_thread_index_at(&self, column: u16, row: u16) -> Option<usize> {
+        self.workspace_list_item_index_at(column, row)
+            .and_then(|index| self.workspace.actual_row_index_for_visible(index))
     }
 
-    fn center_visible_index_at(&self, column: u16, row: u16) -> Option<usize> {
-        self.center_list_item_index_at(column, row)
-            .filter(|index| self.center.actual_row_index_for_visible(*index).is_some())
+    fn workspace_visible_index_at(&self, column: u16, row: u16) -> Option<usize> {
+        self.workspace_list_item_index_at(column, row)
+            .filter(|index| {
+                self.workspace
+                    .actual_row_index_for_visible(*index)
+                    .is_some()
+            })
     }
 
-    fn center_subagent_toggle_hit(
+    fn workspace_subagent_toggle_hit(
         &self,
         visible_index: usize,
         row_index: usize,
         column: u16,
         row: u16,
     ) -> bool {
-        let Some(area) = self.center.list_area else {
+        let Some(area) = self.workspace.list_area else {
             return false;
         };
-        let Some(thread_row) = self.center.rows.get(row_index) else {
+        let Some(thread_row) = self.workspace.rows.get(row_index) else {
             return false;
         };
         if thread_row.subagents.is_empty() {
             return false;
         }
-        let relative_index = visible_index.saturating_sub(self.center.list_scroll);
+        let relative_index = visible_index.saturating_sub(self.workspace.list_scroll);
         let row_y = area
             .y
-            .saturating_add(CENTER_LIST_TOP_PADDING)
-            .saturating_add((relative_index as u16).saturating_mul(CENTER_ROW_HEIGHT));
+            .saturating_add(WORKSPACE_LIST_TOP_PADDING)
+            .saturating_add((relative_index as u16).saturating_mul(WORKSPACE_ROW_HEIGHT));
         let toggle_x = area
             .x
             .saturating_add(1)
-            .saturating_add(center_row_tree_indent(thread_row));
+            .saturating_add(workspace_row_tree_indent(thread_row));
         row == row_y && column >= toggle_x && column <= toggle_x.saturating_add(3)
     }
 
-    fn center_list_item_index_at(&self, column: u16, row: u16) -> Option<usize> {
-        if !self.center.enabled {
+    fn workspace_list_item_index_at(&self, column: u16, row: u16) -> Option<usize> {
+        if !self.workspace.enabled {
             return None;
         }
-        let area = self.center.list_area?;
+        let area = self.workspace.list_area?;
         if area.is_empty()
             || column < area.x
             || column >= area.right()
-            || row < area.y.saturating_add(CENTER_LIST_TOP_PADDING)
+            || row < area.y.saturating_add(WORKSPACE_LIST_TOP_PADDING)
             || row >= area.bottom()
         {
             return None;
@@ -6743,14 +6312,14 @@ impl App {
 
         let relative_row = row
             .saturating_sub(area.y)
-            .saturating_sub(CENTER_LIST_TOP_PADDING);
-        if relative_row % CENTER_ROW_HEIGHT >= 2 {
+            .saturating_sub(WORKSPACE_LIST_TOP_PADDING);
+        if relative_row % WORKSPACE_ROW_HEIGHT >= 2 {
             return None;
         }
 
-        let visible_index = usize::from(relative_row / CENTER_ROW_HEIGHT);
-        let index = self.center.list_scroll.saturating_add(visible_index);
-        (index < self.center.list_item_count()).then_some(index)
+        let visible_index = usize::from(relative_row / WORKSPACE_ROW_HEIGHT);
+        let index = self.workspace.list_scroll.saturating_add(visible_index);
+        (index < self.workspace.list_item_count()).then_some(index)
     }
 
     fn handle_mouse_selection_copy_shortcut(&mut self, key_event: KeyEvent) -> bool {
@@ -6768,7 +6337,8 @@ impl App {
 
     fn copy_mouse_selection_to_clipboard(&mut self, selection: MouseDragSelection) -> bool {
         let snapshot = match selection.pane {
-            MousePane::CenterList => self.mouse.center_list_snapshot.as_ref(),
+            MousePane::WorkspaceChrome => None,
+            MousePane::WorkspaceList => self.mouse.workspace_list_snapshot.as_ref(),
             MousePane::Chat => self.mouse.chat_snapshot.as_ref(),
         };
         let Some(snapshot) = snapshot else {
@@ -6812,7 +6382,8 @@ impl App {
             lines: capture_pane_text(buf, area),
         };
         match pane {
-            MousePane::CenterList => self.mouse.center_list_snapshot = Some(snapshot),
+            MousePane::WorkspaceChrome => {}
+            MousePane::WorkspaceList => self.mouse.workspace_list_snapshot = Some(snapshot),
             MousePane::Chat => self.mouse.chat_snapshot = Some(snapshot),
         }
     }
@@ -6822,8 +6393,9 @@ impl App {
             return;
         };
         let area = match selection.pane {
-            MousePane::CenterList => self.center.list_area,
-            MousePane::Chat => self.center.chat_area,
+            MousePane::WorkspaceChrome => None,
+            MousePane::WorkspaceList => self.workspace.list_area,
+            MousePane::Chat => self.workspace.chat_area,
         };
         let Some(area) = area else {
             return;
@@ -6834,46 +6406,76 @@ impl App {
         }
     }
 
-    fn center_active_thread_id(&self) -> Option<ThreadId> {
+    fn workspace_active_thread_id(&self) -> Option<ThreadId> {
         self.chat_widget.thread_id().or(self.active_thread_id)
     }
 
-    fn upsert_center_thread_row(&mut self, row: CenterThreadRow) {
-        if let Some(index) = self.center.row_index(row.thread_id) {
-            self.center.rows[index] = row;
-        } else {
-            self.center.rows.push(row);
-        }
-        let active_thread_id = self.center_active_thread_id();
-        let visible_rows = self.center_visible_row_capacity();
-        sort_center_thread_rows(
-            &mut self.center.rows,
+    fn resort_workspace_thread_rows(&mut self) {
+        let active_thread_id = self.workspace_active_thread_id();
+        let visible_rows = self.workspace_visible_row_capacity();
+        sort_workspace_thread_rows(
+            &mut self.workspace.rows,
             active_thread_id,
-            &self.center.pinned_thread_ids,
+            &self.workspace.pinned_thread_ids,
         );
-        self.center.clamp_selection(visible_rows);
+        self.workspace.clamp_selection(visible_rows);
     }
 
-    pub(super) async fn observe_center_thread_if_needed(
+    fn clamp_workspace_thread_rows(&mut self) {
+        let visible_rows = self.workspace_visible_row_capacity();
+        self.workspace.clamp_selection(visible_rows);
+    }
+
+    fn update_workspace_thread_row(
+        &mut self,
+        thread_id: ThreadId,
+        resort_after_update: bool,
+        update: impl FnOnce(&mut ThreadListRow),
+    ) -> bool {
+        let Some(index) = self.workspace.row_index(thread_id) else {
+            return false;
+        };
+        update(&mut self.workspace.rows[index]);
+        if resort_after_update {
+            self.resort_workspace_thread_rows();
+        }
+        true
+    }
+
+    fn remove_workspace_thread_row(&mut self, thread_id: ThreadId) {
+        self.workspace.rows.retain(|row| row.thread_id != thread_id);
+        self.clamp_workspace_thread_rows();
+    }
+
+    fn upsert_workspace_thread_row(&mut self, row: ThreadListRow) {
+        if let Some(index) = self.workspace.row_index(row.thread_id) {
+            self.workspace.rows[index] = row;
+        } else {
+            self.workspace.rows.push(row);
+        }
+        self.resort_workspace_thread_rows();
+    }
+
+    pub(super) async fn observe_workspace_thread_if_needed(
         &mut self,
         app_gateway: &mut AppGatewaySession,
         thread_id: ThreadId,
     ) {
-        if !self.center.enabled {
+        if !self.workspace.enabled {
             return;
         }
         if self.primary_thread_id == Some(thread_id) {
-            self.center_observed_thread_ids.insert(thread_id);
+            self.workspace_observed_thread_ids.insert(thread_id);
             return;
         }
-        if !self.center_observed_thread_ids.insert(thread_id) {
+        if !self.workspace_observed_thread_ids.insert(thread_id) {
             return;
         }
 
         match app_gateway.watch_thread(&self.config, thread_id).await {
-            Ok(started) => self.apply_center_observed_thread(started).await,
+            Ok(started) => self.apply_workspace_observed_thread(started).await,
             Err(err) => {
-                self.center_observed_thread_ids.remove(&thread_id);
+                self.workspace_observed_thread_ids.remove(&thread_id);
                 tracing::warn!(
                     thread_id = %thread_id,
                     error = %err,
@@ -6883,34 +6485,34 @@ impl App {
         }
     }
 
-    pub(super) fn center_thread_should_auto_observe(&self, thread_id: ThreadId) -> bool {
-        self.center
+    pub(super) fn workspace_thread_should_auto_observe(&self, thread_id: ThreadId) -> bool {
+        self.workspace
             .row_index(thread_id)
-            .and_then(|index| self.center.rows.get(index))
-            .is_some_and(center_row_should_auto_observe)
+            .and_then(|index| self.workspace.rows.get(index))
+            .is_some_and(workspace_row_should_auto_observe)
     }
 
-    async fn observe_existing_center_threads_if_needed(
+    async fn observe_existing_workspace_threads_if_needed(
         &mut self,
         app_gateway: &mut AppGatewaySession,
     ) {
-        if !self.center.enabled {
+        if !self.workspace.enabled {
             return;
         }
         let thread_ids = self
-            .center
+            .workspace
             .rows
             .iter()
-            .filter(|row| center_row_should_auto_observe(row))
+            .filter(|row| workspace_row_should_auto_observe(row))
             .map(|row| row.thread_id)
             .collect::<Vec<_>>();
         for thread_id in thread_ids {
-            self.observe_center_thread_if_needed(app_gateway, thread_id)
+            self.observe_workspace_thread_if_needed(app_gateway, thread_id)
                 .await;
         }
     }
 
-    async fn apply_center_observed_thread(&mut self, started: AppGatewayStartedThread) {
+    async fn apply_workspace_observed_thread(&mut self, started: AppGatewayStartedThread) {
         let AppGatewayStartedThread {
             session,
             turns,
@@ -6918,18 +6520,10 @@ impl App {
             control_state,
         } = started;
         let thread_id = session.thread_id;
-        if let Some(index) = self.center.row_index(thread_id) {
-            self.center.rows[index].status = status;
-            self.center.rows[index].control_state = control_state.clone();
-            let active_thread_id = self.center_active_thread_id();
-            let visible_rows = self.center_visible_row_capacity();
-            sort_center_thread_rows(
-                &mut self.center.rows,
-                active_thread_id,
-                &self.center.pinned_thread_ids,
-            );
-            self.center.clamp_selection(visible_rows);
-        }
+        self.update_workspace_thread_row(thread_id, /*resort_after_update*/ true, |row| {
+            row.status = status;
+            row.control_state = control_state.clone();
+        });
 
         let store = {
             let channel = self.ensure_thread_channel(thread_id);
@@ -6941,131 +6535,131 @@ impl App {
             store.rebase_buffer_after_session_refresh();
         }
 
-        if self.center_active_thread_id() == Some(thread_id) {
+        if self.workspace_active_thread_id() == Some(thread_id) {
             self.chat_widget
                 .set_thread_control_state(control_state.as_ref());
         }
     }
 
-    pub(super) fn apply_center_server_notification(
+    pub(super) fn apply_workspace_server_notification(
         &mut self,
         notification: &ServerNotification,
     ) -> bool {
-        if !self.center.enabled {
+        if !self.workspace.enabled {
             return false;
         }
 
         match notification {
             ServerNotification::ThreadStarted(notification) => {
-                let Some(row) = CenterThreadRow::from_thread(notification.thread.clone()) else {
+                let Some(row) = ThreadListRow::from_thread(notification.thread.clone()) else {
                     return true;
                 };
-                self.upsert_center_thread_row(row);
+                self.upsert_workspace_thread_row(row);
                 false
             }
             ServerNotification::ThreadStatusChanged(notification) => {
-                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
                     return true;
                 };
-                let Some(index) = self.center.row_index(thread_id) else {
+                if !self.update_workspace_thread_row(
+                    thread_id,
+                    /*resort_after_update*/ true,
+                    |row| {
+                        row.status = notification.status.clone();
+                    },
+                ) {
                     return true;
-                };
-                self.center.rows[index].status = notification.status.clone();
-                let active_thread_id = self.center_active_thread_id();
-                let visible_rows = self.center_visible_row_capacity();
-                sort_center_thread_rows(
-                    &mut self.center.rows,
-                    active_thread_id,
-                    &self.center.pinned_thread_ids,
-                );
-                self.center.clamp_selection(visible_rows);
+                }
                 false
             }
             ServerNotification::ThreadControlChanged(notification) => {
-                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
                     return true;
                 };
-                let Some(index) = self.center.row_index(thread_id) else {
+                if !self.update_workspace_thread_row(
+                    thread_id,
+                    /*resort_after_update*/ true,
+                    |row| {
+                        row.control_state = notification.control_state.clone();
+                    },
+                ) {
                     return true;
-                };
-                self.center.rows[index].control_state = notification.control_state.clone();
+                }
                 if self
-                    .center_active_thread_id()
+                    .workspace_active_thread_id()
                     .is_some_and(|active_thread_id| active_thread_id == thread_id)
                 {
                     self.chat_widget
                         .set_thread_control_state(notification.control_state.as_ref());
                 }
-                let active_thread_id = self.center_active_thread_id();
-                let visible_rows = self.center_visible_row_capacity();
-                sort_center_thread_rows(
-                    &mut self.center.rows,
-                    active_thread_id,
-                    &self.center.pinned_thread_ids,
-                );
-                self.center.clamp_selection(visible_rows);
                 false
             }
             ServerNotification::ThreadNameUpdated(notification) => {
-                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
-                    return true;
-                };
-                let Some(index) = self.center.row_index(thread_id) else {
+                let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
                     return true;
                 };
                 if let Some(name) = notification.thread_name.as_deref() {
-                    self.center.rows[index].name = center_single_line(name);
+                    if !self.update_workspace_thread_row(
+                        thread_id,
+                        /*resort_after_update*/ false,
+                        |row| {
+                            row.name = workspace_single_line(name);
+                        },
+                    ) {
+                        return true;
+                    }
                     false
                 } else {
                     true
                 }
             }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
-                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
                     return true;
                 };
                 let info = token_usage_info_from_app_gateway(notification.token_usage.clone());
-                self.center.usage_by_thread.insert(thread_id, info.clone());
-                if let Some(index) = self.center.row_index(thread_id) {
-                    self.center.rows[index].token_usage = Some(info);
-                }
+                self.workspace
+                    .usage_by_thread
+                    .insert(thread_id, info.clone());
+                self.update_workspace_thread_row(
+                    thread_id,
+                    /*resort_after_update*/ false,
+                    |row| {
+                        row.token_usage = Some(info);
+                    },
+                );
                 false
             }
             ServerNotification::ThreadArchived(notification) => {
-                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
                     return true;
                 };
-                self.center.rows.retain(|row| row.thread_id != thread_id);
-                let visible_rows = self.center_visible_row_capacity();
-                self.center.clamp_selection(visible_rows);
+                self.remove_workspace_thread_row(thread_id);
                 false
             }
             ServerNotification::ThreadUnarchived(_) => true,
             ServerNotification::ThreadClosed(notification) => {
-                let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+                let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
                     return true;
                 };
-                let Some(index) = self.center.row_index(thread_id) else {
+                if !self.update_workspace_thread_row(
+                    thread_id,
+                    /*resort_after_update*/ true,
+                    |row| {
+                        row.status = ThreadStatus::NotLoaded;
+                        row.control_state = None;
+                    },
+                ) {
                     return true;
-                };
-                self.center.rows[index].status = ThreadStatus::NotLoaded;
-                self.center.rows[index].control_state = None;
-                let active_thread_id = self.center_active_thread_id();
-                let visible_rows = self.center_visible_row_capacity();
-                sort_center_thread_rows(
-                    &mut self.center.rows,
-                    active_thread_id,
-                    &self.center.pinned_thread_ids,
-                );
-                self.center.clamp_selection(visible_rows);
+                }
                 false
             }
             _ => false,
         }
     }
 
-    fn refresh_center_threads(&mut self, app_gateway: &AppGatewaySession, force: bool) {
-        self.request_center_threads(app_gateway, force, None);
+    fn refresh_workspace_threads(&mut self, app_gateway: &AppGatewaySession, force: bool) {
+        self.request_workspace_threads(app_gateway, force, None);
     }
 
     fn fetch_token_usage_summary(&self, app_gateway: &AppGatewaySession, limit: usize) {
@@ -7073,7 +6667,7 @@ impl App {
         let request_handle = app_gateway.request_handle();
         tokio::spawn(async move {
             let result = tokio::time::timeout(
-                CENTER_REFRESH_TIMEOUT,
+                WORKSPACE_REFRESH_TIMEOUT,
                 request_handle.request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
                     request_id: RequestId::String(format!("praxis-token-usage-{}", Uuid::new_v4())),
                     params: token_usage_thread_list_params(limit),
@@ -7086,75 +6680,75 @@ impl App {
         });
     }
 
-    fn load_more_center_threads(&mut self, app_gateway: &AppGatewaySession) {
-        let Some(cursor) = self.center.next_cursor.clone() else {
+    fn load_more_workspace_threads(&mut self, app_gateway: &AppGatewaySession) {
+        let Some(cursor) = self.workspace.pagination.next_cursor() else {
             return;
         };
-        self.request_center_threads(app_gateway, true, Some(cursor));
+        self.request_workspace_threads(app_gateway, true, Some(cursor));
     }
 
-    fn request_center_threads(
+    fn request_workspace_threads(
         &mut self,
         app_gateway: &AppGatewaySession,
         force: bool,
         cursor: Option<String>,
     ) {
-        if !self.center.enabled {
+        if !self.workspace.enabled {
             return;
         }
-        if self.center.refresh_in_flight {
+        if self.workspace.refresh_in_flight {
             return;
         }
         let is_load_more = cursor.is_some();
         if !force
             && !is_load_more
             && self
-                .center
+                .workspace
                 .last_refresh_at
-                .is_some_and(|last| last.elapsed() < CENTER_REFRESH_INTERVAL)
+                .is_some_and(|last| last.elapsed() < WORKSPACE_REFRESH_INTERVAL)
         {
             return;
         }
-        self.center.last_refresh_at = Some(Instant::now());
-        self.center.refresh_in_flight = true;
-        self.center.refresh_request_id = self.center.refresh_request_id.wrapping_add(1);
-        self.center.pending_refresh_cursor = cursor.clone();
+        self.workspace.last_refresh_at = Some(Instant::now());
+        self.workspace.refresh_in_flight = true;
+        self.workspace.refresh_request_id = self.workspace.refresh_request_id.wrapping_add(1);
+        self.workspace.pagination.set_pending_cursor(cursor.clone());
         if !is_load_more {
-            self.center.next_cursor = None;
+            self.workspace.pagination.clear_next_cursor();
         }
 
-        let request_id = self.center.refresh_request_id;
-        let search_term = center_search_term(&self.center.search_query);
+        let request_id = self.workspace.refresh_request_id;
+        let search_term = workspace_search_term(&self.workspace.search_query);
         let app_event_tx = self.app_event_tx.clone();
         let request_handle = app_gateway.request_handle();
         tokio::spawn(async move {
             let result = tokio::time::timeout(
-                CENTER_REFRESH_TIMEOUT,
+                WORKSPACE_REFRESH_TIMEOUT,
                 request_handle.request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
                     request_id: RequestId::String(format!(
-                        "praxis-center-thread-list-{request_id}"
+                        "praxis-workspace-thread-list-{request_id}"
                     )),
-                    params: center_thread_list_params(search_term, cursor),
+                    params: workspace_thread_list_params(search_term, cursor),
                 }),
             )
             .await
             .map_err(|_| "thread/list timed out while refreshing Praxis workspace".to_string())
             .and_then(|result| result.map_err(|err| err.to_string()));
-            app_event_tx.send(AppEvent::CenterThreadsLoaded { request_id, result });
+            app_event_tx.send(AppEvent::WorkspaceThreadsLoaded { request_id, result });
         });
     }
 
-    fn handle_center_threads_loaded(
+    fn handle_workspace_threads_loaded(
         &mut self,
         request_id: u64,
         result: std::result::Result<ThreadListResponse, String>,
     ) {
-        if request_id != self.center.refresh_request_id {
+        if request_id != self.workspace.refresh_request_id {
             return;
         }
-        let append = self.center.pending_refresh_cursor.is_some();
-        self.center.refresh_in_flight = false;
-        self.center.pending_refresh_cursor = None;
+        let append = self.workspace.pagination.is_pending_next_page();
+        self.workspace.refresh_in_flight = false;
+        self.workspace.pagination.take_pending_cursor();
         let response = match result {
             Ok(response) => response,
             Err(err) => {
@@ -7162,24 +6756,25 @@ impl App {
                 return;
             }
         };
-        self.apply_center_threads(response, append);
+        self.apply_workspace_threads(response, append);
     }
 
-    fn apply_center_threads(&mut self, response: ThreadListResponse, append: bool) {
-        let active_thread_id = self.center_active_thread_id();
-        let was_empty = self.center.rows.is_empty();
-        let previous_top_thread_id = self.center.top_visible_thread_id();
-        let old_len = self.center.rows.len();
-        let old_visible_len = self.center.visible_row_count();
-        let selected_was_load_more = append && self.center.is_load_more_index(self.center.selected);
-        let mut incoming_rows: Vec<CenterThreadRow> = response
+    fn apply_workspace_threads(&mut self, response: ThreadListResponse, append: bool) {
+        let active_thread_id = self.workspace_active_thread_id();
+        let was_empty = self.workspace.rows.is_empty();
+        let previous_top_thread_id = self.workspace.top_visible_thread_id();
+        let old_len = self.workspace.rows.len();
+        let old_visible_len = self.workspace.visible_row_count();
+        let selected_was_load_more =
+            append && self.workspace.is_load_more_index(self.workspace.selected);
+        let mut incoming_rows: Vec<ThreadListRow> = response
             .data
             .into_iter()
-            .filter_map(CenterThreadRow::from_thread)
+            .filter_map(ThreadListRow::from_thread)
             .collect();
         let first_incoming_thread_id = incoming_rows.first().map(|row| row.thread_id);
         let mut rows = if append {
-            std::mem::take(&mut self.center.rows)
+            std::mem::take(&mut self.workspace.rows)
         } else {
             Vec::new()
         };
@@ -7193,145 +6788,392 @@ impl App {
                 rows.push(row);
             }
         }
-        sort_center_thread_rows(&mut rows, active_thread_id, &self.center.pinned_thread_ids);
+        sort_workspace_thread_rows(
+            &mut rows,
+            active_thread_id,
+            &self.workspace.pinned_thread_ids,
+        );
 
         let selected_thread_id = self
-            .center
-            .actual_row_index_for_visible(self.center.selected)
-            .and_then(|index| self.center.rows.get(index))
+            .workspace
+            .actual_row_index_for_visible(self.workspace.selected)
+            .and_then(|index| self.workspace.rows.get(index))
             .map(|row| row.thread_id)
             .or(active_thread_id);
-        self.center.rows = rows;
-        self.center.next_cursor = response.next_cursor;
+        self.workspace.rows = rows;
+        self.workspace
+            .pagination
+            .set_next_cursor(response.next_cursor);
         let loaded_thread_ids = self
-            .center
+            .workspace
             .rows
             .iter()
             .map(|row| row.thread_id)
             .collect::<HashSet<_>>();
-        self.center
+        self.workspace
             .expanded_subagent_parent_ids
             .retain(|thread_id| loaded_thread_ids.contains(thread_id));
-        self.center
+        self.workspace
             .expanded_closed_subagent_parent_ids
             .retain(|thread_id| loaded_thread_ids.contains(thread_id));
-        self.center.selected = if selected_was_load_more && self.center.rows.len() > old_len {
+        self.workspace.selected = if selected_was_load_more && self.workspace.rows.len() > old_len {
             first_incoming_thread_id
-                .and_then(|thread_id| self.center.visible_index_for_thread(thread_id))
+                .and_then(|thread_id| self.workspace.visible_index_for_thread(thread_id))
                 .unwrap_or_else(|| {
-                    old_visible_len.min(self.center.list_item_count().saturating_sub(1))
+                    old_visible_len.min(self.workspace.list_item_count().saturating_sub(1))
                 })
         } else {
             selected_thread_id
-                .and_then(|thread_id| self.center.visible_index_for_thread(thread_id))
+                .and_then(|thread_id| self.workspace.visible_index_for_thread(thread_id))
                 .unwrap_or(0)
         };
-        let visible_rows = self.center_visible_row_capacity();
+        let visible_rows = self.workspace_visible_row_capacity();
         if visible_rows > 0 {
             if was_empty
                 || !self
-                    .center
+                    .workspace
                     .keep_top_visible_thread(previous_top_thread_id, visible_rows)
             {
-                self.center.ensure_selected_visible(visible_rows);
+                self.workspace.ensure_selected_visible(visible_rows);
             } else {
-                self.center.clamp_list_scroll(visible_rows);
+                self.workspace.clamp_list_scroll(visible_rows);
             }
         }
     }
 
-    fn center_visible_row_capacity(&self) -> usize {
-        self.center
+    fn workspace_visible_row_capacity(&self) -> usize {
+        self.workspace
             .list_area
             .map(|area| {
-                ((area.height.saturating_sub(CENTER_LIST_TOP_PADDING)) / CENTER_ROW_HEIGHT) as usize
+                ((area.height.saturating_sub(WORKSPACE_LIST_TOP_PADDING)) / WORKSPACE_ROW_HEIGHT)
+                    as usize
             })
             .unwrap_or(0)
     }
 
-    fn render_center_or_chat(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) -> Rect {
-        if !self.center.enabled {
-            self.center.list_area = None;
-            self.center.chat_area = Some(area);
-            self.center.toolbar_new_area = None;
-            self.center.toolbar_search_area = None;
-            self.mouse.hover_center_thread_index = None;
-            self.mouse.hover_center_target = None;
-            self.mouse.center_list_snapshot = None;
+    fn render_workspace_or_chat(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) -> Rect {
+        if !self.workspace.enabled {
+            self.workspace.list_area = None;
+            self.workspace.chat_area = Some(area);
+            self.workspace.chrome_bar_area = None;
+            self.workspace.chrome_bar_areas = WorkspaceChromeBarAreas::default();
+            self.workspace.toolbar_new_area = None;
+            self.workspace.toolbar_search_area = None;
+            self.mouse.hover_workspace_thread_index = None;
+            self.mouse.hover_workspace_target = None;
+            self.mouse.workspace_list_snapshot = None;
             self.chat_widget.render_standalone_chat(
                 area,
                 buf,
                 &self.transcript_cells,
-                self.center.chat_scroll_from_bottom,
+                self.workspace.chat_scroll_from_bottom,
+                &self.workspace.launch,
             );
             self.update_mouse_pane_snapshot(MousePane::Chat, area, buf);
             self.render_mouse_selection_overlay(buf);
             return area;
         }
 
-        let theme = self.chat_widget.center_theme();
-        crate::surface::render_app_background(area, buf, theme);
-        let desktop_area = center_desktop_area(area);
-        let frame_height = desktop_area.height.saturating_sub(1).max(1);
-        let layout_width = desktop_area.width.saturating_sub(1).max(1);
-        let list_width = center_list_width(layout_width);
-        let gap_width = if list_width < layout_width {
-            CENTER_SPLIT_GAP.min(layout_width.saturating_sub(list_width))
+        let theme = self.chat_widget.workspace_theme();
+        let desktop_area = area;
+        crate::surface::render_main_surface(desktop_area, buf, theme, None);
+        let window_inner_area = workspace_window_inner_area(desktop_area);
+        let chrome_area = Rect::new(
+            window_inner_area.x,
+            window_inner_area.y,
+            window_inner_area.width,
+            WORKSPACE_CHROME_HEIGHT.min(window_inner_area.height),
+        );
+        self.render_workspace_chrome_bar(chrome_area, buf);
+        let content_y = window_inner_area.y.saturating_add(WORKSPACE_CHROME_HEIGHT);
+        let content_area = Rect::new(
+            window_inner_area.x,
+            content_y,
+            window_inner_area.width,
+            window_inner_area
+                .bottom()
+                .saturating_sub(content_y)
+                .saturating_sub(0),
+        );
+        let list_width = workspace_list_width(content_area.width);
+        let gap_width = if list_width < content_area.width {
+            WORKSPACE_SPLIT_GAP.min(content_area.width.saturating_sub(list_width))
         } else {
             0
         };
-        let list_area = Rect::new(desktop_area.x, desktop_area.y, list_width, frame_height);
-        let gap_x = desktop_area.x.saturating_add(list_width);
+        let list_area = Rect::new(
+            content_area.x,
+            content_area.y,
+            list_width,
+            content_area.height,
+        );
+        let gap_x = content_area.x.saturating_add(list_width);
         let chat_x = gap_x.saturating_add(gap_width);
         let chat_area = Rect::new(
             chat_x,
-            desktop_area.y,
-            desktop_area
+            content_area.y,
+            content_area
                 .right()
                 .saturating_sub(chat_x)
-                .saturating_sub(1),
-            frame_height,
+                .saturating_sub(0),
+            content_area.height,
         );
-        let gap_area = Rect::new(gap_x, desktop_area.y, gap_width, frame_height);
-        self.center.list_area = Some(list_area);
-        self.center.chat_area = (!chat_area.is_empty()).then_some(chat_area);
-        self.center
-            .clamp_list_scroll(self.center_visible_row_capacity());
-        let max_chat_scroll = if chat_area.is_empty() {
-            0
-        } else {
-            self.chat_widget.center_chat_scroll_limit(
-                chat_area,
-                &self.transcript_cells,
-                self.center.chat_scroll_from_bottom,
-            )
-        };
-        self.center.chat_scroll_from_bottom =
-            self.center.chat_scroll_from_bottom.min(max_chat_scroll);
+        let gap_area = Rect::new(gap_x, content_area.y, gap_width, content_area.height);
+        self.workspace.list_area = Some(list_area);
+        self.workspace.chat_area = (!chat_area.is_empty()).then_some(chat_area);
+        self.workspace
+            .clamp_list_scroll(self.workspace_visible_row_capacity());
+        let max_chat_scroll =
+            if chat_area.is_empty() || !matches!(self.workspace.main_pane, WorkspacePane::Chat) {
+                0
+            } else {
+                self.chat_widget.workspace_chat_scroll_limit_embedded(
+                    chat_area,
+                    &self.transcript_cells,
+                    self.workspace.chat_scroll_from_bottom,
+                )
+            };
+        self.workspace.chat_scroll_from_bottom =
+            self.workspace.chat_scroll_from_bottom.min(max_chat_scroll);
         if !gap_area.is_empty() {
-            buf.set_style(gap_area, Style::default().bg(theme.gap_bg).fg(theme.gap_fg));
-        }
-        self.render_center_list(list_area, buf);
-        if !chat_area.is_empty() {
-            self.chat_widget.render_center_chat(
-                chat_area,
-                buf,
-                &self.transcript_cells,
-                self.center.chat_scroll_from_bottom,
+            buf.set_style(
+                gap_area,
+                Style::default()
+                    .bg(theme.panel_bg)
+                    .fg(theme.border_muted)
+                    .add_modifier(Modifier::BOLD),
             );
+            for y in gap_area.y..gap_area.bottom() {
+                buf[(gap_area.x, y)].set_symbol("│");
+            }
+        }
+        self.render_workspace_list(list_area, buf, false);
+        if !chat_area.is_empty() {
+            match &mut self.workspace.main_pane {
+                WorkspacePane::SessionPicker(picker) => {
+                    let view_rows = usize::from(chat_area.height.saturating_sub(4)) / 3;
+                    picker.set_view_rows(view_rows.max(1));
+                    render_session_picker(chat_area, buf, picker);
+                }
+                WorkspacePane::AgentPicker(picker) => {
+                    let view_rows = usize::from(chat_area.height.saturating_sub(4)) / 3;
+                    picker.set_view_rows(view_rows.max(1));
+                    render_agent_picker(chat_area, buf, picker);
+                }
+                WorkspacePane::Chat | WorkspacePane::WorkerBoard(_) => {
+                    self.chat_widget.render_workspace_chat_embedded(
+                        chat_area,
+                        buf,
+                        &self.transcript_cells,
+                        self.workspace.chat_scroll_from_bottom,
+                        &self.workspace.launch,
+                    );
+                }
+            }
             self.update_mouse_pane_snapshot(MousePane::Chat, chat_area, buf);
         } else {
             self.mouse.chat_snapshot = None;
         }
-        self.update_mouse_pane_snapshot(MousePane::CenterList, list_area, buf);
+        self.update_mouse_pane_snapshot(MousePane::WorkspaceList, list_area, buf);
+        self.render_workspace_chrome_overlay(window_inner_area, buf);
         self.render_mouse_selection_overlay(buf);
         chat_area
     }
 
-    fn render_center_list(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
-        refresh_center_subagent_summaries(&mut self.center.rows);
-        let theme = self.chat_widget.center_theme();
-        let bg = theme.base_bg;
+    fn render_workspace_chrome_bar(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer) {
+        if area.is_empty() {
+            self.workspace.chrome_bar_area = None;
+            self.workspace.chrome_bar_areas = WorkspaceChromeBarAreas::default();
+            return;
+        }
+        let theme = self.chat_widget.workspace_theme();
+        let language = self.chat_widget.ui_language();
+        let areas = workspace_chrome_menu_bar_areas(area, language);
+        self.workspace.chrome_bar_area = Some(area);
+        self.workspace.chrome_bar_areas = areas;
+        buf.set_style(
+            area,
+            Style::default()
+                .bg(theme.header_bg)
+                .fg(theme.text)
+                .add_modifier(Modifier::empty()),
+        );
+        for (menu, menu_area) in [
+            (WorkspaceChromeMenu::File, areas.file),
+            (WorkspaceChromeMenu::Help, areas.help),
+        ] {
+            if menu_area.is_empty() {
+                continue;
+            }
+            let active = matches!(
+                self.workspace.overlay,
+                WorkspaceOverlay::ChromeMenu(WorkspaceChromeMenuState { menu: active, .. })
+                    if active == menu
+            );
+            let hovered =
+                self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::ChromeMenu(menu));
+            let style = if active {
+                Style::default()
+                    .bg(theme.selected_bg)
+                    .fg(theme.text_strong)
+                    .add_modifier(Modifier::BOLD)
+            } else if hovered {
+                Style::default().bg(theme.hover_bg).fg(theme.text_strong)
+            } else {
+                Style::default().bg(theme.header_bg).fg(theme.text)
+            };
+            let label = format!(" {} ", workspace_chrome_menu_title(menu, language));
+            Paragraph::new(label).style(style).render(menu_area, buf);
+        }
+    }
+
+    fn render_workspace_chrome_overlay(
+        &mut self,
+        shell_area: Rect,
+        buf: &mut ratatui::buffer::Buffer,
+    ) {
+        let overlay = self.workspace.overlay.clone();
+        let language = self.chat_widget.ui_language();
+        let theme = self.chat_widget.workspace_theme();
+        match overlay {
+            WorkspaceOverlay::ChromeMenu(menu_state) => {
+                let anchor = match menu_state.menu {
+                    WorkspaceChromeMenu::File => self.workspace.chrome_bar_areas.file,
+                    WorkspaceChromeMenu::Help => self.workspace.chrome_bar_areas.help,
+                };
+                let area =
+                    workspace_chrome_menu_popup_area(shell_area, anchor, menu_state.menu, language);
+                if let WorkspaceOverlay::ChromeMenu(current) = &mut self.workspace.overlay {
+                    current.area = Some(area);
+                }
+                crate::surface::render_popup_surface(
+                    area,
+                    buf,
+                    theme,
+                    Some(Line::from(workspace_chrome_menu_title(
+                        menu_state.menu,
+                        language,
+                    ))),
+                );
+                let actions = workspace_chrome_menu_actions(menu_state.menu);
+                for (index, action) in actions.iter().copied().enumerate() {
+                    let y = area.y.saturating_add(1 + index as u16);
+                    if y >= area.bottom().saturating_sub(1) {
+                        break;
+                    }
+                    let hovered = self.mouse.hover_workspace_target
+                        == Some(WorkspaceMouseTarget::ChromeAction(action));
+                    let selected = hovered || index == menu_state.selected;
+                    let style = if selected {
+                        Style::default().bg(theme.selected_bg).fg(theme.text_strong)
+                    } else {
+                        Style::default().bg(theme.dropdown_bg).fg(theme.text)
+                    };
+                    let label = workspace_chrome_action_label(action, language);
+                    let shortcut = workspace_chrome_action_shortcut(action);
+                    let line_width = area.width.saturating_sub(2) as usize;
+                    let text = if shortcut.is_empty() {
+                        workspace_truncate(label, line_width)
+                    } else {
+                        let shortcut_width = shortcut.chars().count();
+                        let label_width = line_width.saturating_sub(shortcut_width + 2);
+                        format!(
+                            "{:<label_width$}  {}",
+                            workspace_truncate(label, label_width),
+                            shortcut
+                        )
+                    };
+                    Paragraph::new(text).style(style).render(
+                        Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(2), 1),
+                        buf,
+                    );
+                }
+            }
+            WorkspaceOverlay::OpenFolder(prompt) => {
+                let area = workspace_dialog_area(shell_area, 68, 8);
+                if let WorkspaceOverlay::OpenFolder(current) = &mut self.workspace.overlay {
+                    current.area = Some(area);
+                }
+                let title = match language {
+                    UiLanguage::En => " Open Folder ",
+                    UiLanguage::Cn => " 打开文件夹 ",
+                };
+                crate::surface::render_popup_surface(area, buf, theme, Some(Line::from(title)));
+                let label = match language {
+                    UiLanguage::En => "Workspace path",
+                    UiLanguage::Cn => "工作目录路径",
+                };
+                Paragraph::new(label)
+                    .style(Style::default().bg(theme.dropdown_bg).fg(theme.muted))
+                    .render(
+                        Rect::new(area.x + 2, area.y + 1, area.width.saturating_sub(4), 1),
+                        buf,
+                    );
+                let mut value = prompt.value.clone();
+                let cursor = prompt.cursor.min(value.len());
+                value.insert(cursor, '|');
+                Paragraph::new(workspace_truncate(
+                    &value,
+                    area.width.saturating_sub(4) as usize,
+                ))
+                .style(Style::default().bg(theme.input_bg).fg(theme.text_strong))
+                .render(
+                    Rect::new(area.x + 2, area.y + 2, area.width.saturating_sub(4), 1),
+                    buf,
+                );
+                let detail = match prompt.message.as_deref() {
+                    Some(message) => message,
+                    None => match language {
+                        UiLanguage::En => {
+                            "Enter an existing folder. Relative paths resolve from the current workspace."
+                        }
+                        UiLanguage::Cn => "输入已存在的文件夹。相对路径会基于当前工作目录解析。",
+                    },
+                };
+                Paragraph::new(workspace_truncate(
+                    detail,
+                    area.width.saturating_sub(4) as usize,
+                ))
+                .style(Style::default().bg(theme.dropdown_bg).fg(theme.muted))
+                .render(
+                    Rect::new(area.x + 2, area.y + 4, area.width.saturating_sub(4), 1),
+                    buf,
+                );
+                let confirm_hovered = self.mouse.hover_workspace_target
+                    == Some(WorkspaceMouseTarget::OpenFolderConfirm);
+                let cancel_hovered = self.mouse.hover_workspace_target
+                    == Some(WorkspaceMouseTarget::OpenFolderCancel);
+                let confirm_label = match language {
+                    UiLanguage::En => " Open ",
+                    UiLanguage::Cn => " 打开 ",
+                };
+                Paragraph::new(confirm_label)
+                    .style(if confirm_hovered {
+                        Style::default().bg(theme.selected_bg).fg(theme.text_strong)
+                    } else {
+                        Style::default().bg(theme.dropdown_bg).fg(theme.accent)
+                    })
+                    .render(Rect::new(area.x + 2, area.y + 6, 10, 1), buf);
+                Paragraph::new(language.workspace_cancel_label())
+                    .style(if cancel_hovered {
+                        Style::default().bg(theme.selected_bg).fg(theme.text_strong)
+                    } else {
+                        Style::default().bg(theme.dropdown_bg).fg(theme.text)
+                    })
+                    .render(Rect::new(area.x + 14, area.y + 6, 12, 1), buf);
+            }
+            _ => {}
+        }
+    }
+
+    fn render_workspace_list(
+        &mut self,
+        area: Rect,
+        buf: &mut ratatui::buffer::Buffer,
+        framed: bool,
+    ) {
+        refresh_workspace_subagent_summaries(&mut self.workspace.rows);
+        let theme = self.chat_widget.workspace_theme();
         let text = theme.text;
         let muted = theme.muted;
         let green = theme.accent;
@@ -7339,72 +7181,83 @@ impl App {
         let controlled_muted = theme.control_muted;
         let ui_palette = theme.ui_palette();
         let language = self.chat_widget.ui_language();
-        buf.set_style(area, Style::default().bg(bg).fg(text));
+        buf.set_style(area, Style::default().bg(theme.panel_bg).fg(text));
+        let title = Line::from(vec![
+            Span::styled(language.workspace_title(), Style::default().fg(green)),
+            Span::styled(
+                language.workspace_thread_count(self.workspace.rows.len()),
+                Style::default().fg(muted),
+            ),
+        ]);
+        if framed {
+            crate::surface::render_panel_surface(area, buf, theme, Some(title));
+        } else if area.width > 2 && area.height > 0 {
+            Paragraph::new(title)
+                .style(Style::default().fg(text).bg(theme.panel_bg))
+                .render(
+                    Rect::new(
+                        area.x.saturating_add(1),
+                        area.y,
+                        area.width.saturating_sub(2),
+                        1,
+                    ),
+                    buf,
+                );
+        }
 
-        crate::surface::render_panel_surface(
-            area,
-            buf,
-            theme,
-            Some(Line::from(vec![
-                Span::styled(language.center_title(), Style::default().fg(green)),
-                Span::styled(
-                    language.center_thread_count(self.center.rows.len()),
-                    Style::default().fg(muted),
-                ),
-            ])),
-        );
-
-        if area.height < CENTER_LIST_TOP_PADDING + 1 {
-            self.center.toolbar_new_area = None;
-            self.center.toolbar_search_area = None;
+        if area.height < WORKSPACE_LIST_TOP_PADDING + 1 {
+            self.workspace.toolbar_new_area = None;
+            self.workspace.toolbar_search_area = None;
             return;
         }
 
-        let (new_area, search_area) = center_toolbar_areas(area);
-        self.center.toolbar_new_area = (!new_area.is_empty()).then_some(new_area);
-        self.center.toolbar_search_area = (!search_area.is_empty()).then_some(search_area);
-        let new_hovered = self.mouse.hover_center_target == Some(CenterMouseTarget::NewThread);
-        let search_hovered = self.mouse.hover_center_target == Some(CenterMouseTarget::Search);
+        let (new_area, search_area) = workspace_toolbar_areas(area);
+        self.workspace.toolbar_new_area = (!new_area.is_empty()).then_some(new_area);
+        self.workspace.toolbar_search_area = (!search_area.is_empty()).then_some(search_area);
+        let new_hovered =
+            self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::StartThread);
+        let search_hovered =
+            self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::Search);
         let visual_palette = theme.visual_palette();
         let new_style = visual_palette.button_style(new_hovered, false);
         if !new_area.is_empty() {
             buf.set_style(new_area, new_style);
             Paragraph::new(Line::from(vec![Span::styled(
-                center_truncate(language.center_new_thread(), new_area.width as usize),
+                workspace_truncate(language.workspace_new_thread(), new_area.width as usize),
                 new_style.add_modifier(Modifier::BOLD),
             )]))
             .style(new_style)
             .render(new_area, buf);
         }
         if !search_area.is_empty() {
-            let prefix = if self.center.search_focused {
+            let prefix = if self.workspace.search_focused {
                 "> "
             } else {
                 "/ "
             };
             let mut search_palette = ui_palette.clone();
             search_palette.surface_input =
-                visual_palette.input_surface(self.center.search_focused, search_hovered);
-            search_palette.accent_soft = if self.center.search_focused {
+                visual_palette.input_surface(self.workspace.search_focused, search_hovered);
+            search_palette.accent_soft = if self.workspace.search_focused {
                 visual_palette.control_accent
             } else {
                 visual_palette.text_muted
             };
-            search_palette.text = if self.center.search_focused {
+            search_palette.text = if self.workspace.search_focused {
                 visual_palette.text_strong
             } else {
                 visual_palette.text
             };
-            search_palette.text_inactive = if self.center.search_focused {
+            search_palette.text_inactive = if self.workspace.search_focused {
                 visual_palette.text_inactive
             } else {
                 visual_palette.text_inactive
             };
-            let cursor = InputVisual::new(self.center.search_query.as_str())
-                .placeholder(language.center_search_placeholder())
+            let cursor = InputVisual::new(self.workspace.search_query.as_str())
+                .placeholder(language.workspace_search_placeholder())
                 .prefix(prefix)
-                .cursor_byte(self.center.search_query.len())
-                .focused(self.center.search_focused)
+                .cursor_byte(self.workspace.search_query.len())
+                .focused(self.workspace.search_focused)
                 .render(search_area, buf, &search_palette);
             if let Some(cursor) = cursor
                 && cursor.x < search_area.right()
@@ -7418,33 +7271,34 @@ impl App {
         }
 
         let active_thread_id = self.chat_widget.thread_id().or(self.active_thread_id);
-        let max_rows = ((area.height - CENTER_LIST_TOP_PADDING) / CENTER_ROW_HEIGHT) as usize;
-        let visible_items = self.center.visible_items();
-        let item_count = visible_items.len() + usize::from(self.center.has_load_more_row());
-        let first_visible_index = self.center.list_scroll.min(item_count);
+        let max_rows = ((area.height - WORKSPACE_LIST_TOP_PADDING) / WORKSPACE_ROW_HEIGHT) as usize;
+        let visible_items = self.workspace.visible_items();
+        let item_count = visible_items.len() + usize::from(self.workspace.has_load_more_row());
+        let first_visible_index = self.workspace.list_scroll.min(item_count);
         let last_visible_index = first_visible_index.saturating_add(max_rows).min(item_count);
         let text_width = area.width.saturating_sub(4) as usize;
         for (screen_index, visible_item_index) in
             (first_visible_index..last_visible_index).enumerate()
         {
-            let y = area.y + CENTER_LIST_TOP_PADDING + (screen_index as u16 * CENTER_ROW_HEIGHT);
+            let y =
+                area.y + WORKSPACE_LIST_TOP_PADDING + (screen_index as u16 * WORKSPACE_ROW_HEIGHT);
             let row_area = Rect::new(area.x + 1, y, area.width.saturating_sub(2), 2);
-            if self.center.is_load_more_index(visible_item_index) {
-                let is_selected = visible_item_index == self.center.selected;
+            if self.workspace.is_load_more_index(visible_item_index) {
+                let is_selected = visible_item_index == self.workspace.selected;
                 let is_hovered =
-                    self.mouse.hover_center_target == Some(CenterMouseTarget::LoadMore);
-                let row_style = center_row_style(theme, false, is_selected, is_hovered, false);
+                    self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::LoadMore);
+                let row_style = workspace_row_style(theme, false, is_selected, is_hovered, false);
                 buf.set_style(row_area, row_style);
-                render_center_row_accent(
+                render_workspace_row_accent(
                     buf,
                     row_area,
                     row_style,
-                    center_row_accent(theme, false, is_selected, is_hovered, false),
+                    workspace_row_accent(theme, false, is_selected, is_hovered, false),
                 );
-                let label = if self.center.is_loading_more() {
-                    language.center_loading_more_threads()
+                let label = if self.workspace.is_loading_more() {
+                    language.workspace_loading_more_threads()
                 } else {
-                    language.center_load_more_threads()
+                    language.workspace_load_more_threads()
                 };
                 Paragraph::new(Line::from(vec![
                     Span::styled(
@@ -7463,8 +7317,8 @@ impl App {
                     ),
                     buf,
                 );
-                Paragraph::new(center_truncate(
-                    &language.center_loaded_threads(self.center.rows.len()),
+                Paragraph::new(workspace_truncate(
+                    &language.workspace_loaded_threads(self.workspace.rows.len()),
                     text_width.saturating_sub(2),
                 ))
                 .style(row_style.fg(muted))
@@ -7482,38 +7336,38 @@ impl App {
             let Some(visible_item) = visible_items.get(visible_item_index).copied() else {
                 continue;
             };
-            if let CenterVisibleItem::ClosedSubagents { parent_index } = visible_item {
-                let Some(parent_row) = self.center.rows.get(parent_index) else {
+            if let WorkspaceVisibleItem::ClosedSubagents { parent_index } = visible_item {
+                let Some(parent_row) = self.workspace.rows.get(parent_index) else {
                     continue;
                 };
-                let is_selected = visible_item_index == self.center.selected;
+                let is_selected = visible_item_index == self.workspace.selected;
                 let is_hovered = matches!(
-                    self.mouse.hover_center_target,
-                    Some(CenterMouseTarget::ClosedSubagentsToggle(target))
+                    self.mouse.hover_workspace_target,
+                    Some(WorkspaceMouseTarget::ClosedSubagentsToggle(target))
                         if target == parent_index
                 );
-                let row_style = center_row_style(theme, false, is_selected, is_hovered, false);
+                let row_style = workspace_row_style(theme, false, is_selected, is_hovered, false);
                 buf.set_style(row_area, row_style);
-                render_center_row_accent(
+                render_workspace_row_accent(
                     buf,
                     row_area,
                     row_style,
-                    center_row_accent(theme, false, is_selected, is_hovered, false),
+                    workspace_row_accent(theme, false, is_selected, is_hovered, false),
                 );
                 let expanded = self
-                    .center
+                    .workspace
                     .expanded_closed_subagent_parent_ids
                     .contains(&parent_row.thread_id);
                 let tree_prefix = if expanded { "▾" } else { "▸" };
-                let row_indent = center_row_tree_indent(parent_row)
-                    .saturating_add(CENTER_SUBAGENT_INDENT_STEP)
+                let row_indent = workspace_row_tree_indent(parent_row)
+                    .saturating_add(WORKSPACE_SUBAGENT_INDENT_STEP)
                     .min(row_area.width.saturating_sub(2));
                 let row_content_x = row_area.x.saturating_add(1).saturating_add(row_indent);
                 let row_content_width = row_area.width.saturating_sub(2).saturating_sub(row_indent);
                 let row_text_width = row_content_width as usize;
-                let title_width = row_text_width.saturating_sub(CENTER_STATUS_LABEL_WIDTH + 8);
-                let title = center_truncate(
-                    &center_closed_subagents_label(parent_row.subagents.closed, language),
+                let title_width = row_text_width.saturating_sub(WORKSPACE_STATUS_LABEL_WIDTH + 8);
+                let title = workspace_truncate(
+                    &workspace_closed_subagents_label(parent_row.subagents.closed, language),
                     title_width,
                 );
                 Paragraph::new(Line::from(vec![
@@ -7527,10 +7381,10 @@ impl App {
                     Span::styled(
                         format!(
                             "{:<width$}",
-                            center_truncate("CLOSED", CENTER_STATUS_LABEL_WIDTH),
-                            width = CENTER_STATUS_LABEL_WIDTH
+                            workspace_truncate("CLOSED", WORKSPACE_STATUS_LABEL_WIDTH),
+                            width = WORKSPACE_STATUS_LABEL_WIDTH
                         ),
-                        center_status_style(theme, muted, false),
+                        workspace_status_style(theme, muted, false),
                     ),
                     Span::raw(" "),
                     Span::styled(title, row_style.fg(muted).add_modifier(Modifier::BOLD)),
@@ -7540,8 +7394,8 @@ impl App {
                     Rect::new(row_content_x, row_area.y, row_content_width, 1),
                     buf,
                 );
-                Paragraph::new(center_truncate(
-                    &center_closed_subagents_detail(parent_row.subagents.closed, language),
+                Paragraph::new(workspace_truncate(
+                    &workspace_closed_subagents_detail(parent_row.subagents.closed, language),
                     row_text_width,
                 ))
                 .style(row_style.fg(muted))
@@ -7551,29 +7405,29 @@ impl App {
                 );
                 continue;
             }
-            let CenterVisibleItem::Thread(index) = visible_item else {
+            let WorkspaceVisibleItem::Thread(index) = visible_item else {
                 continue;
             };
-            let Some(row) = self.center.rows.get(index) else {
+            let Some(row) = self.workspace.rows.get(index) else {
                 continue;
             };
             let is_active = Some(row.thread_id) == active_thread_id;
-            let is_selected = visible_item_index == self.center.selected;
-            let is_hovered = self.mouse.hover_center_thread_index == Some(index)
+            let is_selected = visible_item_index == self.workspace.selected;
+            let is_hovered = self.mouse.hover_workspace_thread_index == Some(index)
                 || matches!(
-                    self.mouse.hover_center_target,
-                    Some(CenterMouseTarget::Thread(target)
-                        | CenterMouseTarget::SubagentsToggle(target)) if target == index
+                    self.mouse.hover_workspace_target,
+                    Some(WorkspaceMouseTarget::Thread(target)
+                        | WorkspaceMouseTarget::SubagentsToggle(target)) if target == index
                 );
-            let is_controlled = center_row_is_controlled(row);
+            let is_controlled = workspace_row_is_controlled(row);
             let row_style =
-                center_row_style(theme, is_active, is_selected, is_hovered, is_controlled);
+                workspace_row_style(theme, is_active, is_selected, is_hovered, is_controlled);
             buf.set_style(row_area, row_style);
-            render_center_row_accent(
+            render_workspace_row_accent(
                 buf,
                 row_area,
                 row_style,
-                center_row_accent(theme, is_active, is_selected, is_hovered, is_controlled),
+                workspace_row_accent(theme, is_active, is_selected, is_hovered, is_controlled),
             );
 
             let status_color = if is_controlled {
@@ -7587,12 +7441,12 @@ impl App {
                 }
             };
             let subagents_expanded = self
-                .center
+                .workspace
                 .expanded_subagent_parent_ids
                 .contains(&row.thread_id);
-            let tree_prefix = center_row_tree_prefix(row, subagents_expanded);
-            let subagent_marker = center_row_subagent_marker(row);
-            let row_indent = center_row_tree_indent(row).min(row_area.width.saturating_sub(2));
+            let tree_prefix = workspace_row_tree_prefix(row, subagents_expanded);
+            let subagent_marker = workspace_row_subagent_marker(row);
+            let row_indent = workspace_row_tree_indent(row).min(row_area.width.saturating_sub(2));
             let row_content_x = row_area.x.saturating_add(1).saturating_add(row_indent);
             let row_content_width = row_area.width.saturating_sub(2).saturating_sub(row_indent);
             let row_text_width = row_content_width as usize;
@@ -7602,12 +7456,12 @@ impl App {
                 .unwrap_or(0);
             let tree_prefix_width = tree_prefix.width().saturating_add(1);
             let title_width = row_text_width.saturating_sub(
-                CENTER_STATUS_LABEL_WIDTH + 8 + tree_prefix_width + subagent_marker_width,
+                WORKSPACE_STATUS_LABEL_WIDTH + 8 + tree_prefix_width + subagent_marker_width,
             );
-            let pinned = self.center.pinned_thread_ids.contains(&row.thread_id);
+            let pinned = self.workspace.pinned_thread_ids.contains(&row.thread_id);
             let pin = if pinned { "* " } else { "" };
-            let title = center_truncate(
-                &format!("{pin}{}", center_thread_display_name(row)),
+            let title = workspace_truncate(
+                &format!("{pin}{}", workspace_thread_display_name(row)),
                 title_width,
             );
             let mut first_line_spans = vec![
@@ -7627,7 +7481,7 @@ impl App {
                 ),
                 Span::raw(" "),
                 Span::styled(
-                    center_row_control_marker(row),
+                    workspace_row_control_marker(row),
                     Style::default()
                         .fg(if is_controlled {
                             controlled_accent
@@ -7644,10 +7498,13 @@ impl App {
                 Span::styled(
                     format!(
                         "{:<width$}",
-                        center_truncate(&center_row_status_label(row), CENTER_STATUS_LABEL_WIDTH,),
-                        width = CENTER_STATUS_LABEL_WIDTH
+                        workspace_truncate(
+                            &workspace_row_status_label(row),
+                            WORKSPACE_STATUS_LABEL_WIDTH,
+                        ),
+                        width = WORKSPACE_STATUS_LABEL_WIDTH
                     ),
-                    center_status_style(theme, status_color, is_controlled),
+                    workspace_status_style(theme, status_color, is_controlled),
                 ),
                 Span::raw(" "),
                 Span::styled(title, row_style),
@@ -7677,11 +7534,11 @@ impl App {
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_else(|| row.cwd.display().to_string());
             let usage = self
-                .center
+                .workspace
                 .usage_by_thread
                 .get(&row.thread_id)
                 .or(row.token_usage.as_ref());
-            let base_detail = match center_cache_label(usage, is_selected || is_hovered) {
+            let base_detail = match workspace_cache_label(usage, is_selected || is_hovered) {
                 Some(cache_label) => {
                     format!(
                         "{}  {}  {}  {}",
@@ -7695,21 +7552,21 @@ impl App {
             };
             let detail = if let Some(control_state) = row.control_state.as_ref() {
                 let control_banner = if control_state.read_only {
-                    language.center_locked_view()
+                    language.workspace_locked_view()
                 } else {
-                    language.center_controlled()
+                    language.workspace_controlled()
                 };
                 format!(
                     "{control_banner}  {}  {}",
-                    center_control_detail(control_state, language),
+                    workspace_control_detail(control_state, language),
                     base_detail
                 )
             } else if is_controlled {
-                format!("{}  {base_detail}", language.center_controlled())
+                format!("{}  {base_detail}", language.workspace_controlled())
             } else {
                 base_detail
             };
-            Paragraph::new(center_truncate(&detail, row_text_width))
+            Paragraph::new(workspace_truncate(&detail, row_text_width))
                 .style(row_style.fg(if is_controlled {
                     controlled_muted
                 } else {
@@ -7721,29 +7578,29 @@ impl App {
                 );
         }
 
-        self.render_center_list_scrollbar(area, max_rows, buf);
-        self.render_center_overlay(area, buf);
+        self.render_workspace_list_scrollbar(area, max_rows, buf);
+        self.render_workspace_overlay(area, buf);
     }
 
-    fn render_center_list_scrollbar(
+    fn render_workspace_list_scrollbar(
         &self,
         area: Rect,
         visible_rows: usize,
         buf: &mut ratatui::buffer::Buffer,
     ) {
-        let total = self.center.list_item_count();
+        let total = self.workspace.list_item_count();
         if visible_rows == 0 || total <= visible_rows || area.width == 0 {
             return;
         }
 
-        let track_height = area.height.saturating_sub(CENTER_LIST_TOP_PADDING);
+        let track_height = area.height.saturating_sub(WORKSPACE_LIST_TOP_PADDING);
         if track_height == 0 {
             return;
         }
 
-        let theme = self.chat_widget.center_theme();
+        let theme = self.chat_widget.workspace_theme();
         let x = area.right().saturating_sub(1);
-        let track_y = area.y.saturating_add(CENTER_LIST_TOP_PADDING);
+        let track_y = area.y.saturating_add(WORKSPACE_LIST_TOP_PADDING);
         let muted = theme.dim;
         let thumb = theme.accent;
         for offset in 0..track_height {
@@ -7756,7 +7613,7 @@ impl App {
             .max(1)
             .min(track_height as usize) as u16;
         let max_scroll = total.saturating_sub(visible_rows).max(1);
-        let thumb_offset = ((self.center.list_scroll
+        let thumb_offset = ((self.workspace.list_scroll
             * track_height.saturating_sub(thumb_height) as usize)
             / max_scroll) as u16;
         for offset in 0..thumb_height {
@@ -7766,28 +7623,30 @@ impl App {
         }
     }
 
-    fn render_center_overlay(&mut self, list_area: Rect, buf: &mut ratatui::buffer::Buffer) {
-        let overlay = self.center.overlay.clone();
+    fn render_workspace_overlay(&mut self, list_area: Rect, buf: &mut ratatui::buffer::Buffer) {
+        let overlay = self.workspace.overlay.clone();
         let language = self.chat_widget.ui_language();
-        let theme = self.chat_widget.center_theme();
+        let theme = self.chat_widget.workspace_theme();
         match overlay {
-            CenterOverlayState::None => {}
-            CenterOverlayState::ContextMenu(menu) => {
-                let actions = center_menu_actions();
+            WorkspaceOverlay::None
+            | WorkspaceOverlay::ChromeMenu(_)
+            | WorkspaceOverlay::OpenFolder(_) => {}
+            WorkspaceOverlay::ContextMenu(menu) => {
+                let actions = workspace_menu_actions();
                 let row = self
-                    .center
+                    .workspace
                     .rows
                     .iter()
                     .find(|row| row.thread_id == menu.thread_id);
-                let subagent_lines = center_context_subagent_lines(row, language);
-                let area = center_popup_area(
+                let subagent_lines = workspace_context_subagent_lines(row, language);
+                let area = workspace_popup_area(
                     list_area,
                     menu.anchor_column,
                     menu.anchor_row,
-                    CENTER_CONTEXT_MENU_WIDTH,
+                    WORKSPACE_CONTEXT_MENU_WIDTH,
                     actions.len() as u16 + subagent_lines.len() as u16 + 2,
                 );
-                if let CenterOverlayState::ContextMenu(current) = &mut self.center.overlay {
+                if let WorkspaceOverlay::ContextMenu(current) = &mut self.workspace.overlay {
                     current.area = Some(area);
                 }
                 let panel = theme.dropdown_bg;
@@ -7795,45 +7654,49 @@ impl App {
                 let text = theme.text;
                 let muted = theme.muted;
                 let green = theme.accent;
-                buf.set_style(area, Style::default().bg(panel).fg(text));
-                Block::new()
-                    .borders(Borders::ALL)
-                    .title(language.center_context_title())
-                    .style(Style::default().bg(panel).fg(muted))
-                    .render(area, buf);
-                let pinned = self.center.pinned_thread_ids.contains(&menu.thread_id);
+                crate::surface::render_popup_surface(
+                    area,
+                    buf,
+                    theme,
+                    Some(Line::from(language.workspace_context_title())),
+                );
+                let pinned = self.workspace.pinned_thread_ids.contains(&menu.thread_id);
                 let locked = self
-                    .center
+                    .workspace
                     .rows
                     .iter()
                     .find(|row| row.thread_id == menu.thread_id)
-                    .is_some_and(center_row_is_controlled);
+                    .is_some_and(workspace_row_is_controlled);
                 for (index, action) in actions.iter().copied().enumerate() {
                     let y = area.y.saturating_add(1 + index as u16);
                     let is_selected = index == menu.selected
-                        || self.mouse.hover_center_target
-                            == Some(CenterMouseTarget::ContextMenu(action));
-                    let disabled = center_menu_action_disabled(action, locked);
+                        || self.mouse.hover_workspace_target
+                            == Some(WorkspaceMouseTarget::ContextMenu(action));
+                    let disabled = workspace_menu_action_disabled(action, locked);
                     let style = if is_selected && disabled {
                         Style::default().bg(selected_bg).fg(muted)
                     } else if is_selected {
                         Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else if disabled {
                         Style::default().bg(panel).fg(muted)
-                    } else if matches!(action, CenterMenuAction::Archive | CenterMenuAction::Delete)
-                    {
+                    } else if matches!(
+                        action,
+                        WorkspaceMenuAction::Archive | WorkspaceMenuAction::Delete
+                    ) {
                         Style::default().bg(panel).fg(theme.danger)
-                    } else if matches!(action, CenterMenuAction::TogglePin) && pinned {
+                    } else if matches!(action, WorkspaceMenuAction::TogglePin) && pinned {
                         Style::default().bg(panel).fg(green)
                     } else {
                         Style::default().bg(panel).fg(text)
                     };
-                    Paragraph::new(center_menu_action_label(action, pinned, locked, language))
-                        .style(style)
-                        .render(
-                            Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(2), 1),
-                            buf,
-                        );
+                    Paragraph::new(workspace_menu_action_label(
+                        action, pinned, locked, language,
+                    ))
+                    .style(style)
+                    .render(
+                        Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(2), 1),
+                        buf,
+                    );
                 }
                 let details_y = area.y.saturating_add(1 + actions.len() as u16);
                 for (line_index, line) in subagent_lines.iter().enumerate() {
@@ -7846,17 +7709,20 @@ impl App {
                     } else {
                         Style::default().bg(panel).fg(muted)
                     };
-                    Paragraph::new(center_truncate(line, area.width.saturating_sub(2) as usize))
-                        .style(style)
-                        .render(
-                            Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(2), 1),
-                            buf,
-                        );
+                    Paragraph::new(workspace_truncate(
+                        line,
+                        area.width.saturating_sub(2) as usize,
+                    ))
+                    .style(style)
+                    .render(
+                        Rect::new(area.x.saturating_add(1), y, area.width.saturating_sub(2), 1),
+                        buf,
+                    );
                 }
             }
-            CenterOverlayState::Rename(rename) => {
-                let area = center_dialog_area(list_area, CENTER_RENAME_POPUP_WIDTH, 6);
-                if let CenterOverlayState::Rename(current) = &mut self.center.overlay {
+            WorkspaceOverlay::Rename(rename) => {
+                let area = workspace_dialog_area(list_area, WORKSPACE_RENAME_POPUP_WIDTH, 6);
+                if let WorkspaceOverlay::Rename(current) = &mut self.workspace.overlay {
                     current.area = Some(area);
                 }
                 let panel = theme.dropdown_bg;
@@ -7864,36 +7730,36 @@ impl App {
                 let text = theme.text;
                 let muted = theme.muted;
                 let green = theme.accent;
-                buf.set_style(area, Style::default().bg(panel).fg(text));
-                Block::new()
-                    .borders(Borders::ALL)
-                    .title(language.center_rename_title())
-                    .style(Style::default().bg(panel).fg(muted))
-                    .render(area, buf);
-                Paragraph::new(language.center_thread_name_label())
+                crate::surface::render_popup_surface(
+                    area,
+                    buf,
+                    theme,
+                    Some(Line::from(language.workspace_rename_title())),
+                );
+                Paragraph::new(language.workspace_thread_name_label())
                     .style(Style::default().bg(panel).fg(muted))
                     .render(Rect::new(area.x + 2, area.y + 1, area.width - 4, 1), buf);
                 let mut value = rename.value.clone();
                 let cursor = rename.cursor.min(value.len());
                 value.insert(cursor, '|');
-                Paragraph::new(center_truncate(
+                Paragraph::new(workspace_truncate(
                     &value,
                     area.width.saturating_sub(4) as usize,
                 ))
                 .style(Style::default().bg(theme.input_bg).fg(theme.text_strong))
                 .render(Rect::new(area.x + 2, area.y + 2, area.width - 4, 1), buf);
                 let save_hovered =
-                    self.mouse.hover_center_target == Some(CenterMouseTarget::RenameSave);
+                    self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::RenameSave);
                 let cancel_hovered =
-                    self.mouse.hover_center_target == Some(CenterMouseTarget::RenameCancel);
-                Paragraph::new(language.center_save_label())
+                    self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::RenameCancel);
+                Paragraph::new(language.workspace_save_label())
                     .style(if save_hovered {
                         Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
                         Style::default().bg(panel).fg(green)
                     })
                     .render(Rect::new(area.x + 2, area.y + 4, 8, 1), buf);
-                Paragraph::new(language.center_cancel_label())
+                Paragraph::new(language.workspace_cancel_label())
                     .style(if cancel_hovered {
                         Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
@@ -7901,24 +7767,23 @@ impl App {
                     })
                     .render(Rect::new(area.x + 12, area.y + 4, 10, 1), buf);
             }
-            CenterOverlayState::ConfirmArchive(confirm) => {
-                let area = center_dialog_area(list_area, CENTER_CONFIRM_POPUP_WIDTH, 5);
-                if let CenterOverlayState::ConfirmArchive(current) = &mut self.center.overlay {
+            WorkspaceOverlay::ConfirmArchive(confirm) => {
+                let area = workspace_dialog_area(list_area, WORKSPACE_CONFIRM_POPUP_WIDTH, 5);
+                if let WorkspaceOverlay::ConfirmArchive(current) = &mut self.workspace.overlay {
                     current.area = Some(area);
                 }
                 let panel = theme.dropdown_bg;
                 let selected_bg = theme.selected_bg;
                 let text = theme.text;
                 let danger = theme.danger;
-                let muted = theme.muted;
-                buf.set_style(area, Style::default().bg(panel).fg(text));
-                Block::new()
-                    .borders(Borders::ALL)
-                    .title(language.center_archive_title())
-                    .style(Style::default().bg(panel).fg(muted))
-                    .render(area, buf);
+                crate::surface::render_popup_surface(
+                    area,
+                    buf,
+                    theme,
+                    Some(Line::from(language.workspace_archive_title())),
+                );
                 let name = self
-                    .center
+                    .workspace
                     .rows
                     .iter()
                     .find(|row| row.thread_id == confirm.thread_id)
@@ -7927,24 +7792,24 @@ impl App {
                         UiLanguage::En => "this thread",
                         UiLanguage::Cn => "此线程",
                     });
-                Paragraph::new(center_truncate(
-                    &language.center_archive_prompt(name),
+                Paragraph::new(workspace_truncate(
+                    &language.workspace_archive_prompt(name),
                     area.width.saturating_sub(4) as usize,
                 ))
                 .style(Style::default().bg(panel).fg(text))
                 .render(Rect::new(area.x + 2, area.y + 1, area.width - 4, 1), buf);
                 let confirm_hovered =
-                    self.mouse.hover_center_target == Some(CenterMouseTarget::ArchiveConfirm);
+                    self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::ArchiveConfirm);
                 let cancel_hovered =
-                    self.mouse.hover_center_target == Some(CenterMouseTarget::ArchiveCancel);
-                Paragraph::new(language.center_archive_title())
+                    self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::ArchiveCancel);
+                Paragraph::new(language.workspace_archive_title())
                     .style(if confirm_hovered {
                         Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
                         Style::default().bg(panel).fg(danger)
                     })
                     .render(Rect::new(area.x + 2, area.y + 3, 10, 1), buf);
-                Paragraph::new(language.center_cancel_label())
+                Paragraph::new(language.workspace_cancel_label())
                     .style(if cancel_hovered {
                         Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
@@ -7952,24 +7817,23 @@ impl App {
                     })
                     .render(Rect::new(area.x + 14, area.y + 3, 10, 1), buf);
             }
-            CenterOverlayState::ConfirmDelete(confirm) => {
-                let area = center_dialog_area(list_area, CENTER_CONFIRM_POPUP_WIDTH, 5);
-                if let CenterOverlayState::ConfirmDelete(current) = &mut self.center.overlay {
+            WorkspaceOverlay::ConfirmDelete(confirm) => {
+                let area = workspace_dialog_area(list_area, WORKSPACE_CONFIRM_POPUP_WIDTH, 5);
+                if let WorkspaceOverlay::ConfirmDelete(current) = &mut self.workspace.overlay {
                     current.area = Some(area);
                 }
                 let panel = theme.dropdown_bg;
                 let selected_bg = theme.selected_bg;
                 let text = theme.text;
                 let danger = theme.danger;
-                let muted = theme.muted;
-                buf.set_style(area, Style::default().bg(panel).fg(text));
-                Block::new()
-                    .borders(Borders::ALL)
-                    .title(language.center_delete_title())
-                    .style(Style::default().bg(panel).fg(muted))
-                    .render(area, buf);
+                crate::surface::render_popup_surface(
+                    area,
+                    buf,
+                    theme,
+                    Some(Line::from(language.workspace_delete_title())),
+                );
                 let name = self
-                    .center
+                    .workspace
                     .rows
                     .iter()
                     .find(|row| row.thread_id == confirm.thread_id)
@@ -7978,24 +7842,24 @@ impl App {
                         UiLanguage::En => "this thread",
                         UiLanguage::Cn => "此线程",
                     });
-                Paragraph::new(center_truncate(
-                    &language.center_delete_prompt(name),
+                Paragraph::new(workspace_truncate(
+                    &language.workspace_delete_prompt(name),
                     area.width.saturating_sub(4) as usize,
                 ))
                 .style(Style::default().bg(panel).fg(text))
                 .render(Rect::new(area.x + 2, area.y + 1, area.width - 4, 1), buf);
                 let confirm_hovered =
-                    self.mouse.hover_center_target == Some(CenterMouseTarget::DeleteConfirm);
+                    self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::DeleteConfirm);
                 let cancel_hovered =
-                    self.mouse.hover_center_target == Some(CenterMouseTarget::DeleteCancel);
-                Paragraph::new(language.center_delete_title())
+                    self.mouse.hover_workspace_target == Some(WorkspaceMouseTarget::DeleteCancel);
+                Paragraph::new(language.workspace_delete_title())
                     .style(if confirm_hovered {
                         Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
                         Style::default().bg(panel).fg(danger)
                     })
                     .render(Rect::new(area.x + 2, area.y + 3, 10, 1), buf);
-                Paragraph::new(language.center_cancel_label())
+                Paragraph::new(language.workspace_cancel_label())
                     .style(if cancel_hovered {
                         Style::default().bg(selected_bg).fg(theme.text_strong)
                     } else {
@@ -8012,9 +7876,9 @@ impl App {
         app_gateway: &mut AppGatewaySession,
         target_session: SessionTarget,
     ) -> Result<Option<AppRunControl>> {
-        if self.center.enabled {
+        if self.workspace.enabled {
             return self
-                .switch_center_thread(tui, app_gateway, target_session)
+                .switch_workspace_thread(tui, app_gateway, target_session)
                 .await;
         }
 
@@ -8028,7 +7892,7 @@ impl App {
         let resume_cwd = if self.remote_app_gateway_url.is_some() {
             current_cwd.clone()
         } else {
-            let allow_cwd_prompt = !self.center.enabled;
+            let allow_cwd_prompt = !self.workspace.enabled;
             match crate::resolve_cwd_for_resume_or_fork(
                 tui,
                 &self.config,
@@ -8107,12 +7971,12 @@ impl App {
             }
         }
 
-        self.refresh_center_threads(app_gateway, true);
+        self.refresh_workspace_threads(app_gateway, true);
         tui.frame_requester().schedule_frame();
         Ok(None)
     }
 
-    async fn switch_center_thread(
+    async fn switch_workspace_thread(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
@@ -8228,14 +8092,14 @@ impl App {
         );
         self.replace_chat_widget(ChatWidget::new_with_app_event(init));
         self.reset_for_thread_switch(tui)?;
-        self.center.chat_scroll_from_bottom = 0;
+        self.workspace.chat_scroll_from_bottom = 0;
         self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
         self.chat_widget
             .set_thread_control_state(control_state.as_ref());
         self.backfill_loaded_subagent_threads(app_gateway).await;
         self.drain_active_thread_events(tui).await?;
         self.refresh_pending_thread_approvals().await;
-        self.refresh_center_threads(app_gateway, true);
+        self.refresh_workspace_threads(app_gateway, true);
         tui.frame_requester().schedule_frame();
         Ok(None)
     }
@@ -8377,104 +8241,128 @@ impl App {
         source: crate::SessionLookupSource,
         action: SessionPickerAction,
     ) -> Result<Option<AppRunControl>> {
-        let picker_target = match self.remote_app_gateway_url.clone() {
+        if !self.workspace.enabled
+            && let Err(err) = tui.set_mouse_capture_enabled(true)
+        {
+            tracing::warn!(error = %err, "failed to enable mouse capture for Workspace picker");
+        }
+        self.workspace.enabled = true;
+        self.workspace_session_picker_loaders.clear();
+        let mut picker = SessionPickerState::new(SessionPickerOpenRequest {
+            source,
+            action,
+            include_non_interactive: false,
+        });
+        let effect = picker.start_initial_load();
+        self.workspace.open_session_picker(picker);
+        self.handle_workspace_session_picker_effect(tui, app_gateway, effect)
+            .await
+    }
+
+    async fn handle_workspace_session_picker_effect(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        effect: SessionPickerEffect,
+    ) -> Result<Option<AppRunControl>> {
+        match effect {
+            SessionPickerEffect::None => Ok(None),
+            SessionPickerEffect::Close => {
+                self.workspace.close_main_pane();
+                tui.frame_requester().schedule_frame();
+                Ok(None)
+            }
+            SessionPickerEffect::LoadPage(request) => {
+                self.queue_workspace_session_picker_page(request).await;
+                tui.frame_requester().schedule_frame();
+                Ok(None)
+            }
+            SessionPickerEffect::Select(selection) => {
+                self.workspace.close_main_pane();
+                self.apply_session_selection(tui, app_gateway, selection)
+                    .await
+            }
+        }
+    }
+
+    async fn queue_workspace_session_picker_page(&mut self, request: SessionPickerPageRequest) {
+        let source = request.source;
+        if !self.workspace_session_picker_loaders.contains_key(&source) {
+            match self.spawn_workspace_session_picker_loader(source).await {
+                Ok(sender) => {
+                    self.workspace_session_picker_loaders.insert(source, sender);
+                }
+                Err(err) => {
+                    self.app_event_tx
+                        .send(AppEvent::WorkspaceSessionPickerPageLoaded {
+                            request,
+                            result: Err(format!(
+                                "Failed to prepare {} picker source: {err}",
+                                source.display_name()
+                            )),
+                        });
+                    return;
+                }
+            }
+        }
+
+        if let Some(sender) = self.workspace_session_picker_loaders.get(&source)
+            && sender.send(request.clone()).is_err()
+        {
+            self.workspace_session_picker_loaders.remove(&source);
+            self.app_event_tx
+                .send(AppEvent::WorkspaceSessionPickerPageLoaded {
+                    request,
+                    result: Err(format!(
+                        "{} picker worker stopped before loading threads.",
+                        source.display_name()
+                    )),
+                });
+        }
+    }
+
+    async fn spawn_workspace_session_picker_loader(
+        &self,
+        source: crate::SessionLookupSource,
+    ) -> Result<mpsc::UnboundedSender<SessionPickerPageRequest>> {
+        let current_gateway_target = match self.remote_app_gateway_url.clone() {
             Some(websocket_url) => crate::AppGatewayTarget::Remote {
                 websocket_url,
                 auth_token: self.remote_app_gateway_auth_token.clone(),
             },
             None => crate::AppGatewayTarget::Embedded,
         };
-        let picker_config = match source {
-            crate::SessionLookupSource::Praxis => self.config.clone(),
-            crate::SessionLookupSource::Codex => {
-                match crate::build_praxis_bridge_lookup_config(&self.config).await {
-                    Ok(config) => config,
-                    Err(err) => {
-                        self.chat_widget.add_error_message(format!(
-                            "Failed to prepare Codex picker source: {err}"
-                        ));
-                        return Ok(None);
-                    }
-                }
+        let picker_target =
+            crate::session_lookup_app_gateway_target(source, &current_gateway_target);
+        let picker_config = crate::build_session_lookup_config(source, &self.config)
+            .await
+            .map_err(color_eyre::Report::new)?;
+        let mut picker_app_gateway =
+            crate::start_app_gateway_for_picker(&picker_config, &picker_target).await?;
+        let (sender, mut receiver) = mpsc::unbounded_channel::<SessionPickerPageRequest>();
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            while let Some(request) = receiver.recv().await {
+                let params = session_picker_thread_list_params(&request);
+                let result = picker_app_gateway
+                    .thread_list(params)
+                    .await
+                    .map_err(|err| err.to_string());
+                app_event_tx.send(AppEvent::WorkspaceSessionPickerPageLoaded { request, result });
             }
-        };
-        let picker_app_gateway =
-            match crate::start_app_gateway_for_picker(&picker_config, &picker_target).await {
-                Ok(app_gateway) => app_gateway,
-                Err(err) => {
-                    self.chat_widget
-                        .add_error_message(format!("Failed to start TUI session picker: {err}"));
-                    return Ok(None);
-                }
-            };
-        let alternate_picker_source = if crate::picker_source_switch_enabled(&picker_target) {
-            let alternate_source = match source {
-                crate::SessionLookupSource::Praxis => crate::SessionLookupSource::Codex,
-                crate::SessionLookupSource::Codex => crate::SessionLookupSource::Praxis,
-            };
-            let alternate_config = match alternate_source {
-                crate::SessionLookupSource::Praxis => self.config.clone(),
-                crate::SessionLookupSource::Codex => {
-                    match crate::build_praxis_bridge_lookup_config(&self.config).await {
-                        Ok(config) => config,
-                        Err(err) => {
-                            self.chat_widget.add_error_message(format!(
-                                "Failed to prepare Codex picker source: {err}"
-                            ));
-                            return Ok(None);
-                        }
-                    }
-                }
-            };
-            match crate::start_app_gateway_for_picker(&alternate_config, &picker_target).await {
-                Ok(alternate_app_gateway) => Some(crate::resume_picker::AlternatePickerSource {
-                    source: alternate_source,
-                    config: alternate_config,
-                    app_gateway: alternate_app_gateway,
-                }),
-                Err(err) => {
-                    self.chat_widget.add_error_message(format!(
-                        "Failed to start alternate picker source: {err}"
-                    ));
-                    None
-                }
+            if let Err(err) = picker_app_gateway.shutdown().await {
+                tracing::warn!(%err, "Failed to shut down Workspace session picker app gateway");
             }
-        } else {
-            None
-        };
-        let selection = match action {
-            SessionPickerAction::Resume => {
-                crate::resume_picker::run_resume_picker_with_app_gateway(
-                    tui,
-                    &picker_config,
-                    /*show_all*/ false,
-                    /*include_non_interactive*/ false,
-                    source,
-                    picker_app_gateway,
-                    alternate_picker_source,
-                )
-                .await?
-            }
-            SessionPickerAction::Fork => {
-                crate::resume_picker::run_fork_picker_with_app_gateway(
-                    tui,
-                    &picker_config,
-                    /*show_all*/ false,
-                    source,
-                    picker_app_gateway,
-                    alternate_picker_source,
-                )
-                .await?
-            }
-        };
-        let selection = match selection {
-            SessionSelection::Resume(target_session)
-                if matches!(source, crate::SessionLookupSource::Codex) =>
-            {
-                SessionSelection::Fork(target_session)
-            }
-            other => other,
-        };
+        });
+        Ok(sender)
+    }
+
+    async fn apply_session_selection(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        selection: SessionSelection,
+    ) -> Result<Option<AppRunControl>> {
         match selection {
             SessionSelection::Resume(target_session) => {
                 if let Some(control) = self
@@ -8596,6 +8484,7 @@ impl App {
             SessionSelection::Exit | SessionSelection::StartFresh => {}
         }
 
+        self.refresh_workspace_threads(app_gateway, true);
         tui.frame_requester().schedule_frame();
         Ok(None)
     }
@@ -8713,15 +8602,15 @@ impl App {
                     );
                     return Ok(AppRunControl::Continue);
                 };
-                self.release_center_thread_control(app_gateway, thread_id)
+                self.release_workspace_thread_control(app_gateway, thread_id)
                     .await;
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::RegenerateThreadName { thread_id } => {
                 match app_gateway.thread_regenerate_name(thread_id).await {
                     Ok(thread_name) => {
-                        if let Some(index) = self.center.row_index(thread_id) {
-                            self.center.rows[index].name = center_single_line(&thread_name);
+                        if let Some(index) = self.workspace.row_index(thread_id) {
+                            self.workspace.rows[index].name = workspace_single_line(&thread_name);
                         }
                         self.chat_widget.add_info_message(
                             format!("Thread name regenerated: {thread_name}"),
@@ -8803,8 +8692,9 @@ impl App {
             AppEvent::FatalExitRequest(message) => {
                 return Ok(AppRunControl::Exit(ExitReason::Fatal(message)));
             }
-            AppEvent::CodexOp(op) => {
-                self.submit_active_thread_op(app_gateway, op.into()).await?;
+            AppEvent::AgentOp(op) => {
+                self.submit_active_thread_op_or_start(tui, app_gateway, op.into())
+                    .await?;
             }
             AppEvent::SubmitThreadOp { thread_id, op } => {
                 self.submit_thread_op(app_gateway, thread_id, op.into())
@@ -8985,11 +8875,19 @@ impl App {
                         .finish_status_rate_limit_refresh(request_id);
                 }
             },
-            AppEvent::CenterThreadsLoaded { request_id, result } => {
-                self.handle_center_threads_loaded(request_id, result);
-                self.observe_existing_center_threads_if_needed(app_gateway)
+            AppEvent::WorkspaceThreadsLoaded { request_id, result } => {
+                self.handle_workspace_threads_loaded(request_id, result);
+                self.observe_existing_workspace_threads_if_needed(app_gateway)
                     .await;
                 tui.frame_requester().schedule_frame();
+            }
+            AppEvent::WorkspaceSessionPickerPageLoaded { request, result } => {
+                if let Some(picker) = self.workspace.session_picker_mut()
+                    && picker.source == request.source
+                {
+                    picker.apply_page(request.request_id, result);
+                    tui.frame_requester().schedule_frame();
+                }
             }
             AppEvent::FetchTokenUsageSummary { limit } => {
                 self.fetch_token_usage_summary(app_gateway, limit);
@@ -9350,7 +9248,7 @@ impl App {
                             if let Some((sample_paths, extra_count, failed_scan)) =
                                 self.chat_widget.world_writable_warning_details()
                             {
-                                self.app_event_tx.send(AppEvent::CodexOp(
+                                self.app_event_tx.send(AppEvent::AgentOp(
                                     AppCommand::override_turn_context(
                                         /*cwd*/ None,
                                         /*approval_policy*/ None,
@@ -9377,7 +9275,7 @@ impl App {
                                     },
                                 );
                             } else {
-                                self.app_event_tx.send(AppEvent::CodexOp(
+                                self.app_event_tx.send(AppEvent::AgentOp(
                                     AppCommand::override_turn_context(
                                         /*cwd*/ None,
                                         Some(preset.approval),
@@ -9841,7 +9739,15 @@ impl App {
                 self.chat_widget.open_approvals_popup();
             }
             AppEvent::OpenAgentPicker => {
+                if !self.workspace.enabled {
+                    if let Err(err) = tui.set_mouse_capture_enabled(true) {
+                        tracing::warn!(error = %err, "failed to enable mouse capture for Workspace agent picker");
+                    }
+                    self.workspace.enabled = true;
+                    self.refresh_workspace_threads(app_gateway, true);
+                }
                 self.open_agent_picker(app_gateway).await;
+                tui.frame_requester().schedule_frame();
             }
             AppEvent::SelectAgentThread(thread_id) => {
                 self.select_agent_thread(tui, app_gateway, thread_id)
@@ -10234,7 +10140,7 @@ impl App {
             ThreadBufferedEvent::Notification(ServerNotification::TurnStarted(_))
                 | ThreadBufferedEvent::Notification(ServerNotification::ThreadTokenUsageUpdated(_))
         );
-        self.remember_center_token_usage_from_event(&event);
+        self.remember_workspace_token_usage_from_event(&event);
         match event {
             ThreadBufferedEvent::Notification(notification) => {
                 self.chat_widget
@@ -10257,7 +10163,7 @@ impl App {
     }
 
     fn handle_thread_event_replay(&mut self, event: ThreadBufferedEvent) {
-        self.remember_center_token_usage_from_event(&event);
+        self.remember_workspace_token_usage_from_event(&event);
         match event {
             ThreadBufferedEvent::Notification(notification) => self
                 .chat_widget
@@ -10274,8 +10180,8 @@ impl App {
         }
     }
 
-    fn remember_center_token_usage_from_event(&mut self, event: &ThreadBufferedEvent) {
-        if !self.center.enabled {
+    fn remember_workspace_token_usage_from_event(&mut self, event: &ThreadBufferedEvent) {
+        if !self.workspace.enabled {
             return;
         }
         let ThreadBufferedEvent::Notification(ServerNotification::ThreadTokenUsageUpdated(
@@ -10284,10 +10190,10 @@ impl App {
         else {
             return;
         };
-        let Ok(thread_id) = ThreadId::from_string(&notification.thread_id) else {
+        let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
             return;
         };
-        self.center.usage_by_thread.insert(
+        self.workspace.usage_by_thread.insert(
             thread_id,
             token_usage_info_from_app_gateway(notification.token_usage.clone()),
         );
@@ -10548,7 +10454,7 @@ impl App {
         }
 
         if self
-            .handle_center_key_event(tui, app_gateway, key_event)
+            .handle_workspace_key_event(tui, app_gateway, key_event)
             .await
         {
             return;
@@ -10645,13 +10551,13 @@ impl App {
         };
     }
 
-    async fn handle_center_key_event(
+    async fn handle_workspace_key_event(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
         key_event: KeyEvent,
     ) -> bool {
-        if !self.center.enabled
+        if !self.workspace.enabled
             || self.overlay.is_some()
             || !self.chat_widget.no_modal_or_popup_active()
             || !matches!(key_event.kind, KeyEventKind::Press | KeyEventKind::Repeat)
@@ -10659,16 +10565,46 @@ impl App {
             return false;
         }
 
-        if self.center.search_focused {
-            let handled = self.handle_center_search_key(app_gateway, key_event);
+        if !matches!(self.workspace.overlay, WorkspaceOverlay::None) {
+            return self
+                .handle_workspace_overlay_key(tui, app_gateway, key_event)
+                .await;
+        }
+
+        if self.workspace.session_picker().is_some() {
+            return self
+                .handle_workspace_session_picker_key(tui, app_gateway, key_event)
+                .await;
+        }
+
+        if self.workspace.agent_picker().is_some() {
+            return self
+                .handle_workspace_agent_picker_key(tui, app_gateway, key_event)
+                .await;
+        }
+
+        if self.workspace.search_focused {
+            let handled = self.handle_workspace_search_key(app_gateway, key_event);
             tui.frame_requester().schedule_frame();
             return handled;
         }
 
-        if !matches!(self.center.overlay, CenterOverlayState::None) {
-            return self
-                .handle_center_overlay_key(tui, app_gateway, key_event)
+        if key_event.code == KeyCode::Char('o')
+            && key_event
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL)
+            && self.chat_widget.composer_text_with_pending().is_empty()
+        {
+            self.workspace.clear_search_focus();
+            let _ = self
+                .execute_workspace_chrome_action(
+                    tui,
+                    app_gateway,
+                    WorkspaceChromeAction::OpenFolder,
+                )
                 .await;
+            tui.frame_requester().schedule_frame();
+            return true;
         }
 
         if key_event.code == KeyCode::Char('n')
@@ -10677,11 +10613,11 @@ impl App {
                 .contains(crossterm::event::KeyModifiers::CONTROL)
             && self.chat_widget.composer_text_with_pending().is_empty()
         {
-            self.center.clear_overlay();
-            self.center.clear_search_focus();
+            self.workspace.clear_overlay();
+            self.workspace.clear_search_focus();
             self.start_fresh_session_with_summary_hint(tui, app_gateway)
                 .await;
-            self.refresh_center_threads(app_gateway, true);
+            self.refresh_workspace_threads(app_gateway, true);
             tui.frame_requester().schedule_frame();
             return true;
         }
@@ -10690,55 +10626,56 @@ impl App {
             return false;
         }
 
-        let visible_rows = self.center_visible_row_capacity();
-        let item_count = self.center.list_item_count();
+        let visible_rows = self.workspace_visible_row_capacity();
+        let item_count = self.workspace.list_item_count();
         match key_event.code {
             KeyCode::Up => {
-                self.center.selected = self.center.selected.saturating_sub(1);
+                self.workspace.selected = self.workspace.selected.saturating_sub(1);
             }
             KeyCode::Down => {
-                self.center.selected = self
-                    .center
+                self.workspace.selected = self
+                    .workspace
                     .selected
                     .saturating_add(1)
                     .min(item_count.saturating_sub(1));
             }
             KeyCode::PageUp => {
-                self.center.selected = self.center.selected.saturating_sub(visible_rows.max(1));
+                self.workspace.selected =
+                    self.workspace.selected.saturating_sub(visible_rows.max(1));
             }
             KeyCode::PageDown => {
-                self.center.selected = self
-                    .center
+                self.workspace.selected = self
+                    .workspace
                     .selected
                     .saturating_add(visible_rows.max(1))
                     .min(item_count.saturating_sub(1));
             }
-            KeyCode::Home => self.center.selected = 0,
+            KeyCode::Home => self.workspace.selected = 0,
             KeyCode::End => {
-                self.center.selected = item_count.saturating_sub(1);
+                self.workspace.selected = item_count.saturating_sub(1);
             }
             KeyCode::Enter => {
-                if self.center.is_load_more_index(self.center.selected) {
-                    self.load_more_center_threads(app_gateway);
+                if self.workspace.is_load_more_index(self.workspace.selected) {
+                    self.load_more_workspace_threads(app_gateway);
                     tui.frame_requester().schedule_frame();
                     return true;
                 }
-                if let Some(CenterVisibleItem::ClosedSubagents { parent_index }) =
-                    self.center.visible_item_at(self.center.selected)
+                if let Some(WorkspaceVisibleItem::ClosedSubagents { parent_index }) =
+                    self.workspace.visible_item_at(self.workspace.selected)
                 {
-                    self.center.toggle_closed_subagents(parent_index);
-                    self.center
-                        .ensure_selected_visible(self.center_visible_row_capacity());
+                    self.workspace.toggle_closed_subagents(parent_index);
+                    self.workspace
+                        .ensure_selected_visible(self.workspace_visible_row_capacity());
                     tui.frame_requester().schedule_frame();
                     return true;
                 }
                 let Some(row_index) = self
-                    .center
-                    .actual_row_index_for_visible(self.center.selected)
+                    .workspace
+                    .actual_row_index_for_visible(self.workspace.selected)
                 else {
                     return true;
                 };
-                let Some(row) = self.center.rows.get(row_index).cloned() else {
+                let Some(row) = self.workspace.rows.get(row_index).cloned() else {
                     return true;
                 };
                 let _ = self
@@ -10761,12 +10698,76 @@ impl App {
             _ => return false,
         }
 
-        self.center.ensure_selected_visible(visible_rows);
+        self.workspace.ensure_selected_visible(visible_rows);
         tui.frame_requester().schedule_frame();
         true
     }
 
-    fn handle_center_search_key(
+    async fn handle_workspace_session_picker_key(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        key_event: KeyEvent,
+    ) -> bool {
+        let Some(picker) = self.workspace.session_picker_mut() else {
+            return false;
+        };
+        let effect = picker.handle_key(key_event);
+        if let Err(err) = self
+            .handle_workspace_session_picker_effect(tui, app_gateway, effect)
+            .await
+        {
+            self.chat_widget
+                .add_error_message(format!("Session picker failed: {err}"));
+        }
+        tui.frame_requester().schedule_frame();
+        true
+    }
+
+    async fn handle_workspace_agent_picker_key(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        key_event: KeyEvent,
+    ) -> bool {
+        let Some(picker) = self.workspace.agent_picker_mut() else {
+            return false;
+        };
+        let effect = picker.handle_key(key_event);
+        if let Err(err) = self
+            .handle_workspace_agent_picker_effect(tui, app_gateway, effect)
+            .await
+        {
+            self.chat_widget
+                .add_error_message(format!("Agent picker failed: {err}"));
+        }
+        tui.frame_requester().schedule_frame();
+        true
+    }
+
+    async fn handle_workspace_agent_picker_effect(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        effect: AgentPickerEffect,
+    ) -> Result<Option<AppRunControl>> {
+        match effect {
+            AgentPickerEffect::None => Ok(None),
+            AgentPickerEffect::Close => {
+                self.workspace.close_main_pane();
+                tui.frame_requester().schedule_frame();
+                Ok(None)
+            }
+            AgentPickerEffect::Select(thread_id) => {
+                self.workspace.close_main_pane();
+                self.select_agent_thread(tui, app_gateway, thread_id)
+                    .await?;
+                Ok(None)
+            }
+        }
+    }
+
+    fn handle_workspace_search_key(
         &mut self,
         app_gateway: &AppGatewaySession,
         key_event: KeyEvent,
@@ -10774,109 +10775,220 @@ impl App {
         let mut changed = false;
         match key_event.code {
             KeyCode::Esc => {
-                if self.center.search_query.is_empty() {
-                    self.center.search_focused = false;
+                if self.workspace.search_query.is_empty() {
+                    self.workspace.search_focused = false;
                 } else {
-                    self.center.search_query.clear();
+                    self.workspace.search_query.clear();
                     changed = true;
                 }
             }
-            KeyCode::Enter => self.center.search_focused = false,
+            KeyCode::Enter => self.workspace.search_focused = false,
             KeyCode::Backspace => {
-                changed = self.center.search_query.pop().is_some();
+                changed = self.workspace.search_query.pop().is_some();
             }
             KeyCode::Delete => {
-                changed = !self.center.search_query.is_empty();
-                self.center.search_query.clear();
+                changed = !self.workspace.search_query.is_empty();
+                self.workspace.search_query.clear();
             }
             KeyCode::Char('u')
                 if key_event
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
-                changed = !self.center.search_query.is_empty();
-                self.center.search_query.clear();
+                changed = !self.workspace.search_query.is_empty();
+                self.workspace.search_query.clear();
             }
             KeyCode::Char(c)
                 if key_event.modifiers.is_empty()
                     || key_event.modifiers == crossterm::event::KeyModifiers::SHIFT =>
             {
-                self.center.search_query.push(c);
+                self.workspace.search_query.push(c);
                 changed = true;
             }
             _ => {}
         }
 
         if changed {
-            self.center.selected = 0;
-            self.center.list_scroll = 0;
-            self.center.refresh_in_flight = false;
-            self.center.last_refresh_at = None;
-            self.refresh_center_threads(app_gateway, true);
+            self.workspace.selected = 0;
+            self.workspace.list_scroll = 0;
+            self.workspace.refresh_in_flight = false;
+            self.workspace.last_refresh_at = None;
+            self.refresh_workspace_threads(app_gateway, true);
         }
         true
     }
 
-    async fn handle_center_overlay_key(
+    async fn handle_workspace_overlay_key(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
         key_event: KeyEvent,
     ) -> bool {
-        match self.center.overlay.clone() {
-            CenterOverlayState::ContextMenu(menu) => match key_event.code {
-                KeyCode::Esc => {
-                    self.center.clear_overlay();
+        match self.workspace.overlay.clone() {
+            WorkspaceOverlay::ChromeMenu(menu) => match key_event.code {
+                KeyCode::Esc => self.workspace.clear_overlay(),
+                KeyCode::Left | KeyCode::Right => {
+                    let next_menu = match menu.menu {
+                        WorkspaceChromeMenu::File => WorkspaceChromeMenu::Help,
+                        WorkspaceChromeMenu::Help => WorkspaceChromeMenu::File,
+                    };
+                    self.workspace.overlay =
+                        WorkspaceOverlay::ChromeMenu(WorkspaceChromeMenuState {
+                            menu: next_menu,
+                            selected: 0,
+                            area: None,
+                        });
                 }
                 KeyCode::Up => {
-                    if let CenterOverlayState::ContextMenu(current) = &mut self.center.overlay {
+                    if let WorkspaceOverlay::ChromeMenu(current) = &mut self.workspace.overlay {
                         current.selected = current.selected.saturating_sub(1);
                     }
                 }
                 KeyCode::Down => {
-                    if let CenterOverlayState::ContextMenu(current) = &mut self.center.overlay {
-                        current.selected = current
-                            .selected
-                            .saturating_add(1)
-                            .min(center_menu_actions().len().saturating_sub(1));
+                    if let WorkspaceOverlay::ChromeMenu(current) = &mut self.workspace.overlay {
+                        current.selected = current.selected.saturating_add(1).min(
+                            workspace_chrome_menu_actions(current.menu)
+                                .len()
+                                .saturating_sub(1),
+                        );
                     }
                 }
                 KeyCode::Enter => {
-                    let action = center_menu_actions()
+                    let action = workspace_chrome_menu_actions(menu.menu)
+                        .get(menu.selected)
+                        .copied();
+                    if let Some(action) = action {
+                        let _ = self
+                            .execute_workspace_chrome_action(tui, app_gateway, action)
+                            .await;
+                    }
+                }
+                _ => {}
+            },
+            WorkspaceOverlay::OpenFolder(_) => match key_event.code {
+                KeyCode::Esc => self.workspace.clear_overlay(),
+                KeyCode::Enter => {
+                    let _ = self.commit_workspace_open_folder(tui, app_gateway).await;
+                }
+                KeyCode::Home => {
+                    if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay {
+                        prompt.cursor = 0;
+                        prompt.message = None;
+                    }
+                }
+                KeyCode::End => {
+                    if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay {
+                        prompt.cursor = prompt.value.len();
+                        prompt.message = None;
+                    }
+                }
+                KeyCode::Left => {
+                    if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay {
+                        prompt.cursor = previous_char_boundary(&prompt.value, prompt.cursor);
+                        prompt.message = None;
+                    }
+                }
+                KeyCode::Right => {
+                    if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay {
+                        prompt.cursor = next_char_boundary(&prompt.value, prompt.cursor);
+                        prompt.message = None;
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay
+                        && prompt.cursor > 0
+                    {
+                        let previous = previous_char_boundary(&prompt.value, prompt.cursor);
+                        prompt.value.drain(previous..prompt.cursor);
+                        prompt.cursor = previous;
+                        prompt.message = None;
+                    }
+                }
+                KeyCode::Delete => {
+                    if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay
+                        && prompt.cursor < prompt.value.len()
+                    {
+                        let next = next_char_boundary(&prompt.value, prompt.cursor);
+                        prompt.value.drain(prompt.cursor..next);
+                        prompt.message = None;
+                    }
+                }
+                KeyCode::Char('u')
+                    if key_event
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                {
+                    if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay {
+                        prompt.value.clear();
+                        prompt.cursor = 0;
+                        prompt.message = None;
+                    }
+                }
+                KeyCode::Char(c)
+                    if key_event.modifiers.is_empty()
+                        || key_event.modifiers == crossterm::event::KeyModifiers::SHIFT =>
+                {
+                    if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay {
+                        prompt.value.insert(prompt.cursor, c);
+                        prompt.cursor += c.len_utf8();
+                        prompt.message = None;
+                    }
+                }
+                _ => {}
+            },
+            WorkspaceOverlay::ContextMenu(menu) => match key_event.code {
+                KeyCode::Esc => {
+                    self.workspace.clear_overlay();
+                }
+                KeyCode::Up => {
+                    if let WorkspaceOverlay::ContextMenu(current) = &mut self.workspace.overlay {
+                        current.selected = current.selected.saturating_sub(1);
+                    }
+                }
+                KeyCode::Down => {
+                    if let WorkspaceOverlay::ContextMenu(current) = &mut self.workspace.overlay {
+                        current.selected = current
+                            .selected
+                            .saturating_add(1)
+                            .min(workspace_menu_actions().len().saturating_sub(1));
+                    }
+                }
+                KeyCode::Enter => {
+                    let action = workspace_menu_actions()
                         .get(menu.selected)
                         .copied()
-                        .unwrap_or(CenterMenuAction::Open);
+                        .unwrap_or(WorkspaceMenuAction::Open);
                     let _ = self
-                        .execute_center_menu_action(tui, app_gateway, action)
+                        .execute_workspace_menu_action(tui, app_gateway, action)
                         .await;
                 }
                 _ => {}
             },
-            CenterOverlayState::Rename(_) => match key_event.code {
-                KeyCode::Esc => self.center.clear_overlay(),
-                KeyCode::Enter => self.commit_center_rename(app_gateway).await,
+            WorkspaceOverlay::Rename(_) => match key_event.code {
+                KeyCode::Esc => self.workspace.clear_overlay(),
+                KeyCode::Enter => self.commit_workspace_rename(app_gateway).await,
                 KeyCode::Home => {
-                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                    if let WorkspaceOverlay::Rename(rename) = &mut self.workspace.overlay {
                         rename.cursor = 0;
                     }
                 }
                 KeyCode::End => {
-                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                    if let WorkspaceOverlay::Rename(rename) = &mut self.workspace.overlay {
                         rename.cursor = rename.value.len();
                     }
                 }
                 KeyCode::Left => {
-                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                    if let WorkspaceOverlay::Rename(rename) = &mut self.workspace.overlay {
                         rename.cursor = previous_char_boundary(&rename.value, rename.cursor);
                     }
                 }
                 KeyCode::Right => {
-                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                    if let WorkspaceOverlay::Rename(rename) = &mut self.workspace.overlay {
                         rename.cursor = next_char_boundary(&rename.value, rename.cursor);
                     }
                 }
                 KeyCode::Backspace => {
-                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay
+                    if let WorkspaceOverlay::Rename(rename) = &mut self.workspace.overlay
                         && rename.cursor > 0
                     {
                         let previous = previous_char_boundary(&rename.value, rename.cursor);
@@ -10885,7 +10997,7 @@ impl App {
                     }
                 }
                 KeyCode::Delete => {
-                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay
+                    if let WorkspaceOverlay::Rename(rename) = &mut self.workspace.overlay
                         && rename.cursor < rename.value.len()
                     {
                         let next = next_char_boundary(&rename.value, rename.cursor);
@@ -10897,7 +11009,7 @@ impl App {
                         .modifiers
                         .contains(crossterm::event::KeyModifiers::CONTROL) =>
                 {
-                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                    if let WorkspaceOverlay::Rename(rename) = &mut self.workspace.overlay {
                         rename.value.clear();
                         rename.cursor = 0;
                     }
@@ -10906,28 +11018,28 @@ impl App {
                     if key_event.modifiers.is_empty()
                         || key_event.modifiers == crossterm::event::KeyModifiers::SHIFT =>
                 {
-                    if let CenterOverlayState::Rename(rename) = &mut self.center.overlay {
+                    if let WorkspaceOverlay::Rename(rename) = &mut self.workspace.overlay {
                         rename.value.insert(rename.cursor, c);
                         rename.cursor += c.len_utf8();
                     }
                 }
                 _ => {}
             },
-            CenterOverlayState::ConfirmArchive(_) => match key_event.code {
-                KeyCode::Esc | KeyCode::Char('n') => self.center.clear_overlay(),
+            WorkspaceOverlay::ConfirmArchive(_) => match key_event.code {
+                KeyCode::Esc | KeyCode::Char('n') => self.workspace.clear_overlay(),
                 KeyCode::Enter | KeyCode::Char('y') => {
-                    self.confirm_center_archive(tui, app_gateway).await;
+                    self.confirm_workspace_archive(tui, app_gateway).await;
                 }
                 _ => {}
             },
-            CenterOverlayState::ConfirmDelete(_) => match key_event.code {
-                KeyCode::Esc | KeyCode::Char('n') => self.center.clear_overlay(),
+            WorkspaceOverlay::ConfirmDelete(_) => match key_event.code {
+                KeyCode::Esc | KeyCode::Char('n') => self.workspace.clear_overlay(),
                 KeyCode::Enter | KeyCode::Char('y') => {
-                    self.confirm_center_delete(tui, app_gateway).await;
+                    self.confirm_workspace_delete(tui, app_gateway).await;
                 }
                 _ => {}
             },
-            CenterOverlayState::None => {}
+            WorkspaceOverlay::None => {}
         }
         tui.frame_requester().schedule_frame();
         true
@@ -11030,7 +11142,7 @@ async fn fetch_plugins_list(
             },
         })
         .await
-        .wrap_err("plugin/list failed in TUI")
+        .wrap_err("plugin/catalog/list failed in TUI")
 }
 
 async fn fetch_plugin_detail(
@@ -11527,7 +11639,7 @@ mod tests {
             enhanced_keys_supported: false,
             has_chatgpt_account: false,
             model_catalog: app.model_catalog.clone(),
-            feedback: praxis_feedback::CodexFeedback::new(),
+            feedback: praxis_feedback::PraxisFeedback::new(),
             is_first_run: false,
             status_account_display: None,
             initial_plan_type: None,
@@ -11569,7 +11681,7 @@ mod tests {
                     assert_eq!(op_thread_id, thread_id);
                     submitted_items = Some(items);
                 }
-                AppEvent::CodexOp(Op::UserTurn { items, .. }) => {
+                AppEvent::AgentOp(Op::UserTurn { items, .. }) => {
                     submitted_items = Some(items);
                 }
                 _ => {}
@@ -14119,10 +14231,12 @@ guardian_approval = true
             backtrack: BacktrackState::default(),
             backtrack_render_pending: false,
             transcript_scrollback_backfill: None,
-            feedback: praxis_feedback::CodexFeedback::new(),
+            feedback: praxis_feedback::PraxisFeedback::new(),
             feedback_audience: FeedbackAudience::External,
             remote_app_gateway_url: None,
             remote_app_gateway_auth_token: None,
+            app_gateway_reconnect_pending: false,
+            last_app_gateway_reconnect_attempt: None,
             pending_update_action: None,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState::default(),
@@ -14136,6 +14250,11 @@ guardian_approval = true
             primary_session_configured: None,
             pending_primary_events: VecDeque::new(),
             pending_app_gateway_requests: PendingAppGatewayRequests::default(),
+            workspace: WorkspaceState::new(false),
+            workspace_observed_thread_ids: HashSet::new(),
+            workspace_session_picker_loaders: HashMap::new(),
+            mouse: MouseInteractionState::default(),
+            mouse_capture_resume_at: None,
         }
     }
 
@@ -14176,10 +14295,12 @@ guardian_approval = true
                 backtrack: BacktrackState::default(),
                 backtrack_render_pending: false,
                 transcript_scrollback_backfill: None,
-                feedback: praxis_feedback::CodexFeedback::new(),
+                feedback: praxis_feedback::PraxisFeedback::new(),
                 feedback_audience: FeedbackAudience::External,
                 remote_app_gateway_url: None,
                 remote_app_gateway_auth_token: None,
+                app_gateway_reconnect_pending: false,
+                last_app_gateway_reconnect_attempt: None,
                 pending_update_action: None,
                 pending_shutdown_exit_thread_id: None,
                 windows_sandbox: WindowsSandboxState::default(),
@@ -14193,6 +14314,11 @@ guardian_approval = true
                 primary_session_configured: None,
                 pending_primary_events: VecDeque::new(),
                 pending_app_gateway_requests: PendingAppGatewayRequests::default(),
+                workspace: WorkspaceState::new(false),
+                workspace_observed_thread_ids: HashSet::new(),
+                workspace_session_picker_loaders: HashMap::new(),
+                mouse: MouseInteractionState::default(),
+                mouse_capture_resume_at: None,
             },
             rx,
             op_rx,

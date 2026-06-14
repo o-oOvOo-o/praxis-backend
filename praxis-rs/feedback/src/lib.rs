@@ -33,17 +33,17 @@ const FEEDBACK_TAGS_TARGET: &str = "feedback_tags";
 const MAX_FEEDBACK_TAGS: usize = 64;
 
 #[derive(Clone)]
-pub struct CodexFeedback {
+pub struct PraxisFeedback {
     inner: Arc<FeedbackInner>,
 }
 
-impl Default for CodexFeedback {
+impl Default for PraxisFeedback {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl CodexFeedback {
+impl PraxisFeedback {
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_MAX_BYTES)
     }
@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn ring_buffer_drops_front_when_full() {
-        let fb = CodexFeedback::with_capacity(/*max_bytes*/ 8);
+        let fb = PraxisFeedback::with_capacity(/*max_bytes*/ 8);
         {
             let mut w = fb.make_writer().make_writer();
             w.write_all(b"abcdefgh").unwrap();
@@ -506,7 +506,7 @@ mod tests {
 
     #[test]
     fn metadata_layer_records_tags_from_feedback_target() {
-        let fb = CodexFeedback::new();
+        let fb = PraxisFeedback::new();
         let _guard = tracing_subscriber::registry()
             .with(fb.metadata_layer())
             .set_default();
@@ -524,7 +524,7 @@ mod tests {
         let extra_path = std::env::temp_dir().join(&extra_filename);
         fs::write(&extra_path, "rollout").expect("extra attachment should be written");
 
-        let snapshot_with_diagnostics = CodexFeedback::new()
+        let snapshot_with_diagnostics = PraxisFeedback::new()
             .snapshot(/*session_id*/ None)
             .with_feedback_diagnostics(FeedbackDiagnostics::new(vec![FeedbackDiagnostic {
                 headline: "OPENAI_BASE_URL is set and may affect connectivity.".to_string(),
@@ -558,7 +558,7 @@ mod tests {
             OsStr::new(attachments_with_diagnostics[2].filename.as_str()),
             OsStr::new(extra_filename.as_str())
         );
-        let attachments_without_diagnostics = CodexFeedback::new()
+        let attachments_without_diagnostics = PraxisFeedback::new()
             .snapshot(/*session_id*/ None)
             .feedback_attachments(/*include_logs*/ true, &[], Some(vec![1]));
 

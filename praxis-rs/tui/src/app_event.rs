@@ -36,6 +36,7 @@ use crate::bottom_pane::TerminalTitleItem;
 use crate::history_cell::HistoryCell;
 use crate::provider_setup::ProviderSetupKind;
 use crate::resume_picker::SessionPickerAction;
+use crate::workspace::SessionPickerPageRequest;
 
 use praxis_config::types::ApprovalsReviewer;
 use praxis_features::Feature;
@@ -179,7 +180,7 @@ pub(crate) enum AppEvent {
 
     /// Forward an `Op` to the Agent. Using an `AppEvent` for this avoids
     /// bubbling channels through layers of widgets.
-    CodexOp(Op),
+    AgentOp(Op),
 
     /// Kick off an asynchronous file search for the given query (text after
     /// the `@`). Previous searches may be cancelled by the app layer so there
@@ -205,9 +206,15 @@ pub(crate) enum AppEvent {
         result: Result<Vec<RateLimitSnapshot>, String>,
     },
 
-    /// Result of refreshing Praxis Center's thread list.
-    CenterThreadsLoaded {
+    /// Result of refreshing Praxis Workspace's thread list.
+    WorkspaceThreadsLoaded {
         request_id: u64,
+        result: Result<ThreadListResponse, String>,
+    },
+
+    /// Result of loading one page for the Workspace-embedded session picker.
+    WorkspaceSessionPickerPageLoaded {
+        request: SessionPickerPageRequest,
         result: Result<ThreadListResponse, String>,
     },
 

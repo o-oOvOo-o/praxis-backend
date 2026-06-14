@@ -97,27 +97,55 @@ use serde_with::serde_as;
 use thiserror::Error;
 use ts_rs::TS;
 
-pub use praxis_protocol::apps::{AppBranding, AppInfo, AppMetadata, AppReview, AppScreenshot};
-pub use praxis_protocol::config_layers::{ConfigLayer, ConfigLayerMetadata, ConfigLayerSource};
+pub use praxis_protocol::apps::AppBranding;
+pub use praxis_protocol::apps::AppInfo;
+pub use praxis_protocol::apps::AppMetadata;
+pub use praxis_protocol::apps::AppReview;
+pub use praxis_protocol::apps::AppScreenshot;
+pub use praxis_protocol::config_layers::ConfigLayer;
+pub use praxis_protocol::config_layers::ConfigLayerMetadata;
+pub use praxis_protocol::config_layers::ConfigLayerSource;
 pub use praxis_protocol::dynamic_tools::DynamicToolSpec;
-pub use praxis_protocol::fs::{
-    FsCopyParams, FsCopyResponse, FsCreateDirectoryParams, FsCreateDirectoryResponse,
-    FsGetMetadataParams, FsGetMetadataResponse, FsReadDirectoryEntry, FsReadDirectoryParams,
-    FsReadDirectoryResponse, FsReadFileParams, FsReadFileResponse, FsRemoveParams,
-    FsRemoveResponse, FsWriteFileParams, FsWriteFileResponse,
-};
-pub use praxis_protocol::mcp_elicitation::{
-    McpElicitationArrayType, McpElicitationBooleanSchema, McpElicitationBooleanType,
-    McpElicitationConstOption, McpElicitationEnumSchema, McpElicitationLegacyTitledEnumSchema,
-    McpElicitationMultiSelectEnumSchema, McpElicitationNumberSchema, McpElicitationNumberType,
-    McpElicitationObjectType, McpElicitationPrimitiveSchema, McpElicitationSchema,
-    McpElicitationSingleSelectEnumSchema, McpElicitationStringFormat, McpElicitationStringSchema,
-    McpElicitationStringType, McpElicitationTitledEnumItems,
-    McpElicitationTitledMultiSelectEnumSchema, McpElicitationTitledSingleSelectEnumSchema,
-    McpElicitationUntitledEnumItems, McpElicitationUntitledMultiSelectEnumSchema,
-    McpElicitationUntitledSingleSelectEnumSchema, McpServerElicitationAction,
-    McpServerElicitationRequest, McpServerElicitationRequestParams,
-};
+pub use praxis_protocol::fs::FsCopyParams;
+pub use praxis_protocol::fs::FsCopyResponse;
+pub use praxis_protocol::fs::FsCreateDirectoryParams;
+pub use praxis_protocol::fs::FsCreateDirectoryResponse;
+pub use praxis_protocol::fs::FsGetMetadataParams;
+pub use praxis_protocol::fs::FsGetMetadataResponse;
+pub use praxis_protocol::fs::FsReadDirectoryEntry;
+pub use praxis_protocol::fs::FsReadDirectoryParams;
+pub use praxis_protocol::fs::FsReadDirectoryResponse;
+pub use praxis_protocol::fs::FsReadFileParams;
+pub use praxis_protocol::fs::FsReadFileResponse;
+pub use praxis_protocol::fs::FsRemoveParams;
+pub use praxis_protocol::fs::FsRemoveResponse;
+pub use praxis_protocol::fs::FsWriteFileParams;
+pub use praxis_protocol::fs::FsWriteFileResponse;
+pub use praxis_protocol::mcp_elicitation::McpElicitationArrayType;
+pub use praxis_protocol::mcp_elicitation::McpElicitationBooleanSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationBooleanType;
+pub use praxis_protocol::mcp_elicitation::McpElicitationConstOption;
+pub use praxis_protocol::mcp_elicitation::McpElicitationEnumSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationLegacyTitledEnumSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationMultiSelectEnumSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationNumberSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationNumberType;
+pub use praxis_protocol::mcp_elicitation::McpElicitationObjectType;
+pub use praxis_protocol::mcp_elicitation::McpElicitationPrimitiveSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationSingleSelectEnumSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationStringFormat;
+pub use praxis_protocol::mcp_elicitation::McpElicitationStringSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationStringType;
+pub use praxis_protocol::mcp_elicitation::McpElicitationTitledEnumItems;
+pub use praxis_protocol::mcp_elicitation::McpElicitationTitledMultiSelectEnumSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationTitledSingleSelectEnumSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationUntitledEnumItems;
+pub use praxis_protocol::mcp_elicitation::McpElicitationUntitledMultiSelectEnumSchema;
+pub use praxis_protocol::mcp_elicitation::McpElicitationUntitledSingleSelectEnumSchema;
+pub use praxis_protocol::mcp_elicitation::McpServerElicitationAction;
+pub use praxis_protocol::mcp_elicitation::McpServerElicitationRequest;
+pub use praxis_protocol::mcp_elicitation::McpServerElicitationRequestParams;
 pub use praxis_protocol::protocol::NetworkAccess;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema, TS)]
@@ -2619,7 +2647,7 @@ pub struct ThreadListParams {
     /// Opaque pagination cursor returned by a previous call.
     #[ts(optional = nullable)]
     pub cursor: Option<String>,
-    /// Optional page size; defaults to a reasonable server-side value.
+    /// Optional page size; defaults to THREAD_LIST_DEFAULT_LIMIT.
     #[ts(optional = nullable)]
     pub limit: Option<u32>,
     /// Optional sort key; defaults to created_at.
@@ -2645,6 +2673,9 @@ pub struct ThreadListParams {
     #[ts(optional = nullable)]
     pub search_term: Option<String>,
 }
+
+pub const THREAD_LIST_DEFAULT_LIMIT: u32 = 20;
+pub const THREAD_LIST_MAX_LIMIT: u32 = 100;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -2686,7 +2717,7 @@ pub struct ThreadLoadedListParams {
     /// Opaque pagination cursor returned by a previous call.
     #[ts(optional = nullable)]
     pub cursor: Option<String>,
-    /// Optional page size; defaults to no limit.
+    /// Optional page size; defaults to THREAD_LIST_DEFAULT_LIMIT.
     #[ts(optional = nullable)]
     pub limit: Option<u32>,
 }
@@ -2791,6 +2822,69 @@ pub struct PluginListResponse {
     pub remote_sync_error: Option<String>,
     #[serde(default)]
     pub featured_plugin_ids: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSyncParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub marketplace_name: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub force: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSyncResponse {
+    #[serde(default)]
+    pub installed_plugin_ids: Vec<String>,
+    #[serde(default)]
+    pub enabled_plugin_ids: Vec<String>,
+    #[serde(default)]
+    pub disabled_plugin_ids: Vec<String>,
+    #[serde(default)]
+    pub uninstalled_plugin_ids: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginActivationDelta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub plugin_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub installed_path: Option<AbsolutePathBuf>,
+    pub skills_changed: bool,
+    pub mcp_servers_changed: bool,
+    pub apps_changed: bool,
+    #[serde(default)]
+    pub skill_roots: Vec<PathBuf>,
+    #[serde(default)]
+    pub mcp_servers: Vec<String>,
+    #[serde(default)]
+    pub app_connector_ids: Vec<String>,
+    #[serde(default)]
+    pub diagnostics: Vec<PluginDiagnostic>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDiagnostic {
+    pub severity: PluginDiagnosticSeverity,
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum PluginDiagnosticSeverity {
+    Error,
+    Warning,
+    Info,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -3039,6 +3133,7 @@ pub struct PluginInstallParams {
 pub struct PluginInstallResponse {
     pub auth_policy: PluginAuthPolicy,
     pub apps_needing_auth: Vec<AppSummary>,
+    pub activation_delta: PluginActivationDelta,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -3052,7 +3147,22 @@ pub struct PluginUninstallParams {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct PluginUninstallResponse {}
+pub struct PluginUninstallResponse {
+    pub activation_delta: PluginActivationDelta,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSetEnabledParams {
+    pub plugin_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSetEnabledResponse {
+    pub activation_delta: PluginActivationDelta,
+}
 
 impl From<CoreSkillMetadata> for SkillMetadata {
     fn from(value: CoreSkillMetadata) -> Self {

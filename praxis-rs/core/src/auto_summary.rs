@@ -11,6 +11,7 @@ use tracing::warn;
 
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
+use crate::history_preview::HistoryPreview;
 use crate::praxis::Session;
 
 const SUMMARY_CHAR_LIMIT: usize = 240;
@@ -23,8 +24,9 @@ pub(crate) async fn maybe_auto_generate_summary(
         return;
     }
 
-    let history = sess.clone_history().await;
-    let conversation_preview = build_conversation_preview(history.raw_items(), last_agent_message);
+    let conversation_preview = HistoryPreview::for_session(sess.as_ref())
+        .await
+        .conversation_summary_preview(last_agent_message.as_deref());
     let Some(conversation_preview) = conversation_preview else {
         sess.auto_summary_in_flight.store(false, Ordering::SeqCst);
         return;
@@ -66,89 +68,6 @@ async fn persist_session_summary(sess: &Arc<Session>, summary: String) {
     }
 }
 
-fn build_conversation_preview(
-    items: &[ResponseItem],
-    last_agent_message: Option<String>,
-) -> Option<String> {
-    let mut transcript = Vec::new();
-    for item in items {
-        if let ResponseItem::Message { role, content, .. } = item
-            && let Some(text) = extract_text_content(content)
-        {
-            transcript.push((role.as_str(), text));
-        }
-    }
-
-    if let Some(last_agent_message) = last_agent_message {
-        let trimmed = last_agent_message.trim();
-        if !trimmed.is_empty() {
-            let duplicate_last_assistant = transcript
-                .last()
-                .is_some_and(|(role, text)| *role == "assistant" && text == trimmed);
-            if !duplicate_last_assistant {
-                transcript.push(("assistant", trimmed.to_string()));
-            }
-        }
-    }
-
-    if transcript.is_empty() {
-        return None;
-    }
-
-    let first_user = transcript
-        .iter()
-        .find(|(role, _)| *role == "user")
-        .map(|(_, text)| text.clone())
-        .unwrap_or_default();
-    let recent = transcript
-        .iter()
-        .rev()
-        .take(6)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .map(|(role, text)| format!("{}: {}", role_label(role), truncate_for_prompt(text, 280)))
-        .collect::<Vec<_>>();
-
-    let mut sections = Vec::new();
-    if !first_user.is_empty() {
-        sections.push(format!(
-            "Original user goal: {}",
-            truncate_for_prompt(&first_user, 400)
-        ));
-    }
-    sections.push("Recent conversation:".to_string());
-    sections.extend(recent);
-
-    Some(sections.join("\n"))
-}
-
-fn extract_text_content(content: &[ContentItem]) -> Option<String> {
-    let parts = content
-        .iter()
-        .filter_map(|item| match item {
-            ContentItem::InputText { text } | ContentItem::OutputText { text } => {
-                let trimmed = text.trim();
-                (!trimmed.is_empty()).then_some(trimmed)
-            }
-            ContentItem::InputImage { .. } => None,
-        })
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join("\n"))
-    }
-}
-
-fn role_label(role: &str) -> &'static str {
-    match role {
-        "assistant" => "Assistant",
-        "user" => "User",
-        _ => "Message",
-    }
-}
-
 fn heuristic_summary(conversation_preview: &str) -> String {
     let mut parts = Vec::new();
     for line in conversation_preview.lines() {
@@ -178,10 +97,6 @@ fn sanitize_summary(raw: &str) -> String {
         .trim_matches('"')
         .to_string();
     truncate_chars(compact, SUMMARY_CHAR_LIMIT)
-}
-
-fn truncate_for_prompt(text: &str, max_chars: usize) -> String {
-    truncate_chars(text.trim().to_string(), max_chars)
 }
 
 fn truncate_chars(text: String, max_chars: usize) -> String {

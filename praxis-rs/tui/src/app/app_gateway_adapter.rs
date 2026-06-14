@@ -12,7 +12,8 @@ should shrink and eventually disappear.
 */
 
 use super::App;
-use crate::app_event::AppEvent;
+#[cfg(test)]
+use crate::app_gateway_core_conversions::app_gateway_web_search_action_to_core;
 use crate::app_gateway_session::AppGatewaySession;
 use crate::app_gateway_session::app_gateway_rate_limit_snapshot_to_core;
 use crate::app_gateway_session::status_account_display_from_auth_mode;
@@ -132,7 +133,7 @@ impl App {
                 );
                 self.refresh_mcp_startup_expected_servers_from_config();
                 self.chat_widget.finish_mcp_startup_after_lag();
-                self.refresh_center_threads(app_gateway_client, /*force*/ true);
+                self.refresh_workspace_threads(app_gateway_client, /*force*/ true);
             }
             AppGatewayEvent::ServerNotification(notification) => {
                 self.handle_server_notification_event(app_gateway_client, notification)
@@ -144,8 +145,7 @@ impl App {
             }
             AppGatewayEvent::Disconnected { message } => {
                 tracing::warn!("app-gateway event stream disconnected: {message}");
-                self.chat_widget.add_error_message(message.clone());
-                self.app_event_tx.send(AppEvent::FatalExitRequest(message));
+                self.mark_app_gateway_disconnected(message);
             }
         }
     }
@@ -186,28 +186,13 @@ impl App {
             _ => {}
         }
 
-        if self.apply_center_server_notification(&notification) {
-            self.refresh_center_threads(app_gateway_client, /*force*/ true);
+        if self.apply_workspace_server_notification(&notification) {
+            self.refresh_workspace_threads(app_gateway_client, /*force*/ true);
         }
 
-        let thread_to_observe = match &notification {
-            ServerNotification::ThreadStarted(notification) => {
-                ThreadId::from_string(&notification.thread.id).ok()
-            }
-            ServerNotification::ThreadStatusChanged(notification) => {
-                ThreadId::from_string(&notification.thread_id)
-                    .ok()
-                    .filter(|thread_id| self.center_thread_should_auto_observe(*thread_id))
-            }
-            ServerNotification::ThreadControlChanged(notification) => {
-                ThreadId::from_string(&notification.thread_id)
-                    .ok()
-                    .filter(|thread_id| self.center_thread_should_auto_observe(*thread_id))
-            }
-            _ => None,
-        };
+        let thread_to_observe = self.workspace_observable_notification_thread_id(&notification);
         if let Some(thread_id) = thread_to_observe {
-            self.observe_center_thread_if_needed(app_gateway_client, thread_id)
+            self.observe_workspace_thread_if_needed(app_gateway_client, thread_id)
                 .await;
         }
 
@@ -303,30 +288,45 @@ impl App {
             .await
             .map_err(|err| format!("failed to reject app-gateway request: {err}"))
     }
+
+    fn workspace_observable_notification_thread_id(
+        &self,
+        notification: &ServerNotification,
+    ) -> Option<ThreadId> {
+        match notification {
+            ServerNotification::ThreadStarted(notification) => {
+                parse_app_gateway_thread_id(&notification.thread.id)
+            }
+            ServerNotification::ThreadStatusChanged(_)
+            | ServerNotification::ThreadControlChanged(_) => {
+                server_notification_thread_id(notification)
+                    .and_then(parse_app_gateway_thread_id)
+                    .filter(|thread_id| self.workspace_thread_should_auto_observe(*thread_id))
+            }
+            _ => None,
+        }
+    }
+}
+
+fn parse_app_gateway_thread_id(thread_id: &str) -> Option<ThreadId> {
+    ThreadId::from_string(thread_id).ok()
 }
 
 fn server_request_thread_id(request: &ServerRequest) -> Option<ThreadId> {
-    match request {
+    let thread_id = match request {
         ServerRequest::CommandExecutionRequestApproval { params, .. } => {
-            ThreadId::from_string(&params.thread_id).ok()
+            Some(params.thread_id.as_str())
         }
-        ServerRequest::FileChangeRequestApproval { params, .. } => {
-            ThreadId::from_string(&params.thread_id).ok()
-        }
-        ServerRequest::ToolRequestUserInput { params, .. } => {
-            ThreadId::from_string(&params.thread_id).ok()
-        }
+        ServerRequest::FileChangeRequestApproval { params, .. } => Some(params.thread_id.as_str()),
+        ServerRequest::ToolRequestUserInput { params, .. } => Some(params.thread_id.as_str()),
         ServerRequest::McpServerElicitationRequest { params, .. } => {
-            ThreadId::from_string(&params.thread_id).ok()
+            Some(params.thread_id.as_str())
         }
-        ServerRequest::PermissionsRequestApproval { params, .. } => {
-            ThreadId::from_string(&params.thread_id).ok()
-        }
-        ServerRequest::DynamicToolCall { params, .. } => {
-            ThreadId::from_string(&params.thread_id).ok()
-        }
+        ServerRequest::PermissionsRequestApproval { params, .. } => Some(params.thread_id.as_str()),
+        ServerRequest::DynamicToolCall { params, .. } => Some(params.thread_id.as_str()),
         ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
-    }
+    }?;
+    parse_app_gateway_thread_id(thread_id)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -339,7 +339,17 @@ enum ServerNotificationThreadTarget {
 fn server_notification_thread_target(
     notification: &ServerNotification,
 ) -> ServerNotificationThreadTarget {
-    let thread_id = match notification {
+    match server_notification_thread_id(notification) {
+        Some(thread_id) => match parse_app_gateway_thread_id(thread_id) {
+            Some(thread_id) => ServerNotificationThreadTarget::Thread(thread_id),
+            None => ServerNotificationThreadTarget::InvalidThreadId(thread_id.to_string()),
+        },
+        None => ServerNotificationThreadTarget::Global,
+    }
+}
+
+fn server_notification_thread_id(notification: &ServerNotification) -> Option<&str> {
+    match notification {
         ServerNotification::Error(notification) => Some(notification.thread_id.as_str()),
         ServerNotification::ThreadStarted(notification) => Some(notification.thread.id.as_str()),
         ServerNotification::ThreadStatusChanged(notification) => {
@@ -442,14 +452,6 @@ fn server_notification_thread_target(
         | ServerNotification::WindowsWorldWritableWarning(_)
         | ServerNotification::WindowsSandboxSetupCompleted(_)
         | ServerNotification::AccountLoginCompleted(_) => None,
-    };
-
-    match thread_id {
-        Some(thread_id) => match ThreadId::from_string(thread_id) {
-            Ok(thread_id) => ServerNotificationThreadTarget::Thread(thread_id),
-            Err(_) => ServerNotificationThreadTarget::InvalidThreadId(thread_id.to_string()),
-        },
-        None => ServerNotificationThreadTarget::Global,
     }
 }
 
@@ -483,9 +485,11 @@ pub(super) fn thread_snapshot_events(
 fn server_notification_thread_events(
     notification: ServerNotification,
 ) -> Option<(ThreadId, Vec<Event>)> {
+    let thread_id =
+        server_notification_thread_id(&notification).and_then(parse_app_gateway_thread_id)?;
     match notification {
         ServerNotification::ThreadTokenUsageUpdated(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::TokenCount(TokenCountEvent {
@@ -495,7 +499,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::Error(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::Error(ErrorEvent {
@@ -508,17 +512,17 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::ThreadNameUpdated(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::ThreadNameUpdated(ThreadNameUpdatedEvent {
-                    thread_id: ThreadId::from_string(&notification.thread_id).ok()?,
+                    thread_id,
                     thread_name: notification.thread_name,
                 }),
             }],
         )),
         ServerNotification::TurnStarted(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::TurnStarted(TurnStartedEvent {
@@ -529,7 +533,6 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::TurnCompleted(notification) => {
-            let thread_id = ThreadId::from_string(&notification.thread_id).ok()?;
             let mut events = Vec::new();
             append_terminal_turn_events(
                 &mut events,
@@ -539,13 +542,13 @@ fn server_notification_thread_events(
             Some((thread_id, events))
         }
         ServerNotification::ItemStarted(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             command_execution_started_event(&notification.turn_id, &notification.item).or_else(
                 || {
                     Some(vec![Event {
                         id: String::new(),
                         msg: EventMsg::ItemStarted(ItemStartedEvent {
-                            thread_id: ThreadId::from_string(&notification.thread_id).ok()?,
+                            thread_id,
                             turn_id: notification.turn_id.clone(),
                             item: thread_item_to_core(&notification.item)?,
                         }),
@@ -554,13 +557,13 @@ fn server_notification_thread_events(
             )?,
         )),
         ServerNotification::ItemCompleted(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             command_execution_completed_event(&notification.turn_id, &notification.item).or_else(
                 || {
                     Some(vec![Event {
                         id: String::new(),
                         msg: EventMsg::ItemCompleted(ItemCompletedEvent {
-                            thread_id: ThreadId::from_string(&notification.thread_id).ok()?,
+                            thread_id,
                             turn_id: notification.turn_id.clone(),
                             item: thread_item_to_core(&notification.item)?,
                         }),
@@ -569,7 +572,7 @@ fn server_notification_thread_events(
             )?,
         )),
         ServerNotification::CommandExecutionOutputDelta(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::ExecCommandOutputDelta(ExecCommandOutputDeltaEvent {
@@ -580,7 +583,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::AgentMessageDelta(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
@@ -589,7 +592,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::PlanDelta(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::PlanDelta(PlanDeltaEvent {
@@ -601,7 +604,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::ReasoningSummaryTextDelta(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
@@ -610,7 +613,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::ReasoningTextDelta(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::AgentReasoningRawContentDelta(AgentReasoningRawContentDeltaEvent {
@@ -619,7 +622,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::ThreadRealtimeStarted(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::RealtimeConversationStarted(RealtimeConversationStartedEvent {
@@ -629,7 +632,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::ThreadRealtimeItemAdded(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
@@ -638,7 +641,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::ThreadRealtimeOutputAudioDelta(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
@@ -647,7 +650,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::ThreadRealtimeError(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
@@ -656,7 +659,7 @@ fn server_notification_thread_events(
             }],
         )),
         ServerNotification::ThreadRealtimeClosed(notification) => Some((
-            ThreadId::from_string(&notification.thread_id).ok()?,
+            thread_id,
             vec![Event {
                 id: String::new(),
                 msg: EventMsg::RealtimeConversationClosed(RealtimeConversationClosedEvent {
@@ -840,7 +843,7 @@ fn thread_item_to_core(item: &ThreadItem) -> Option<TurnItem> {
         ThreadItem::WebSearch { id, query, action } => Some(TurnItem::WebSearch(WebSearchItem {
             id: id.clone(),
             query: query.clone(),
-            action: app_gateway_web_search_action_to_core(action.clone()?)?,
+            action: app_gateway_web_search_action_to_core(action.clone()?),
         })),
         ThreadItem::ImageGeneration {
             id,
@@ -985,26 +988,6 @@ fn command_execution_snapshot_events(turn_id: &str, item: &ThreadItem) -> Option
         events.extend(end_events);
     }
     Some(events)
-}
-
-#[cfg(test)]
-fn app_gateway_web_search_action_to_core(
-    action: praxis_app_gateway_protocol::WebSearchAction,
-) -> Option<praxis_protocol::models::WebSearchAction> {
-    match action {
-        praxis_app_gateway_protocol::WebSearchAction::Search { query, queries } => {
-            Some(praxis_protocol::models::WebSearchAction::Search { query, queries })
-        }
-        praxis_app_gateway_protocol::WebSearchAction::OpenPage { url } => {
-            Some(praxis_protocol::models::WebSearchAction::OpenPage { url })
-        }
-        praxis_app_gateway_protocol::WebSearchAction::FindInPage { url, pattern } => {
-            Some(praxis_protocol::models::WebSearchAction::FindInPage { url, pattern })
-        }
-        praxis_app_gateway_protocol::WebSearchAction::Other => {
-            Some(praxis_protocol::models::WebSearchAction::Other)
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1416,7 +1399,7 @@ mod tests {
                 thread_id,
                 turn_id: "turn".to_string(),
                 item_id: "item".to_string(),
-                delta: "Thinking".to_string(),
+                delta: "reasoning delta".to_string(),
                 summary_index: 0,
             }),
         )
@@ -1428,7 +1411,7 @@ mod tests {
         let EventMsg::AgentReasoningDelta(delta) = &reasoning_event.msg else {
             panic!("expected bridged reasoning delta");
         };
-        assert_eq!(delta.delta, "Thinking");
+        assert_eq!(delta.delta, "reasoning delta");
     }
 
     #[test]

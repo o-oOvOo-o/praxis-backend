@@ -48,6 +48,8 @@ pub(super) fn test_thread_metadata(
         created_at: now,
         updated_at: now,
         source: "cli".to_string(),
+        agent_base_name: None,
+        agent_title: None,
         agent_display_name: None,
         agent_role: None,
         agent_path: None,

@@ -51,7 +51,15 @@ use crate::SessionLookupSource;
 use crate::app_command::AppCommand;
 use crate::app_event::RealtimeAudioDeviceKind;
 use crate::app_event::ThreadGoalSetMode;
-use crate::app_gateway_approval_conversions::network_approval_context_to_core;
+use crate::app_gateway_core_conversions::app_gateway_collab_state_to_core;
+use crate::app_gateway_core_conversions::app_gateway_collab_thread_id_to_core;
+use crate::app_gateway_core_conversions::app_gateway_patch_changes_to_core;
+use crate::app_gateway_core_conversions::app_gateway_request_id_to_mcp_request_id;
+use crate::app_gateway_core_conversions::app_gateway_web_search_action_to_core;
+use crate::app_gateway_core_conversions::exec_approval_request_from_params;
+use crate::app_gateway_core_conversions::patch_approval_request_from_params;
+use crate::app_gateway_core_conversions::request_permissions_from_params;
+use crate::app_gateway_core_conversions::request_user_input_from_params;
 use crate::app_gateway_session::ThreadSessionState;
 use crate::app_gateway_session::token_usage_info_from_app_gateway;
 #[cfg(not(target_os = "linux"))]
@@ -84,23 +92,24 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use praxis_app_core::thread_commands::CodexThreadCommandAction;
-use praxis_app_core::thread_commands::CodexThreadCommandIntent;
-use praxis_app_core::thread_commands::parse_codex_thread_command;
+use praxis_app_core::thread_commands::ExternalThreadCommandAction;
+use praxis_app_core::thread_commands::ExternalThreadCommandIntent;
+use praxis_app_core::thread_commands::ExternalThreadCommandSource;
+use praxis_app_core::thread_commands::parse_external_thread_command;
 use praxis_app_gateway_protocol::AppSummary;
 use praxis_app_gateway_protocol::CodexErrorInfo as AppGatewayCodexErrorInfo;
 use praxis_app_gateway_protocol::CollabAgentState as AppGatewayCollabAgentState;
-use praxis_app_gateway_protocol::CollabAgentStatus as AppGatewayCollabAgentStatus;
 use praxis_app_gateway_protocol::CollabAgentTool;
 use praxis_app_gateway_protocol::CollabAgentToolCallStatus;
-use praxis_app_gateway_protocol::CommandExecutionRequestApprovalParams;
 use praxis_app_gateway_protocol::ErrorNotification;
-use praxis_app_gateway_protocol::FileChangeRequestApprovalParams;
 use praxis_app_gateway_protocol::GuardianApprovalReviewAction;
 use praxis_app_gateway_protocol::ItemCompletedNotification;
 use praxis_app_gateway_protocol::ItemStartedNotification;
 use praxis_app_gateway_protocol::McpServerStartupState;
 use praxis_app_gateway_protocol::McpServerStatusUpdatedNotification;
+use praxis_app_gateway_protocol::ResumedHistoryLabel;
+use praxis_app_gateway_protocol::ResumedHistoryLane;
+use praxis_app_gateway_protocol::ResumedThreadHistoryAction;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::ThreadControlState;
@@ -109,11 +118,11 @@ use praxis_app_gateway_protocol::ThreadGoal;
 use praxis_app_gateway_protocol::ThreadGoalClearedNotification;
 use praxis_app_gateway_protocol::ThreadGoalStatus as AppGatewayThreadGoalStatus;
 use praxis_app_gateway_protocol::ThreadItem;
-use praxis_app_gateway_protocol::ToolRequestUserInputParams;
 use praxis_app_gateway_protocol::Turn;
 use praxis_app_gateway_protocol::TurnCompletedNotification;
 use praxis_app_gateway_protocol::TurnPlanStepStatus;
 use praxis_app_gateway_protocol::TurnStatus;
+use praxis_app_gateway_protocol::classify_resumed_thread_item;
 use praxis_chatgpt::connectors;
 use praxis_config::types::ApprovalsReviewer;
 use praxis_config::types::Notifications;
@@ -237,7 +246,6 @@ use praxis_protocol::protocol::WebSearchBeginEvent;
 use praxis_protocol::protocol::WebSearchEndEvent;
 use praxis_protocol::request_permissions::RequestPermissionsEvent;
 use praxis_protocol::request_user_input::RequestUserInputEvent;
-use praxis_protocol::request_user_input::RequestUserInputQuestionOption;
 use praxis_protocol::user_input::TextElement;
 use praxis_protocol::user_input::UserInput;
 use praxis_terminal_detection::Multiplexer;
@@ -256,9 +264,7 @@ use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::text::Text;
-use ratatui::visual::OpenFrame;
 use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
 use ratatui::widgets::Wrap;
@@ -290,6 +296,7 @@ const SELFWORK_PLAN_PREVIEW_WIDTH: usize = 88;
 const STATUS_ACTIVITY_TEXT_MAX_GRAPHEMES: usize = 48;
 const REASONING_SUMMARY_STATUS_PREVIEW_MAX_LINES: usize = 4;
 const REASONING_FULL_STATUS_PREVIEW_MAX_LINES: usize = 8;
+const RESUME_REPLAY_PREVIEW_MAX_GRAPHEMES: usize = 180;
 const IN_APP_TOAST_DURATION: Duration = Duration::from_secs(4);
 const IN_APP_TOAST_PRIORITY_DURATION: Duration = Duration::from_secs(6);
 const ACTIVE_CELL_ANIMATION_FRAME_DELAY_FOCUSED: Duration = Duration::from_millis(60);
@@ -297,18 +304,14 @@ const ACTIVE_CELL_ANIMATION_FRAME_DELAY_UNFOCUSED: Duration = Duration::from_mil
 const DEEPSEEK_HEADER_HEIGHT: u16 = 1;
 const DEEPSEEK_FOOTER_HEIGHT: u16 = 1;
 const DEEPSEEK_CHROME_MIN_HEIGHT: u16 = 6;
-const CENTER_ENTRY_MAX_WIDTH: u16 = 88;
-const CENTER_ENTRY_MIN_SIDE_PADDING: u16 = 4;
-const CENTER_ENTRY_INTRO_HEIGHT: u16 = 7;
-const CENTER_LAUNCH_RANK_MAX: u8 = 2;
-const CHAT_TIMELINE_SIDE_PADDING: u16 = 2;
+const WORKSPACE_ENTRY_MAX_WIDTH: u16 = 88;
+const WORKSPACE_ENTRY_MIN_SIDE_PADDING: u16 = 4;
+const WORKSPACE_ENTRY_INTRO_HEIGHT: u16 = 7;
+const LAUNCH_STRIP_RANK_MAX: u8 = 2;
 const CHAT_SURFACE_CONTENT_MAX_WIDTH: u16 = 96;
-const CHAT_TIMELINE_USER_MAX_WIDTH: u16 = 56;
-const CHAT_TIMELINE_ASSISTANT_MAX_WIDTH: u16 = 96;
-const CHAT_TIMELINE_USER_WIDTH_PERCENT: u16 = 58;
-const CENTER_INPUT_BORDER_ROWS: u16 = 1;
-const CENTER_INPUT_BORDER_COLS: u16 = 2;
-const CENTER_INPUT_STRIP_ROWS: u16 = 1;
+const WORKSPACE_INPUT_BORDER_ROWS: u16 = 1;
+const WORKSPACE_INPUT_BORDER_COLS: u16 = 2;
+const WORKSPACE_INPUT_STRIP_ROWS: u16 = 1;
 
 /// Choose the keybinding used to edit the most-recently queued message.
 ///
@@ -357,7 +360,6 @@ use crate::bottom_pane::BottomPaneParams;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::CollaborationModeIndicator;
 use crate::bottom_pane::ColumnWidthMode;
-use crate::bottom_pane::DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED;
 use crate::bottom_pane::ExperimentalFeatureItem;
 use crate::bottom_pane::ExperimentalFeaturesView;
 use crate::bottom_pane::InputResult;
@@ -370,7 +372,6 @@ use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
-use crate::center_theme;
 use crate::clipboard_paste::paste_image_to_temp_png;
 use crate::clipboard_text;
 use crate::collaboration_modes;
@@ -402,6 +403,7 @@ use crate::slash_command::SlashCommand;
 use crate::status::RateLimitSnapshotDisplay;
 use crate::status_indicator_widget::STATUS_DETAILS_DEFAULT_MAX_LINES;
 use crate::status_indicator_widget::StatusDetailsCapitalization;
+use crate::status_runtime::GENERIC_STATUS_HEADER;
 use crate::text_formatting::truncate_text;
 use crate::thinking_persona::ThinkingPersona;
 use crate::toast_queue::ToastEntry;
@@ -415,6 +417,25 @@ use crate::tui::FrameRequester;
 use crate::turn_runtime::ActivityTrail;
 use crate::turn_runtime::RuntimeTextCapitalization;
 use crate::turn_runtime::TurnRuntimeState;
+use crate::workspace::LaunchStripDropdown;
+use crate::workspace::LaunchStripDropdownItem;
+use crate::workspace::LaunchStripDropdownMouseTarget;
+use crate::workspace::LaunchStripMouseAction;
+use crate::workspace::LaunchStripState;
+use crate::workspace::WorkPanelContextState;
+use crate::workspace::WorkPanelControlState;
+use crate::workspace::WorkPanelGoalState;
+use crate::workspace::WorkPanelGoalStatus;
+use crate::workspace::WorkPanelQueueState;
+use crate::workspace::WorkPanelState;
+use crate::workspace::WorkspaceTranscriptCache;
+use crate::workspace::WorkspaceTranscriptRequest;
+use crate::workspace::WorkspaceTranscriptTail;
+use crate::workspace::WorkspaceTranscriptViewport;
+use crate::workspace::render_workspace_transcript_viewport;
+use crate::workspace::theme as workspace_theme;
+use crate::workspace::workspace_transcript_lane_width;
+use crate::workspace::wrap_workspace_transcript_lines;
 mod interrupts;
 use self::interrupts::InterruptManager;
 mod session_header;
@@ -438,13 +459,6 @@ use self::surface_layout::ChatWidgetLayout;
 use self::surface_layout::IN_APP_TOAST_ROW_HEIGHT;
 use self::surface_layout::chat_surface_split_for_width;
 use self::surface_layout::layout_chat_surface;
-mod work_panel;
-use self::work_panel::WorkPanelContextState;
-use self::work_panel::WorkPanelControlState;
-use self::work_panel::WorkPanelGoalState;
-use self::work_panel::WorkPanelGoalStatus;
-use self::work_panel::WorkPanelQueueState;
-use self::work_panel::WorkPanelState;
 use crate::streaming::chunking::AdaptiveChunkingPolicy;
 use crate::streaming::commit_tick::CommitTickScope;
 use crate::streaming::commit_tick::run_commit_tick;
@@ -635,7 +649,7 @@ pub(crate) struct ChatWidgetInit {
     pub(crate) enhanced_keys_supported: bool,
     pub(crate) has_chatgpt_account: bool,
     pub(crate) model_catalog: Arc<ModelCatalog>,
-    pub(crate) feedback: praxis_feedback::CodexFeedback,
+    pub(crate) feedback: praxis_feedback::PraxisFeedback,
     pub(crate) is_first_run: bool,
     pub(crate) status_account_display: Option<StatusAccountDisplay>,
     pub(crate) initial_plan_type: Option<PlanType>,
@@ -726,9 +740,9 @@ struct StatusIndicatorState {
 }
 
 impl StatusIndicatorState {
-    fn working() -> Self {
+    fn turn_running() -> Self {
         Self {
-            header: String::from("Working"),
+            header: GENERIC_STATUS_HEADER.to_string(),
             details: None,
             details_max_lines: STATUS_DETAILS_DEFAULT_MAX_LINES,
             thinking_persona: ThinkingPersona::None,
@@ -1028,20 +1042,13 @@ pub(crate) struct ChatWidget {
     last_separator_elapsed_secs: Option<u64>,
     // Runtime metrics accumulated across delta snapshots for the active turn.
     turn_runtime_metrics: RuntimeMetricsSummary,
-    center_launch_rank: u8,
-    center_launch_dropdown: Option<CenterLaunchDropdown>,
-    center_launch_model_area: Cell<Option<Rect>>,
-    center_launch_reasoning_area: Cell<Option<Rect>>,
-    center_launch_rank_area: Cell<Option<Rect>>,
-    center_launch_permissions_area: Cell<Option<Rect>>,
-    center_launch_dropdown_targets: RefCell<Vec<CenterDropdownMouseTarget>>,
     last_rendered_width: Cell<Option<usize>>,
     last_visible_patch_cell_ids: RefCell<Vec<crate::history_presentation::PatchCellId>>,
     active_cell_render_cache: RefCell<Option<ActiveCellRenderCache>>,
-    center_active_tail_cache: RefCell<Option<CenterActiveTailCache>>,
-    center_transcript_viewport_cache: RefCell<Option<CenterTranscriptViewportCache>>,
+    workspace_active_tail_cache: RefCell<Option<WorkspaceActiveTailCache>>,
+    workspace_transcript_cache: RefCell<WorkspaceTranscriptCache>,
     // Feedback sink for /feedback
-    feedback: praxis_feedback::CodexFeedback,
+    feedback: praxis_feedback::PraxisFeedback,
     // Current session rollout path (if known)
     current_rollout_path: Option<PathBuf>,
     // Current working directory (if known)
@@ -1106,75 +1113,14 @@ struct ActiveCellRenderCache {
 }
 
 #[derive(Clone, Debug)]
-struct CenterActiveTailCache {
+struct WorkspaceActiveTailCache {
     key: ActiveCellRenderCacheKey,
     lane: ChatLane,
     lines: Vec<Line<'static>>,
 }
 
-#[derive(Clone, Debug)]
-struct CenterTranscriptViewport {
-    content_area: Rect,
-    lines: Vec<Line<'static>>,
-    patch_cell_ids: Vec<crate::history_presentation::PatchCellId>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CenterTranscriptViewportCacheKey {
-    width: u16,
-    height: u16,
-    scroll_from_bottom: usize,
-    theme_kind: center_theme::CenterThemeKind,
-    committed_len: usize,
-    committed_first_ptr: usize,
-    committed_last_ptr: usize,
-    presentation_revision: u64,
-    active_key: Option<ActiveCellRenderCacheKey>,
-}
-
-#[derive(Clone, Debug)]
-struct CenterTranscriptViewportCache {
-    key: CenterTranscriptViewportCacheKey,
-    viewport: CenterTranscriptViewport,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CenterChatMouseAction {
-    ToggleModelDropdown,
-    ToggleReasoningDropdown,
-    ToggleRankDropdown,
-    TogglePermissionsDropdown,
-    SelectModel(usize),
-    SelectReasoning(usize),
-    SelectRank(u8),
-    SelectPermission(usize),
-    DismissDropdown,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CenterLaunchDropdown {
-    Model,
-    Reasoning,
-    Rank,
-    Permissions,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct CenterDropdownMouseTarget {
-    area: Rect,
-    action: CenterChatMouseAction,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct CenterDropdownItem {
-    name: String,
-    description: Option<String>,
-    is_current: bool,
-    is_disabled: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct CenterReasoningChoice {
+struct WorkspaceReasoningChoice {
     effort: Option<ReasoningEffortConfig>,
     name: String,
     description: Option<String>,
@@ -1184,10 +1130,6 @@ struct CenterReasoningChoice {
 struct PermissionsMenuModel {
     items: Vec<SelectionItem>,
     show_elevate_sandbox_hint: bool,
-}
-
-fn rect_contains_point(area: Rect, column: u16, row: u16) -> bool {
-    column >= area.x && column < area.right() && row >= area.y && row < area.bottom()
 }
 
 fn thread_control_display_label(control_state: &ThreadControlState) -> String {
@@ -1643,155 +1585,6 @@ fn hook_completed_event_from_notification(
     }
 }
 
-fn app_gateway_request_id_to_mcp_request_id(
-    request_id: &praxis_app_gateway_protocol::RequestId,
-) -> praxis_protocol::mcp::RequestId {
-    match request_id {
-        praxis_app_gateway_protocol::RequestId::String(value) => {
-            praxis_protocol::mcp::RequestId::String(value.clone())
-        }
-        praxis_app_gateway_protocol::RequestId::Integer(value) => {
-            praxis_protocol::mcp::RequestId::Integer(*value)
-        }
-    }
-}
-
-fn exec_approval_request_from_params(
-    params: CommandExecutionRequestApprovalParams,
-) -> ExecApprovalRequestEvent {
-    ExecApprovalRequestEvent {
-        call_id: params.item_id,
-        command: params
-            .command
-            .as_deref()
-            .map(split_command_string)
-            .unwrap_or_default(),
-        cwd: params.cwd.unwrap_or_default(),
-        reason: params.reason,
-        network_approval_context: params
-            .network_approval_context
-            .map(network_approval_context_to_core),
-        additional_permissions: params.additional_permissions.map(Into::into),
-        turn_id: params.turn_id,
-        approval_id: params.approval_id,
-        proposed_execpolicy_amendment: params
-            .proposed_execpolicy_amendment
-            .map(praxis_app_gateway_protocol::ExecPolicyAmendment::into_core),
-        proposed_network_policy_amendments: params.proposed_network_policy_amendments.map(
-            |amendments| {
-                amendments
-                    .into_iter()
-                    .map(praxis_app_gateway_protocol::NetworkPolicyAmendment::into_core)
-                    .collect()
-            },
-        ),
-        available_decisions: params.available_decisions.map(|decisions| {
-            decisions
-                .into_iter()
-                .map(|decision| match decision {
-                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::Accept => {
-                        praxis_protocol::protocol::ReviewDecision::Approved
-                    }
-                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::AcceptForSession => {
-                        praxis_protocol::protocol::ReviewDecision::ApprovedForSession
-                    }
-                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::AcceptWithExecpolicyAmendment {
-                        execpolicy_amendment,
-                    } => praxis_protocol::protocol::ReviewDecision::ApprovedExecpolicyAmendment {
-                        proposed_execpolicy_amendment: execpolicy_amendment.into_core(),
-                    },
-                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::ApplyNetworkPolicyAmendment {
-                        network_policy_amendment,
-                    } => praxis_protocol::protocol::ReviewDecision::NetworkPolicyAmendment {
-                        network_policy_amendment: network_policy_amendment.into_core(),
-                    },
-                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::Decline => {
-                        praxis_protocol::protocol::ReviewDecision::Denied
-                    }
-                    praxis_app_gateway_protocol::CommandExecutionApprovalDecision::Cancel => {
-                        praxis_protocol::protocol::ReviewDecision::Abort
-                    }
-                })
-                .collect()
-        }),
-        parsed_cmd: params
-            .command_actions
-            .unwrap_or_default()
-            .into_iter()
-            .map(praxis_app_gateway_protocol::CommandAction::into_core)
-            .collect(),
-    }
-}
-
-fn patch_approval_request_from_params(
-    params: FileChangeRequestApprovalParams,
-) -> ApplyPatchApprovalRequestEvent {
-    ApplyPatchApprovalRequestEvent {
-        call_id: params.item_id,
-        turn_id: params.turn_id,
-        changes: HashMap::new(),
-        reason: params.reason,
-        grant_root: params.grant_root,
-    }
-}
-
-fn app_gateway_patch_changes_to_core(
-    changes: Vec<praxis_app_gateway_protocol::FileUpdateChange>,
-) -> HashMap<PathBuf, praxis_protocol::protocol::FileChange> {
-    changes
-        .into_iter()
-        .map(|change| {
-            let path = PathBuf::from(change.path);
-            let file_change = match change.kind {
-                praxis_app_gateway_protocol::PatchChangeKind::Add => {
-                    praxis_protocol::protocol::FileChange::Add {
-                        content: change.diff,
-                    }
-                }
-                praxis_app_gateway_protocol::PatchChangeKind::Delete => {
-                    praxis_protocol::protocol::FileChange::Delete {
-                        content: change.diff,
-                    }
-                }
-                praxis_app_gateway_protocol::PatchChangeKind::Update { move_path } => {
-                    praxis_protocol::protocol::FileChange::Update {
-                        unified_diff: change.diff,
-                        move_path,
-                    }
-                }
-            };
-            (path, file_change)
-        })
-        .collect()
-}
-
-fn app_gateway_collab_thread_id_to_core(thread_id: &str) -> Option<ThreadId> {
-    match ThreadId::from_string(thread_id) {
-        Ok(thread_id) => Some(thread_id),
-        Err(err) => {
-            warn!("ignoring collab tool-call item with invalid thread id {thread_id}: {err}");
-            None
-        }
-    }
-}
-
-fn app_gateway_collab_state_to_core(state: &AppGatewayCollabAgentState) -> AgentStatus {
-    match state.status {
-        AppGatewayCollabAgentStatus::PendingInit => AgentStatus::PendingInit,
-        AppGatewayCollabAgentStatus::Running => AgentStatus::Running,
-        AppGatewayCollabAgentStatus::Interrupted => AgentStatus::Interrupted,
-        AppGatewayCollabAgentStatus::Completed => AgentStatus::Completed(state.message.clone()),
-        AppGatewayCollabAgentStatus::Errored => AgentStatus::Errored(
-            state
-                .message
-                .clone()
-                .unwrap_or_else(|| "Agent errored".into()),
-        ),
-        AppGatewayCollabAgentStatus::Shutdown => AgentStatus::Shutdown,
-        AppGatewayCollabAgentStatus::NotFound => AgentStatus::NotFound,
-    }
-}
-
 /// Converts app-gateway collab agent states into the core protocol representation, enriching each
 /// entry with cached nickname and role metadata so rendered items show human-readable names.
 fn app_gateway_collab_agent_statuses_to_core(
@@ -1853,65 +1646,6 @@ fn app_gateway_collab_receiver_agent_refs(
             })
         })
         .collect()
-}
-
-fn request_permissions_from_params(
-    params: praxis_app_gateway_protocol::PermissionsRequestApprovalParams,
-) -> RequestPermissionsEvent {
-    RequestPermissionsEvent {
-        turn_id: params.turn_id,
-        call_id: params.item_id,
-        reason: params.reason,
-        permissions: params.permissions.into(),
-    }
-}
-
-fn request_user_input_from_params(params: ToolRequestUserInputParams) -> RequestUserInputEvent {
-    RequestUserInputEvent {
-        turn_id: params.turn_id,
-        call_id: params.item_id,
-        questions: params
-            .questions
-            .into_iter()
-            .map(
-                |question| praxis_protocol::request_user_input::RequestUserInputQuestion {
-                    id: question.id,
-                    header: question.header,
-                    question: question.question,
-                    is_other: question.is_other,
-                    is_secret: question.is_secret,
-                    options: question.options.map(|options| {
-                        options
-                            .into_iter()
-                            .map(|option| RequestUserInputQuestionOption {
-                                label: option.label,
-                                description: option.description,
-                            })
-                            .collect()
-                    }),
-                },
-            )
-            .collect(),
-    }
-}
-
-fn web_search_action_to_core(
-    action: praxis_app_gateway_protocol::WebSearchAction,
-) -> praxis_protocol::models::WebSearchAction {
-    match action {
-        praxis_app_gateway_protocol::WebSearchAction::Search { query, queries } => {
-            praxis_protocol::models::WebSearchAction::Search { query, queries }
-        }
-        praxis_app_gateway_protocol::WebSearchAction::OpenPage { url } => {
-            praxis_protocol::models::WebSearchAction::OpenPage { url }
-        }
-        praxis_app_gateway_protocol::WebSearchAction::FindInPage { url, pattern } => {
-            praxis_protocol::models::WebSearchAction::FindInPage { url, pattern }
-        }
-        praxis_app_gateway_protocol::WebSearchAction::Other => {
-            praxis_protocol::models::WebSearchAction::Other
-        }
-    }
 }
 
 impl ChatWidget {
@@ -2053,7 +1787,7 @@ impl ChatWidget {
 
     fn restore_reasoning_status_header(&mut self) {
         if let Some(header) = extract_first_bold(&self.reasoning_buffer) {
-            self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
+            self.terminal_title_status_kind = TerminalTitleStatusKind::Reasoning;
             let kind = self
                 .reasoning_block_kind
                 .unwrap_or(ReasoningBlockKind::Summary);
@@ -2065,8 +1799,8 @@ impl ChatWidget {
                 self.thinking_persona_for_reasoning_kind(kind),
             );
         } else if self.bottom_pane.is_task_running() {
-            self.terminal_title_status_kind = TerminalTitleStatusKind::Working;
-            self.set_status_header(String::from("Working"));
+            self.terminal_title_status_kind = TerminalTitleStatusKind::TurnRunning;
+            self.set_status_header(GENERIC_STATUS_HEADER.to_string());
         }
     }
 
@@ -2672,10 +2406,10 @@ impl ChatWidget {
             return;
         }
 
-        self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
+        self.terminal_title_status_kind = TerminalTitleStatusKind::Reasoning;
         let header = extract_first_bold(&self.reasoning_buffer).unwrap_or_else(|| match kind {
-            ReasoningBlockKind::Summary => "Thinking summary".to_string(),
-            ReasoningBlockKind::Full => "Thinking".to_string(),
+            ReasoningBlockKind::Summary => "Reasoning summary".to_string(),
+            ReasoningBlockKind::Full => "Reasoning".to_string(),
         });
         let thinking_persona = self.thinking_persona_for_reasoning_kind(kind);
         let preview_max_lines = match kind {
@@ -2780,8 +2514,8 @@ impl ChatWidget {
         self.pending_status_indicator_restore = false;
         self.bottom_pane
             .set_interrupt_hint_visible(/*visible*/ true);
-        self.terminal_title_status_kind = TerminalTitleStatusKind::Working;
-        self.set_status_header(String::from("Working"));
+        self.terminal_title_status_kind = TerminalTitleStatusKind::TurnRunning;
+        self.set_status_header(GENERIC_STATUS_HEADER.to_string());
         self.full_reasoning_buffer.clear();
         self.reasoning_buffer.clear();
         self.reasoning_block_kind = None;
@@ -4158,12 +3892,12 @@ impl ChatWidget {
                     status.details_max_lines,
                 );
             } else if self.current_status.is_guardian_review() {
-                self.set_status_header(String::from("Working"));
+                self.set_status_header(GENERIC_STATUS_HEADER.to_string());
             }
         } else if self.pending_guardian_review_status.is_empty()
             && self.current_status.is_guardian_review()
         {
-            self.set_status_header(String::from("Working"));
+            self.set_status_header(GENERIC_STATUS_HEADER.to_string());
         }
 
         if ev.status == GuardianAssessmentStatus::Approved {
@@ -4815,7 +4549,7 @@ impl ChatWidget {
         self.bottom_pane.ensure_status_indicator();
         self.bottom_pane
             .set_interrupt_hint_visible(/*visible*/ true);
-        self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
+        self.terminal_title_status_kind = TerminalTitleStatusKind::Reasoning;
         self.set_status_header(message);
     }
 
@@ -4866,7 +4600,7 @@ impl ChatWidget {
     fn on_undo_completed(&mut self, event: UndoCompletedEvent) {
         let UndoCompletedEvent { success, message } = event;
         self.bottom_pane.hide_status_indicator();
-        self.terminal_title_status_kind = TerminalTitleStatusKind::Working;
+        self.terminal_title_status_kind = TerminalTitleStatusKind::TurnRunning;
         self.refresh_terminal_title();
         let message = message.unwrap_or_else(|| {
             if success {
@@ -4887,7 +4621,7 @@ impl ChatWidget {
             self.retry_status_header = Some(self.current_status.header.clone());
         }
         self.bottom_pane.ensure_status_indicator();
-        self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
+        self.terminal_title_status_kind = TerminalTitleStatusKind::Reasoning;
         self.set_status(
             message,
             additional_details,
@@ -5196,7 +4930,7 @@ impl ChatWidget {
         self.had_work_activity = true;
         if self.running_commands.is_empty() && self.bottom_pane.is_task_running() {
             self.push_status_activity("Waiting for model response");
-            self.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;
+            self.terminal_title_status_kind = TerminalTitleStatusKind::Reasoning;
             self.set_status_header("Waiting for model".to_string());
         }
     }
@@ -5583,11 +5317,11 @@ impl ChatWidget {
             reasoning_buffer: String::new(),
             full_reasoning_buffer: String::new(),
             reasoning_block_kind: None,
-            current_status: StatusIndicatorState::working(),
+            current_status: StatusIndicatorState::turn_running(),
             turn_status_snapshot: TurnRuntimeState::default(),
             status_activity_trail: ActivityTrail::default(),
             pending_guardian_review_status: PendingGuardianReviewStatus::default(),
-            terminal_title_status_kind: TerminalTitleStatusKind::Working,
+            terminal_title_status_kind: TerminalTitleStatusKind::TurnRunning,
             retry_status_header: None,
             pending_status_indicator_restore: false,
             suppress_queue_autosend: false,
@@ -5620,18 +5354,11 @@ impl ChatWidget {
             plan_item_active: false,
             last_separator_elapsed_secs: None,
             turn_runtime_metrics: RuntimeMetricsSummary::default(),
-            center_launch_rank: 0,
-            center_launch_dropdown: None,
-            center_launch_model_area: Cell::new(None),
-            center_launch_reasoning_area: Cell::new(None),
-            center_launch_rank_area: Cell::new(None),
-            center_launch_permissions_area: Cell::new(None),
-            center_launch_dropdown_targets: RefCell::new(Vec::new()),
             last_rendered_width: Cell::new(None),
             last_visible_patch_cell_ids: RefCell::new(Vec::new()),
             active_cell_render_cache: RefCell::new(None),
-            center_active_tail_cache: RefCell::new(None),
-            center_transcript_viewport_cache: RefCell::new(None),
+            workspace_active_tail_cache: RefCell::new(None),
+            workspace_transcript_cache: RefCell::new(WorkspaceTranscriptCache::default()),
             feedback,
             current_rollout_path: None,
             current_cwd,
@@ -5866,7 +5593,7 @@ impl ChatWidget {
                         self.reasoning_buffer.clear();
                         self.full_reasoning_buffer.clear();
                         self.reasoning_block_kind = None;
-                        self.set_status_header(String::from("Working"));
+                        self.set_status_header(GENERIC_STATUS_HEADER.to_string());
                         self.submit_user_message(user_message);
                     } else {
                         self.queue_user_message(user_message);
@@ -5906,7 +5633,7 @@ impl ChatWidget {
                     self.dispatch_command_with_args(cmd, args, text_elements);
                 }
                 InputResult::ThreadCommand(intent) => {
-                    self.dispatch_codex_thread_command(intent);
+                    self.dispatch_external_thread_command(intent);
                 }
                 InputResult::None => {}
             },
@@ -6653,9 +6380,14 @@ impl ChatWidget {
             SlashCommand::Fork => {
                 self.app_event_tx.send(AppEvent::ForkCurrentSession);
             }
-            SlashCommand::Codex => {
-                self.dispatch_codex_thread_command(CodexThreadCommandIntent {
-                    action: CodexThreadCommandAction::Resume,
+            SlashCommand::Codex | SlashCommand::Cursor => {
+                self.dispatch_external_thread_command(ExternalThreadCommandIntent {
+                    source: match cmd {
+                        SlashCommand::Codex => ExternalThreadCommandSource::Codex,
+                        SlashCommand::Cursor => ExternalThreadCommandSource::Cursor,
+                        _ => unreachable!(),
+                    },
+                    action: ExternalThreadCommandAction::Resume,
                 });
             }
             SlashCommand::Init => {
@@ -6873,7 +6605,7 @@ impl ChatWidget {
                 self.request_quit_without_confirmation();
             }
             // SlashCommand::Undo => {
-            //     self.app_event_tx.send(AppEvent::CodexOp(Op::Undo));
+            //     self.app_event_tx.send(AppEvent::AgentOp(Op::Undo));
             // }
             SlashCommand::Diff => {
                 self.add_diff_in_progress();
@@ -7036,15 +6768,17 @@ impl ChatWidget {
         }
     }
 
-    fn dispatch_codex_thread_command(&mut self, intent: CodexThreadCommandIntent) {
+    fn dispatch_external_thread_command(&mut self, intent: ExternalThreadCommandIntent) {
         let action = match intent.action {
-            CodexThreadCommandAction::Resume => SessionPickerAction::Resume,
-            CodexThreadCommandAction::Fork => SessionPickerAction::Fork,
+            ExternalThreadCommandAction::Resume => SessionPickerAction::Resume,
+            ExternalThreadCommandAction::Fork => SessionPickerAction::Fork,
         };
-        self.app_event_tx.send(AppEvent::OpenThreadPicker {
-            source: SessionLookupSource::Codex,
-            action,
-        });
+        let source = match intent.source {
+            ExternalThreadCommandSource::Codex => SessionLookupSource::Codex,
+            ExternalThreadCommandSource::Cursor => SessionLookupSource::Cursor,
+        };
+        self.app_event_tx
+            .send(AppEvent::OpenThreadPicker { source, action });
     }
 
     fn dispatch_command_with_args(
@@ -7069,16 +6803,18 @@ impl ChatWidget {
 
         let trimmed = args.trim();
         match cmd {
-            SlashCommand::Codex => {
+            SlashCommand::Codex | SlashCommand::Cursor => {
+                let command_name = cmd.command();
                 let command = if trimmed.is_empty() {
-                    "/codex".to_owned()
+                    format!("/{command_name}")
                 } else {
-                    format!("/codex {trimmed}")
+                    format!("/{command_name} {trimmed}")
                 };
-                match parse_codex_thread_command(command.as_str()) {
-                    Some(intent) => self.dispatch_codex_thread_command(intent),
-                    None => self
-                        .add_error_message("Usage: /codex [resume|fork|threads|list]".to_string()),
+                match parse_external_thread_command(command.as_str()) {
+                    Some(intent) => self.dispatch_external_thread_command(intent),
+                    None => self.add_error_message(format!(
+                        "Usage: /{command_name} [resume|fork|threads|list]"
+                    )),
                 }
             }
             SlashCommand::Language => {
@@ -7170,7 +6906,7 @@ impl ChatWidget {
                     self.reasoning_buffer.clear();
                     self.full_reasoning_buffer.clear();
                     self.reasoning_block_kind = None;
-                    self.set_status_header(String::from("Working"));
+                    self.set_status_header(GENERIC_STATUS_HEADER.to_string());
                     self.submit_user_message(user_message);
                 } else {
                     self.queue_user_message(user_message);
@@ -7320,8 +7056,8 @@ impl ChatWidget {
         else {
             return false;
         };
-        if let Some(intent) = parse_codex_thread_command(user_message.text.as_str()) {
-            self.dispatch_codex_thread_command(intent);
+        if let Some(intent) = parse_external_thread_command(user_message.text.as_str()) {
+            self.dispatch_external_thread_command(intent);
             return true;
         }
         let Ok(cmd) = SlashCommand::from_str(name) else {
@@ -7779,6 +7515,7 @@ impl ChatWidget {
     /// avoid triggering side effects. Event ids are passed as `None` to
     /// distinguish replayed events from live ones.
     pub(crate) fn replay_thread_turns(&mut self, turns: Vec<Turn>, replay_kind: ReplayKind) {
+        let mut hidden_resume_tool_events = 0usize;
         for turn in turns {
             let Turn {
                 id: turn_id,
@@ -7793,7 +7530,9 @@ impl ChatWidget {
                 self.on_task_started();
             }
             for item in items {
-                self.replay_thread_item(item, turn_id.clone(), replay_kind);
+                hidden_resume_tool_events = hidden_resume_tool_events.saturating_add(usize::from(
+                    self.replay_thread_item(item, turn_id.clone(), replay_kind),
+                ));
             }
             if matches!(
                 status,
@@ -7813,6 +7552,14 @@ impl ChatWidget {
                 );
             }
         }
+        if matches!(replay_kind, ReplayKind::ResumeInitialMessages) && hidden_resume_tool_events > 0
+        {
+            self.add_resume_replay_line(
+                ChatLane::Assistant,
+                "Resume",
+                format!("{hidden_resume_tool_events} tool events hidden from resumed history"),
+            );
+        }
     }
 
     pub(crate) fn replay_thread_item(
@@ -7820,8 +7567,8 @@ impl ChatWidget {
         item: ThreadItem,
         turn_id: String,
         replay_kind: ReplayKind,
-    ) {
-        self.handle_thread_item(item, turn_id, ThreadItemRenderSource::Replay(replay_kind));
+    ) -> bool {
+        self.handle_thread_item(item, turn_id, ThreadItemRenderSource::Replay(replay_kind))
     }
 
     fn handle_thread_item(
@@ -7829,9 +7576,12 @@ impl ChatWidget {
         item: ThreadItem,
         turn_id: String,
         render_source: ThreadItemRenderSource,
-    ) {
+    ) -> bool {
         let from_replay = render_source.is_replay();
         let replay_kind = render_source.replay_kind();
+        if matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
+            return self.replay_initial_thread_item_compact(item);
+        }
         match item {
             ThreadItem::UserMessage { id, content } => {
                 let user_message = praxis_protocol::items::UserMessageItem {
@@ -8076,7 +7826,7 @@ impl ChatWidget {
                     call_id: id,
                     query,
                     action: action
-                        .map(web_search_action_to_core)
+                        .map(app_gateway_web_search_action_to_core)
                         .unwrap_or(praxis_protocol::models::WebSearchAction::Other),
                 });
             }
@@ -8140,6 +7890,65 @@ impl ChatWidget {
         if matches!(replay_kind, Some(ReplayKind::ThreadSnapshot)) && turn_id.is_empty() {
             self.request_redraw();
         }
+        false
+    }
+
+    fn replay_initial_thread_item_compact(&mut self, item: ThreadItem) -> bool {
+        match classify_resumed_thread_item(item) {
+            ResumedThreadHistoryAction::Show {
+                lane,
+                label,
+                preview,
+            } => {
+                self.add_resume_replay_line(
+                    Self::resumed_history_lane_to_chat_lane(lane),
+                    Self::resumed_history_label_text(label),
+                    preview,
+                );
+                false
+            }
+            ResumedThreadHistoryAction::FoldToolEvent => true,
+            ResumedThreadHistoryAction::Drop => false,
+        }
+    }
+
+    fn resumed_history_lane_to_chat_lane(lane: ResumedHistoryLane) -> ChatLane {
+        match lane {
+            ResumedHistoryLane::User => ChatLane::User,
+            ResumedHistoryLane::Assistant => ChatLane::Assistant,
+        }
+    }
+
+    fn resumed_history_label_text(label: ResumedHistoryLabel) -> &'static str {
+        match label {
+            ResumedHistoryLabel::You => "You",
+            ResumedHistoryLabel::Assistant => "Assistant",
+            ResumedHistoryLabel::AssistantNote => "Assistant note",
+            ResumedHistoryLabel::Plan => "Plan",
+            ResumedHistoryLabel::Reasoning => "Reasoning",
+            ResumedHistoryLabel::Review => "Review",
+            ResumedHistoryLabel::ReviewExited => "Review exited",
+            ResumedHistoryLabel::Context => "Context",
+            ResumedHistoryLabel::Hook => "Hook",
+        }
+    }
+
+    fn add_resume_replay_line(
+        &mut self,
+        lane: ChatLane,
+        label: impl Into<String>,
+        preview: impl AsRef<str>,
+    ) {
+        self.add_to_history(history_cell::ResumeReplayHistoryCell::new(
+            lane,
+            label.into(),
+            Self::compact_resume_preview(preview.as_ref()),
+        ));
+    }
+
+    fn compact_resume_preview(text: &str) -> String {
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        truncate_text(&text, RESUME_REPLAY_PREVIEW_MAX_GRAPHEMES)
     }
 
     pub(crate) fn handle_server_request(
@@ -9137,8 +8946,7 @@ impl ChatWidget {
         // worst causes a one-time cache-key collision.
         self.active_cell_revision = self.active_cell_revision.wrapping_add(1);
         self.active_cell_render_cache.borrow_mut().take();
-        self.center_active_tail_cache.borrow_mut().take();
-        self.center_transcript_viewport_cache.borrow_mut().take();
+        self.workspace_active_tail_cache.borrow_mut().take();
     }
 
     fn notify(&mut self, notification: Notification) {
@@ -9621,7 +9429,7 @@ impl ChatWidget {
         let default_effort: ReasoningEffortConfig = preset.default_reasoning_effort;
 
         let switch_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-            tx.send(AppEvent::CodexOp(
+            tx.send(AppEvent::AgentOp(
                 AppCommand::override_turn_context(
                     /*cwd*/ None,
                     /*approval_policy*/ None,
@@ -9929,7 +9737,7 @@ impl ChatWidget {
                 let name = Self::personality_label(personality).to_string();
                 let description = Some(Self::personality_description(personality).to_string());
                 let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
-                    tx.send(AppEvent::CodexOp(
+                    tx.send(AppEvent::AgentOp(
                         AppCommand::override_turn_context(
                             /*cwd*/ None,
                             /*approval_policy*/ None,
@@ -11003,7 +10811,7 @@ impl ChatWidget {
     ) -> Vec<SelectionAction> {
         vec![Box::new(move |tx| {
             let sandbox_clone = sandbox.clone();
-            tx.send(AppEvent::CodexOp(
+            tx.send(AppEvent::AgentOp(
                 AppCommand::override_turn_context(
                     /*cwd*/ None,
                     Some(approval),
@@ -11636,19 +11444,6 @@ impl ChatWidget {
             self.turn_sleep_inhibitor
                 .set_turn_running(self.agent_turn_running);
         }
-        #[cfg(target_os = "windows")]
-        if matches!(
-            feature,
-            Feature::WindowsSandbox | Feature::WindowsSandboxElevated
-        ) {
-            self.bottom_pane.set_windows_degraded_sandbox_active(
-                praxis_core::windows_sandbox::ELEVATED_SANDBOX_NUX_ENABLED
-                    && matches!(
-                        WindowsSandboxLevel::from_config(&self.config),
-                        WindowsSandboxLevel::RestrictedToken
-                    ),
-            );
-        }
         enabled
     }
 
@@ -11830,7 +11625,7 @@ impl ChatWidget {
 
     fn set_service_tier_selection(&mut self, service_tier: Option<ServiceTier>) {
         self.set_service_tier(service_tier);
-        self.app_event_tx.send(AppEvent::CodexOp(
+        self.app_event_tx.send(AppEvent::AgentOp(
             AppCommand::override_turn_context(
                 /*cwd*/ None,
                 /*approval_policy*/ None,
@@ -11865,16 +11660,16 @@ impl ChatWidget {
         self.config.model_provider_id.as_str()
     }
 
-    pub(crate) fn center_theme(&self) -> center_theme::CenterTheme {
-        center_theme::for_preference(
+    pub(crate) fn workspace_theme(&self) -> workspace_theme::WorkspaceTheme {
+        workspace_theme::for_preference(
             self.tui_config.surface_theme.as_deref(),
             self.current_model_provider_id(),
             self.model_display_name(),
         )
     }
 
-    fn center_theme_kind(&self) -> center_theme::CenterThemeKind {
-        center_theme::kind_for_preference(
+    fn workspace_theme_kind(&self) -> workspace_theme::WorkspaceThemeKind {
+        workspace_theme::kind_for_preference(
             self.tui_config.surface_theme.as_deref(),
             self.current_model_provider_id(),
             self.model_display_name(),
@@ -11882,7 +11677,7 @@ impl ChatWidget {
     }
 
     fn sync_surface_theme(&mut self) {
-        let theme = self.center_theme();
+        let theme = self.workspace_theme();
         crate::surface::set_runtime_theme_kind(theme.kind);
         self.bottom_pane.set_surface_theme(theme);
     }
@@ -12525,9 +12320,8 @@ impl ChatWidget {
 
     /// Handles a Ctrl+C press at the chat-widget layer.
     ///
-    /// The first press arms a time-bounded quit shortcut and shows a footer hint via the bottom
-    /// pane. If cancellable work is active, Ctrl+C also submits `Op::Interrupt` after the shortcut
-    /// is armed.
+    /// Running work treats Ctrl+C as interrupt-only. Idle Ctrl+C requires a second press before
+    /// shutdown, so accidental terminal control keys cannot close a live session.
     ///
     /// Active realtime conversations take precedence over bottom-pane Ctrl+C handling so the
     /// first press always stops live voice, even when the composer contains the recording meter.
@@ -12537,32 +12331,18 @@ impl ChatWidget {
     fn on_ctrl_c(&mut self) {
         let key = key_hint::ctrl(KeyCode::Char('c'));
         if self.realtime_conversation.is_live() {
-            self.bottom_pane.clear_quit_shortcut_hint();
-            self.quit_shortcut_expires_at = None;
-            self.quit_shortcut_key = None;
+            self.clear_quit_shortcut();
             self.stop_realtime_conversation_from_ui();
             return;
         }
-        let modal_or_popup_active = !self.bottom_pane.no_modal_or_popup_active();
         if self.bottom_pane.on_ctrl_c() == CancellationEvent::Handled {
-            if DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED {
-                if modal_or_popup_active {
-                    self.quit_shortcut_expires_at = None;
-                    self.quit_shortcut_key = None;
-                    self.bottom_pane.clear_quit_shortcut_hint();
-                } else {
-                    self.arm_quit_shortcut(key);
-                }
-            }
+            self.clear_quit_shortcut();
             return;
         }
 
-        if !DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED {
-            if self.is_cancellable_work_active() {
-                self.submit_op(AppCommand::interrupt());
-            } else {
-                self.request_quit_without_confirmation();
-            }
+        if self.is_cancellable_work_active() {
+            self.clear_quit_shortcut();
+            self.submit_op(AppCommand::interrupt());
             return;
         }
 
@@ -12574,10 +12354,6 @@ impl ChatWidget {
         }
 
         self.arm_quit_shortcut(key);
-
-        if self.is_cancellable_work_active() {
-            self.submit_op(AppCommand::interrupt());
-        }
     }
 
     /// Handles a Ctrl+D press at the chat-widget layer.
@@ -12586,13 +12362,12 @@ impl ChatWidget {
     /// Otherwise it should be routed to the active view and not attempt to quit.
     fn on_ctrl_d(&mut self) -> bool {
         let key = key_hint::ctrl(KeyCode::Char('d'));
-        if !DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED {
-            if !self.bottom_pane.composer_is_empty() || !self.bottom_pane.no_modal_or_popup_active()
-            {
-                return false;
-            }
+        if !self.bottom_pane.composer_is_empty() || !self.bottom_pane.no_modal_or_popup_active() {
+            return false;
+        }
 
-            self.request_quit_without_confirmation();
+        if self.is_cancellable_work_active() {
+            self.clear_quit_shortcut();
             return true;
         }
 
@@ -12601,10 +12376,6 @@ impl ChatWidget {
             self.quit_shortcut_key = None;
             self.request_quit_without_confirmation();
             return true;
-        }
-
-        if !self.bottom_pane.composer_is_empty() || !self.bottom_pane.no_modal_or_popup_active() {
-            return false;
         }
 
         self.arm_quit_shortcut(key);
@@ -12630,6 +12401,12 @@ impl ChatWidget {
             .or_else(|| Some(Instant::now()));
         self.quit_shortcut_key = Some(key);
         self.bottom_pane.show_quit_shortcut_hint(key);
+    }
+
+    fn clear_quit_shortcut(&mut self) {
+        self.quit_shortcut_expires_at = None;
+        self.quit_shortcut_key = None;
+        self.bottom_pane.clear_quit_shortcut_hint();
     }
 
     // Review mode counts as cancellable work so Ctrl+C interrupts instead of quitting.
@@ -12767,7 +12544,7 @@ impl ChatWidget {
                 }
             }
             PraxisOpTarget::AppEvent => {
-                self.app_event_tx.send(AppEvent::CodexOp(op.into()));
+                self.app_event_tx.send(AppEvent::AgentOp(op.into()));
             }
         }
         true
@@ -13382,135 +13159,75 @@ impl ChatWidget {
             .map(|target| target.action.clone())
     }
 
-    pub(crate) fn center_chat_mouse_action(
-        &self,
-        column: u16,
-        row: u16,
-    ) -> Option<CenterChatMouseAction> {
-        if let Some(target) = self
-            .center_launch_dropdown_targets
-            .borrow()
-            .iter()
-            .find(|target| rect_contains_point(target.area, column, row))
-        {
-            return Some(target.action.clone());
-        }
-
-        if self
-            .center_launch_model_area
-            .get()
-            .is_some_and(|area| rect_contains_point(area, column, row))
-        {
-            return Some(CenterChatMouseAction::ToggleModelDropdown);
-        }
-
-        if self
-            .center_launch_reasoning_area
-            .get()
-            .is_some_and(|area| rect_contains_point(area, column, row))
-        {
-            return Some(CenterChatMouseAction::ToggleReasoningDropdown);
-        }
-
-        if self
-            .center_launch_rank_area
-            .get()
-            .is_some_and(|area| rect_contains_point(area, column, row))
-        {
-            return Some(CenterChatMouseAction::ToggleRankDropdown);
-        }
-
-        if self
-            .center_launch_permissions_area
-            .get()
-            .is_some_and(|area| rect_contains_point(area, column, row))
-        {
-            return Some(CenterChatMouseAction::TogglePermissionsDropdown);
-        }
-
-        self.center_launch_dropdown
-            .is_some()
-            .then_some(CenterChatMouseAction::DismissDropdown)
-    }
-
-    pub(crate) fn handle_center_chat_mouse_action(&mut self, action: CenterChatMouseAction) {
+    pub(crate) fn handle_workspace_chat_mouse_action(
+        &mut self,
+        launch: &mut LaunchStripState,
+        action: LaunchStripMouseAction,
+    ) {
         match action {
-            CenterChatMouseAction::ToggleModelDropdown => {
-                if self.center_model_presets().is_empty() {
+            LaunchStripMouseAction::ToggleModelDropdown => {
+                if self.workspace_model_presets().is_empty() {
                     self.show_info_toast("Models are being updated; try again in a moment.");
-                    self.center_launch_dropdown = None;
+                    launch.clear_dropdown();
                 } else {
-                    self.center_launch_dropdown = match self.center_launch_dropdown {
-                        Some(CenterLaunchDropdown::Model) => None,
-                        _ => Some(CenterLaunchDropdown::Model),
-                    };
+                    launch.toggle_dropdown(LaunchStripDropdown::Model);
                 }
             }
-            CenterChatMouseAction::ToggleReasoningDropdown => {
-                if self.center_reasoning_choices().is_empty() {
+            LaunchStripMouseAction::ToggleReasoningDropdown => {
+                if self.workspace_reasoning_choices().is_empty() {
                     self.show_info_toast(
                         "Reasoning options are being updated; try again in a moment.",
                     );
-                    self.center_launch_dropdown = None;
+                    launch.clear_dropdown();
                 } else {
-                    self.center_launch_dropdown = match self.center_launch_dropdown {
-                        Some(CenterLaunchDropdown::Reasoning) => None,
-                        _ => Some(CenterLaunchDropdown::Reasoning),
-                    };
+                    launch.toggle_dropdown(LaunchStripDropdown::Reasoning);
                 }
             }
-            CenterChatMouseAction::ToggleRankDropdown => {
-                self.center_launch_dropdown = match self.center_launch_dropdown {
-                    Some(CenterLaunchDropdown::Rank) => None,
-                    _ => Some(CenterLaunchDropdown::Rank),
-                };
+            LaunchStripMouseAction::ToggleRankDropdown => {
+                launch.toggle_dropdown(LaunchStripDropdown::Rank);
             }
-            CenterChatMouseAction::TogglePermissionsDropdown => {
-                self.center_launch_dropdown = match self.center_launch_dropdown {
-                    Some(CenterLaunchDropdown::Permissions) => None,
-                    _ => Some(CenterLaunchDropdown::Permissions),
-                };
+            LaunchStripMouseAction::TogglePermissionsDropdown => {
+                launch.toggle_dropdown(LaunchStripDropdown::Permissions);
             }
-            CenterChatMouseAction::SelectModel(index) => {
-                self.apply_center_model_dropdown_selection(index);
+            LaunchStripMouseAction::SelectModel(index) => {
+                self.apply_workspace_model_dropdown_selection(launch, index);
             }
-            CenterChatMouseAction::SelectReasoning(index) => {
-                self.apply_center_reasoning_dropdown_selection(index);
+            LaunchStripMouseAction::SelectReasoning(index) => {
+                self.apply_workspace_reasoning_dropdown_selection(launch, index);
             }
-            CenterChatMouseAction::SelectRank(rank) => {
-                self.set_center_launch_rank(rank);
-                self.center_launch_dropdown = None;
+            LaunchStripMouseAction::SelectRank(rank) => {
+                self.set_launch_strip_rank(launch, rank);
+                launch.clear_dropdown();
             }
-            CenterChatMouseAction::SelectPermission(index) => {
-                self.apply_center_permission_dropdown_selection(index);
+            LaunchStripMouseAction::SelectPermission(index) => {
+                self.apply_workspace_permission_dropdown_selection(launch, index);
             }
-            CenterChatMouseAction::DismissDropdown => {
-                self.center_launch_dropdown = None;
+            LaunchStripMouseAction::DismissDropdown => {
+                launch.clear_dropdown();
             }
         }
         self.request_redraw();
     }
 
-    pub(crate) fn set_center_launch_rank(&mut self, rank: u8) {
-        let next_rank = rank.min(CENTER_LAUNCH_RANK_MAX);
-        self.center_launch_rank = next_rank;
+    pub(crate) fn set_launch_strip_rank(&mut self, launch: &mut LaunchStripState, rank: u8) {
+        let next_rank = launch.set_rank(rank, LAUNCH_STRIP_RANK_MAX);
         let message = match self.ui_language {
             UiLanguage::En => format!(
                 "Launch rank: R{} {}",
                 next_rank,
-                Self::center_rank_name(next_rank)
+                Self::workspace_rank_name(next_rank)
             ),
             UiLanguage::Cn => format!(
                 "启动级别：R{} {}",
                 next_rank,
-                Self::center_rank_name(next_rank)
+                Self::workspace_rank_name(next_rank)
             ),
         };
         self.show_info_toast(message);
         self.request_redraw();
     }
 
-    fn center_rank_name(rank: u8) -> &'static str {
+    fn workspace_rank_name(rank: u8) -> &'static str {
         match rank {
             0 => "Coordinator",
             1 => "Supervisor",
@@ -13518,7 +13235,7 @@ impl ChatWidget {
         }
     }
 
-    fn center_rank_description(rank: u8) -> &'static str {
+    fn workspace_rank_description(rank: u8) -> &'static str {
         match rank {
             0 => "Top-level coordinator; can spawn and control R1/R2 descendants.",
             1 => "Supervisor; can coordinate direct R2 worker threads.",
@@ -13526,7 +13243,7 @@ impl ChatWidget {
         }
     }
 
-    fn center_permissions_label(&self) -> String {
+    fn workspace_permissions_label(&self) -> String {
         if self.config.approvals_reviewer == ApprovalsReviewer::GuardianSubagent {
             return "Guardian Approvals".to_string();
         }
@@ -13539,7 +13256,7 @@ impl ChatWidget {
             .unwrap_or_else(|| "Custom".to_string())
     }
 
-    fn center_model_presets(&self) -> Vec<ModelPreset> {
+    fn workspace_model_presets(&self) -> Vec<ModelPreset> {
         let models = self.model_catalog.try_list_models().unwrap_or_default();
         let mut indexed = models
             .into_iter()
@@ -13553,8 +13270,8 @@ impl ChatWidget {
         indexed.into_iter().map(|(_, preset)| preset).collect()
     }
 
-    fn center_model_display_items(&self) -> Vec<CenterDropdownItem> {
-        self.center_model_presets()
+    fn workspace_model_display_items(&self) -> Vec<LaunchStripDropdownItem> {
+        self.workspace_model_presets()
             .into_iter()
             .map(|preset| {
                 let selection = self.selection_metadata_or_current(&preset);
@@ -13569,7 +13286,7 @@ impl ChatWidget {
                     description.push_str("  ");
                     description.push_str(selection.provider_id.as_str());
                 }
-                CenterDropdownItem {
+                LaunchStripDropdownItem {
                     name: Self::model_picker_item_name(&preset),
                     description: Some(description),
                     is_current: self.is_current_model_selection(&preset),
@@ -13579,10 +13296,14 @@ impl ChatWidget {
             .collect()
     }
 
-    fn apply_center_model_dropdown_selection(&mut self, index: usize) {
-        let presets = self.center_model_presets();
+    fn apply_workspace_model_dropdown_selection(
+        &mut self,
+        launch: &mut LaunchStripState,
+        index: usize,
+    ) {
+        let presets = self.workspace_model_presets();
         let Some(preset) = presets.get(index).cloned() else {
-            self.center_launch_dropdown = None;
+            launch.clear_dropdown();
             return;
         };
         let selection = self.selection_metadata_or_current(&preset);
@@ -13602,10 +13323,10 @@ impl ChatWidget {
         for action in actions {
             action(&self.app_event_tx);
         }
-        self.center_launch_dropdown = None;
+        launch.clear_dropdown();
     }
 
-    fn center_current_model_preset(&self) -> Option<ModelPreset> {
+    fn workspace_current_model_preset(&self) -> Option<ModelPreset> {
         let models = self.model_catalog.try_list_models().ok()?;
         let current_model = self.current_model().to_string();
         let current_provider_id = self.current_model_provider_id().to_string();
@@ -13622,21 +13343,21 @@ impl ChatWidget {
             .find(|preset| preset.model == current_model)
     }
 
-    fn center_reasoning_explicit_effort(&self) -> Option<ReasoningEffortConfig> {
+    fn workspace_reasoning_explicit_effort(&self) -> Option<ReasoningEffortConfig> {
         if self.collaboration_modes_enabled() && self.active_mode_kind() == ModeKind::Plan {
             return self.config.plan_mode_reasoning_effort;
         }
         self.current_collaboration_mode.reasoning_effort()
     }
 
-    fn center_reasoning_display_label(&self) -> String {
+    fn workspace_reasoning_display_label(&self) -> String {
         self.effective_reasoning_effort()
             .map(Self::reasoning_effort_label)
             .unwrap_or("Default")
             .to_string()
     }
 
-    fn center_reasoning_effort_description(effort: ReasoningEffortConfig) -> &'static str {
+    fn workspace_reasoning_effort_description(effort: ReasoningEffortConfig) -> &'static str {
         match effort {
             ReasoningEffortConfig::None => "Disable explicit model thinking.",
             ReasoningEffortConfig::Minimal => "Use the smallest advertised thinking budget.",
@@ -13647,10 +13368,10 @@ impl ChatWidget {
         }
     }
 
-    fn center_reasoning_choices(&self) -> Vec<CenterReasoningChoice> {
-        let explicit_effort = self.center_reasoning_explicit_effort();
+    fn workspace_reasoning_choices(&self) -> Vec<WorkspaceReasoningChoice> {
+        let explicit_effort = self.workspace_reasoning_explicit_effort();
         let effective_effort = self.effective_reasoning_effort();
-        let current_preset = self.center_current_model_preset();
+        let current_preset = self.workspace_current_model_preset();
         let default_display = effective_effort.or_else(|| {
             current_preset
                 .as_ref()
@@ -13660,7 +13381,7 @@ impl ChatWidget {
             || "Default".to_string(),
             |effort| format!("Default ({})", Self::reasoning_effort_label(effort)),
         );
-        let mut choices = vec![CenterReasoningChoice {
+        let mut choices = vec![WorkspaceReasoningChoice {
             effort: None,
             name: default_name,
             description: Some("Use the current mode or model default reasoning level.".to_string()),
@@ -13673,7 +13394,7 @@ impl ChatWidget {
                 if choices.iter().any(|choice| choice.effort == Some(effort)) {
                     continue;
                 }
-                choices.push(CenterReasoningChoice {
+                choices.push(WorkspaceReasoningChoice {
                     effort: Some(effort),
                     name: Self::reasoning_effort_label(effort).to_string(),
                     description: Some(option.description.clone())
@@ -13685,11 +13406,11 @@ impl ChatWidget {
 
         if choices.len() == 1 {
             for effort in ReasoningEffortConfig::iter() {
-                choices.push(CenterReasoningChoice {
+                choices.push(WorkspaceReasoningChoice {
                     effort: Some(effort),
                     name: Self::reasoning_effort_label(effort).to_string(),
                     description: Some(
-                        Self::center_reasoning_effort_description(effort).to_string(),
+                        Self::workspace_reasoning_effort_description(effort).to_string(),
                     ),
                     is_current: explicit_effort == Some(effort),
                 });
@@ -13697,7 +13418,7 @@ impl ChatWidget {
         } else if let Some(effort) = explicit_effort
             && !choices.iter().any(|choice| choice.effort == Some(effort))
         {
-            choices.push(CenterReasoningChoice {
+            choices.push(WorkspaceReasoningChoice {
                 effort: Some(effort),
                 name: format!("{} (current)", Self::reasoning_effort_label(effort)),
                 description: Some(
@@ -13710,10 +13431,10 @@ impl ChatWidget {
         choices
     }
 
-    fn center_reasoning_display_items(&self) -> Vec<CenterDropdownItem> {
-        self.center_reasoning_choices()
+    fn workspace_reasoning_display_items(&self) -> Vec<LaunchStripDropdownItem> {
+        self.workspace_reasoning_choices()
             .into_iter()
-            .map(|choice| CenterDropdownItem {
+            .map(|choice| LaunchStripDropdownItem {
                 name: choice.name,
                 description: choice.description,
                 is_current: choice.is_current,
@@ -13722,10 +13443,14 @@ impl ChatWidget {
             .collect()
     }
 
-    fn apply_center_reasoning_dropdown_selection(&mut self, index: usize) {
-        let choices = self.center_reasoning_choices();
+    fn apply_workspace_reasoning_dropdown_selection(
+        &mut self,
+        launch: &mut LaunchStripState,
+        index: usize,
+    ) {
+        let choices = self.workspace_reasoning_choices();
         let Some(choice) = choices.get(index).cloned() else {
-            self.center_launch_dropdown = None;
+            launch.clear_dropdown();
             return;
         };
         let effort = choice.effort;
@@ -13744,10 +13469,10 @@ impl ChatWidget {
             });
         }
 
-        self.center_launch_dropdown = None;
+        launch.clear_dropdown();
     }
 
-    fn center_permission_display_items(&self) -> Vec<CenterDropdownItem> {
+    fn workspace_permission_display_items(&self) -> Vec<LaunchStripDropdownItem> {
         let include_read_only = cfg!(target_os = "windows");
         let current_approval = self.config.permissions.approval_policy.value();
         let current_sandbox = self.config.permissions.sandbox_policy.get();
@@ -13788,7 +13513,7 @@ impl ChatWidget {
             let default_disabled = approval_disabled || guardian_disabled_reason(false).is_some();
             let is_current = current_review_policy == ApprovalsReviewer::User
                 && Self::preset_matches_current(current_approval, current_sandbox, &preset);
-            items.push(CenterDropdownItem {
+            items.push(LaunchStripDropdownItem {
                 name: name.clone(),
                 description: description.clone(),
                 is_current,
@@ -13796,7 +13521,7 @@ impl ChatWidget {
             });
 
             if preset.id == "auto" && guardian_approval_enabled {
-                items.push(CenterDropdownItem {
+                items.push(LaunchStripDropdownItem {
                     name: "Guardian Approvals".to_string(),
                     description: Some(
                         "Same workspace-write permissions, approvals route through guardian."
@@ -13812,10 +13537,14 @@ impl ChatWidget {
         items
     }
 
-    fn apply_center_permission_dropdown_selection(&mut self, index: usize) {
+    fn apply_workspace_permission_dropdown_selection(
+        &mut self,
+        launch: &mut LaunchStripState,
+        index: usize,
+    ) {
         let mut model = self.permissions_menu_model();
         let Some(mut item) = (index < model.items.len()).then(|| model.items.remove(index)) else {
-            self.center_launch_dropdown = None;
+            launch.clear_dropdown();
             return;
         };
         if item.is_disabled || item.disabled_reason.is_some() {
@@ -13823,14 +13552,14 @@ impl ChatWidget {
                 .disabled_reason
                 .unwrap_or_else(|| "permission preset is not available".to_string());
             self.show_error_toast(reason);
-            self.center_launch_dropdown = None;
+            launch.clear_dropdown();
             return;
         }
 
         for action in item.actions.drain(..) {
             action(&self.app_event_tx);
         }
-        self.center_launch_dropdown = None;
+        launch.clear_dropdown();
     }
 
     /// Return a reference to the widget's current config (includes any
@@ -13898,7 +13627,8 @@ impl Drop for ChatWidget {
 
 impl Renderable for ChatWidget {
     fn render(&self, area: Rect, buf: &mut Buffer) {
-        self.render_chat_surface(area, buf, &[], 0);
+        let launch = LaunchStripState::default();
+        self.render_chat_surface(area, buf, &[], 0, &launch, true);
     }
 
     fn desired_height(&self, width: u16) -> u16 {
@@ -13907,7 +13637,7 @@ impl Renderable for ChatWidget {
     }
 
     fn cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
-        self.center_cursor_pos(area)
+        self.workspace_cursor_pos(area)
     }
 }
 
@@ -13918,18 +13648,34 @@ impl ChatWidget {
         buf: &mut Buffer,
         transcript_cells: &[Arc<dyn HistoryCell>],
         scroll_from_bottom: usize,
+        launch: &LaunchStripState,
     ) {
-        self.render_chat_surface(area, buf, transcript_cells, scroll_from_bottom);
+        self.render_chat_surface(
+            area,
+            buf,
+            transcript_cells,
+            scroll_from_bottom,
+            launch,
+            true,
+        );
     }
 
-    pub(crate) fn render_center_chat(
+    pub(crate) fn render_workspace_chat_embedded(
         &self,
         area: Rect,
         buf: &mut Buffer,
         transcript_cells: &[Arc<dyn HistoryCell>],
         scroll_from_bottom: usize,
+        launch: &LaunchStripState,
     ) {
-        self.render_chat_surface(area, buf, transcript_cells, scroll_from_bottom);
+        self.render_chat_surface(
+            area,
+            buf,
+            transcript_cells,
+            scroll_from_bottom,
+            launch,
+            false,
+        );
     }
 
     fn render_chat_surface(
@@ -13938,73 +13684,97 @@ impl ChatWidget {
         buf: &mut Buffer,
         transcript_cells: &[Arc<dyn HistoryCell>],
         scroll_from_bottom: usize,
+        launch: &LaunchStripState,
+        framed: bool,
     ) {
-        self.render_deepseek_background(area, buf);
-        let header_area = self.deepseek_header_area(area);
-        let footer_area = self.deepseek_footer_area(area);
-        let body_area = self.deepseek_body_area(area);
+        let theme = self.workspace_theme();
+        if framed {
+            self.render_deepseek_background(area, buf);
+        } else {
+            buf.set_style(
+                area,
+                Style::default().bg(theme.panel_raised_bg).fg(theme.text),
+            );
+        }
+        let chrome_area = if framed {
+            Self::workspace_surface_inner_area(area)
+        } else {
+            area
+        };
+        let header_area = Self::surface_header_area(chrome_area);
+        let footer_area = Self::surface_footer_area(chrome_area);
+        let body_area = Self::surface_body_area(chrome_area);
 
         if let Some(header_area) = header_area {
             self.render_deepseek_header(header_area, buf);
         }
 
-        let use_entry_layout = self.center_entry_state_visible(transcript_cells)
+        let use_entry_layout = self.workspace_entry_state_visible(transcript_cells)
             && !self.bottom_pane.has_active_view();
         let layout = if use_entry_layout {
-            self.center_entry_layout_for_area(body_area)
+            self.workspace_entry_layout_for_area(body_area)
         } else {
-            self.center_layout_for_area(body_area)
+            self.workspace_layout_for_area(body_area)
         };
         if use_entry_layout {
             self.replace_visible_patch_cell_ids(Vec::new());
-            self.render_center_entry_intro(layout, buf);
+            self.render_workspace_entry_intro(layout, buf);
         } else {
             if let Some(viewport) =
-                self.center_transcript_viewport(layout, transcript_cells, scroll_from_bottom)
+                self.workspace_transcript_viewport(layout, transcript_cells, scroll_from_bottom)
             {
                 self.replace_visible_patch_cell_ids(viewport.patch_cell_ids.clone());
-                self.render_center_transcript_viewport(&viewport, buf);
+                self.render_workspace_transcript_viewport(&viewport, buf);
             } else {
                 self.replace_visible_patch_cell_ids(Vec::new());
             }
         }
         self.render_work_panel(layout, buf);
         self.render_bottom_pane(layout, buf);
-        self.render_center_launch_strip(layout, buf);
-        self.render_center_launch_dropdown(layout, buf);
+        self.render_launch_strip_strip(layout, buf, launch);
+        self.render_launch_strip_dropdown(layout, buf, launch);
         self.render_in_app_toast_overlay(layout, buf);
 
         if let Some(footer_area) = footer_area {
             self.render_deepseek_footer(footer_area, buf);
         }
-        let theme = self.center_theme();
-        crate::surface::render_panel_outline(
-            area,
-            buf,
-            theme,
-            Some(Line::from(vec![
-                Span::styled(
-                    " Praxis ",
-                    Style::default()
-                        .fg(theme.title_fg)
-                        .bg(theme.panel_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    self.model_display_name().to_string(),
-                    Style::default().fg(theme.muted).bg(theme.panel_bg),
-                ),
-            ])),
-        );
+        if framed {
+            crate::surface::render_panel_outline(
+                area,
+                buf,
+                theme,
+                Some(Line::from(vec![
+                    Span::styled(
+                        " Praxis ",
+                        Style::default()
+                            .fg(theme.title_fg)
+                            .bg(theme.panel_bg)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        self.model_display_name().to_string(),
+                        Style::default().fg(theme.muted).bg(theme.panel_bg),
+                    ),
+                ])),
+            );
+        }
         self.last_rendered_width.set(Some(area.width as usize));
     }
 
-    pub(crate) fn center_cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
+    pub(crate) fn workspace_cursor_pos(&self, area: Rect) -> Option<(u16, u16)> {
         let body_area = self.deepseek_body_area(area);
-        let layout = if self.center_entry_state_active() && !self.bottom_pane.has_active_view() {
-            self.center_entry_layout_for_area(body_area)
+        self.workspace_cursor_pos_for_body(body_area)
+    }
+
+    pub(crate) fn workspace_cursor_pos_embedded(&self, area: Rect) -> Option<(u16, u16)> {
+        self.workspace_cursor_pos_for_body(Self::surface_body_area(area))
+    }
+
+    fn workspace_cursor_pos_for_body(&self, body_area: Rect) -> Option<(u16, u16)> {
+        let layout = if self.workspace_entry_state_active() && !self.bottom_pane.has_active_view() {
+            self.workspace_entry_layout_for_area(body_area)
         } else {
-            self.center_layout_for_area(body_area)
+            self.workspace_layout_for_area(body_area)
         };
         if layout.bottom_content_area.is_empty() {
             None
@@ -14021,101 +13791,46 @@ impl ChatWidget {
         *self.last_visible_patch_cell_ids.borrow_mut() = ids;
     }
 
-    fn center_visible_patch_cell_ids_for_viewport(
-        &self,
-        transcript_cells: &[Arc<dyn HistoryCell>],
-        width: u16,
-        visible_rows: usize,
-        scroll_from_bottom: usize,
-    ) -> Vec<crate::history_presentation::PatchCellId> {
-        let mut skip = scroll_from_bottom;
-        let mut needed = visible_rows;
-        let mut ids = Vec::new();
-
-        let active_tail_len = self.center_active_tail_cache(width).map_or(0, |cache| {
-            self.chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone())
-                .len()
-        });
-        let active_id = self
-            .active_cell
-            .as_ref()
-            .and_then(|cell| cell.patch_cell_id());
-        Self::collect_visible_patch_id(
-            active_id,
-            active_tail_len,
-            &mut skip,
-            &mut needed,
-            &mut ids,
-        );
-
-        if needed > 0 && active_tail_len > 0 && !transcript_cells.is_empty() {
-            Self::collect_visible_patch_id(None, 1, &mut skip, &mut needed, &mut ids);
-        }
-
-        for (index, cell) in transcript_cells.iter().enumerate().rev() {
-            if needed == 0 {
-                break;
-            }
-            let cell_len = self
-                .chat_timeline_lines_for_cell(cell.as_ref(), width)
-                .len();
-            if cell_len == 0 {
-                continue;
-            }
-            Self::collect_visible_patch_id(
-                cell.patch_cell_id(),
-                cell_len,
-                &mut skip,
-                &mut needed,
-                &mut ids,
-            );
-            if needed > 0 && index > 0 && !cell.is_stream_continuation() {
-                Self::collect_visible_patch_id(None, 1, &mut skip, &mut needed, &mut ids);
-            }
-        }
-
-        ids
-    }
-
-    fn collect_visible_patch_id(
-        id: Option<crate::history_presentation::PatchCellId>,
-        segment_len: usize,
-        skip: &mut usize,
-        needed: &mut usize,
-        output: &mut Vec<crate::history_presentation::PatchCellId>,
-    ) {
-        if segment_len == 0 || *needed == 0 {
-            return;
-        }
-        if *skip >= segment_len {
-            *skip -= segment_len;
-            return;
-        }
-
-        let end = segment_len - *skip;
-        *skip = 0;
-        let start = end.saturating_sub(*needed);
-        let visible_len = end.saturating_sub(start);
-        if visible_len > 0
-            && let Some(id) = id
-            && !output.contains(&id)
-        {
-            output.push(id);
-        }
-        *needed = (*needed).saturating_sub(visible_len);
-    }
-
-    pub(crate) fn center_chat_scroll_limit(
+    pub(crate) fn workspace_chat_scroll_limit(
         &self,
         area: Rect,
         transcript_cells: &[Arc<dyn HistoryCell>],
         current_scroll_from_bottom: usize,
     ) -> usize {
-        if self.center_entry_state_visible(transcript_cells) {
+        if self.workspace_entry_state_visible(transcript_cells) {
             return 0;
         }
         let body_area = self.deepseek_body_area(area);
-        let layout = self.center_layout_for_area(body_area);
+        self.workspace_chat_scroll_limit_for_body(
+            body_area,
+            transcript_cells,
+            current_scroll_from_bottom,
+        )
+    }
+
+    pub(crate) fn workspace_chat_scroll_limit_embedded(
+        &self,
+        area: Rect,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        current_scroll_from_bottom: usize,
+    ) -> usize {
+        if self.workspace_entry_state_visible(transcript_cells) {
+            return 0;
+        }
+        self.workspace_chat_scroll_limit_for_body(
+            Self::surface_body_area(area),
+            transcript_cells,
+            current_scroll_from_bottom,
+        )
+    }
+
+    fn workspace_chat_scroll_limit_for_body(
+        &self,
+        body_area: Rect,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        _current_scroll_from_bottom: usize,
+    ) -> usize {
+        let layout = self.workspace_layout_for_area(body_area);
         let Some(content_area) = layout.active_content_area else {
             return 0;
         };
@@ -14123,17 +13838,14 @@ impl ChatWidget {
             return 0;
         }
 
-        let visible_rows = usize::from(content_area.height);
-        let threshold = current_scroll_from_bottom
-            .saturating_add(visible_rows)
-            .saturating_add(1);
-        let counted_rows =
-            self.center_transcript_row_count_until(transcript_cells, content_area.width, threshold);
-        if counted_rows >= threshold {
-            current_scroll_from_bottom.saturating_add(visible_rows.max(1))
-        } else {
-            counted_rows.saturating_sub(visible_rows)
-        }
+        let request = self.workspace_transcript_request(
+            content_area,
+            transcript_cells,
+            /*scroll_from_bottom*/ 0,
+        );
+        self.workspace_transcript_cache
+            .borrow_mut()
+            .scroll_limit(request)
     }
 
     fn deepseek_chrome_enabled(area: Rect) -> bool {
@@ -14145,36 +13857,44 @@ impl ChatWidget {
     }
 
     fn deepseek_header_area(&self, area: Rect) -> Option<Rect> {
-        let inner = Self::center_surface_inner_area(area);
-        (Self::deepseek_chrome_enabled(area) && !inner.is_empty()).then_some(Rect::new(
-            inner.x,
-            inner.y,
-            inner.width,
-            DEEPSEEK_HEADER_HEIGHT.min(inner.height),
-        ))
+        Self::surface_header_area(Self::workspace_surface_inner_area(area))
     }
 
     fn deepseek_footer_area(&self, area: Rect) -> Option<Rect> {
-        let inner = Self::center_surface_inner_area(area);
-        (Self::deepseek_chrome_enabled(area) && !inner.is_empty()).then_some(Rect::new(
-            inner.x,
-            inner.bottom().saturating_sub(DEEPSEEK_FOOTER_HEIGHT),
-            inner.width,
-            DEEPSEEK_FOOTER_HEIGHT.min(inner.height),
-        ))
+        Self::surface_footer_area(Self::workspace_surface_inner_area(area))
     }
 
     fn deepseek_body_area(&self, area: Rect) -> Rect {
-        let inner = Self::center_surface_inner_area(area);
+        Self::surface_body_area(Self::workspace_surface_inner_area(area))
+    }
+
+    fn surface_header_area(area: Rect) -> Option<Rect> {
+        (Self::deepseek_chrome_enabled(area) && !area.is_empty()).then_some(Rect::new(
+            area.x,
+            area.y,
+            area.width,
+            DEEPSEEK_HEADER_HEIGHT.min(area.height),
+        ))
+    }
+
+    fn surface_footer_area(area: Rect) -> Option<Rect> {
+        (Self::deepseek_chrome_enabled(area) && !area.is_empty()).then_some(Rect::new(
+            area.x,
+            area.bottom().saturating_sub(DEEPSEEK_FOOTER_HEIGHT),
+            area.width,
+            DEEPSEEK_FOOTER_HEIGHT.min(area.height),
+        ))
+    }
+
+    fn surface_body_area(area: Rect) -> Rect {
         if !Self::deepseek_chrome_enabled(area) {
-            return inner;
+            return area;
         }
         Rect::new(
-            inner.x,
-            inner.y.saturating_add(DEEPSEEK_HEADER_HEIGHT),
-            inner.width,
-            inner
-                .height
+            area.x,
+            area.y.saturating_add(DEEPSEEK_HEADER_HEIGHT),
+            area.width,
+            area.height
                 .saturating_sub(DEEPSEEK_HEADER_HEIGHT)
                 .saturating_sub(DEEPSEEK_FOOTER_HEIGHT),
         )
@@ -14184,11 +13904,11 @@ impl ChatWidget {
         if area.is_empty() {
             return;
         }
-        let theme = self.center_theme();
+        let theme = self.workspace_theme();
         crate::surface::render_panel_surface(area, buf, theme, None);
     }
 
-    fn center_surface_inner_area(area: Rect) -> Rect {
+    fn workspace_surface_inner_area(area: Rect) -> Rect {
         if area.width <= 2 || area.height <= 2 {
             return area;
         }
@@ -14208,7 +13928,7 @@ impl ChatWidget {
         if area.is_empty() {
             return;
         }
-        let theme = self.center_theme();
+        let theme = self.workspace_theme();
         Block::default()
             .style(Style::default().bg(theme.header_bg))
             .render(area, buf);
@@ -14289,7 +14009,7 @@ impl ChatWidget {
         if area.is_empty() {
             return;
         }
-        let theme = self.center_theme();
+        let theme = self.workspace_theme();
         Block::default()
             .style(Style::default().bg(theme.footer_bg))
             .render(area, buf);
@@ -14354,7 +14074,7 @@ impl ChatWidget {
             .render(area, buf);
     }
 
-    fn center_layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
+    fn workspace_layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
         let split = chat_surface_split_for_width(area.width, self.work_panel.should_show());
         let content_width = Self::chat_surface_column_width(split.agent_width);
         let work_panel_outer_height = split
@@ -14373,7 +14093,7 @@ impl ChatWidget {
             show_work_panel: self.work_panel.should_show(),
             fill_available_top: true,
         });
-        Self::center_bottom_pane_layout(layout)
+        Self::workspace_bottom_pane_layout(layout)
     }
 
     fn chat_surface_column_width(width: u16) -> u16 {
@@ -14384,7 +14104,7 @@ impl ChatWidget {
         }
     }
 
-    fn center_chat_column_rect(area: Rect) -> Rect {
+    fn workspace_chat_column_rect(area: Rect) -> Rect {
         if area.is_empty() {
             return area;
         }
@@ -14397,31 +14117,31 @@ impl ChatWidget {
         )
     }
 
-    fn center_input_inner_area(area: Rect) -> Rect {
-        if area.width <= CENTER_INPUT_BORDER_COLS || area.height <= CENTER_INPUT_BORDER_ROWS {
+    fn workspace_input_inner_area(area: Rect) -> Rect {
+        if area.width <= WORKSPACE_INPUT_BORDER_COLS || area.height <= WORKSPACE_INPUT_BORDER_ROWS {
             return Rect::new(area.x, area.y, 0, 0);
         }
         Rect::new(
             area.x.saturating_add(1),
             area.y.saturating_add(1),
-            area.width.saturating_sub(CENTER_INPUT_BORDER_COLS),
-            area.height.saturating_sub(CENTER_INPUT_BORDER_ROWS),
+            area.width.saturating_sub(WORKSPACE_INPUT_BORDER_COLS),
+            area.height.saturating_sub(WORKSPACE_INPUT_BORDER_ROWS),
         )
     }
 
-    fn center_input_strip_area(area: Rect) -> Rect {
-        let inner = Self::center_input_inner_area(area);
+    fn workspace_input_strip_area(area: Rect) -> Rect {
+        let inner = Self::workspace_input_inner_area(area);
         Rect::new(
             inner.x,
             inner.y,
             inner.width,
-            CENTER_INPUT_STRIP_ROWS.min(inner.height),
+            WORKSPACE_INPUT_STRIP_ROWS.min(inner.height),
         )
     }
 
-    fn center_input_composer_area(area: Rect) -> Rect {
-        let inner = Self::center_input_inner_area(area);
-        let strip_height = CENTER_INPUT_STRIP_ROWS.min(inner.height);
+    fn workspace_input_composer_area(area: Rect) -> Rect {
+        let inner = Self::workspace_input_inner_area(area);
+        let strip_height = WORKSPACE_INPUT_STRIP_ROWS.min(inner.height);
         Rect::new(
             inner.x,
             inner.y.saturating_add(strip_height),
@@ -14430,7 +14150,7 @@ impl ChatWidget {
         )
     }
 
-    fn center_bottom_pane_layout(mut layout: ChatWidgetLayout) -> ChatWidgetLayout {
+    fn workspace_bottom_pane_layout(mut layout: ChatWidgetLayout) -> ChatWidgetLayout {
         if layout.bottom_outer_area.is_empty() {
             return layout;
         }
@@ -14440,24 +14160,24 @@ impl ChatWidget {
             .active_outer_area
             .map(|active| Rect::new(active.x, bottom_area.y, active.width, bottom_area.height))
             .unwrap_or(bottom_area);
-        let bottom_outer_area = Self::center_chat_column_rect(bottom_base_area);
-        let bottom_content_area = Self::center_input_composer_area(bottom_outer_area);
+        let bottom_outer_area = Self::workspace_chat_column_rect(bottom_base_area);
+        let bottom_content_area = Self::workspace_input_composer_area(bottom_outer_area);
         layout.bottom_outer_area = bottom_outer_area;
         layout.bottom_content_area = bottom_content_area;
         layout
     }
 
-    fn center_entry_layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
+    fn workspace_entry_layout_for_area(&self, area: Rect) -> ChatWidgetLayout {
         if area.is_empty() {
             return ChatWidgetLayout::default();
         }
 
-        let content_width = if area.width <= CENTER_ENTRY_MIN_SIDE_PADDING.saturating_mul(2) {
+        let content_width = if area.width <= WORKSPACE_ENTRY_MIN_SIDE_PADDING.saturating_mul(2) {
             area.width
         } else {
             area.width
-                .saturating_sub(CENTER_ENTRY_MIN_SIDE_PADDING.saturating_mul(2))
-                .min(CENTER_ENTRY_MAX_WIDTH)
+                .saturating_sub(WORKSPACE_ENTRY_MIN_SIDE_PADDING.saturating_mul(2))
+                .min(WORKSPACE_ENTRY_MAX_WIDTH)
                 .max(1)
         };
         let x = area
@@ -14467,7 +14187,7 @@ impl ChatWidget {
             .bottom_pane_total_height(content_width)
             .min(area.height);
         let intro_height =
-            CENTER_ENTRY_INTRO_HEIGHT.min(area.height.saturating_sub(bottom_outer_height));
+            WORKSPACE_ENTRY_INTRO_HEIGHT.min(area.height.saturating_sub(bottom_outer_height));
         let toast_height = u16::try_from(self.in_app_toasts.visible_entries().len())
             .unwrap_or(u16::MAX)
             .saturating_mul(IN_APP_TOAST_ROW_HEIGHT)
@@ -14502,7 +14222,7 @@ impl ChatWidget {
             content_width,
             bottom_outer_height.min(bottom_outer_available),
         );
-        let bottom_content_area = Self::center_input_composer_area(bottom_outer_area);
+        let bottom_content_area = Self::workspace_input_composer_area(bottom_outer_area);
 
         ChatWidgetLayout {
             active_outer_area,
@@ -14514,15 +14234,15 @@ impl ChatWidget {
         }
     }
 
-    fn center_entry_state_visible(&self, transcript_cells: &[Arc<dyn HistoryCell>]) -> bool {
-        transcript_cells.is_empty() && self.center_entry_state_active()
+    fn workspace_entry_state_visible(&self, transcript_cells: &[Arc<dyn HistoryCell>]) -> bool {
+        transcript_cells.is_empty() && self.workspace_entry_state_active()
     }
 
-    fn center_entry_state_active(&self) -> bool {
+    fn workspace_entry_state_active(&self) -> bool {
         self.thread_id.is_none() && self.active_cell.is_none()
     }
 
-    fn render_center_entry_intro(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
+    fn render_workspace_entry_intro(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
         let Some(area) = layout.active_content_area else {
             return;
         };
@@ -14545,8 +14265,8 @@ impl ChatWidget {
             UiLanguage::En => "New coordinator thread in this workspace.",
             UiLanguage::Cn => "此工作区的新协调线程。",
         };
-        let theme = self.center_theme();
-        let cat = self.center_cat_frame();
+        let theme = self.workspace_theme();
+        let cat = self.workspace_cat_frame();
         let lines = vec![
             Line::from(Span::styled(cat[0], Style::default().fg(theme.accent))),
             Line::from(Span::styled(cat[1], Style::default().fg(theme.accent))),
@@ -14563,7 +14283,7 @@ impl ChatWidget {
             .render(area, buf);
     }
 
-    fn center_cat_frame(&self) -> [&'static str; 3] {
+    fn workspace_cat_frame(&self) -> [&'static str; 3] {
         if !self.tui_config.animations {
             return [" /\\_/\\ ", "( o.o )", " > ^ < "];
         }
@@ -14579,18 +14299,23 @@ impl ChatWidget {
         }
     }
 
-    fn render_center_launch_strip(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
-        self.clear_center_launch_hit_areas();
+    fn render_launch_strip_strip(
+        &self,
+        layout: ChatWidgetLayout,
+        buf: &mut Buffer,
+        launch: &LaunchStripState,
+    ) {
+        self.clear_launch_strip_hit_areas(launch);
         if self.bottom_pane.has_active_view() {
             return;
         }
-        let area = Self::center_input_strip_area(layout.bottom_outer_area);
+        let area = Self::workspace_input_strip_area(layout.bottom_outer_area);
         if area.is_empty() || area.height == 0 {
             return;
         }
 
         let row = Rect::new(area.x, area.y, area.width, 1);
-        let theme = self.center_theme();
+        let theme = self.workspace_theme();
         let left_pad = 2.min(row.width.saturating_sub(1));
         let mut cursor_x = row.x.saturating_add(left_pad);
         let mut spans: Vec<Span<'static>> = vec![Span::raw(" ".repeat(left_pad as usize))];
@@ -14627,34 +14352,34 @@ impl ChatWidget {
         push_chip(
             model_chip,
             Style::default().fg(theme.text).bg(theme.chip_model_bg),
-            &self.center_launch_model_area,
+            &launch.model_area,
         );
 
-        let reasoning_label = truncate_text(self.center_reasoning_display_label().as_str(), 12);
+        let reasoning_label = truncate_text(self.workspace_reasoning_display_label().as_str(), 12);
         let reasoning_chip = format!(" Reason {reasoning_label} ▾ ");
         push_chip(
             reasoning_chip,
             Style::default().fg(theme.text).bg(theme.chip_reasoning_bg),
-            &self.center_launch_reasoning_area,
+            &launch.reasoning_area,
         );
 
-        let rank_chip = format!(" R{} ▾ ", self.center_launch_rank);
+        let rank_chip = format!(" R{} ▾ ", launch.rank);
         push_chip(
             rank_chip,
             Style::default()
                 .fg(theme.accent)
                 .bg(theme.chip_rank_bg)
                 .add_modifier(Modifier::BOLD),
-            &self.center_launch_rank_area,
+            &launch.rank_area,
         );
 
-        let permission_label = self.center_permissions_label();
+        let permission_label = self.workspace_permissions_label();
         let permission_label = truncate_text(permission_label.as_str(), 18);
         let permission_chip = format!(" {permission_label} ▾ ");
         push_chip(
             permission_chip,
             Style::default().fg(theme.text).bg(theme.chip_permission_bg),
-            &self.center_launch_permissions_area,
+            &launch.permissions_area,
         );
 
         let line = Line::from(spans);
@@ -14662,82 +14387,97 @@ impl ChatWidget {
         Paragraph::new(line).render(row, buf);
     }
 
-    fn render_center_launch_dropdown(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
-        self.center_launch_dropdown_targets.borrow_mut().clear();
+    fn render_launch_strip_dropdown(
+        &self,
+        layout: ChatWidgetLayout,
+        buf: &mut Buffer,
+        launch: &LaunchStripState,
+    ) {
+        launch.dropdown_targets.borrow_mut().clear();
         if self.bottom_pane.has_active_view() {
             return;
         }
-        let Some(dropdown) = self.center_launch_dropdown else {
+        let Some(dropdown) = launch.dropdown else {
             return;
         };
 
         match dropdown {
-            CenterLaunchDropdown::Model => {
-                let Some(anchor) = self.center_launch_model_area.get() else {
+            LaunchStripDropdown::Model => {
+                let Some(anchor) = launch.model_area.get() else {
                     return;
                 };
-                self.render_center_dropdown_items(
+                self.render_workspace_dropdown_items(
                     layout,
                     buf,
                     anchor,
                     58,
-                    self.center_model_display_items(),
-                    CenterChatMouseAction::SelectModel,
+                    self.workspace_model_display_items(),
+                    launch,
+                    LaunchStripMouseAction::SelectModel,
                 );
             }
-            CenterLaunchDropdown::Reasoning => {
-                let Some(anchor) = self.center_launch_reasoning_area.get() else {
+            LaunchStripDropdown::Reasoning => {
+                let Some(anchor) = launch.reasoning_area.get() else {
                     return;
                 };
-                self.render_center_dropdown_items(
+                self.render_workspace_dropdown_items(
                     layout,
                     buf,
                     anchor,
                     42,
-                    self.center_reasoning_display_items(),
-                    CenterChatMouseAction::SelectReasoning,
+                    self.workspace_reasoning_display_items(),
+                    launch,
+                    LaunchStripMouseAction::SelectReasoning,
                 );
             }
-            CenterLaunchDropdown::Rank => {
-                let Some(anchor) = self.center_launch_rank_area.get() else {
+            LaunchStripDropdown::Rank => {
+                let Some(anchor) = launch.rank_area.get() else {
                     return;
                 };
-                let items = (0..=CENTER_LAUNCH_RANK_MAX)
-                    .map(|rank| CenterDropdownItem {
-                        name: format!("R{rank} {}", Self::center_rank_name(rank)),
-                        description: Some(Self::center_rank_description(rank).to_string()),
-                        is_current: self.center_launch_rank == rank,
+                let items = (0..=LAUNCH_STRIP_RANK_MAX)
+                    .map(|rank| LaunchStripDropdownItem {
+                        name: format!("R{rank} {}", Self::workspace_rank_name(rank)),
+                        description: Some(Self::workspace_rank_description(rank).to_string()),
+                        is_current: launch.rank == rank,
                         is_disabled: false,
                     })
                     .collect::<Vec<_>>();
-                self.render_center_dropdown_items(layout, buf, anchor, 34, items, |index| {
-                    CenterChatMouseAction::SelectRank(index as u8)
-                });
+                self.render_workspace_dropdown_items(
+                    layout,
+                    buf,
+                    anchor,
+                    34,
+                    items,
+                    launch,
+                    |index| LaunchStripMouseAction::SelectRank(index as u8),
+                );
             }
-            CenterLaunchDropdown::Permissions => {
-                let Some(anchor) = self.center_launch_permissions_area.get() else {
+            LaunchStripDropdown::Permissions => {
+                let Some(anchor) = launch.permissions_area.get() else {
                     return;
                 };
-                self.render_center_dropdown_items(
+                self.render_workspace_dropdown_items(
                     layout,
                     buf,
                     anchor,
                     46,
-                    self.center_permission_display_items(),
-                    CenterChatMouseAction::SelectPermission,
+                    self.workspace_permission_display_items(),
+                    launch,
+                    LaunchStripMouseAction::SelectPermission,
                 );
             }
         }
     }
 
-    fn render_center_dropdown_items(
+    fn render_workspace_dropdown_items(
         &self,
         layout: ChatWidgetLayout,
         buf: &mut Buffer,
         anchor: Rect,
         preferred_width: u16,
-        items: Vec<CenterDropdownItem>,
-        action_for_index: impl Fn(usize) -> CenterChatMouseAction,
+        items: Vec<LaunchStripDropdownItem>,
+        launch: &LaunchStripState,
+        action_for_index: impl Fn(usize) -> LaunchStripMouseAction,
     ) {
         if items.is_empty() {
             return;
@@ -14764,11 +14504,8 @@ impl ChatWidget {
             return;
         }
 
-        let theme = self.center_theme();
-        Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default().fg(theme.text).bg(theme.dropdown_bg))
-            .render(area, buf);
+        let theme = self.workspace_theme();
+        crate::surface::render_popup_surface(area, buf, theme, None);
 
         let inner_width = area.width.saturating_sub(2);
         for (index, item) in items.into_iter().enumerate() {
@@ -14816,391 +14553,87 @@ impl ChatWidget {
             buf.set_style(row, Style::default().bg(bg));
             truncate_line_with_ellipsis_if_overflow(line, row.width as usize).render(row, buf);
 
-            self.center_launch_dropdown_targets
+            launch
+                .dropdown_targets
                 .borrow_mut()
-                .push(CenterDropdownMouseTarget {
+                .push(LaunchStripDropdownMouseTarget {
                     area: row,
                     action: action_for_index(index),
                 });
         }
     }
 
-    fn clear_center_launch_hit_areas(&self) {
-        self.center_launch_model_area.set(None);
-        self.center_launch_reasoning_area.set(None);
-        self.center_launch_rank_area.set(None);
-        self.center_launch_permissions_area.set(None);
-        self.center_launch_dropdown_targets.borrow_mut().clear();
+    fn clear_launch_strip_hit_areas(&self, launch: &LaunchStripState) {
+        launch.clear_hit_areas();
     }
 
-    fn render_center_transcript_viewport(
+    fn render_workspace_transcript_viewport(
         &self,
-        viewport: &CenterTranscriptViewport,
+        viewport: &WorkspaceTranscriptViewport,
         buf: &mut Buffer,
     ) {
-        if viewport.lines.is_empty() {
-            return;
-        }
-
-        let visible_height = usize::from(viewport.content_area.height);
-        let rendered_len = visible_height.min(viewport.lines.len());
-        let top_offset = visible_height.saturating_sub(rendered_len);
-        for visible_index in 0..rendered_len {
-            let Some(source_line) = viewport.lines.get(visible_index) else {
-                break;
-            };
-            let y_offset = top_offset.saturating_add(visible_index);
-            source_line.clone().render(
-                Rect::new(
-                    viewport.content_area.x,
-                    viewport
-                        .content_area
-                        .y
-                        .saturating_add(u16::try_from(y_offset).unwrap_or(u16::MAX)),
-                    viewport.content_area.width,
-                    1,
-                ),
-                buf,
-            );
-        }
+        render_workspace_transcript_viewport(viewport, buf);
     }
 
-    fn center_transcript_viewport(
+    fn workspace_transcript_viewport(
         &self,
         layout: ChatWidgetLayout,
         transcript_cells: &[Arc<dyn HistoryCell>],
         scroll_from_bottom: usize,
-    ) -> Option<CenterTranscriptViewport> {
+    ) -> Option<WorkspaceTranscriptViewport> {
         let content_area = layout.active_content_area?;
         if content_area.is_empty() {
             return None;
         }
-        let key = self.center_transcript_viewport_cache_key(
-            content_area,
-            transcript_cells,
-            scroll_from_bottom,
-        );
-        let needs_refresh = self
-            .center_transcript_viewport_cache
-            .borrow()
-            .as_ref()
-            .is_none_or(|cache| cache.key != key);
-        if needs_refresh {
-            let visible_rows = usize::from(content_area.height);
-            let viewport = CenterTranscriptViewport {
-                content_area,
-                lines: self.center_transcript_visible_lines(
-                    transcript_cells,
-                    content_area.width,
-                    visible_rows,
-                    scroll_from_bottom,
-                ),
-                patch_cell_ids: self.center_visible_patch_cell_ids_for_viewport(
-                    transcript_cells,
-                    content_area.width,
-                    visible_rows,
-                    scroll_from_bottom,
-                ),
-            };
-            *self.center_transcript_viewport_cache.borrow_mut() =
-                Some(CenterTranscriptViewportCache { key, viewport });
-        }
 
+        let request =
+            self.workspace_transcript_request(content_area, transcript_cells, scroll_from_bottom);
         Some(
-            self.center_transcript_viewport_cache
-                .borrow()
-                .as_ref()
-                .expect("center transcript viewport cache should be populated")
-                .viewport
-                .clone(),
+            self.workspace_transcript_cache
+                .borrow_mut()
+                .viewport(request),
         )
     }
 
-    fn center_transcript_viewport_cache_key(
+    fn workspace_transcript_request<'a>(
         &self,
         content_area: Rect,
-        transcript_cells: &[Arc<dyn HistoryCell>],
+        transcript_cells: &'a [Arc<dyn HistoryCell>],
         scroll_from_bottom: usize,
-    ) -> CenterTranscriptViewportCacheKey {
-        CenterTranscriptViewportCacheKey {
-            width: content_area.width,
-            height: content_area.height,
+    ) -> WorkspaceTranscriptRequest<'a> {
+        WorkspaceTranscriptRequest {
+            content_area,
+            transcript_cells,
             scroll_from_bottom,
-            committed_len: transcript_cells.len(),
-            committed_first_ptr: transcript_cells
-                .first()
-                .map(Self::history_cell_ptr_id)
-                .unwrap_or(0),
-            committed_last_ptr: transcript_cells
-                .last()
-                .map(Self::history_cell_ptr_id)
-                .unwrap_or(0),
+            theme: self.workspace_theme(),
+            theme_kind: self.workspace_theme_kind(),
             presentation_revision: history_cell::history_presentation_revision(),
-            active_key: self.active_cell_render_cache_key(content_area.width),
-            theme_kind: self.center_theme_kind(),
+            active_tail: self.workspace_transcript_tail(content_area.width),
         }
     }
 
-    fn center_transcript_visible_lines(
-        &self,
-        transcript_cells: &[Arc<dyn HistoryCell>],
-        width: u16,
-        visible_rows: usize,
-        scroll_from_bottom: usize,
-    ) -> Vec<Line<'static>> {
-        if visible_rows == 0 {
-            return Vec::new();
-        }
-        let mut skip = scroll_from_bottom;
-        let mut needed = visible_rows;
-        let mut lines = VecDeque::new();
-
-        let active_tail = self
-            .center_active_tail_cache(width)
-            .map(|cache| self.chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone()))
-            .unwrap_or_default();
-        Self::collect_center_lines_from_bottom(&active_tail, &mut skip, &mut needed, &mut lines);
-
-        if needed > 0 && !active_tail.is_empty() && !transcript_cells.is_empty() {
-            let separator = [Line::from("")];
-            Self::collect_center_lines_from_bottom(&separator, &mut skip, &mut needed, &mut lines);
-        }
-
-        for (index, cell) in transcript_cells.iter().enumerate().rev() {
-            if needed == 0 {
-                break;
-            }
-            let cell_lines = self.chat_timeline_lines_for_cell(cell.as_ref(), width);
-            if cell_lines.is_empty() {
-                continue;
-            }
-            Self::collect_center_lines_from_bottom(&cell_lines, &mut skip, &mut needed, &mut lines);
-            if needed > 0 && index > 0 && !cell.is_stream_continuation() {
-                let separator = [Line::from("")];
-                Self::collect_center_lines_from_bottom(
-                    &separator,
-                    &mut skip,
-                    &mut needed,
-                    &mut lines,
-                );
-            }
-        }
-
-        lines.into_iter().collect()
+    fn workspace_transcript_tail(&self, width: u16) -> Option<WorkspaceTranscriptTail> {
+        let cache = self.workspace_active_tail_cache(width)?;
+        Some(WorkspaceTranscriptTail {
+            lane: cache.lane,
+            lines: cache.lines.clone(),
+            patch_cell_id: self
+                .active_cell
+                .as_ref()
+                .and_then(|cell| cell.patch_cell_id()),
+        })
     }
 
-    fn collect_center_lines_from_bottom(
-        source: &[Line<'static>],
-        skip: &mut usize,
-        needed: &mut usize,
-        output: &mut VecDeque<Line<'static>>,
-    ) {
-        if source.is_empty() || *needed == 0 {
-            return;
-        }
-        if *skip >= source.len() {
-            *skip -= source.len();
-            return;
-        }
-
-        let end = source.len() - *skip;
-        *skip = 0;
-        let start = end.saturating_sub(*needed);
-        for line in source[start..end].iter().rev() {
-            output.push_front(line.clone());
-        }
-        *needed = (*needed).saturating_sub(end.saturating_sub(start));
-    }
-
-    fn center_transcript_row_count_until(
-        &self,
-        transcript_cells: &[Arc<dyn HistoryCell>],
-        width: u16,
-        limit: usize,
-    ) -> usize {
-        if limit == 0 {
-            return 0;
-        }
-
-        let mut rows = 0usize;
-        let active_len = self.center_active_tail_cache(width).map_or(0, |cache| {
-            self.chat_timeline_lines_for_raw(width, cache.lane, cache.lines.clone())
-                .len()
-        });
-        rows = rows.saturating_add(active_len);
-        if rows >= limit {
-            return rows;
-        }
-        if active_len > 0 && !transcript_cells.is_empty() {
-            rows = rows.saturating_add(1);
-            if rows >= limit {
-                return rows;
-            }
-        }
-
-        for (index, cell) in transcript_cells.iter().enumerate().rev() {
-            let cell_len = self
-                .chat_timeline_lines_for_cell(cell.as_ref(), width)
-                .len();
-            if cell_len == 0 {
-                continue;
-            }
-            rows = rows.saturating_add(cell_len);
-            if rows >= limit {
-                return rows;
-            }
-            if index > 0 && !cell.is_stream_continuation() {
-                rows = rows.saturating_add(1);
-                if rows >= limit {
-                    return rows;
-                }
-            }
-        }
-
-        rows
-    }
-
-    fn chat_timeline_lines_for_cell(
-        &self,
-        cell: &dyn HistoryCell,
-        width: u16,
-    ) -> Vec<Line<'static>> {
-        let lane = cell.chat_lane();
-        let lane_width = Self::chat_timeline_lane_width(width, lane);
-        let lines = Self::center_wrap_lines(cell.committed_display_lines(lane_width), lane_width);
-        self.chat_timeline_lines_for_raw(width, lane, lines)
-    }
-
-    fn chat_timeline_lines_for_raw(
+    fn workspace_active_tail_cache(
         &self,
         width: u16,
-        lane: ChatLane,
-        lines: Vec<Line<'static>>,
-    ) -> Vec<Line<'static>> {
-        let lane_width = Self::chat_timeline_lane_width(width, lane);
-        let wrapped = Self::center_wrap_lines(lines, lane_width);
-        let theme = self.center_theme();
-        match lane {
-            ChatLane::Assistant => wrapped
-                .into_iter()
-                .map(|line| Self::assistant_timeline_row(width, lane_width, line))
-                .collect(),
-            ChatLane::User => wrapped
-                .into_iter()
-                .map(|line| Self::user_timeline_row(width, lane_width, line, theme))
-                .collect(),
-        }
-    }
-
-    fn chat_timeline_lane_width(width: u16, lane: ChatLane) -> u16 {
-        let (_, frame_width) = Self::chat_timeline_frame(width);
-        let available = frame_width
-            .saturating_sub(CHAT_TIMELINE_SIDE_PADDING.saturating_mul(2))
-            .max(1);
-        match lane {
-            ChatLane::Assistant => available.min(CHAT_TIMELINE_ASSISTANT_MAX_WIDTH).max(1),
-            ChatLane::User => {
-                let proportional =
-                    frame_width.saturating_mul(CHAT_TIMELINE_USER_WIDTH_PERCENT) / 100;
-                proportional
-                    .min(CHAT_TIMELINE_USER_MAX_WIDTH)
-                    .min(available)
-                    .max(1)
-            }
-        }
-    }
-
-    fn chat_timeline_frame(width: u16) -> (u16, u16) {
-        let frame_width = Self::chat_surface_column_width(width);
-        let left_offset = width.saturating_sub(frame_width) / 2;
-        (left_offset, frame_width)
-    }
-
-    fn assistant_timeline_row(width: u16, lane_width: u16, line: Line<'static>) -> Line<'static> {
-        if width == 0 {
-            return Line::from("");
-        }
-        let (frame_left, frame_width) = Self::chat_timeline_frame(width);
-        let left_pad = frame_left
-            .saturating_add(CHAT_TIMELINE_SIDE_PADDING.min(frame_width.saturating_sub(1)));
-        let mut spans = Vec::new();
-        if left_pad > 0 {
-            spans.push(Span::raw(" ".repeat(left_pad as usize)));
-        }
-        let line = truncate_line_with_ellipsis_if_overflow(line, usize::from(lane_width));
-        spans.extend(line.spans);
-        Line::from(spans)
-    }
-
-    fn user_timeline_row(
-        width: u16,
-        lane_width: u16,
-        line: Line<'static>,
-        theme: center_theme::CenterTheme,
-    ) -> Line<'static> {
-        if width == 0 {
-            return Line::from("");
-        }
-
-        let bubble_bg = theme.user_bubble_bg;
-        let bubble_fg = theme.text_strong;
-        let (frame_left, frame_width) = Self::chat_timeline_frame(width);
-        let padded_bubble = frame_width > 2;
-        let inner_width = if padded_bubble {
-            lane_width.max(1).min(frame_width.saturating_sub(2))
-        } else {
-            lane_width.max(1).min(frame_width.max(1))
-        };
-        let bubble_width = inner_width
-            .saturating_add(if padded_bubble { 2 } else { 0 })
-            .min(frame_width.max(1));
-        let right_pad = CHAT_TIMELINE_SIDE_PADDING.min(frame_width.saturating_sub(bubble_width));
-        let left_pad = frame_left
-            .saturating_add(frame_width.saturating_sub(bubble_width))
-            .saturating_sub(right_pad);
-        let mut line = truncate_line_with_ellipsis_if_overflow(line, usize::from(inner_width));
-        let used_width = u16::try_from(line_width(&line)).unwrap_or(u16::MAX);
-        let fill_width = inner_width.saturating_sub(used_width);
-        for span in &mut line.spans {
-            span.style = span.style.fg(bubble_fg).bg(bubble_bg);
-        }
-
-        let mut spans = Vec::new();
-        if left_pad > 0 {
-            spans.push(Span::raw(" ".repeat(left_pad as usize)));
-        }
-        if padded_bubble {
-            spans.push(Span::styled(
-                " ",
-                Style::default().fg(bubble_fg).bg(bubble_bg),
-            ));
-        }
-        spans.extend(line.spans);
-        if fill_width > 0 {
-            spans.push(Span::styled(
-                " ".repeat(fill_width as usize),
-                Style::default().fg(bubble_fg).bg(bubble_bg),
-            ));
-        }
-        if padded_bubble {
-            spans.push(Span::styled(
-                " ",
-                Style::default().fg(bubble_fg).bg(bubble_bg),
-            ));
-        }
-        Line::from(spans)
-    }
-
-    fn center_active_tail_cache(
-        &self,
-        width: u16,
-    ) -> Option<std::cell::Ref<'_, CenterActiveTailCache>> {
+    ) -> Option<std::cell::Ref<'_, WorkspaceActiveTailCache>> {
         let Some(key) = self.active_cell_render_cache_key(width) else {
-            self.center_active_tail_cache.borrow_mut().take();
+            self.workspace_active_tail_cache.borrow_mut().take();
             return None;
         };
         let needs_refresh = self
-            .center_active_tail_cache
+            .workspace_active_tail_cache
             .borrow()
             .as_ref()
             .is_none_or(|cache| cache.key != key);
@@ -15210,31 +14643,23 @@ impl ChatWidget {
                 .as_ref()
                 .map(|cell| cell.chat_lane())
                 .unwrap_or(ChatLane::Assistant);
-            let lane_width = Self::chat_timeline_lane_width(width, lane);
+            let lane_width = workspace_transcript_lane_width(width, lane);
             let lines = {
                 let cache = self.active_cell_render_cache(lane_width)?;
-                Self::center_wrap_lines(cache.lines.clone(), lane_width)
+                wrap_workspace_transcript_lines(cache.lines.clone(), lane_width)
             };
-            *self.center_active_tail_cache.borrow_mut() =
-                Some(CenterActiveTailCache { key, lane, lines });
+            *self.workspace_active_tail_cache.borrow_mut() =
+                Some(WorkspaceActiveTailCache { key, lane, lines });
         }
 
         Some(std::cell::Ref::map(
-            self.center_active_tail_cache.borrow(),
+            self.workspace_active_tail_cache.borrow(),
             |cache| {
                 cache
                     .as_ref()
-                    .expect("center active tail cache should be populated")
+                    .expect("workspace active tail cache should be populated")
             },
         ))
-    }
-
-    fn center_wrap_lines(lines: Vec<Line<'static>>, width: u16) -> Vec<Line<'static>> {
-        if lines.is_empty() {
-            Vec::new()
-        } else {
-            crate::wrapping::word_wrap_lines(lines, usize::from(width.max(1)))
-        }
     }
 
     fn active_cell_render_cache_key(&self, width: u16) -> Option<ActiveCellRenderCacheKey> {
@@ -15299,11 +14724,11 @@ impl ChatWidget {
     }
 
     fn bottom_pane_total_height(&self, width: u16) -> u16 {
-        let composer_width = width.saturating_sub(CENTER_INPUT_BORDER_COLS);
+        let composer_width = width.saturating_sub(WORKSPACE_INPUT_BORDER_COLS);
         self.bottom_pane
             .desired_height(composer_width)
-            .saturating_add(CENTER_INPUT_STRIP_ROWS)
-            .saturating_add(CENTER_INPUT_BORDER_ROWS)
+            .saturating_add(WORKSPACE_INPUT_STRIP_ROWS)
+            .saturating_add(WORKSPACE_INPUT_BORDER_ROWS)
     }
 
     fn desired_total_height(&self, width: u16) -> u16 {
@@ -15341,40 +14766,42 @@ impl ChatWidget {
             show_work_panel: self.work_panel.should_show(),
             fill_available_top: false,
         });
-        Self::center_bottom_pane_layout(layout)
+        Self::workspace_bottom_pane_layout(layout)
     }
 
     fn render_work_panel(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
         let Some(area) = layout.work_panel_area else {
             return;
         };
-        self.work_panel.render(area, buf);
+        let card_area = if area.width > 1 && area.height > 1 {
+            Rect::new(area.x, area.y, area.width - 1, area.height - 1)
+        } else {
+            area
+        };
+        self.work_panel
+            .render(card_area, buf, self.workspace_theme());
     }
 
     fn render_bottom_pane(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
         if layout.bottom_outer_area.is_empty() {
             return;
         }
-        self.render_center_input_frame(layout.bottom_outer_area, buf);
+        self.render_workspace_input_frame(layout.bottom_outer_area, buf);
         if layout.bottom_content_area.is_empty() {
             return;
         }
         self.bottom_pane.render(layout.bottom_content_area, buf);
     }
 
-    fn render_center_input_frame(&self, area: Rect, buf: &mut Buffer) {
+    fn render_workspace_input_frame(&self, area: Rect, buf: &mut Buffer) {
         if area.is_empty() {
             return;
         }
-        let theme = self.center_theme();
-        let palette = theme.visual_palette();
-        OpenFrame::horizontal(
-            theme.input_bg,
-            palette.border_muted,
-            /*top*/ true,
-            /*bottom*/ false,
-        )
-        .render(area, buf);
+        let theme = self.workspace_theme();
+        buf.set_style(
+            area,
+            Style::default().bg(theme.panel_raised_bg).fg(theme.text),
+        );
     }
 
     fn render_in_app_toast_overlay(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {

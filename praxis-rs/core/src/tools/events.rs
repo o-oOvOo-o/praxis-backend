@@ -6,6 +6,8 @@ use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::sandboxing::ToolError;
+use praxis_protocol::mcp::CallToolResult;
+use praxis_protocol::models::WebSearchAction;
 use praxis_protocol::parse_command::ParsedCommand;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::ExecCommandBeginEvent;
@@ -13,10 +15,15 @@ use praxis_protocol::protocol::ExecCommandEndEvent;
 use praxis_protocol::protocol::ExecCommandSource;
 use praxis_protocol::protocol::ExecCommandStatus;
 use praxis_protocol::protocol::FileChange;
+use praxis_protocol::protocol::McpInvocation;
+use praxis_protocol::protocol::McpToolCallBeginEvent;
+use praxis_protocol::protocol::McpToolCallEndEvent;
 use praxis_protocol::protocol::PatchApplyBeginEvent;
 use praxis_protocol::protocol::PatchApplyEndEvent;
 use praxis_protocol::protocol::PatchApplyStatus;
 use praxis_protocol::protocol::TurnDiffEvent;
+use praxis_protocol::protocol::WebSearchBeginEvent;
+use praxis_protocol::protocol::WebSearchEndEvent;
 use praxis_shell_command::parse_command::parse_command;
 use std::collections::HashMap;
 use std::path::Path;
@@ -46,6 +53,76 @@ impl<'a> ToolEventCtx<'a> {
             call_id,
             turn_diff_tracker,
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct ToolLifecycleEmitter<'a> {
+    ctx: ToolEventCtx<'a>,
+}
+
+impl<'a> ToolLifecycleEmitter<'a> {
+    pub fn new(ctx: ToolEventCtx<'a>) -> Self {
+        Self { ctx }
+    }
+
+    pub async fn web_search_begin(&self) {
+        self.ctx
+            .session
+            .send_event(
+                self.ctx.turn,
+                EventMsg::WebSearchBegin(WebSearchBeginEvent {
+                    call_id: self.ctx.call_id.to_string(),
+                }),
+            )
+            .await;
+    }
+
+    pub async fn web_search_end(&self, query: String, action: WebSearchAction) {
+        self.ctx
+            .session
+            .send_event(
+                self.ctx.turn,
+                EventMsg::WebSearchEnd(WebSearchEndEvent {
+                    call_id: self.ctx.call_id.to_string(),
+                    query,
+                    action,
+                }),
+            )
+            .await;
+    }
+
+    pub async fn mcp_call_begin(&self, invocation: McpInvocation) {
+        self.ctx
+            .session
+            .send_event(
+                self.ctx.turn,
+                EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
+                    call_id: self.ctx.call_id.to_string(),
+                    invocation,
+                }),
+            )
+            .await;
+    }
+
+    pub async fn mcp_call_end(
+        &self,
+        invocation: McpInvocation,
+        duration: Duration,
+        result: Result<CallToolResult, String>,
+    ) {
+        self.ctx
+            .session
+            .send_event(
+                self.ctx.turn,
+                EventMsg::McpToolCallEnd(McpToolCallEndEvent {
+                    call_id: self.ctx.call_id.to_string(),
+                    invocation,
+                    duration,
+                    result,
+                }),
+            )
+            .await;
     }
 }
 

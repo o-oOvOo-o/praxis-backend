@@ -495,13 +495,17 @@ client_request_definitions! {
         params: api::SkillsListParams,
         response: api::SkillsListResponse,
     },
-    PluginList => "plugin/list" {
+    PluginList => "plugin/catalog/list" {
         params: api::PluginListParams,
         response: api::PluginListResponse,
     },
     PluginRead => "plugin/read" {
         params: api::PluginReadParams,
         response: api::PluginReadResponse,
+    },
+    PluginSync => "plugin/sync" {
+        params: api::PluginSyncParams,
+        response: api::PluginSyncResponse,
     },
     AppsList => "app/list" {
         params: api::AppsListParams,
@@ -554,6 +558,10 @@ client_request_definitions! {
     PluginUninstall => "plugin/uninstall" {
         params: api::PluginUninstallParams,
         response: api::PluginUninstallResponse,
+    },
+    PluginSetEnabled => "plugin/setEnabled" {
+        params: api::PluginSetEnabledParams,
+        response: api::PluginSetEnabledResponse,
     },
     TurnStart => "turn/start" {
         params: api::TurnStartParams,

@@ -1,6 +1,6 @@
 use super::*;
 
-impl AgentOsRuntime {
+impl AgentOs {
     pub(crate) async fn request_command_ticket(
         &self,
         thread_id: ThreadId,

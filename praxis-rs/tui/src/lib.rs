@@ -13,10 +13,9 @@ use cwd_prompt::CwdPromptAction;
 use cwd_prompt::CwdPromptOutcome;
 use cwd_prompt::CwdSelection;
 use praxis_app_gateway_client::AppGatewayClient;
-use praxis_app_gateway_client::DEFAULT_LOCAL_APP_GATEWAY_ADDR;
-use praxis_app_gateway_client::DEFAULT_LOCAL_APP_GATEWAY_URL;
 use praxis_app_gateway_client::NativeAppGatewayClient;
 use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
+use praxis_app_gateway_client::NativeControlAuthSettings;
 use praxis_app_gateway_client::RemoteAppGatewayClient;
 use praxis_app_gateway_client::RemoteAppGatewayConnectArgs;
 use praxis_app_gateway_protocol::AuthMode as AppGatewayAuthMode;
@@ -24,7 +23,6 @@ use praxis_app_gateway_protocol::ConfigWarningNotification;
 use praxis_app_gateway_protocol::Thread as AppGatewayThread;
 use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadSortKey as AppGatewayThreadSortKey;
-use praxis_app_gateway_protocol::ThreadSourceKind;
 use praxis_cloud_requirements::cloud_config_bundle_loader_for_storage;
 use praxis_core::LMSTUDIO_OSS_PROVIDER_ID;
 use praxis_core::ModelProviderInfo;
@@ -69,25 +67,16 @@ use praxis_utils_oss::get_default_model_for_oss_provider;
 use std::fs::OpenOptions;
 use std::future::Future;
 use std::net::SocketAddr;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
-use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::net::TcpStream;
-use tokio::time::sleep;
-use tokio::time::timeout;
+use thread_pagination::interactive_thread_source_kinds;
+use thread_pagination::thread_list_params as app_gateway_thread_list_params;
 use tracing::error;
 use tracing::warn;
 
 pub(crate) const TUI_APP_GATEWAY_CHANNEL_CAPACITY: usize = 8192;
-const LOCAL_APP_GATEWAY_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
-const LOCAL_APP_GATEWAY_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(windows)]
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub const DEFAULT_CENTER_CONTROL_LISTEN_URL: &str = "ws://127.0.0.1:4222";
 use tracing_appender::non_blocking;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
@@ -101,7 +90,7 @@ mod app_backtrack;
 mod app_command;
 mod app_event;
 mod app_event_sender;
-mod app_gateway_approval_conversions;
+mod app_gateway_core_conversions;
 mod app_gateway_session;
 mod ascii_animation;
 #[cfg(not(target_os = "linux"))]
@@ -121,7 +110,6 @@ mod audio_device {
     }
 }
 mod bottom_pane;
-mod center_theme;
 mod chatwidget;
 mod cli;
 mod clipboard_paste;
@@ -178,6 +166,8 @@ mod terminal_title;
 mod text_formatting;
 mod theme_picker;
 mod thinking_persona;
+mod thread_pagination;
+mod thread_replay_policy;
 mod toast_queue;
 mod token_usage_summary;
 mod transcript_search;
@@ -193,6 +183,7 @@ mod updates;
 mod version;
 #[cfg(not(target_os = "linux"))]
 mod voice;
+mod workspace;
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod voice {
@@ -274,7 +265,8 @@ async fn start_embedded_app_gateway(
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
     cloud_requirements: CloudConfigBundleLoader,
-    feedback: praxis_feedback::CodexFeedback,
+    feedback: praxis_feedback::PraxisFeedback,
+    control_listen: Option<SocketAddr>,
 ) -> color_eyre::Result<NativeAppGatewayClient> {
     start_embedded_app_gateway_with(
         arg0_paths,
@@ -283,6 +275,7 @@ async fn start_embedded_app_gateway(
         loader_overrides,
         cloud_requirements,
         feedback,
+        control_listen,
         NativeAppGatewayClient::start,
     )
     .await
@@ -295,6 +288,28 @@ pub(crate) enum AppGatewayTarget {
         websocket_url: String,
         auth_token: Option<String>,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ControlListenConfig {
+    pub addr: SocketAddr,
+    pub required: bool,
+}
+
+impl ControlListenConfig {
+    pub fn required(addr: SocketAddr) -> Self {
+        Self {
+            addr,
+            required: true,
+        }
+    }
+
+    pub fn best_effort(addr: SocketAddr) -> Self {
+        Self {
+            addr,
+            required: false,
+        }
+    }
 }
 
 fn remote_addr_has_explicit_port(addr: &str, parsed: &Url) -> bool {
@@ -360,6 +375,19 @@ pub fn normalize_remote_addr(addr: &str) -> color_eyre::Result<String> {
     );
 }
 
+pub fn parse_control_listen_addr(addr: &str) -> color_eyre::Result<SocketAddr> {
+    let Some(socket_addr) = addr.strip_prefix("ws://") else {
+        color_eyre::eyre::bail!(
+            "invalid control listen address `{addr}`; expected `ws://IP:PORT`"
+        );
+    };
+    socket_addr.parse::<SocketAddr>().map_err(|err| {
+        color_eyre::eyre::eyre!(
+            "invalid control listen address `{addr}`; expected `ws://IP:PORT`: {err}"
+        )
+    })
+}
+
 fn validate_remote_auth_token_transport(websocket_url: &str) -> color_eyre::Result<()> {
     let parsed = Url::parse(websocket_url).map_err(color_eyre::Report::new)?;
     if websocket_url_supports_auth_token(&parsed) {
@@ -389,101 +417,19 @@ async fn connect_remote_app_gateway(
     Ok(AppGatewayClient::Remote(app_gateway))
 }
 
-async fn local_app_gateway_is_listening() -> bool {
-    let Ok(addr) = DEFAULT_LOCAL_APP_GATEWAY_ADDR.parse::<SocketAddr>() else {
-        return false;
-    };
-    matches!(
-        timeout(LOCAL_APP_GATEWAY_CONNECT_TIMEOUT, TcpStream::connect(addr)).await,
-        Ok(Ok(_))
-    )
-}
-
-async fn wait_for_local_app_gateway() -> bool {
-    let deadline = std::time::Instant::now() + LOCAL_APP_GATEWAY_STARTUP_TIMEOUT;
-    while std::time::Instant::now() < deadline {
-        if local_app_gateway_is_ready().await.is_ok() {
-            return true;
-        }
-        sleep(Duration::from_millis(100)).await;
-    }
-    false
-}
-
-async fn local_app_gateway_is_ready() -> Result<(), String> {
-    if !local_app_gateway_is_listening().await {
-        return Err("local Praxis app-gateway is not listening".to_string());
-    }
-
-    let client = connect_remote_app_gateway(DEFAULT_LOCAL_APP_GATEWAY_URL.to_string(), None)
-        .await
-        .map_err(|err| err.to_string())?;
-    if let Err(err) = client.shutdown().await {
-        warn!(%err, "temporary local Praxis app-gateway health-check shutdown failed");
-    }
-    Ok(())
-}
-
-fn spawn_local_app_gateway_process(
-    arg0_paths: &Arg0DispatchPaths,
-    raw_overrides: &[String],
-) -> color_eyre::Result<()> {
-    let exe = arg0_paths
-        .praxis_self_exe
-        .clone()
-        .or_else(|| std::env::current_exe().ok())
-        .ok_or_else(|| color_eyre::eyre::eyre!("unable to locate praxis executable"))?;
-    let mut command = Command::new(exe);
-    for raw_override in raw_overrides {
-        command.arg("-c").arg(raw_override);
-    }
-    command
-        .arg("app-gateway")
-        .arg("--listen")
-        .arg(DEFAULT_LOCAL_APP_GATEWAY_URL)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    #[cfg(windows)]
-    command.creation_flags(CREATE_NO_WINDOW);
-    command
-        .spawn()
-        .wrap_err("failed to spawn local Praxis app-gateway")?;
-    Ok(())
-}
-
-async fn ensure_local_app_gateway_for_center(
-    arg0_paths: &Arg0DispatchPaths,
-    raw_overrides: &[String],
-) -> Option<String> {
-    if local_app_gateway_is_listening().await {
-        match local_app_gateway_is_ready().await {
-            Ok(()) => return Some(DEFAULT_LOCAL_APP_GATEWAY_URL.to_string()),
-            Err(err) => {
-                warn!(
-                    %err,
-                    "local Praxis app-gateway is listening but not usable; falling back to embedded app-gateway"
-                );
-                return None;
-            }
-        }
-    }
-    match spawn_local_app_gateway_process(arg0_paths, raw_overrides) {
-        Ok(()) => {
-            if wait_for_local_app_gateway().await {
-                Some(DEFAULT_LOCAL_APP_GATEWAY_URL.to_string())
-            } else {
-                warn!(
-                    "local Praxis app-gateway did not become ready; falling back to embedded app-gateway"
-                );
-                None
-            }
-        }
-        Err(err) => {
-            warn!(%err, "failed to start local Praxis app-gateway; falling back to embedded app-gateway");
-            None
-        }
-    }
+fn control_listener_bind_failed(err: &color_eyre::Report) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|err| {
+                matches!(
+                    err.kind(),
+                    std::io::ErrorKind::AddrInUse
+                        | std::io::ErrorKind::AddrNotAvailable
+                        | std::io::ErrorKind::PermissionDenied
+                )
+            })
+    })
 }
 
 async fn start_app_gateway(
@@ -493,19 +439,50 @@ async fn start_app_gateway(
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
     cloud_requirements: CloudConfigBundleLoader,
-    feedback: praxis_feedback::CodexFeedback,
+    feedback: praxis_feedback::PraxisFeedback,
+    control_listen: Option<ControlListenConfig>,
 ) -> color_eyre::Result<AppGatewayClient> {
     match target {
-        AppGatewayTarget::Embedded => start_embedded_app_gateway(
-            arg0_paths,
-            config,
-            cli_kv_overrides,
-            loader_overrides,
-            cloud_requirements,
-            feedback,
-        )
-        .await
-        .map(AppGatewayClient::Native),
+        AppGatewayTarget::Embedded => {
+            let control_addr = control_listen.map(|control| control.addr);
+            match start_embedded_app_gateway(
+                arg0_paths.clone(),
+                config.clone(),
+                cli_kv_overrides.clone(),
+                loader_overrides.clone(),
+                cloud_requirements.clone(),
+                feedback.clone(),
+                control_addr,
+            )
+            .await
+            {
+                Ok(client) => Ok(AppGatewayClient::Native(client)),
+                Err(err)
+                    if control_listen.is_some_and(|control| !control.required)
+                        && control_listener_bind_failed(&err) =>
+                {
+                    if let Some(control) = control_listen {
+                        warn!(
+                            %err,
+                            control_addr = %control.addr,
+                            "default Praxis Center control listener failed; continuing without external control listener"
+                        );
+                    }
+                    start_embedded_app_gateway(
+                        arg0_paths,
+                        config,
+                        cli_kv_overrides,
+                        loader_overrides,
+                        cloud_requirements,
+                        feedback,
+                        None,
+                    )
+                    .await
+                    .map(AppGatewayClient::Native)
+                }
+                Err(err) => Err(err),
+            }
+        }
         AppGatewayTarget::Remote {
             websocket_url,
             auth_token,
@@ -524,7 +501,8 @@ pub(crate) async fn start_app_gateway_for_picker(
         Vec::new(),
         LoaderOverrides::default(),
         CloudConfigBundleLoader::default(),
-        praxis_feedback::CodexFeedback::new(),
+        praxis_feedback::PraxisFeedback::new(),
+        None,
     )
     .await?;
     Ok(AppGatewaySession::new(app_gateway))
@@ -543,7 +521,8 @@ async fn start_embedded_app_gateway_with<F, Fut>(
     cli_kv_overrides: Vec<(String, toml::Value)>,
     loader_overrides: LoaderOverrides,
     cloud_requirements: CloudConfigBundleLoader,
-    feedback: praxis_feedback::CodexFeedback,
+    feedback: praxis_feedback::PraxisFeedback,
+    control_listen: Option<SocketAddr>,
     start_client: F,
 ) -> color_eyre::Result<NativeAppGatewayClient>
 where
@@ -575,6 +554,8 @@ where
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
         channel_capacity: TUI_APP_GATEWAY_CHANNEL_CAPACITY,
+        control_listen,
+        control_auth: NativeControlAuthSettings::default(),
     })
     .await
     .wrap_err("failed to start embedded app gateway")?;
@@ -616,19 +597,15 @@ async fn lookup_session_target_by_name_with_app_gateway(
     let mut cursor = None;
     loop {
         let response = app_gateway
-            .thread_list(ThreadListParams {
-                cursor: cursor.clone(),
-                limit: Some(100),
-                sort_key: Some(AppGatewayThreadSortKey::UpdatedAt),
-                model_providers: None,
-                source_kinds: Some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode]),
-                archived: Some(false),
-                cwd: None,
+            .thread_list(app_gateway_thread_list_params(
+                cursor.clone(),
+                AppGatewayThreadSortKey::UpdatedAt,
+                interactive_thread_source_kinds(/*include_non_interactive*/ false),
                 // Thread names are hydrated after `thread/list` resolves rollout metadata, so
                 // name-based resume must scan the filtered list client-side instead of relying on
                 // the backend search index.
-                search_term: None,
-            })
+                None,
+            ))
             .await?;
         if let Some(thread) = response
             .data
@@ -715,17 +692,12 @@ fn latest_session_lookup_params(
     cursor: Option<String>,
     include_non_interactive: bool,
 ) -> ThreadListParams {
-    ThreadListParams {
+    app_gateway_thread_list_params(
         cursor,
-        limit: Some(100),
-        sort_key: Some(AppGatewayThreadSortKey::UpdatedAt),
-        model_providers: None,
-        source_kinds: (!include_non_interactive)
-            .then_some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode]),
-        archived: Some(false),
-        cwd: None,
-        search_term: None,
-    }
+        AppGatewayThreadSortKey::UpdatedAt,
+        interactive_thread_source_kinds(include_non_interactive),
+        None,
+    )
 }
 
 fn project_scope_root(path: &Path) -> PathBuf {
@@ -733,9 +705,9 @@ fn project_scope_root(path: &Path) -> PathBuf {
 }
 
 fn session_lookup_command_hint(action: &str, source: SessionLookupSource) -> String {
-    match source {
-        SessionLookupSource::Praxis => format!("praxis {action}"),
-        SessionLookupSource::Codex => format!("praxis {action} codex"),
+    match source.command_keyword() {
+        Some(keyword) => format!("praxis {action} {keyword}"),
+        None => format!("praxis {action}"),
     }
 }
 
@@ -755,16 +727,60 @@ pub(crate) async fn build_praxis_bridge_lookup_config(
     // ~/.codex/sessions and auth, but Codex runtime-only config keys must not
     // block Praxis from listing threads. All Praxis-generated indexes, logs,
     // and bridge state stay under the primary Praxis home.
-    let bridge_state_home = primary_config.praxis_home.join("codex_bridge_state");
+    let source = praxis_core::external_agent_migration::ExternalAgentSource::Codex;
+    let bridge_state_home = primary_config
+        .praxis_home
+        .join(source.bridge_state_dir_name());
     bridge_config.praxis_home = codex_home;
     bridge_config.sqlite_home = bridge_state_home.clone();
-    bridge_config.log_dir = primary_config.log_dir.join("codex_bridge");
+    bridge_config.log_dir = primary_config.log_dir.join(source.bridge_log_dir_name());
     Ok(bridge_config)
+}
+
+pub(crate) async fn build_cursor_bridge_lookup_config(
+    primary_config: &Config,
+) -> std::io::Result<Config> {
+    let mut bridge_config = primary_config.clone();
+    let source = praxis_core::external_agent_migration::ExternalAgentSource::Cursor;
+    let bridge_state_home = primary_config
+        .praxis_home
+        .join(source.bridge_state_dir_name());
+    bridge_config.praxis_home = bridge_state_home.clone();
+    bridge_config.sqlite_home = bridge_state_home;
+    bridge_config.log_dir = primary_config.log_dir.join(source.bridge_log_dir_name());
+    praxis_core::external_agent_migration::sync_external_agent_sessions_to_praxis_home(
+        source,
+        &bridge_config,
+    )
+    .await?;
+    Ok(bridge_config)
+}
+
+pub(crate) async fn build_session_lookup_config(
+    source: SessionLookupSource,
+    primary_config: &Config,
+) -> std::io::Result<Config> {
+    match source {
+        SessionLookupSource::Praxis => Ok(primary_config.clone()),
+        SessionLookupSource::Codex => build_praxis_bridge_lookup_config(primary_config).await,
+        SessionLookupSource::Cursor => build_cursor_bridge_lookup_config(primary_config).await,
+    }
 }
 
 pub(crate) fn picker_source_switch_enabled(app_gateway_target: &AppGatewayTarget) -> bool {
     matches!(current_praxis_home_namespace(), PraxisHomeNamespace::Praxis)
         && matches!(app_gateway_target, AppGatewayTarget::Embedded)
+}
+
+pub(crate) fn session_lookup_app_gateway_target(
+    source: SessionLookupSource,
+    app_gateway_target: &AppGatewayTarget,
+) -> AppGatewayTarget {
+    if source.is_external() {
+        AppGatewayTarget::Embedded
+    } else {
+        app_gateway_target.clone()
+    }
 }
 
 async fn start_session_lookup_context(
@@ -773,14 +789,11 @@ async fn start_session_lookup_context(
     app_gateway_target: &AppGatewayTarget,
     arg0_paths: Arg0DispatchPaths,
     loader_overrides: LoaderOverrides,
-    feedback: praxis_feedback::CodexFeedback,
+    feedback: praxis_feedback::PraxisFeedback,
 ) -> color_eyre::Result<SessionLookupContext> {
-    let lookup_config = match source {
-        SessionLookupSource::Praxis => primary_config.clone(),
-        SessionLookupSource::Codex => build_praxis_bridge_lookup_config(primary_config)
-            .await
-            .map_err(color_eyre::Report::new)?,
-    };
+    let lookup_config = build_session_lookup_config(source, primary_config)
+        .await
+        .map_err(color_eyre::Report::new)?;
     let app_gateway = start_app_gateway(
         app_gateway_target,
         arg0_paths,
@@ -789,6 +802,7 @@ async fn start_session_lookup_context(
         loader_overrides,
         CloudConfigBundleLoader::default(),
         feedback,
+        None,
     )
     .await?;
     Ok(SessionLookupContext {
@@ -804,29 +818,16 @@ pub async fn run_main(
     loader_overrides: LoaderOverrides,
     remote: Option<String>,
     remote_auth_token: Option<String>,
+    control_listen: Option<ControlListenConfig>,
 ) -> std::io::Result<AppExitInfo> {
-    let mut remote_url = remote;
+    let remote_url = remote;
     if let (Some(websocket_url), Some(_)) = (remote_url.as_deref(), remote_auth_token.as_ref()) {
         validate_remote_auth_token_transport(websocket_url).map_err(std::io::Error::other)?;
     }
-    let launch_mode = cli.launch_mode();
     let app_gateway_target = if let Some(websocket_url) = remote_url.clone() {
         AppGatewayTarget::Remote {
             websocket_url,
             auth_token: remote_auth_token.clone(),
-        }
-    } else if launch_mode.is_workspace() {
-        match ensure_local_app_gateway_for_center(&arg0_paths, &cli.config_overrides.raw_overrides)
-            .await
-        {
-            Some(websocket_url) => {
-                remote_url = Some(websocket_url.clone());
-                AppGatewayTarget::Remote {
-                    websocket_url,
-                    auth_token: None,
-                }
-            }
-            None => AppGatewayTarget::Embedded,
         }
     } else {
         AppGatewayTarget::Embedded
@@ -1069,7 +1070,7 @@ pub async fn run_main(
         )
         .with_filter(env_filter());
 
-    let feedback = praxis_feedback::CodexFeedback::new();
+    let feedback = praxis_feedback::PraxisFeedback::new();
     let feedback_layer = feedback.logger_layer();
     let feedback_metadata_layer = feedback.metadata_layer();
 
@@ -1143,6 +1144,7 @@ pub async fn run_main(
         feedback,
         remote_url,
         remote_auth_token,
+        control_listen,
     )
     .await
     .map_err(|err| std::io::Error::other(err.to_string()))
@@ -1159,9 +1161,10 @@ async fn run_ratatui_app(
     overrides: ConfigOverrides,
     cli_kv_overrides: Vec<(String, toml::Value)>,
     mut cloud_requirements: CloudConfigBundleLoader,
-    feedback: praxis_feedback::CodexFeedback,
+    feedback: praxis_feedback::PraxisFeedback,
     remote_url: Option<String>,
     remote_auth_token: Option<String>,
+    control_listen: Option<ControlListenConfig>,
 ) -> color_eyre::Result<AppExitInfo> {
     let remote_mode = matches!(&app_gateway_target, AppGatewayTarget::Remote { .. });
     install_color_eyre()?;
@@ -1222,6 +1225,7 @@ async fn run_ratatui_app(
                 loader_overrides.clone(),
                 cloud_requirements.clone(),
                 feedback.clone(),
+                None,
             )
             .await?,
         ))
@@ -1351,12 +1355,14 @@ async fn run_ratatui_app(
     } else {
         cli.resume_source
     };
+    let session_lookup_target =
+        session_lookup_app_gateway_target(session_lookup_source, &app_gateway_target);
     let mut session_lookup_context = if needs_app_gateway_session_lookup {
         Some(
             start_session_lookup_context(
                 session_lookup_source,
                 &config,
-                &app_gateway_target,
+                &session_lookup_target,
                 arg0_paths.clone(),
                 loader_overrides.clone(),
                 feedback.clone(),
@@ -1410,14 +1416,11 @@ async fn run_ratatui_app(
                 config: lookup_config,
                 app_gateway,
             } = lookup;
-            let alternate_source = if picker_source_switch_enabled(&app_gateway_target) {
+            let alternate_source = if picker_source_switch_enabled(&session_lookup_target) {
                 let alternate_lookup = start_session_lookup_context(
-                    match source {
-                        SessionLookupSource::Praxis => SessionLookupSource::Codex,
-                        SessionLookupSource::Codex => SessionLookupSource::Praxis,
-                    },
+                    source.default_alternate(),
                     &config,
-                    &app_gateway_target,
+                    &session_lookup_target,
                     arg0_paths.clone(),
                     loader_overrides.clone(),
                     feedback.clone(),
@@ -1466,12 +1469,10 @@ async fn run_ratatui_app(
             unreachable!("session lookup app gateway should be initialized for --resume <id>");
         };
         match lookup_session_target_with_app_gateway(&mut lookup.app_gateway, id_str).await? {
-            Some(target_session) => match lookup.source {
-                SessionLookupSource::Praxis => {
-                    resume_picker::SessionSelection::Resume(target_session)
-                }
-                SessionLookupSource::Codex => resume_picker::SessionSelection::Fork(target_session),
-            },
+            Some(target_session) if lookup.source.is_external() => {
+                resume_picker::SessionSelection::Fork(target_session)
+            }
+            Some(target_session) => resume_picker::SessionSelection::Resume(target_session),
             None => {
                 shutdown_app_gateway_if_present(
                     session_lookup_context.take().map(|ctx| ctx.app_gateway),
@@ -1496,12 +1497,10 @@ async fn run_ratatui_app(
         )
         .await?
         {
-            Some(target_session) => match lookup.source {
-                SessionLookupSource::Praxis => {
-                    resume_picker::SessionSelection::Resume(target_session)
-                }
-                SessionLookupSource::Codex => resume_picker::SessionSelection::Fork(target_session),
-            },
+            Some(target_session) if lookup.source.is_external() => {
+                resume_picker::SessionSelection::Fork(target_session)
+            }
+            Some(target_session) => resume_picker::SessionSelection::Resume(target_session),
             None => resume_picker::SessionSelection::StartFresh,
         }
     } else if cli.resume_picker {
@@ -1513,14 +1512,11 @@ async fn run_ratatui_app(
             config: lookup_config,
             app_gateway,
         } = lookup;
-        let alternate_source = if picker_source_switch_enabled(&app_gateway_target) {
+        let alternate_source = if picker_source_switch_enabled(&session_lookup_target) {
             let alternate_lookup = start_session_lookup_context(
-                match source {
-                    SessionLookupSource::Praxis => SessionLookupSource::Codex,
-                    SessionLookupSource::Codex => SessionLookupSource::Praxis,
-                },
+                source.default_alternate(),
                 &config,
-                &app_gateway_target,
+                &session_lookup_target,
                 arg0_paths.clone(),
                 loader_overrides.clone(),
                 feedback.clone(),
@@ -1545,9 +1541,7 @@ async fn run_ratatui_app(
         )
         .await?
         {
-            resume_picker::SessionSelection::Resume(target_session)
-                if matches!(source, SessionLookupSource::Codex) =>
-            {
+            resume_picker::SessionSelection::Resume(target_session) if source.is_external() => {
                 resume_picker::SessionSelection::Fork(target_session)
             }
             resume_picker::SessionSelection::Exit => {
@@ -1568,7 +1562,7 @@ async fn run_ratatui_app(
     };
     shutdown_app_gateway_if_present(session_lookup_context.take().map(|ctx| ctx.app_gateway)).await;
 
-    let center_mode = cli.launch_mode().is_workspace();
+    let workspace_mode = cli.launch_mode().is_workspace();
 
     let current_cwd = config.cwd.clone();
     let allow_prompt = !remote_mode && cli.cwd.is_none();
@@ -1659,9 +1653,9 @@ async fn run_ratatui_app(
     } = cli;
 
     let use_alt_screen =
-        center_mode || determine_alt_screen_mode(no_alt_screen, tui_config.alternate_screen);
+        workspace_mode || determine_alt_screen_mode(no_alt_screen, tui_config.alternate_screen);
     tui.set_alt_screen_enabled(use_alt_screen);
-    tui.set_mouse_capture_enabled(center_mode)?;
+    tui.set_mouse_capture_enabled(workspace_mode)?;
     let app_gateway = match start_app_gateway(
         &app_gateway_target,
         arg0_paths,
@@ -1670,6 +1664,7 @@ async fn run_ratatui_app(
         loader_overrides,
         cloud_requirements.clone(),
         feedback.clone(),
+        control_listen,
     )
     .await
     {
@@ -1701,7 +1696,7 @@ async fn run_ratatui_app(
         should_prompt_windows_sandbox_nux_at_startup,
         remote_url,
         remote_auth_token,
-        center_mode,
+        workspace_mode,
     )
     .await;
 
@@ -2218,7 +2213,7 @@ mod tests {
             Vec::new(),
             LoaderOverrides::default(),
             CloudConfigBundleLoader::default(),
-            praxis_feedback::CodexFeedback::new(),
+            praxis_feedback::PraxisFeedback::new(),
         )
         .await
     }
@@ -2462,7 +2457,7 @@ mod tests {
             Vec::new(),
             LoaderOverrides::default(),
             CloudConfigBundleLoader::default(),
-            praxis_feedback::CodexFeedback::new(),
+            praxis_feedback::PraxisFeedback::new(),
             |_args| async { Err(std::io::Error::other("boom")) },
         )
         .await;

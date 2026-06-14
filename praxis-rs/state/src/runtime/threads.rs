@@ -1421,7 +1421,7 @@ pub(super) fn push_thread_filters<'a>(
     if let Some(cwd) = cwd {
         builder.push(" AND (cwd = ");
         builder.push_bind(cwd);
-        let cwd_root = cwd.trim_end_matches(|ch| ch == '/' || ch == '\\');
+        let cwd_root = cwd.trim_end_matches(['/', '\\']);
         if !cwd_root.is_empty() {
             let escaped = sqlite_like_escape(cwd_root);
             builder.push(" OR cwd LIKE ");
@@ -1610,6 +1610,8 @@ mod tests {
                 parent_thread_id: cli_id,
                 depth: 1,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: Some("builder".to_string()),
                 agent_role: None,
             }));
@@ -1712,6 +1714,8 @@ mod tests {
                 cli_version: String::new(),
                 source: SessionSource::Cli,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: None,
                 model_provider: None,
@@ -1770,6 +1774,8 @@ mod tests {
                 cli_version: String::new(),
                 source: SessionSource::Cli,
                 agent_path: None,
+                agent_base_name: None,
+                agent_title: None,
                 agent_display_name: None,
                 agent_role: None,
                 model_provider: None,

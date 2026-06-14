@@ -29,7 +29,7 @@ praxis-app-gateway-service
 praxis-app-gateway-client
   client-side request abstraction
 
-praxis-app-gateway-runtime
+praxis-app-gateway
   shared runtime and message processor used by native and service modes
 
 praxis-host-sdk

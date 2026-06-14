@@ -1585,7 +1585,7 @@ impl PraxisClient {
         for override_kv in config_overrides {
             cmd.arg("--config").arg(override_kv);
         }
-        let mut praxis_app_gateway_runtime = cmd
+        let mut praxis_app_gateway = cmd
             .arg("app-gateway")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1593,18 +1593,18 @@ impl PraxisClient {
             .spawn()
             .with_context(|| format!("failed to start `{praxis_bin_display}` app-gateway"))?;
 
-        let stdin = praxis_app_gateway_runtime
+        let stdin = praxis_app_gateway
             .stdin
             .take()
             .context("praxis app-gateway stdin unavailable")?;
-        let stdout = praxis_app_gateway_runtime
+        let stdout = praxis_app_gateway
             .stdout
             .take()
             .context("praxis app-gateway stdout unavailable")?;
 
         Ok(Self {
             transport: ClientTransport::Stdio {
-                child: praxis_app_gateway_runtime,
+                child: praxis_app_gateway,
                 stdin: Some(stdin),
                 stdout: BufReader::new(stdout),
             },

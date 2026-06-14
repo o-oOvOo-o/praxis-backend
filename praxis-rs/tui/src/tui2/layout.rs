@@ -136,7 +136,8 @@ impl Axis {
 mod tests {
     use ratatui::layout::Rect;
 
-    use super::{Axis, Edges};
+    use super::Axis;
+    use super::Edges;
 
     #[test]
     fn inset_saturates_when_padding_is_larger_than_area() {

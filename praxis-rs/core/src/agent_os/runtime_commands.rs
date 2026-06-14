@@ -1,6 +1,6 @@
 use super::*;
 
-impl AgentOsRuntime {
+impl AgentOs {
     pub(super) async fn note_runtime_command_activity(
         &self,
         thread_id: ThreadId,

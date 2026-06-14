@@ -54,7 +54,7 @@ pub(crate) enum StatusDetailsCapitalization {
 
 /// Displays a single-line in-progress status with optional wrapped details.
 pub(crate) struct StatusIndicatorWidget {
-    /// Animated header text (defaults to "Working").
+    /// Live header text (defaults to the active turn state).
     header: String,
     details: Option<String>,
     activity_message: Option<String>,
@@ -98,7 +98,7 @@ impl StatusIndicatorWidget {
         animations_enabled: bool,
     ) -> Self {
         Self {
-            header: String::from("Working"),
+            header: GENERIC_STATUS_HEADER.to_string(),
             details: None,
             activity_message: None,
             footer_lines: Vec::new(),
@@ -387,7 +387,7 @@ impl Renderable for StatusIndicatorWidget {
         let rendered_header = self.rendered_header(elapsed_duration);
         let alert = status_alert(elapsed_duration);
         let alert_style = match alert {
-            StatusAlert::Stalled => ratatui::style::Style::default().red().bold(),
+            StatusAlert::LongRunning => ratatui::style::Style::default().red().bold(),
             StatusAlert::Slow => ratatui::style::Style::default().yellow().bold(),
             StatusAlert::None => ratatui::style::Style::default(),
         };
@@ -420,14 +420,6 @@ impl Renderable for StatusIndicatorWidget {
             spans.push(" · ".dim());
             spans.push(message.clone().dim());
         }
-        if alert == StatusAlert::Stalled {
-            spans.push(" · ".dim());
-            spans.push("check progress".red().bold());
-        } else if alert == StatusAlert::Slow {
-            spans.push(" · ".dim());
-            spans.push("taking a while".yellow().bold());
-        }
-
         let persona_elapsed = if self.animations_enabled {
             elapsed_duration
         } else {

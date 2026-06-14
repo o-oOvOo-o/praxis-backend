@@ -19,10 +19,10 @@ use dunce::canonicalize as normalize_path;
 use futures::StreamExt;
 use praxis_core::ModelClient;
 use praxis_core::ModelProviderInfo;
-use praxis_core::NewThread;
 use praxis_core::Prompt;
 use praxis_core::ResponseEvent;
 use praxis_core::ThreadManager;
+use praxis_core::ThreadSpawnResult;
 use praxis_core::WireApi;
 use praxis_core::built_in_model_providers;
 use praxis_core::error::PraxisErr;
@@ -1070,7 +1070,7 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
             /*exec_server_url*/ None,
         )),
     );
-    let NewThread { thread: codex, .. } = thread_manager
+    let ThreadSpawnResult { thread: codex, .. } = thread_manager
         .start_thread(config)
         .await
         .expect("create new conversation");

@@ -120,11 +120,11 @@ if [ "$1" = "ls-remote" ]; then
 fi
 if [ "$1" = "clone" ]; then
   dest="$5"
-  mkdir -p "$dest/.git" "$dest/.agents/plugins" "$dest/plugins/gmail/.codex-plugin"
+  mkdir -p "$dest/.git" "$dest/.agents/plugins" "$dest/plugins/gmail/.praxis-plugin"
   cat > "$dest/.agents/plugins/marketplace.json" <<'EOF'
 {{"name":"openai-curated","plugins":[{{"name":"gmail","source":{{"source":"local","path":"./plugins/gmail"}}}}]}}
 EOF
-  printf '%s\n' '{{"name":"gmail"}}' > "$dest/plugins/gmail/.codex-plugin/plugin.json"
+  printf '%s\n' '{{"name":"gmail"}}' > "$dest/plugins/gmail/.praxis-plugin/plugin.json"
   exit 0
 fi
 if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ] && [ "$4" = "HEAD" ]; then
@@ -207,7 +207,7 @@ async fn sync_openai_plugins_repo_falls_back_to_http_when_git_is_unavailable() {
     assert!(repo_path.join(".agents/plugins/marketplace.json").is_file());
     assert!(
         repo_path
-            .join("plugins/gmail/.codex-plugin/plugin.json")
+            .join("plugins/gmail/.praxis-plugin/plugin.json")
             .is_file()
     );
     assert_eq!(read_curated_plugins_sha(tmp.path()).as_deref(), Some(sha));
@@ -282,7 +282,7 @@ exit 1
     assert!(repo_path.join(".agents/plugins/marketplace.json").is_file());
     assert!(
         repo_path
-            .join("plugins/gmail/.codex-plugin/plugin.json")
+            .join("plugins/gmail/.praxis-plugin/plugin.json")
             .is_file()
     );
     assert_eq!(read_curated_plugins_sha(tmp.path()).as_deref(), Some(sha));
@@ -518,7 +518,7 @@ fn curated_repo_zipball_bytes(sha: &str) -> Vec<u8> {
         .expect("write marketplace");
     writer
         .start_file(
-            format!("{root}/plugins/gmail/.codex-plugin/plugin.json"),
+            format!("{root}/plugins/gmail/.praxis-plugin/plugin.json"),
             options,
         )
         .expect("start plugin manifest entry");

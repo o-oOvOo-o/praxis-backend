@@ -154,7 +154,7 @@ pub(crate) fn format_directory_display(directory: &Path, max_width: Option<usize
             return String::new();
         }
         if UnicodeWidthStr::width(formatted.as_str()) > max_width {
-            return text_formatting::center_truncate_path(&formatted, max_width);
+            return text_formatting::workspace_truncate_path(&formatted, max_width);
         }
     }
 

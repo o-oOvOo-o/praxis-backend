@@ -3,11 +3,15 @@ use std::ops::Range;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
+use ratatui::text::Line;
+use ratatui::text::Span;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use unicode_width::UnicodeWidthStr;
 
-use super::style::{Surface, TextStyle, Tone};
+use super::style::Surface;
+use super::style::TextStyle;
+use super::style::Tone;
 use super::tokens::UiPalette;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

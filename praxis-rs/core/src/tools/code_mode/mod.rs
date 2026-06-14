@@ -2,7 +2,6 @@ mod execute_handler;
 mod response_adapter;
 mod wait_handler;
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,10 +20,10 @@ use crate::tools::ToolRouter;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
-use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
 use crate::tools::router::ToolRouterParams;
+use crate::tools::tool_call_runtime::ToolCallRuntime;
 use crate::unified_exec::resolve_max_tokens;
 use praxis_features::Feature;
 use praxis_tools::ToolSpec;
@@ -52,7 +51,7 @@ pub(crate) struct CodeModeService {
 }
 
 impl CodeModeService {
-    pub(crate) fn new(_js_repl_node_path: Option<PathBuf>) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             inner: praxis_code_mode::CodeModeService::new(),
         }

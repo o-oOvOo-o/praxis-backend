@@ -61,7 +61,8 @@ use message_conversion::*;
 use parsing::*;
 use streaming::*;
 use transport::ParsedProviderResponse;
-pub(crate) use transport::{stream_claude_unary, stream_common_unary};
+pub(crate) use transport::stream_claude_unary;
+pub(crate) use transport::stream_common_unary;
 
 #[cfg(test)]
 mod tests;

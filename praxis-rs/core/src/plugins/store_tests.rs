@@ -5,10 +5,10 @@ use tempfile::tempdir;
 
 fn write_plugin(root: &Path, dir_name: &str, manifest_name: &str) {
     let plugin_root = root.join(dir_name);
-    fs::create_dir_all(plugin_root.join(".codex-plugin")).unwrap();
+    fs::create_dir_all(plugin_root.join(".praxis-plugin")).unwrap();
     fs::create_dir_all(plugin_root.join("skills")).unwrap();
     fs::write(
-        plugin_root.join(".codex-plugin/plugin.json"),
+        plugin_root.join(".praxis-plugin/plugin.json"),
         format!(r#"{{"name":"{manifest_name}"}}"#),
     )
     .unwrap();
@@ -38,7 +38,7 @@ fn install_copies_plugin_into_default_marketplace() {
             installed_path: AbsolutePathBuf::try_from(installed_path.clone()).unwrap(),
         }
     );
-    assert!(installed_path.join(".codex-plugin/plugin.json").is_file());
+    assert!(installed_path.join(".praxis-plugin/plugin.json").is_file());
     assert!(installed_path.join("skills/SKILL.md").is_file());
 }
 
@@ -107,7 +107,7 @@ fn install_with_version_uses_requested_cache_version() {
             installed_path: AbsolutePathBuf::try_from(installed_path.clone()).unwrap(),
         }
     );
-    assert!(installed_path.join(".codex-plugin/plugin.json").is_file());
+    assert!(installed_path.join(".praxis-plugin/plugin.json").is_file());
 }
 
 #[test]

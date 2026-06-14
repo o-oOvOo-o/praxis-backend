@@ -5,3 +5,4 @@ pub mod api;
 pub mod common;
 mod serde_helpers;
 pub mod thread_history;
+pub mod thread_history_policy;

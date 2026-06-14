@@ -28,6 +28,7 @@ fn main() -> anyhow::Result<()> {
             praxis_core::config_loader::LoaderOverrides::default(),
             /*remote*/ None,
             /*remote_auth_token*/ None,
+            /*control_listen*/ None,
         )
         .await?;
         let token_usage = exit_info.token_usage;

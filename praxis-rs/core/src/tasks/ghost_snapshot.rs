@@ -1,7 +1,7 @@
 use crate::praxis::TurnContext;
-use crate::state::TaskKind;
-use crate::tasks::SessionTask;
-use crate::tasks::SessionTaskContext;
+use crate::state::AgentTaskKind;
+use crate::tasks::AgentTask;
+use crate::tasks::AgentTaskContext;
 use async_trait::async_trait;
 use praxis_git_utils::CreateGhostCommitOptions;
 use praxis_git_utils::GhostSnapshotReport;
@@ -27,18 +27,18 @@ pub(crate) struct GhostSnapshotTask {
 const SNAPSHOT_WARNING_THRESHOLD: Duration = Duration::from_secs(240);
 
 #[async_trait]
-impl SessionTask for GhostSnapshotTask {
-    fn kind(&self) -> TaskKind {
-        TaskKind::Regular
+impl AgentTask for GhostSnapshotTask {
+    fn kind(&self) -> AgentTaskKind {
+        AgentTaskKind::Regular
     }
 
     fn span_name(&self) -> &'static str {
-        "session_task.ghost_snapshot"
+        "agent_task.ghost_snapshot"
     }
 
     async fn run(
         self: Arc<Self>,
-        session: Arc<SessionTaskContext>,
+        session: Arc<AgentTaskContext>,
         ctx: Arc<TurnContext>,
         _input: Vec<UserInput>,
         cancellation_token: CancellationToken,

@@ -1,5 +1,5 @@
 #![allow(clippy::expect_used)]
-use praxis_login::CODEX_API_KEY_ENV_VAR;
+use praxis_login::PRAXIS_API_KEY_ENV_VAR;
 use std::path::Path;
 use tempfile::TempDir;
 use wiremock::MockServer;
@@ -17,7 +17,7 @@ impl TestCodexExecBuilder {
         );
         cmd.current_dir(self.cwd.path())
             .env("CODEX_HOME", self.home.path())
-            .env(CODEX_API_KEY_ENV_VAR, "dummy");
+            .env(PRAXIS_API_KEY_ENV_VAR, "dummy");
         cmd
     }
     pub fn cmd_with_server(&self, server: &MockServer) -> assert_cmd::Command {

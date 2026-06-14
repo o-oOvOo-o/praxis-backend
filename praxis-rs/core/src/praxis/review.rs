@@ -128,7 +128,6 @@ pub(super) async fn spawn_review_thread(
         praxis_linux_sandbox_exe: parent_turn_context.praxis_linux_sandbox_exe.clone(),
         tool_call_gate: Arc::new(ReadinessFlag::new()),
         tool_loop_guard: Arc::new(ToolLoopGuardState::default()),
-        js_repl: Arc::clone(&sess.js_repl),
         dynamic_tools: parent_turn_context.dynamic_tools.clone(),
         truncation_policy: model_info.truncation_policy.into(),
         turn_metadata_state,

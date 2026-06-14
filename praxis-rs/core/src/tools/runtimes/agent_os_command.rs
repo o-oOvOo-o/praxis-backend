@@ -5,53 +5,12 @@ use std::path::Path;
 
 use praxis_shell_command::parse_command::shlex_join;
 
+use crate::agent_os::AgentOsExecutionOpenRequest;
 use crate::agent_os::ManagedCommandSpan;
-use crate::agent_os::process_runtime_kind;
 use crate::exec::ExecToolCallOutput;
 use crate::tools::output_reducer::apply_command_output_reduction;
 use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
-
-/// Start an AgentOS managed command span for a concrete runtime backend.
-///
-/// Shell, unified exec, zsh-fork, and future command-like runtimes must route
-/// through this helper instead of open-coding ticket/lease acquisition. This is
-/// the thin shared bridge between runtime backends and the AgentOS execution
-/// ticket model; backend-specific code is only responsible for process spawn.
-pub(crate) async fn start_agent_os_command_span(
-    ctx: &ToolCtx,
-    command: &[String],
-    cwd: &Path,
-    process_id: Option<i32>,
-) -> Result<ManagedCommandSpan, ToolError> {
-    start_agent_os_command_span_with_runtime_route(
-        ctx,
-        command,
-        cwd,
-        process_id,
-        process_runtime_kind::COMMAND,
-        None,
-    )
-    .await
-}
-
-pub(crate) async fn start_agent_os_command_span_with_runtime_kind(
-    ctx: &ToolCtx,
-    command: &[String],
-    cwd: &Path,
-    process_id: Option<i32>,
-    runtime_kind: &'static str,
-) -> Result<ManagedCommandSpan, ToolError> {
-    start_agent_os_command_span_with_runtime_route(
-        ctx,
-        command,
-        cwd,
-        process_id,
-        runtime_kind,
-        None,
-    )
-    .await
-}
 
 pub(crate) async fn start_agent_os_command_span_with_runtime_route(
     ctx: &ToolCtx,
@@ -64,15 +23,15 @@ pub(crate) async fn start_agent_os_command_span_with_runtime_route(
     ctx.session
         .services
         .agent_os
-        .start_managed_command_with_runtime_kind(
-            ctx.session.conversation_id,
-            shlex_join(command),
-            command,
+        .open_execution(AgentOsExecutionOpenRequest {
+            thread_id: ctx.session.conversation_id,
+            command: shlex_join(command),
+            argv: command,
             cwd,
             process_id,
-            Some(runtime_kind),
+            runtime_kind: Some(runtime_kind),
             runtime_owner_id,
-        )
+        })
         .await
         .map_err(|err| ToolError::Rejected(err.to_string()))
 }

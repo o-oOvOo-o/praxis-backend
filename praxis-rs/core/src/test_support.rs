@@ -70,7 +70,7 @@ pub async fn start_thread_with_user_shell_override(
     thread_manager: &ThreadManager,
     config: Config,
     user_shell_override: crate::shell::Shell,
-) -> crate::error::Result<crate::NewThread> {
+) -> crate::error::Result<crate::ThreadSpawnResult> {
     thread_manager
         .start_thread_with_user_shell_override_for_tests(config, user_shell_override)
         .await
@@ -82,7 +82,7 @@ pub async fn resume_thread_from_rollout_with_user_shell_override(
     rollout_path: PathBuf,
     auth_manager: Arc<AuthManager>,
     user_shell_override: crate::shell::Shell,
-) -> crate::error::Result<crate::NewThread> {
+) -> crate::error::Result<crate::ThreadSpawnResult> {
     thread_manager
         .resume_thread_from_rollout_with_user_shell_override_for_tests(
             config,

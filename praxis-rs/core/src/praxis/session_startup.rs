@@ -1,4 +1,6 @@
 use super::*;
+use crate::praxis::event_delivery::make_deprecation_notice_event;
+use crate::praxis::event_delivery::make_warning_event;
 
 impl Session {
     /// Builds the `x-praxis-beta-features` header value for this session.
@@ -108,7 +110,7 @@ impl Session {
         mcp_manager: Arc<McpManager>,
         skills_watcher: Arc<SkillsWatcher>,
         agent_control: AgentControl,
-        agent_os: Arc<AgentOsRuntime>,
+        agent_os: Arc<AgentOs>,
     ) -> anyhow::Result<Arc<Self>> {
         debug!(
             "Configuring session: model={}; provider={:?}",
@@ -236,34 +238,24 @@ impl Session {
         let mut post_session_configured_events = Vec::<Event>::new();
 
         for usage in config.features.legacy_feature_usages() {
-            post_session_configured_events.push(Event {
-                id: INITIAL_SUBMIT_ID.to_owned(),
-                msg: EventMsg::DeprecationNotice(DeprecationNoticeEvent {
-                    summary: usage.summary.clone(),
-                    details: usage.details.clone(),
-                }),
-            });
+            post_session_configured_events.push(make_deprecation_notice_event(
+                INITIAL_SUBMIT_ID,
+                usage.summary.clone(),
+                usage.details.clone(),
+            ));
         }
         if crate::config::uses_deprecated_instructions_file(&config.config_layer_stack) {
-            post_session_configured_events.push(Event {
-                id: INITIAL_SUBMIT_ID.to_owned(),
-                msg: EventMsg::DeprecationNotice(DeprecationNoticeEvent {
-                    summary: "`experimental_instructions_file` is deprecated and ignored. Use `model_instructions_file` instead."
+            post_session_configured_events.push(make_deprecation_notice_event(
+                INITIAL_SUBMIT_ID,
+                "`experimental_instructions_file` is deprecated and ignored. Use `model_instructions_file` instead.",
+                Some(
+                    "Move the setting to `model_instructions_file` in config.toml (or under a profile) to load instructions from a file."
                         .to_string(),
-                    details: Some(
-                        "Move the setting to `model_instructions_file` in config.toml (or under a profile) to load instructions from a file."
-                            .to_string(),
-                    ),
-                }),
-            });
+                ),
+            ));
         }
         for message in &config.startup_warnings {
-            post_session_configured_events.push(Event {
-                id: "".to_owned(),
-                msg: EventMsg::Warning(WarningEvent {
-                    message: message.clone(),
-                }),
-            });
+            post_session_configured_events.push(make_warning_event("", message.clone()));
         }
         let config_path = config.praxis_home.join(CONFIG_TOML_FILE);
         if let Some(event) = unstable_features_warning_event(
@@ -279,12 +271,10 @@ impl Session {
             post_session_configured_events.push(event);
         }
         if config.permissions.approval_policy.value() == AskForApproval::OnFailure {
-            post_session_configured_events.push(Event {
-                id: "".to_owned(),
-                msg: EventMsg::Warning(WarningEvent {
-                    message: "`on-failure` approval policy is deprecated and will be removed in a future release. Use `on-request` for interactive approvals or `never` for non-interactive runs.".to_string(),
-                }),
-            });
+            post_session_configured_events.push(make_warning_event(
+                "",
+                "`on-failure` approval policy is deprecated and will be removed in a future release. Use `on-request` for interactive approvals or `never` for non-interactive runs.",
+            ));
         }
 
         let auth = auth.as_ref();
@@ -491,12 +481,8 @@ impl Session {
             shell_args: hook_shell_argv,
         });
         for warning in hooks.startup_warnings() {
-            post_session_configured_events.push(Event {
-                id: INITIAL_SUBMIT_ID.to_owned(),
-                msg: EventMsg::Warning(WarningEvent {
-                    message: warning.clone(),
-                }),
-            });
+            post_session_configured_events
+                .push(make_warning_event(INITIAL_SUBMIT_ID, warning.clone()));
         }
 
         agent_os.attach_state_db(state_db_ctx.clone()).await;
@@ -586,15 +572,9 @@ impl Session {
                 config.features.enabled(Feature::RuntimeMetrics),
                 Self::build_model_client_beta_features_header(config.as_ref()),
             ),
-            code_mode_service: crate::tools::code_mode::CodeModeService::new(
-                config.js_repl_node_path.clone(),
-            ),
+            code_mode_service: crate::tools::code_mode::CodeModeService::new(),
             environment: environment_manager.current().await?,
         };
-        let js_repl = Arc::new(JsReplHandle::with_node_path(
-            config.js_repl_node_path.clone(),
-            config.js_repl_node_module_dirs.clone(),
-        ));
         let (out_of_band_elicitation_paused, _out_of_band_elicitation_paused_rx) =
             watch::channel(false);
 
@@ -616,7 +596,6 @@ impl Session {
             services,
             goal_runtime: crate::goals::GoalRuntimeState::new(),
             llm_runtime_catalog,
-            js_repl,
             next_internal_sub_id: AtomicU64::new(0),
             auto_title_attempted: AtomicBool::new(false),
             auto_summary_in_flight: AtomicBool::new(false),

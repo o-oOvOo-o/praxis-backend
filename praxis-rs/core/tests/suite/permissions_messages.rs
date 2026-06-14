@@ -7,7 +7,7 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
-use praxis_core::ForkSnapshot;
+use praxis_core::ThreadForkSnapshot;
 use praxis_core::config::Constrained;
 use praxis_execpolicy::Policy;
 use praxis_protocol::models::DeveloperInstructions;
@@ -424,7 +424,7 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
     let forked = initial
         .thread_manager
         .fork_thread(
-            ForkSnapshot::Interrupted,
+            ThreadForkSnapshot::Interrupted,
             fork_config,
             rollout_path,
             /*persist_extended_history*/ false,

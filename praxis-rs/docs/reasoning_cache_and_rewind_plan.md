@@ -95,7 +95,7 @@ Preferred display:
 
 - Compact footer/status line for the current thread.
 - Expanded usage panel or tooltip for detailed last/session numbers.
-- Center view should surface cache stats per selected thread, not just globally.
+- Workspace view should surface cache stats per selected thread, not just globally.
 
 Implementation notes:
 
@@ -109,7 +109,7 @@ Implemented state as of 2026-06-01:
 - DeepSeek common transport normalizes `prompt_cache_hit_tokens` and `prompt_cache_miss_tokens` into `TokenUsage`.
 - Thread metadata persists the latest full `TokenUsageInfo` snapshot in SQLite so historical thread lists can show cache data.
 - App gateway `Thread` responses expose persisted usage through `ThreadTokenUsage`.
-- Praxis Center thread rows prefer live token usage and fall back to persisted thread usage; selected rows show cached/reported token counts.
+- Praxis Workspace thread rows prefer live token usage and fall back to persisted thread usage; selected rows show cached/reported token counts.
 
 ## Work Phase 3: Future Rewind
 

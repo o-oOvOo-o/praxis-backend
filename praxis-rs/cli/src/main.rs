@@ -222,7 +222,7 @@ struct DebugAppGatewaySendMessageApiCommand {
 
 #[derive(Debug, Parser)]
 struct ResumeCommand {
-    /// Optional source namespace (`praxis` or `codex`) followed by a conversation/session id
+    /// Optional source namespace (`praxis`, `codex`, or `cursor`) followed by a conversation/session id
     /// (UUID) or thread name. If omitted, defaults to Praxis sessions.
     #[arg(value_name = "SOURCE_OR_TARGET")]
     target: Option<String>,
@@ -252,7 +252,7 @@ struct ResumeCommand {
 
 #[derive(Debug, Parser)]
 struct ForkCommand {
-    /// Optional source namespace (`praxis` or `codex`) followed by a conversation/session id
+    /// Optional source namespace (`praxis`, `codex`, or `cursor`) followed by a conversation/session id
     /// (UUID) or thread name. If omitted, defaults to Praxis sessions.
     #[arg(value_name = "SOURCE_OR_TARGET")]
     target: Option<String>,
@@ -596,6 +596,20 @@ struct InteractiveRemoteOptions {
     #[arg(long = "remote", value_name = "ADDR")]
     remote: Option<String>,
 
+    /// Expose the native Center backend to external agents on a websocket listener.
+    ///
+    /// Accepted form: `ws://IP:PORT`. Native Center defaults to `ws://127.0.0.1:4222`.
+    #[arg(long = "control-listen", value_name = "ADDR")]
+    control_listen: Option<String>,
+
+    /// Disable the default native Center external-control listener.
+    #[arg(
+        long = "no-control-listen",
+        action = clap::ArgAction::SetTrue,
+        conflicts_with = "control_listen"
+    )]
+    no_control_listen: bool,
+
     /// Name of the environment variable containing the bearer token to send to
     /// a remote app gateway websocket.
     #[arg(long = "remote-auth-token-env", value_name = "ENV_VAR")]
@@ -651,6 +665,7 @@ struct FeatureSetArgs {
 enum SessionTargetSource {
     Praxis,
     Codex,
+    Cursor,
 }
 
 impl SessionTargetSource {
@@ -658,6 +673,7 @@ impl SessionTargetSource {
         match value.trim().to_ascii_lowercase().as_str() {
             "praxis" => Some(Self::Praxis),
             "codex" => Some(Self::Codex),
+            "cursor" => Some(Self::Cursor),
             _ => None,
         }
     }
@@ -666,6 +682,7 @@ impl SessionTargetSource {
         match self {
             Self::Praxis => SessionLookupSource::Praxis,
             Self::Codex => SessionLookupSource::Codex,
+            Self::Cursor => SessionLookupSource::Cursor,
         }
     }
 }
@@ -711,7 +728,7 @@ fn parse_session_target_args(
         [source, session_id] => {
             let Some(source) = SessionTargetSource::from_keyword(source) else {
                 anyhow::bail!(
-                    "`praxis {action}` accepts two positional arguments only when the first is `praxis` or `codex`."
+                    "`praxis {action}` accepts two positional arguments only when the first is `praxis`, `codex`, or `cursor`."
                 );
             };
             Ok(ParsedSessionTarget {
@@ -763,7 +780,14 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
     let toggle_overrides = feature_toggles.to_overrides()?;
     root_config_overrides.raw_overrides.extend(toggle_overrides);
     let root_remote = remote.remote;
+    let root_control_listen = remote.control_listen;
+    let root_no_control_listen = remote.no_control_listen;
     let root_remote_auth_token_env = remote.remote_auth_token_env;
+    reject_control_options_for_noninteractive_subcommand(
+        root_control_listen.as_deref(),
+        root_no_control_listen,
+        subcommand.as_ref(),
+    )?;
 
     match subcommand {
         None => {
@@ -774,6 +798,8 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             let exit_info = run_interactive_tui(
                 interactive,
                 root_remote.clone(),
+                root_control_listen.clone(),
+                root_no_control_listen,
                 root_remote_auth_token_env.clone(),
                 arg0_paths.clone(),
             )
@@ -890,7 +916,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 dev_interactive,
             );
             let exit_info =
-                run_interactive_tui(interactive, None, None, arg0_paths.clone()).await?;
+                run_interactive_tui(interactive, None, None, true, None, arg0_paths.clone()).await?;
             handle_app_exit(exit_info)?;
         }
         #[cfg(target_os = "macos")]
@@ -924,9 +950,17 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 include_non_interactive,
                 config_overrides,
             );
+            let (control_listen, no_control_listen) = merge_control_listen_options(
+                root_control_listen.clone(),
+                root_no_control_listen,
+                remote.control_listen,
+                remote.no_control_listen,
+            );
             let exit_info = run_interactive_tui(
                 interactive,
                 remote.remote.or(root_remote.clone()),
+                control_listen,
+                no_control_listen,
                 remote
                     .remote_auth_token_env
                     .or(root_remote_auth_token_env.clone()),
@@ -955,9 +989,17 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 all,
                 config_overrides,
             );
+            let (control_listen, no_control_listen) = merge_control_listen_options(
+                root_control_listen.clone(),
+                root_no_control_listen,
+                remote.control_listen,
+                remote.no_control_listen,
+            );
             let exit_info = run_interactive_tui(
                 interactive,
                 remote.remote.or(root_remote.clone()),
+                control_listen,
+                no_control_listen,
                 remote
                     .remote_auth_token_env
                     .or(root_remote_auth_token_env.clone()),
@@ -1366,6 +1408,46 @@ fn reject_remote_mode_for_app_gateway_subcommand(
     reject_remote_mode_for_subcommand(remote, remote_auth_token_env, subcommand_name)
 }
 
+fn reject_control_options_for_noninteractive_subcommand(
+    control_listen: Option<&str>,
+    no_control_listen: bool,
+    subcommand: Option<&Subcommand>,
+) -> anyhow::Result<()> {
+    if control_listen.is_none() && !no_control_listen {
+        return Ok(());
+    };
+    if matches!(
+        subcommand,
+        None | Some(Subcommand::Resume(_)) | Some(Subcommand::Fork(_))
+    ) {
+        return Ok(());
+    }
+    let control_option = control_listen
+        .map(|addr| format!("--control-listen {addr}"))
+        .unwrap_or_else(|| "--no-control-listen".to_string());
+    anyhow::bail!(
+        "`{control_option}` is only supported for Praxis Center/TUI commands"
+    )
+}
+
+fn merge_control_listen_options(
+    root_control_listen: Option<String>,
+    root_no_control_listen: bool,
+    command_control_listen: Option<String>,
+    command_no_control_listen: bool,
+) -> (Option<String>, bool) {
+    if command_no_control_listen {
+        return (None, true);
+    }
+    if command_control_listen.is_some() {
+        return (command_control_listen, false);
+    }
+    if root_no_control_listen {
+        return (None, true);
+    }
+    (root_control_listen, false)
+}
+
 fn read_remote_auth_token_from_env_var_with<F>(
     env_var_name: &str,
     get_var: F,
@@ -1413,6 +1495,8 @@ async fn resolve_exec_remote_app_gateway(
 async fn run_interactive_tui(
     mut interactive: TuiCli,
     remote: Option<String>,
+    control_listen: Option<String>,
+    no_control_listen: bool,
     remote_auth_token_env: Option<String>,
     arg0_paths: Arg0DispatchPaths,
 ) -> std::io::Result<AppExitInfo> {
@@ -1444,6 +1528,26 @@ async fn run_interactive_tui(
         .map(praxis_tui::normalize_remote_addr)
         .transpose()
         .map_err(std::io::Error::other)?;
+    let normalized_control_listen = control_listen
+        .as_deref()
+        .map(praxis_tui::parse_control_listen_addr)
+        .transpose()
+        .map_err(std::io::Error::other)?;
+    if normalized_remote.is_some() && normalized_control_listen.is_some() {
+        return Ok(AppExitInfo::fatal(
+            "`--control-listen` requires native Center mode and cannot be combined with `--remote`.",
+        ));
+    }
+    let control_listen = if normalized_remote.is_some() || no_control_listen {
+        None
+    } else if let Some(addr) = normalized_control_listen {
+        Some(praxis_tui::ControlListenConfig::required(addr))
+    } else {
+        let default_addr =
+            praxis_tui::parse_control_listen_addr(praxis_tui::DEFAULT_CENTER_CONTROL_LISTEN_URL)
+                .map_err(std::io::Error::other)?;
+        Some(praxis_tui::ControlListenConfig::best_effort(default_addr))
+    };
     if remote_auth_token_env.is_some() && normalized_remote.is_none() {
         return Ok(AppExitInfo::fatal(
             "`--remote-auth-token-env` requires `--remote`.",
@@ -1460,6 +1564,7 @@ async fn run_interactive_tui(
         praxis_core::config_loader::LoaderOverrides::default(),
         normalized_remote,
         remote_auth_token,
+        control_listen,
     )
     .await
 }
@@ -2120,6 +2225,24 @@ mod tests {
     }
 
     #[test]
+    fn control_listen_flag_parses_for_interactive_root() {
+        let cli =
+            MultitoolCli::try_parse_from(["codex", "--control-listen", "ws://127.0.0.1:4222"])
+                .expect("parse");
+        assert_eq!(
+            cli.remote.control_listen.as_deref(),
+            Some("ws://127.0.0.1:4222")
+        );
+    }
+
+    #[test]
+    fn no_control_listen_flag_parses_for_interactive_root() {
+        let cli =
+            MultitoolCli::try_parse_from(["codex", "--no-control-listen"]).expect("parse");
+        assert!(cli.remote.no_control_listen);
+    }
+
+    #[test]
     fn remote_auth_token_env_flag_parses_for_interactive_root() {
         let cli = MultitoolCli::try_parse_from([
             "codex",
@@ -2174,6 +2297,39 @@ mod tests {
             err.to_string()
                 .contains("only supported for interactive TUI commands")
         );
+    }
+
+    #[test]
+    fn reject_control_options_for_non_interactive_subcommands() {
+        let cli = MultitoolCli::try_parse_from([
+            "codex",
+            "--control-listen",
+            "ws://127.0.0.1:4222",
+            "mcp-server",
+        ])
+        .expect("parse");
+        let err = reject_control_options_for_noninteractive_subcommand(
+            cli.remote.control_listen.as_deref(),
+            cli.remote.no_control_listen,
+            cli.subcommand.as_ref(),
+        )
+        .expect_err("non-interactive subcommands should reject --control-listen");
+        assert!(
+            err.to_string()
+                .contains("only supported for Praxis Center/TUI commands")
+        );
+    }
+
+    #[test]
+    fn merge_control_listen_options_prefers_command_explicit_addr() {
+        let (addr, disabled) = merge_control_listen_options(
+            None,
+            /*root_no_control_listen*/ true,
+            Some("ws://127.0.0.1:4223".to_string()),
+            /*command_no_control_listen*/ false,
+        );
+        assert_eq!(addr.as_deref(), Some("ws://127.0.0.1:4223"));
+        assert!(!disabled);
     }
 
     #[test]

@@ -6158,75 +6158,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "praxis-app-gateway-client"
-version = "0.0.0"
-dependencies = [
- "futures",
- "praxis-app-gateway-native",
- "praxis-app-gateway-protocol",
- "praxis-arg0",
- "praxis-core",
- "praxis-feedback",
- "praxis-protocol",
- "pretty_assertions",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "toml 0.9.11+spec-1.1.0",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "praxis-app-gateway-core"
-version = "0.0.0"
-dependencies = [
- "praxis-app-gateway-protocol",
- "serde_json",
-]
-
-[[package]]
-name = "praxis-app-gateway-native"
-version = "0.0.0"
-dependencies = [
- "praxis-app-gateway-core",
- "praxis-app-gateway-protocol",
- "praxis-app-gateway-runtime",
- "praxis-arg0",
- "praxis-core",
- "praxis-feedback",
- "praxis-protocol",
- "toml 0.9.11+spec-1.1.0",
-]
-
-[[package]]
-name = "praxis-app-gateway-protocol"
-version = "0.0.0"
-dependencies = [
- "anyhow",
- "clap",
- "inventory",
- "praxis-experimental-api-macros",
- "praxis-git-utils",
- "praxis-protocol",
- "praxis-utils-absolute-path",
- "pretty_assertions",
- "rmcp",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "serde_with",
- "shlex",
- "strum_macros 0.28.0",
- "thiserror 2.0.18",
- "tracing",
- "ts-rs",
- "uuid",
-]
-
-[[package]]
-name = "praxis-app-gateway-runtime"
+name = "praxis-app-gateway"
 version = "0.0.0"
 dependencies = [
  "anyhow",
@@ -6294,11 +6226,79 @@ dependencies = [
 ]
 
 [[package]]
-name = "praxis-app-gateway-service"
+name = "praxis-app-gateway-client"
+version = "0.0.0"
+dependencies = [
+ "futures",
+ "praxis-app-gateway-native",
+ "praxis-app-gateway-protocol",
+ "praxis-arg0",
+ "praxis-core",
+ "praxis-feedback",
+ "praxis-protocol",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "toml 0.9.11+spec-1.1.0",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "praxis-app-gateway-core"
 version = "0.0.0"
 dependencies = [
  "praxis-app-gateway-protocol",
- "praxis-app-gateway-runtime",
+ "serde_json",
+]
+
+[[package]]
+name = "praxis-app-gateway-native"
+version = "0.0.0"
+dependencies = [
+ "praxis-app-gateway",
+ "praxis-app-gateway-core",
+ "praxis-app-gateway-protocol",
+ "praxis-arg0",
+ "praxis-core",
+ "praxis-feedback",
+ "praxis-protocol",
+ "toml 0.9.11+spec-1.1.0",
+]
+
+[[package]]
+name = "praxis-app-gateway-protocol"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "inventory",
+ "praxis-experimental-api-macros",
+ "praxis-git-utils",
+ "praxis-protocol",
+ "praxis-utils-absolute-path",
+ "pretty_assertions",
+ "rmcp",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "shlex",
+ "strum_macros 0.28.0",
+ "thiserror 2.0.18",
+ "tracing",
+ "ts-rs",
+ "uuid",
+]
+
+[[package]]
+name = "praxis-app-gateway-service"
+version = "0.0.0"
+dependencies = [
+ "praxis-app-gateway",
+ "praxis-app-gateway-protocol",
  "praxis-arg0",
  "praxis-core",
  "praxis-protocol",
@@ -6720,6 +6720,7 @@ dependencies = [
  "sha1",
  "shlex",
  "similar",
+ "sqlx",
  "tempfile",
  "test-case",
  "test-log",

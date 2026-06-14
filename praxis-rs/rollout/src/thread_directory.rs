@@ -17,6 +17,7 @@ use crate::INTERACTIVE_SESSION_SOURCES;
 use crate::RolloutConfigView;
 use crate::RolloutRecorder;
 use crate::list::Cursor;
+use crate::list::ThreadArchiveFilter;
 use crate::list::ThreadItem;
 use crate::list::ThreadSortKey;
 use crate::list::ThreadsPage;
@@ -153,7 +154,7 @@ impl<'a, C: RolloutConfigView> ThreadDirectory<'a, C> {
         crate::list::find_thread_path_by_id_str_with_db_context(
             self.config.praxis_home(),
             &thread_id.to_string(),
-            archived_only,
+            ThreadArchiveFilter::from_archived_only(archived_only),
             self.state_db(),
         )
         .await
@@ -823,6 +824,8 @@ mod tests {
             parent_thread_id,
             depth: 1,
             agent_path: None,
+            agent_base_name: None,
+            agent_title: None,
             agent_display_name: None,
             agent_role: None,
         });

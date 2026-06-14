@@ -164,7 +164,7 @@ async fn helpers_are_available_and_do_not_panic() {
         enhanced_keys_supported: false,
         has_chatgpt_account: false,
         model_catalog: test_model_catalog(&cfg),
-        feedback: praxis_feedback::CodexFeedback::new(),
+        feedback: praxis_feedback::PraxisFeedback::new(),
         is_first_run: true,
         status_account_display: None,
         initial_plan_type: None,
@@ -747,7 +747,7 @@ async fn ui_snapshots_small_heights_task_running() {
     chat.handle_praxis_event(Event {
         id: "task-1".into(),
         msg: EventMsg::AgentReasoningDelta(AgentReasoningDeltaEvent {
-            delta: "**Thinking**".into(),
+            delta: "**Reasoning**".into(),
         }),
     });
     for h in [1u16, 2, 3] {

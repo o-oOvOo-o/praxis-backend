@@ -69,7 +69,7 @@ async fn experimental_mode_plan_is_ignored_on_startup() {
         enhanced_keys_supported: false,
         has_chatgpt_account: false,
         model_catalog: test_model_catalog(&cfg),
-        feedback: praxis_feedback::CodexFeedback::new(),
+        feedback: praxis_feedback::PraxisFeedback::new(),
         is_first_run: true,
         status_account_display: None,
         initial_plan_type: None,

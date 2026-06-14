@@ -402,7 +402,8 @@ impl ChatgptAuth {
 }
 
 pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
-pub const CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
+pub const PRAXIS_API_KEY_ENV_VAR: &str = "PRAXIS_API_KEY";
+const LEGACY_CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
 
 pub fn read_openai_api_key_from_env() -> Option<String> {
     env::var(OPENAI_API_KEY_ENV_VAR)
@@ -412,10 +413,14 @@ pub fn read_openai_api_key_from_env() -> Option<String> {
 }
 
 pub fn read_praxis_api_key_from_env() -> Option<String> {
-    env::var(CODEX_API_KEY_ENV_VAR)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    [PRAXIS_API_KEY_ENV_VAR, LEGACY_CODEX_API_KEY_ENV_VAR]
+        .into_iter()
+        .find_map(|name| {
+            env::var(name)
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+        })
 }
 
 /// Delete the auth.json file inside `praxis_home` if it exists. Returns `Ok(true)`

@@ -1,6 +1,6 @@
 use super::*;
 
-impl AgentOsRuntime {
+impl AgentOs {
     pub(super) async fn record_event(
         &self,
         event_type: &str,
@@ -9,7 +9,9 @@ impl AgentOsRuntime {
         command_id: Option<String>,
         payload: serde_json::Value,
     ) {
+        let sequence = self.change_seq.fetch_add(1, Ordering::Relaxed) + 1;
         let entry = EventLedgerEntry {
+            sequence,
             event_id: format!("event-{}", Uuid::new_v4()),
             event_type: event_type.to_string(),
             thread_id,
@@ -44,7 +46,7 @@ impl AgentOsRuntime {
                 tracing::warn!("failed to persist AgentOS event: {err}");
             }
         }
-        self.notify_changed();
+        self.change_tx.send_replace(sequence);
     }
 
     pub(super) async fn persist_thread_snapshot(&self, entry: &ThreadRegistryEntry) {

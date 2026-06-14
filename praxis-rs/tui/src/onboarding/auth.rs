@@ -1080,6 +1080,7 @@ mod tests {
     use praxis_app_gateway_client::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
     use praxis_app_gateway_client::NativeAppGatewayClient;
     use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
+    use praxis_app_gateway_client::NativeControlAuthSettings;
     use praxis_arg0::Arg0DispatchPaths;
     use praxis_cloud_requirements::cloud_config_bundle_loader_for_storage;
     use praxis_core::config::ConfigBuilder;
@@ -1108,7 +1109,7 @@ mod tests {
                 AuthCredentialsStoreMode::File,
                 "https://chatgpt.com/backend-api/".to_string(),
             ),
-            feedback: praxis_feedback::CodexFeedback::new(),
+            feedback: praxis_feedback::PraxisFeedback::new(),
             config_warnings: Vec::new(),
             session_source: SessionSource::Cli,
             enable_praxis_api_key_env: false,
@@ -1117,6 +1118,8 @@ mod tests {
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
             channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
+            control_listen: None,
+            control_auth: NativeControlAuthSettings::default(),
         })
         .await
         .unwrap();

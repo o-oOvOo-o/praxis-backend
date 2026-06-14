@@ -36,10 +36,10 @@ fn write_plugin_skill(
         .join(plugin_name)
         .join("local");
     let skill_dir = plugin_root.join("skills").join(dir);
-    fs::create_dir_all(plugin_root.join(".codex-plugin")).unwrap();
+    fs::create_dir_all(plugin_root.join(".praxis-plugin")).unwrap();
     fs::create_dir_all(&skill_dir).unwrap();
     fs::write(
-        plugin_root.join(".codex-plugin/plugin.json"),
+        plugin_root.join(".praxis-plugin/plugin.json"),
         format!(r#"{{"name":"{plugin_name}"}}"#),
     )
     .unwrap();

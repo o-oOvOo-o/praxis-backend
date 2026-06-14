@@ -4,10 +4,9 @@
 //! resulting `InterAgentCommunication` should wake the target immediately.
 
 use super::*;
+use crate::agent_os::AgentTaskDispatchRequest;
 use crate::agent_os::ResourceRequirement;
 use crate::agent_os::RuntimeCommandStatus;
-use crate::agent_os::RuntimeCommandType;
-use crate::agent_os::TaskCreateRequest;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::InterAgentCommunication;
 
@@ -226,16 +225,18 @@ async fn handle_message_submission(
             "Tasks can't be assigned to the root agent".to_string(),
         ));
     }
-    session
-        .services
-        .agent_os
-        .ensure_inter_thread_message_allowed(
-            session.conversation_id,
-            receiver_thread_id,
-            mode == MessageDeliveryMode::TriggerTurn,
-        )
-        .await
-        .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+    if mode == MessageDeliveryMode::QueueOnly {
+        session
+            .services
+            .agent_os
+            .ensure_inter_thread_message_allowed(
+                session.conversation_id,
+                receiver_thread_id,
+                /*require_active_dispatcher*/ false,
+            )
+            .await
+            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
+    }
     if interrupt {
         session
             .services
@@ -244,93 +245,50 @@ async fn handle_message_submission(
             .await
             .map_err(|err| collab_agent_error(receiver_thread_id, err))?;
     }
-    let (task_id, runtime_command_payload) = if mode == MessageDeliveryMode::TriggerTurn {
+    let dispatch = if mode == MessageDeliveryMode::TriggerTurn {
         let task = structured_task.ok_or_else(|| {
             FunctionCallError::RespondToModel(
                 "AgentOS task dispatch requires structured task metadata".to_string(),
             )
         })?;
-        let task_id = session
-            .services
-            .agent_os
-            .create_task(TaskCreateRequest {
-                objective: task.objective.clone(),
-                scope: task.scope.clone(),
-                constraints: task.constraints.clone(),
-                acceptance_criteria: task.acceptance_criteria.clone(),
-                artifact_refs: task.artifact_refs.clone(),
-                priority: task.priority,
-                assigned_thread_id: Some(receiver_thread_id),
-                required_capabilities: task.required_capabilities.clone(),
-                required_resources: task.required_resources.clone(),
-                token_budget: task.token_budget,
-                exploratory: task.exploratory,
-                created_by: session.conversation_id,
-            })
-            .await
-            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
-        session
-            .services
-            .agent_os
-            .assign_task(task_id.as_str(), receiver_thread_id)
-            .await
-            .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?;
-        let runtime_command_payload = serde_json::json!({
-            "objective": &task.objective,
-            "prompt": &prompt,
-            "scope": &task.scope,
-            "constraints": &task.constraints,
-            "acceptance_criteria": &task.acceptance_criteria,
-            "artifact_refs": &task.artifact_refs,
-            "required_capabilities": &task.required_capabilities,
-            "required_resources": task.required_resources.iter().map(|resource| resource.key()).collect::<Vec<_>>(),
-            "token_budget": task.token_budget,
-            "priority": task.priority,
-            "exploratory": task.exploratory,
-            "interrupt": interrupt,
-        });
-        (Some(task_id), Some(runtime_command_payload))
-    } else {
-        (None, None)
-    };
-    let runtime_command = if let Some(payload) = runtime_command_payload.clone() {
         Some(
             session
                 .services
                 .agent_os
-                .issue_runtime_command(
-                    session.conversation_id,
-                    receiver_thread_id,
-                    RuntimeCommandType::AssignTask,
-                    task_id.clone(),
-                    payload,
-                )
+                .dispatch_task(AgentTaskDispatchRequest {
+                    from_thread_id: session.conversation_id,
+                    to_thread_id: receiver_thread_id,
+                    prompt: prompt.clone(),
+                    objective: task.objective,
+                    scope: task.scope,
+                    constraints: task.constraints,
+                    acceptance_criteria: task.acceptance_criteria,
+                    artifact_refs: task.artifact_refs,
+                    required_capabilities: task.required_capabilities,
+                    required_resources: task.required_resources,
+                    token_budget: task.token_budget,
+                    priority: task.priority,
+                    exploratory: task.exploratory,
+                    interrupt,
+                })
                 .await
                 .map_err(|err| FunctionCallError::RespondToModel(err.to_string()))?,
         )
     } else {
         None
     };
-    session
-        .send_event(
-            &turn,
-            CollabAgentInteractionBeginEvent {
-                call_id: call_id.clone(),
-                sender_thread_id: session.conversation_id,
-                receiver_thread_id,
-                kind: mode.interaction_kind(),
-                prompt: prompt.clone(),
-            }
-            .into(),
-        )
+    let collab_events = CollabAgentEventEmitter::new(session.as_ref(), turn.as_ref(), &call_id);
+    collab_events
+        .interaction_begin(receiver_thread_id, mode.interaction_kind(), prompt.clone())
         .await;
     let receiver_agent_path = receiver_agent.agent_path.clone().ok_or_else(|| {
         FunctionCallError::RespondToModel("target agent is missing an agent_path".to_string())
     })?;
-    let communication_content = if let (Some(command), Some(payload)) =
-        (runtime_command.as_ref(), runtime_command_payload.as_ref())
-    {
-        format_assign_task_communication(command.command_id.as_str(), payload)
+    let communication_content = if let Some(dispatch) = dispatch.as_ref() {
+        format_assign_task_communication(
+            dispatch.runtime_command.command_id.as_str(),
+            &dispatch.runtime_command_payload,
+        )
     } else {
         prompt.clone()
     };
@@ -354,28 +312,22 @@ async fn handle_message_submission(
         .agent_control
         .get_status(receiver_thread_id)
         .await;
-    session
-        .send_event(
-            &turn,
-            CollabAgentInteractionEndEvent {
-                call_id,
-                sender_thread_id: session.conversation_id,
-                receiver_thread_id,
-                kind: mode.interaction_kind(),
-                receiver_agent_base_name: receiver_agent_base_name.clone(),
-                receiver_agent_title: receiver_agent_title.clone(),
-                receiver_agent_display_name: receiver_agent_display_name.clone(),
-                receiver_agent_role: receiver_agent.agent_role,
-                prompt,
-                status,
-            }
-            .into(),
-        )
+    collab_events
+        .interaction_end(CollabInteractionEndEventInput {
+            receiver_thread_id,
+            kind: mode.interaction_kind(),
+            receiver_agent_base_name: receiver_agent_base_name.clone(),
+            receiver_agent_title: receiver_agent_title.clone(),
+            receiver_agent_display_name: receiver_agent_display_name.clone(),
+            receiver_agent_role: receiver_agent.agent_role,
+            prompt,
+            status,
+        })
         .await;
     let submission_id = match result {
         Ok(submission_id) => submission_id,
         Err(err) => {
-            if let Some(command) = runtime_command.as_ref() {
+            if let Some(command) = dispatch.as_ref().map(|dispatch| &dispatch.runtime_command) {
                 let _ = session
                     .services
                     .agent_os
@@ -389,10 +341,10 @@ async fn handle_message_submission(
             return Err(err);
         }
     };
-    let runtime_command_id = runtime_command
+    let runtime_command_id = dispatch
         .as_ref()
-        .map(|command| command.command_id.clone());
-    if let Some(task_id) = task_id {
+        .map(|dispatch| dispatch.runtime_command.command_id.clone());
+    if let Some(task_id) = dispatch.as_ref().map(|dispatch| &dispatch.task_id) {
         tracing::debug!(%task_id, %receiver_thread_id, "AgentOS task assigned through multi-agent tool");
     }
     let target_for_next_action = receiver_thread_id.to_string();

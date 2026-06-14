@@ -1,0 +1,19 @@
+{
+  "name": "praxis-thread-control",
+  "description": "Operate Praxis threads through the App Gateway thread control APIs.",
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Praxis Thread Control",
+    "shortDescription": "List, resume, fork, and control Praxis threads.",
+    "longDescription": "Thin operational capability over App Gateway thread/list, thread/read, thread/resume, thread/fork, and thread/control APIs.",
+    "developerName": "Praxis",
+    "category": "agent-control",
+    "capabilities": [
+      "thread list",
+      "thread resume",
+      "thread fork",
+      "control acquire",
+      "control release"
+    ]
+  }
+}

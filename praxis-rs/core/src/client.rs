@@ -116,8 +116,8 @@ use crate::util::emit_feedback_auth_recovery_tags;
 use crate::util::emit_feedback_request_tags_with_auth_env;
 
 pub const OPENAI_BETA_HEADER: &str = "OpenAI-Beta";
-pub const X_CODEX_TURN_STATE_HEADER: &str = "x-praxis-turn-state";
-pub const X_CODEX_TURN_METADATA_HEADER: &str = "x-praxis-turn-metadata";
+pub const X_PRAXIS_TURN_STATE_HEADER: &str = "x-praxis-turn-state";
+pub const X_PRAXIS_TURN_METADATA_HEADER: &str = "x-praxis-turn-metadata";
 pub const X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER: &str =
     "x-responsesapi-include-timing-metrics";
 const RESPONSES_WEBSOCKETS_V2_BETA_HEADER_VALUE: &str = "responses_websockets=2026-02-06";
@@ -1663,7 +1663,7 @@ fn build_ws_client_metadata(turn_metadata_header: Option<&str>) -> Option<HashMa
     let turn_metadata_header = parse_turn_metadata_header(turn_metadata_header)?;
     let turn_metadata = turn_metadata_header.to_str().ok()?.to_string();
     let mut client_metadata = HashMap::new();
-    client_metadata.insert(X_CODEX_TURN_METADATA_HEADER.to_string(), turn_metadata);
+    client_metadata.insert(X_PRAXIS_TURN_METADATA_HEADER.to_string(), turn_metadata);
     Some(client_metadata)
 }
 
@@ -1690,10 +1690,10 @@ fn build_responses_headers(
         && let Some(state) = turn_state.get()
         && let Ok(header_value) = HeaderValue::from_str(state)
     {
-        headers.insert(X_CODEX_TURN_STATE_HEADER, header_value);
+        headers.insert(X_PRAXIS_TURN_STATE_HEADER, header_value);
     }
     if let Some(header_value) = turn_metadata_header {
-        headers.insert(X_CODEX_TURN_METADATA_HEADER, header_value.clone());
+        headers.insert(X_PRAXIS_TURN_METADATA_HEADER, header_value.clone());
     }
     headers
 }

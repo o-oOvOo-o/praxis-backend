@@ -13,13 +13,14 @@ use tokio_util::sync::CancellationToken;
 use crate::error::PraxisErr;
 use crate::error::Result;
 use crate::function_tool::FunctionCallError;
+use crate::history_preview::HistoryPreview;
 use crate::memories::citations::get_thread_id_from_citations;
 use crate::memories::citations::parse_memory_citation;
 use crate::parse_turn_item;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
-use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolRouter;
+use crate::tools::tool_call_runtime::ToolCallRuntime;
 use futures::Future;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::DeveloperInstructions;
@@ -196,6 +197,67 @@ pub(crate) struct HandleOutputCtx {
     pub cancellation_token: CancellationToken,
 }
 
+pub(crate) struct CompletedResponseItemSink<'a> {
+    sess: &'a Session,
+    turn_context: &'a TurnContext,
+    plan_mode: bool,
+}
+
+impl<'a> CompletedResponseItemSink<'a> {
+    pub(crate) fn new(sess: &'a Session, turn_context: &'a TurnContext) -> Self {
+        Self {
+            sess,
+            turn_context,
+            plan_mode: turn_context.collaboration_mode.mode == ModeKind::Plan,
+        }
+    }
+
+    pub(crate) async fn emit_and_record(
+        &self,
+        item: &ResponseItem,
+        previously_active_item: Option<&TurnItem>,
+    ) -> Option<String> {
+        if let Some(turn_item) =
+            handle_non_tool_response_item(self.sess, self.turn_context, item, self.plan_mode).await
+        {
+            self.emit_completed_turn_item(turn_item, previously_active_item)
+                .await;
+        }
+        self.record_completed(item).await
+    }
+
+    pub(crate) async fn record_completed(&self, item: &ResponseItem) -> Option<String> {
+        record_completed_response_item(self.sess, self.turn_context, item).await;
+        last_assistant_message_from_item(item, self.plan_mode)
+    }
+
+    async fn emit_completed_turn_item(
+        &self,
+        turn_item: TurnItem,
+        previously_active_item: Option<&TurnItem>,
+    ) {
+        if previously_active_item.is_none() {
+            let started_item = started_item_for_completed_turn_item(turn_item.clone());
+            self.sess
+                .emit_turn_item_started(self.turn_context, &started_item)
+                .await;
+        }
+        self.sess
+            .emit_turn_item_completed(self.turn_context, turn_item)
+            .await;
+    }
+}
+
+fn started_item_for_completed_turn_item(mut turn_item: TurnItem) -> TurnItem {
+    if let TurnItem::ImageGeneration(item) = &mut turn_item {
+        item.status = "in_progress".to_string();
+        item.revised_prompt = None;
+        item.result.clear();
+        item.saved_path = None;
+    }
+    turn_item
+}
+
 #[instrument(level = "trace", skip_all)]
 pub(crate) async fn handle_output_item_done(
     ctx: &mut HandleOutputCtx,
@@ -203,7 +265,6 @@ pub(crate) async fn handle_output_item_done(
     previously_active_item: Option<TurnItem>,
 ) -> Result<OutputItemResult> {
     let mut output = OutputItemResult::default();
-    let plan_mode = ctx.turn_context.collaboration_mode.mode == ModeKind::Plan;
 
     match ToolRouter::build_tool_call(ctx.sess.as_ref(), item.clone()).await {
         // The model emitted a tool call; log it, persist the item immediately, and queue the tool execution.
@@ -218,29 +279,9 @@ pub(crate) async fn handle_output_item_done(
                     "hidden tool call suppressed after tool loop guard intervention"
                 );
                 let final_item = hidden_tool_loop_final_item(ctx, call.tool_name.as_str()).await;
-                if let Some(turn_item) = handle_non_tool_response_item(
-                    ctx.sess.as_ref(),
-                    ctx.turn_context.as_ref(),
-                    &final_item,
-                    plan_mode,
-                )
-                .await
-                {
-                    ctx.sess
-                        .emit_turn_item_started(&ctx.turn_context, &turn_item)
-                        .await;
-                    ctx.sess
-                        .emit_turn_item_completed(&ctx.turn_context, turn_item)
-                        .await;
-                }
-                record_completed_response_item(
-                    ctx.sess.as_ref(),
-                    ctx.turn_context.as_ref(),
-                    &final_item,
-                )
-                .await;
-                output.last_agent_message =
-                    last_assistant_message_from_item(&final_item, plan_mode);
+                let sink =
+                    CompletedResponseItemSink::new(ctx.sess.as_ref(), ctx.turn_context.as_ref());
+                output.last_agent_message = sink.emit_and_record(&final_item, None).await;
                 return Ok(output);
             }
 
@@ -267,36 +308,10 @@ pub(crate) async fn handle_output_item_done(
         }
         // No tool call: convert messages/reasoning into turn items and mark them as complete.
         Ok(None) => {
-            if let Some(turn_item) = handle_non_tool_response_item(
-                ctx.sess.as_ref(),
-                ctx.turn_context.as_ref(),
-                &item,
-                plan_mode,
-            )
-            .await
-            {
-                if previously_active_item.is_none() {
-                    let mut started_item = turn_item.clone();
-                    if let TurnItem::ImageGeneration(item) = &mut started_item {
-                        item.status = "in_progress".to_string();
-                        item.revised_prompt = None;
-                        item.result.clear();
-                        item.saved_path = None;
-                    }
-                    ctx.sess
-                        .emit_turn_item_started(&ctx.turn_context, &started_item)
-                        .await;
-                }
-
-                ctx.sess
-                    .emit_turn_item_completed(&ctx.turn_context, turn_item)
-                    .await;
-            }
-            record_completed_response_item(ctx.sess.as_ref(), ctx.turn_context.as_ref(), &item)
+            let sink = CompletedResponseItemSink::new(ctx.sess.as_ref(), ctx.turn_context.as_ref());
+            output.last_agent_message = sink
+                .emit_and_record(&item, previously_active_item.as_ref())
                 .await;
-            let last_agent_message = last_assistant_message_from_item(&item, plan_mode);
-
-            output.last_agent_message = last_agent_message;
         }
         // Guardrail: the model issued a LocalShellCall without an id; surface the error back into history.
         Err(FunctionCallError::MissingLocalShellCallId) => {
@@ -357,10 +372,7 @@ pub(crate) async fn handle_output_item_done(
     Ok(output)
 }
 
-pub(crate) async fn tool_loop_guard_final_item(
-    sess: Arc<Session>,
-    tool_name: &str,
-) -> ResponseItem {
+async fn tool_loop_guard_final_item(sess: Arc<Session>, tool_name: &str) -> ResponseItem {
     final_answer_item(
         sess,
         format!(
@@ -371,7 +383,7 @@ pub(crate) async fn tool_loop_guard_final_item(
     .await
 }
 
-pub(crate) async fn subagent_workflow_empty_final_item(sess: Arc<Session>) -> ResponseItem {
+async fn subagent_workflow_empty_final_item(sess: Arc<Session>) -> ResponseItem {
     final_answer_item(
         sess,
         "Sub-agent workflow completed, but the model ended the turn without a final assistant message.".to_string(),
@@ -380,7 +392,7 @@ pub(crate) async fn subagent_workflow_empty_final_item(sess: Arc<Session>) -> Re
     .await
 }
 
-pub(crate) async fn subagent_workflow_incomplete_final_item(sess: Arc<Session>) -> ResponseItem {
+async fn subagent_workflow_incomplete_final_item(sess: Arc<Session>) -> ResponseItem {
     final_answer_item(
         sess,
         "Sub-agent workflow ended without a final assistant message while live sub-agents still remain. Not emitting the requested completion marker.".to_string(),
@@ -389,7 +401,7 @@ pub(crate) async fn subagent_workflow_incomplete_final_item(sess: Arc<Session>) 
     .await
 }
 
-pub(crate) async fn model_empty_final_item(sess: Arc<Session>) -> ResponseItem {
+async fn model_empty_final_item(sess: Arc<Session>) -> ResponseItem {
     final_answer_item(
         sess,
         "Model completed the turn without a final assistant message. Not emitting any requested completion marker.".to_string(),
@@ -398,13 +410,54 @@ pub(crate) async fn model_empty_final_item(sess: Arc<Session>) -> ResponseItem {
     .await
 }
 
+async fn has_live_subagents(sess: &Arc<Session>, turn_context: &Arc<TurnContext>) -> bool {
+    sess.services
+        .agent_control
+        .list_agents(sess.conversation_id, &turn_context.session_source, None)
+        .await
+        .map(|agents| agents.into_iter().any(|agent| agent.agent_name != "/root"))
+        .unwrap_or(true)
+}
+
+pub(crate) async fn synthetic_final_item_for_guard(
+    sess: Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    include_model_empty: bool,
+) -> Option<ResponseItem> {
+    let guard = &turn_context.tool_loop_guard;
+    if guard.has_terminal_list_agents() {
+        Some(tool_loop_guard_final_item(sess, "list_agents").await)
+    } else if guard.has_subagent_tool_calls() {
+        Some(if has_live_subagents(&sess, turn_context).await {
+            subagent_workflow_incomplete_final_item(Arc::clone(&sess)).await
+        } else {
+            subagent_workflow_empty_final_item(Arc::clone(&sess)).await
+        })
+    } else if include_model_empty {
+        Some(model_empty_final_item(sess).await)
+    } else {
+        None
+    }
+}
+
+pub(crate) async fn emit_synthetic_final_answer(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    final_item: ResponseItem,
+) -> Option<String> {
+    let sink = CompletedResponseItemSink::new(sess.as_ref(), turn_context.as_ref());
+    sink.emit_and_record(&final_item, None).await
+}
+
 async fn final_answer_item(
     sess: Arc<Session>,
     mut text: String,
     include_requested_marker: bool,
 ) -> ResponseItem {
     if include_requested_marker {
-        let marker = requested_final_line_marker(sess.clone_history().await.raw_items());
+        let marker = HistoryPreview::for_session(sess.as_ref())
+            .await
+            .requested_final_line_marker();
         if let Some(marker) = marker {
             text.push('\n');
             text.push_str(marker.as_str());
@@ -421,57 +474,6 @@ async fn final_answer_item(
 
 async fn hidden_tool_loop_final_item(ctx: &HandleOutputCtx, tool_name: &str) -> ResponseItem {
     tool_loop_guard_final_item(Arc::clone(&ctx.sess), tool_name).await
-}
-
-fn requested_final_line_marker(items: &[ResponseItem]) -> Option<String> {
-    const PREFIXES: &[&str] = &[
-        "最后一行必须精确输出：",
-        "最后一行必须精确输出:",
-        "最后一行必须输出：",
-        "最后一行必须输出:",
-        "last line must be exactly:",
-        "final line must be exactly:",
-    ];
-
-    items.iter().rev().find_map(|item| {
-        let ResponseItem::Message { role, content, .. } = item else {
-            return None;
-        };
-        if role != "user" {
-            return None;
-        }
-        let text = content_text(content);
-        PREFIXES.iter().find_map(|prefix| {
-            let haystack = if prefix.is_ascii() {
-                text.to_lowercase()
-            } else {
-                text.clone()
-            };
-            let index = haystack.rfind(prefix)?;
-            let value = text[index + prefix.len()..]
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .trim_matches('`')
-                .trim()
-                .to_string();
-            (!value.is_empty()).then_some(value)
-        })
-    })
-}
-
-fn content_text(content: &[ContentItem]) -> String {
-    content
-        .iter()
-        .filter_map(|item| match item {
-            ContentItem::InputText { text } | ContentItem::OutputText { text } => {
-                Some(text.as_str())
-            }
-            ContentItem::InputImage { .. } => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 pub(crate) async fn handle_non_tool_response_item(

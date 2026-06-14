@@ -1,5 +1,6 @@
 use super::*;
-use crate::model::{ThreadGoalRow, datetime_to_millis};
+use crate::model::ThreadGoalRow;
+use crate::model::datetime_to_millis;
 use uuid::Uuid;
 
 pub struct GoalUpdate {

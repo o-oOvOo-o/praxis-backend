@@ -1,6 +1,6 @@
 use super::*;
 
-impl AgentOsRuntime {
+impl AgentOs {
     pub(super) fn claim_or_renew_active_coordinator_locked(
         state: &mut AgentOsState,
         thread: &ThreadRegistryEntry,

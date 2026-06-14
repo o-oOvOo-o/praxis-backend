@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::RolloutRecorder;
 use crate::SkillsManager;
 use crate::agent::AgentControl;
-use crate::agent_os::AgentOsRuntime;
+use crate::agent_os::AgentOs;
 use crate::client::ModelRuntimeRegistry;
 use crate::config::StartedNetworkProxy;
 use crate::exec_policy::ExecPolicyManager;
@@ -52,7 +52,7 @@ pub(crate) struct SessionServices {
     pub(crate) mcp_manager: Arc<McpManager>,
     pub(crate) skills_watcher: Arc<SkillsWatcher>,
     pub(crate) agent_control: AgentControl,
-    pub(crate) agent_os: Arc<AgentOsRuntime>,
+    pub(crate) agent_os: Arc<AgentOs>,
     pub(crate) network_proxy: Option<StartedNetworkProxy>,
     pub(crate) network_approval: Arc<NetworkApprovalService>,
     pub(crate) state_db: Option<StateDbHandle>,

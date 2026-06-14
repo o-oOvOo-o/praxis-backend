@@ -47,29 +47,6 @@ fn use_legacy_landlock_is_stable_and_disabled_by_default() {
 }
 
 #[test]
-fn use_linux_sandbox_bwrap_is_removed_and_disabled_by_default() {
-    assert_eq!(Feature::UseLinuxSandboxBwrap.stage(), Stage::Removed);
-    assert_eq!(Feature::UseLinuxSandboxBwrap.default_enabled(), false);
-}
-
-#[test]
-fn js_repl_is_experimental_and_user_toggleable() {
-    let spec = Feature::JsRepl.info();
-    let stage = spec.stage;
-    let expected_node_version = include_str!("../../node-version.txt").trim_end();
-
-    assert!(matches!(stage, Stage::Experimental { .. }));
-    assert_eq!(stage.experimental_menu_name(), Some("JavaScript REPL"));
-    assert_eq!(
-        stage.experimental_menu_description().map(str::to_owned),
-        Some(format!(
-            "Enable a persistent Node-backed JavaScript REPL for interactive website debugging and other inline JavaScript execution capabilities. Requires Node >= v{expected_node_version} installed."
-        ))
-    );
-    assert_eq!(Feature::JsRepl.default_enabled(), false);
-}
-
-#[test]
 fn code_mode_only_requires_code_mode() {
     let mut features = Features::with_defaults();
     features.enable(Feature::CodeModeOnly);
@@ -132,19 +109,6 @@ fn general_analytics_is_under_development_and_disabled_by_default() {
     assert_eq!(Feature::GeneralAnalytics.default_enabled(), false);
 }
 
-#[test]
-fn use_linux_sandbox_bwrap_is_a_removed_feature_key() {
-    assert_eq!(
-        feature_for_key("use_legacy_landlock"),
-        Some(Feature::UseLegacyLandlock)
-    );
-    assert_eq!(
-        feature_for_key("use_linux_sandbox_bwrap"),
-        Some(Feature::UseLinuxSandboxBwrap)
-    );
-}
-
-#[test]
 fn image_generation_is_under_development() {
     assert_eq!(Feature::ImageGeneration.stage(), Stage::UnderDevelopment);
     assert_eq!(Feature::ImageGeneration.default_enabled(), false);

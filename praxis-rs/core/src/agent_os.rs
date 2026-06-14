@@ -29,89 +29,78 @@ mod artifacts;
 mod capability;
 mod classification;
 mod commands;
+mod control_plane;
 mod coordination;
 mod dirty;
 mod intent;
 mod leases;
+mod lifecycle;
+mod managed_commands;
 mod model;
 mod paths;
 mod persistence;
 mod policy;
 mod process;
-mod queries;
+mod read_model;
 mod runtime_commands;
-mod runtime_lifecycle;
+mod state;
 mod tasks;
 mod tickets;
 mod worker_requests;
 
-pub(crate) use classification::{
-    classify_command, coordination_scope_for_session_source, profile_for_rank,
-    rank_for_session_source,
-};
+pub(crate) use classification::classify_command;
+pub(crate) use classification::coordination_scope_for_session_source;
+pub(crate) use classification::profile_for_rank;
+pub(crate) use classification::rank_for_session_source;
+pub(crate) use commands::AgentOsExecutionOpenRequest;
+pub(crate) use control_plane::AgentTaskDispatchRequest;
+pub(crate) use managed_commands::ManagedCommandSpan;
 pub(crate) use model::*;
-pub(crate) use process::{AgentOsProcessCleaner, process_runtime_kind, process_runtime_owner};
+pub(crate) use process::AgentOsProcessCleaner;
+pub(crate) use process::process_runtime_kind;
+pub(crate) use process::process_runtime_owner;
+pub(crate) use read_model::AgentOsEventBatch;
+pub(crate) use read_model::AgentOsEventQuery;
+pub(crate) use read_model::AgentOsSnapshot;
+pub(crate) use read_model::AgentOsSnapshotOptions;
 
-use artifacts::{append_spool_stream, metadata_with_blob, sanitize_artifact_extension};
+use artifacts::append_spool_stream;
+use artifacts::metadata_with_blob;
+use artifacts::sanitize_artifact_extension;
+use classification::artifact_type_for_intent;
+use classification::capacity_for_requirement;
+use classification::classify_mutating_tool;
+use classification::requires_dirty_audit;
+use classification::runtime_kind_for_intent;
+use classification::summarize_output;
 #[cfg(test)]
 use classification::task_resource_allows;
-use classification::{
-    artifact_type_for_intent, capacity_for_requirement, classify_mutating_tool,
-    requires_dirty_audit, runtime_kind_for_intent, summarize_output, validate_task_action_contract,
-};
-use dirty::{
-    audit_git_dirty_files, dirty_file_allowed_by_task, dirty_file_delta, dirty_file_fingerprints,
-    format_dirty_file_report, push_unique_dirty_files,
-};
-use model::{ActiveCoordinatorLease, DirtyFileFingerprint, RuntimeCommandActivity};
+use classification::validate_task_action_contract;
+use dirty::audit_git_dirty_files;
+use dirty::dirty_file_allowed_by_task;
+use dirty::dirty_file_delta;
+use dirty::dirty_file_fingerprints;
+use dirty::format_dirty_file_report;
+use dirty::push_unique_dirty_files;
+use managed_commands::DirtyAuditOutcome;
+use managed_commands::ManagedCommandOutputSource;
+use model::DirtyFileFingerprint;
+use model::RuntimeCommandActivity;
 use paths::action_fingerprint;
-use policy::{
-    AgentOsPolicy, COORDINATOR_RANK, HARD_ARTIFACT_READ_MAX_BYTES, LEASE_JANITOR_INTERVAL_SECONDS,
-    MAX_COORDINATORS,
-};
-use process::{cleaner_registry_key, process_registry_key};
+use policy::AgentOsPolicy;
+use policy::COORDINATOR_RANK;
+use policy::HARD_ARTIFACT_READ_MAX_BYTES;
+use policy::LEASE_JANITOR_INTERVAL_SECONDS;
+use policy::MAX_COORDINATORS;
+use process::cleaner_registry_key;
+use process::process_registry_key;
+use state::AgentOsState;
+use state::has_active_assign_runtime_command_locked;
 
-fn has_active_assign_runtime_command_locked(
-    state: &AgentOsState,
-    thread_id: ThreadId,
-    task_id: &str,
-) -> bool {
-    state.runtime_commands.values().any(|command| {
-        command.to_thread_id == thread_id
-            && command.command_type == RuntimeCommandType::AssignTask
-            && command.task_id.as_deref() == Some(task_id)
-            && matches!(
-                command.status,
-                RuntimeCommandStatus::Pending
-                    | RuntimeCommandStatus::Acked
-                    | RuntimeCommandStatus::Executing
-            )
-    })
-}
-
-#[derive(Default)]
-struct AgentOsState {
-    threads: HashMap<ThreadId, ThreadRegistryEntry>,
-    profiles: HashMap<String, CapabilityProfile>,
-    tasks: HashMap<String, TaskRecord>,
-    leases: HashMap<String, ResourceLease>,
-    tickets: HashMap<String, ExecutionTicket>,
-    intent_plans: HashMap<String, CommandIntentPlan>,
-    commands: HashMap<String, CommandRecord>,
-    processes: HashMap<String, ManagedProcessRecord>,
-    artifacts: HashMap<String, ArtifactRecord>,
-    worker_requests: HashMap<String, WorkerRequestRecord>,
-    runtime_commands: HashMap<String, RuntimeCommandRecord>,
-    events: Vec<EventLedgerEntry>,
-    active_coordinators: HashMap<String, ActiveCoordinatorLease>,
-    fencing_counter: u64,
-    coordinator_epoch: u64,
-}
-
-pub(crate) struct AgentOsRuntime {
+pub(crate) struct AgentOs {
     state: RwLock<AgentOsState>,
     state_db: RwLock<Option<StateDbHandle>>,
-    // Multiple sessions share one AgentOS runtime. Cleaners are indexed by runtime
+    // Multiple sessions share one AgentOS instance. Cleaners are indexed by runtime
     // kind so lease expiry can route process cleanup to the backend that owns the
     // process instead of guessing through every session-level manager.
     process_cleaners: RwLock<HashMap<String, Vec<Arc<dyn AgentOsProcessCleaner>>>>,
@@ -121,7 +110,7 @@ pub(crate) struct AgentOsRuntime {
     change_tx: watch::Sender<u64>,
 }
 
-impl Default for AgentOsRuntime {
+impl Default for AgentOs {
     fn default() -> Self {
         let (change_tx, _) = watch::channel(0);
         Self {
@@ -136,116 +125,7 @@ impl Default for AgentOsRuntime {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct ManagedCommandSpan {
-    agent_os: Arc<AgentOsRuntime>,
-    command_id: String,
-}
-
-struct DirtyAuditOutcome {
-    command: CommandRecord,
-    thread_snapshot: Option<ThreadRegistryEntry>,
-    task_snapshot: Option<TaskRecord>,
-    dirty_files: Vec<PathBuf>,
-    violation_path: Option<PathBuf>,
-}
-
-enum ManagedCommandOutputSource<'a> {
-    Bytes(&'a [u8]),
-    Spool {
-        spool: ExecOutputSpool,
-        fallback_raw_output: &'a [u8],
-    },
-}
-
-impl ManagedCommandOutputSource<'_> {
-    fn is_empty(&self) -> bool {
-        match self {
-            Self::Bytes(bytes) => bytes.is_empty(),
-            Self::Spool { spool, .. } => spool.is_empty(),
-        }
-    }
-
-    fn byte_len(&self) -> usize {
-        match self {
-            Self::Bytes(bytes) => bytes.len(),
-            Self::Spool { spool, .. } => spool.total_bytes(),
-        }
-    }
-
-    fn summary(&self) -> String {
-        match self {
-            Self::Bytes(bytes) => summarize_output(bytes),
-            Self::Spool {
-                fallback_raw_output,
-                ..
-            } => summarize_output(fallback_raw_output),
-        }
-    }
-}
-
-impl ManagedCommandSpan {
-    pub(crate) async fn finish_success(&self, raw_output: &[u8]) -> PraxisResult<Option<String>> {
-        self.finish(Some(0), raw_output).await
-    }
-
-    pub(crate) async fn finish_failure(&self, raw_output: &[u8]) -> PraxisResult<Option<String>> {
-        self.finish(Some(-1), raw_output).await
-    }
-
-    pub(crate) async fn finish(
-        &self,
-        exit_code: Option<i32>,
-        raw_output: &[u8],
-    ) -> PraxisResult<Option<String>> {
-        self.agent_os
-            .finish_managed_command(self.command_id.as_str(), exit_code, raw_output, true)
-            .await
-    }
-
-    pub(crate) async fn finish_with_spooled_output(
-        &self,
-        exit_code: Option<i32>,
-        output_spool: ExecOutputSpool,
-        fallback_raw_output: &[u8],
-    ) -> PraxisResult<Option<String>> {
-        self.agent_os
-            .finish_managed_command_with_spooled_output(
-                self.command_id.as_str(),
-                exit_code,
-                output_spool,
-                fallback_raw_output,
-                true,
-            )
-            .await
-    }
-
-    pub(crate) async fn checkpoint(&self, raw_output: &[u8]) -> PraxisResult<Option<String>> {
-        self.agent_os
-            .checkpoint_managed_command(self.command_id.as_str(), raw_output)
-            .await
-    }
-
-    pub(crate) async fn record_dirty_files(&self, dirty_files: Vec<PathBuf>) -> PraxisResult<()> {
-        self.agent_os
-            .record_command_dirty_files(self.command_id.as_str(), dirty_files)
-            .await
-    }
-
-    pub(crate) async fn attach_process(&self, process_id: i32) -> PraxisResult<()> {
-        self.agent_os
-            .attach_process_to_managed_command(self.command_id.as_str(), process_id)
-            .await
-    }
-
-    pub(crate) async fn raw_command(&self) -> Option<String> {
-        self.agent_os
-            .command_raw_command(self.command_id.as_str())
-            .await
-    }
-}
-
-impl AgentOsRuntime {
+impl AgentOs {
     pub(crate) fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
@@ -256,11 +136,6 @@ impl AgentOsRuntime {
 
     pub(crate) fn change_sequence(&self) -> u64 {
         self.change_seq.load(Ordering::SeqCst)
-    }
-
-    fn notify_changed(&self) {
-        let seq = self.change_seq.fetch_add(1, Ordering::Relaxed) + 1;
-        self.change_tx.send_replace(seq);
     }
 
     pub(crate) async fn attach_state_db(&self, state_db: Option<StateDbHandle>) {

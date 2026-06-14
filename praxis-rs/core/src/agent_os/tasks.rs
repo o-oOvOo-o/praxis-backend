@@ -1,6 +1,6 @@
 use super::*;
 
-impl AgentOsRuntime {
+impl AgentOs {
     pub(crate) async fn register_thread(
         &self,
         registration: ThreadRegistration,

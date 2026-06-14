@@ -36,9 +36,9 @@ use tracing::Span;
 use crate::rollout::policy::EventPersistenceMode;
 use crate::rollout::recorder::RolloutRecorder;
 use crate::rollout::recorder::RolloutRecorderParams;
-use crate::state::TaskKind;
-use crate::tasks::SessionTask;
-use crate::tasks::SessionTaskContext;
+use crate::state::AgentTaskKind;
+use crate::tasks::AgentTask;
+use crate::tasks::AgentTaskContext;
 use crate::tools::ToolRouter;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
@@ -184,7 +184,7 @@ async fn regular_turn_emits_turn_started_without_waiting_for_startup_prewarm() {
     sess.spawn_task(
         Arc::clone(&tc),
         Vec::new(),
-        crate::tasks::RegularTask::new(),
+        crate::tasks::RegularAgentTask::new(),
     )
     .await;
 
@@ -220,7 +220,7 @@ async fn interrupting_regular_turn_waiting_on_startup_prewarm_emits_turn_aborted
     sess.spawn_task(
         Arc::clone(&tc),
         Vec::new(),
-        crate::tasks::RegularTask::new(),
+        crate::tasks::RegularAgentTask::new(),
     )
     .await;
 
@@ -2572,7 +2572,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         mcp_manager,
         Arc::new(SkillsWatcher::noop()),
         AgentControl::default(),
-        crate::agent_os::AgentOsRuntime::new(),
+        crate::agent_os::AgentOs::new(),
     )
     .await;
 
@@ -2703,7 +2703,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         mcp_manager,
         skills_watcher,
         agent_control,
-        agent_os: crate::agent_os::AgentOsRuntime::new(),
+        agent_os: crate::agent_os::AgentOs::new(),
         network_proxy: None,
         network_approval: Arc::clone(&network_approval),
         state_db: None,
@@ -3142,18 +3142,18 @@ async fn spawn_task_turn_span_inherits_dispatch_trace_context() {
     }
 
     #[async_trait::async_trait]
-    impl SessionTask for TraceCaptureTask {
-        fn kind(&self) -> TaskKind {
-            TaskKind::Regular
+    impl AgentTask for TraceCaptureTask {
+        fn kind(&self) -> AgentTaskKind {
+            AgentTaskKind::Regular
         }
 
         fn span_name(&self) -> &'static str {
-            "session_task.trace_capture"
+            "agent_task.trace_capture"
         }
 
         async fn run(
             self: Arc<Self>,
-            _session: Arc<SessionTaskContext>,
+            _session: Arc<AgentTaskContext>,
             _ctx: Arc<TurnContext>,
             _input: Vec<UserInput>,
             _cancellation_token: CancellationToken,
@@ -3321,7 +3321,7 @@ async fn shutdown_and_wait_shuts_down_cached_guardian_subagent() {
     let (_parent_status_tx, parent_agent_status) = watch::channel(AgentStatus::PendingInit);
     let parent_session_for_loop = Arc::clone(&parent_session);
     let parent_session_loop_handle = tokio::spawn(async move {
-        submission_loop(parent_session_for_loop, parent_config, parent_rx_sub).await;
+        main_agent_loop(parent_session_for_loop, parent_config, parent_rx_sub).await;
     });
     let parent_codex = Praxis {
         tx_sub: parent_tx_sub,
@@ -3378,7 +3378,7 @@ async fn shutdown_and_wait_shuts_down_tracked_ephemeral_guardian_review() {
     let (_parent_status_tx, parent_agent_status) = watch::channel(AgentStatus::PendingInit);
     let parent_session_for_loop = Arc::clone(&parent_session);
     let parent_session_loop_handle = tokio::spawn(async move {
-        submission_loop(parent_session_for_loop, parent_config, parent_rx_sub).await;
+        main_agent_loop(parent_session_for_loop, parent_config, parent_rx_sub).await;
     });
     let parent_codex = Praxis {
         tx_sub: parent_tx_sub,
@@ -3549,7 +3549,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         mcp_manager,
         skills_watcher,
         agent_control,
-        agent_os: crate::agent_os::AgentOsRuntime::new(),
+        agent_os: crate::agent_os::AgentOs::new(),
         network_proxy: None,
         network_approval: Arc::clone(&network_approval),
         state_db: None,
@@ -3708,7 +3708,7 @@ async fn record_model_warning_appends_user_message() {
 }
 
 #[tokio::test]
-async fn spawn_task_does_not_update_previous_turn_settings_for_non_run_turn_tasks() {
+async fn spawn_task_does_not_update_previous_turn_settings_for_non_agent_turn_loop_tasks() {
     let (sess, tc, _rx) = make_session_and_context_with_rx().await;
     sess.set_previous_turn_settings(/*previous_turn_settings*/ None)
         .await;
@@ -3721,7 +3721,7 @@ async fn spawn_task_does_not_update_previous_turn_settings_for_non_run_turn_task
         Arc::clone(&tc),
         input,
         NeverEndingTask {
-            kind: TaskKind::Regular,
+            kind: AgentTaskKind::Regular,
             listen_to_cancellation_token: true,
         },
     )
@@ -4400,23 +4400,23 @@ async fn run_user_shell_command_does_not_set_reference_context_item() {
 
 #[derive(Clone, Copy)]
 struct NeverEndingTask {
-    kind: TaskKind,
+    kind: AgentTaskKind,
     listen_to_cancellation_token: bool,
 }
 
 #[async_trait::async_trait]
-impl SessionTask for NeverEndingTask {
-    fn kind(&self) -> TaskKind {
+impl AgentTask for NeverEndingTask {
+    fn kind(&self) -> AgentTaskKind {
         self.kind
     }
 
     fn span_name(&self) -> &'static str {
-        "session_task.never_ending"
+        "agent_task.never_ending"
     }
 
     async fn run(
         self: Arc<Self>,
-        _session: Arc<SessionTaskContext>,
+        _session: Arc<AgentTaskContext>,
         _ctx: Arc<TurnContext>,
         _input: Vec<UserInput>,
         cancellation_token: CancellationToken,
@@ -4443,7 +4443,7 @@ async fn abort_regular_task_emits_turn_aborted_only() {
         Arc::clone(&tc),
         input,
         NeverEndingTask {
-            kind: TaskKind::Regular,
+            kind: AgentTaskKind::Regular,
             listen_to_cancellation_token: false,
         },
     )
@@ -4476,7 +4476,7 @@ async fn abort_gracefully_emits_turn_aborted_only() {
         Arc::clone(&tc),
         input,
         NeverEndingTask {
-            kind: TaskKind::Regular,
+            kind: AgentTaskKind::Regular,
             listen_to_cancellation_token: true,
         },
     )
@@ -4509,7 +4509,7 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
         Arc::clone(&tc),
         input,
         NeverEndingTask {
-            kind: TaskKind::Regular,
+            kind: AgentTaskKind::Regular,
             listen_to_cancellation_token: false,
         },
     )
@@ -4637,7 +4637,7 @@ async fn steer_input_enforces_expected_turn_id() {
         Arc::clone(&tc),
         input,
         NeverEndingTask {
-            kind: TaskKind::Regular,
+            kind: AgentTaskKind::Regular,
             listen_to_cancellation_token: false,
         },
     )
@@ -4666,8 +4666,8 @@ async fn steer_input_enforces_expected_turn_id() {
 #[tokio::test]
 async fn steer_input_rejects_non_regular_turns() {
     for (task_kind, turn_kind) in [
-        (TaskKind::Review, NonSteerableTurnKind::Review),
-        (TaskKind::Compact, NonSteerableTurnKind::Compact),
+        (AgentTaskKind::Review, NonSteerableTurnKind::Review),
+        (AgentTaskKind::Compact, NonSteerableTurnKind::Compact),
     ] {
         let (sess, _tc, _rx) = make_session_and_context_with_rx().await;
         let input = vec![UserInput::Text {
@@ -4711,7 +4711,7 @@ async fn steer_input_returns_active_turn_id() {
         Arc::clone(&tc),
         input,
         NeverEndingTask {
-            kind: TaskKind::Regular,
+            kind: AgentTaskKind::Regular,
             listen_to_cancellation_token: false,
         },
     )
@@ -4741,7 +4741,7 @@ async fn prepend_pending_input_keeps_older_tail_ahead_of_newer_input() {
         Arc::clone(&tc),
         input,
         NeverEndingTask {
-            kind: TaskKind::Regular,
+            kind: AgentTaskKind::Regular,
             listen_to_cancellation_token: false,
         },
     )
@@ -4803,7 +4803,7 @@ async fn queued_response_items_for_next_turn_move_into_next_active_turn() {
         Arc::clone(&tc),
         Vec::new(),
         NeverEndingTask {
-            kind: TaskKind::Regular,
+            kind: AgentTaskKind::Regular,
             listen_to_cancellation_token: false,
         },
     )

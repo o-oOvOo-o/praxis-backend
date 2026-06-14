@@ -69,13 +69,9 @@ impl Session {
         )
         .await;
 
-        self.send_event(
-            turn_context,
-            EventMsg::Warning(WarningEvent {
-                message: warning_message.clone(),
-            }),
-        )
-        .await;
+        self.turn_event_emitter(turn_context)
+            .warning(warning_message.clone())
+            .await;
         self.record_model_warning(warning_message, turn_context)
             .await;
         true
@@ -576,7 +572,7 @@ impl Session {
         let task = GhostSnapshotTask::new(token);
         Arc::new(task)
             .run(
-                Arc::new(SessionTaskContext::new(self.clone())),
+                Arc::new(AgentTaskContext::new(self.clone())),
                 turn_context.clone(),
                 Vec::new(),
                 cancellation_token,

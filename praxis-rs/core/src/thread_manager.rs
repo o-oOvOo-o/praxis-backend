@@ -1,7 +1,7 @@
 use crate::ModelProviderInfo;
 use crate::SkillsManager;
 use crate::agent::AgentControl;
-use crate::agent_os::AgentOsRuntime;
+use crate::agent_os::AgentOs;
 use crate::config::Config;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
@@ -128,7 +128,7 @@ fn build_skills_watcher(skills_manager: Arc<SkillsManager>) -> Arc<SkillsWatcher
 
 /// Represents a newly created Praxis thread (formerly called a conversation), including the first event
 /// (which is [`EventMsg::SessionConfigured`]).
-pub struct NewThread {
+pub struct ThreadSpawnResult {
     pub thread_id: ThreadId,
     pub thread: Arc<PraxisThread>,
     pub session_configured: SessionConfiguredEvent,
@@ -144,7 +144,7 @@ pub struct NewThread {
 // - `WaitUntilNextSamplingBoundary` (or similar) for callers that prefer to
 //   fork after the next sampling boundary rather than interrupting immediately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ForkSnapshot {
+pub enum ThreadForkSnapshot {
     /// Fork a committed prefix ending strictly before the nth user message.
     ///
     /// When `n` is within range, this cuts before that 0-based user-message
@@ -167,7 +167,7 @@ pub enum ForkSnapshot {
 
 /// Preserve legacy `fork_thread(usize, ...)` callsites by mapping them to the
 /// existing truncate-before-nth-user-message snapshot mode.
-impl From<usize> for ForkSnapshot {
+impl From<usize> for ThreadForkSnapshot {
     fn from(value: usize) -> Self {
         Self::TruncateBeforeNthUserMessage(value)
     }
@@ -189,15 +189,51 @@ enum ShutdownOutcome {
 /// [`ThreadManager`] is responsible for creating threads and maintaining
 /// them in memory.
 pub struct ThreadManager {
-    state: Arc<ThreadManagerState>,
+    state: Arc<ThreadManagerInner>,
     _test_praxis_home_guard: Option<TempCodexHomeGuard>,
+}
+
+#[derive(Default)]
+struct ThreadRegistry {
+    threads: RwLock<HashMap<ThreadId, Arc<PraxisThread>>>,
+}
+
+impl ThreadRegistry {
+    async fn list_ids(&self) -> Vec<ThreadId> {
+        self.threads.read().await.keys().copied().collect()
+    }
+
+    async fn snapshot_threads(&self) -> Vec<Arc<PraxisThread>> {
+        self.threads.read().await.values().cloned().collect()
+    }
+
+    async fn snapshot_entries(&self) -> Vec<(ThreadId, Arc<PraxisThread>)> {
+        self.threads
+            .read()
+            .await
+            .iter()
+            .map(|(thread_id, thread)| (*thread_id, Arc::clone(thread)))
+            .collect()
+    }
+
+    async fn get(&self, thread_id: ThreadId) -> Option<Arc<PraxisThread>> {
+        self.threads.read().await.get(&thread_id).cloned()
+    }
+
+    async fn insert(&self, thread_id: ThreadId, thread: Arc<PraxisThread>) {
+        self.threads.write().await.insert(thread_id, thread);
+    }
+
+    async fn remove(&self, thread_id: &ThreadId) -> Option<Arc<PraxisThread>> {
+        self.threads.write().await.remove(thread_id)
+    }
 }
 
 /// Shared, `Arc`-owned state for [`ThreadManager`]. This `Arc` is required to have a single
 /// `Arc` reference that can be downgraded to by `AgentControl` while preventing every single
 /// function to require an `Arc<&Self>`.
-pub(crate) struct ThreadManagerState {
-    threads: Arc<RwLock<HashMap<ThreadId, Arc<PraxisThread>>>>,
+pub(crate) struct ThreadManagerInner {
+    threads: ThreadRegistry,
     thread_created_tx: broadcast::Sender<ThreadId>,
     auth_manager: Arc<AuthManager>,
     models_manager: Arc<ModelsManager>,
@@ -206,7 +242,7 @@ pub(crate) struct ThreadManagerState {
     plugins_manager: Arc<PluginsManager>,
     mcp_manager: Arc<McpManager>,
     skills_watcher: Arc<SkillsWatcher>,
-    pub(crate) agent_os: Arc<AgentOsRuntime>,
+    pub(crate) agent_os: Arc<AgentOs>,
     session_source: SessionSource,
     // Captures submitted ops for testing purpose when test mode is enabled.
     ops_log: Option<SharedCapturedOps>,
@@ -235,8 +271,8 @@ impl ThreadManager {
         ));
         let skills_watcher = build_skills_watcher(Arc::clone(&skills_manager));
         Self {
-            state: Arc::new(ThreadManagerState {
-                threads: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(ThreadManagerInner {
+                threads: ThreadRegistry::default(),
                 thread_created_tx,
                 models_manager: Arc::new(ModelsManager::new_with_provider(
                     praxis_home,
@@ -250,7 +286,7 @@ impl ThreadManager {
                 plugins_manager,
                 mcp_manager,
                 skills_watcher,
-                agent_os: AgentOsRuntime::new(),
+                agent_os: AgentOs::new(),
                 auth_manager,
                 session_source,
                 ops_log: should_use_test_thread_manager_behavior()
@@ -307,8 +343,8 @@ impl ThreadManager {
         ));
         let skills_watcher = build_skills_watcher(Arc::clone(&skills_manager));
         Self {
-            state: Arc::new(ThreadManagerState {
-                threads: Arc::new(RwLock::new(HashMap::new())),
+            state: Arc::new(ThreadManagerInner {
+                threads: ThreadRegistry::default(),
                 thread_created_tx,
                 models_manager: Arc::new(ModelsManager::with_provider_for_tests(
                     praxis_home,
@@ -320,7 +356,7 @@ impl ThreadManager {
                 plugins_manager,
                 mcp_manager,
                 skills_watcher,
-                agent_os: AgentOsRuntime::new(),
+                agent_os: AgentOs::new(),
                 auth_manager,
                 session_source: SessionSource::Exec,
                 ops_log: should_use_test_thread_manager_behavior()
@@ -373,14 +409,7 @@ impl ThreadManager {
     }
 
     pub async fn refresh_mcp_servers(&self, refresh_config: McpServerRefreshConfig) {
-        let threads = self
-            .state
-            .threads
-            .read()
-            .await
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+        let threads = self.state.threads.snapshot_threads().await;
         for thread in threads {
             if let Err(err) = thread
                 .submit(Op::RefreshMcpServers {
@@ -401,7 +430,7 @@ impl ThreadManager {
         self.state.get_thread(thread_id).await
     }
 
-    pub async fn start_thread(&self, config: Config) -> PraxisResult<NewThread> {
+    pub async fn start_thread(&self, config: Config) -> PraxisResult<ThreadSpawnResult> {
         // Box delegated thread-spawn futures so these convenience wrappers do
         // not inline the full spawn path into every caller's async state.
         Box::pin(self.start_thread_with_tools(
@@ -417,7 +446,7 @@ impl ThreadManager {
         config: Config,
         dynamic_tools: Vec<praxis_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         Box::pin(self.start_thread_with_tools_and_service_name(
             config,
             dynamic_tools,
@@ -435,7 +464,7 @@ impl ThreadManager {
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
         parent_trace: Option<W3cTraceContext>,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         Box::pin(self.state.spawn_thread(
             config,
             InitialHistory::New,
@@ -458,7 +487,7 @@ impl ThreadManager {
         persist_extended_history: bool,
         metrics_service_name: Option<String>,
         parent_trace: Option<W3cTraceContext>,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         let inherited_shell_snapshot = self
             .inherited_shell_snapshot_for_source(&session_source)
             .await;
@@ -489,7 +518,7 @@ impl ThreadManager {
         rollout_path: PathBuf,
         auth_manager: Arc<AuthManager>,
         parent_trace: Option<W3cTraceContext>,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         let initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
         Box::pin(self.resume_thread_with_history(
             config,
@@ -508,7 +537,7 @@ impl ThreadManager {
         auth_manager: Arc<AuthManager>,
         persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         Box::pin(self.state.spawn_thread(
             config,
             initial_history,
@@ -527,7 +556,7 @@ impl ThreadManager {
         &self,
         config: Config,
         user_shell_override: crate::shell::Shell,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         Box::pin(self.state.spawn_thread(
             config,
             InitialHistory::New,
@@ -548,7 +577,7 @@ impl ThreadManager {
         rollout_path: PathBuf,
         auth_manager: Arc<AuthManager>,
         user_shell_override: crate::shell::Shell,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         let initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
         Box::pin(self.state.spawn_thread(
             config,
@@ -568,20 +597,14 @@ impl ThreadManager {
     /// as `Arc<PraxisThread>`, it is possible that other references to it exist elsewhere.
     /// Returns the thread if the thread was found and removed.
     pub async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<PraxisThread>> {
-        self.state.threads.write().await.remove(thread_id)
+        self.state.threads.remove(thread_id).await
     }
 
     /// Tries to shut down all tracked threads concurrently within the provided timeout.
     /// Threads that complete shutdown are removed from the manager; incomplete shutdowns
     /// remain tracked so callers can retry or inspect them later.
     pub async fn shutdown_all_threads_bounded(&self, timeout: Duration) -> ThreadShutdownReport {
-        let threads = {
-            let threads = self.state.threads.read().await;
-            threads
-                .iter()
-                .map(|(thread_id, thread)| (*thread_id, Arc::clone(thread)))
-                .collect::<Vec<_>>()
-        };
+        let threads = self.state.threads.snapshot_entries().await;
 
         let mut shutdowns = threads
             .into_iter()
@@ -605,9 +628,8 @@ impl ThreadManager {
             }
         }
 
-        let mut tracked_threads = self.state.threads.write().await;
         for thread_id in &report.completed {
-            tracked_threads.remove(thread_id);
+            self.state.threads.remove(thread_id).await;
         }
 
         report
@@ -633,18 +655,18 @@ impl ThreadManager {
         path: PathBuf,
         persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
-    ) -> PraxisResult<NewThread>
+    ) -> PraxisResult<ThreadSpawnResult>
     where
-        S: Into<ForkSnapshot>,
+        S: Into<ThreadForkSnapshot>,
     {
         let snapshot = snapshot.into();
         let history = RolloutRecorder::get_rollout_history(&path).await?;
         let snapshot_state = snapshot_turn_state(&history);
         let history = match snapshot {
-            ForkSnapshot::TruncateBeforeNthUserMessage(nth_user_message) => {
+            ThreadForkSnapshot::TruncateBeforeNthUserMessage(nth_user_message) => {
                 truncate_before_nth_user_message(history, nth_user_message, &snapshot_state)
             }
-            ForkSnapshot::Interrupted => {
+            ThreadForkSnapshot::Interrupted => {
                 let history = match history {
                     InitialHistory::New => InitialHistory::New,
                     InitialHistory::Forked(history) => InitialHistory::Forked(history),
@@ -741,17 +763,16 @@ impl ThreadManager {
     }
 }
 
-impl ThreadManagerState {
+impl ThreadManagerInner {
     pub(crate) async fn list_thread_ids(&self) -> Vec<ThreadId> {
-        self.threads.read().await.keys().copied().collect()
+        self.threads.list_ids().await
     }
 
     /// Fetch a thread by ID or return ThreadNotFound.
     pub(crate) async fn get_thread(&self, thread_id: ThreadId) -> PraxisResult<Arc<PraxisThread>> {
-        let threads = self.threads.read().await;
-        threads
-            .get(&thread_id)
-            .cloned()
+        self.threads
+            .get(thread_id)
+            .await
             .ok_or_else(|| PraxisErr::ThreadNotFound(thread_id))
     }
 
@@ -779,7 +800,7 @@ impl ThreadManagerState {
 
     /// Remove a thread from the manager by ID, returning it when present.
     pub(crate) async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<PraxisThread>> {
-        self.threads.write().await.remove(thread_id)
+        self.threads.remove(thread_id).await
     }
 
     /// Spawn a new thread with no history using a provided config.
@@ -787,7 +808,7 @@ impl ThreadManagerState {
         &self,
         config: Config,
         agent_control: AgentControl,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         Box::pin(self.spawn_new_thread_with_source(
             config,
             agent_control,
@@ -810,7 +831,7 @@ impl ThreadManagerState {
         metrics_service_name: Option<String>,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         Box::pin(self.spawn_thread_with_source(
             config,
             InitialHistory::New,
@@ -836,7 +857,7 @@ impl ThreadManagerState {
         session_source: SessionSource,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         let initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
         Box::pin(self.spawn_thread_with_source(
             config,
@@ -865,7 +886,7 @@ impl ThreadManagerState {
         persist_extended_history: bool,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         Box::pin(self.spawn_thread_with_source(
             config,
             initial_history,
@@ -896,7 +917,7 @@ impl ThreadManagerState {
         metrics_service_name: Option<String>,
         parent_trace: Option<W3cTraceContext>,
         user_shell_override: Option<crate::shell::Shell>,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         Box::pin(self.spawn_thread_with_source(
             config,
             initial_history,
@@ -929,7 +950,7 @@ impl ThreadManagerState {
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
         parent_trace: Option<W3cTraceContext>,
         user_shell_override: Option<crate::shell::Shell>,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         let watch_registration = self.skills_watcher.register_config(
             &config,
             self.skills_manager.as_ref(),
@@ -968,7 +989,7 @@ impl ThreadManagerState {
         praxis: Praxis,
         thread_id: ThreadId,
         watch_registration: crate::file_watcher::WatchRegistration,
-    ) -> PraxisResult<NewThread> {
+    ) -> PraxisResult<ThreadSpawnResult> {
         let event = praxis.next_event().await?;
         let session_configured = match event {
             Event {
@@ -985,10 +1006,9 @@ impl ThreadManagerState {
             session_configured.rollout_path.clone(),
             watch_registration,
         ));
-        let mut threads = self.threads.write().await;
-        threads.insert(thread_id, thread.clone());
+        self.threads.insert(thread_id, thread.clone()).await;
 
-        Ok(NewThread {
+        Ok(ThreadSpawnResult {
             thread_id,
             thread,
             session_configured,

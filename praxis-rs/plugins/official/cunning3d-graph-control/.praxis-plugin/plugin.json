@@ -1,0 +1,19 @@
+{
+  "name": "cunning3d-graph-control",
+  "description": "Control Cunning3D graph, node, and parameter operations from Praxis.",
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Cunning3D Graph Control",
+    "shortDescription": "Operate Cunning3D graphs through the product bridge.",
+    "longDescription": "Cunning3D product capability wrapper for graph nodes, connections, display flags, parameters, and diagnostics.",
+    "developerName": "Cunning3D",
+    "category": "dcc-control",
+    "capabilities": [
+      "graph nodes",
+      "node parameters",
+      "connections",
+      "display flags",
+      "diagnostics"
+    ]
+  }
+}

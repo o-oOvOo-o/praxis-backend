@@ -450,7 +450,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
             GUARDIAN_REVIEWER_NAME.to_string(),
         )),
         agent_control: AgentControl::default(),
-        agent_os: crate::agent_os::AgentOsRuntime::new(),
+        agent_os: crate::agent_os::AgentOs::new(),
         dynamic_tools: Vec::new(),
         persist_extended_history: false,
         metrics_service_name: None,

@@ -1,6 +1,8 @@
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono::Utc;
 use praxis_protocol::ThreadId;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
@@ -577,6 +579,7 @@ pub(crate) struct RuntimeCommandRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct EventLedgerEntry {
+    pub(crate) sequence: u64,
     pub(crate) event_id: String,
     pub(crate) event_type: String,
     pub(crate) thread_id: Option<ThreadId>,

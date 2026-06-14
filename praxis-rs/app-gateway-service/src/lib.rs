@@ -12,9 +12,9 @@ use praxis_core::config_loader::LoaderOverrides;
 use praxis_protocol::protocol::SessionSource;
 use praxis_utils_cli::CliConfigOverrides;
 
-pub use praxis_app_gateway_runtime::AppGatewayWebsocketAuthArgs;
-pub use praxis_app_gateway_runtime::AppGatewayWebsocketAuthSettings as ServiceGatewayAuthSettings;
-pub use praxis_app_gateway_runtime::WebsocketAuthCliMode;
+pub use praxis_app_gateway::AppGatewayWebsocketAuthArgs;
+pub use praxis_app_gateway::AppGatewayWebsocketAuthSettings as ServiceGatewayAuthSettings;
+pub use praxis_app_gateway::WebsocketAuthCliMode;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ServiceListenAddr {
@@ -59,14 +59,12 @@ impl ServiceListenAddr {
         }
     }
 
-    fn into_current_transport(
-        self,
-    ) -> IoResult<praxis_app_gateway_runtime::AppGatewayRuntimeTransport> {
+    fn into_current_transport(self) -> IoResult<praxis_app_gateway::AppGatewayTransport> {
         match self {
-            Self::Stdio => Ok(praxis_app_gateway_runtime::AppGatewayRuntimeTransport::Stdio),
-            Self::WebSocket { bind_address } => Ok(
-                praxis_app_gateway_runtime::AppGatewayRuntimeTransport::WebSocket { bind_address },
-            ),
+            Self::Stdio => Ok(praxis_app_gateway::AppGatewayTransport::Stdio),
+            Self::WebSocket { bind_address } => {
+                Ok(praxis_app_gateway::AppGatewayTransport::WebSocket { bind_address })
+            }
             Self::NamedPipe { .. } => Err(IoError::new(
                 ErrorKind::Unsupported,
                 "service gateway named-pipe transport is not wired yet",
@@ -111,7 +109,7 @@ pub struct ServiceGatewayStartArgs {
 
 pub async fn run_service_gateway(args: ServiceGatewayStartArgs) -> IoResult<()> {
     let transport = args.listen.into_current_transport()?;
-    praxis_app_gateway_runtime::run_main_with_transport(
+    praxis_app_gateway::run_main_with_transport(
         args.arg0_paths,
         args.cli_config_overrides,
         args.loader_overrides,

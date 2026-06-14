@@ -563,7 +563,7 @@ async fn mcp_tool_call_request_meta_includes_turn_metadata_for_custom_server() {
     assert_eq!(
         meta,
         serde_json::json!({
-            crate::X_CODEX_TURN_METADATA_HEADER: expected_turn_metadata,
+            crate::X_PRAXIS_TURN_METADATA_HEADER: expected_turn_metadata,
         })
     );
 }
@@ -604,7 +604,7 @@ async fn praxis_apps_tool_call_request_meta_includes_turn_metadata_and_praxis_ap
             Some(&metadata),
         ),
         Some(serde_json::json!({
-            crate::X_CODEX_TURN_METADATA_HEADER: expected_turn_metadata,
+            crate::X_PRAXIS_TURN_METADATA_HEADER: expected_turn_metadata,
             MCP_TOOL_CODEX_APPS_META_KEY: {
                 "resource_uri": "connector://calendar/tools/calendar_create_event",
                 "contains_mcp_source": true,

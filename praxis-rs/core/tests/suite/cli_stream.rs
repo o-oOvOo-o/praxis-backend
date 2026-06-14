@@ -3,7 +3,7 @@ use core_test_support::fs_wait;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use praxis_git_utils::collect_git_info;
-use praxis_login::CODEX_API_KEY_ENV_VAR;
+use praxis_login::PRAXIS_API_KEY_ENV_VAR;
 use praxis_protocol::protocol::GitInfo;
 use praxis_utils_cargo_bin::find_resource;
 use std::time::Duration;
@@ -358,7 +358,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg(&repo_root)
         .arg(&prompt);
     cmd.env("CODEX_HOME", home.path())
-        .env(CODEX_API_KEY_ENV_VAR, "dummy")
+        .env(PRAXIS_API_KEY_ENV_VAR, "dummy")
         .env("CODEX_RS_SSE_FIXTURE", &fixture);
 
     let output = cmd.output().unwrap();

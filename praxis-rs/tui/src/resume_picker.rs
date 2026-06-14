@@ -9,6 +9,10 @@ use crate::app_gateway_session::AppGatewaySession;
 use crate::diff_render::display_path_for;
 use crate::key_hint;
 use crate::text_formatting::truncate_text;
+use crate::thread_pagination::THREAD_PAGE_SIZE;
+use crate::thread_pagination::ThreadListPagination;
+use crate::thread_pagination::interactive_thread_source_kinds;
+use crate::thread_pagination::thread_list_params as common_thread_list_params;
 use crate::tui::FrameRequester;
 use crate::tui::Tui;
 use crate::tui::TuiEvent;
@@ -45,9 +49,6 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::warn;
 use unicode_width::UnicodeWidthStr;
-
-const PAGE_SIZE: usize = 25;
-const LOAD_NEAR_THRESHOLD: usize = 5;
 
 #[derive(Debug, Clone)]
 pub struct SessionTarget {
@@ -94,7 +95,7 @@ impl SessionPickerAction {
         }
     }
 
-    fn selection(
+    pub(crate) fn selection(
         self,
         path: Option<PathBuf>,
         thread_id: ThreadId,
@@ -131,9 +132,14 @@ struct PickerSourceConfig {
 }
 
 #[derive(Clone)]
+struct PickerSourceEntry {
+    source: SessionLookupSource,
+    config: PickerSourceConfig,
+}
+
+#[derive(Clone)]
 struct SourceSwitcher {
-    praxis: PickerSourceConfig,
-    codex: PickerSourceConfig,
+    sources: Vec<PickerSourceEntry>,
 }
 
 impl SourceSwitcher {
@@ -143,24 +149,47 @@ impl SourceSwitcher {
         alternate_source: SessionLookupSource,
         alternate: PickerSourceConfig,
     ) -> Self {
-        match (primary_source, alternate_source) {
-            (SessionLookupSource::Praxis, SessionLookupSource::Codex) => Self {
-                praxis: primary,
-                codex: alternate,
-            },
-            (SessionLookupSource::Codex, SessionLookupSource::Praxis) => Self {
-                praxis: alternate,
-                codex: primary,
-            },
-            _ => unreachable!("source switcher requires Praxis and Codex sources"),
+        Self {
+            sources: vec![
+                PickerSourceEntry {
+                    source: primary_source,
+                    config: primary,
+                },
+                PickerSourceEntry {
+                    source: alternate_source,
+                    config: alternate,
+                },
+            ],
         }
     }
 
-    fn config(&self, source: SessionLookupSource) -> &PickerSourceConfig {
-        match source {
-            SessionLookupSource::Praxis => &self.praxis,
-            SessionLookupSource::Codex => &self.codex,
+    fn config(&self, source: SessionLookupSource) -> Option<&PickerSourceConfig> {
+        self.sources
+            .iter()
+            .find(|entry| entry.source == source)
+            .map(|entry| &entry.config)
+    }
+
+    fn sources(&self) -> impl Iterator<Item = SessionLookupSource> + '_ {
+        self.sources.iter().map(|entry| entry.source)
+    }
+
+    fn source_index(&self, source: SessionLookupSource) -> Option<usize> {
+        self.sources.iter().position(|entry| entry.source == source)
+    }
+
+    fn previous_source(&self, source: SessionLookupSource) -> Option<SessionLookupSource> {
+        let index = self.source_index(source)?;
+        if index == 0 {
+            None
+        } else {
+            self.sources.get(index - 1).map(|entry| entry.source)
         }
+    }
+
+    fn next_source(&self, source: SessionLookupSource) -> Option<SessionLookupSource> {
+        let index = self.source_index(source)?;
+        self.sources.get(index + 1).map(|entry| entry.source)
     }
 }
 
@@ -380,9 +409,7 @@ async fn run_session_picker_with_loader(
                     }
                     TuiEvent::Draw => {
                         if let Ok(size) = alt.tui.terminal.size() {
-                            let list_height = size.height.saturating_sub(4) as usize;
-                            state.update_view_rows(list_height);
-                            state.ensure_minimum_rows_for_view(list_height);
+                            state.update_view_rows(size.height.saturating_sub(4) as usize);
                         }
                         draw_picker(alt.tui, &state)?;
                     }
@@ -427,7 +454,7 @@ fn spawn_rollout_page_loader(
             let directory = ThreadDirectory::open(&config).await;
             let page = directory
                 .list_threads(ListThreadsQuery {
-                    page_size: PAGE_SIZE,
+                    page_size: THREAD_PAGE_SIZE,
                     cursor: cursor.cloned(),
                     sort_key,
                     model_providers: None,
@@ -549,7 +576,7 @@ struct PickerState {
 }
 
 struct PaginationState {
-    next_cursor: Option<PageCursor>,
+    cursors: ThreadListPagination<PageCursor>,
     num_scanned_files: usize,
     reached_scan_cap: bool,
     loading: LoadingState,
@@ -574,7 +601,7 @@ enum SearchState {
 }
 
 enum LoadTrigger {
-    Scroll,
+    Manual,
     Search { token: usize },
 }
 
@@ -673,7 +700,7 @@ impl PickerState {
             praxis_home,
             requester,
             pagination: PaginationState {
-                next_cursor: None,
+                cursors: ThreadListPagination::default(),
                 num_scanned_files: 0,
                 reached_scan_cap: false,
                 loading: LoadingState::Idle,
@@ -732,13 +759,11 @@ impl PickerState {
     }
 
     fn shows_source_section(&self) -> bool {
-        self.has_source_switcher() || matches!(self.active_source, SessionLookupSource::Codex)
+        self.has_source_switcher() || self.active_source.is_external()
     }
 
     fn effective_action(&self) -> SessionPickerAction {
-        if matches!(self.action, SessionPickerAction::Resume)
-            && matches!(self.active_source, SessionLookupSource::Codex)
-        {
+        if matches!(self.action, SessionPickerAction::Resume) && self.active_source.is_external() {
             SessionPickerAction::Fork
         } else {
             self.action
@@ -746,20 +771,18 @@ impl PickerState {
     }
 
     fn apply_source(&mut self, source: SessionLookupSource) {
-        let Some((praxis_home, page_loader)) = self.source_switcher.as_ref().map(|switcher| {
-            let source_config = switcher.config(source);
-            (
-                source_config.praxis_home.clone(),
-                source_config.page_loader.clone(),
-            )
-        }) else {
+        let Some(source_config) = self
+            .source_switcher
+            .as_ref()
+            .and_then(|switcher| switcher.config(source))
+        else {
             self.active_source = source;
             return;
         };
 
         self.active_source = source;
-        self.praxis_home = praxis_home;
-        self.page_loader = page_loader;
+        self.praxis_home = source_config.praxis_home.clone();
+        self.page_loader = source_config.page_loader.clone();
         self.thread_name_cache.clear();
     }
 
@@ -785,6 +808,11 @@ impl PickerState {
                 return Ok(Some(SessionSelection::Exit));
             }
             KeyCode::Enter => {
+                if self.is_load_more_index(self.selected) {
+                    self.load_more_if_needed(LoadTrigger::Manual);
+                    self.request_frame();
+                    return Ok(None);
+                }
                 if let Some(row) = self.filtered_rows.get(self.selected) {
                     let path = row.path.clone();
                     let thread_id = match row.thread_id {
@@ -826,11 +854,10 @@ impl PickerState {
                 self.request_frame();
             }
             KeyCode::Down => {
-                if self.selected + 1 < self.filtered_rows.len() {
+                if self.selected + 1 < self.list_item_count() {
                     self.selected += 1;
                     self.ensure_selected_visible();
                 }
-                self.maybe_load_more_for_scroll();
                 self.request_frame();
             }
             KeyCode::PageUp => {
@@ -842,21 +869,32 @@ impl PickerState {
                 }
             }
             KeyCode::PageDown => {
-                if !self.filtered_rows.is_empty() {
+                if self.list_item_count() > 0 {
                     let step = self.view_rows.unwrap_or(10).max(1);
-                    let max_index = self.filtered_rows.len().saturating_sub(1);
+                    let max_index = self.list_item_count().saturating_sub(1);
                     self.selected = (self.selected + step).min(max_index);
                     self.ensure_selected_visible();
-                    self.maybe_load_more_for_scroll();
                     self.request_frame();
                 }
             }
             KeyCode::Left => {
-                self.switch_source(SessionLookupSource::Praxis);
+                if let Some(source) = self
+                    .source_switcher
+                    .as_ref()
+                    .and_then(|switcher| switcher.previous_source(self.active_source))
+                {
+                    self.switch_source(source);
+                }
                 self.request_frame();
             }
             KeyCode::Right => {
-                self.switch_source(SessionLookupSource::Codex);
+                if let Some(source) = self
+                    .source_switcher
+                    .as_ref()
+                    .and_then(|switcher| switcher.next_source(self.active_source))
+                {
+                    self.switch_source(source);
+                }
                 self.request_frame();
             }
             KeyCode::Tab => {
@@ -947,18 +985,14 @@ impl PickerState {
     }
 
     fn reset_pagination(&mut self) {
-        self.pagination.next_cursor = None;
+        self.pagination.cursors.clear();
         self.pagination.num_scanned_files = 0;
         self.pagination.reached_scan_cap = false;
         self.pagination.loading = LoadingState::Idle;
     }
 
     fn ingest_page(&mut self, page: PickerPage) {
-        if let Some(cursor) = page.next_cursor.clone() {
-            self.pagination.next_cursor = Some(cursor);
-        } else {
-            self.pagination.next_cursor = None;
-        }
+        self.pagination.cursors.set_next_cursor(page.next_cursor);
         self.pagination.num_scanned_files = self
             .pagination
             .num_scanned_files
@@ -1038,10 +1072,10 @@ impl PickerState {
         {
             self.filtered_rows = self.all_rows.clone();
         }
-        if self.selected >= self.filtered_rows.len() {
-            self.selected = self.filtered_rows.len().saturating_sub(1);
+        if self.selected >= self.list_item_count() {
+            self.selected = self.list_item_count().saturating_sub(1);
         }
-        if self.filtered_rows.is_empty() {
+        if self.list_item_count() == 0 {
             self.scroll_top = 0;
         }
         self.ensure_selected_visible();
@@ -1070,6 +1104,18 @@ impl PickerState {
         self.start_initial_load();
     }
 
+    fn has_load_more_row(&self) -> bool {
+        self.pagination.cursors.has_next_page()
+    }
+
+    fn list_item_count(&self) -> usize {
+        self.filtered_rows.len() + usize::from(self.has_load_more_row())
+    }
+
+    fn is_load_more_index(&self, index: usize) -> bool {
+        self.has_load_more_row() && index == self.filtered_rows.len()
+    }
+
     fn continue_search_if_needed(&mut self) {
         let Some(token) = self.search_state.active_token() else {
             return;
@@ -1078,7 +1124,7 @@ impl PickerState {
             self.search_state = SearchState::Idle;
             return;
         }
-        if self.pagination.reached_scan_cap || self.pagination.next_cursor.is_none() {
+        if self.pagination.reached_scan_cap || !self.pagination.cursors.has_next_page() {
             self.search_state = SearchState::Idle;
             return;
         }
@@ -1098,11 +1144,12 @@ impl PickerState {
     }
 
     fn ensure_selected_visible(&mut self) {
-        if self.filtered_rows.is_empty() {
+        let item_count = self.list_item_count();
+        if item_count == 0 {
             self.scroll_top = 0;
             return;
         }
-        let capacity = self.view_rows.unwrap_or(self.filtered_rows.len()).max(1);
+        let capacity = self.view_rows.unwrap_or(item_count).max(1);
 
         if self.selected < self.scroll_top {
             self.scroll_top = self.selected;
@@ -1113,26 +1160,9 @@ impl PickerState {
             }
         }
 
-        let max_start = self.filtered_rows.len().saturating_sub(capacity);
+        let max_start = item_count.saturating_sub(capacity);
         if self.scroll_top > max_start {
             self.scroll_top = max_start;
-        }
-    }
-
-    fn ensure_minimum_rows_for_view(&mut self, minimum_rows: usize) {
-        if minimum_rows == 0 {
-            return;
-        }
-        if self.filtered_rows.len() >= minimum_rows {
-            return;
-        }
-        if self.pagination.loading.is_pending() || self.pagination.next_cursor.is_none() {
-            return;
-        }
-        if let Some(token) = self.search_state.active_token() {
-            self.load_more_if_needed(LoadTrigger::Search { token });
-        } else {
-            self.load_more_if_needed(LoadTrigger::Scroll);
         }
     }
 
@@ -1141,32 +1171,16 @@ impl PickerState {
         self.ensure_selected_visible();
     }
 
-    fn maybe_load_more_for_scroll(&mut self) {
-        if self.pagination.loading.is_pending() {
-            return;
-        }
-        if self.pagination.next_cursor.is_none() {
-            return;
-        }
-        if self.filtered_rows.is_empty() {
-            return;
-        }
-        let remaining = self.filtered_rows.len().saturating_sub(self.selected + 1);
-        if remaining <= LOAD_NEAR_THRESHOLD {
-            self.load_more_if_needed(LoadTrigger::Scroll);
-        }
-    }
-
     fn load_more_if_needed(&mut self, trigger: LoadTrigger) {
         if self.pagination.loading.is_pending() {
             return;
         }
-        let Some(cursor) = self.pagination.next_cursor.clone() else {
+        let Some(cursor) = self.pagination.cursors.next_cursor() else {
             return;
         };
         let request_token = self.allocate_request_token();
         let search_token = match trigger {
-            LoadTrigger::Scroll => None,
+            LoadTrigger::Manual => None,
             LoadTrigger::Search { token } => Some(token),
         };
         self.pagination.loading = LoadingState::Pending(PendingLoad {
@@ -1332,20 +1346,15 @@ fn thread_list_params(
     search_term: Option<String>,
     _filter_cwd: Option<PathBuf>,
 ) -> ThreadListParams {
-    ThreadListParams {
+    common_thread_list_params(
         cursor,
-        limit: Some(PAGE_SIZE as u32),
-        sort_key: Some(match sort_key {
+        match sort_key {
             ThreadSortKey::CreatedAt => AppGatewayThreadSortKey::CreatedAt,
             ThreadSortKey::UpdatedAt => AppGatewayThreadSortKey::UpdatedAt,
-        }),
-        model_providers: None,
-        source_kinds: (!include_non_interactive)
-            .then_some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode]),
-        archived: Some(false),
-        cwd: None,
+        },
+        interactive_thread_source_kinds(include_non_interactive),
         search_term,
-    }
+    )
 }
 
 fn paths_match(a: &Path, b: &Path) -> bool {
@@ -1392,12 +1401,18 @@ fn draw_picker(tui: &mut Tui, state: &PickerState) -> std::io::Result<()> {
         frame.render_widget_ref(&search_line, search);
 
         let (start, end) = visible_row_range(
-            state.filtered_rows.len(),
+            state.list_item_count(),
             state.scroll_top,
             list.height as usize,
         );
-        let metrics =
-            calculate_column_metrics_for_range(&state.filtered_rows, start, end, state.show_all);
+        let row_start = start.min(state.filtered_rows.len());
+        let row_end = end.min(state.filtered_rows.len());
+        let metrics = calculate_column_metrics_for_range(
+            &state.filtered_rows,
+            row_start,
+            row_end,
+            state.show_all,
+        );
 
         // Column headers and list
         render_column_headers(frame, columns, &metrics, state.sort_key);
@@ -1416,15 +1431,16 @@ fn picker_header_line(state: &PickerState) -> Line<'static> {
         spans.push("  ".into());
         spans.push("Source:".dim());
         spans.push(" ".into());
-        spans.push(source_tab_span(
-            SessionLookupSource::Praxis,
-            state.active_source,
-        ));
-        spans.push(" ".into());
-        spans.push(source_tab_span(
-            SessionLookupSource::Codex,
-            state.active_source,
-        ));
+        if let Some(switcher) = state.source_switcher.as_ref() {
+            for (index, source) in switcher.sources().enumerate() {
+                if index > 0 {
+                    spans.push(" ".into());
+                }
+                spans.push(source_tab_span(source, state.active_source));
+            }
+        } else {
+            spans.push(source_tab_span(state.active_source, state.active_source));
+        }
     }
 
     spans.push("  ".into());
@@ -1435,10 +1451,9 @@ fn picker_header_line(state: &PickerState) -> Line<'static> {
 }
 
 fn picker_hint_line(state: &PickerState) -> Line<'static> {
-    let action_label = if matches!(
-        (state.action, state.active_source),
-        (SessionPickerAction::Resume, SessionLookupSource::Codex)
-    ) {
+    let action_label = if matches!(state.action, SessionPickerAction::Resume)
+        && state.active_source.is_external()
+    {
         "fork into Praxis"
     } else {
         state.effective_action().action_label()
@@ -1487,10 +1502,7 @@ fn source_tab_span(
 }
 
 fn source_display_name(source: SessionLookupSource) -> &'static str {
-    match source {
-        SessionLookupSource::Praxis => "Praxis",
-        SessionLookupSource::Codex => "Codex",
-    }
+    source.display_name()
 }
 
 fn search_line(state: &PickerState) -> Line<'_> {
@@ -1523,16 +1535,22 @@ fn render_list(
     }
 
     let rows = &state.filtered_rows;
-    if rows.is_empty() {
+    if state.list_item_count() == 0 {
         let message = render_empty_state_line(state);
         frame.render_widget_ref(&message, area);
         return;
     }
 
-    let (start, end) = visible_row_range(rows.len(), state.scroll_top, area.height as usize);
+    let (start, end) = visible_row_range(
+        state.list_item_count(),
+        state.scroll_top,
+        area.height as usize,
+    );
+    let row_start = start.min(rows.len());
+    let row_end = end.min(rows.len());
     let labels = &metrics.labels;
-    let label_start = start.saturating_sub(metrics.first_row);
-    let label_end = label_start + (end - start);
+    let label_start = row_start.saturating_sub(metrics.first_row);
+    let label_end = label_start + row_end.saturating_sub(row_start);
     let mut y = area.y;
 
     let visibility = column_visibility(area.width, metrics, state.sort_key);
@@ -1541,12 +1559,13 @@ fn render_list(
     let max_branch_width = metrics.max_branch_width;
     let max_cwd_width = metrics.max_cwd_width;
 
-    for (idx, (row, (created_label, updated_label, branch_label, cwd_label))) in rows[start..end]
+    for (idx, (row, (created_label, updated_label, branch_label, cwd_label))) in rows
+        [row_start..row_end]
         .iter()
         .zip(labels[label_start..label_end].iter())
         .enumerate()
     {
-        let is_sel = start + idx == state.selected;
+        let is_sel = row_start + idx == state.selected;
         let marker = if is_sel { "> ".bold() } else { "  ".into() };
         let marker_width = 2usize;
         let created_span = if visibility.show_created {
@@ -1638,17 +1657,42 @@ fn render_list(
         y = y.saturating_add(1);
     }
 
-    if state.pagination.loading.is_pending() && y < area.y.saturating_add(area.height) {
+    let rendered_load_more = state.has_load_more_row()
+        && start <= rows.len()
+        && rows.len() < end
+        && y < area.y.saturating_add(area.height);
+    if rendered_load_more {
+        let selected = state.is_load_more_index(state.selected);
+        let line = render_load_more_line(selected, state.pagination.loading.is_pending());
+        let rect = Rect::new(area.x, y, area.width, 1);
+        frame.render_widget_ref(&line, rect);
+        y = y.saturating_add(1);
+    }
+
+    if state.pagination.loading.is_pending()
+        && !rendered_load_more
+        && y < area.y.saturating_add(area.height)
+    {
         let loading_line: Line = vec!["  ".into(), "Loading older sessions…".italic().dim()].into();
         let rect = Rect::new(area.x, y, area.width, 1);
         frame.render_widget_ref(&loading_line, rect);
     }
 }
 
+fn render_load_more_line(selected: bool, loading: bool) -> Line<'static> {
+    let marker = if selected { "> ".bold() } else { "  ".into() };
+    let label = if loading {
+        "Loading older sessions…".italic().dim()
+    } else {
+        "Load more".cyan()
+    };
+    vec![marker, label].into()
+}
+
 fn render_empty_state_line(state: &PickerState) -> Line<'static> {
     if !state.query.is_empty() {
         if state.search_state.is_active()
-            || (state.pagination.loading.is_pending() && state.pagination.next_cursor.is_some())
+            || (state.pagination.loading.is_pending() && state.pagination.cursors.has_next_page())
         {
             return vec!["Searching…".italic().dim()].into();
         }
@@ -2067,7 +2111,7 @@ mod tests {
     //
     //     let page = RolloutRecorder::list_threads(
     //         tempdir.path(),
-    //         PAGE_SIZE,
+    //         THREAD_PAGE_SIZE,
     //         None,
     //         ThreadSortKey::UpdatedAt,
     //         INTERACTIVE_SESSION_SOURCES,
@@ -2487,7 +2531,7 @@ mod tests {
     //
     //     let page = RolloutRecorder::list_threads(
     //         &state.praxis_home,
-    //         PAGE_SIZE,
+    //         THREAD_PAGE_SIZE,
     //         None,
     //         ThreadSortKey::CreatedAt,
     //         INTERACTIVE_SESSION_SOURCES,
@@ -2717,8 +2761,8 @@ mod tests {
         assert_eq!(unique_paths.len(), 4);
     }
 
-    #[test]
-    fn ensure_minimum_rows_prefetches_when_underfilled() {
+    #[tokio::test]
+    async fn enter_on_load_more_requests_next_page() {
         let recorded_requests: Arc<Mutex<Vec<PageLoadRequest>>> = Arc::new(Mutex::new(Vec::new()));
         let request_sink = recorded_requests.clone();
         let loader: PageLoader = Arc::new(move |req: PageLoadRequest| {
@@ -2747,10 +2791,16 @@ mod tests {
         ));
 
         assert!(recorded_requests.lock().unwrap().is_empty());
-        state.ensure_minimum_rows_for_view(/*minimum_rows*/ 10);
+        state.selected = state.filtered_rows.len();
+        state
+            .handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .await
+            .unwrap();
+
         let guard = recorded_requests.lock().unwrap();
         assert_eq!(guard.len(), 1);
         assert!(guard[0].search_token.is_none());
+        assert!(guard[0].cursor.is_some());
     }
 
     #[test]

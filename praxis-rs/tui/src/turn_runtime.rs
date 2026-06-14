@@ -8,6 +8,8 @@
 
 use std::collections::VecDeque;
 
+use crate::status_runtime::GENERIC_STATUS_HEADER;
+
 const DEFAULT_ACTIVITY_TRAIL_LIMIT: usize = 3;
 
 fn compact_footer_note(message: &str) -> Option<String> {
@@ -157,11 +159,9 @@ impl Default for TurnRuntimeState {
 }
 
 impl TurnRuntimeState {
-    const WORKING_HEADER: &str = "Working";
-
     pub(crate) fn new() -> Self {
         Self {
-            base_header: Self::WORKING_HEADER.to_string(),
+            base_header: GENERIC_STATUS_HEADER.to_string(),
             details: None,
             details_capitalization: RuntimeTextCapitalization::CapitalizeFirst,
             details_max_lines: 3,
@@ -183,7 +183,7 @@ impl TurnRuntimeState {
         details_max_lines: usize,
     ) {
         self.base_header = if header.trim().is_empty() {
-            Self::WORKING_HEADER.to_string()
+            GENERIC_STATUS_HEADER.to_string()
         } else {
             header
         };
@@ -240,14 +240,14 @@ impl TurnRuntimeState {
     }
 
     fn resolved_header(&self) -> String {
-        if self.base_header != Self::WORKING_HEADER {
+        if self.base_header != GENERIC_STATUS_HEADER {
             return self.base_header.clone();
         }
 
         self.active_task
             .as_ref()
             .and_then(RuntimeTaskSnapshot::display_message)
-            .unwrap_or_else(|| Self::WORKING_HEADER.to_string())
+            .unwrap_or_else(|| GENERIC_STATUS_HEADER.to_string())
     }
 
     fn extra_lines(&self) -> Vec<String> {
@@ -306,13 +306,13 @@ mod tests {
         let mut runtime = TurnRuntimeState::new();
         runtime.set_active_task(Some(RuntimeTaskSnapshot::new(
             "task-1",
-            "Run tests",
-            Some("Running tests".to_string()),
+            "tool: shell",
+            Some("Shell command running".to_string()),
         )));
 
         assert_eq!(
             runtime.status_snapshot().header,
-            "Running tests".to_string()
+            "Shell command running".to_string()
         );
     }
 
@@ -327,8 +327,8 @@ mod tests {
         );
         runtime.set_active_task(Some(RuntimeTaskSnapshot::new(
             "task-1",
-            "Run tests",
-            Some("Running tests".to_string()),
+            "tool: shell",
+            Some("Shell command running".to_string()),
         )));
 
         assert_eq!(
@@ -340,11 +340,14 @@ mod tests {
     #[test]
     fn activity_trail_dedupes_adjacent_entries() {
         let mut trail = ActivityTrail::new(3);
-        trail.push("Checking".to_string());
-        trail.push("Checking".to_string());
-        trail.push("Editing".to_string());
+        trail.push("tool shell started".to_string());
+        trail.push("tool shell started".to_string());
+        trail.push("tool shell completed".to_string());
 
-        assert_eq!(trail.summary(), Some("Checking → Editing".to_string()));
+        assert_eq!(
+            trail.summary(),
+            Some("tool shell started → tool shell completed".to_string())
+        );
     }
 
     #[test]

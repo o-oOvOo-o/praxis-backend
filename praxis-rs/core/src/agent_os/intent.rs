@@ -1,6 +1,6 @@
 use super::*;
 
-impl AgentOsRuntime {
+impl AgentOs {
     pub(crate) async fn preflight_command_intent(
         &self,
         thread_id: ThreadId,

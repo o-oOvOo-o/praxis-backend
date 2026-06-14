@@ -1,16 +1,12 @@
 use crate::model::ThreadMetadata;
-use praxis_protocol::models::ContentItem;
+use crate::thread_preview;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::RolloutItem;
 use praxis_protocol::protocol::SessionMetaLine;
 use praxis_protocol::protocol::TurnContextItem;
-use praxis_protocol::protocol::USER_MESSAGE_BEGIN;
-use praxis_protocol::protocol::UserMessageEvent;
 use serde::Serialize;
 use serde_json::Value;
-
-const IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER: &str = "[Image]";
 
 /// Apply a rollout item to the metadata structure.
 pub fn apply_rollout_item(
@@ -35,7 +31,7 @@ pub fn rollout_item_affects_thread_metadata(item: &RolloutItem) -> bool {
     match item {
         RolloutItem::SessionMeta(_) | RolloutItem::TurnContext(_) => true,
         RolloutItem::EventMsg(EventMsg::TokenCount(_) | EventMsg::UserMessage(_)) => true,
-        RolloutItem::ResponseItem(item) => response_item_user_message_preview(item).is_some(),
+        RolloutItem::ResponseItem(item) => thread_preview::response_item_preview(item).is_some(),
         RolloutItem::EventMsg(_) | RolloutItem::Compacted(_) => false,
     }
 }
@@ -88,14 +84,16 @@ fn apply_event_msg(metadata: &mut ThreadMetadata, event: &EventMsg) {
             }
         }
         EventMsg::UserMessage(user) => {
+            let preview = thread_preview::user_message_event_preview(user);
             if metadata.first_user_message.is_none() {
-                metadata.first_user_message = user_message_preview(user);
+                metadata.first_user_message = preview
+                    .as_ref()
+                    .map(|preview| preview.as_display_text().to_string());
             }
-            if metadata.title.is_empty() {
-                let title = strip_user_message_prefix(user.message.as_str());
-                if !title.is_empty() {
-                    metadata.title = title.to_string();
-                }
+            if metadata.title.is_empty()
+                && let Some(title) = preview.as_ref().and_then(|preview| preview.title_text())
+            {
+                metadata.title = title.to_string();
             }
         }
         _ => {}
@@ -103,76 +101,17 @@ fn apply_event_msg(metadata: &mut ThreadMetadata, event: &EventMsg) {
 }
 
 fn apply_response_item(metadata: &mut ThreadMetadata, item: &ResponseItem) {
-    let Some(message) = response_item_user_message_preview(item) else {
+    let Some(preview) = thread_preview::response_item_preview(item) else {
         return;
     };
     if metadata.first_user_message.is_none() {
-        metadata.first_user_message = Some(message.clone());
+        metadata.first_user_message = Some(preview.as_display_text().to_string());
     }
-    if metadata.title.is_empty() && message != IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER {
-        metadata.title = message;
-    }
-}
-
-fn strip_user_message_prefix(text: &str) -> &str {
-    match text.find(USER_MESSAGE_BEGIN) {
-        Some(idx) => text[idx + USER_MESSAGE_BEGIN.len()..].trim(),
-        None => text.trim(),
-    }
-}
-
-fn user_message_preview(user: &UserMessageEvent) -> Option<String> {
-    let message = strip_user_message_prefix(user.message.as_str());
-    if !message.is_empty() && !is_bootstrap_context_message(message) {
-        return Some(message.to_string());
-    }
-    if user
-        .images
-        .as_ref()
-        .is_some_and(|images| !images.is_empty())
-        || !user.local_images.is_empty()
+    if metadata.title.is_empty()
+        && let Some(title) = preview.title_text()
     {
-        return Some(IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string());
+        metadata.title = title.to_string();
     }
-    None
-}
-
-fn response_item_user_message_preview(item: &ResponseItem) -> Option<String> {
-    let ResponseItem::Message { role, content, .. } = item else {
-        return None;
-    };
-    if !role.eq_ignore_ascii_case("user") {
-        return None;
-    }
-
-    let text = content
-        .iter()
-        .filter_map(|item| match item {
-            ContentItem::InputText { text } => {
-                let text = text.trim();
-                (!text.is_empty() && !is_bootstrap_context_message(text)).then_some(text)
-            }
-            ContentItem::InputImage { .. } | ContentItem::OutputText { .. } => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    if !text.is_empty() {
-        return Some(text);
-    }
-    if content
-        .iter()
-        .any(|item| matches!(item, ContentItem::InputImage { .. }))
-    {
-        return Some(IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER.to_string());
-    }
-    None
-}
-
-fn is_bootstrap_context_message(text: &str) -> bool {
-    let trimmed = text.trim_start();
-    trimmed.starts_with("<environment_context>")
-        || trimmed.starts_with("<skills_instructions>")
-        || trimmed.starts_with("# AGENTS.md instructions for ")
 }
 
 pub(crate) fn enum_to_string<T: Serialize>(value: &T) -> String {
@@ -368,7 +307,7 @@ mod tests {
 
         assert_eq!(
             metadata.first_user_message.as_deref(),
-            Some(super::IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER)
+            Some(super::thread_preview::IMAGE_ONLY_USER_MESSAGE_PLACEHOLDER)
         );
         assert_eq!(metadata.title, "");
     }
@@ -409,6 +348,8 @@ mod tests {
                     cli_version: "0.0.0".to_string(),
                     source: SessionSource::Cli,
                     agent_path: None,
+                    agent_base_name: None,
+                    agent_title: None,
                     agent_display_name: None,
                     agent_role: None,
                     model_provider: Some("openai".to_string()),
@@ -536,6 +477,8 @@ mod tests {
                     cli_version: "0.0.0".to_string(),
                     source: SessionSource::Cli,
                     agent_path: None,
+                    agent_base_name: None,
+                    agent_title: None,
                     agent_display_name: None,
                     agent_role: None,
                     model_provider: Some("openai".to_string()),
@@ -562,6 +505,8 @@ mod tests {
             updated_at: created_at,
             source: "cli".to_string(),
             agent_path: None,
+            agent_base_name: None,
+            agent_title: None,
             agent_display_name: None,
             agent_role: None,
             model_provider: "openai".to_string(),

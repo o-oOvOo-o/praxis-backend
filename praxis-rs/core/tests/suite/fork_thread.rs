@@ -4,8 +4,8 @@ use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
-use praxis_core::ForkSnapshot;
-use praxis_core::NewThread;
+use praxis_core::ThreadForkSnapshot;
+use praxis_core::ThreadSpawnResult;
 use praxis_core::parse_turn_item;
 use praxis_protocol::items::TurnItem;
 use praxis_protocol::protocol::EventMsg;
@@ -107,12 +107,12 @@ async fn fork_thread_twice_drops_to_first_message() {
     // After dropping again (n=1 on fork1), compute expected relative to fork1's rollout.
 
     // Fork once with n=1 → drops the last user input and everything after.
-    let NewThread {
+    let ThreadSpawnResult {
         thread: praxis_fork1,
         ..
     } = thread_manager
         .fork_thread(
-            ForkSnapshot::TruncateBeforeNthUserMessage(1),
+            ThreadForkSnapshot::TruncateBeforeNthUserMessage(1),
             config_for_fork.clone(),
             base_path.clone(),
             /*persist_extended_history*/ false,
@@ -131,12 +131,12 @@ async fn fork_thread_twice_drops_to_first_message() {
     );
 
     // Fork again with n=0 → drops the (new) last user message, leaving only the first.
-    let NewThread {
+    let ThreadSpawnResult {
         thread: praxis_fork2,
         ..
     } = thread_manager
         .fork_thread(
-            ForkSnapshot::TruncateBeforeNthUserMessage(0),
+            ThreadForkSnapshot::TruncateBeforeNthUserMessage(0),
             config_for_fork.clone(),
             fork1_path.clone(),
             /*persist_extended_history*/ false,

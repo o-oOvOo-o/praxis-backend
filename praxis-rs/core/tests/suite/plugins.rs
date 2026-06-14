@@ -34,9 +34,10 @@ fn sample_plugin_root(home: &TempDir) -> std::path::PathBuf {
 
 fn write_sample_plugin_manifest_and_config(home: &TempDir) -> std::path::PathBuf {
     let plugin_root = sample_plugin_root(home);
-    std::fs::create_dir_all(plugin_root.join(".codex-plugin")).expect("create plugin manifest dir");
+    std::fs::create_dir_all(plugin_root.join(".praxis-plugin"))
+        .expect("create plugin manifest dir");
     std::fs::write(
-        plugin_root.join(".codex-plugin/plugin.json"),
+        plugin_root.join(".praxis-plugin/plugin.json"),
         format!(
             r#"{{"name":"{SAMPLE_PLUGIN_DISPLAY_NAME}","description":"{SAMPLE_PLUGIN_DESCRIPTION}"}}"#
         ),

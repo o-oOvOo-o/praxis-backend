@@ -1,6 +1,6 @@
 use super::*;
 
-impl AgentOsRuntime {
+impl AgentOs {
     pub(crate) async fn submit_worker_request(
         &self,
         request: WorkerRequestCreateRequest,

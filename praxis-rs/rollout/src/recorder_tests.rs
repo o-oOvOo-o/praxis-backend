@@ -309,7 +309,8 @@ async fn list_threads_db_paginates_without_filesystem_fallback() -> std::io::Res
         );
         builder.model_provider = Some(config.model_provider_id.clone());
         builder.cwd = home.path().to_path_buf();
-        let metadata = builder.build(config.model_provider_id.as_str());
+        let mut metadata = builder.build(config.model_provider_id.as_str());
+        metadata.first_user_message = Some("Hello from user".to_string());
         runtime
             .upsert_thread(&metadata)
             .await

@@ -40,8 +40,9 @@ mod results;
 pub use engine::rip_web_search;
 use github::*;
 use providers::*;
+pub use query::web_search_action_detail;
+pub use query::web_search_detail;
 use query::*;
-pub use query::{web_search_action_detail, web_search_detail};
 use render::*;
 use results::*;
 

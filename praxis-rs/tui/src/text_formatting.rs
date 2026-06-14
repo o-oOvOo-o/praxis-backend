@@ -117,7 +117,7 @@ pub(crate) fn truncate_text(text: &str, max_graphemes: usize) -> String {
 /// Truncate a path-like string to the given display width, keeping leading and trailing segments
 /// where possible and inserting a single Unicode ellipsis between them. If an individual segment
 /// cannot fit, it is front-truncated with an ellipsis.
-pub(crate) fn center_truncate_path(path: &str, max_width: usize) -> String {
+pub(crate) fn workspace_truncate_path(path: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
     }
@@ -458,19 +458,19 @@ mod tests {
     }
 
     #[test]
-    fn test_center_truncate_doesnt_truncate_short_path() {
+    fn test_workspace_truncate_doesnt_truncate_short_path() {
         let sep = std::path::MAIN_SEPARATOR;
         let path = format!("{sep}Users{sep}codex{sep}Public");
-        let truncated = center_truncate_path(&path, /*max_width*/ 40);
+        let truncated = workspace_truncate_path(&path, /*max_width*/ 40);
 
         assert_eq!(truncated, path);
     }
 
     #[test]
-    fn test_center_truncate_truncates_long_path() {
+    fn test_workspace_truncate_truncates_long_path() {
         let sep = std::path::MAIN_SEPARATOR;
         let path = format!("~{sep}hello{sep}the{sep}fox{sep}is{sep}very{sep}fast");
-        let truncated = center_truncate_path(&path, /*max_width*/ 24);
+        let truncated = workspace_truncate_path(&path, /*max_width*/ 24);
 
         assert_eq!(
             truncated,
@@ -479,12 +479,12 @@ mod tests {
     }
 
     #[test]
-    fn test_center_truncate_truncates_long_windows_path() {
+    fn test_workspace_truncate_truncates_long_windows_path() {
         let sep = std::path::MAIN_SEPARATOR;
         let path = format!(
             "C:{sep}Users{sep}codex{sep}Projects{sep}super{sep}long{sep}windows{sep}path{sep}file.txt"
         );
-        let truncated = center_truncate_path(&path, /*max_width*/ 36);
+        let truncated = workspace_truncate_path(&path, /*max_width*/ 36);
 
         let expected = format!("C:{sep}Users{sep}codex{sep}…{sep}path{sep}file.txt");
 
@@ -492,10 +492,10 @@ mod tests {
     }
 
     #[test]
-    fn test_center_truncate_handles_long_segment() {
+    fn test_workspace_truncate_handles_long_segment() {
         let sep = std::path::MAIN_SEPARATOR;
         let path = format!("~{sep}supercalifragilisticexpialidocious");
-        let truncated = center_truncate_path(&path, /*max_width*/ 18);
+        let truncated = workspace_truncate_path(&path, /*max_width*/ 18);
 
         assert_eq!(truncated, format!("~{sep}…cexpialidocious"));
     }

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -24,12 +23,11 @@ use crate::praxis::TurnContext;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
+use crate::tools::events::ToolEventCtx;
+use crate::tools::events::ToolLifecycleEmitter;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
-use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::McpInvocation;
-use praxis_protocol::protocol::McpToolCallBeginEvent;
-use praxis_protocol::protocol::McpToolCallEndEvent;
 
 pub struct McpResourceHandler;
 
@@ -259,7 +257,13 @@ async fn handle_list_resources(
         arguments: arguments.clone(),
     };
 
-    emit_tool_call_begin(&session, turn.as_ref(), &call_id, invocation.clone()).await;
+    let tool_events = ToolLifecycleEmitter::new(ToolEventCtx::new(
+        session.as_ref(),
+        turn.as_ref(),
+        &call_id,
+        None,
+    ));
+    tool_events.mcp_call_begin(invocation.clone()).await;
     let start = Instant::now();
 
     let payload_result: Result<ListResourcesPayload, FunctionCallError> = async {
@@ -297,53 +301,7 @@ async fn handle_list_resources(
     }
     .await;
 
-    match payload_result {
-        Ok(payload) => match serialize_function_output(payload) {
-            Ok(output) => {
-                let content =
-                    function_call_output_content_items_to_text(&output.body).unwrap_or_default();
-                let duration = start.elapsed();
-                emit_tool_call_end(
-                    &session,
-                    turn.as_ref(),
-                    &call_id,
-                    invocation,
-                    duration,
-                    Ok(call_tool_result_from_content(&content, output.success)),
-                )
-                .await;
-                Ok(output)
-            }
-            Err(err) => {
-                let duration = start.elapsed();
-                let message = err.to_string();
-                emit_tool_call_end(
-                    &session,
-                    turn.as_ref(),
-                    &call_id,
-                    invocation,
-                    duration,
-                    Err(message.clone()),
-                )
-                .await;
-                Err(err)
-            }
-        },
-        Err(err) => {
-            let duration = start.elapsed();
-            let message = err.to_string();
-            emit_tool_call_end(
-                &session,
-                turn.as_ref(),
-                &call_id,
-                invocation,
-                duration,
-                Err(message.clone()),
-            )
-            .await;
-            Err(err)
-        }
-    }
+    finish_mcp_resource_call(tool_events, invocation, start, payload_result).await
 }
 
 async fn handle_list_resource_templates(
@@ -363,7 +321,13 @@ async fn handle_list_resource_templates(
         arguments: arguments.clone(),
     };
 
-    emit_tool_call_begin(&session, turn.as_ref(), &call_id, invocation.clone()).await;
+    let tool_events = ToolLifecycleEmitter::new(ToolEventCtx::new(
+        session.as_ref(),
+        turn.as_ref(),
+        &call_id,
+        None,
+    ));
+    tool_events.mcp_call_begin(invocation.clone()).await;
     let start = Instant::now();
 
     let payload_result: Result<ListResourceTemplatesPayload, FunctionCallError> = async {
@@ -403,53 +367,7 @@ async fn handle_list_resource_templates(
     }
     .await;
 
-    match payload_result {
-        Ok(payload) => match serialize_function_output(payload) {
-            Ok(output) => {
-                let content =
-                    function_call_output_content_items_to_text(&output.body).unwrap_or_default();
-                let duration = start.elapsed();
-                emit_tool_call_end(
-                    &session,
-                    turn.as_ref(),
-                    &call_id,
-                    invocation,
-                    duration,
-                    Ok(call_tool_result_from_content(&content, output.success)),
-                )
-                .await;
-                Ok(output)
-            }
-            Err(err) => {
-                let duration = start.elapsed();
-                let message = err.to_string();
-                emit_tool_call_end(
-                    &session,
-                    turn.as_ref(),
-                    &call_id,
-                    invocation,
-                    duration,
-                    Err(message.clone()),
-                )
-                .await;
-                Err(err)
-            }
-        },
-        Err(err) => {
-            let duration = start.elapsed();
-            let message = err.to_string();
-            emit_tool_call_end(
-                &session,
-                turn.as_ref(),
-                &call_id,
-                invocation,
-                duration,
-                Err(message.clone()),
-            )
-            .await;
-            Err(err)
-        }
-    }
+    finish_mcp_resource_call(tool_events, invocation, start, payload_result).await
 }
 
 async fn handle_read_resource(
@@ -469,7 +387,13 @@ async fn handle_read_resource(
         arguments: arguments.clone(),
     };
 
-    emit_tool_call_begin(&session, turn.as_ref(), &call_id, invocation.clone()).await;
+    let tool_events = ToolLifecycleEmitter::new(ToolEventCtx::new(
+        session.as_ref(),
+        turn.as_ref(),
+        &call_id,
+        None,
+    ));
+    tool_events.mcp_call_begin(invocation.clone()).await;
     let start = Instant::now();
 
     let payload_result: Result<ReadResourcePayload, FunctionCallError> = async {
@@ -494,53 +418,7 @@ async fn handle_read_resource(
     }
     .await;
 
-    match payload_result {
-        Ok(payload) => match serialize_function_output(payload) {
-            Ok(output) => {
-                let content =
-                    function_call_output_content_items_to_text(&output.body).unwrap_or_default();
-                let duration = start.elapsed();
-                emit_tool_call_end(
-                    &session,
-                    turn.as_ref(),
-                    &call_id,
-                    invocation,
-                    duration,
-                    Ok(call_tool_result_from_content(&content, output.success)),
-                )
-                .await;
-                Ok(output)
-            }
-            Err(err) => {
-                let duration = start.elapsed();
-                let message = err.to_string();
-                emit_tool_call_end(
-                    &session,
-                    turn.as_ref(),
-                    &call_id,
-                    invocation,
-                    duration,
-                    Err(message.clone()),
-                )
-                .await;
-                Err(err)
-            }
-        },
-        Err(err) => {
-            let duration = start.elapsed();
-            let message = err.to_string();
-            emit_tool_call_end(
-                &session,
-                turn.as_ref(),
-                &call_id,
-                invocation,
-                duration,
-                Err(message.clone()),
-            )
-            .await;
-            Err(err)
-        }
-    }
+    finish_mcp_resource_call(tool_events, invocation, start, payload_result).await
 }
 
 fn call_tool_result_from_content(content: &str, success: Option<bool>) -> CallToolResult {
@@ -552,42 +430,45 @@ fn call_tool_result_from_content(content: &str, success: Option<bool>) -> CallTo
     }
 }
 
-async fn emit_tool_call_begin(
-    session: &Arc<Session>,
-    turn: &TurnContext,
-    call_id: &str,
+async fn finish_mcp_resource_call<T>(
+    tool_events: ToolLifecycleEmitter<'_>,
     invocation: McpInvocation,
-) {
-    session
-        .send_event(
-            turn,
-            EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
-                call_id: call_id.to_string(),
-                invocation,
-            }),
-        )
-        .await;
-}
-
-async fn emit_tool_call_end(
-    session: &Arc<Session>,
-    turn: &TurnContext,
-    call_id: &str,
-    invocation: McpInvocation,
-    duration: Duration,
-    result: Result<CallToolResult, String>,
-) {
-    session
-        .send_event(
-            turn,
-            EventMsg::McpToolCallEnd(McpToolCallEndEvent {
-                call_id: call_id.to_string(),
-                invocation,
-                duration,
-                result,
-            }),
-        )
-        .await;
+    start: Instant,
+    payload_result: Result<T, FunctionCallError>,
+) -> Result<FunctionToolOutput, FunctionCallError>
+where
+    T: Serialize,
+{
+    match payload_result {
+        Ok(payload) => match serialize_function_output(payload) {
+            Ok(output) => {
+                let content =
+                    function_call_output_content_items_to_text(&output.body).unwrap_or_default();
+                tool_events
+                    .mcp_call_end(
+                        invocation,
+                        start.elapsed(),
+                        Ok(call_tool_result_from_content(&content, output.success)),
+                    )
+                    .await;
+                Ok(output)
+            }
+            Err(err) => {
+                let message = err.to_string();
+                tool_events
+                    .mcp_call_end(invocation, start.elapsed(), Err(message))
+                    .await;
+                Err(err)
+            }
+        },
+        Err(err) => {
+            let message = err.to_string();
+            tool_events
+                .mcp_call_end(invocation, start.elapsed(), Err(message))
+                .await;
+            Err(err)
+        }
+    }
 }
 
 fn normalize_optional_string(input: Option<String>) -> Option<String> {

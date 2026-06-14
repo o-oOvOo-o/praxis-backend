@@ -9,9 +9,9 @@ use crate::exec_approval::handle_exec_approval_request;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::OutgoingNotificationMeta;
 use crate::patch_approval::handle_patch_approval_request;
-use praxis_core::NewThread;
 use praxis_core::PraxisThread;
 use praxis_core::ThreadManager;
+use praxis_core::ThreadSpawnResult;
 use praxis_core::config::Config as CodexConfig;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::AgentMessageEvent;
@@ -64,7 +64,7 @@ pub async fn run_praxis_tool_session(
     thread_manager: Arc<ThreadManager>,
     running_requests_id_to_praxis_uuid: Arc<Mutex<HashMap<RequestId, ThreadId>>>,
 ) {
-    let NewThread {
+    let ThreadSpawnResult {
         thread_id,
         thread,
         session_configured,

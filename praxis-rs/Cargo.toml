@@ -9,7 +9,7 @@ members = [
     "app-gateway-native",
     "app-gateway-protocol",
     "app-gateway-service",
-    "app-gateway-runtime",
+    "app-gateway",
     "app-gateway-test-client",
     "debug-client",
     "apply-patch",
@@ -101,7 +101,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 # Internal
-app_test_support = { path = "app-gateway-runtime/tests/common" }
+app_test_support = { path = "app-gateway/tests/common" }
 praxis-analytics = { path = "analytics" }
 praxis-ansi-escape = { path = "ansi-escape" }
 praxis-app-core = { path = "../../praxis-app-core" }
@@ -111,7 +111,7 @@ praxis-app-gateway-core = { path = "app-gateway-core" }
 praxis-app-gateway-native = { path = "app-gateway-native" }
 praxis-app-gateway-protocol = { path = "app-gateway-protocol" }
 praxis-app-gateway-service = { path = "app-gateway-service" }
-praxis-app-gateway-runtime = { path = "app-gateway-runtime" }
+praxis-app-gateway = { path = "app-gateway" }
 praxis-app-gateway-test-client = { path = "app-gateway-test-client" }
 praxis-apply-patch = { path = "apply-patch" }
 praxis-arg0 = { path = "arg0" }

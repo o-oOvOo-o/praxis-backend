@@ -4,6 +4,7 @@
 //! behavior easier to review without paging through the rest of `chatwidget.rs`.
 
 use super::*;
+use crate::status_runtime::GENERIC_STATUS_HEADER;
 
 /// Items shown in the terminal title when the user has not configured a
 /// custom selection.
@@ -26,11 +27,11 @@ pub(super) const TERMINAL_TITLE_SPINNER_INTERVAL: Duration = Duration::from_mill
 /// onto one of these buckets before rendering.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum TerminalTitleStatusKind {
-    Working,
+    #[default]
+    TurnRunning,
     WaitingForBackgroundTerminal,
     Undoing,
-    #[default]
-    Thinking,
+    Reasoning,
 }
 
 #[derive(Debug)]
@@ -569,7 +570,7 @@ impl ChatWidget {
         }
 
         match self.terminal_title_status_kind {
-            TerminalTitleStatusKind::Working if !self.bottom_pane.is_task_running() => {
+            TerminalTitleStatusKind::TurnRunning if !self.bottom_pane.is_task_running() => {
                 "Ready".to_string()
             }
             TerminalTitleStatusKind::WaitingForBackgroundTerminal
@@ -577,13 +578,13 @@ impl ChatWidget {
             {
                 "Ready".to_string()
             }
-            TerminalTitleStatusKind::Thinking if !self.bottom_pane.is_task_running() => {
+            TerminalTitleStatusKind::Reasoning if !self.bottom_pane.is_task_running() => {
                 "Ready".to_string()
             }
-            TerminalTitleStatusKind::Working => "Working".to_string(),
+            TerminalTitleStatusKind::TurnRunning => GENERIC_STATUS_HEADER.to_string(),
             TerminalTitleStatusKind::WaitingForBackgroundTerminal => "Waiting".to_string(),
             TerminalTitleStatusKind::Undoing => "Undoing".to_string(),
-            TerminalTitleStatusKind::Thinking => "Thinking".to_string(),
+            TerminalTitleStatusKind::Reasoning => "Reasoning".to_string(),
         }
     }
 

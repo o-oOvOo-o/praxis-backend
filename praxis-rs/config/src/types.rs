@@ -19,6 +19,7 @@ use praxis_utils_absolute_path::AbsolutePathBuf;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
+use std::path::PathBuf;
 use wildmatch::WildMatchPattern;
 
 use schemars::JsonSchema;
@@ -553,6 +554,38 @@ pub use crate::skills_config::SkillsConfig;
 pub struct PluginConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PluginMarketplaceConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub sync_on_startup: bool,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(flatten)]
+    pub provider: PluginMarketplaceProviderConfig,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[serde(tag = "provider", rename_all = "snake_case")]
+#[schemars(deny_unknown_fields)]
+pub enum PluginMarketplaceProviderConfig {
+    Local {
+        path: AbsolutePathBuf,
+    },
+    Git {
+        repo: String,
+        #[serde(default)]
+        reference: Option<String>,
+        #[serde(default)]
+        path: Option<PathBuf>,
+    },
+    Http {
+        url: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]

@@ -198,7 +198,7 @@ fn render_preview(
     area: Rect,
     buf: &mut Buffer,
     preview_rows: &[PreviewRow],
-    center_vertically: bool,
+    workspace_vertically: bool,
     left_inset: u16,
 ) {
     if area.height == 0 || area.width == 0 {
@@ -225,7 +225,7 @@ fn render_preview(
     let content_height = ((semantic_lines.len() + preview_rows.len()) as u16).min(area.height);
 
     let left_pad = left_inset.min(area.width.saturating_sub(1));
-    let top_pad = if center_vertically {
+    let top_pad = if workspace_vertically {
         centered_offset(area.height, content_height, PREVIEW_FRAME_PADDING)
     } else {
         0
@@ -289,7 +289,7 @@ impl Renderable for ThemePreviewWideRenderable {
             area,
             buf,
             &WIDE_PREVIEW_ROWS,
-            /*center_vertically*/ true,
+            /*workspace_vertically*/ true,
             WIDE_PREVIEW_LEFT_INSET,
         );
     }
@@ -305,7 +305,7 @@ impl Renderable for ThemePreviewNarrowRenderable {
             area,
             buf,
             &NARROW_PREVIEW_ROWS,
-            /*center_vertically*/ false,
+            /*workspace_vertically*/ false,
             /*left_inset*/ 0,
         );
     }
@@ -557,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn wide_preview_renders_all_lines_with_vertical_center_and_left_inset() {
+    fn wide_preview_renders_all_lines_with_vertical_workspace_and_left_inset() {
         let lines = render_lines(
             &ThemePreviewWideRenderable,
             /*width*/ 80,

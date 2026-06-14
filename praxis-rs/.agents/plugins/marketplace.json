@@ -1,0 +1,41 @@
+{
+  "name": "praxis-official",
+  "interface": {
+    "displayName": "Praxis Official"
+  },
+  "plugins": [
+    {
+      "name": "external-agent-migration",
+      "source": {
+        "source": "local",
+        "path": "./plugins/official/external-agent-migration"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
+    },
+    {
+      "name": "praxis-thread-control",
+      "source": {
+        "source": "local",
+        "path": "./plugins/official/praxis-thread-control"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
+    },
+    {
+      "name": "cunning3d-graph-control",
+      "source": {
+        "source": "local",
+        "path": "./plugins/official/cunning3d-graph-control"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      }
+    }
+  ]
+}

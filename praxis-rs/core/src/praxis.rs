@@ -45,14 +45,12 @@ use crate::render_skills_section;
 use crate::session_prefix::format_subagent_notification_message;
 use crate::skills_load_input_from_config;
 use crate::stream_events_utils::HandleOutputCtx;
+use crate::stream_events_utils::emit_synthetic_final_answer;
 use crate::stream_events_utils::handle_non_tool_response_item;
 use crate::stream_events_utils::handle_output_item_done;
 use crate::stream_events_utils::last_assistant_message_from_item;
 use crate::stream_events_utils::raw_assistant_output_text_from_item;
-use crate::stream_events_utils::record_completed_response_item;
-use crate::stream_events_utils::subagent_workflow_empty_final_item;
-use crate::stream_events_utils::subagent_workflow_incomplete_final_item;
-use crate::stream_events_utils::tool_loop_guard_final_item;
+use crate::stream_events_utils::synthetic_final_item_for_guard;
 use crate::tools::loop_guard::ToolLoopGuardState;
 use crate::turn_metadata::TurnMetadataState;
 use crate::util::error_or_panic;
@@ -270,7 +268,7 @@ use crate::SkillInjections;
 use crate::SkillLoadOutcome;
 use crate::SkillMetadata;
 use crate::SkillsManager;
-use crate::agent_os::AgentOsRuntime;
+use crate::agent_os::AgentOs;
 use crate::agent_os::RuntimeCommandRecord;
 use crate::agent_os::ThreadRegistration;
 use crate::agent_os::coordination_scope_for_session_source;
@@ -282,10 +280,8 @@ use crate::collect_explicit_skill_mentions;
 use crate::exec_policy::ExecPolicyUpdateError;
 use crate::feedback_tags;
 use crate::guardian::GuardianReviewSessionManager;
-use crate::hook_runtime::PendingInputHookDisposition;
-use crate::hook_runtime::inspect_pending_input;
+use crate::hook_runtime::process_pending_input_for_sampling;
 use crate::hook_runtime::record_additional_contexts;
-use crate::hook_runtime::record_pending_input;
 use crate::hook_runtime::run_pending_session_start_hooks;
 use crate::hook_runtime::run_user_prompt_submit_hooks;
 use crate::injection::ToolMentionKind;
@@ -319,21 +315,19 @@ use crate::skills_watcher::SkillsWatcherEvent;
 use crate::state::ActiveTurn;
 use crate::state::SessionServices;
 use crate::state::SessionState;
+use crate::tasks::AgentTask;
+use crate::tasks::AgentTaskContext;
 use crate::tasks::GhostSnapshotTask;
 use crate::tasks::ReviewTask;
-use crate::tasks::SessionTask;
-use crate::tasks::SessionTaskContext;
 use crate::tools::ToolRouter;
 use crate::tools::context::SharedTurnDiffTracker;
-use crate::tools::js_repl::JsReplHandle;
-use crate::tools::js_repl::resolve_compatible_node;
 use crate::tools::network_approval::NetworkApprovalService;
 use crate::tools::network_approval::build_blocked_request_observer;
 use crate::tools::network_approval::build_network_policy_decider;
-use crate::tools::parallel::ToolCallRuntime;
 use crate::tools::router::ToolRouterParams;
 use crate::tools::runtimes::shell::ShellHostProcessCleaner;
 use crate::tools::sandboxing::ApprovalStore;
+use crate::tools::tool_call_runtime::ToolCallRuntime;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::turn_timing::TurnTimingState;
 use crate::turn_timing::record_turn_ttfm_metric;
@@ -469,7 +463,7 @@ pub(crate) struct PraxisSpawnArgs {
     pub(crate) conversation_history: InitialHistory,
     pub(crate) session_source: SessionSource,
     pub(crate) agent_control: AgentControl,
-    pub(crate) agent_os: Arc<AgentOsRuntime>,
+    pub(crate) agent_os: Arc<AgentOs>,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) persist_extended_history: bool,
     pub(crate) metrics_service_name: Option<String>,
@@ -548,7 +542,6 @@ pub(crate) struct Session {
     pub(crate) services: SessionServices,
     pub(crate) goal_runtime: crate::goals::GoalRuntimeState,
     llm_runtime_catalog: LlmRuntimeCatalog,
-    js_repl: Arc<JsReplHandle>,
     next_internal_sub_id: AtomicU64,
     /// Guards one-shot auto-title generation so it runs at most once per session.
     pub(crate) auto_title_attempted: AtomicBool,
@@ -614,7 +607,6 @@ pub(crate) struct TurnContext {
     pub(crate) tool_call_gate: Arc<ReadinessFlag>,
     pub(crate) tool_loop_guard: Arc<ToolLoopGuardState>,
     pub(crate) truncation_policy: TruncationPolicy,
-    pub(crate) js_repl: Arc<JsReplHandle>,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) turn_metadata_state: Arc<TurnMetadataState>,
     pub(crate) turn_skills: TurnSkillsContext,
@@ -750,7 +742,6 @@ impl TurnContext {
             tool_call_gate: Arc::new(ReadinessFlag::new()),
             tool_loop_guard: Arc::clone(&self.tool_loop_guard),
             truncation_policy,
-            js_repl: Arc::clone(&self.js_repl),
             dynamic_tools: self.dynamic_tools.clone(),
             turn_metadata_state: self.turn_metadata_state.clone(),
             turn_skills: self.turn_skills.clone(),
@@ -1018,32 +1009,39 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) app_gateway_client_name: Option<String>,
 }
 
+mod agent_turn_loop;
 mod event_delivery;
 /// Operation handlers
 mod handlers;
 mod history_context;
+mod main_agent_loop;
 mod mcp_runtime;
 mod review;
-mod run_turn;
-mod runtime_lifecycle;
 mod session_core;
 mod session_startup;
-mod submission;
+mod thread_lifecycle;
 mod turn_context;
 
-use review::{errors_to_info, skills_to_info, spawn_review_thread};
-use run_turn::effective_auto_compact_token_limit;
-pub(crate) use run_turn::{record_empty_model_recovery, run_turn};
-use submission::submission_loop;
+pub(crate) use agent_turn_loop::agent_turn_loop;
+use agent_turn_loop::effective_auto_compact_token_limit;
+pub(crate) use agent_turn_loop::record_empty_model_recovery;
+use main_agent_loop::main_agent_loop;
+use review::errors_to_info;
+use review::skills_to_info;
+use review::spawn_review_thread;
 
 use crate::memories::prompts::build_memory_tool_developer_instructions;
-use sampling::{
-    SamplingRequestResult, collect_explicit_app_ids_from_skill_items, realtime_text_for_event,
-    run_sampling_request,
-};
-pub(crate) use sampling::{build_prompt, built_tools, get_last_assistant_message_from_turn};
+use sampling::SamplingRequestResult;
+pub(crate) use sampling::build_prompt;
+pub(crate) use sampling::built_tools;
+use sampling::collect_explicit_app_ids_from_skill_items;
 #[cfg(test)]
-use sampling::{filter_connectors_for_input, filter_praxis_apps_mcp_tools};
+use sampling::filter_connectors_for_input;
+#[cfg(test)]
+use sampling::filter_praxis_apps_mcp_tools;
+pub(crate) use sampling::get_last_assistant_message_from_turn;
+use sampling::realtime_text_for_event;
+use sampling::run_sampling_request;
 #[cfg(test)]
 pub(crate) use tests::make_session_and_context;
 #[cfg(test)]

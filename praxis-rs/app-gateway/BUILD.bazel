@@ -1,0 +1,7 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "app-gateway",
+    crate_name = "praxis_app_gateway",
+    test_tags = ["no-sandbox"],
+)

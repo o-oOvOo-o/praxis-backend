@@ -1,8 +1,12 @@
+use super::DirtyFileFingerprint;
+use super::TaskRecord;
 use super::paths::find_repo_root;
-use super::{DirtyFileFingerprint, TaskRecord};
-use crate::path_scope::{normalize_path_for_scope, scope_matches};
-use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use crate::path_scope::normalize_path_for_scope;
+use crate::path_scope::scope_matches;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::path::Path;
+use std::path::PathBuf;
 
 pub(super) fn dirty_file_allowed_by_task(task: &TaskRecord, path: &Path) -> bool {
     if task.exploratory || task.scope.is_empty() {

@@ -222,7 +222,7 @@ impl ToolRouter {
         turn: Arc<TurnContext>,
         tracker: SharedTurnDiffTracker,
         call: ToolCall,
-        source: ToolCallSource,
+        _source: ToolCallSource,
     ) -> Result<AnyToolResult, FunctionCallError> {
         let ToolCall {
             tool_name,
@@ -232,16 +232,6 @@ impl ToolRouter {
         } = call;
         let response_payload = payload.clone();
         let payload = self.normalize_freeform_payload(&tool_name, payload)?;
-
-        if source == ToolCallSource::Direct
-            && turn.tools_config.js_repl_tools_only
-            && !matches!(tool_name.as_str(), "js_repl" | "js_repl_reset")
-        {
-            return Err(FunctionCallError::RespondToModel(
-                "direct tool calls are disabled; use js_repl and codex.tool(...) instead"
-                    .to_string(),
-            ));
-        }
 
         let invocation = ToolInvocation {
             session,

@@ -50,21 +50,15 @@ impl ToolHandler for Handler {
                 "Agent depth limit reached. Solve the task yourself.".to_string(),
             ));
         }
-        session
-            .send_event(
-                &turn,
-                CollabAgentSpawnBeginEvent {
-                    call_id: call_id.clone(),
-                    sender_thread_id: session.conversation_id,
-                    prompt: prompt.clone(),
-                    model: args
-                        .model
-                        .clone()
-                        .or_else(|| args.model_provider.clone())
-                        .unwrap_or_default(),
-                    reasoning_effort: args.reasoning_effort.unwrap_or_default(),
-                }
-                .into(),
+        let collab_events = CollabAgentEventEmitter::new(session.as_ref(), turn.as_ref(), &call_id);
+        collab_events
+            .spawn_begin(
+                prompt.clone(),
+                args.model
+                    .clone()
+                    .or_else(|| args.model_provider.clone())
+                    .unwrap_or_default(),
+                args.reasoning_effort.unwrap_or_default(),
             )
             .await;
         let mut config = build_agent_spawn_config(turn.as_ref())?;
@@ -158,24 +152,18 @@ impl ToolHandler for Handler {
         let result_agent_base_name = new_agent_base_name.clone();
         let result_agent_title = new_agent_title.clone();
         let result_agent_display_name = new_agent_display_name.clone();
-        session
-            .send_event(
-                &turn,
-                CollabAgentSpawnEndEvent {
-                    call_id,
-                    sender_thread_id: session.conversation_id,
-                    new_thread_id,
-                    new_agent_base_name,
-                    new_agent_title,
-                    new_agent_display_name,
-                    new_agent_role,
-                    prompt,
-                    model: effective_model,
-                    reasoning_effort: effective_reasoning_effort,
-                    status,
-                }
-                .into(),
-            )
+        collab_events
+            .spawn_end(CollabSpawnEndEventInput {
+                new_thread_id,
+                new_agent_base_name,
+                new_agent_title,
+                new_agent_display_name,
+                new_agent_role,
+                prompt,
+                model: effective_model,
+                reasoning_effort: effective_reasoning_effort,
+                status,
+            })
             .await;
         let _ = result?;
         let role_tag = role_name.unwrap_or(DEFAULT_ROLE_NAME);

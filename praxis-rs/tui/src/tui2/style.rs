@@ -1,4 +1,6 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 
 use super::tokens::UiPalette;
 

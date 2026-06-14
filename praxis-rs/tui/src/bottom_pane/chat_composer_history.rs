@@ -278,7 +278,7 @@ impl ChatComposerHistory {
             self.last_history_text = Some(entry.text.clone());
             return Some(entry);
         } else if let Some(log_id) = self.history_log_id {
-            app_event_tx.send(AppEvent::CodexOp(Op::GetHistoryEntryRequest {
+            app_event_tx.send(AppEvent::AgentOp(Op::GetHistoryEntryRequest {
                 offset: global_idx,
                 log_id,
             }));
@@ -338,7 +338,7 @@ mod tests {
 
         // Verify that a history lookup request was sent.
         let event = rx.try_recv().expect("expected AppEvent to be sent");
-        let AppEvent::CodexOp(op) = event else {
+        let AppEvent::AgentOp(op) = event else {
             panic!("unexpected event variant");
         };
         assert_eq!(
@@ -360,7 +360,7 @@ mod tests {
 
         // Verify second lookup request for offset 1.
         let event2 = rx.try_recv().expect("expected second event");
-        let AppEvent::CodexOp(op) = event2 else {
+        let AppEvent::AgentOp(op) = event2 else {
             panic!("unexpected event variant");
         };
         assert_eq!(

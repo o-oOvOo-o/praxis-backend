@@ -27,6 +27,8 @@ use crate::mcp_tool_approval_templates::RenderedMcpToolApprovalParam;
 use crate::mcp_tool_approval_templates::render_mcp_tool_approval_template;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
+use crate::tools::events::ToolEventCtx;
+use crate::tools::events::ToolLifecycleEmitter;
 use praxis_analytics::AppInvocation;
 use praxis_analytics::InvocationType;
 use praxis_analytics::build_track_events_context;
@@ -37,10 +39,7 @@ use praxis_otel::sanitize_metric_tag_value;
 use praxis_protocol::mcp::CallToolResult;
 use praxis_protocol::openai_models::InputModality;
 use praxis_protocol::protocol::AskForApproval;
-use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::McpInvocation;
-use praxis_protocol::protocol::McpToolCallBeginEvent;
-use praxis_protocol::protocol::McpToolCallEndEvent;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::request_user_input::RequestUserInputAnswer;
@@ -94,6 +93,12 @@ pub(crate) async fn handle_mcp_tool_call(
         tool: tool_name.clone(),
         arguments: arguments_value.clone(),
     };
+    let tool_events = ToolLifecycleEmitter::new(ToolEventCtx::new(
+        sess.as_ref(),
+        turn_context.as_ref(),
+        &call_id,
+        None,
+    ));
 
     let metadata =
         lookup_mcp_tool_metadata(sess.as_ref(), turn_context.as_ref(), &server, &tool_name).await;
@@ -122,9 +127,7 @@ pub(crate) async fn handle_mcp_tool_call(
 
     if server == CODEX_APPS_MCP_SERVER_NAME && !app_tool_policy.enabled {
         let result = notify_mcp_tool_call_skip(
-            sess.as_ref(),
-            turn_context.as_ref(),
-            &call_id,
+            tool_events,
             invocation,
             "MCP tool call blocked by app configuration".to_string(),
             /*already_started*/ false,
@@ -154,11 +157,7 @@ pub(crate) async fn handle_mcp_tool_call(
         .server_origin(&server)
         .map(str::to_string);
 
-    let tool_call_begin_event = EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
-        call_id: call_id.clone(),
-        invocation: invocation.clone(),
-    });
-    notify_mcp_tool_call_event(sess.as_ref(), turn_context.as_ref(), tool_call_begin_event).await;
+    tool_events.mcp_call_begin(invocation.clone()).await;
 
     if let Some(decision) = maybe_request_mcp_tool_approval(
         &sess,
@@ -211,18 +210,9 @@ pub(crate) async fn handle_mcp_tool_call(
                     tracing::warn!("MCP tool call error: {error:?}");
                 }
                 let duration = start.elapsed();
-                let tool_call_end_event = EventMsg::McpToolCallEnd(McpToolCallEndEvent {
-                    call_id: call_id.clone(),
-                    invocation,
-                    duration,
-                    result: result.clone(),
-                });
-                notify_mcp_tool_call_event(
-                    sess.as_ref(),
-                    turn_context.as_ref(),
-                    tool_call_end_event.clone(),
-                )
-                .await;
+                tool_events
+                    .mcp_call_end(invocation, duration, result.clone())
+                    .await;
                 maybe_track_praxis_app_used(
                     sess.as_ref(),
                     turn_context.as_ref(),
@@ -236,9 +226,7 @@ pub(crate) async fn handle_mcp_tool_call(
                 let message = "user rejected MCP tool call".to_string();
                 (
                     notify_mcp_tool_call_skip(
-                        sess.as_ref(),
-                        turn_context.as_ref(),
-                        &call_id,
+                        tool_events,
                         invocation,
                         message,
                         /*already_started*/ true,
@@ -251,9 +239,7 @@ pub(crate) async fn handle_mcp_tool_call(
                 let message = "user cancelled MCP tool call".to_string();
                 (
                     notify_mcp_tool_call_skip(
-                        sess.as_ref(),
-                        turn_context.as_ref(),
-                        &call_id,
+                        tool_events,
                         invocation,
                         message,
                         /*already_started*/ true,
@@ -265,9 +251,7 @@ pub(crate) async fn handle_mcp_tool_call(
             McpToolApprovalDecision::BlockedBySafetyMonitor(message) => {
                 (
                     notify_mcp_tool_call_skip(
-                        sess.as_ref(),
-                        turn_context.as_ref(),
-                        &call_id,
+                        tool_events,
                         invocation,
                         message,
                         /*already_started*/ true,
@@ -324,19 +308,9 @@ pub(crate) async fn handle_mcp_tool_call(
         tracing::warn!("MCP tool call error: {error:?}");
     }
     let duration = start.elapsed();
-    let tool_call_end_event = EventMsg::McpToolCallEnd(McpToolCallEndEvent {
-        call_id: call_id.clone(),
-        invocation,
-        duration,
-        result: result.clone(),
-    });
-
-    notify_mcp_tool_call_event(
-        sess.as_ref(),
-        turn_context.as_ref(),
-        tool_call_end_event.clone(),
-    )
-    .await;
+    tool_events
+        .mcp_call_end(invocation, duration, result.clone())
+        .await;
     maybe_track_praxis_app_used(sess.as_ref(), turn_context.as_ref(), &server, &tool_name).await;
 
     let status = if result.is_ok() { "ok" } else { "error" };
@@ -500,10 +474,6 @@ fn sanitize_mcp_tool_result_for_model(
     })
 }
 
-async fn notify_mcp_tool_call_event(sess: &Session, turn_context: &TurnContext, event: EventMsg) {
-    sess.send_event(turn_context, event).await;
-}
-
 struct McpAppUsageMetadata {
     connector_id: Option<String>,
     app_name: Option<String>,
@@ -600,7 +570,7 @@ fn build_mcp_tool_call_request_meta(
 
     if let Some(turn_metadata) = turn_context.turn_metadata_state.current_meta_value() {
         request_meta.insert(
-            crate::X_CODEX_TURN_METADATA_HEADER.to_string(),
+            crate::X_PRAXIS_TURN_METADATA_HEADER.to_string(),
             turn_metadata,
         );
     }
@@ -1578,28 +1548,18 @@ fn requires_mcp_tool_approval(annotations: Option<&ToolAnnotations>) -> bool {
 }
 
 async fn notify_mcp_tool_call_skip(
-    sess: &Session,
-    turn_context: &TurnContext,
-    call_id: &str,
+    tool_events: ToolLifecycleEmitter<'_>,
     invocation: McpInvocation,
     message: String,
     already_started: bool,
 ) -> Result<CallToolResult, String> {
     if !already_started {
-        let tool_call_begin_event = EventMsg::McpToolCallBegin(McpToolCallBeginEvent {
-            call_id: call_id.to_string(),
-            invocation: invocation.clone(),
-        });
-        notify_mcp_tool_call_event(sess, turn_context, tool_call_begin_event).await;
+        tool_events.mcp_call_begin(invocation.clone()).await;
     }
 
-    let tool_call_end_event = EventMsg::McpToolCallEnd(McpToolCallEndEvent {
-        call_id: call_id.to_string(),
-        invocation,
-        duration: Duration::ZERO,
-        result: Err(message.clone()),
-    });
-    notify_mcp_tool_call_event(sess, turn_context, tool_call_end_event).await;
+    tool_events
+        .mcp_call_end(invocation, Duration::ZERO, Err(message.clone()))
+        .await;
     Err(message)
 }
 

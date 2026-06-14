@@ -50,7 +50,6 @@ impl Session {
         network: Option<NetworkProxy>,
         environment: Arc<Environment>,
         sub_id: String,
-        js_repl: Arc<JsReplHandle>,
         skills_outcome: Arc<SkillLoadOutcome>,
     ) -> TurnContext {
         let reasoning_effort = session_configuration.collaboration_mode.reasoning_effort();
@@ -147,7 +146,6 @@ impl Session {
             tool_call_gate: Arc::new(ReadinessFlag::new()),
             tool_loop_guard: Arc::new(ToolLoopGuardState::default()),
             truncation_policy: model_info.truncation_policy.into(),
-            js_repl,
             dynamic_tools: session_configuration.dynamic_tools.clone(),
             turn_metadata_state,
             turn_skills: TurnSkillsContext::new(skills_outcome),
@@ -260,14 +258,9 @@ impl Session {
                 }
                 Err(err) => {
                     drop(state);
-                    self.send_event_raw(Event {
-                        id: sub_id.clone(),
-                        msg: EventMsg::Error(ErrorEvent {
-                            message: err.to_string(),
-                            praxis_error_info: Some(CodexErrorInfo::BadRequest),
-                        }),
-                    })
-                    .await;
+                    self.raw_event_emitter(sub_id.clone())
+                        .error(err.to_string(), Some(CodexErrorInfo::BadRequest))
+                        .await;
                     return Err(err);
                 }
             }
@@ -418,7 +411,6 @@ impl Session {
                 .map(StartedNetworkProxy::proxy),
             Arc::clone(&self.services.environment),
             sub_id,
-            Arc::clone(&self.js_repl),
             skills_outcome,
         );
         turn_context.realtime_active = self.conversation.running_state().await.is_some();
@@ -433,16 +425,12 @@ impl Session {
 
     pub(crate) async fn maybe_emit_unknown_model_warning_for_turn(&self, tc: &TurnContext) {
         if tc.model_info.used_fallback_model_metadata {
-            self.send_event(
-                tc,
-                EventMsg::Warning(WarningEvent {
-                    message: format!(
-                        "Model metadata for `{}` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.",
-                        tc.model_info.slug
-                    ),
-                }),
-            )
-            .await;
+            self.turn_event_emitter(tc)
+                .warning(format!(
+                    "Model metadata for `{}` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.",
+                    tc.model_info.slug
+                ))
+                .await;
         }
     }
 

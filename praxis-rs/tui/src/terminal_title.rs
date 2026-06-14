@@ -185,9 +185,10 @@ mod tests {
 
     #[test]
     fn sanitizes_terminal_title() {
-        let sanitized =
-            sanitize_terminal_title("  Project\t|\nWorking\x1b\x07\u{009D}\u{009C} |  Thread  ");
-        assert_eq!(sanitized, "Project | Working | Thread");
+        let sanitized = sanitize_terminal_title(
+            "  Project\t|\nTurn running\x1b\x07\u{009D}\u{009C} |  Thread  ",
+        );
+        assert_eq!(sanitized, "Project | Turn running | Thread");
     }
 
     #[test]

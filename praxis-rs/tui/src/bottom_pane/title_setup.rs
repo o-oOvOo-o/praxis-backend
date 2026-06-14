@@ -58,7 +58,9 @@ impl TerminalTitleItem {
             TerminalTitleItem::Spinner => {
                 "Animated task spinner (omitted while idle or when animations are off)"
             }
-            TerminalTitleItem::Status => "Compact session status text (Ready, Working, Thinking)",
+            TerminalTitleItem::Status => {
+                "Compact session status text (Ready, Turn running, Reasoning)"
+            }
             TerminalTitleItem::Thread => "Current thread title (omitted until available)",
             TerminalTitleItem::GitBranch => "Current Git branch (omitted when unavailable)",
             TerminalTitleItem::Model => "Current model name",
@@ -74,10 +76,10 @@ impl TerminalTitleItem {
     /// session.
     pub(crate) fn preview_example(self) -> &'static str {
         match self {
-            TerminalTitleItem::AppName => "codex",
+            TerminalTitleItem::AppName => "praxis",
             TerminalTitleItem::Project => "my-project",
             TerminalTitleItem::Spinner => "⠋",
-            TerminalTitleItem::Status => "Working",
+            TerminalTitleItem::Status => "Turn running",
             TerminalTitleItem::Thread => "Investigate flaky test",
             TerminalTitleItem::GitBranch => "feat/awesome-feature",
             TerminalTitleItem::Model => "gpt-5.2-codex",
@@ -88,7 +90,7 @@ impl TerminalTitleItem {
     /// Returns the separator to place before this item in a rendered title.
     ///
     /// The spinner gets a plain space on either side so it reads as
-    /// `my-project <spinner> Working` rather than `my-project · <spinner> · Working`.
+    /// `my-project <spinner> Turn running` rather than `my-project · <spinner> · Turn running`.
     /// All other adjacent items are joined with ` · `.
     pub(crate) fn separator_from_previous(self, previous: Option<Self>) -> &'static str {
         match previous {

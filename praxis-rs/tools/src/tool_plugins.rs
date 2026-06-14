@@ -26,8 +26,6 @@ use crate::create_create_goal_tool;
 use crate::create_exec_command_tool;
 use crate::create_get_goal_tool;
 use crate::create_image_generation_tool;
-use crate::create_js_repl_reset_tool;
-use crate::create_js_repl_tool;
 use crate::create_list_agents_tool;
 use crate::create_list_dir_tool;
 use crate::create_list_mcp_resource_templates_tool;
@@ -82,7 +80,6 @@ pub(crate) enum BuiltinToolPlugin {
     Shell,
     McpResources,
     PlanAndGoal,
-    JsRepl,
     HumanApproval,
     Discovery,
     ApplyPatch,
@@ -96,13 +93,12 @@ pub(crate) enum BuiltinToolPlugin {
     Dynamic,
 }
 
-pub(crate) fn builtin_tool_plugins() -> [BuiltinToolPlugin; 16] {
+pub(crate) fn builtin_tool_plugins() -> [BuiltinToolPlugin; 15] {
     [
         BuiltinToolPlugin::CodeMode,
         BuiltinToolPlugin::Shell,
         BuiltinToolPlugin::McpResources,
         BuiltinToolPlugin::PlanAndGoal,
-        BuiltinToolPlugin::JsRepl,
         BuiltinToolPlugin::HumanApproval,
         BuiltinToolPlugin::Discovery,
         BuiltinToolPlugin::ApplyPatch,
@@ -129,7 +125,6 @@ impl ToolPlugin for BuiltinToolPlugin {
             Self::Shell => register_shell(plan, config),
             Self::McpResources => register_mcp_resources(plan, config, params),
             Self::PlanAndGoal => register_plan_and_goal(plan, config),
-            Self::JsRepl => register_js_repl(plan, config),
             Self::HumanApproval => register_human_approval(plan, config),
             Self::Discovery => register_discovery(plan, config, params),
             Self::ApplyPatch => register_apply_patch(plan, config),
@@ -302,24 +297,6 @@ fn register_plan_and_goal(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {
         config.code_mode_enabled,
     );
     plan.register_handler("update_goal", ToolHandlerKind::UpdateGoal);
-}
-
-fn register_js_repl(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {
-    if !config.js_repl_enabled {
-        return;
-    }
-    plan.push_spec(
-        create_js_repl_tool(),
-        /*supports_parallel_tool_calls*/ false,
-        config.code_mode_enabled,
-    );
-    plan.push_spec(
-        create_js_repl_reset_tool(),
-        /*supports_parallel_tool_calls*/ false,
-        config.code_mode_enabled,
-    );
-    plan.register_handler("js_repl", ToolHandlerKind::JsRepl);
-    plan.register_handler("js_repl_reset", ToolHandlerKind::JsReplReset);
 }
 
 fn register_human_approval(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {

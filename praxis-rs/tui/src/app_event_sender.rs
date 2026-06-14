@@ -29,7 +29,7 @@ impl AppEventSender {
     pub(crate) fn send(&self, event: AppEvent) {
         // Record inbound events for high-fidelity session replay.
         // Avoid double-logging Ops; those are logged at the point of submission.
-        if !matches!(event, AppEvent::CodexOp(_)) {
+        if !matches!(event, AppEvent::AgentOp(_)) {
             session_log::log_inbound_app_event(&event);
         }
         if let Err(e) = self.app_event_tx.send(event) {
@@ -38,40 +38,40 @@ impl AppEventSender {
     }
 
     pub(crate) fn interrupt(&self) {
-        self.send(AppEvent::CodexOp(AppCommand::interrupt().into_core()));
+        self.send(AppEvent::AgentOp(AppCommand::interrupt().into_core()));
     }
 
     pub(crate) fn compact(&self) {
-        self.send(AppEvent::CodexOp(AppCommand::compact().into_core()));
+        self.send(AppEvent::AgentOp(AppCommand::compact().into_core()));
     }
 
     pub(crate) fn set_thread_name(&self, name: String) {
-        self.send(AppEvent::CodexOp(
+        self.send(AppEvent::AgentOp(
             AppCommand::set_thread_name(name).into_core(),
         ));
     }
 
     pub(crate) fn review(&self, review_request: ReviewRequest) {
-        self.send(AppEvent::CodexOp(
+        self.send(AppEvent::AgentOp(
             AppCommand::review(review_request).into_core(),
         ));
     }
 
     pub(crate) fn list_skills(&self, cwds: Vec<PathBuf>, force_reload: bool) {
-        self.send(AppEvent::CodexOp(
+        self.send(AppEvent::AgentOp(
             AppCommand::list_skills(cwds, force_reload).into_core(),
         ));
     }
 
     #[cfg_attr(target_os = "linux", allow(dead_code))]
     pub(crate) fn realtime_conversation_audio(&self, params: ConversationAudioParams) {
-        self.send(AppEvent::CodexOp(
+        self.send(AppEvent::AgentOp(
             AppCommand::realtime_conversation_audio(params).into_core(),
         ));
     }
 
     pub(crate) fn user_input_answer(&self, id: String, response: RequestUserInputResponse) {
-        self.send(AppEvent::CodexOp(
+        self.send(AppEvent::AgentOp(
             AppCommand::user_input_answer(id, response).into_core(),
         ));
     }

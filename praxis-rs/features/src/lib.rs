@@ -77,14 +77,10 @@ pub enum Feature {
     ShellTool,
 
     // Experimental
-    /// Enable JavaScript REPL tools backed by a persistent Node kernel.
-    JsRepl,
     /// Enable a minimal JavaScript mode backed by Node's built-in vm runtime.
     CodeMode,
     /// Restrict model-visible tools to code mode entrypoints (`exec`, `wait`).
     CodeModeOnly,
-    /// Only expose js_repl tools directly to the model.
-    JsReplToolsOnly,
     /// Use the single unified PTY-backed exec tool.
     UnifiedExec,
     /// Route shell tool execution through the zsh exec bridge.
@@ -102,22 +98,9 @@ pub enum Feature {
     /// Allow the model to request web searches that fetch cached content.
     /// Takes precedence over `WebSearchRequest`.
     WebSearchCached,
-    /// Legacy search-tool feature flag kept for backward compatibility.
-    SearchTool,
-    /// Removed legacy Linux bubblewrap opt-in flag retained as a no-op so old
-    /// wrappers and config can still parse it.
-    UseLinuxSandboxBwrap,
     /// Use the legacy Landlock Linux sandbox fallback instead of the default
     /// bubblewrap pipeline.
     UseLegacyLandlock,
-    /// Allow the model to request approval and propose exec rules.
-    RequestRule,
-    /// Enable Windows sandbox (restricted token) on Windows.
-    WindowsSandbox,
-    /// Use the elevated Windows sandbox pipeline (setup + runner).
-    WindowsSandboxElevated,
-    /// Legacy remote models flag kept for backward compatibility.
-    RemoteModels,
     /// Experimental shell snapshotting.
     ShellSnapshot,
     /// Enable git commit attribution guidance via model instructions.
@@ -126,8 +109,6 @@ pub enum Feature {
     RuntimeMetrics,
     /// Enable thread lifecycle analytics emitted via the app-gateway analytics pipeline.
     GeneralAnalytics,
-    /// Persist rollout metadata to a local SQLite database.
-    Sqlite,
     /// Enable startup memory extraction and file-backed memory consolidation.
     MemoryTool,
     /// Append additional AGENTS.md guidance to user instructions.
@@ -154,16 +135,10 @@ pub enum Feature {
     SkillMcpDependencyInstall,
     /// Prompt for missing skill env var dependencies.
     SkillEnvVarDependencyPrompt,
-    /// Steer feature flag - when enabled, Enter submits immediately instead of queuing.
-    /// Kept for config backward compatibility; behavior is always steer-enabled.
-    Steer,
     /// Allow request_user_input in Default collaboration mode.
     DefaultModeRequestUserInput,
     /// Enable automatic review for approval prompts.
     GuardianApproval,
-    /// Enable collaboration modes (Plan, Default).
-    /// Kept for config backward compatibility; behavior is always collaboration-modes-enabled.
-    CollaborationModes,
     /// Route MCP tool approval prompts through the MCP elicitation request path.
     ToolCallMcpElicitation,
     /// Enable personality selection in the TUI.
@@ -174,14 +149,8 @@ pub enum Feature {
     FastMode,
     /// Enable experimental realtime voice conversation mode in the TUI.
     RealtimeConversation,
-    /// Removed compatibility flag. The TUI now always uses the app-gateway implementation.
-    TuiAppGateway,
     /// Prevent idle system sleep while a turn is actively running.
     PreventIdleSleep,
-    /// Legacy rollout flag for Responses API WebSocket transport experiments.
-    ResponsesWebsockets,
-    /// Legacy rollout flag for Responses API WebSocket transport v2 experiments.
-    ResponsesWebsocketsV2,
 }
 
 impl Feature {
@@ -376,9 +345,6 @@ impl Features {
             }
             match feature_for_key(k) {
                 Some(feat) => {
-                    if matches!(feat, Feature::TuiAppGateway) {
-                        continue;
-                    }
                     if k != feat.key() {
                         self.record_legacy_usage(k.as_str(), feat);
                     }
@@ -431,10 +397,6 @@ impl Features {
         }
         if self.enabled(Feature::CodeModeOnly) && !self.enabled(Feature::CodeMode) {
             self.enable(Feature::CodeMode);
-        }
-        if self.enabled(Feature::JsReplToolsOnly) && !self.enabled(Feature::JsRepl) {
-            tracing::warn!("js_repl_tools_only requires js_repl; disabling js_repl_tools_only");
-            self.disable(Feature::JsReplToolsOnly);
         }
     }
 }
@@ -551,16 +513,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: true,
     },
     FeatureSpec {
-        id: Feature::JsRepl,
-        key: "js_repl",
-        stage: Stage::Experimental {
-            name: "JavaScript REPL",
-            menu_description: "Enable a persistent Node-backed JavaScript REPL for interactive website debugging and other inline JavaScript execution capabilities. Requires Node >= v22.22.0 installed.",
-            announcement: "NEW: JavaScript REPL is now available in /experimental. Enable it, then start a new chat or restart Praxis to use it.",
-        },
-        default_enabled: false,
-    },
-    FeatureSpec {
         id: Feature::CodeMode,
         key: "code_mode",
         stage: Stage::UnderDevelopment,
@@ -569,12 +521,6 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::CodeModeOnly,
         key: "code_mode_only",
-        stage: Stage::UnderDevelopment,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::JsReplToolsOnly,
-        key: "js_repl_tools_only",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
@@ -588,12 +534,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::WebSearchCached,
         key: "web_search_cached",
         stage: Stage::Deprecated,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::SearchTool,
-        key: "search_tool",
-        stage: Stage::Removed,
         default_enabled: false,
     },
     // Experimental program. Rendered in the `/experimental` menu for users.
@@ -614,12 +554,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "general_analytics",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::Sqlite,
-        key: "sqlite",
-        stage: Stage::Removed,
-        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::MemoryTool,
@@ -664,39 +598,9 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::UseLinuxSandboxBwrap,
-        key: "use_linux_sandbox_bwrap",
-        stage: Stage::Removed,
-        default_enabled: false,
-    },
-    FeatureSpec {
         id: Feature::UseLegacyLandlock,
         key: "use_legacy_landlock",
         stage: Stage::Stable,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::RequestRule,
-        key: "request_rule",
-        stage: Stage::Removed,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::WindowsSandbox,
-        key: "experimental_windows_sandbox",
-        stage: Stage::Removed,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::WindowsSandboxElevated,
-        key: "elevated_windows_sandbox",
-        stage: Stage::Removed,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::RemoteModels,
-        key: "remote_models",
-        stage: Stage::Removed,
         default_enabled: false,
     },
     FeatureSpec {
@@ -760,12 +664,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::Steer,
-        key: "steer",
-        stage: Stage::Removed,
-        default_enabled: true,
-    },
-    FeatureSpec {
         id: Feature::DefaultModeRequestUserInput,
         key: "default_mode_request_user_input",
         stage: Stage::UnderDevelopment,
@@ -780,12 +678,6 @@ pub const FEATURES: &[FeatureSpec] = &[
             announcement: "",
         },
         default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::CollaborationModes,
-        key: "collaboration_modes",
-        stage: Stage::Removed,
-        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::ToolCallMcpElicitation,
@@ -818,12 +710,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::TuiAppGateway,
-        key: "tui_app_gateway",
-        stage: Stage::Removed,
-        default_enabled: true,
-    },
-    FeatureSpec {
         id: Feature::PreventIdleSleep,
         key: "prevent_idle_sleep",
         stage: if cfg!(any(
@@ -839,18 +725,6 @@ pub const FEATURES: &[FeatureSpec] = &[
         } else {
             Stage::UnderDevelopment
         },
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::ResponsesWebsockets,
-        key: "responses_websockets",
-        stage: Stage::Removed,
-        default_enabled: false,
-    },
-    FeatureSpec {
-        id: Feature::ResponsesWebsocketsV2,
-        key: "responses_websockets_v2",
-        stage: Stage::Removed,
         default_enabled: false,
     },
 ];

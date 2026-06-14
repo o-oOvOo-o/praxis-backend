@@ -31,6 +31,7 @@ pub enum SlashCommand {
     Resume,
     Fork,
     Codex,
+    Cursor,
     Init,
     Compact,
     Plan,
@@ -94,6 +95,7 @@ impl SlashCommand {
             SlashCommand::Clear => "clear the terminal and start a new chat",
             SlashCommand::Fork => "fork the current chat",
             SlashCommand::Codex => "list Codex threads to fork into Praxis",
+            SlashCommand::Cursor => "list Cursor threads to fork into Praxis",
             // SlashCommand::Undo => "ask Praxis to undo a turn",
             SlashCommand::Quit | SlashCommand::Exit => "exit Praxis",
             SlashCommand::Diff => "show git diff (including untracked files)",
@@ -161,6 +163,7 @@ impl SlashCommand {
                 | SlashCommand::SandboxReadRoot
                 | SlashCommand::Selfwork
                 | SlashCommand::Codex
+                | SlashCommand::Cursor
         )
     }
 
@@ -171,6 +174,7 @@ impl SlashCommand {
             | SlashCommand::Resume
             | SlashCommand::Fork
             | SlashCommand::Codex
+            | SlashCommand::Cursor
             | SlashCommand::Init
             | SlashCommand::Compact
             // | SlashCommand::Undo

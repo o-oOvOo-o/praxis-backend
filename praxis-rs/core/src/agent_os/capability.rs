@@ -1,11 +1,16 @@
-use super::classification::{
-    builtin_profiles, denylist_surface, requires_compile, requires_cpu_heavy, requires_write,
-};
-use super::{
-    ActionIntent, ActionIntentKind, AgentOsState, CapabilityProfile, ResourceRequirement,
-    ScopedPaths,
-};
-use crate::path_scope::{normalize_path_for_scope, scope_matches};
+use super::ActionIntent;
+use super::ActionIntentKind;
+use super::AgentOsState;
+use super::CapabilityProfile;
+use super::ResourceRequirement;
+use super::ScopedPaths;
+use super::classification::builtin_profiles;
+use super::classification::denylist_surface;
+use super::classification::requires_compile;
+use super::classification::requires_cpu_heavy;
+use super::classification::requires_write;
+use crate::path_scope::normalize_path_for_scope;
+use crate::path_scope::scope_matches;
 use std::path::Path;
 
 impl AgentOsState {

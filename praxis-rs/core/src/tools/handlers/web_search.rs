@@ -1,13 +1,12 @@
 use async_trait::async_trait;
 use praxis_protocol::models::WebSearchAction;
-use praxis_protocol::protocol::EventMsg;
-use praxis_protocol::protocol::WebSearchBeginEvent;
-use praxis_protocol::protocol::WebSearchEndEvent;
 
 use crate::function_tool::FunctionCallError;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
+use crate::tools::events::ToolEventCtx;
+use crate::tools::events::ToolLifecycleEmitter;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
@@ -53,26 +52,16 @@ impl ToolHandler for WebSearchHandler {
             query: Some(display_query.clone()),
             queries: args.queries.clone(),
         };
-        session
-            .send_event(
-                turn.as_ref(),
-                EventMsg::WebSearchBegin(WebSearchBeginEvent {
-                    call_id: call_id.clone(),
-                }),
-            )
-            .await;
+        let tool_events = ToolLifecycleEmitter::new(ToolEventCtx::new(
+            session.as_ref(),
+            turn.as_ref(),
+            &call_id,
+            None,
+        ));
+        tool_events.web_search_begin().await;
 
         let response = rip_web_search(args).await;
-        session
-            .send_event(
-                turn.as_ref(),
-                EventMsg::WebSearchEnd(WebSearchEndEvent {
-                    call_id,
-                    query: display_query,
-                    action,
-                }),
-            )
-            .await;
+        tool_events.web_search_end(display_query, action).await;
 
         let content = serde_json::to_string_pretty(&response).map_err(|err| {
             FunctionCallError::Fatal(format!("failed to serialize web_search response: {err}"))

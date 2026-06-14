@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use std::io::Result as IoResult;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use praxis_app_gateway_core::GatewayConnectionId;
@@ -18,11 +19,12 @@ use praxis_arg0::Arg0DispatchPaths;
 use praxis_core::config::Config;
 use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::LoaderOverrides;
-use praxis_feedback::CodexFeedback;
+use praxis_feedback::PraxisFeedback;
 use praxis_protocol::protocol::SessionSource;
 use toml::Value as TomlValue;
 
-pub use praxis_app_gateway_runtime::in_process::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
+pub use praxis_app_gateway::in_process::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
+pub use praxis_app_gateway::AppGatewayWebsocketAuthSettings as NativeControlAuthSettings;
 
 pub type NativeGatewayRequestResult = std::result::Result<
     praxis_app_gateway_protocol::Result,
@@ -79,17 +81,19 @@ pub struct NativeRuntimeStartArgs {
     pub cli_overrides: Vec<(String, TomlValue)>,
     pub loader_overrides: LoaderOverrides,
     pub cloud_requirements: CloudConfigBundleLoader,
-    pub feedback: CodexFeedback,
+    pub feedback: PraxisFeedback,
     pub config_warnings: Vec<praxis_app_gateway_protocol::ConfigWarningNotification>,
     pub session_source: SessionSource,
     pub enable_praxis_api_key_env: bool,
     pub initialize: praxis_app_gateway_protocol::InitializeParams,
     pub channel_capacity: usize,
+    pub control_listen: Option<SocketAddr>,
+    pub control_auth: NativeControlAuthSettings,
 }
 
 impl NativeRuntimeStartArgs {
-    fn into_current_start_args(self) -> praxis_app_gateway_runtime::in_process::InProcessStartArgs {
-        praxis_app_gateway_runtime::in_process::InProcessStartArgs {
+    fn into_current_start_args(self) -> praxis_app_gateway::in_process::InProcessStartArgs {
+        praxis_app_gateway::in_process::InProcessStartArgs {
             arg0_paths: self.arg0_paths,
             config: self.config,
             cli_overrides: self.cli_overrides,
@@ -101,6 +105,8 @@ impl NativeRuntimeStartArgs {
             enable_praxis_api_key_env: self.enable_praxis_api_key_env,
             initialize: self.initialize,
             channel_capacity: self.channel_capacity,
+            control_listen: self.control_listen,
+            control_auth: self.control_auth,
         }
     }
 }
@@ -112,24 +118,24 @@ pub enum NativeGatewayEvent {
     ServerRequest(praxis_app_gateway_protocol::ServerRequest),
 }
 
-impl From<praxis_app_gateway_runtime::in_process::InProcessServerEvent> for NativeGatewayEvent {
-    fn from(value: praxis_app_gateway_runtime::in_process::InProcessServerEvent) -> Self {
+impl From<praxis_app_gateway::in_process::InProcessServerEvent> for NativeGatewayEvent {
+    fn from(value: praxis_app_gateway::in_process::InProcessServerEvent) -> Self {
         match value {
-            praxis_app_gateway_runtime::in_process::InProcessServerEvent::Lagged { skipped } => {
+            praxis_app_gateway::in_process::InProcessServerEvent::Lagged { skipped } => {
                 Self::Lagged { skipped }
             }
-            praxis_app_gateway_runtime::in_process::InProcessServerEvent::ServerNotification(
+            praxis_app_gateway::in_process::InProcessServerEvent::ServerNotification(
                 notification,
             ) => Self::Notification(notification),
-            praxis_app_gateway_runtime::in_process::InProcessServerEvent::ServerRequest(
-                request,
-            ) => Self::ServerRequest(request),
+            praxis_app_gateway::in_process::InProcessServerEvent::ServerRequest(request) => {
+                Self::ServerRequest(request)
+            }
         }
     }
 }
 
 pub struct NativeRuntimeHandle {
-    inner: praxis_app_gateway_runtime::in_process::InProcessClientHandle,
+    inner: praxis_app_gateway::in_process::InProcessClientHandle,
 }
 
 impl NativeRuntimeHandle {
@@ -180,7 +186,7 @@ impl NativeRuntimeHandle {
 
 #[derive(Clone)]
 pub struct NativeRuntimeSender {
-    inner: praxis_app_gateway_runtime::in_process::InProcessClientSender,
+    inner: praxis_app_gateway::in_process::InProcessClientSender,
 }
 
 impl NativeRuntimeSender {
@@ -216,8 +222,7 @@ impl NativeRuntimeSender {
 }
 
 pub async fn start_native_runtime(args: NativeRuntimeStartArgs) -> IoResult<NativeRuntimeHandle> {
-    let inner =
-        praxis_app_gateway_runtime::in_process::start(args.into_current_start_args()).await?;
+    let inner = praxis_app_gateway::in_process::start(args.into_current_start_args()).await?;
     Ok(NativeRuntimeHandle { inner })
 }
 

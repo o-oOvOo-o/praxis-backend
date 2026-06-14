@@ -16,6 +16,7 @@ pub use praxis_protocol::jsonrpc_lite::*;
 pub use protocol::api::*;
 pub use protocol::common::*;
 pub use protocol::thread_history::*;
+pub use protocol::thread_history_policy::*;
 pub use schema_fixtures::SchemaFixtureOptions;
 #[doc(hidden)]
 pub use schema_fixtures::generate_typescript_schema_fixture_subtree_for_tests;

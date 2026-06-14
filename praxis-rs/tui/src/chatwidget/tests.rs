@@ -10,6 +10,9 @@ pub(super) use crate::app_event::ExitMode;
 #[cfg(not(target_os = "linux"))]
 pub(super) use crate::app_event::RealtimeAudioDeviceKind;
 pub(super) use crate::app_event_sender::AppEventSender;
+pub(super) use crate::app_gateway_core_conversions::app_gateway_patch_changes_to_core;
+pub(super) use crate::app_gateway_core_conversions::exec_approval_request_from_params;
+pub(super) use crate::app_gateway_core_conversions::request_permissions_from_params;
 pub(super) use crate::bottom_pane::LocalImageAttachment;
 pub(super) use crate::bottom_pane::MentionBinding;
 pub(super) use crate::chatwidget::realtime::RealtimeConversationPhase;

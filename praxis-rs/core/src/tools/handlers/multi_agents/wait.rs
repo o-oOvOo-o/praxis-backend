@@ -1,6 +1,8 @@
 use super::*;
 use crate::agent::status::is_final;
-use crate::agent_os::AgentOsRuntime;
+use crate::agent_os::AgentOs;
+use crate::agent_os::AgentOsEventBatch;
+use crate::agent_os::AgentOsEventQuery;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::CollabAgentRef;
 use std::collections::HashMap;
@@ -72,6 +74,8 @@ pub(crate) struct WaitAgentResult {
     pub(crate) source: String,
     pub(crate) agent_os_sequence: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) agent_os_event_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) target_thread_id: Option<ThreadId>,
@@ -90,6 +94,7 @@ pub(crate) struct WaitAgentResult {
 struct WaitOutcome {
     source: WaitSource,
     agent_os_sequence: Option<u64>,
+    agent_os_event_count: Option<usize>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -116,7 +121,7 @@ impl WaitAgentResult {
                 "mailbox".to_string(),
             ),
             WaitSource::AgentOs => (
-                "Wait completed because AgentOS runtime state changed.".to_string(),
+                "Wait completed because AgentOS state changed.".to_string(),
                 false,
                 "agent_os".to_string(),
             ),
@@ -127,6 +132,7 @@ impl WaitAgentResult {
             timed_out,
             source,
             agent_os_sequence: outcome.agent_os_sequence,
+            agent_os_event_count: outcome.agent_os_event_count,
             target: None,
             target_thread_id: None,
             target_agent_base_name: None,
@@ -168,6 +174,7 @@ impl WaitAgentResult {
             }
             .to_string(),
             agent_os_sequence: Some(agent_os_sequence),
+            agent_os_event_count: None,
             target: Some(target.to_string()),
             target_thread_id: Some(target_thread_id),
             target_agent_base_name,
@@ -223,17 +230,9 @@ async fn handle_target_wait(
         agent_display_name: receiver_agent.agent_display_name.clone(),
         agent_role: receiver_agent.agent_role.clone(),
     }];
-    session
-        .send_event(
-            &turn,
-            CollabWaitingBeginEvent {
-                sender_thread_id: session.conversation_id,
-                receiver_thread_ids: vec![receiver_thread_id],
-                receiver_agents: receiver_agents.clone(),
-                call_id: call_id.clone(),
-            }
-            .into(),
-        )
+    let collab_events = CollabAgentEventEmitter::new(session.as_ref(), turn.as_ref(), &call_id);
+    collab_events
+        .waiting_begin(vec![receiver_thread_id], receiver_agents.clone())
         .await;
 
     let outcome = wait_for_target_status(&session, receiver_thread_id, deadline).await?;
@@ -250,16 +249,10 @@ async fn handle_target_wait(
         receiver_thread_id,
         result.target_status.clone().unwrap_or_default(),
     );
-    session
-        .send_event(
-            &turn,
-            CollabWaitingEndEvent {
-                sender_thread_id: session.conversation_id,
-                call_id,
-                agent_statuses: build_wait_agent_statuses(&statuses, &receiver_agents),
-                statuses,
-            }
-            .into(),
+    collab_events
+        .waiting_end(
+            build_wait_agent_statuses(&statuses, &receiver_agents),
+            statuses,
         )
         .await;
     Ok(result)
@@ -275,18 +268,8 @@ async fn handle_global_wait(
     let agent_os = Arc::clone(&session.services.agent_os);
     let before_agent_os_seq = agent_os.change_sequence();
 
-    session
-        .send_event(
-            &turn,
-            CollabWaitingBeginEvent {
-                sender_thread_id: session.conversation_id,
-                receiver_thread_ids: Vec::new(),
-                receiver_agents: Vec::new(),
-                call_id: call_id.clone(),
-            }
-            .into(),
-        )
-        .await;
+    let collab_events = CollabAgentEventEmitter::new(session.as_ref(), turn.as_ref(), &call_id);
+    collab_events.waiting_begin(Vec::new(), Vec::new()).await;
 
     let outcome = wait_for_mailbox_or_agent_os_change(
         &mut mailbox_seq_rx,
@@ -297,18 +280,7 @@ async fn handle_global_wait(
     .await;
     let result = WaitAgentResult::from_outcome(outcome);
 
-    session
-        .send_event(
-            &turn,
-            CollabWaitingEndEvent {
-                sender_thread_id: session.conversation_id,
-                call_id,
-                agent_statuses: Vec::new(),
-                statuses: HashMap::new(),
-            }
-            .into(),
-        )
-        .await;
+    collab_events.waiting_end(Vec::new(), HashMap::new()).await;
 
     Ok(result)
 }
@@ -378,7 +350,7 @@ async fn wait_for_target_status(
 
 async fn wait_for_mailbox_or_agent_os_change(
     mailbox_seq_rx: &mut tokio::sync::watch::Receiver<u64>,
-    agent_os: Arc<AgentOsRuntime>,
+    agent_os: Arc<AgentOs>,
     before_agent_os_seq: u64,
     deadline: Instant,
 ) -> WaitOutcome {
@@ -386,15 +358,23 @@ async fn wait_for_mailbox_or_agent_os_change(
     loop {
         let current_seq = agent_os.change_sequence();
         if current_seq > before_agent_os_seq {
+            let events: AgentOsEventBatch = agent_os
+                .events_since(AgentOsEventQuery {
+                    since_sequence: before_agent_os_seq,
+                    limit: 32,
+                })
+                .await;
             return WaitOutcome {
                 source: WaitSource::AgentOs,
-                agent_os_sequence: Some(current_seq),
+                agent_os_sequence: Some(events.current_sequence),
+                agent_os_event_count: Some(events.events.len()),
             };
         }
         if Instant::now() >= deadline {
             return WaitOutcome {
                 source: WaitSource::Timeout,
                 agent_os_sequence: Some(current_seq),
+                agent_os_event_count: None,
             };
         }
         select! {
@@ -403,11 +383,13 @@ async fn wait_for_mailbox_or_agent_os_change(
                     return WaitOutcome {
                         source: WaitSource::Mailbox,
                         agent_os_sequence: Some(agent_os.change_sequence()),
+                        agent_os_event_count: None,
                     };
                 }
                 return WaitOutcome {
                     source: WaitSource::Timeout,
                     agent_os_sequence: Some(agent_os.change_sequence()),
+                    agent_os_event_count: None,
                 };
             }
             agent_os_changed = agent_os_rx.changed() => {
@@ -415,13 +397,21 @@ async fn wait_for_mailbox_or_agent_os_change(
                     return WaitOutcome {
                         source: WaitSource::Timeout,
                         agent_os_sequence: Some(agent_os.change_sequence()),
+                        agent_os_event_count: None,
                     };
                 }
                 let current_seq = *agent_os_rx.borrow();
                 if current_seq > before_agent_os_seq {
+                    let events: AgentOsEventBatch = agent_os
+                        .events_since(AgentOsEventQuery {
+                            since_sequence: before_agent_os_seq,
+                            limit: 32,
+                        })
+                        .await;
                     return WaitOutcome {
                         source: WaitSource::AgentOs,
-                        agent_os_sequence: Some(current_seq),
+                        agent_os_sequence: Some(events.current_sequence),
+                        agent_os_event_count: Some(events.events.len()),
                     };
                 }
             }
@@ -429,6 +419,7 @@ async fn wait_for_mailbox_or_agent_os_change(
                 return WaitOutcome {
                     source: WaitSource::Timeout,
                     agent_os_sequence: Some(agent_os.change_sequence()),
+                    agent_os_event_count: None,
                 };
             }
         }

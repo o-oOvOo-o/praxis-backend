@@ -21,30 +21,21 @@ use tracing::warn;
 use crate::contextual_user_message::TURN_ABORTED_CLOSE_TAG;
 use crate::contextual_user_message::TURN_ABORTED_OPEN_TAG;
 use crate::goals::GoalRuntimeEvent;
-use crate::hook_runtime::PendingInputHookDisposition;
-use crate::hook_runtime::inspect_pending_input;
-use crate::hook_runtime::record_additional_contexts;
-use crate::hook_runtime::record_pending_input;
+use crate::hook_runtime::record_pending_inputs;
 use crate::models_manager::manager::ModelsManager;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::state::ActiveTurn;
-use crate::state::RunningTask;
-use crate::state::TaskKind;
-use crate::stream_events_utils::handle_non_tool_response_item;
-use crate::stream_events_utils::last_assistant_message_from_item;
-use crate::stream_events_utils::model_empty_final_item;
-use crate::stream_events_utils::record_completed_response_item;
-use crate::stream_events_utils::subagent_workflow_empty_final_item;
-use crate::stream_events_utils::subagent_workflow_incomplete_final_item;
-use crate::stream_events_utils::tool_loop_guard_final_item;
+use crate::state::AgentTaskKind;
+use crate::state::RunningAgentTask;
+use crate::stream_events_utils::emit_synthetic_final_answer;
+use crate::stream_events_utils::synthetic_final_item_for_guard;
 use praxis_login::AuthManager;
 use praxis_otel::SessionTelemetry;
 use praxis_otel::metrics::names::TURN_E2E_DURATION_METRIC;
 use praxis_otel::metrics::names::TURN_NETWORK_PROXY_METRIC;
 use praxis_otel::metrics::names::TURN_TOKEN_USAGE_METRIC;
 use praxis_otel::metrics::names::TURN_TOOL_CALL_METRIC;
-use praxis_protocol::config_types::ModeKind;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::models::ResponseItem;
@@ -59,7 +50,7 @@ use praxis_protocol::user_input::UserInput;
 pub(crate) use compact::CompactTask;
 pub(crate) use ghost_snapshot::GhostSnapshotTask;
 use praxis_features::Feature;
-pub(crate) use regular::RegularTask;
+pub(crate) use regular::RegularAgentTask;
 pub(crate) use review::ReviewTask;
 pub(crate) use undo::UndoTask;
 pub(crate) use user_shell::UserShellCommandMode;
@@ -102,54 +93,33 @@ fn emit_turn_network_proxy_metric(
     );
 }
 
-async fn synthesize_missing_task_final_message(
-    sess: &Arc<Session>,
-    turn_context: &Arc<TurnContext>,
-) -> Option<String> {
-    let guard = &turn_context.tool_loop_guard;
-    if guard.has_terminal_model_error() {
-        return None;
+fn emit_turn_token_usage_metrics(
+    session_telemetry: &SessionTelemetry,
+    usage: &TokenUsage,
+    tmp_mem: (&str, &str),
+) {
+    for (token_type, value) in [
+        ("total", usage.total_tokens),
+        ("input", usage.input_tokens),
+        ("cached_input", usage.cached_input()),
+        ("output", usage.output_tokens),
+        ("reasoning_output", usage.reasoning_output_tokens),
+    ] {
+        session_telemetry.histogram(
+            TURN_TOKEN_USAGE_METRIC,
+            value,
+            &[("token_type", token_type), tmp_mem],
+        );
     }
-    let final_item = if guard.has_terminal_list_agents() {
-        Some(tool_loop_guard_final_item(Arc::clone(sess), "list_agents").await)
-    } else if guard.has_subagent_tool_calls() {
-        Some(if has_live_subagents_for_task(sess, turn_context).await {
-            subagent_workflow_incomplete_final_item(Arc::clone(sess)).await
-        } else {
-            subagent_workflow_empty_final_item(Arc::clone(sess)).await
-        })
-    } else {
-        Some(model_empty_final_item(Arc::clone(sess)).await)
-    }?;
-
-    let plan_mode = turn_context.collaboration_mode.mode == ModeKind::Plan;
-    if let Some(turn_item) =
-        handle_non_tool_response_item(sess.as_ref(), turn_context.as_ref(), &final_item, plan_mode)
-            .await
-    {
-        sess.emit_turn_item_started(turn_context, &turn_item).await;
-        sess.emit_turn_item_completed(turn_context, turn_item).await;
-    }
-    record_completed_response_item(sess.as_ref(), turn_context.as_ref(), &final_item).await;
-    last_assistant_message_from_item(&final_item, plan_mode)
-}
-
-async fn has_live_subagents_for_task(sess: &Arc<Session>, turn_context: &Arc<TurnContext>) -> bool {
-    sess.services
-        .agent_control
-        .list_agents(sess.conversation_id, &turn_context.session_source, None)
-        .await
-        .map(|agents| agents.into_iter().any(|agent| agent.agent_name != "/root"))
-        .unwrap_or(true)
 }
 
 /// Thin wrapper that exposes the parts of [`Session`] task runners need.
 #[derive(Clone)]
-pub(crate) struct SessionTaskContext {
+pub(crate) struct AgentTaskContext {
     session: Arc<Session>,
 }
 
-impl SessionTaskContext {
+impl AgentTaskContext {
     pub(crate) fn new(session: Arc<Session>) -> Self {
         Self { session }
     }
@@ -173,13 +143,13 @@ impl SessionTaskContext {
 /// reviews, ghost snapshots, etc.). Each task instance is owned by a
 /// [`Session`] and executed on a background Tokio task. The trait is
 /// intentionally small: implementers identify themselves via
-/// [`SessionTask::kind`], perform their work in [`SessionTask::run`], and may
-/// release resources in [`SessionTask::abort`].
+/// [`AgentTask::kind`], perform their work in [`AgentTask::run`], and may
+/// release resources in [`AgentTask::abort`].
 #[async_trait]
-pub(crate) trait SessionTask: Send + Sync + 'static {
+pub(crate) trait AgentTask: Send + Sync + 'static {
     /// Describes the type of work the task performs so the session can
     /// surface it in telemetry and UI.
-    fn kind(&self) -> TaskKind;
+    fn kind(&self) -> AgentTaskKind;
 
     /// Returns the tracing name for a spawned task span.
     fn span_name(&self) -> &'static str;
@@ -194,7 +164,7 @@ pub(crate) trait SessionTask: Send + Sync + 'static {
     /// [`Session::on_task_finished`] will emit to the client.
     async fn run(
         self: Arc<Self>,
-        session: Arc<SessionTaskContext>,
+        session: Arc<AgentTaskContext>,
         ctx: Arc<TurnContext>,
         input: Vec<UserInput>,
         cancellation_token: CancellationToken,
@@ -205,13 +175,20 @@ pub(crate) trait SessionTask: Send + Sync + 'static {
     /// The default implementation is a no-op; override this if additional
     /// teardown or notifications are required once
     /// [`Session::abort_all_tasks`] cancels the task.
-    async fn abort(&self, session: Arc<SessionTaskContext>, ctx: Arc<TurnContext>) {
+    async fn abort(&self, session: Arc<AgentTaskContext>, ctx: Arc<TurnContext>) {
         let _ = (session, ctx);
     }
 }
 
+struct FinishedTaskState {
+    pending_input: Vec<ResponseInputItem>,
+    should_schedule_pending_work: bool,
+    token_usage_at_turn_start: Option<TokenUsage>,
+    turn_tool_calls: u64,
+}
+
 impl Session {
-    pub async fn spawn_task<T: SessionTask>(
+    pub async fn spawn_task<T: AgentTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         input: Vec<UserInput>,
@@ -222,13 +199,13 @@ impl Session {
         self.start_task(turn_context, input, task).await;
     }
 
-    async fn start_task<T: SessionTask>(
+    async fn start_task<T: AgentTask>(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         input: Vec<UserInput>,
         task: T,
     ) {
-        let task: Arc<dyn SessionTask> = Arc::new(task);
+        let task: Arc<dyn AgentTask> = Arc::new(task);
         let task_kind = task.kind();
         let span_name = task.span_name();
         let started_at = Instant::now();
@@ -273,7 +250,7 @@ impl Session {
         let turn = active.get_or_insert_with(ActiveTurn::default);
         debug_assert!(turn.tasks.is_empty());
         let done_clone = Arc::clone(&done);
-        let session_ctx = Arc::new(SessionTaskContext::new(Arc::clone(self)));
+        let session_ctx = Arc::new(AgentTaskContext::new(Arc::clone(self)));
         let ctx = Arc::clone(&turn_context);
         let task_for_run = Arc::clone(&task);
         let task_cancellation_token = cancellation_token.child_token();
@@ -312,7 +289,7 @@ impl Session {
             .session_telemetry
             .start_timer(TURN_E2E_DURATION_METRIC, &[])
             .ok();
-        let running_task = RunningTask::new(
+        let running_task = RunningAgentTask::new(
             done,
             task_kind,
             task,
@@ -367,7 +344,7 @@ impl Session {
         let turn_context = self.new_default_turn_with_sub_id(sub_id).await;
         self.maybe_emit_unknown_model_warning_for_turn(turn_context.as_ref())
             .await;
-        self.start_task(turn_context, Vec::new(), RegularTask::new())
+        self.start_task(turn_context, Vec::new(), RegularAgentTask::new())
             .await;
     }
 
@@ -394,132 +371,23 @@ impl Session {
             .turn_metadata_state
             .cancel_git_enrichment_task();
 
-        let mut pending_input = Vec::<ResponseInputItem>::new();
-        let mut should_clear_active_turn = false;
-        let mut token_usage_at_turn_start = None;
-        let mut turn_token_usage = None;
-        let mut turn_tool_calls = 0_u64;
-        let turn_state = {
-            let mut active = self.active_turn.lock().await;
-            if let Some(at) = active.as_mut()
-                && at.remove_task(&turn_context.sub_id)
-            {
-                should_clear_active_turn = true;
-                let turn_state = Arc::clone(&at.turn_state);
-                if should_clear_active_turn {
-                    *active = None;
-                }
-                Some(turn_state)
-            } else {
-                None
-            }
-        };
-        if let Some(turn_state) = turn_state {
-            let mut ts = turn_state.lock().await;
-            pending_input = ts.take_pending_input();
-            turn_tool_calls = ts.tool_calls;
-            token_usage_at_turn_start = Some(ts.token_usage_at_turn_start.clone());
-        }
-        if !pending_input.is_empty() {
-            for pending_input_item in pending_input {
-                match inspect_pending_input(self, &turn_context, pending_input_item).await {
-                    PendingInputHookDisposition::Accepted(pending_input) => {
-                        record_pending_input(self, &turn_context, *pending_input).await;
-                    }
-                    PendingInputHookDisposition::Blocked {
-                        additional_contexts,
-                    } => {
-                        record_additional_contexts(self, &turn_context, additional_contexts).await;
-                    }
-                }
-            }
-        }
+        let finished_task_state = self.take_finished_task_state(&turn_context).await;
+        self.record_finished_task_pending_input(&turn_context, finished_task_state.pending_input)
+            .await;
         let terminal_model_error = turn_context.tool_loop_guard.terminal_model_error_message();
-        // Emit token usage metrics.
-        if let Some(token_usage_at_turn_start) = token_usage_at_turn_start {
-            // TODO(jif): drop this
-            let tmp_mem = (
-                "tmp_mem_enabled",
-                if self.enabled(Feature::MemoryTool) {
-                    "true"
-                } else {
-                    "false"
-                },
-            );
-            let network_proxy_active = match self.services.network_proxy.as_ref() {
-                Some(started_network_proxy) => {
-                    match started_network_proxy.proxy().current_cfg().await {
-                        Ok(config) => config.network.enabled,
-                        Err(err) => {
-                            warn!(
-                                "failed to read managed network proxy state for turn metrics: {err:#}"
-                            );
-                            false
-                        }
-                    }
-                }
-                None => false,
-            };
-            emit_turn_network_proxy_metric(
-                &self.services.session_telemetry,
-                network_proxy_active,
-                tmp_mem,
-            );
-            self.services.session_telemetry.histogram(
-                TURN_TOOL_CALL_METRIC,
-                i64::try_from(turn_tool_calls).unwrap_or(i64::MAX),
-                &[tmp_mem],
-            );
-            let total_token_usage = self.total_token_usage().await.unwrap_or_default();
-            let computed_turn_token_usage = TokenUsage {
-                input_tokens: (total_token_usage.input_tokens
-                    - token_usage_at_turn_start.input_tokens)
-                    .max(0),
-                cached_input_tokens: (total_token_usage.cached_input_tokens
-                    - token_usage_at_turn_start.cached_input_tokens)
-                    .max(0),
-                cache_reported_input_tokens: (total_token_usage.cache_reported_input_tokens
-                    - token_usage_at_turn_start.cache_reported_input_tokens)
-                    .max(0),
-                output_tokens: (total_token_usage.output_tokens
-                    - token_usage_at_turn_start.output_tokens)
-                    .max(0),
-                reasoning_output_tokens: (total_token_usage.reasoning_output_tokens
-                    - token_usage_at_turn_start.reasoning_output_tokens)
-                    .max(0),
-                total_tokens: (total_token_usage.total_tokens
-                    - token_usage_at_turn_start.total_tokens)
-                    .max(0),
-            };
-            turn_token_usage = Some(computed_turn_token_usage.clone());
-            self.services.session_telemetry.histogram(
-                TURN_TOKEN_USAGE_METRIC,
-                computed_turn_token_usage.total_tokens,
-                &[("token_type", "total"), tmp_mem],
-            );
-            self.services.session_telemetry.histogram(
-                TURN_TOKEN_USAGE_METRIC,
-                computed_turn_token_usage.input_tokens,
-                &[("token_type", "input"), tmp_mem],
-            );
-            self.services.session_telemetry.histogram(
-                TURN_TOKEN_USAGE_METRIC,
-                computed_turn_token_usage.cached_input(),
-                &[("token_type", "cached_input"), tmp_mem],
-            );
-            self.services.session_telemetry.histogram(
-                TURN_TOKEN_USAGE_METRIC,
-                computed_turn_token_usage.output_tokens,
-                &[("token_type", "output"), tmp_mem],
-            );
-            self.services.session_telemetry.histogram(
-                TURN_TOKEN_USAGE_METRIC,
-                computed_turn_token_usage.reasoning_output_tokens,
-                &[("token_type", "reasoning_output"), tmp_mem],
-            );
-        }
+        let turn_token_usage = self
+            .emit_finished_turn_metrics(
+                finished_task_state.token_usage_at_turn_start,
+                finished_task_state.turn_tool_calls,
+            )
+            .await;
         if last_agent_message.is_none() && terminal_model_error.is_none() {
-            last_agent_message = synthesize_missing_task_final_message(self, &turn_context).await;
+            if let Some(final_item) =
+                synthetic_final_item_for_guard(Arc::clone(self), &turn_context, true).await
+            {
+                last_agent_message =
+                    emit_synthetic_final_answer(self, &turn_context, final_item).await;
+            }
         }
         let last_agent_message_for_title = last_agent_message.clone();
         let last_agent_message_for_summary = last_agent_message.clone();
@@ -565,20 +433,128 @@ impl Session {
         crate::auto_summary::maybe_auto_generate_summary(self, last_agent_message_for_summary)
             .await;
 
-        if should_clear_active_turn {
-            let session = Arc::clone(self);
-            let _scheduler = tokio::task::spawn_blocking(move || {
-                tokio::runtime::Handle::current().block_on(async move {
-                    session.maybe_start_turn_for_pending_work().await;
-                    if let Err(err) = session
-                        .goal_runtime_apply(GoalRuntimeEvent::MaybeContinueIfIdle)
-                        .await
-                    {
-                        warn!("failed to apply goal idle-continuation runtime event: {err}");
-                    }
-                });
-            });
+        if finished_task_state.should_schedule_pending_work {
+            self.schedule_pending_work_continuation();
         }
+    }
+
+    async fn take_finished_task_state(&self, turn_context: &TurnContext) -> FinishedTaskState {
+        let turn_state = {
+            let mut active = self.active_turn.lock().await;
+            if let Some(at) = active.as_mut()
+                && at.remove_task(&turn_context.sub_id)
+            {
+                let turn_state = Arc::clone(&at.turn_state);
+                *active = None;
+                Some(turn_state)
+            } else {
+                None
+            }
+        };
+        let Some(turn_state) = turn_state else {
+            return FinishedTaskState {
+                pending_input: Vec::new(),
+                should_schedule_pending_work: false,
+                token_usage_at_turn_start: None,
+                turn_tool_calls: 0,
+            };
+        };
+        let mut turn_state = turn_state.lock().await;
+        FinishedTaskState {
+            pending_input: turn_state.take_pending_input(),
+            should_schedule_pending_work: true,
+            token_usage_at_turn_start: Some(turn_state.token_usage_at_turn_start.clone()),
+            turn_tool_calls: turn_state.tool_calls,
+        }
+    }
+
+    async fn record_finished_task_pending_input(
+        self: &Arc<Self>,
+        turn_context: &Arc<TurnContext>,
+        pending_input: Vec<ResponseInputItem>,
+    ) {
+        record_pending_inputs(self, turn_context, pending_input).await;
+    }
+
+    async fn emit_finished_turn_metrics(
+        &self,
+        token_usage_at_turn_start: Option<TokenUsage>,
+        turn_tool_calls: u64,
+    ) -> Option<TokenUsage> {
+        let token_usage_at_turn_start = token_usage_at_turn_start?;
+        // TODO(jif): drop this
+        let tmp_mem = (
+            "tmp_mem_enabled",
+            if self.enabled(Feature::MemoryTool) {
+                "true"
+            } else {
+                "false"
+            },
+        );
+        let network_proxy_active = match self.services.network_proxy.as_ref() {
+            Some(started_network_proxy) => {
+                match started_network_proxy.proxy().current_cfg().await {
+                    Ok(config) => config.network.enabled,
+                    Err(err) => {
+                        warn!(
+                            "failed to read managed network proxy state for turn metrics: {err:#}"
+                        );
+                        false
+                    }
+                }
+            }
+            None => false,
+        };
+        emit_turn_network_proxy_metric(
+            &self.services.session_telemetry,
+            network_proxy_active,
+            tmp_mem,
+        );
+        self.services.session_telemetry.histogram(
+            TURN_TOOL_CALL_METRIC,
+            i64::try_from(turn_tool_calls).unwrap_or(i64::MAX),
+            &[tmp_mem],
+        );
+        let total_token_usage = self.total_token_usage().await.unwrap_or_default();
+        let computed_turn_token_usage = TokenUsage {
+            input_tokens: (total_token_usage.input_tokens - token_usage_at_turn_start.input_tokens)
+                .max(0),
+            cached_input_tokens: (total_token_usage.cached_input_tokens
+                - token_usage_at_turn_start.cached_input_tokens)
+                .max(0),
+            cache_reported_input_tokens: (total_token_usage.cache_reported_input_tokens
+                - token_usage_at_turn_start.cache_reported_input_tokens)
+                .max(0),
+            output_tokens: (total_token_usage.output_tokens
+                - token_usage_at_turn_start.output_tokens)
+                .max(0),
+            reasoning_output_tokens: (total_token_usage.reasoning_output_tokens
+                - token_usage_at_turn_start.reasoning_output_tokens)
+                .max(0),
+            total_tokens: (total_token_usage.total_tokens - token_usage_at_turn_start.total_tokens)
+                .max(0),
+        };
+        emit_turn_token_usage_metrics(
+            &self.services.session_telemetry,
+            &computed_turn_token_usage,
+            tmp_mem,
+        );
+        Some(computed_turn_token_usage)
+    }
+
+    fn schedule_pending_work_continuation(self: &Arc<Self>) {
+        let session = Arc::clone(self);
+        let _scheduler = tokio::task::spawn_blocking(move || {
+            tokio::runtime::Handle::current().block_on(async move {
+                session.maybe_start_turn_for_pending_work().await;
+                if let Err(err) = session
+                    .goal_runtime_apply(GoalRuntimeEvent::MaybeContinueIfIdle)
+                    .await
+                {
+                    warn!("failed to apply goal idle-continuation runtime event: {err}");
+                }
+            });
+        });
     }
 
     async fn take_active_turn(&self) -> Option<ActiveTurn> {
@@ -594,14 +570,10 @@ impl Session {
     }
 
     pub(crate) async fn cleanup_after_interrupt(&self, turn_context: &Arc<TurnContext>) {
-        if let Some(manager) = turn_context.js_repl.manager_if_initialized()
-            && let Err(err) = manager.interrupt_turn_exec(&turn_context.sub_id).await
-        {
-            warn!("failed to interrupt js_repl kernel: {err}");
-        }
+        let _ = turn_context;
     }
 
-    async fn handle_task_abort(self: &Arc<Self>, task: RunningTask, reason: TurnAbortReason) {
+    async fn handle_task_abort(self: &Arc<Self>, task: RunningAgentTask, reason: TurnAbortReason) {
         let sub_id = task.turn_context.sub_id.clone();
         if task.cancellation_token.is_cancelled() {
             return;
@@ -612,7 +584,7 @@ impl Session {
         task.turn_context
             .turn_metadata_state
             .cancel_git_enrichment_task();
-        let session_task = Arc::clone(&task.task);
+        let agent_task = Arc::clone(&task.task);
 
         select! {
             _ = task.done.notified() => {
@@ -624,8 +596,8 @@ impl Session {
 
         task.handle.abort();
 
-        let session_ctx = Arc::new(SessionTaskContext::new(Arc::clone(self)));
-        session_task
+        let session_ctx = Arc::new(AgentTaskContext::new(Arc::clone(self)));
+        agent_task
             .abort(session_ctx, Arc::clone(&task.turn_context))
             .await;
         self.services

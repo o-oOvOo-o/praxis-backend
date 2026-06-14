@@ -1,6 +1,16 @@
 use super::*;
 
-impl AgentOsRuntime {
+pub(crate) struct AgentOsExecutionOpenRequest<'a> {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) command: String,
+    pub(crate) argv: &'a [String],
+    pub(crate) cwd: &'a Path,
+    pub(crate) process_id: Option<i32>,
+    pub(crate) runtime_kind: Option<&'a str>,
+    pub(crate) runtime_owner_id: Option<&'a str>,
+}
+
+impl AgentOs {
     pub(super) async fn command_raw_command(&self, command_id: &str) -> Option<String> {
         self.state
             .read()
@@ -10,40 +20,22 @@ impl AgentOsRuntime {
             .map(|command| command.raw_command.clone())
     }
 
-    pub(crate) async fn start_managed_command(
+    pub(crate) async fn open_execution(
         self: &Arc<Self>,
-        thread_id: ThreadId,
-        command: String,
-        argv: &[String],
-        cwd: &Path,
-        process_id: Option<i32>,
+        request: AgentOsExecutionOpenRequest<'_>,
     ) -> PraxisResult<ManagedCommandSpan> {
-        self.start_managed_command_with_runtime_kind(
-            thread_id, command, argv, cwd, process_id, None, None,
-        )
-        .await
-    }
-
-    pub(crate) async fn start_managed_command_with_runtime_kind(
-        self: &Arc<Self>,
-        thread_id: ThreadId,
-        command: String,
-        argv: &[String],
-        cwd: &Path,
-        process_id: Option<i32>,
-        runtime_kind: Option<&str>,
-        runtime_owner_id: Option<&str>,
-    ) -> PraxisResult<ManagedCommandSpan> {
-        let ticket = self.request_command_ticket(thread_id, argv, cwd).await?;
+        let ticket = self
+            .request_command_ticket(request.thread_id, request.argv, request.cwd)
+            .await?;
         let command_id = match self
             .begin_managed_command(
                 &ticket,
-                command,
-                argv,
-                cwd.to_path_buf(),
-                process_id,
-                runtime_kind.map(str::to_string),
-                runtime_owner_id.map(str::to_string),
+                request.command,
+                request.argv,
+                request.cwd.to_path_buf(),
+                request.process_id,
+                request.runtime_kind.map(str::to_string),
+                request.runtime_owner_id.map(str::to_string),
             )
             .await
         {
@@ -53,10 +45,7 @@ impl AgentOsRuntime {
                 return Err(err);
             }
         };
-        Ok(ManagedCommandSpan {
-            agent_os: Arc::clone(self),
-            command_id,
-        })
+        Ok(ManagedCommandSpan::new(Arc::clone(self), command_id))
     }
 
     pub(super) async fn begin_managed_command(

@@ -28,6 +28,34 @@ Use `$` in the composer to insert a ChatGPT connector; the popover lists accessi
 apps. The `/apps` command lists available and installed apps. Connected apps appear first
 and are labeled as connected; others are marked as can be installed.
 
+## Plugin Marketplaces
+
+Praxis plugins use `.praxis-plugin/plugin.json` as their manifest entrypoint.
+Marketplace providers are configured under `[plugin_marketplaces.<name>]`:
+
+```toml
+[plugin_marketplaces.local-dev]
+provider = "local"
+path = "D:/path/to/plugin-repo"
+
+[plugin_marketplaces.cunning3d]
+provider = "git"
+repo = "git@github.com:cunning-org/cunning3d-praxis-plugins.git"
+reference = "main"
+path = "."
+```
+
+For the in-repo official development marketplace, configure a local provider whose
+`path` points at the `praxis-rs` directory that contains `.agents/plugins/marketplace.json`.
+Git marketplace caches are refreshed through `plugin/sync`.
+
+Installed plugins are enabled or disabled under `[plugins."<plugin>@<marketplace>"]`:
+
+```toml
+[plugins."external-agent-migration@praxis-official"]
+enabled = true
+```
+
 ## Notify
 
 Codex can run a notification hook when the agent finishes a turn. See the configuration reference for the latest notification settings:

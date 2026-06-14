@@ -61,7 +61,7 @@ async fn list_tool_suggest_discoverable_plugins_normalizes_description() {
     write_openai_curated_marketplace(&curated_root, &["slack"]);
     write_plugins_feature_config(praxis_home.path());
     write_file(
-        &curated_root.join("plugins/slack/.codex-plugin/plugin.json"),
+        &curated_root.join("plugins/slack/.praxis-plugin/plugin.json"),
         r#"{
   "name": "slack",
   "description": "  Plugin\n   with   extra   spacing  "

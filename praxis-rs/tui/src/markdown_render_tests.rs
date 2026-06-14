@@ -1193,7 +1193,7 @@ Image: ![alt text](https://example.com/img.png "Title")
 - [x] Task: checked with link [home](https://example.org)
 ---
 Table below (alignment test):
-| Left | Center | Right |
+| Left | Workspace | Right |
 |:-----|:------:|------:|
 | a    |   b    |     c |
 Inline HTML: <sup>sup</sup> and <sub>sub</sub>.

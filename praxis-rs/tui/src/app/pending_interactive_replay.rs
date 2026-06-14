@@ -1,5 +1,6 @@
 use crate::app_command::AppCommand;
 use crate::app_command::AppCommandView;
+use crate::app_gateway_core_conversions::app_gateway_request_id_to_mcp_request_id;
 use praxis_app_gateway_protocol::RequestId as AppGatewayRequestId;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
@@ -559,17 +560,6 @@ impl PendingInteractiveReplayState {
             ) => turn_id == &params.turn_id && item_id == &params.item_id,
             _ => false,
         }
-    }
-}
-
-fn app_gateway_request_id_to_mcp_request_id(
-    request_id: &AppGatewayRequestId,
-) -> praxis_protocol::mcp::RequestId {
-    match request_id {
-        AppGatewayRequestId::String(value) => {
-            praxis_protocol::mcp::RequestId::String(value.clone())
-        }
-        AppGatewayRequestId::Integer(value) => praxis_protocol::mcp::RequestId::Integer(*value),
     }
 }
 

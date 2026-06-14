@@ -42,8 +42,6 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::CreateGoalHandler;
     use crate::tools::handlers::DynamicToolHandler;
     use crate::tools::handlers::GetGoalHandler;
-    use crate::tools::handlers::JsReplHandler;
-    use crate::tools::handlers::JsReplResetHandler;
     use crate::tools::handlers::ListDirHandler;
     use crate::tools::handlers::McpHandler;
     use crate::tools::handlers::McpResourceHandler;
@@ -122,8 +120,6 @@ pub(crate) fn build_specs_with_discoverable_tools(
     let tool_suggest_handler = Arc::new(ToolSuggestHandler);
     let code_mode_handler = Arc::new(CodeModeExecuteHandler);
     let code_mode_wait_handler = Arc::new(CodeModeWaitHandler);
-    let js_repl_handler = Arc::new(JsReplHandler);
-    let js_repl_reset_handler = Arc::new(JsReplResetHandler);
     let web_search_handler = Arc::new(WebSearchHandler);
 
     for spec in plan.specs {
@@ -167,12 +163,6 @@ pub(crate) fn build_specs_with_discoverable_tools(
             }
             ToolHandlerKind::UpdateGoal => {
                 builder.register_handler(handler.name, update_goal_handler.clone());
-            }
-            ToolHandlerKind::JsRepl => {
-                builder.register_handler(handler.name, js_repl_handler.clone());
-            }
-            ToolHandlerKind::JsReplReset => {
-                builder.register_handler(handler.name, js_repl_reset_handler.clone());
             }
             ToolHandlerKind::ListAgents => {
                 builder.register_handler(handler.name, Arc::new(ListAgentsHandler));

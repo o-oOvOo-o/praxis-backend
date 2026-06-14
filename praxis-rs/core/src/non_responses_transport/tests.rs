@@ -1,5 +1,4 @@
 use super::*;
-use super::*;
 use futures::StreamExt;
 use pretty_assertions::assert_eq;
 use wiremock::Mock;

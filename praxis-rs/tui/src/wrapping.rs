@@ -29,10 +29,69 @@
 use ratatui::text::Line;
 use ratatui::text::Span;
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Range;
+use std::sync::LazyLock;
+use std::sync::Mutex;
 use textwrap::Options;
 
 use crate::render::line_utils::push_owned_lines;
+
+const WRAP_CACHE_CAPACITY: usize = 512;
+
+static WRAP_CACHE: LazyLock<Mutex<WrapCache>> = LazyLock::new(|| Mutex::new(WrapCache::default()));
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+enum WrapCacheMode {
+    Standard,
+    Adaptive,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+struct WrapCacheKey {
+    mode: WrapCacheMode,
+    fingerprint: u64,
+}
+
+#[derive(Default)]
+struct WrapCache {
+    order: VecDeque<WrapCacheKey>,
+    values: HashMap<WrapCacheKey, Vec<Line<'static>>>,
+}
+
+impl WrapCache {
+    fn get(&mut self, key: &WrapCacheKey) -> Option<Vec<Line<'static>>> {
+        let value = self.values.get(key)?.clone();
+        if let Some(index) = self.order.iter().position(|existing| existing == key) {
+            if let Some(existing) = self.order.remove(index) {
+                self.order.push_back(existing);
+            }
+        }
+        Some(value)
+    }
+
+    fn insert(&mut self, key: WrapCacheKey, value: Vec<Line<'static>>) {
+        if self.values.contains_key(&key) {
+            self.values.insert(key.clone(), value);
+            if let Some(index) = self.order.iter().position(|existing| existing == &key) {
+                self.order.remove(index);
+            }
+            self.order.push_back(key);
+            return;
+        }
+        self.values.insert(key.clone(), value);
+        self.order.push_back(key);
+        while self.order.len() > WRAP_CACHE_CAPACITY {
+            if let Some(oldest) = self.order.pop_front() {
+                self.values.remove(&oldest);
+            }
+        }
+    }
+}
 
 /// Returns byte-ranges into `text` for each wrapped line, including
 /// trailing whitespace and a +1 sentinel byte. Used by the textarea
@@ -513,10 +572,15 @@ where
     L: IntoLineInput<'a>,
 {
     let base_opts = width_or_options;
+    let input_lines = collect_line_inputs(lines);
+    let cache_key = wrap_cache_key(WrapCacheMode::Adaptive, &base_opts, &input_lines);
+    if let Some(cached) = wrap_cache_get(&cache_key) {
+        return cached;
+    }
+
     let mut out: Vec<Line<'static>> = Vec::new();
 
-    for (idx, line) in lines.into_iter().enumerate() {
-        let line_input = line.into_line_input();
+    for (idx, line) in input_lines.iter().enumerate() {
         let opts = if idx == 0 {
             base_opts.clone()
         } else {
@@ -525,10 +589,11 @@ where
                 .initial_indent(base_opts.subsequent_indent.clone())
         };
 
-        let wrapped = adaptive_wrap_line(line_input.as_ref(), opts);
+        let wrapped = adaptive_wrap_line(line, opts);
         push_owned_lines(&wrapped, &mut out);
     }
 
+    wrap_cache_insert(cache_key, out.clone());
     out
 }
 
@@ -725,15 +790,6 @@ enum LineInput<'a> {
     Owned(Line<'a>),
 }
 
-impl<'a> LineInput<'a> {
-    fn as_ref(&self) -> &Line<'a> {
-        match self {
-            LineInput::Borrowed(line) => line,
-            LineInput::Owned(line) => line,
-        }
-    }
-}
-
 /// This trait makes it easier to pass whatever we need into word_wrap_lines.
 trait IntoLineInput<'a> {
     fn into_line_input(self) -> LineInput<'a>;
@@ -787,6 +843,59 @@ impl<'a> IntoLineInput<'a> for Vec<Span<'a>> {
     }
 }
 
+fn collect_line_inputs<'a, I, L>(lines: I) -> Vec<Line<'a>>
+where
+    I: IntoIterator<Item = L>,
+    L: IntoLineInput<'a>,
+{
+    lines
+        .into_iter()
+        .map(|line| match line.into_line_input() {
+            LineInput::Borrowed(line) => line.clone(),
+            LineInput::Owned(line) => line,
+        })
+        .collect()
+}
+
+fn wrap_cache_key(
+    mode: WrapCacheMode,
+    options: &RtOptions<'_>,
+    lines: &[Line<'_>],
+) -> WrapCacheKey {
+    let mut hasher = DefaultHasher::new();
+    mode.hash(&mut hasher);
+    options.width.hash(&mut hasher);
+    format!("{:?}", options.line_ending).hash(&mut hasher);
+    format!("{:?}", options.initial_indent).hash(&mut hasher);
+    format!("{:?}", options.subsequent_indent).hash(&mut hasher);
+    options.break_words.hash(&mut hasher);
+    format!("{:?}", options.wrap_algorithm).hash(&mut hasher);
+    format!("{:?}", options.word_separator).hash(&mut hasher);
+    format!("{:?}", options.word_splitter).hash(&mut hasher);
+    lines.len().hash(&mut hasher);
+    for line in lines {
+        format!("{line:?}").hash(&mut hasher);
+    }
+    WrapCacheKey {
+        mode,
+        fingerprint: hasher.finish(),
+    }
+}
+
+fn wrap_cache_get(key: &WrapCacheKey) -> Option<Vec<Line<'static>>> {
+    WRAP_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(key)
+}
+
+fn wrap_cache_insert(key: WrapCacheKey, value: Vec<Line<'static>>) {
+    WRAP_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(key, value);
+}
+
 /// Wrap a sequence of lines, applying the initial indent only to the very first
 /// output line, and using the subsequent indent for all later wrapped pieces.
 #[allow(private_bounds)] // IntoLineInput isn't public, but it doesn't really need to be.
@@ -797,10 +906,15 @@ where
     O: Into<RtOptions<'a>>,
 {
     let base_opts: RtOptions<'a> = width_or_options.into();
+    let input_lines = collect_line_inputs(lines);
+    let cache_key = wrap_cache_key(WrapCacheMode::Standard, &base_opts, &input_lines);
+    if let Some(cached) = wrap_cache_get(&cache_key) {
+        return cached;
+    }
+
     let mut out: Vec<Line<'static>> = Vec::new();
 
-    for (idx, line) in lines.into_iter().enumerate() {
-        let line_input = line.into_line_input();
+    for (idx, line) in input_lines.iter().enumerate() {
         let opts = if idx == 0 {
             base_opts.clone()
         } else {
@@ -809,10 +923,11 @@ where
             o = o.initial_indent(sub);
             o
         };
-        let wrapped = word_wrap_line(line_input.as_ref(), opts);
+        let wrapped = word_wrap_line(line, opts);
         push_owned_lines(&wrapped, &mut out);
     }
 
+    wrap_cache_insert(cache_key, out.clone());
     out
 }
 

@@ -1,9 +1,9 @@
 use praxis_otel::AuthEnvTelemetryMetadata;
 
 use crate::model_provider_info::ModelProviderInfo;
-use praxis_login::CODEX_API_KEY_ENV_VAR;
 use praxis_login::OPENAI_API_KEY_ENV_VAR;
 use praxis_login::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
+use praxis_login::read_praxis_api_key_from_env;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct AuthEnvTelemetry {
@@ -34,7 +34,7 @@ pub(crate) fn collect_auth_env_telemetry(
 ) -> AuthEnvTelemetry {
     AuthEnvTelemetry {
         openai_api_key_env_present: env_var_present(OPENAI_API_KEY_ENV_VAR),
-        praxis_api_key_env_present: env_var_present(CODEX_API_KEY_ENV_VAR),
+        praxis_api_key_env_present: read_praxis_api_key_from_env().is_some(),
         praxis_api_key_env_enabled,
         // Custom provider `env_key` is arbitrary config text, so emit only a safe bucket.
         provider_env_key_name: provider.env_key.as_ref().map(|_| "configured".to_string()),

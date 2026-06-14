@@ -509,8 +509,8 @@ pub(super) async fn handle_assistant_item_done_in_plan_mode(
             .await;
         }
 
-        record_completed_response_item(sess, turn_context, item).await;
-        if let Some(agent_message) = last_assistant_message_from_item(item, /*plan_mode*/ true) {
+        let sink = crate::stream_events_utils::CompletedResponseItemSink::new(sess, turn_context);
+        if let Some(agent_message) = sink.record_completed(item).await {
             *last_agent_message = Some(agent_message);
         }
         return true;

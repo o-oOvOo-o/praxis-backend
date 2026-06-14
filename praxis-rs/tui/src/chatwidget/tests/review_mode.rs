@@ -955,12 +955,27 @@ async fn replaced_turn_clears_pending_steers_but_keeps_queued_drafts() {
 }
 
 #[tokio::test]
-async fn ctrl_c_shutdown_works_with_caps_lock() {
+async fn ctrl_c_shutdown_requires_second_press_with_caps_lock() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.handle_key_event(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::CONTROL));
+    assert!(chat.bottom_pane.quit_shortcut_hint_visible());
+    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::CONTROL));
     assert_matches!(rx.try_recv(), Ok(AppEvent::Exit(ExitMode::ShutdownFirst)));
+}
+
+#[tokio::test]
+async fn ctrl_c_running_work_interrupts_without_arming_quit() {
+    let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.is_review_mode = true;
+
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+    assert_matches!(next_submit_op(&mut op_rx), Op::Interrupt);
+    assert!(!chat.bottom_pane.quit_shortcut_hint_visible());
+    assert_matches!(rx.try_recv(), Err(TryRecvError::Empty));
 }
 
 #[tokio::test]
@@ -1112,10 +1127,10 @@ async fn custom_prompt_submit_sends_review_op() {
     chat.handle_paste("  please audit dependencies  ".to_string());
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    // Expect AppEvent::CodexOp(Op::Review { .. }) with trimmed prompt
+    // Expect AppEvent::AgentOp(Op::Review { .. }) with trimmed prompt
     let evt = rx.try_recv().expect("expected one app event");
     match evt {
-        AppEvent::CodexOp(Op::Review { review_request }) => {
+        AppEvent::AgentOp(Op::Review { review_request }) => {
             assert_eq!(
                 review_request,
                 ReviewRequest {
@@ -1139,7 +1154,7 @@ async fn custom_prompt_enter_empty_does_not_send() {
     // Enter without any text
     chat.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-    // No AppEvent::CodexOp should be sent
+    // No AppEvent::AgentOp should be sent
     assert!(rx.try_recv().is_err(), "no app event should be sent");
 }
 

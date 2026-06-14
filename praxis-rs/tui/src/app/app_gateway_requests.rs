@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use crate::app_command::AppCommand;
 use crate::app_command::AppCommandView;
-use crate::app_gateway_approval_conversions::granted_permission_profile_from_request;
+use crate::app_gateway_core_conversions::app_gateway_request_id_to_mcp_request_id;
+use crate::app_gateway_core_conversions::granted_permission_profile_from_request;
 use praxis_app_gateway_protocol::CommandExecutionRequestApprovalResponse;
 use praxis_app_gateway_protocol::FileChangeApprovalDecision;
 use praxis_app_gateway_protocol::FileChangeRequestApprovalResponse;
@@ -230,13 +231,6 @@ impl PendingAppGatewayRequests {
 struct McpLegacyRequestKey {
     server_name: String,
     request_id: McpRequestId,
-}
-
-fn app_gateway_request_id_to_mcp_request_id(request_id: &AppGatewayRequestId) -> McpRequestId {
-    match request_id {
-        AppGatewayRequestId::String(value) => McpRequestId::String(value.clone()),
-        AppGatewayRequestId::Integer(value) => McpRequestId::Integer(*value),
-    }
 }
 
 fn file_change_decision(decision: &ReviewDecision) -> Result<FileChangeApprovalDecision, String> {

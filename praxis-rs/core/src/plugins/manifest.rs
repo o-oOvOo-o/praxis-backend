@@ -718,8 +718,9 @@ mod tests {
     }
 
     fn write_raw_manifest(plugin_root: &Path, manifest: &str) {
-        fs::create_dir_all(plugin_root.join(".codex-plugin")).expect("create manifest dir");
-        fs::write(plugin_root.join(".codex-plugin/plugin.json"), manifest).expect("write manifest");
+        fs::create_dir_all(plugin_root.join(".praxis-plugin")).expect("create manifest dir");
+        fs::write(plugin_root.join(".praxis-plugin/plugin.json"), manifest)
+            .expect("write manifest");
     }
 
     fn load_manifest(plugin_root: &Path) -> PluginManifest {

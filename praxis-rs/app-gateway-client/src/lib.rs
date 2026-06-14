@@ -23,10 +23,12 @@ use std::future::Future;
 use std::io::Error as IoError;
 use std::io::ErrorKind;
 use std::io::Result as IoResult;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 pub use praxis_app_gateway_native::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
+pub use praxis_app_gateway_native::NativeControlAuthSettings;
 pub use praxis_app_gateway_native::NativeGatewayEvent;
 use praxis_app_gateway_native::NativeRuntimeStartArgs;
 use praxis_app_gateway_native::start_native_runtime;
@@ -45,7 +47,7 @@ use praxis_arg0::Arg0DispatchPaths;
 use praxis_core::config::Config;
 use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::LoaderOverrides;
-use praxis_feedback::CodexFeedback;
+use praxis_feedback::PraxisFeedback;
 use praxis_protocol::protocol::SessionSource;
 use serde::de::DeserializeOwned;
 use tokio::sync::mpsc;
@@ -471,7 +473,7 @@ pub struct NativeAppGatewayClientStartArgs {
     /// Preloaded cloud config bundle provider.
     pub cloud_requirements: CloudConfigBundleLoader,
     /// Feedback sink used by app-gateway/core telemetry and logs.
-    pub feedback: CodexFeedback,
+    pub feedback: PraxisFeedback,
     /// Startup warnings emitted after initialize succeeds.
     pub config_warnings: Vec<ConfigWarningNotification>,
     /// Session source recorded in app-gateway thread metadata.
@@ -488,6 +490,10 @@ pub struct NativeAppGatewayClientStartArgs {
     pub opt_out_notification_methods: Vec<String>,
     /// Queue capacity for command/event channels (clamped to at least 1).
     pub channel_capacity: usize,
+    /// Optional websocket listener exposing this native backend to external agents.
+    pub control_listen: Option<SocketAddr>,
+    /// Auth settings for the optional native external-control listener.
+    pub control_auth: NativeControlAuthSettings,
 }
 
 impl NativeAppGatewayClientStartArgs {
@@ -515,6 +521,8 @@ impl NativeAppGatewayClientStartArgs {
             enable_praxis_api_key_env: self.enable_praxis_api_key_env,
             initialize,
             channel_capacity: self.channel_capacity,
+            control_listen: self.control_listen,
+            control_auth: self.control_auth,
         }
     }
 }
@@ -1046,7 +1054,7 @@ mod tests {
             cli_overrides: Vec::new(),
             loader_overrides: LoaderOverrides::default(),
             cloud_requirements: CloudConfigBundleLoader::default(),
-            feedback: CodexFeedback::new(),
+            feedback: PraxisFeedback::new(),
             config_warnings: Vec::new(),
             session_source,
             enable_praxis_api_key_env: false,
@@ -1055,6 +1063,8 @@ mod tests {
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
             channel_capacity,
+            control_listen: None,
+            control_auth: NativeControlAuthSettings::default(),
         })
         .await
         .expect("in-process app-gateway client should start")
@@ -2041,7 +2051,7 @@ mod tests {
             cli_overrides: Vec::new(),
             loader_overrides: LoaderOverrides::default(),
             cloud_requirements: CloudConfigBundleLoader::default(),
-            feedback: CodexFeedback::new(),
+            feedback: PraxisFeedback::new(),
             config_warnings: Vec::new(),
             session_source: SessionSource::Exec,
             enable_praxis_api_key_env: false,
@@ -2050,6 +2060,8 @@ mod tests {
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
             channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
+            control_listen: None,
+            control_auth: NativeControlAuthSettings::default(),
         }
         .into_runtime_start_args();
 

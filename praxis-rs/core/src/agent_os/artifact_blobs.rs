@@ -1,6 +1,6 @@
 use super::*;
 
-impl AgentOsRuntime {
+impl AgentOs {
     pub(crate) async fn read_artifact_blob(
         &self,
         reader_thread_id: ThreadId,

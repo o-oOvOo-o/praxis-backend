@@ -15,7 +15,7 @@ use crate::session_prefix::format_subagent_context_line;
 #[cfg(test)]
 use crate::session_prefix::format_subagent_notification_message;
 use crate::shell_snapshot::ShellSnapshot;
-use crate::thread_manager::ThreadManagerState;
+use crate::thread_manager::ThreadManagerInner;
 use crate::thread_rollout_truncation::truncate_rollout_to_last_n_fork_turns;
 use praxis_features::Feature;
 use praxis_protocol::AgentPath;
@@ -195,14 +195,14 @@ fn is_redundant_agent_title(base_name: &str, title: &str) -> bool {
 pub(crate) struct AgentControl {
     /// Weak handle back to the global thread registry/state.
     /// This is `Weak` to avoid reference cycles and shadow persistence of the form
-    /// `ThreadManagerState -> PraxisThread -> Session -> SessionServices -> ThreadManagerState`.
-    manager: Weak<ThreadManagerState>,
+    /// `ThreadManagerInner -> PraxisThread -> Session -> SessionServices -> ThreadManagerInner`.
+    manager: Weak<ThreadManagerInner>,
     state: Arc<AgentRegistry>,
 }
 
 impl AgentControl {
     /// Construct a new `AgentControl` that can spawn/message agents via the given manager state.
-    pub(crate) fn new(manager: Weak<ThreadManagerState>) -> Self {
+    pub(crate) fn new(manager: Weak<ThreadManagerInner>) -> Self {
         Self {
             manager,
             ..Default::default()
@@ -337,13 +337,13 @@ impl AgentControl {
 
     async fn spawn_forked_thread(
         &self,
-        state: &Arc<ThreadManagerState>,
+        state: &Arc<ThreadManagerInner>,
         config: crate::config::Config,
         session_source: SessionSource,
         options: &SpawnAgentOptions,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
-    ) -> PraxisResult<crate::thread_manager::NewThread> {
+    ) -> PraxisResult<crate::thread_manager::ThreadSpawnResult> {
         let Some(call_id) = options.fork_parent_spawn_call_id.as_deref() else {
             return Err(PraxisErr::Fatal(
                 "spawn_agent fork requires a parent spawn call id".to_string(),
@@ -675,7 +675,7 @@ impl AgentControl {
     async fn handle_thread_request_result(
         &self,
         agent_id: ThreadId,
-        state: &Arc<ThreadManagerState>,
+        state: &Arc<ThreadManagerInner>,
         result: PraxisResult<String>,
     ) -> PraxisResult<String> {
         if matches!(result, Err(PraxisErr::InternalAgentDied)) {
@@ -1107,7 +1107,7 @@ impl AgentControl {
 
     async fn resolve_tree_root_thread_id(
         &self,
-        state: &Arc<ThreadManagerState>,
+        state: &Arc<ThreadManagerInner>,
         current_thread_id: ThreadId,
         current_session_source: &SessionSource,
     ) -> ThreadId {
@@ -1192,7 +1192,7 @@ impl AgentControl {
 
     async fn live_agent_metadata_for_thread(
         &self,
-        state: &Arc<ThreadManagerState>,
+        state: &Arc<ThreadManagerInner>,
         thread_id: ThreadId,
     ) -> Option<AgentMetadata> {
         let existing = self.state.agent_metadata_for_thread(thread_id);
@@ -1264,7 +1264,7 @@ impl AgentControl {
         Ok((session_source, agent_metadata))
     }
 
-    fn upgrade(&self) -> PraxisResult<Arc<ThreadManagerState>> {
+    fn upgrade(&self) -> PraxisResult<Arc<ThreadManagerInner>> {
         self.manager
             .upgrade()
             .ok_or_else(|| PraxisErr::UnsupportedOperation("thread manager dropped".to_string()))
@@ -1272,7 +1272,7 @@ impl AgentControl {
 
     async fn inherited_shell_snapshot_for_source(
         &self,
-        state: &Arc<ThreadManagerState>,
+        state: &Arc<ThreadManagerInner>,
         session_source: Option<&SessionSource>,
     ) -> Option<Arc<ShellSnapshot>> {
         let Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
@@ -1288,7 +1288,7 @@ impl AgentControl {
 
     async fn inherited_exec_policy_for_source(
         &self,
-        state: &Arc<ThreadManagerState>,
+        state: &Arc<ThreadManagerInner>,
         session_source: Option<&SessionSource>,
         child_config: &crate::config::Config,
     ) -> Option<Arc<crate::exec_policy::ExecPolicyManager>> {
@@ -1472,7 +1472,7 @@ fn merge_live_agent_metadata(
 }
 
 async fn resolve_root_thread_id_from_source(
-    state: &Arc<ThreadManagerState>,
+    state: &Arc<ThreadManagerInner>,
     current_thread_id: ThreadId,
     current_session_source: &SessionSource,
     state_db: Option<&Arc<praxis_state::StateRuntime>>,
@@ -1503,7 +1503,7 @@ async fn resolve_root_thread_id_from_source(
 }
 
 async fn is_ancestor_thread_in_source_chain(
-    state: &Arc<ThreadManagerState>,
+    state: &Arc<ThreadManagerInner>,
     ancestor_thread_id: ThreadId,
     current_session_source: &SessionSource,
     state_db: Option<&Arc<praxis_state::StateRuntime>>,

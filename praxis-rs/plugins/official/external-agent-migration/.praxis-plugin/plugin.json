@@ -1,0 +1,18 @@
+{
+  "name": "external-agent-migration",
+  "description": "Discover and migrate external agent sessions and configuration into Praxis.",
+  "skills": "./skills",
+  "interface": {
+    "displayName": "External Agent Migration",
+    "shortDescription": "Import Codex, Claude, and Cursor agent state.",
+    "longDescription": "Provider-oriented migration helpers for external agent sessions, commands, MCP configuration, hooks, and skills.",
+    "developerName": "Praxis",
+    "category": "migration",
+    "capabilities": [
+      "codex sessions",
+      "claude configuration",
+      "cursor sessions",
+      "praxis fork"
+    ]
+  }
+}

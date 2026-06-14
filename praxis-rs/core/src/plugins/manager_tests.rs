@@ -975,14 +975,17 @@ async fn install_plugin_updates_config_with_relative_path_and_plugin_key() {
         .unwrap();
 
     let installed_path = tmp.path().join("plugins/cache/debug/sample-plugin/local");
+    let plugin_id = PluginId::new("sample-plugin".to_string(), "debug".to_string()).unwrap();
+    assert_eq!(result.plugin_id, plugin_id);
+    assert_eq!(result.plugin_version, "local");
     assert_eq!(
-        result,
-        PluginInstallOutcome {
-            plugin_id: PluginId::new("sample-plugin".to_string(), "debug".to_string()).unwrap(),
-            plugin_version: "local".to_string(),
-            installed_path: AbsolutePathBuf::try_from(installed_path).unwrap(),
-            auth_policy: MarketplacePluginAuthPolicy::OnUse,
-        }
+        result.installed_path,
+        AbsolutePathBuf::try_from(installed_path).unwrap()
+    );
+    assert_eq!(result.auth_policy, MarketplacePluginAuthPolicy::OnUse);
+    assert_eq!(
+        result.activation_delta.plugin_id,
+        Some(PluginId::new("sample-plugin".to_string(), "debug".to_string()).unwrap())
     );
 
     let config = fs::read_to_string(tmp.path().join("config.toml")).unwrap();

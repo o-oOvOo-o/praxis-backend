@@ -43,6 +43,7 @@ use praxis_config::types::OtelConfig;
 use praxis_config::types::OtelConfigToml;
 use praxis_config::types::OtelExporterKind;
 use praxis_config::types::PluginConfig;
+use praxis_config::types::PluginMarketplaceConfig;
 use praxis_config::types::SandboxWorkspaceWrite;
 use praxis_config::types::ShellEnvironmentPolicy;
 use praxis_config::types::ShellEnvironmentPolicyToml;
@@ -340,6 +341,9 @@ pub struct Config {
     /// Definition for MCP servers that Praxis can reach out to for tool calls.
     pub mcp_servers: Constrained<HashMap<String, McpServerConfig>>,
 
+    /// Configured plugin marketplace providers keyed by stable marketplace name.
+    pub plugin_marketplaces: HashMap<String, PluginMarketplaceConfig>,
+
     /// Preferred store for MCP OAuth credentials.
     /// keyring: Use an OS-specific keyring service.
     ///          Credentials stored in the keyring will only be readable by Praxis unless the user explicitly grants access via OS-level keyring access.
@@ -423,12 +427,6 @@ pub struct Config {
     /// escalation. This cannot be set in the config file: it must be set in
     /// code via [`ConfigOverrides`].
     pub main_execve_wrapper_exe: Option<PathBuf>,
-
-    /// Optional absolute path to the Node runtime used by `js_repl`.
-    pub js_repl_node_path: Option<PathBuf>,
-
-    /// Ordered list of directories to search for Node modules in `js_repl`.
-    pub js_repl_node_module_dirs: Vec<PathBuf>,
 
     /// Optional absolute path to patched zsh used by zsh-exec-bridge-backed shell execution.
     pub zsh_path: Option<PathBuf>,
@@ -1221,12 +1219,6 @@ pub struct ConfigToml {
     /// Default: `300000` (5 minutes).
     pub background_terminal_max_timeout: Option<u64>,
 
-    /// Optional absolute path to the Node runtime used by `js_repl`.
-    pub js_repl_node_path: Option<AbsolutePathBuf>,
-
-    /// Ordered list of directories to search for Node modules in `js_repl`.
-    pub js_repl_node_module_dirs: Option<Vec<AbsolutePathBuf>>,
-
     /// Optional absolute path to patched zsh used by zsh-exec-bridge-backed shell execution.
     pub zsh_path: Option<AbsolutePathBuf>,
 
@@ -1337,6 +1329,10 @@ pub struct ConfigToml {
     /// User-level plugin config entries keyed by plugin name.
     #[serde(default)]
     pub plugins: HashMap<String, PluginConfig>,
+
+    /// Plugin marketplace providers keyed by stable marketplace name.
+    #[serde(default)]
+    pub plugin_marketplaces: HashMap<String, PluginMarketplaceConfig>,
 
     /// Centralized feature flags (new). Prefer this over individual toggles.
     #[serde(default)]
@@ -1825,8 +1821,6 @@ pub struct ConfigOverrides {
     pub praxis_self_exe: Option<PathBuf>,
     pub praxis_linux_sandbox_exe: Option<PathBuf>,
     pub main_execve_wrapper_exe: Option<PathBuf>,
-    pub js_repl_node_path: Option<PathBuf>,
-    pub js_repl_node_module_dirs: Option<Vec<PathBuf>>,
     pub zsh_path: Option<PathBuf>,
     pub base_instructions: Option<String>,
     pub developer_instructions: Option<String>,
@@ -2071,8 +2065,6 @@ impl Config {
             praxis_self_exe,
             praxis_linux_sandbox_exe,
             main_execve_wrapper_exe,
-            js_repl_node_path: js_repl_node_path_override,
-            js_repl_node_module_dirs: js_repl_node_module_dirs_override,
             zsh_path: zsh_path_override,
             base_instructions,
             developer_instructions,
@@ -2502,20 +2494,6 @@ impl Config {
             "experimental compact prompt file",
         )?;
         let compact_prompt = compact_prompt.or(file_compact_prompt);
-        let js_repl_node_path = js_repl_node_path_override
-            .or(config_profile.js_repl_node_path.map(Into::into))
-            .or(cfg.js_repl_node_path.map(Into::into));
-        let js_repl_node_module_dirs = js_repl_node_module_dirs_override
-            .or_else(|| {
-                config_profile
-                    .js_repl_node_module_dirs
-                    .map(|dirs| dirs.into_iter().map(Into::into).collect::<Vec<PathBuf>>())
-            })
-            .or_else(|| {
-                cfg.js_repl_node_module_dirs
-                    .map(|dirs| dirs.into_iter().map(Into::into).collect::<Vec<PathBuf>>())
-            })
-            .unwrap_or_default();
         let zsh_path = zsh_path_override
             .or(config_profile.zsh_path.map(Into::into))
             .or(cfg.zsh_path.map(Into::into));
@@ -2651,6 +2629,7 @@ impl Config {
             // is important in code to differentiate the mode from the store implementation.
             cli_auth_credentials_store_mode: cfg.cli_auth_credentials_store.unwrap_or_default(),
             mcp_servers,
+            plugin_marketplaces: cfg.plugin_marketplaces,
             // The config.toml omits "_mode" because it's a config file. However, "_mode"
             // is important in code to differentiate the mode from the store implementation.
             mcp_oauth_credentials_store_mode: cfg.mcp_oauth_credentials_store.unwrap_or_default(),
@@ -2687,8 +2666,6 @@ impl Config {
             praxis_self_exe,
             praxis_linux_sandbox_exe,
             main_execve_wrapper_exe,
-            js_repl_node_path,
-            js_repl_node_module_dirs,
             zsh_path,
 
             hide_agent_reasoning: cfg.hide_agent_reasoning.unwrap_or(false),

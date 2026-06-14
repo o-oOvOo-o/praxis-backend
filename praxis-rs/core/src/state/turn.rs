@@ -18,14 +18,14 @@ use rmcp::model::RequestId;
 use tokio::sync::oneshot;
 
 use crate::praxis::TurnContext;
-use crate::tasks::SessionTask;
+use crate::tasks::AgentTask;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_protocol::protocol::TokenUsage;
 
 /// Metadata about the currently running turn.
 pub(crate) struct ActiveTurn {
-    pub(crate) tasks: IndexMap<String, RunningTask>,
+    pub(crate) tasks: IndexMap<String, RunningAgentTask>,
     pub(crate) turn_state: Arc<Mutex<TurnState>>,
 }
 
@@ -39,16 +39,16 @@ impl Default for ActiveTurn {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum TaskKind {
+pub(crate) enum AgentTaskKind {
     Regular,
     Review,
     Compact,
 }
 
-pub(crate) struct RunningTask {
+pub(crate) struct RunningAgentTask {
     pub(crate) done: Arc<Notify>,
-    pub(crate) kind: TaskKind,
-    pub(crate) task: Arc<dyn SessionTask>,
+    pub(crate) kind: AgentTaskKind,
+    pub(crate) task: Arc<dyn AgentTask>,
     pub(crate) cancellation_token: CancellationToken,
     pub(crate) handle: AbortHandle,
     pub(crate) turn_context: Arc<TurnContext>,
@@ -57,11 +57,11 @@ pub(crate) struct RunningTask {
     pub(crate) _timer: Option<praxis_otel::Timer>,
 }
 
-impl RunningTask {
+impl RunningAgentTask {
     pub(crate) fn new(
         done: Arc<Notify>,
-        kind: TaskKind,
-        task: Arc<dyn SessionTask>,
+        kind: AgentTaskKind,
+        task: Arc<dyn AgentTask>,
         cancellation_token: CancellationToken,
         handle: AbortHandle,
         turn_context: Arc<TurnContext>,
@@ -84,7 +84,7 @@ impl RunningTask {
     }
 }
 
-impl Drop for RunningTask {
+impl Drop for RunningAgentTask {
     fn drop(&mut self) {
         if self.abort_on_drop {
             self.handle.abort();
@@ -93,7 +93,7 @@ impl Drop for RunningTask {
 }
 
 impl ActiveTurn {
-    pub(crate) fn add_task(&mut self, task: RunningTask) {
+    pub(crate) fn add_task(&mut self, task: RunningAgentTask) {
         let sub_id = task.turn_context.sub_id.clone();
         self.tasks.insert(sub_id, task);
     }
@@ -105,7 +105,7 @@ impl ActiveTurn {
         self.tasks.is_empty()
     }
 
-    pub(crate) fn drain_tasks(&mut self) -> Vec<RunningTask> {
+    pub(crate) fn drain_tasks(&mut self) -> Vec<RunningAgentTask> {
         self.tasks.drain(..).map(|(_, task)| task).collect()
     }
 }

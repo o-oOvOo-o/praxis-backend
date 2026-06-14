@@ -32,13 +32,13 @@ impl Session {
         }
 
         match active_turn.tasks.first().map(|(_, task)| task.kind) {
-            Some(crate::state::TaskKind::Regular) => {}
-            Some(crate::state::TaskKind::Review) => {
+            Some(crate::state::AgentTaskKind::Regular) => {}
+            Some(crate::state::AgentTaskKind::Review) => {
                 return Err(SteerInputError::ActiveTurnNotSteerable {
                     turn_kind: NonSteerableTurnKind::Review,
                 });
             }
-            Some(crate::state::TaskKind::Compact) => {
+            Some(crate::state::AgentTaskKind::Compact) => {
                 return Err(SteerInputError::ActiveTurnNotSteerable {
                     turn_kind: NonSteerableTurnKind::Compact,
                 });

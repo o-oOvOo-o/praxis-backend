@@ -12,7 +12,7 @@ path = "src/lib.rs"
 workspace = true
 
 [dependencies]
-praxis-app-gateway-runtime = { workspace = true }
+praxis-app-gateway = { workspace = true }
 praxis-app-gateway-core = { workspace = true }
 praxis-app-gateway-protocol = { workspace = true }
 praxis-arg0 = { workspace = true }

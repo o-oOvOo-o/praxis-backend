@@ -45,13 +45,19 @@ use crate::loader::load_skills_from_roots;
 use praxis_analytics::AnalyticsEventsClient;
 use praxis_config::types::McpServerConfig;
 use praxis_config::types::PluginConfig;
+use praxis_config::types::PluginMarketplaceProviderConfig;
 use praxis_features::Feature;
 use praxis_login::AuthManager;
 use praxis_login::CodexAuth;
 use praxis_plugin::AppConnectorId;
+use praxis_plugin::PluginActivationDelta;
+use praxis_plugin::PluginCapabilityChanges;
 use praxis_plugin::PluginCapabilitySummary;
 use praxis_plugin::PluginId;
 use praxis_plugin::PluginIdError;
+use praxis_plugin::PluginMarketplaceProviderSource;
+use praxis_plugin::PluginMarketplaceRef;
+use praxis_plugin::PluginMarketplaceSyncOutcome;
 use praxis_plugin::PluginTelemetryMetadata;
 use praxis_plugin::prompt_safe_plugin_description;
 use praxis_protocol::protocol::Product;
@@ -66,11 +72,16 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
+use std::process::Output;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 use std::time::Instant;
+use tempfile::TempDir;
 use tokio::sync::Mutex;
 use toml_edit::value;
 use tracing::info;
@@ -79,6 +90,9 @@ use tracing::warn;
 const DEFAULT_SKILLS_DIR_NAME: &str = "skills";
 const DEFAULT_MCP_CONFIG_FILE: &str = ".mcp.json";
 const DEFAULT_APP_CONFIG_FILE: &str = ".app.json";
+const MARKETPLACE_PROVIDER_CACHE_DIR: &str = "plugins/marketplaces";
+const MARKETPLACE_PROVIDER_GIT_TIMEOUT: Duration = Duration::from_secs(45);
+const MARKETPLACE_PROVIDER_STALE_TEMP_DIR_MAX_AGE: Duration = Duration::from_secs(10 * 60);
 pub const OPENAI_CURATED_MARKETPLACE_NAME: &str = "openai-curated";
 pub const OPENAI_CURATED_MARKETPLACE_DISPLAY_NAME: &str = "OpenAI Curated";
 static CURATED_REPO_SYNC_STARTED: AtomicBool = AtomicBool::new(false);
@@ -134,12 +148,13 @@ pub struct PluginReadRequest {
     pub marketplace_path: AbsolutePathBuf,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PluginInstallOutcome {
     pub plugin_id: PluginId,
     pub plugin_version: String,
     pub installed_path: AbsolutePathBuf,
     pub auth_policy: MarketplacePluginAuthPolicy,
+    pub activation_delta: PluginActivationDelta<McpServerConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -310,6 +325,33 @@ impl From<RemotePluginFetchError> for PluginRemoteSyncError {
             RemotePluginFetchError::Decode { url, source } => Self::Decode { url, source },
         }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PluginMarketplaceProviderSyncError {
+    #[error("plugin marketplace `{0}` is not configured")]
+    NotConfigured(String),
+
+    #[error("plugin marketplace `{0}` is disabled")]
+    Disabled(String),
+
+    #[error("plugin marketplace `{marketplace_name}` has unsupported provider `{provider}`")]
+    UnsupportedProvider {
+        marketplace_name: String,
+        provider: &'static str,
+    },
+
+    #[error("invalid plugin marketplace name `{0}`")]
+    InvalidMarketplaceName(String),
+
+    #[error("failed to sync git plugin marketplace `{marketplace_name}`: {message}")]
+    Git {
+        marketplace_name: String,
+        message: String,
+    },
+
+    #[error("failed to join marketplace provider sync task: {0}")]
+    Join(#[from] tokio::task::JoinError),
 }
 
 pub struct PluginsManager {
@@ -523,7 +565,7 @@ impl PluginsManager {
         )?;
         let plugin_id = resolved.plugin_id.as_key();
         // This only forwards the backend mutation before the local install flow. We rely on
-        // `plugin/list(forceRemoteSync=true)` to sync local state rather than doing an extra
+        // `plugin/catalog/list(forceRemoteSync=true)` to sync local state rather than doing an extra
         // reconcile pass here.
         enable_remote_plugin(config, auth, &plugin_id)
             .await
@@ -584,15 +626,22 @@ impl PluginsManager {
             ));
         }
 
+        let activation_delta =
+            plugin_activation_delta_from_root(&result.plugin_id, result.installed_path.as_path());
+
         Ok(PluginInstallOutcome {
             plugin_id: result.plugin_id,
             plugin_version: result.plugin_version,
             installed_path: result.installed_path,
             auth_policy,
+            activation_delta,
         })
     }
 
-    pub async fn uninstall_plugin(&self, plugin_id: String) -> Result<(), PluginUninstallError> {
+    pub async fn uninstall_plugin(
+        &self,
+        plugin_id: String,
+    ) -> Result<PluginActivationDelta<McpServerConfig>, PluginUninstallError> {
         let plugin_id = PluginId::parse(&plugin_id)?;
         self.uninstall_plugin_id(plugin_id).await
     }
@@ -602,11 +651,11 @@ impl PluginsManager {
         config: &Config,
         auth: Option<&CodexAuth>,
         plugin_id: String,
-    ) -> Result<(), PluginUninstallError> {
+    ) -> Result<PluginActivationDelta<McpServerConfig>, PluginUninstallError> {
         let plugin_id = PluginId::parse(&plugin_id)?;
         let plugin_key = plugin_id.as_key();
         // This only forwards the backend mutation before the local uninstall flow. We rely on
-        // `plugin/list(forceRemoteSync=true)` to sync local state rather than doing an extra
+        // `plugin/catalog/list(forceRemoteSync=true)` to sync local state rather than doing an extra
         // reconcile pass here.
         uninstall_remote_plugin(config, auth, &plugin_key)
             .await
@@ -614,7 +663,45 @@ impl PluginsManager {
         self.uninstall_plugin_id(plugin_id).await
     }
 
-    async fn uninstall_plugin_id(&self, plugin_id: PluginId) -> Result<(), PluginUninstallError> {
+    pub async fn set_plugin_enabled(
+        &self,
+        plugin_id: String,
+        enabled: bool,
+    ) -> Result<PluginActivationDelta<McpServerConfig>, PluginSetEnabledError> {
+        let plugin_id = PluginId::parse(&plugin_id)?;
+        let plugin_root = self
+            .store
+            .active_plugin_root(&plugin_id)
+            .ok_or_else(|| PluginSetEnabledError::NotInstalled(plugin_id.as_key()))?;
+        let activation_delta = plugin_activation_delta_from_root(&plugin_id, plugin_root.as_path());
+
+        ConfigService::new_with_defaults(self.praxis_home.clone())
+            .write_value(ConfigValueWriteParams {
+                key_path: format!("plugins.{}.enabled", plugin_id.as_key()),
+                value: json!(enabled),
+                merge_strategy: MergeStrategy::Replace,
+                file_path: None,
+                expected_version: None,
+            })
+            .await
+            .map(|_| ())
+            .map_err(PluginSetEnabledError::from)?;
+        self.clear_cache();
+        Ok(activation_delta)
+    }
+
+    async fn uninstall_plugin_id(
+        &self,
+        plugin_id: PluginId,
+    ) -> Result<PluginActivationDelta<McpServerConfig>, PluginUninstallError> {
+        let activation_delta = self
+            .store
+            .active_plugin_root(&plugin_id)
+            .map(|plugin_root| plugin_activation_delta_from_root(&plugin_id, plugin_root.as_path()))
+            .unwrap_or_else(|| PluginActivationDelta {
+                plugin_id: Some(plugin_id.clone()),
+                ..PluginActivationDelta::default()
+            });
         let plugin_telemetry = self
             .store
             .active_plugin_root(&plugin_id)
@@ -642,7 +729,7 @@ impl PluginsManager {
             analytics_events_client.track_plugin_uninstalled(plugin_telemetry);
         }
 
-        Ok(())
+        Ok(activation_delta)
     }
 
     pub async fn sync_plugins_from_remote(
@@ -848,6 +935,76 @@ impl PluginsManager {
         Ok(result)
     }
 
+    pub async fn sync_marketplace_provider(
+        &self,
+        config: &Config,
+        marketplace_name: String,
+    ) -> Result<PluginMarketplaceSyncOutcome, PluginMarketplaceProviderSyncError> {
+        let marketplace = config
+            .plugin_marketplaces
+            .get(&marketplace_name)
+            .ok_or_else(|| {
+                PluginMarketplaceProviderSyncError::NotConfigured(marketplace_name.clone())
+            })?;
+        if !marketplace.enabled {
+            return Err(PluginMarketplaceProviderSyncError::Disabled(
+                marketplace_name,
+            ));
+        }
+
+        let outcome = match &marketplace.provider {
+            PluginMarketplaceProviderConfig::Local { path } => PluginMarketplaceSyncOutcome {
+                marketplace_name,
+                changed: false,
+                local_root: Some(path.as_path().to_path_buf()),
+                version: None,
+                diagnostics: Vec::new(),
+            },
+            PluginMarketplaceProviderConfig::Git {
+                repo,
+                reference,
+                path,
+            } => {
+                if praxis_plugin::validate_plugin_segment(&marketplace_name, "marketplace name")
+                    .is_err()
+                {
+                    return Err(PluginMarketplaceProviderSyncError::InvalidMarketplaceName(
+                        marketplace_name,
+                    ));
+                }
+                let praxis_home = self.praxis_home.clone();
+                let marketplace_name_for_task = marketplace_name.clone();
+                let repo = repo.clone();
+                let reference = reference.clone();
+                let path = path.clone();
+                tokio::task::spawn_blocking(move || {
+                    sync_git_marketplace_provider(
+                        praxis_home.as_path(),
+                        &marketplace_name_for_task,
+                        &repo,
+                        reference.as_deref(),
+                        path.as_deref(),
+                    )
+                })
+                .await
+                .map_err(PluginMarketplaceProviderSyncError::from)?
+                .map_err(|message| PluginMarketplaceProviderSyncError::Git {
+                    marketplace_name,
+                    message,
+                })?
+            }
+            PluginMarketplaceProviderConfig::Http { .. } => {
+                return Err(PluginMarketplaceProviderSyncError::UnsupportedProvider {
+                    marketplace_name,
+                    provider: "http",
+                });
+            }
+        };
+
+        self.clear_cache();
+        Ok(outcome)
+    }
+
     pub fn list_marketplaces_for_config(
         &self,
         config: &Config,
@@ -858,7 +1015,8 @@ impl PluginsManager {
         }
 
         let (installed_plugins, enabled_plugins) = self.configured_plugin_states(config);
-        let marketplace_outcome = list_marketplaces(&self.marketplace_roots(additional_roots))?;
+        let marketplace_outcome =
+            list_marketplaces(&self.marketplace_roots(config, additional_roots))?;
         let mut seen_plugin_keys = HashSet::new();
         let marketplaces = marketplace_outcome
             .marketplaces
@@ -959,7 +1117,7 @@ impl PluginsManager {
         }
         let manifest = load_plugin_manifest(source_path.as_path()).ok_or_else(|| {
             MarketplaceError::InvalidPlugin(
-                "missing or invalid .codex-plugin/plugin.json".to_string(),
+                "missing or invalid .praxis-plugin/plugin.json".to_string(),
             )
         })?;
         let description = manifest.description.clone();
@@ -1100,9 +1258,11 @@ impl PluginsManager {
         (installed_plugins, enabled_plugins)
     }
 
-    fn marketplace_roots(&self, additional_roots: &[AbsolutePathBuf]) -> Vec<AbsolutePathBuf> {
-        // Treat the curated catalog as an extra marketplace root so plugin listing can surface it
-        // without requiring every caller to know where it is stored.
+    fn marketplace_roots(
+        &self,
+        config: &Config,
+        additional_roots: &[AbsolutePathBuf],
+    ) -> Vec<AbsolutePathBuf> {
         let mut roots = additional_roots.to_vec();
         let curated_repo_root = curated_plugins_repo_path(self.praxis_home.as_path());
         if curated_repo_root.is_dir()
@@ -1110,9 +1270,435 @@ impl PluginsManager {
         {
             roots.push(curated_repo_root);
         }
+        roots.extend(self.configured_marketplace_roots(config));
         roots.sort_unstable_by(|left, right| left.as_path().cmp(right.as_path()));
         roots.dedup();
         roots
+    }
+
+    fn configured_marketplace_roots(&self, config: &Config) -> Vec<AbsolutePathBuf> {
+        let mut roots = Vec::new();
+        for (name, marketplace) in &config.plugin_marketplaces {
+            if !marketplace.enabled {
+                continue;
+            }
+
+            match &marketplace.provider {
+                PluginMarketplaceProviderConfig::Local { path } => roots.push(path.clone()),
+                PluginMarketplaceProviderConfig::Git { path, .. } => {
+                    if let Some(root) = self.cached_marketplace_root(name, path.as_deref()) {
+                        roots.push(root);
+                    }
+                }
+                PluginMarketplaceProviderConfig::Http { .. } => {
+                    if let Some(root) = self.cached_marketplace_root(name, None) {
+                        roots.push(root);
+                    }
+                }
+            }
+        }
+        roots
+    }
+
+    fn cached_marketplace_root(
+        &self,
+        marketplace_name: &str,
+        relative_path: Option<&Path>,
+    ) -> Option<AbsolutePathBuf> {
+        if praxis_plugin::validate_plugin_segment(marketplace_name, "marketplace name").is_err() {
+            warn!(
+                marketplace = marketplace_name,
+                "ignoring invalid plugin marketplace cache name"
+            );
+            return None;
+        }
+        let mut root = self
+            .praxis_home
+            .join(MARKETPLACE_PROVIDER_CACHE_DIR)
+            .join(marketplace_name);
+        if let Some(relative_path) = relative_path {
+            root.push(relative_path);
+        }
+        root.is_dir()
+            .then(|| AbsolutePathBuf::try_from(root).ok())
+            .flatten()
+    }
+
+    pub fn configured_marketplace_refs(&self, config: &Config) -> Vec<PluginMarketplaceRef> {
+        let mut refs = config
+            .plugin_marketplaces
+            .iter()
+            .map(|(name, marketplace)| PluginMarketplaceRef {
+                name: name.clone(),
+                display_name: marketplace.display_name.clone(),
+                provider: marketplace_provider_source(&marketplace.provider),
+                enabled: marketplace.enabled,
+                sync_on_startup: marketplace.sync_on_startup,
+            })
+            .collect::<Vec<_>>();
+        refs.sort_unstable_by(|left, right| left.name.cmp(&right.name));
+        refs
+    }
+}
+
+fn marketplace_provider_source(
+    provider: &PluginMarketplaceProviderConfig,
+) -> PluginMarketplaceProviderSource {
+    match provider {
+        PluginMarketplaceProviderConfig::Local { path } => PluginMarketplaceProviderSource::Local {
+            path: path.as_path().to_path_buf(),
+        },
+        PluginMarketplaceProviderConfig::Git {
+            repo,
+            reference,
+            path,
+        } => PluginMarketplaceProviderSource::Git {
+            repo: repo.clone(),
+            reference: reference.clone(),
+            path: path.clone(),
+        },
+        PluginMarketplaceProviderConfig::Http { url } => {
+            PluginMarketplaceProviderSource::Http { url: url.clone() }
+        }
+    }
+}
+
+fn sync_git_marketplace_provider(
+    praxis_home: &Path,
+    marketplace_name: &str,
+    repo: &str,
+    reference: Option<&str>,
+    path: Option<&Path>,
+) -> Result<PluginMarketplaceSyncOutcome, String> {
+    let relative_path = validate_marketplace_provider_relative_path(path)?;
+    let repo_path = marketplace_provider_cache_root(praxis_home, marketplace_name);
+    let old_version = if repo_path.join(".git").is_dir() {
+        git_head_sha(repo_path.as_path(), "git").ok()
+    } else {
+        None
+    };
+
+    let staged_repo_dir = prepare_marketplace_provider_temp_dir(repo_path.as_path())?;
+    clone_git_marketplace_repo(repo, reference, staged_repo_dir.path(), marketplace_name)?;
+    ensure_marketplace_provider_manifest_exists(staged_repo_dir.path(), relative_path.as_deref())?;
+    let new_version = git_head_sha(staged_repo_dir.path(), "git").ok();
+
+    let changed = old_version != new_version;
+    if changed || !repo_path.is_dir() {
+        activate_marketplace_provider_repo(repo_path.as_path(), staged_repo_dir)?;
+    }
+
+    let local_root = relative_path
+        .as_deref()
+        .map(|path| repo_path.join(path))
+        .unwrap_or(repo_path);
+
+    Ok(PluginMarketplaceSyncOutcome {
+        marketplace_name: marketplace_name.to_string(),
+        changed,
+        local_root: Some(local_root),
+        version: new_version,
+        diagnostics: Vec::new(),
+    })
+}
+
+fn marketplace_provider_cache_root(praxis_home: &Path, marketplace_name: &str) -> PathBuf {
+    praxis_home
+        .join(MARKETPLACE_PROVIDER_CACHE_DIR)
+        .join(marketplace_name)
+}
+
+fn validate_marketplace_provider_relative_path(
+    path: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    if path.as_os_str().is_empty() || path == Path::new(".") {
+        return Ok(None);
+    }
+    if path.is_absolute() {
+        return Err(format!(
+            "git marketplace subpath must be relative, got {}",
+            path.display()
+        ));
+    }
+    if path
+        .components()
+        .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(format!(
+            "git marketplace subpath must stay within the repository root, got {}",
+            path.display()
+        ));
+    }
+    Ok(Some(path.to_path_buf()))
+}
+
+fn prepare_marketplace_provider_temp_dir(repo_path: &Path) -> Result<TempDir, String> {
+    let Some(parent) = repo_path.parent() else {
+        return Err(format!(
+            "failed to determine marketplace cache parent directory for {}",
+            repo_path.display()
+        ));
+    };
+    fs::create_dir_all(parent).map_err(|err| {
+        format!(
+            "failed to create marketplace cache parent directory {}: {err}",
+            parent.display()
+        )
+    })?;
+    remove_stale_marketplace_provider_temp_dirs(parent);
+    tempfile::Builder::new()
+        .prefix("marketplace-clone-")
+        .tempdir_in(parent)
+        .map_err(|err| {
+            format!(
+                "failed to create temporary marketplace clone directory in {}: {err}",
+                parent.display()
+            )
+        })
+}
+
+fn remove_stale_marketplace_provider_temp_dirs(parent: &Path) {
+    let entries = match fs::read_dir(parent) {
+        Ok(entries) => entries,
+        Err(err) => {
+            warn!(
+                error = %err,
+                parent = %parent.display(),
+                "failed to list marketplace cache parent for stale cleanup"
+            );
+            return;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        let is_temp_dir = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("marketplace-clone-"));
+        if !is_temp_dir {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        if modified
+            .elapsed()
+            .is_ok_and(|age| age >= MARKETPLACE_PROVIDER_STALE_TEMP_DIR_MAX_AGE)
+        {
+            let _ = fs::remove_dir_all(path);
+        }
+    }
+}
+
+fn clone_git_marketplace_repo(
+    repo: &str,
+    reference: Option<&str>,
+    destination: &Path,
+    marketplace_name: &str,
+) -> Result<(), String> {
+    let repo_url = normalize_git_marketplace_repo(repo);
+    let mut command = Command::new("git");
+    command
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .arg("clone")
+        .arg("--depth")
+        .arg("1");
+    if let Some(reference) = reference.filter(|reference| !reference.trim().is_empty()) {
+        command.arg("--branch").arg(reference);
+    }
+    command.arg(repo_url).arg(destination);
+
+    let output = run_git_command_with_timeout(
+        &mut command,
+        &format!("git clone plugin marketplace `{marketplace_name}`"),
+        MARKETPLACE_PROVIDER_GIT_TIMEOUT,
+    )?;
+    ensure_git_success(&output, "git clone plugin marketplace")
+}
+
+fn normalize_git_marketplace_repo(repo: &str) -> String {
+    let trimmed = repo.trim();
+    if trimmed.contains("://") || trimmed.starts_with("git@") || trimmed.ends_with(".git") {
+        return trimmed.to_string();
+    }
+    let mut parts = trimmed.split('/');
+    if let (Some(owner), Some(name), None) = (parts.next(), parts.next(), parts.next())
+        && !owner.is_empty()
+        && !name.is_empty()
+    {
+        return format!("https://github.com/{owner}/{name}.git");
+    }
+    trimmed.to_string()
+}
+
+fn ensure_marketplace_provider_manifest_exists(
+    repo_path: &Path,
+    relative_path: Option<&Path>,
+) -> Result<(), String> {
+    let root = relative_path
+        .map(|path| repo_path.join(path))
+        .unwrap_or_else(|| repo_path.to_path_buf());
+    let manifest = root.join(".agents/plugins/marketplace.json");
+    if manifest.is_file() {
+        return Ok(());
+    }
+    Err(format!(
+        "plugin marketplace repo missing manifest at {}",
+        manifest.display()
+    ))
+}
+
+fn activate_marketplace_provider_repo(
+    repo_path: &Path,
+    staged_repo_dir: TempDir,
+) -> Result<(), String> {
+    let staged_repo_path = staged_repo_dir.path();
+    if repo_path.exists() {
+        let parent = repo_path.parent().ok_or_else(|| {
+            format!(
+                "failed to determine marketplace cache parent directory for {}",
+                repo_path.display()
+            )
+        })?;
+        let backup_dir = tempfile::Builder::new()
+            .prefix("marketplace-backup-")
+            .tempdir_in(parent)
+            .map_err(|err| {
+                format!(
+                    "failed to create marketplace cache backup directory in {}: {err}",
+                    parent.display()
+                )
+            })?;
+        let backup_repo_path = backup_dir.path().join("repo");
+        fs::rename(repo_path, &backup_repo_path).map_err(|err| {
+            format!(
+                "failed to move previous marketplace cache out of the way at {}: {err}",
+                repo_path.display()
+            )
+        })?;
+        if let Err(err) = fs::rename(staged_repo_path, repo_path) {
+            let rollback_result = fs::rename(&backup_repo_path, repo_path);
+            return match rollback_result {
+                Ok(()) => Err(format!(
+                    "failed to activate new marketplace cache at {}: {err}",
+                    repo_path.display()
+                )),
+                Err(rollback_err) => {
+                    let backup_path = backup_dir.keep().join("repo");
+                    Err(format!(
+                        "failed to activate new marketplace cache at {}: {err}; failed to restore previous cache (left at {}): {rollback_err}",
+                        repo_path.display(),
+                        backup_path.display()
+                    ))
+                }
+            };
+        }
+    } else {
+        fs::rename(staged_repo_path, repo_path).map_err(|err| {
+            format!(
+                "failed to activate marketplace cache at {}: {err}",
+                repo_path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn git_head_sha(repo_path: &Path, git_binary: &str) -> Result<String, String> {
+    let output = Command::new(git_binary)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .arg("-C")
+        .arg(repo_path)
+        .arg("rev-parse")
+        .arg("HEAD")
+        .output()
+        .map_err(|err| {
+            format!(
+                "failed to run git rev-parse HEAD in {}: {err}",
+                repo_path.display()
+            )
+        })?;
+    ensure_git_success(&output, "git rev-parse HEAD")?;
+
+    let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if sha.is_empty() {
+        return Err(format!(
+            "git rev-parse HEAD returned empty output in {}",
+            repo_path.display()
+        ));
+    }
+    Ok(sha)
+}
+
+fn run_git_command_with_timeout(
+    command: &mut Command,
+    context: &str,
+    timeout: Duration,
+) -> Result<Output, String> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("failed to run {context}: {err}"))?;
+
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|err| format!("failed to wait for {context}: {err}"));
+            }
+            Ok(None) => {}
+            Err(err) => return Err(format!("failed to poll {context}: {err}")),
+        }
+
+        if start.elapsed() >= timeout {
+            let _ = child.kill();
+            let output = child
+                .wait_with_output()
+                .map_err(|err| format!("failed to wait for {context} after timeout: {err}"))?;
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return if stderr.is_empty() {
+                Err(format!("{context} timed out after {}s", timeout.as_secs()))
+            } else {
+                Err(format!(
+                    "{context} timed out after {}s: {stderr}",
+                    timeout.as_secs()
+                ))
+            };
+        }
+
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn ensure_git_success(output: &Output, context: &str) -> Result<(), String> {
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        Err(format!("{context} failed with status {}", output.status))
+    } else {
+        Err(format!(
+            "{context} failed with status {}: {stderr}",
+            output.status
+        ))
     }
 }
 
@@ -1178,6 +1764,24 @@ impl PluginUninstallError {
 
     pub fn is_invalid_request(&self) -> bool {
         matches!(self, Self::InvalidPluginId(_))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PluginSetEnabledError {
+    #[error("{0}")]
+    InvalidPluginId(#[from] PluginIdError),
+
+    #[error("plugin `{0}` is not installed")]
+    NotInstalled(String),
+
+    #[error("{0}")]
+    Config(#[from] ConfigServiceError),
+}
+
+impl PluginSetEnabledError {
+    pub fn is_invalid_request(&self) -> bool {
+        matches!(self, Self::InvalidPluginId(_) | Self::NotInstalled(_))
     }
 }
 
@@ -1450,7 +2054,7 @@ fn load_plugin(
     }
 
     let Some(manifest) = load_plugin_manifest(plugin_root.as_path()) else {
-        loaded_plugin.error = Some("missing or invalid .codex-plugin/plugin.json".to_string());
+        loaded_plugin.error = Some("missing or invalid .praxis-plugin/plugin.json".to_string());
         return loaded_plugin;
     };
 
@@ -1703,6 +2307,33 @@ pub fn load_plugin_mcp_servers(plugin_root: &Path) -> HashMap<String, McpServerC
     }
 
     mcp_servers
+}
+
+pub fn plugin_activation_delta_from_root(
+    plugin_id: &PluginId,
+    plugin_root: &Path,
+) -> PluginActivationDelta<McpServerConfig> {
+    let skill_roots = load_plugin_manifest(plugin_root)
+        .map(|manifest| plugin_skill_roots(plugin_root, &manifest.paths))
+        .unwrap_or_default();
+    let mcp_servers = load_plugin_mcp_servers(plugin_root)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let app_connector_ids = load_plugin_apps(plugin_root);
+
+    PluginActivationDelta {
+        plugin_id: Some(plugin_id.clone()),
+        installed_path: AbsolutePathBuf::try_from(plugin_root.to_path_buf()).ok(),
+        changes: PluginCapabilityChanges {
+            skills_changed: !skill_roots.is_empty(),
+            mcp_servers_changed: !mcp_servers.is_empty(),
+            apps_changed: !app_connector_ids.is_empty(),
+            skill_roots,
+            mcp_servers,
+            app_connector_ids,
+        },
+        diagnostics: Vec::new(),
+    }
 }
 
 pub fn installed_plugin_telemetry_metadata(

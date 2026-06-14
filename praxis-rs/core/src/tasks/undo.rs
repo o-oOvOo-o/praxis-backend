@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::praxis::TurnContext;
-use crate::state::TaskKind;
-use crate::tasks::SessionTask;
-use crate::tasks::SessionTaskContext;
+use crate::state::AgentTaskKind;
+use crate::tasks::AgentTask;
+use crate::tasks::AgentTaskContext;
 use async_trait::async_trait;
 use praxis_git_utils::RestoreGhostCommitOptions;
 use praxis_git_utils::restore_ghost_commit_with_options;
@@ -26,18 +26,18 @@ impl UndoTask {
 }
 
 #[async_trait]
-impl SessionTask for UndoTask {
-    fn kind(&self) -> TaskKind {
-        TaskKind::Regular
+impl AgentTask for UndoTask {
+    fn kind(&self) -> AgentTaskKind {
+        AgentTaskKind::Regular
     }
 
     fn span_name(&self) -> &'static str {
-        "session_task.undo"
+        "agent_task.undo"
     }
 
     async fn run(
         self: Arc<Self>,
-        session: Arc<SessionTaskContext>,
+        session: Arc<AgentTaskContext>,
         ctx: Arc<TurnContext>,
         _input: Vec<UserInput>,
         cancellation_token: CancellationToken,

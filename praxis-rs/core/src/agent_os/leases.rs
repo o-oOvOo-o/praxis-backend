@@ -1,6 +1,6 @@
 use super::*;
 
-impl AgentOsRuntime {
+impl AgentOs {
     pub(super) async fn acquire_required_leases(
         &self,
         thread_id: ThreadId,

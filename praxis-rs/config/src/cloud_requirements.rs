@@ -1,8 +1,8 @@
+use crate::CloudConfigBundle;
+use crate::CloudConfigBundleLoadError;
+use crate::CloudConfigBundleLoadErrorCode;
+use crate::CloudConfigBundleLoader;
 use crate::config_requirements::ConfigRequirementsToml;
-use crate::{
-    CloudConfigBundle, CloudConfigBundleLoadError, CloudConfigBundleLoadErrorCode,
-    CloudConfigBundleLoader,
-};
 use futures::future::BoxFuture;
 use futures::future::FutureExt;
 use futures::future::Shared;

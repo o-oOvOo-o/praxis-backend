@@ -30,7 +30,7 @@ use serde_json::Value;
 use serde_json::json;
 use tokio::sync::oneshot;
 
-async fn run_turn(test: &TestCodex, prompt: &str) -> anyhow::Result<()> {
+async fn run_test_turn(test: &TestCodex, prompt: &str) -> anyhow::Result<()> {
     let session_model = test.session_configured.model.clone();
 
     test.codex
@@ -58,9 +58,9 @@ async fn run_turn(test: &TestCodex, prompt: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_turn_and_measure(test: &TestCodex, prompt: &str) -> anyhow::Result<Duration> {
+async fn run_test_turn_and_measure(test: &TestCodex, prompt: &str) -> anyhow::Result<Duration> {
     let start = Instant::now();
-    run_turn(test, prompt).await?;
+    run_test_turn(test, prompt).await?;
     Ok(start.elapsed())
 }
 
@@ -132,9 +132,9 @@ async fn read_file_tools_run_in_parallel() -> anyhow::Result<()> {
     )
     .await;
 
-    run_turn(&test, "warm up parallel tool").await?;
+    run_test_turn(&test, "warm up parallel tool").await?;
 
-    let duration = run_turn_and_measure(&test, "exercise sync tool").await?;
+    let duration = run_test_turn_and_measure(&test, "exercise sync tool").await?;
     assert_parallel_duration(duration);
 
     Ok(())
@@ -169,7 +169,7 @@ async fn shell_tools_run_in_parallel() -> anyhow::Result<()> {
     ]);
     mount_sse_sequence(&server, vec![first_response, second_response]).await;
 
-    let duration = run_turn_and_measure(&test, "run shell_command twice").await?;
+    let duration = run_test_turn_and_measure(&test, "run shell_command twice").await?;
     assert_parallel_duration(duration);
 
     Ok(())
@@ -205,7 +205,7 @@ async fn mixed_parallel_tools_run_in_parallel() -> anyhow::Result<()> {
     ]);
     mount_sse_sequence(&server, vec![first_response, second_response]).await;
 
-    let duration = run_turn_and_measure(&test, "mix tools").await?;
+    let duration = run_test_turn_and_measure(&test, "mix tools").await?;
     assert_parallel_duration(duration);
 
     Ok(())
@@ -243,7 +243,7 @@ async fn tool_results_grouped() -> anyhow::Result<()> {
     )
     .await;
 
-    run_turn(&test, "run shell three times").await?;
+    run_test_turn(&test, "run shell three times").await?;
 
     let input = tool_output_request.single_request().input();
 

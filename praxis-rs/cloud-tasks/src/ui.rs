@@ -499,7 +499,7 @@ pub fn draw_apply_modal(frame: &mut Frame, area: Rect, app: &mut App) {
         frame.render_widget(header, rows[0]);
         // Body: spinner while preflight/apply runs; otherwise show result message and path lists
         if app.apply_preflight_inflight {
-            draw_centered_spinner(frame, rows[1], &mut app.spinner_start, "Checking…");
+            draw_centered_spinner(frame, rows[1], &mut app.spinner_start, "Preflight running…");
         } else if app.apply_inflight {
             draw_centered_spinner(frame, rows[1], &mut app.spinner_start, "Applying…");
         } else if m.result_message.is_none() {

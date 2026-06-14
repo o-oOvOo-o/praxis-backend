@@ -161,7 +161,7 @@ fn handle_command(
             true
         }
         UserCommand::Quit => false,
-        UserCommand::NewThread => {
+        UserCommand::StartThread => {
             match client.request_thread_start(build_thread_start_params(
                 approval_policy,
                 cli.model.clone(),

@@ -21,7 +21,6 @@ use crate::tasks::execute_user_shell_command;
 use praxis_mcp::mcp::auth::compute_auth_statuses;
 use praxis_mcp::mcp::collect_mcp_snapshot_from_manager;
 use praxis_protocol::protocol::CodexErrorInfo;
-use praxis_protocol::protocol::ErrorEvent;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::InterAgentCommunication;
@@ -35,7 +34,6 @@ use praxis_protocol::protocol::SkillsListEntry;
 use praxis_protocol::protocol::ThreadNameUpdatedEvent;
 use praxis_protocol::protocol::ThreadRolledBackEvent;
 use praxis_protocol::protocol::TurnAbortReason;
-use praxis_protocol::protocol::WarningEvent;
 use praxis_protocol::request_permissions::RequestPermissionsResponse;
 use praxis_protocol::request_user_input::RequestUserInputResponse;
 
@@ -64,14 +62,9 @@ pub async fn clean_background_terminals(sess: &Arc<Session>) {
 
 pub async fn override_turn_context(sess: &Session, sub_id: String, updates: SessionSettingsUpdate) {
     if let Err(err) = sess.update_settings(updates).await {
-        sess.send_event_raw(Event {
-            id: sub_id,
-            msg: EventMsg::Error(ErrorEvent {
-                message: err.to_string(),
-                praxis_error_info: Some(CodexErrorInfo::BadRequest),
-            }),
-        })
-        .await;
+        sess.raw_event_emitter(sub_id)
+            .error(err.to_string(), Some(CodexErrorInfo::BadRequest))
+            .await;
     }
 }
 
@@ -155,16 +148,14 @@ pub async fn user_input_or_turn(sess: &Arc<Session>, sub_id: String, op: Op) {
             sess.spawn_task(
                 Arc::clone(&current_context),
                 items,
-                crate::tasks::RegularTask::new(),
+                crate::tasks::RegularAgentTask::new(),
             )
             .await;
         }
         Err(err) => {
-            sess.send_event_raw(Event {
-                id: sub_id,
-                msg: EventMsg::Error(err.to_error_event()),
-            })
-            .await;
+            sess.raw_event_emitter(sub_id)
+                .error_event(err.to_error_event())
+                .await;
         }
     }
 }
@@ -278,12 +269,9 @@ pub async fn exec_approval(
             Err(err) => {
                 let message = format!("Failed to apply execpolicy amendment: {err}");
                 tracing::warn!("{message}");
-                let warning = EventMsg::Warning(WarningEvent { message });
-                sess.send_event_raw(Event {
-                    id: event_turn_id.clone(),
-                    msg: warning,
-                })
-                .await;
+                sess.raw_event_emitter(event_turn_id.clone())
+                    .warning(message)
+                    .await;
             }
         }
     }
@@ -525,27 +513,21 @@ pub async fn drop_memories(sess: &Arc<Session>, config: &Arc<Config>, sub_id: St
     }
 
     if errors.is_empty() {
-        sess.send_event_raw(Event {
-            id: sub_id,
-            msg: EventMsg::Warning(WarningEvent {
-                message: format!(
-                    "Dropped memories at {} and cleared memory rows from state db.",
-                    memory_root.display()
-                ),
-            }),
-        })
-        .await;
+        sess.raw_event_emitter(sub_id)
+            .warning(format!(
+                "Dropped memories at {} and cleared memory rows from state db.",
+                memory_root.display()
+            ))
+            .await;
         return;
     }
 
-    sess.send_event_raw(Event {
-        id: sub_id,
-        msg: EventMsg::Error(ErrorEvent {
-            message: format!("Memory drop completed with errors: {}", errors.join("; ")),
-            praxis_error_info: Some(CodexErrorInfo::Other),
-        }),
-    })
-    .await;
+    sess.raw_event_emitter(sub_id)
+        .error(
+            format!("Memory drop completed with errors: {}", errors.join("; ")),
+            Some(CodexErrorInfo::Other),
+        )
+        .await;
 }
 
 pub async fn update_memories(sess: &Arc<Session>, config: &Arc<Config>, sub_id: String) {
@@ -556,38 +538,30 @@ pub async fn update_memories(sess: &Arc<Session>, config: &Arc<Config>, sub_id: 
 
     crate::memories::start_memories_startup_task(sess, Arc::clone(config), &session_source);
 
-    sess.send_event_raw(Event {
-        id: sub_id.clone(),
-        msg: EventMsg::Warning(WarningEvent {
-            message: "Memory update triggered.".to_string(),
-        }),
-    })
-    .await;
+    sess.raw_event_emitter(sub_id)
+        .warning("Memory update triggered.")
+        .await;
 }
 
 pub async fn thread_rollback(sess: &Arc<Session>, sub_id: String, num_turns: u32) {
     if num_turns == 0 {
-        sess.send_event_raw(Event {
-            id: sub_id,
-            msg: EventMsg::Error(ErrorEvent {
-                message: "num_turns must be >= 1".to_string(),
-                praxis_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
-            }),
-        })
-        .await;
+        sess.raw_event_emitter(sub_id)
+            .error(
+                "num_turns must be >= 1",
+                Some(CodexErrorInfo::ThreadRollbackFailed),
+            )
+            .await;
         return;
     }
 
     let has_active_turn = { sess.active_turn.lock().await.is_some() };
     if has_active_turn {
-        sess.send_event_raw(Event {
-            id: sub_id,
-            msg: EventMsg::Error(ErrorEvent {
-                message: "Cannot rollback while a turn is in progress.".to_string(),
-                praxis_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
-            }),
-        })
-        .await;
+        sess.raw_event_emitter(sub_id)
+            .error(
+                "Cannot rollback while a turn is in progress.",
+                Some(CodexErrorInfo::ThreadRollbackFailed),
+            )
+            .await;
         return;
     }
 
@@ -598,14 +572,12 @@ pub async fn thread_rollback(sess: &Arc<Session>, sub_id: String, num_turns: u32
             guard.clone()
         };
         let Some(recorder) = recorder else {
-            sess.send_event_raw(Event {
-                id: turn_context.sub_id.clone(),
-                msg: EventMsg::Error(ErrorEvent {
-                    message: "thread rollback requires a persisted rollout path".to_string(),
-                    praxis_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
-                }),
-            })
-            .await;
+            sess.raw_event_emitter(turn_context.sub_id.clone())
+                .error(
+                    "thread rollback requires a persisted rollout path",
+                    Some(CodexErrorInfo::ThreadRollbackFailed),
+                )
+                .await;
             return;
         };
         recorder.rollout_path().to_path_buf()
@@ -615,34 +587,30 @@ pub async fn thread_rollback(sess: &Arc<Session>, sub_id: String, num_turns: u32
         guard.clone()
     } && let Err(err) = recorder.flush().await
     {
-        sess.send_event_raw(Event {
-            id: turn_context.sub_id.clone(),
-            msg: EventMsg::Error(ErrorEvent {
-                message: format!(
+        sess.raw_event_emitter(turn_context.sub_id.clone())
+            .error(
+                format!(
                     "failed to flush rollout `{}` for rollback replay: {err}",
                     rollout_path.display()
                 ),
-                praxis_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
-            }),
-        })
-        .await;
+                Some(CodexErrorInfo::ThreadRollbackFailed),
+            )
+            .await;
         return;
     }
 
     let initial_history = match RolloutRecorder::get_rollout_history(rollout_path.as_path()).await {
         Ok(history) => history,
         Err(err) => {
-            sess.send_event_raw(Event {
-                id: turn_context.sub_id.clone(),
-                msg: EventMsg::Error(ErrorEvent {
-                    message: format!(
+            sess.raw_event_emitter(turn_context.sub_id.clone())
+                .error(
+                    format!(
                         "failed to load rollout `{}` for rollback replay: {err}",
                         rollout_path.display()
                     ),
-                    praxis_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
-                }),
-            })
-            .await;
+                    Some(CodexErrorInfo::ThreadRollbackFailed),
+                )
+                .await;
             return;
         }
     };
@@ -671,14 +639,12 @@ pub async fn thread_rollback(sess: &Arc<Session>, sub_id: String, num_turns: u32
 /// Persists the thread name, updates in-memory state, and emits `ThreadNameUpdated` on success.
 pub async fn set_thread_name(sess: &Arc<Session>, sub_id: String, name: String) {
     let Some(name) = crate::util::normalize_thread_name(&name) else {
-        let event = Event {
-            id: sub_id,
-            msg: EventMsg::Error(ErrorEvent {
-                message: "Thread name cannot be empty.".to_string(),
-                praxis_error_info: Some(CodexErrorInfo::BadRequest),
-            }),
-        };
-        sess.send_event_raw(event).await;
+        sess.raw_event_emitter(sub_id)
+            .error(
+                "Thread name cannot be empty.",
+                Some(CodexErrorInfo::BadRequest),
+            )
+            .await;
         return;
     };
 
@@ -687,14 +653,12 @@ pub async fn set_thread_name(sess: &Arc<Session>, sub_id: String, name: String) 
         rollout.is_some()
     };
     if !persistence_enabled {
-        let event = Event {
-            id: sub_id,
-            msg: EventMsg::Error(ErrorEvent {
-                message: "Session persistence is disabled; cannot rename thread.".to_string(),
-                praxis_error_info: Some(CodexErrorInfo::Other),
-            }),
-        };
-        sess.send_event_raw(event).await;
+        sess.raw_event_emitter(sub_id)
+            .error(
+                "Session persistence is disabled; cannot rename thread.",
+                Some(CodexErrorInfo::Other),
+            )
+            .await;
         return;
     };
 
@@ -702,14 +666,12 @@ pub async fn set_thread_name(sess: &Arc<Session>, sub_id: String, name: String) 
         .write_name(sess.conversation_id, &name)
         .await
     {
-        let event = Event {
-            id: sub_id,
-            msg: EventMsg::Error(ErrorEvent {
-                message: format!("Failed to set thread name: {e}"),
-                praxis_error_info: Some(CodexErrorInfo::Other),
-            }),
-        };
-        sess.send_event_raw(event).await;
+        sess.raw_event_emitter(sub_id)
+            .error(
+                format!("Failed to set thread name: {e}"),
+                Some(CodexErrorInfo::Other),
+            )
+            .await;
         return;
     }
 
@@ -759,14 +721,12 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         && let Err(e) = rec.shutdown().await
     {
         warn!("failed to shutdown rollout recorder: {e}");
-        let event = Event {
-            id: sub_id.clone(),
-            msg: EventMsg::Error(ErrorEvent {
-                message: "Failed to shutdown rollout recorder".to_string(),
-                praxis_error_info: Some(CodexErrorInfo::Other),
-            }),
-        };
-        sess.send_event_raw(event).await;
+        sess.raw_event_emitter(sub_id.clone())
+            .error(
+                "Failed to shutdown rollout recorder",
+                Some(CodexErrorInfo::Other),
+            )
+            .await;
     }
 
     let event = Event {
@@ -799,14 +759,9 @@ pub async fn review(
             .await;
         }
         Err(err) => {
-            let event = Event {
-                id: sub_id,
-                msg: EventMsg::Error(ErrorEvent {
-                    message: err.to_string(),
-                    praxis_error_info: Some(CodexErrorInfo::Other),
-                }),
-            };
-            sess.send_event(&turn_context, event.msg).await;
+            sess.turn_event_emitter(&turn_context)
+                .error(err.to_string(), Some(CodexErrorInfo::Other))
+                .await;
         }
     }
 }

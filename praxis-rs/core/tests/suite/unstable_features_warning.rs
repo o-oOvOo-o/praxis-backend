@@ -4,7 +4,7 @@ use core::time::Duration;
 use core_test_support::load_default_config_for_test;
 use core_test_support::wait_for_event;
 use praxis_config::CONFIG_TOML_FILE;
-use praxis_core::NewThread;
+use praxis_core::ThreadSpawnResult;
 use praxis_features::Feature;
 use praxis_login::CodexAuth;
 use praxis_protocol::protocol::EventMsg;
@@ -38,7 +38,7 @@ async fn emits_warning_when_unstable_features_enabled_via_config() {
     let auth_manager =
         praxis_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("test"));
 
-    let NewThread {
+    let ThreadSpawnResult {
         thread: conversation,
         ..
     } = thread_manager
@@ -85,7 +85,7 @@ async fn suppresses_warning_when_configured() {
     let auth_manager =
         praxis_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("test"));
 
-    let NewThread {
+    let ThreadSpawnResult {
         thread: conversation,
         ..
     } = thread_manager

@@ -235,7 +235,7 @@ async fn approvals_popup_navigation_skips_disabled() {
     assert!(
         app_events.iter().any(|ev| matches!(
             ev,
-            AppEvent::CodexOp(Op::OverrideTurnContext {
+            AppEvent::AgentOp(Op::OverrideTurnContext {
                 approval_policy: Some(AskForApproval::OnRequest),
                 personality: None,
                 ..
@@ -246,7 +246,7 @@ async fn approvals_popup_navigation_skips_disabled() {
     assert!(
         !app_events.iter().any(|ev| matches!(
             ev,
-            AppEvent::CodexOp(Op::OverrideTurnContext {
+            AppEvent::AgentOp(Op::OverrideTurnContext {
                 approval_policy: Some(AskForApproval::Never),
                 personality: None,
                 ..
@@ -619,7 +619,7 @@ async fn permissions_selection_sends_approvals_reviewer_in_override_turn_context
 
     let op = std::iter::from_fn(|| rx.try_recv().ok())
         .find_map(|event| match event {
-            AppEvent::CodexOp(op @ Op::OverrideTurnContext { .. }) => Some(op),
+            AppEvent::AgentOp(op @ Op::OverrideTurnContext { .. }) => Some(op),
             _ => None,
         })
         .expect("expected OverrideTurnContext op");

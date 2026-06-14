@@ -17,11 +17,10 @@ use event_processor_with_human_output::EventProcessorWithHumanOutput;
 use event_processor_with_jsonl_output::EventProcessorWithJsonOutput;
 use praxis_app_gateway_client::AppGatewayClient;
 use praxis_app_gateway_client::AppGatewayEvent;
-use praxis_app_gateway_client::DEFAULT_LOCAL_APP_GATEWAY_ADDR;
-use praxis_app_gateway_client::DEFAULT_LOCAL_APP_GATEWAY_URL;
 use praxis_app_gateway_client::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
 use praxis_app_gateway_client::NativeAppGatewayClient;
 use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
+use praxis_app_gateway_client::NativeControlAuthSettings;
 use praxis_app_gateway_client::RemoteAppGatewayClient;
 use praxis_app_gateway_client::RemoteAppGatewayConnectArgs;
 use praxis_app_gateway_protocol::ClientRequest;
@@ -70,7 +69,7 @@ use praxis_core::config_loader::LoaderOverrides;
 use praxis_core::config_loader::format_config_error_with_source;
 use praxis_core::format_exec_policy_error_with_source;
 use praxis_core::path_utils;
-use praxis_feedback::CodexFeedback;
+use praxis_feedback::PraxisFeedback;
 use praxis_git_utils::get_git_repo_root;
 use praxis_login::AuthConfig;
 use praxis_login::default_client::set_default_client_residency_requirement;
@@ -95,14 +94,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::io::Read;
-use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::Duration;
 use supports_color::Stream;
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
-use tokio::time::timeout;
 use tracing::Instrument;
 use tracing::error;
 use tracing::field;
@@ -118,8 +113,6 @@ use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
 
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
-const LOCAL_APP_GATEWAY_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
-
 enum InitialOperation {
     UserTurn {
         items: Vec<UserInput>,
@@ -182,16 +175,6 @@ pub struct ExecRemoteAppGateway {
     pub auth_token: Option<String>,
 }
 
-async fn local_shared_app_gateway_is_listening() -> bool {
-    let Ok(addr) = DEFAULT_LOCAL_APP_GATEWAY_ADDR.parse::<SocketAddr>() else {
-        return false;
-    };
-    matches!(
-        timeout(LOCAL_APP_GATEWAY_CONNECT_TIMEOUT, TcpStream::connect(addr)).await,
-        Ok(Ok(_))
-    )
-}
-
 async fn connect_remote_exec_app_gateway(
     remote: ExecRemoteAppGateway,
 ) -> anyhow::Result<AppGatewayClient> {
@@ -215,23 +198,6 @@ async fn start_exec_app_gateway(
 ) -> anyhow::Result<AppGatewayClient> {
     if let Some(remote) = remote_app_gateway {
         return connect_remote_exec_app_gateway(remote).await;
-    }
-
-    if local_shared_app_gateway_is_listening().await {
-        match connect_remote_exec_app_gateway(ExecRemoteAppGateway {
-            websocket_url: DEFAULT_LOCAL_APP_GATEWAY_URL.to_string(),
-            auth_token: None,
-        })
-        .await
-        {
-            Ok(client) => return Ok(client),
-            Err(err) => {
-                warn!(
-                    %err,
-                    "local Praxis app-gateway is listening but not usable; using embedded app-gateway"
-                );
-            }
-        }
     }
 
     let client = NativeAppGatewayClient::start(in_process_start_args)
@@ -426,8 +392,6 @@ pub async fn run_main(
         praxis_self_exe: arg0_paths.praxis_self_exe.clone(),
         praxis_linux_sandbox_exe: arg0_paths.praxis_linux_sandbox_exe.clone(),
         main_execve_wrapper_exe: arg0_paths.main_execve_wrapper_exe.clone(),
-        js_repl_node_path: None,
-        js_repl_node_module_dirs: None,
         zsh_path: None,
         base_instructions: None,
         developer_instructions: None,
@@ -520,7 +484,7 @@ pub async fn run_main(
         cli_overrides: run_cli_overrides,
         loader_overrides: run_loader_overrides,
         cloud_requirements: run_cloud_requirements.into(),
-        feedback: CodexFeedback::new(),
+        feedback: PraxisFeedback::new(),
         config_warnings,
         session_source: SessionSource::Exec,
         enable_praxis_api_key_env: true,
@@ -529,6 +493,8 @@ pub async fn run_main(
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
         channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
+        control_listen: None,
+        control_auth: NativeControlAuthSettings::default(),
     };
     run_exec_session(ExecRunArgs {
         in_process_start_args,

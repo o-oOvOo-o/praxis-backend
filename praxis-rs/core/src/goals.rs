@@ -1,6 +1,7 @@
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
-use crate::state_db_bridge::{self as state_db, StateDbHandle};
+use crate::state_db_bridge::StateDbHandle;
+use crate::state_db_bridge::{self as state_db};
 use anyhow::Context;
 use futures::future::BoxFuture;
 use praxis_protocol::config_types::ModeKind;

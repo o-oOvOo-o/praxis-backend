@@ -128,10 +128,8 @@ pub(crate) const QUIT_SHORTCUT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Whether Ctrl+C/Ctrl+D require a second press to quit.
 ///
-/// This UX experiment was enabled by default, but requiring a double press to quit feels janky in
-/// practice (especially for users accustomed to shells and other TUIs). Disable it for now while we
-/// rethink a better quit/interrupt design.
-pub(crate) const DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED: bool = false;
+/// A single accidental terminal control key must not close an active Praxis session.
+pub(crate) const DOUBLE_PRESS_QUIT_SHORTCUT_ENABLED: bool = true;
 
 /// The result of offering a cancellation key to a bottom-pane surface.
 ///
@@ -468,8 +466,7 @@ impl BottomPane {
     /// An active modal view is given the first chance to consume the key (typically to dismiss
     /// itself). If no view is active, Ctrl+C clears draft composer input.
     ///
-    /// This method may show the quit shortcut hint as a user-visible acknowledgement that Ctrl+C
-    /// was received, but it does not decide whether the process should exit; `ChatWidget` owns the
+    /// This method does not decide whether the process should exit; `ChatWidget` owns the
     /// quit/interrupt state machine and uses the result to decide what happens next.
     pub(crate) fn on_ctrl_c(&mut self) -> CancellationEvent {
         if let Some(view) = self.view_stack.last_mut() {
@@ -479,7 +476,6 @@ impl BottomPane {
                     self.view_stack.pop();
                     self.on_active_view_complete();
                 }
-                self.show_quit_shortcut_hint(key_hint::ctrl(KeyCode::Char('c')));
                 self.request_redraw();
             }
             event
@@ -488,7 +484,6 @@ impl BottomPane {
         } else {
             self.view_stack.pop();
             self.clear_composer_for_ctrl_c();
-            self.show_quit_shortcut_hint(key_hint::ctrl(KeyCode::Char('c')));
             self.request_redraw();
             CancellationEvent::Handled
         }
@@ -643,7 +638,7 @@ impl BottomPane {
         self.request_redraw();
     }
 
-    /// Update the status indicator header (defaults to "Working") and details below it.
+    /// Update the status indicator header and details below it.
     ///
     /// Passing `None` clears any existing details. No-ops if the status indicator is not active.
     pub(crate) fn update_status(
@@ -1385,7 +1380,7 @@ mod tests {
             r0.push(buf[(x, 0)].symbol().chars().next().unwrap_or(' '));
         }
         assert!(
-            !r0.contains("Working"),
+            !r0.contains("Turn running"),
             "overlay should not render above modal"
         );
     }
@@ -1425,7 +1420,7 @@ mod tests {
             "no active modal view after denial"
         );
 
-        // Render and ensure the top row includes the Working header and a composer line below.
+        // Render and ensure the top row includes the running-turn header and a composer line below.
         // Give the animation thread a moment to tick.
         std::thread::sleep(Duration::from_millis(120));
         let area = Rect::new(0, 0, 40, 6);
@@ -1436,8 +1431,8 @@ mod tests {
             row0.push(buf[(x, 0)].symbol().chars().next().unwrap_or(' '));
         }
         assert!(
-            row0.contains("Working"),
-            "expected Working header after denial on row 0: {row0:?}"
+            row0.contains("Turn running"),
+            "expected running-turn header after denial on row 0: {row0:?}"
         );
 
         // Composer placeholder should be visible somewhere below.
@@ -1482,7 +1477,10 @@ mod tests {
         pane.render(area, &mut buf);
 
         let bufs = snapshot_buffer(&buf);
-        assert!(bufs.contains("• Working"), "expected Working header");
+        assert!(
+            bufs.contains("• Turn running"),
+            "expected running-turn header"
+        );
     }
 
     #[test]
@@ -1585,7 +1583,7 @@ mod tests {
 
         pane.set_task_running(/*running*/ true);
         pane.update_status(
-            "Working".to_string(),
+            "Turn running".to_string(),
             Some("First detail line\nSecond detail line".to_string()),
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
@@ -1757,7 +1755,7 @@ mod tests {
 
         while let Ok(ev) = rx.try_recv() {
             assert!(
-                !matches!(ev, AppEvent::CodexOp(Op::Interrupt)),
+                !matches!(ev, AppEvent::AgentOp(Op::Interrupt)),
                 "expected Esc to not send Op::Interrupt when dismissing skill popup"
             );
         }
@@ -1795,7 +1793,7 @@ mod tests {
 
         while let Ok(ev) = rx.try_recv() {
             assert!(
-                !matches!(ev, AppEvent::CodexOp(Op::Interrupt)),
+                !matches!(ev, AppEvent::AgentOp(Op::Interrupt)),
                 "expected Esc to not send Op::Interrupt while command popup is active"
             );
         }
@@ -1831,7 +1829,7 @@ mod tests {
 
         while let Ok(ev) = rx.try_recv() {
             assert!(
-                !matches!(ev, AppEvent::CodexOp(Op::Interrupt)),
+                !matches!(ev, AppEvent::AgentOp(Op::Interrupt)),
                 "expected Esc to not send Op::Interrupt while typing `/agent`"
             );
         }
@@ -1876,7 +1874,7 @@ mod tests {
 
         while let Ok(ev) = rx.try_recv() {
             assert!(
-                !matches!(ev, AppEvent::CodexOp(Op::Interrupt)),
+                !matches!(ev, AppEvent::AgentOp(Op::Interrupt)),
                 "expected Esc release after dismissing agent picker to not interrupt"
             );
         }
@@ -1906,7 +1904,7 @@ mod tests {
         pane.handle_key_event(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         assert!(
-            matches!(rx.try_recv(), Ok(AppEvent::CodexOp(Op::Interrupt))),
+            matches!(rx.try_recv(), Ok(AppEvent::AgentOp(Op::Interrupt))),
             "expected Esc to send Op::Interrupt while a task is running"
         );
     }

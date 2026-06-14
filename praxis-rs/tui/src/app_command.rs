@@ -289,6 +289,10 @@ impl AppCommand {
         matches!(self.view(), AppCommandView::Review { .. })
     }
 
+    pub(crate) fn is_user_turn(&self) -> bool {
+        matches!(self.view(), AppCommandView::UserTurn { .. })
+    }
+
     pub(crate) fn view(&self) -> AppCommandView<'_> {
         match &self.0 {
             Op::Interrupt => AppCommandView::Interrupt,

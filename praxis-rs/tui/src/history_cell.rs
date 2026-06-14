@@ -568,6 +568,36 @@ impl HistoryCell for PlainHistoryCell {
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct ResumeReplayHistoryCell {
+    lane: ChatLane,
+    line: Line<'static>,
+}
+
+impl ResumeReplayHistoryCell {
+    pub(crate) fn new(lane: ChatLane, label: String, preview: String) -> Self {
+        let mut spans = vec!["• ".dim(), label.bold()];
+        if !preview.is_empty() {
+            spans.push(" ".into());
+            spans.push(preview.into());
+        }
+        Self {
+            lane,
+            line: Line::from(spans),
+        }
+    }
+}
+
+impl HistoryCell for ResumeReplayHistoryCell {
+    fn chat_lane(&self) -> ChatLane {
+        self.lane
+    }
+
+    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        vec![self.line.clone()]
+    }
+}
+
 #[cfg_attr(debug_assertions, allow(dead_code))]
 #[derive(Debug)]
 pub(crate) struct UpdateAvailableHistoryCell {
@@ -1559,7 +1589,7 @@ impl SessionHeaderHistoryCell {
                 return String::new();
             }
             if UnicodeWidthStr::width(formatted.as_str()) > max_width {
-                return crate::text_formatting::center_truncate_path(&formatted, max_width);
+                return crate::text_formatting::workspace_truncate_path(&formatted, max_width);
             }
         }
 
@@ -1601,7 +1631,7 @@ impl SessionHeaderHistoryCell {
 
         let mut left_lines: Vec<Line<'static>> = vec![
             Self::blank_padded_line(left_width),
-            Self::center_line(
+            Self::workspace_line(
                 Line::from(vec![Span::styled("Welcome back!", Self::welcome_style())]),
                 left_width,
             ),
@@ -1609,11 +1639,11 @@ impl SessionHeaderHistoryCell {
         ];
         let puppy_lines = Self::puppy_logo_lines(9, puppy_frame)
             .into_iter()
-            .map(|line| Self::center_line(line, left_width));
+            .map(|line| Self::workspace_line(line, left_width));
         left_lines.extend(puppy_lines);
         left_lines.push(Self::blank_padded_line(left_width));
-        left_lines.push(Self::center_line(self.model_billing_line(), left_width));
-        left_lines.push(Self::center_line(
+        left_lines.push(Self::workspace_line(self.model_billing_line(), left_width));
+        left_lines.push(Self::workspace_line(
             Line::from(vec![Span::from(dir_line_plain).dim()]),
             left_width,
         ));
@@ -1647,7 +1677,7 @@ impl SessionHeaderHistoryCell {
         puppy_frame: PuppyAnimationFrame,
     ) -> Vec<Line<'static>> {
         let mut body = vec![
-            Self::center_line(
+            Self::workspace_line(
                 Line::from(vec![Span::styled("Welcome back!", Self::welcome_style())]),
                 inner_width,
             ),
@@ -1656,11 +1686,11 @@ impl SessionHeaderHistoryCell {
         body.extend(
             Self::puppy_logo_lines(9, puppy_frame)
                 .into_iter()
-                .map(|line| Self::center_line(line, inner_width)),
+                .map(|line| Self::workspace_line(line, inner_width)),
         );
         body.push(Self::blank_padded_line(inner_width));
         body.push(self.model_billing_line_padded(inner_width));
-        body.push(Self::center_line(
+        body.push(Self::workspace_line(
             Line::from(vec![
                 Span::from(self.format_directory(Some(inner_width))).dim(),
             ]),
@@ -1847,7 +1877,7 @@ impl SessionHeaderHistoryCell {
     }
 
     fn model_billing_line_padded(&self, width: usize) -> Line<'static> {
-        Self::center_line(self.model_billing_line(), width)
+        Self::workspace_line(self.model_billing_line(), width)
     }
 
     fn border_title_spans(&self) -> Vec<Span<'static>> {
@@ -1946,7 +1976,7 @@ impl SessionHeaderHistoryCell {
         Self::pad_line(line, 0, width)
     }
 
-    fn center_line(line: Line<'static>, width: usize) -> Line<'static> {
+    fn workspace_line(line: Line<'static>, width: usize) -> Line<'static> {
         let used = Self::line_width(&line);
         if used >= width {
             return line;
@@ -5063,7 +5093,7 @@ mod tests {
     }
 
     #[test]
-    fn session_header_directory_center_truncates() {
+    fn session_header_directory_workspace_truncates() {
         let mut dir = home_dir().expect("home directory");
         for part in ["hello", "the", "fox", "is", "very", "fast"] {
             dir.push(part);

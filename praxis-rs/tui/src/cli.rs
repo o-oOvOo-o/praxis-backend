@@ -4,11 +4,41 @@ use praxis_utils_cli::ApprovalModeCliArg;
 use praxis_utils_cli::CliConfigOverrides;
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum SessionLookupSource {
     #[default]
     Praxis,
     Codex,
+    Cursor,
+}
+
+impl SessionLookupSource {
+    pub fn is_external(self) -> bool {
+        !matches!(self, Self::Praxis)
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Praxis => "Praxis",
+            Self::Codex => "Codex",
+            Self::Cursor => "Cursor",
+        }
+    }
+
+    pub fn command_keyword(self) -> Option<&'static str> {
+        match self {
+            Self::Praxis => None,
+            Self::Codex => Some("codex"),
+            Self::Cursor => Some("cursor"),
+        }
+    }
+
+    pub fn default_alternate(self) -> Self {
+        match self {
+            Self::Praxis => Self::Codex,
+            Self::Codex | Self::Cursor => Self::Praxis,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

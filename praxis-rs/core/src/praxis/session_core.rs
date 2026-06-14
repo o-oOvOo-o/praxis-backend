@@ -313,16 +313,12 @@ impl Session {
                     .filter(|model| *model != curr)
                 {
                     warn!("resuming session with different model: previous={prev}, current={curr}");
-                    self.send_event(
-                        &turn_context,
-                        EventMsg::Warning(WarningEvent {
-                            message: format!(
-                                "This session was recorded with model `{prev}` but is resuming with `{curr}`. \
+                    self.turn_event_emitter(&turn_context)
+                        .warning(format!(
+                            "This session was recorded with model `{prev}` but is resuming with `{curr}`. \
                          Consider switching back to `{prev}` as it may affect Praxis performance."
-                            ),
-                        }),
-                    )
-                    .await;
+                        ))
+                        .await;
                 }
 
                 // Seed usage info from the recorded rollout so UIs can show token counts

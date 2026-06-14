@@ -1,10 +1,8 @@
-use crate::compact::content_items_to_text;
-use crate::event_mapping::is_contextual_user_message_content;
+use crate::history_preview::HistoryPreview;
 use crate::praxis::Session;
 use chrono::Utc;
 use dirs::home_dir;
 use praxis_git_utils::resolve_root_git_project_for_trust;
-use praxis_protocol::models::ResponseItem;
 use praxis_state::SortKey;
 use praxis_state::ThreadMetadata;
 use praxis_utils_output_truncation::TruncationPolicy;
@@ -54,8 +52,9 @@ pub(crate) async fn build_realtime_startup_context(
 ) -> Option<String> {
     let config = sess.get_config().await;
     let cwd = config.cwd.clone();
-    let history = sess.clone_history().await;
-    let current_thread_section = build_current_thread_section(history.raw_items());
+    let current_thread_section = HistoryPreview::for_session(sess)
+        .await
+        .current_thread_section(MAX_CURRENT_THREAD_TURNS);
     let recent_threads = load_recent_threads(sess).await;
     let recent_work_section = build_recent_work_section(&cwd, &recent_threads);
     let workspace_section = build_workspace_section_with_user_root(&cwd, home_dir());
@@ -186,90 +185,6 @@ fn build_recent_work_section(cwd: &Path, recent_threads: &[ThreadMetadata]) -> O
         })
         .collect::<Vec<_>>();
     (!sections.is_empty()).then(|| sections.join("\n\n"))
-}
-
-fn build_current_thread_section(items: &[ResponseItem]) -> Option<String> {
-    let mut turns = Vec::new();
-    let mut current_user = Vec::new();
-    let mut current_assistant = Vec::new();
-
-    for item in items {
-        match item {
-            ResponseItem::Message { role, content, .. } if role == "user" => {
-                if is_contextual_user_message_content(content) {
-                    continue;
-                }
-                let Some(text) = content_items_to_text(content)
-                    .map(|text| text.trim().to_string())
-                    .filter(|text| !text.is_empty())
-                else {
-                    continue;
-                };
-                if !current_user.is_empty() || !current_assistant.is_empty() {
-                    turns.push((
-                        std::mem::take(&mut current_user),
-                        std::mem::take(&mut current_assistant),
-                    ));
-                }
-                current_user.push(text);
-            }
-            ResponseItem::Message { role, content, .. } if role == "assistant" => {
-                let Some(text) = content_items_to_text(content)
-                    .map(|text| text.trim().to_string())
-                    .filter(|text| !text.is_empty())
-                else {
-                    continue;
-                };
-                if current_user.is_empty() && current_assistant.is_empty() {
-                    continue;
-                }
-                current_assistant.push(text);
-            }
-            _ => {}
-        }
-    }
-
-    if !current_user.is_empty() || !current_assistant.is_empty() {
-        turns.push((current_user, current_assistant));
-    }
-
-    let retained_turns = turns
-        .into_iter()
-        .rev()
-        .take(MAX_CURRENT_THREAD_TURNS)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>();
-    if retained_turns.is_empty() {
-        return None;
-    }
-
-    let mut lines = vec![
-        "Most recent user/assistant turns from this exact thread. Use them for continuity when responding.".to_string(),
-    ];
-
-    let retained_turn_count = retained_turns.len();
-    for (index, (user_messages, assistant_messages)) in retained_turns.into_iter().enumerate() {
-        lines.push(String::new());
-        if retained_turn_count == 1 || index + 1 == retained_turn_count {
-            lines.push("### Latest turn".to_string());
-        } else {
-            lines.push(format!("### Prior turn {}", index + 1));
-        }
-
-        if !user_messages.is_empty() {
-            lines.push("User:".to_string());
-            lines.push(user_messages.join("\n\n"));
-        }
-        if !assistant_messages.is_empty() {
-            lines.push(String::new());
-            lines.push("Assistant:".to_string());
-            lines.push(assistant_messages.join("\n\n"));
-        }
-    }
-
-    Some(lines.join("\n"))
 }
 
 fn build_workspace_section_with_user_root(

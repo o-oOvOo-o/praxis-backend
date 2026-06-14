@@ -40,17 +40,8 @@ impl ToolHandler for Handler {
                 "root is not a spawned agent".to_string(),
             ));
         }
-        session
-            .send_event(
-                &turn,
-                CollabCloseBeginEvent {
-                    call_id: call_id.clone(),
-                    sender_thread_id: session.conversation_id,
-                    receiver_thread_id: agent_id,
-                }
-                .into(),
-            )
-            .await;
+        let collab_events = CollabAgentEventEmitter::new(session.as_ref(), turn.as_ref(), &call_id);
+        collab_events.close_begin(agent_id).await;
         let status = match session
             .services
             .agent_control
@@ -60,21 +51,15 @@ impl ToolHandler for Handler {
             Ok(mut status_rx) => status_rx.borrow_and_update().clone(),
             Err(err) => {
                 let status = session.services.agent_control.get_status(agent_id).await;
-                session
-                    .send_event(
-                        &turn,
-                        CollabCloseEndEvent {
-                            call_id: call_id.clone(),
-                            sender_thread_id: session.conversation_id,
-                            receiver_thread_id: agent_id,
-                            receiver_agent_base_name: receiver_agent.agent_base_name.clone(),
-                            receiver_agent_title: receiver_agent.agent_title.clone(),
-                            receiver_agent_display_name: receiver_agent.agent_display_name.clone(),
-                            receiver_agent_role: receiver_agent.agent_role.clone(),
-                            status,
-                        }
-                        .into(),
-                    )
+                collab_events
+                    .close_end(CollabCloseEndEventInput {
+                        receiver_thread_id: agent_id,
+                        receiver_agent_base_name: receiver_agent.agent_base_name.clone(),
+                        receiver_agent_title: receiver_agent.agent_title.clone(),
+                        receiver_agent_display_name: receiver_agent.agent_display_name.clone(),
+                        receiver_agent_role: receiver_agent.agent_role.clone(),
+                        status,
+                    })
                     .await;
                 return Err(collab_agent_error(agent_id, err));
             }
@@ -86,21 +71,15 @@ impl ToolHandler for Handler {
             .await
             .map_err(|err| collab_agent_error(agent_id, err))
             .map(|_| ());
-        session
-            .send_event(
-                &turn,
-                CollabCloseEndEvent {
-                    call_id,
-                    sender_thread_id: session.conversation_id,
-                    receiver_thread_id: agent_id,
-                    receiver_agent_base_name: receiver_agent.agent_base_name,
-                    receiver_agent_title: receiver_agent.agent_title,
-                    receiver_agent_display_name: receiver_agent.agent_display_name,
-                    receiver_agent_role: receiver_agent.agent_role,
-                    status: status.clone(),
-                }
-                .into(),
-            )
+        collab_events
+            .close_end(CollabCloseEndEventInput {
+                receiver_thread_id: agent_id,
+                receiver_agent_base_name: receiver_agent.agent_base_name,
+                receiver_agent_title: receiver_agent.agent_title,
+                receiver_agent_display_name: receiver_agent.agent_display_name,
+                receiver_agent_role: receiver_agent.agent_role,
+                status: status.clone(),
+            })
             .await;
         result?;
 

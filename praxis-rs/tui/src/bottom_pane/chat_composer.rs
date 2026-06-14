@@ -124,8 +124,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use praxis_app_core::thread_commands::CodexThreadCommandIntent;
-use praxis_app_core::thread_commands::parse_codex_thread_command;
+use praxis_app_core::thread_commands::ExternalThreadCommandIntent;
+use praxis_app_core::thread_commands::parse_external_thread_command;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
@@ -236,7 +236,7 @@ pub enum InputResult {
     },
     Command(SlashCommand),
     CommandWithArgs(SlashCommand, String, Vec<TextElement>),
-    ThreadCommand(CodexThreadCommandIntent),
+    ThreadCommand(ExternalThreadCommandIntent),
     None,
 }
 
@@ -2108,7 +2108,7 @@ impl ChatComposer {
         {
             let treat_as_plain_text = input_starts_with_space || name.contains('/');
             if !treat_as_plain_text {
-                let is_builtin = parse_codex_thread_command(text.as_str()).is_some()
+                let is_builtin = parse_external_thread_command(text.as_str()).is_some()
                     || slash_commands::find_builtin_command(name, self.builtin_command_flags())
                         .is_some();
                 if !is_builtin {
@@ -2289,7 +2289,7 @@ impl ChatComposer {
             .next()
             .unwrap_or("")
             .to_string();
-        if let Some(intent) = parse_codex_thread_command(first_line.as_str()) {
+        if let Some(intent) = parse_external_thread_command(first_line.as_str()) {
             self.textarea.set_text_clearing_elements("");
             return Some(InputResult::ThreadCommand(intent));
         }
@@ -2328,7 +2328,7 @@ impl ChatComposer {
         if text.starts_with(' ') {
             return None;
         }
-        if let Some(intent) = parse_codex_thread_command(text.as_str()) {
+        if let Some(intent) = parse_external_thread_command(text.as_str()) {
             self.textarea.set_text_clearing_elements("");
             return Some(InputResult::ThreadCommand(intent));
         }
@@ -6161,7 +6161,7 @@ mod tests {
         use crossterm::event::KeyCode;
         use crossterm::event::KeyEvent;
         use crossterm::event::KeyModifiers;
-        use praxis_app_core::thread_commands::CodexThreadCommandAction;
+        use praxis_app_core::thread_commands::ExternalThreadCommandAction;
 
         let (tx, mut rx) = unbounded_channel::<AppEvent>();
         let sender = AppEventSender::new(tx);
@@ -6179,7 +6179,7 @@ mod tests {
 
         match result {
             InputResult::ThreadCommand(intent) => {
-                assert_eq!(intent.action, CodexThreadCommandAction::Fork);
+                assert_eq!(intent.action, ExternalThreadCommandAction::Fork);
             }
             InputResult::Submitted { text, .. } => {
                 panic!(
