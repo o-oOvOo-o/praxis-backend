@@ -23,7 +23,7 @@ use crate::mcp_tool_event_bridge::construct_mcp_tool_call_end_item;
 use crate::mcp_tool_event_bridge::construct_mcp_tool_call_item;
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
 use crate::praxis_message_processor::read_summary_from_rollout;
-use crate::praxis_message_processor::read_turns_from_rollout;
+use crate::praxis_message_processor::read_thread_turns_from_rollout;
 use crate::praxis_message_processor::summary_to_thread;
 use crate::realtime_event_bridge::send_realtime_closed;
 use crate::realtime_event_bridge::send_realtime_event;
@@ -1236,7 +1236,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 {
                     Ok(summary) => {
                         let mut thread = summary_to_thread(summary);
-                        match read_turns_from_rollout(rollout_path.as_path()).await {
+                        match read_thread_turns_from_rollout(rollout_path.as_path()).await {
                             Ok(turns) => {
                                 thread.turns = turns;
                                 thread.status = thread_watch_manager

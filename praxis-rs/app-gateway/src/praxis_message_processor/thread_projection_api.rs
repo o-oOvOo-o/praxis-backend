@@ -279,58 +279,6 @@ pub(crate) async fn read_summary_from_rollout(
     })
 }
 
-pub(crate) async fn read_rollout_items_from_rollout(
-    path: &Path,
-) -> std::io::Result<Vec<RolloutItem>> {
-    let items = match RolloutRecorder::get_rollout_history(path).await? {
-        InitialHistory::New => Vec::new(),
-        InitialHistory::Forked(items) => items,
-        InitialHistory::Resumed(resumed) => resumed.history,
-    };
-
-    Ok(items)
-}
-
-pub(super) enum ThreadTurnSource<'a> {
-    RolloutPath(&'a Path),
-    HistoryItems(&'a [RolloutItem]),
-}
-
-pub(crate) async fn read_turns_from_rollout(path: &Path) -> std::io::Result<Vec<Turn>> {
-    read_rollout_items_from_rollout(path)
-        .await
-        .map(|items| build_turns_from_rollout_items(&items))
-}
-
-pub(super) async fn populate_thread_turns(
-    thread: &mut Thread,
-    turn_source: ThreadTurnSource<'_>,
-    active_turn: Option<&Turn>,
-) -> std::result::Result<(), String> {
-    let mut turns = match turn_source {
-        ThreadTurnSource::RolloutPath(rollout_path) => {
-            read_turns_from_rollout(rollout_path).await.map_err(|err| {
-                format!(
-                    "failed to load rollout `{}` for thread {}: {err}",
-                    rollout_path.display(),
-                    thread.id
-                )
-            })?
-        }
-        ThreadTurnSource::HistoryItems(items) => build_turns_from_rollout_items(items),
-    };
-    if let Some(active_turn) = active_turn {
-        merge_turn_history_with_active_turn(&mut turns, active_turn.clone());
-    }
-    thread.turns = turns;
-    Ok(())
-}
-
-fn merge_turn_history_with_active_turn(turns: &mut Vec<Turn>, active_turn: Turn) {
-    turns.retain(|turn| turn.id != active_turn.id);
-    turns.push(active_turn);
-}
-
 pub(crate) fn extract_rollout_summary(
     path: PathBuf,
     head: &[serde_json::Value],

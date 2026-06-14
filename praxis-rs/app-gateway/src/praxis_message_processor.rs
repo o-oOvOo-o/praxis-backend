@@ -197,6 +197,7 @@ mod thread_listener_api;
 mod thread_metadata_api;
 mod thread_projection_api;
 mod thread_rollout_locator;
+mod thread_store_api;
 mod turn_api;
 mod windows_sandbox_api;
 
@@ -218,10 +219,8 @@ use thread_projection_api::extract_rollout_summary;
 use thread_projection_api::hydrate_rollout_summary_with_state_db;
 use thread_projection_api::load_thread_summary_for_rollout;
 use thread_projection_api::preview_from_rollout_items;
-pub(crate) use thread_projection_api::read_rollout_items_from_rollout;
 pub(crate) use thread_projection_api::read_summary_from_rollout;
 use thread_projection_api::read_summary_from_state_db_context_by_thread_id;
-pub(crate) use thread_projection_api::read_turns_from_rollout;
 #[cfg(test)]
 use thread_projection_api::summary_from_state_db_metadata;
 pub(crate) use thread_projection_api::summary_to_thread;
@@ -230,6 +229,8 @@ use thread_rollout_locator::ThreadRolloutScope;
 use thread_rollout_locator::find_thread_rollout_path;
 use thread_rollout_locator::find_thread_rollout_path_or_not_found;
 use thread_rollout_locator::resolve_thread_rollout_path;
+pub(crate) use thread_store_api::read_thread_rollout_items;
+pub(crate) use thread_store_api::read_thread_turns_from_rollout;
 
 use crate::thread_state::ThreadListenerCommand;
 use crate::thread_state::ThreadState;

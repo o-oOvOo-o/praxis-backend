@@ -1,7 +1,7 @@
 use super::thread_listener_api::set_thread_status_and_interrupt_stale_turns;
-use super::thread_projection_api::ThreadTurnSource;
-use super::thread_projection_api::populate_thread_turns;
-use super::thread_projection_api::read_turns_from_rollout;
+use super::thread_store_api::ThreadHistorySource;
+use super::thread_store_api::hydrate_thread_turns;
+use super::thread_store_api::read_thread_turns_from_rollout;
 use super::*;
 use praxis_app_gateway_protocol::THREAD_LIST_DEFAULT_LIMIT;
 use praxis_app_gateway_protocol::THREAD_LIST_MAX_LIMIT;
@@ -792,7 +792,7 @@ impl PraxisMessageProcessor {
         }
 
         if include_turns && let Some(rollout_path) = rollout_path.as_ref() {
-            match read_turns_from_rollout(rollout_path).await {
+            match read_thread_turns_from_rollout(rollout_path).await {
                 Ok(turns) => {
                     thread.turns = turns;
                 }
@@ -1356,9 +1356,9 @@ impl PraxisMessageProcessor {
         thread.id = thread_id.to_string();
         thread.path = Some(rollout_path.to_path_buf());
         let history_items = thread_history.get_rollout_items();
-        populate_thread_turns(
+        hydrate_thread_turns(
             &mut thread,
-            ThreadTurnSource::HistoryItems(&history_items),
+            ThreadHistorySource::RolloutItems(&history_items),
             /*active_turn*/ None,
         )
         .await?;
@@ -1563,8 +1563,7 @@ impl PraxisMessageProcessor {
             // forked thread names do not inherit the source thread name
             let mut thread =
                 build_thread_from_snapshot(thread_id, &config_snapshot, /*path*/ None);
-            let history_items = match read_rollout_items_from_rollout(rollout_path.as_path()).await
-            {
+            let history_items = match read_thread_rollout_items(rollout_path.as_path()).await {
                 Ok(items) => items,
                 Err(err) => {
                     self.send_internal_error(
@@ -1579,9 +1578,9 @@ impl PraxisMessageProcessor {
                 }
             };
             thread.preview = preview_from_rollout_items(&history_items);
-            if let Err(message) = populate_thread_turns(
+            if let Err(message) = hydrate_thread_turns(
                 &mut thread,
-                ThreadTurnSource::HistoryItems(&history_items),
+                ThreadHistorySource::RolloutItems(&history_items),
                 /*active_turn*/ None,
             )
             .await
@@ -1593,9 +1592,9 @@ impl PraxisMessageProcessor {
         };
 
         if let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
-            && let Err(message) = populate_thread_turns(
+            && let Err(message) = hydrate_thread_turns(
                 &mut thread,
-                ThreadTurnSource::RolloutPath(fork_rollout_path.as_path()),
+                ThreadHistorySource::RolloutPath(fork_rollout_path.as_path()),
                 /*active_turn*/ None,
             )
             .await

@@ -1,5 +1,5 @@
-use super::thread_projection_api::ThreadTurnSource;
-use super::thread_projection_api::populate_thread_turns;
+use super::thread_store_api::ThreadHistorySource;
+use super::thread_store_api::hydrate_thread_turns;
 use super::*;
 use praxis_app_gateway_protocol::ThreadControlState;
 
@@ -305,9 +305,9 @@ async fn handle_pending_thread_resume_request(
     let request_id = pending.request_id;
     let connection_id = request_id.connection_id;
     let mut thread = pending.thread_summary;
-    if let Err(message) = populate_thread_turns(
+    if let Err(message) = hydrate_thread_turns(
         &mut thread,
-        ThreadTurnSource::RolloutPath(pending.rollout_path.as_path()),
+        ThreadHistorySource::RolloutPath(pending.rollout_path.as_path()),
         active_turn.as_ref(),
     )
     .await
