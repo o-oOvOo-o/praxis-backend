@@ -129,9 +129,9 @@ let toolCounter = 0;
 let emitImageCounter = 0;
 const execContextStorage = new AsyncLocalStorage();
 const cwd = process.cwd();
-const tmpDir = process.env.CODEX_JS_TMP_DIR || cwd;
+const tmpDir = process.env.PRAXIS_JS_TMP_DIR || cwd;
 const homeDir = process.env.HOME ?? null;
-const nodeModuleDirEnv = process.env.CODEX_JS_REPL_NODE_MODULE_DIRS ?? "";
+const nodeModuleDirEnv = process.env.PRAXIS_JS_REPL_NODE_MODULE_DIRS ?? "";
 const moduleSearchBases = (() => {
   const bases = [];
   const seen = new Set();
@@ -976,10 +976,10 @@ async function buildModuleSource(code) {
     // once in the prelude and use that stable local binding everywhere.
     // Then delete the raw import.meta hooks so user code cannot spoof
     // committed bindings by calling them directly.
-    `const ${markCommittedFnName} = import.meta.__codexInternalMarkCommittedBindings;`,
-    `const ${markPreludeCompletedFnName} = import.meta.__codexInternalMarkPreludeCompleted;`,
-    "delete import.meta.__codexInternalMarkCommittedBindings;",
-    "delete import.meta.__codexInternalMarkPreludeCompleted;",
+    `const ${markCommittedFnName} = import.meta.__praxisInternalMarkCommittedBindings;`,
+    `const ${markPreludeCompletedFnName} = import.meta.__praxisInternalMarkPreludeCompleted;`,
+    "delete import.meta.__praxisInternalMarkCommittedBindings;",
+    "delete import.meta.__praxisInternalMarkPreludeCompleted;",
   );
   const writeInstrumentedCode = applyReplacements(
     code,
@@ -1209,10 +1209,10 @@ function toByteArray(value) {
 
 function encodeByteImage(bytes, mimeType, detail) {
   if (bytes.byteLength === 0) {
-    throw new Error("codex.emitImage expected non-empty bytes");
+    throw new Error("praxis.emitImage expected non-empty bytes");
   }
   if (typeof mimeType !== "string" || !mimeType) {
-    throw new Error("codex.emitImage expected a non-empty mimeType");
+    throw new Error("praxis.emitImage expected a non-empty mimeType");
   }
   const image_url = `data:${mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
   return { image_url, detail };
@@ -1223,11 +1223,11 @@ function parseImageDetail(detail) {
     return undefined;
   }
   if (typeof detail !== "string" || !detail) {
-    throw new Error("codex.emitImage expected detail to be a non-empty string");
+    throw new Error("praxis.emitImage expected detail to be a non-empty string");
   }
   if (detail !== "original") {
     throw new Error(
-      'codex.emitImage only supports detail "original"; omit detail for default behavior',
+      'praxis.emitImage only supports detail "original"; omit detail for default behavior',
     );
   }
   return detail;
@@ -1235,10 +1235,10 @@ function parseImageDetail(detail) {
 
 function normalizeEmitImageUrl(value) {
   if (typeof value !== "string" || !value) {
-    throw new Error("codex.emitImage expected a non-empty image_url");
+    throw new Error("praxis.emitImage expected a non-empty image_url");
   }
   if (!/^data:/i.test(value)) {
-    throw new Error("codex.emitImage only accepts data URLs");
+    throw new Error("praxis.emitImage only accepts data URLs");
   }
   return value;
 }
@@ -1267,7 +1267,7 @@ function parseContentItems(items) {
   let textCount = 0;
   for (const item of items) {
     if (!isPlainObject(item) || typeof item.type !== "string") {
-      throw new Error("codex.emitImage received malformed content items");
+      throw new Error("praxis.emitImage received malformed content items");
     }
     if (item.type === "input_image") {
       images.push({
@@ -1281,7 +1281,7 @@ function parseContentItems(items) {
       continue;
     }
     throw new Error(
-      `codex.emitImage does not support content item type "${item.type}"`,
+      `praxis.emitImage does not support content item type "${item.type}"`,
     );
   }
 
@@ -1295,7 +1295,7 @@ function parseByteImageValue(value) {
   const bytes = toByteArray(value.bytes);
   if (!bytes) {
     throw new Error(
-      "codex.emitImage expected bytes to be Buffer, Uint8Array, ArrayBuffer, or ArrayBufferView",
+      "praxis.emitImage expected bytes to be Buffer, Uint8Array, ArrayBuffer, or ArrayBufferView",
     );
   }
   const detail = parseImageDetail(value.detail);
@@ -1315,12 +1315,12 @@ function parseToolOutput(output) {
     return parsedItems;
   }
 
-  throw new Error("codex.emitImage received an unsupported tool output shape");
+  throw new Error("praxis.emitImage received an unsupported tool output shape");
 }
 
 function normalizeMcpImageData(data, mimeType) {
   if (typeof data !== "string" || !data) {
-    throw new Error("codex.emitImage expected MCP image data");
+    throw new Error("praxis.emitImage expected MCP image data");
   }
   if (/^data:/i.test(data)) {
     return data;
@@ -1336,7 +1336,7 @@ function parseMcpToolResult(result) {
   }
 
   if (!isPlainObject(result)) {
-    throw new Error("codex.emitImage received an unsupported MCP result");
+    throw new Error("praxis.emitImage received an unsupported MCP result");
   }
 
   if ("Err" in result) {
@@ -1345,19 +1345,19 @@ function parseMcpToolResult(result) {
   }
 
   if (!("Ok" in result)) {
-    throw new Error("codex.emitImage received an unsupported MCP result");
+    throw new Error("praxis.emitImage received an unsupported MCP result");
   }
 
   const ok = result.Ok;
   if (!isPlainObject(ok) || !Array.isArray(ok.content)) {
-    throw new Error("codex.emitImage received malformed MCP content");
+    throw new Error("praxis.emitImage received malformed MCP content");
   }
 
   const images = [];
   let textCount = 0;
   for (const item of ok.content) {
     if (!isPlainObject(item) || typeof item.type !== "string") {
-      throw new Error("codex.emitImage received malformed MCP content");
+      throw new Error("praxis.emitImage received malformed MCP content");
     }
     if (item.type === "image") {
       images.push({
@@ -1370,7 +1370,7 @@ function parseMcpToolResult(result) {
       continue;
     }
     throw new Error(
-      `codex.emitImage does not support MCP content type "${item.type}"`,
+      `praxis.emitImage does not support MCP content type "${item.type}"`,
     );
   }
 
@@ -1379,10 +1379,10 @@ function parseMcpToolResult(result) {
 
 function requireSingleImage(parsed) {
   if (parsed.textCount > 0) {
-    throw new Error("codex.emitImage does not accept mixed text and image content");
+    throw new Error("praxis.emitImage does not accept mixed text and image content");
   }
   if (parsed.images.length !== 1) {
-    throw new Error("codex.emitImage expected exactly one image");
+    throw new Error("praxis.emitImage expected exactly one image");
   }
   return parsed.images[0];
 }
@@ -1408,7 +1408,7 @@ function normalizeEmitImageValue(value) {
   }
 
   if (!isPlainObject(value)) {
-    throw new Error("codex.emitImage received an unsupported value");
+    throw new Error("praxis.emitImage received an unsupported value");
   }
 
   if (value.type === "message") {
@@ -1434,10 +1434,10 @@ function normalizeEmitImageValue(value) {
     return requireSingleImage(parseContentItems(value.content));
   }
 
-  throw new Error("codex.emitImage received an unsupported value");
+  throw new Error("praxis.emitImage received an unsupported value");
 }
 
-const codex = {
+const praxis = {
   cwd,
   homeDir,
   tmpDir,
@@ -1449,7 +1449,7 @@ const codex = {
       return Promise.reject(error);
     }
     if (typeof toolName !== "string" || !toolName) {
-      return Promise.reject(new Error("codex.tool expects a tool name string"));
+      return Promise.reject(new Error("praxis.tool expects a tool name string"));
     }
     const id = `${execState.id}-tool-${toolCounter++}`;
     let argumentsJson = "{}";
@@ -1575,7 +1575,7 @@ async function handleExec(message) {
     priorBindings = builtSource.priorBindings;
     let output = "";
 
-    context.codex = codex;
+    context.praxis = praxis;
     context.tmpDir = tmpDir;
 
     await execContextStorage.run(execState, async () => {
@@ -1589,8 +1589,8 @@ async function handleExec(message) {
           identifier: cellIdentifier,
           initializeImportMeta(meta, mod) {
             setImportMeta(meta, mod, true);
-            meta.__codexInternalMarkCommittedBindings = markCommittedBindings;
-            meta.__codexInternalMarkPreludeCompleted = markPreludeCompleted;
+            meta.__praxisInternalMarkCommittedBindings = markCommittedBindings;
+            meta.__praxisInternalMarkPreludeCompleted = markPreludeCompleted;
           },
           importModuleDynamically(specifier, referrer) {
             return importResolved(resolveSpecifier(specifier, referrer?.identifier));

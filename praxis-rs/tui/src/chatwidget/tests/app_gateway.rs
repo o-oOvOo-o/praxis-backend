@@ -516,7 +516,7 @@ async fn live_app_gateway_stream_recovery_restores_previous_status_header() {
         ServerNotification::Error(ErrorNotification {
             error: AppGatewayTurnError {
                 message: "Reconnecting... 1/5".to_string(),
-                praxis_error_info: Some(CodexErrorInfo::Other.into()),
+                praxis_error_info: Some(PraxisErrorInfo::Other.into()),
                 additional_details: None,
             },
             will_retry: true,
@@ -571,7 +571,7 @@ async fn live_app_gateway_server_overloaded_error_renders_warning() {
         ServerNotification::Error(ErrorNotification {
             error: AppGatewayTurnError {
                 message: "server overloaded".to_string(),
-                praxis_error_info: Some(CodexErrorInfo::ServerOverloaded.into()),
+                praxis_error_info: Some(PraxisErrorInfo::ServerOverloaded.into()),
                 additional_details: None,
             },
             will_retry: false,

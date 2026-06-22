@@ -1,12 +1,12 @@
 //! Default Praxis HTTP client: shared `User-Agent`, `originator`, optional residency header, and
-//! reqwest/`CodexHttpClient` construction.
+//! reqwest/`PraxisHttpClient` construction.
 //!
 //! Use [`crate::default_client`] or [`praxis_login::default_client`] from other crates in this
 //! workspace.
 
 use praxis_client::BuildCustomCaTransportError;
-use praxis_client::CodexHttpClient;
-pub use praxis_client::CodexRequestBuilder;
+use praxis_client::PraxisHttpClient;
+pub use praxis_client::PraxisRequestBuilder;
 use praxis_client::build_reqwest_client_with_custom_ca;
 use praxis_terminal_detection::user_agent;
 use reqwest::header::HeaderMap;
@@ -32,7 +32,7 @@ use std::sync::RwLock;
 /// Parenthesis will be added by Praxis. This should only specify what goes inside of the parenthesis.
 pub static USER_AGENT_SUFFIX: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 pub const DEFAULT_ORIGINATOR: &str = "praxis_cli_rs";
-pub const CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR: &str = "CODEX_INTERNAL_ORIGINATOR_OVERRIDE";
+pub const PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR: &str = "PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE";
 pub const RESIDENCY_HEADER_NAME: &str = "x-openai-internal-praxis-residency";
 
 pub use praxis_config::ResidencyRequirement;
@@ -53,7 +53,7 @@ pub enum SetOriginatorError {
 }
 
 fn get_originator_value(provided: Option<String>) -> Originator {
-    let value = std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
+    let value = std::env::var(PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
         .ok()
         .or(provided)
         .unwrap_or(DEFAULT_ORIGINATOR.to_string());
@@ -103,7 +103,7 @@ pub fn originator() -> Originator {
         return originator.clone();
     }
 
-    if std::env::var(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).is_ok() {
+    if std::env::var(PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR).is_ok() {
         let originator = get_originator_value(/*provided*/ None);
         if let Ok(mut guard) = ORIGINATOR.write() {
             match guard.as_ref() {
@@ -187,15 +187,15 @@ fn sanitize_user_agent(candidate: String, fallback: &str) -> String {
 }
 
 /// Create an HTTP client with default `originator` and `User-Agent` headers set.
-pub fn create_client() -> CodexHttpClient {
+pub fn create_client() -> PraxisHttpClient {
     let inner = build_reqwest_client();
-    CodexHttpClient::new(inner)
+    PraxisHttpClient::new(inner)
 }
 
 /// Builds the default reqwest client used for ordinary Praxis HTTP traffic.
 ///
 /// This starts from the standard Praxis user agent, default headers, and sandbox-specific proxy
-/// policy, then layers in shared custom CA handling from `CODEX_CA_CERTIFICATE` /
+/// policy, then layers in shared custom CA handling from `PRAXIS_CA_CERTIFICATE` /
 /// `SSL_CERT_FILE`. The function remains infallible for compatibility with existing call sites, so
 /// a custom-CA or builder failure is logged and falls back to `reqwest::Client::new()`.
 pub fn build_reqwest_client() -> reqwest::Client {
@@ -272,7 +272,7 @@ pub fn default_headers() -> HeaderMap {
 }
 
 fn is_sandboxed() -> bool {
-    std::env::var("CODEX_SANDBOX").as_deref() == Ok("seatbelt")
+    std::env::var("PRAXIS_SANDBOX").as_deref() == Ok("seatbelt")
 }
 
 #[cfg(test)]

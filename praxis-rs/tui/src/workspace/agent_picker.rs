@@ -201,7 +201,7 @@ impl AgentPickerState {
     }
 }
 
-pub(crate) fn render_agent_picker(area: Rect, buf: &mut Buffer, state: &AgentPickerState) {
+pub(super) fn render_agent_picker(area: Rect, buf: &mut Buffer, state: &AgentPickerState) {
     if area.is_empty() {
         return;
     }

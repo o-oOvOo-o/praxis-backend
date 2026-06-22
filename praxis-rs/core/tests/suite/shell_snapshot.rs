@@ -5,8 +5,8 @@ use core_test_support::responses::ev_function_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
-use core_test_support::test_codex::TestCodexHarness;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxisHarness;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use praxis_features::Feature;
@@ -38,7 +38,7 @@ struct SnapshotRun {
 
 const POLICY_PATH_FOR_TEST: &str = "/codex/policy/path";
 const SNAPSHOT_PATH_FOR_TEST: &str = "/codex/snapshot/path";
-const SNAPSHOT_MARKER_VAR: &str = "CODEX_SNAPSHOT_POLICY_MARKER";
+const SNAPSHOT_MARKER_VAR: &str = "PRAXIS_SNAPSHOT_POLICY_MARKER";
 const SNAPSHOT_MARKER_VALUE: &str = "from_snapshot";
 const POLICY_SUCCESS_OUTPUT: &str = "policy-after-snapshot";
 
@@ -117,7 +117,7 @@ async fn run_snapshot_command_with_options(
     let SnapshotRunOptions {
         shell_environment_set,
     } = options;
-    let builder = test_codex().with_config(move |config| {
+    let builder = test_praxis().with_config(move |config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
@@ -129,7 +129,7 @@ async fn run_snapshot_command_with_options(
             .expect("test config should allow feature update");
         config.permissions.shell_environment_policy.r#set = shell_environment_set;
     });
-    let harness = TestCodexHarness::with_builder(builder).await?;
+    let harness = TestPraxisHarness::with_builder(builder).await?;
     let args = json!({
         "cmd": command,
         "yield_time_ms": 1000,
@@ -150,7 +150,7 @@ async fn run_snapshot_command_with_options(
     mount_sse_sequence(harness.server(), responses).await;
 
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let praxis_home = test.home.path().to_path_buf();
     let session_model = test.session_configured.model.clone();
     let cwd = test.cwd_path().to_path_buf();
@@ -213,14 +213,14 @@ async fn run_shell_command_snapshot_with_options(
     let SnapshotRunOptions {
         shell_environment_set,
     } = options;
-    let builder = test_codex().with_config(move |config| {
+    let builder = test_praxis().with_config(move |config| {
         config
             .features
             .enable(Feature::ShellSnapshot)
             .expect("test config should allow feature update");
         config.permissions.shell_environment_policy.r#set = shell_environment_set;
     });
-    let harness = TestCodexHarness::with_builder(builder).await?;
+    let harness = TestPraxisHarness::with_builder(builder).await?;
     let args = json!({
         "command": command,
         "timeout_ms": 1000,
@@ -241,7 +241,7 @@ async fn run_shell_command_snapshot_with_options(
     mount_sse_sequence(harness.server(), responses).await;
 
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let praxis_home = test.home.path().to_path_buf();
     let session_model = test.session_configured.model.clone();
     let cwd = test.cwd_path().to_path_buf();
@@ -293,7 +293,7 @@ async fn run_shell_command_snapshot_with_options(
 
 #[allow(clippy::expect_used)]
 async fn run_tool_turn_on_harness(
-    harness: &TestCodexHarness,
+    harness: &TestPraxisHarness,
     prompt: &str,
     call_id: &str,
     tool_name: &str,
@@ -314,7 +314,7 @@ async fn run_tool_turn_on_harness(
     mount_sse_sequence(harness.server(), responses).await;
 
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let session_model = test.session_configured.model.clone();
     let cwd = test.cwd_path().to_path_buf();
     codex
@@ -410,14 +410,14 @@ async fn linux_shell_command_uses_shell_snapshot() -> Result<()> {
 #[cfg_attr(target_os = "windows", ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shell_command_snapshot_preserves_shell_environment_policy_set() -> Result<()> {
-    let builder = test_codex().with_config(|config| {
+    let builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ShellSnapshot)
             .expect("test config should allow feature update");
         config.permissions.shell_environment_policy.r#set = policy_set_path_for_test();
     });
-    let harness = TestCodexHarness::with_builder(builder).await?;
+    let harness = TestPraxisHarness::with_builder(builder).await?;
     let praxis_home = harness.test().home.path().to_path_buf();
     run_tool_turn_on_harness(
         &harness,
@@ -459,7 +459,7 @@ async fn shell_command_snapshot_preserves_shell_environment_policy_set() -> Resu
 #[cfg_attr(not(target_os = "linux"), ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn linux_unified_exec_snapshot_preserves_shell_environment_policy_set() -> Result<()> {
-    let builder = test_codex().with_config(|config| {
+    let builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
@@ -471,7 +471,7 @@ async fn linux_unified_exec_snapshot_preserves_shell_environment_policy_set() ->
             .expect("test config should allow feature update");
         config.permissions.shell_environment_policy.r#set = policy_set_path_for_test();
     });
-    let harness = TestCodexHarness::with_builder(builder).await?;
+    let harness = TestPraxisHarness::with_builder(builder).await?;
     let praxis_home = harness.test().home.path().to_path_buf();
     run_tool_turn_on_harness(
         &harness,
@@ -513,17 +513,17 @@ async fn linux_unified_exec_snapshot_preserves_shell_environment_policy_set() ->
 #[cfg_attr(target_os = "windows", ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shell_command_snapshot_still_intercepts_apply_patch() -> Result<()> {
-    let builder = test_codex().with_config(|config| {
+    let builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ShellSnapshot)
             .expect("test config should allow feature update");
         config.include_apply_patch_tool = true;
     });
-    let harness = TestCodexHarness::with_builder(builder).await?;
+    let harness = TestPraxisHarness::with_builder(builder).await?;
 
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let cwd = test.cwd_path().to_path_buf();
     let praxis_home = test.home.path().to_path_buf();
     let target = cwd.join("snapshot-apply.txt");
@@ -613,16 +613,16 @@ async fn shell_command_snapshot_still_intercepts_apply_patch() -> Result<()> {
 #[cfg_attr(target_os = "windows", ignore)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shell_snapshot_deleted_after_shutdown_with_skills() -> Result<()> {
-    let builder = test_codex().with_config(|config| {
+    let builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ShellSnapshot)
             .expect("test config should allow feature update");
     });
-    let harness = TestCodexHarness::with_builder(builder).await?;
+    let harness = TestPraxisHarness::with_builder(builder).await?;
     let home = harness.test().home.clone();
     let praxis_home = home.path().to_path_buf();
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     let snapshot_path = wait_for_snapshot(&praxis_home).await?;
     assert!(snapshot_path.exists());

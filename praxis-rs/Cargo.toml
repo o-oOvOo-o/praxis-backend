@@ -42,6 +42,7 @@ members = [
     "linux-sandbox",
     "lmstudio",
     "login",
+    "loop",
     "praxis-mcp",
     "mcp-server",
     "metra-gateway",
@@ -143,6 +144,7 @@ praxis-keyring-store = { path = "keyring-store" }
 praxis-linux-sandbox = { path = "linux-sandbox" }
 praxis-lmstudio = { path = "lmstudio" }
 praxis-login = { path = "login" }
+praxis-loop = { path = "loop" }
 praxis-mcp = { path = "praxis-mcp" }
 praxis-mcp-server = { path = "mcp-server" }
 praxis-metra-gateway = { path = "metra-gateway" }

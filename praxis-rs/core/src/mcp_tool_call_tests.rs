@@ -188,7 +188,7 @@ async fn approval_elicitation_request_uses_message_override_and_preserves_tool_p
     let (session, turn_context) = make_session_and_context().await;
     let question = build_mcp_tool_approval_question(
         "q".to_string(),
-        CODEX_APPS_MCP_SERVER_NAME,
+        PRAXIS_APPS_MCP_SERVER_NAME,
         "create_event",
         Some("Calendar"),
         prompt_options(
@@ -201,7 +201,7 @@ async fn approval_elicitation_request_uses_message_override_and_preserves_tool_p
         &session,
         &turn_context,
         McpToolApprovalElicitationRequest {
-            server: CODEX_APPS_MCP_SERVER_NAME,
+            server: PRAXIS_APPS_MCP_SERVER_NAME,
             metadata: Some(&approval_metadata(
                 Some("calendar"),
                 Some("Calendar"),
@@ -238,7 +238,7 @@ async fn approval_elicitation_request_uses_message_override_and_preserves_tool_p
         McpServerElicitationRequestParams {
             thread_id: session.conversation_id.to_string(),
             turn_id: Some(turn_context.sub_id),
-            server_name: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+            server_name: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
             request: McpServerElicitationRequest::Form {
                 meta: Some(serde_json::json!({
                     MCP_TOOL_APPROVAL_KIND_KEY: MCP_TOOL_APPROVAL_KIND_MCP_TOOL_CALL,
@@ -313,7 +313,7 @@ fn custom_mcp_tool_question_mentions_server_name() {
 fn praxis_apps_tool_question_uses_fallback_app_label() {
     let question = build_mcp_tool_approval_question(
         "q".to_string(),
-        CODEX_APPS_MCP_SERVER_NAME,
+        PRAXIS_APPS_MCP_SERVER_NAME,
         "run_action",
         /*connector_name*/ None,
         prompt_options(
@@ -332,7 +332,7 @@ fn praxis_apps_tool_question_uses_fallback_app_label() {
 fn trusted_praxis_apps_tool_question_offers_always_allow() {
     let question = build_mcp_tool_approval_question(
         "q".to_string(),
-        CODEX_APPS_MCP_SERVER_NAME,
+        PRAXIS_APPS_MCP_SERVER_NAME,
         "run_action",
         Some("Calendar"),
         prompt_options(
@@ -367,14 +367,14 @@ fn trusted_praxis_apps_tool_question_offers_always_allow() {
 #[test]
 fn praxis_apps_tool_question_without_elicitation_omits_always_allow() {
     let session_key = McpToolApprovalKey {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         connector_id: Some("calendar".to_string()),
         tool_name: "run_action".to_string(),
     };
     let persistent_key = session_key.clone();
     let question = build_mcp_tool_approval_question(
         "q".to_string(),
-        CODEX_APPS_MCP_SERVER_NAME,
+        PRAXIS_APPS_MCP_SERVER_NAME,
         "run_action",
         Some("Calendar"),
         mcp_tool_approval_prompt_options(
@@ -459,7 +459,7 @@ fn custom_servers_support_session_and_persistent_approval() {
 #[test]
 fn praxis_apps_connectors_support_persistent_approval() {
     let invocation = McpInvocation {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         tool: "calendar/list_events".to_string(),
         arguments: None,
     };
@@ -471,7 +471,7 @@ fn praxis_apps_connectors_support_persistent_approval() {
         /*tool_description*/ None,
     );
     let expected = McpToolApprovalKey {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         connector_id: Some("calendar".to_string()),
         tool_name: "calendar/list_events".to_string(),
     };
@@ -600,12 +600,12 @@ async fn praxis_apps_tool_call_request_meta_includes_turn_metadata_and_praxis_ap
     assert_eq!(
         build_mcp_tool_call_request_meta(
             &turn_context,
-            CODEX_APPS_MCP_SERVER_NAME,
+            PRAXIS_APPS_MCP_SERVER_NAME,
             Some(&metadata),
         ),
         Some(serde_json::json!({
             crate::X_PRAXIS_TURN_METADATA_HEADER: expected_turn_metadata,
-            MCP_TOOL_CODEX_APPS_META_KEY: {
+            MCP_TOOL_PRAXIS_APPS_META_KEY: {
                 "resource_uri": "connector://calendar/tools/calendar_create_event",
                 "contains_mcp_source": true,
                 "connector_id": "calendar",
@@ -689,7 +689,7 @@ fn approval_elicitation_meta_merges_session_and_always_persist_for_custom_server
 #[test]
 fn guardian_mcp_review_request_includes_invocation_metadata() {
     let invocation = McpInvocation {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         tool: "browser_navigate".to_string(),
         arguments: Some(serde_json::json!({
             "url": "https://example.com",
@@ -712,7 +712,7 @@ fn guardian_mcp_review_request_includes_invocation_metadata() {
         request,
         GuardianApprovalRequest::McpToolCall {
             id: "call-1".to_string(),
-            server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+            server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
             tool_name: "browser_navigate".to_string(),
             arguments: Some(serde_json::json!({
                 "url": "https://example.com",
@@ -770,7 +770,7 @@ fn guardian_mcp_review_request_includes_annotations_when_present() {
 #[test]
 fn prepare_arc_request_action_serializes_mcp_tool_call_shape() {
     let invocation = McpInvocation {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         tool: "browser_navigate".to_string(),
         arguments: Some(serde_json::json!({
             "url": "https://example.com",
@@ -792,7 +792,7 @@ fn prepare_arc_request_action_serializes_mcp_tool_call_shape() {
         action,
         serde_json::json!({
             "tool": "mcp_tool_call",
-            "server": CODEX_APPS_MCP_SERVER_NAME,
+            "server": PRAXIS_APPS_MCP_SERVER_NAME,
             "tool_name": "browser_navigate",
             "arguments": {
                 "url": "https://example.com",
@@ -823,7 +823,7 @@ fn guardian_review_decision_maps_to_mcp_tool_decision() {
 fn approval_elicitation_meta_includes_connector_source_for_praxis_apps() {
     assert_eq!(
         build_mcp_tool_approval_elicitation_meta(
-            CODEX_APPS_MCP_SERVER_NAME,
+            PRAXIS_APPS_MCP_SERVER_NAME,
             Some(&approval_metadata(
                 Some("calendar"),
                 Some("Calendar"),
@@ -858,7 +858,7 @@ fn approval_elicitation_meta_includes_connector_source_for_praxis_apps() {
 fn approval_elicitation_meta_merges_session_and_always_persist_with_connector_source() {
     assert_eq!(
         build_mcp_tool_approval_elicitation_meta(
-            CODEX_APPS_MCP_SERVER_NAME,
+            PRAXIS_APPS_MCP_SERVER_NAME,
             Some(&approval_metadata(
                 Some("calendar"),
                 Some("Calendar"),
@@ -1068,9 +1068,9 @@ async fn persist_custom_mcp_tool_approval_writes_tool_override() {
 async fn maybe_persist_mcp_tool_approval_reloads_session_config() {
     let (session, turn_context) = make_session_and_context().await;
     let praxis_home = session.praxis_home().await;
-    std::fs::create_dir_all(&praxis_home).expect("create codex home");
+    std::fs::create_dir_all(&praxis_home).expect("create Praxis home");
     let key = McpToolApprovalKey {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         connector_id: Some("calendar".to_string()),
         tool_name: "calendar/list_events".to_string(),
     };
@@ -1107,7 +1107,7 @@ async fn maybe_persist_mcp_tool_approval_reloads_session_config() {
 async fn maybe_persist_mcp_tool_approval_reloads_session_config_for_custom_server() {
     let (session, turn_context) = make_session_and_context().await;
     let praxis_home = session.praxis_home().await;
-    std::fs::create_dir_all(&praxis_home).expect("create codex home");
+    std::fs::create_dir_all(&praxis_home).expect("create Praxis home");
     std::fs::write(
         praxis_home.join(CONFIG_TOML_FILE),
         "[mcp_servers.docs]\ncommand = \"docs-server\"\n",
@@ -1384,7 +1384,7 @@ async fn approve_mode_blocks_when_arc_returns_interrupt_for_model() {
 
     let (session, mut turn_context) = make_session_and_context().await;
     turn_context.auth_manager = Some(crate::test_support::auth_manager_from_auth(
-        praxis_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+        praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
     ));
     let mut config = (*turn_context.config).clone();
     config.chatgpt_base_url = server.uri();
@@ -1393,7 +1393,7 @@ async fn approve_mode_blocks_when_arc_returns_interrupt_for_model() {
     let session = Arc::new(session);
     let turn_context = Arc::new(turn_context);
     let invocation = McpInvocation {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         tool: "dangerous_tool".to_string(),
         arguments: Some(serde_json::json!({ "id": 1 })),
     };
@@ -1453,7 +1453,7 @@ async fn custom_approve_mode_blocks_when_arc_returns_interrupt_for_model() {
 
     let (session, mut turn_context) = make_session_and_context().await;
     turn_context.auth_manager = Some(crate::test_support::auth_manager_from_auth(
-        praxis_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+        praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
     ));
     let mut config = (*turn_context.config).clone();
     config.chatgpt_base_url = server.uri();
@@ -1522,7 +1522,7 @@ async fn approve_mode_blocks_when_arc_returns_interrupt_without_annotations() {
 
     let (session, mut turn_context) = make_session_and_context().await;
     turn_context.auth_manager = Some(crate::test_support::auth_manager_from_auth(
-        praxis_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+        praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
     ));
     let mut config = (*turn_context.config).clone();
     config.chatgpt_base_url = server.uri();
@@ -1531,7 +1531,7 @@ async fn approve_mode_blocks_when_arc_returns_interrupt_without_annotations() {
     let session = Arc::new(session);
     let turn_context = Arc::new(turn_context);
     let invocation = McpInvocation {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         tool: "dangerous_tool".to_string(),
         arguments: Some(serde_json::json!({ "id": 1 })),
     };
@@ -1591,7 +1591,7 @@ async fn full_access_mode_skips_arc_monitor_for_all_approval_modes() {
 
     let (session, mut turn_context) = make_session_and_context().await;
     turn_context.auth_manager = Some(crate::test_support::auth_manager_from_auth(
-        praxis_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+        praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
     ));
     turn_context
         .approval_policy
@@ -1608,7 +1608,7 @@ async fn full_access_mode_skips_arc_monitor_for_all_approval_modes() {
     let session = Arc::new(session);
     let turn_context = Arc::new(turn_context);
     let invocation = McpInvocation {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         tool: "dangerous_tool".to_string(),
         arguments: Some(serde_json::json!({ "id": 1 })),
     };
@@ -1689,7 +1689,7 @@ async fn approve_mode_routes_arc_ask_user_to_guardian_when_guardian_reviewer_is_
 
     let (mut session, mut turn_context) = make_session_and_context().await;
     turn_context.auth_manager = Some(crate::test_support::auth_manager_from_auth(
-        praxis_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+        praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
     ));
     turn_context
         .approval_policy
@@ -1712,7 +1712,7 @@ async fn approve_mode_routes_arc_ask_user_to_guardian_when_guardian_reviewer_is_
     let session = Arc::new(session);
     let turn_context = Arc::new(turn_context);
     let invocation = McpInvocation {
-        server: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         tool: "dangerous_tool".to_string(),
         arguments: Some(serde_json::json!({ "id": 1 })),
     };

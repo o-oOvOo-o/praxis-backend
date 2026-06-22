@@ -1,102 +1,213 @@
-# Praxis CLI (Rust Implementation)
+# Praxis
 
-We provide Praxis CLI as a standalone, native executable to ensure a zero-dependency install.
+Praxis is a Rust-native agent platform: a general agent backend kernel, a
+multi-thread control system, a plugin capability platform, a multi-provider LLM
+runtime, and a shared control plane for TUI, GUI, CLI, and external agents.
 
-## Installing Praxis
+This workspace is not organized around one vendor or one UI. The core language
+is Agent, Thread, Session, Task, Turn, Tool, Provider, Wire, Plugin, Product,
+Gateway, and Store. Product-specific behavior belongs in product profiles or
+plugins. External agent formats belong behind migration adapters.
 
-Today, the easiest way to install Praxis is via `npm`:
+## Current Position
+
+Praxis is being refactored toward a clean, Praxis-first architecture:
+
+```text
+Interface Surfaces
+  -> App Gateway
+  -> Thread Control
+  -> Agent Session
+  -> main_agent_loop
+  -> Agent Task
+  -> agent_task_loop
+  -> agent_turn_loop
+  -> LLM Runtime / Tools Runtime / Plugin System / ThreadStore
+```
+
+The three real agent loops are:
+
+| Loop | Owns |
+|---|---|
+| `main_agent_loop` | Long-lived session submission and operation dispatch. |
+| `agent_task_loop` | Repeated turn control for one task. |
+| `agent_turn_loop` | One model/tool turn: sample, stream, execute tools, record results. |
+
+`AgentOs` is not a loop. It is the cross-thread coordination plane for rank,
+lease, mailbox, managed commands, artifacts, and multi-agent control.
+
+## Key Crates
+
+| Crate or directory | Role |
+|---|---|
+| `core/` | Agent kernel, sessions, thread manager, AgentOS, LLM runtime, tools, plugins, external migration. |
+| `app-gateway-protocol/` | Stable control protocol types. |
+| `app-gateway/` | Transport-neutral request dispatch and protocol projection. |
+| `app-gateway-native/` | In-process control path for Praxis-owned UI surfaces. |
+| `app-gateway-service/` | External control service such as websocket/stdout-facing hosts. |
+| `app-gateway-client/` | Shared client facade used by UI and automation surfaces. |
+| `tui/` | Praxis terminal UI and Center workspace. |
+| `cli/` | Command entrypoint that wires TUI, exec, gateway, MCP, sandbox, and utility commands. |
+| `exec/` | Non-interactive execution surface. |
+| `protocol/` | Core agent protocol and event types. |
+| `plugin/`, `plugins/`, `core-skills/`, `skills/` | Plugin manifests, marketplace support, built-in skills, and skill loading. |
+| `rollout/`, `state/` | Persistence foundations that are being pulled behind ThreadStore-style ownership. |
+| `sandboxing/`, `exec/`, `exec-server/`, `process-hardening/` | Command execution and sandbox infrastructure. |
+| `otel/`, `analytics/`, `feedback/` | Observability, telemetry, diagnostics, and feedback boundaries. |
+
+## Running Praxis
+
+Run the TUI directly:
 
 ```shell
-npm i -g @openai/praxis
 praxis
 ```
 
-You can also install via Homebrew (`brew install --cask praxis`) or download a platform-specific release directly from our [GitHub Releases](https://github.com/o-oOvOo-o/praxis-backend/releases).
-
-## Documentation quickstart
-
-- First run with Praxis? Start with [`docs/getting-started.md`](../docs/getting-started.md) (links to the walkthrough for prompts, keyboard shortcuts, and session management).
-- Want deeper control? See [`docs/config.md`](../docs/config.md) and [`docs/install.md`](../docs/install.md).
-
-## What's new in the Rust CLI
-
-The Rust implementation is now the maintained Praxis CLI and serves as the default experience. It includes a number of features that the legacy TypeScript CLI never supported.
-
-### Config
-
-Praxis supports a rich set of configuration options. Note that the Rust CLI uses `config.toml` instead of `config.json`. See [`docs/config.md`](../docs/config.md) for details.
-
-### Model Context Protocol Support
-
-#### MCP client
-
-Praxis CLI functions as an MCP client that allows the Praxis CLI and IDE extension to connect to MCP servers on startup. See the [`configuration documentation`](../docs/config.md#connecting-to-mcp-servers) for details.
-
-#### MCP server (experimental)
-
-Praxis can be launched as an MCP _server_ by running `praxis mcp-server`. This allows _other_ MCP clients to use Codex as a tool for another agent.
-
-Use the [`@modelcontextprotocol/inspector`](https://github.com/modelcontextprotocol/inspector) to try it out:
+Run with an explicit remote App Gateway:
 
 ```shell
-npx @modelcontextprotocol/inspector praxis mcp-server
+praxis app-gateway --listen ws://127.0.0.1:4222
+praxis --remote ws://127.0.0.1:4222
 ```
 
-Use `praxis mcp` to add/list/get/remove MCP server launchers defined in `config.toml`, and `praxis mcp-server` to run the MCP server directly.
+Run non-interactively:
 
-### Notifications
-
-You can enable notifications by configuring a script that is run whenever the agent finishes a turn. The [notify documentation](../docs/config.md#notify) includes a detailed example that explains how to get desktop notifications via [terminal-notifier](https://github.com/julienXX/terminal-notifier) on macOS. When Praxis detects that it is running under WSL 2 inside Windows Terminal (`WT_SESSION` is set), the TUI automatically falls back to native Windows toast notifications so approval prompts and completed turns surface even though Windows Terminal does not implement OSC 9.
-
-### `praxis exec` to run Praxis programmatically/non-interactively
-
-To run Codex non-interactively, run `praxis exec PROMPT` (you can also pass the prompt via `stdin`) and Praxis will work on your task until it decides that it is done and exits. If you provide both a prompt argument and piped stdin, Codex appends stdin as a `<stdin>` block after the prompt so patterns like `echo "my output" | praxis exec "Summarize this concisely"` work naturally. Output is printed to the terminal directly. You can set the `RUST_LOG` environment variable to see more about what's going on.
-Use `praxis exec --ephemeral ...` to run without persisting session rollout files to disk.
-
-### Experimenting with the Praxis Sandbox
-
-To test to see what happens when a command is run under the sandbox provided by Praxis, we provide the following subcommands in Praxis CLI:
-
+```shell
+praxis exec "Summarize this repository"
+echo "input text" | praxis exec "Summarize stdin"
 ```
-# macOS
+
+Use `praxis exec --ephemeral ...` when the run should not persist session
+rollout files.
+
+## App Gateway
+
+App Gateway is the control plane for threads, turns, events, command execution,
+config, plugins, and external observers. Praxis-owned UI surfaces should prefer
+the native in-process path. External agents can connect through the service
+gateway.
+
+The goal is one control model with multiple transports:
+
+```text
+TUI / GUI / CLI -> native client
+External agents -> service gateway
+Both -> App Gateway protocol -> Praxis core
+```
+
+## Threads, Resume, and Migration
+
+Praxis treats a thread as the durable unit of agent work. Thread lifecycle
+ownership belongs to `ThreadManager`; loaded-thread lookup belongs to
+`ThreadRegistry`; persistence, list/read/resume/fork/import, lazy replay, and
+metadata are moving behind ThreadStore-style APIs.
+
+External agent formats are anti-corruption inputs:
+
+```text
+Codex rollout / Cursor store / Claude session data
+  -> external_agent_migration
+  -> Praxis thread history and ThreadStore records
+```
+
+The TUI should render picker and transcript view models; it should not parse raw
+external stores or own resume/fork semantics.
+
+## LLM Runtime
+
+Praxis separates concepts that are often mixed together:
+
+| Concept | Meaning |
+|---|---|
+| Provider | Account, auth, endpoint, headers, model list. |
+| Wire | Network request/response shape such as Responses, Claude messages, or OpenAI-compatible JSON. |
+| Behavior profile | Model-family behavior: tool format, thinking, summaries, prompt constraints. |
+| Product profile | Product-level overlays such as Praxis or Cunning3D prompt/tool policy. |
+| Plugin | External capability, skill, hook, app, model catalog, marketplace, or product extension. |
+
+Rule:
+
+```text
+Wire != Provider
+Provider != Behavior
+Behavior != Product
+Product != Plugin
+```
+
+## Tools and Sandbox
+
+Tool execution belongs behind the tools runtime: registry, router, tool call
+runtime, approval, sandbox policy, network approval, output reduction, and
+concrete tool handlers.
+
+Sandbox commands are available for platform debugging:
+
+```shell
 praxis sandbox macos [--full-auto] [--log-denials] [COMMAND]...
-
-# Linux
 praxis sandbox linux [--full-auto] [COMMAND]...
-
-# Windows
 praxis sandbox windows [--full-auto] [COMMAND]...
-
-# Legacy aliases
-praxis debug seatbelt [--full-auto] [--log-denials] [COMMAND]...
-praxis debug landlock [--full-auto] [COMMAND]...
 ```
 
-### Selecting a sandbox policy via `--sandbox`
-
-The Rust CLI exposes a dedicated `--sandbox` (`-s`) flag that lets you pick the sandbox policy **without** having to reach for the generic `-c/--config` option:
+The main CLI also accepts `--sandbox`:
 
 ```shell
-# Run Praxis with the default, read-only sandbox
 praxis --sandbox read-only
-
-# Allow the agent to write within the current workspace while still blocking network access
 praxis --sandbox workspace-write
-
-# Danger! Disable sandboxing entirely (only do this if you are already running in a container or other isolated env)
 praxis --sandbox danger-full-access
 ```
 
-The same setting can be persisted in `~/.praxis/config.toml` via the top-level `sandbox_mode = "MODE"` key, e.g. `sandbox_mode = "workspace-write"`.
-In `workspace-write`, Praxis also includes `~/.praxis/memories` in its writable roots so memory maintenance does not require an extra approval.
+The same setting can be stored in `~/.praxis/config.toml` with
+`sandbox_mode = "MODE"`.
 
-## Code Organization
+## MCP
 
-This folder is the root of a Cargo workspace. It contains quite a bit of experimental code, but here are the key crates:
+Praxis can act as an MCP client and connect to configured MCP servers on
+startup. It can also run as an MCP server:
 
-- [`core/`](./core) contains the business logic for Praxis. Ultimately, we hope this to be a library crate that is generally useful for building other Rust/native applications that use Praxis.
-- [`exec/`](./exec) "headless" CLI for use in automation.
-- [`tui/`](./tui) CLI that launches a fullscreen TUI built with [Ratatui](https://ratatui.rs/).
-- [`cli/`](./cli) CLI multitool that provides the aforementioned CLIs via subcommands.
+```shell
+praxis mcp-server
+```
 
-If you want to contribute or inspect behavior in detail, start by reading the module-level `README.md` files under each crate and run the project workspace from the top-level `praxis-rs` directory so shared config, features, and build scripts stay aligned.
+That server mode lets other MCP clients use Praxis as an agent tool.
+
+Use `praxis mcp` to add, list, get, remove, or authenticate MCP server launchers
+defined in `config.toml`.
+
+## Compatibility Boundaries
+
+Praxis intentionally keeps compatibility with selected external ecosystems, but
+those names should stay at the edge:
+
+| Name | Praxis boundary |
+|---|---|
+| Codex | Login compatibility, thread import source, behavior profile, upstream design reference. |
+| OpenAI / GPT | Provider, auth, model family. |
+| Claude | Provider, wire, external migration source. |
+| Cursor | External session migration source. |
+| Cunning3D | Product profile, plugin bundle, domain prompt/tool policy. |
+
+If a type or module is not specifically about one of those compatibility
+boundaries, it should use Praxis domain language.
+
+## Development References
+
+Start here when changing architecture:
+
+- [`docs/refactor/cleanroom_target_architecture.md`](./docs/refactor/cleanroom_target_architecture.md)
+- [`docs/refactor/main_framework_naming.md`](./docs/refactor/main_framework_naming.md)
+- [`docs/refactor/tui_workspace_state_machine_r1.md`](./docs/refactor/tui_workspace_state_machine_r1.md)
+
+General user and configuration docs live one directory above this Rust
+workspace:
+
+- [`../docs/getting-started.md`](../docs/getting-started.md)
+- [`../docs/install.md`](../docs/install.md)
+- [`../docs/config.md`](../docs/config.md)
+- [`../docs/app-gateway.md`](../docs/app-gateway.md)
+- [`../docs/skills.md`](../docs/skills.md)
+
+Build from this workspace when validating Praxis itself:
+
+```shell
+cargo build -p praxis-cli --bin praxis
+```

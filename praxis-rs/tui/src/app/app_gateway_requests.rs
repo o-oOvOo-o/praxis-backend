@@ -90,6 +90,13 @@ impl PendingAppGatewayRequests {
                     message: "Dynamic tool calls are not available in TUI yet.".to_string(),
                 })
             }
+            ServerRequest::Cunning3dBridgeCall { request_id, .. } => {
+                Some(UnsupportedAppGatewayRequest {
+                    request_id: request_id.clone(),
+                    message: "Cunning3D bridge calls require an attached Cunning3D host."
+                        .to_string(),
+                })
+            }
             ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
         }
     }

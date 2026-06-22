@@ -3,12 +3,12 @@ use std::env;
 use std::path::Path;
 use std::path::PathBuf;
 
-use praxis_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
-use praxis_mcp_server::CodexToolCallParam;
+use praxis_core::spawn::PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use praxis_mcp_server::ExecApprovalElicitRequestParams;
 use praxis_mcp_server::ExecApprovalResponse;
 use praxis_mcp_server::PatchApprovalElicitRequestParams;
 use praxis_mcp_server::PatchApprovalResponse;
+use praxis_mcp_server::PraxisToolCallParam;
 use praxis_protocol::protocol::FileChange;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_shell_command::parse_command;
@@ -37,7 +37,7 @@ const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// command, as expected.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_shell_command_approval_triggers_elicitation() {
-    if env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+    if env::var(PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
         println!(
             "Skipping test because it cannot execute when network is disabled in a Praxis sandbox."
         );
@@ -90,11 +90,11 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
     ])
     .await?;
 
-    // Send a "codex" tool request, which should hit the responses endpoint.
+    // Send a Praxis tool request, which should hit the responses endpoint.
     // In turn, it should reply with a tool call, which the MCP should forward
     // as an elicitation.
     let praxis_request_id = mcp_process
-        .send_praxis_tool_call(CodexToolCallParam {
+        .send_praxis_tool_call(PraxisToolCallParam {
             prompt: "run `git init`".to_string(),
             ..Default::default()
         })
@@ -147,7 +147,7 @@ async fn shell_command_approval_triggers_elicitation() -> anyhow::Result<()> {
     .expect("task_complete_notification timeout")
     .expect("task_complete_notification resp");
 
-    // Verify the original `codex` tool call completes and that the file was created.
+    // Verify the original Praxis tool call completes and that the file was created.
     let praxis_response = timeout(
         DEFAULT_READ_TIMEOUT,
         mcp_process.read_stream_until_response_message(RequestId::Number(praxis_request_id)),
@@ -210,7 +210,7 @@ fn create_expected_elicitation_request_params(
 /// sending the approval applies the patch, as expected.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_patch_approval_triggers_elicitation() {
-    if env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
+    if env::var(PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok() {
         println!(
             "Skipping test because it cannot execute when network is disabled in a Praxis sandbox."
         );
@@ -248,9 +248,9 @@ async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
     ])
     .await?;
 
-    // Send a "codex" tool request that will trigger the apply_patch command
+    // Send a Praxis tool request that will trigger the apply_patch command.
     let praxis_request_id = mcp_process
-        .send_praxis_tool_call(CodexToolCallParam {
+        .send_praxis_tool_call(PraxisToolCallParam {
             cwd: Some(cwd.path().to_string_lossy().to_string()),
             prompt: "please modify the test file".to_string(),
             ..Default::default()
@@ -305,7 +305,7 @@ async fn patch_approval_triggers_elicitation() -> anyhow::Result<()> {
         )
         .await?;
 
-    // Verify the original `codex` tool call completes
+    // Verify the original Praxis tool call completes.
     let praxis_response = timeout(
         DEFAULT_READ_TIMEOUT,
         mcp_process.read_stream_until_response_message(RequestId::Number(praxis_request_id)),
@@ -355,15 +355,15 @@ async fn praxis_tool_passes_base_instructions() -> anyhow::Result<()> {
         create_mock_responses_server(vec![create_final_assistant_message_sse_response("Enjoy!")?])
             .await;
 
-    // Run `codex mcp` with a specific config.toml.
+    // Run `praxis mcp-server` with a specific config.toml.
     let praxis_home = TempDir::new()?;
     create_config_toml(praxis_home.path(), &server.uri())?;
     let mut mcp_process = McpProcess::new(praxis_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp_process.initialize()).await??;
 
-    // Send a "codex" tool request, which should hit the responses endpoint.
+    // Send a Praxis tool request, which should hit the responses endpoint.
     let praxis_request_id = mcp_process
-        .send_praxis_tool_call(CodexToolCallParam {
+        .send_praxis_tool_call(PraxisToolCallParam {
             prompt: "How are you?".to_string(),
             base_instructions: Some("You are a helpful assistant.".to_string()),
             developer_instructions: Some("Foreshadow upcoming tool calls.".to_string()),
@@ -393,7 +393,7 @@ async fn praxis_tool_passes_base_instructions() -> anyhow::Result<()> {
                     .get("structuredContent")
                     .and_then(|v| v.get("threadId"))
                     .and_then(serde_json::Value::as_str)
-                    .expect("codex tool response should include structuredContent.threadId"),
+                    .expect("Praxis tool response should include structuredContent.threadId"),
                 "content": "Enjoy!"
             }
         })

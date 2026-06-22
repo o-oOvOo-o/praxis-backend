@@ -10,7 +10,7 @@ use core_test_support::responses::ev_custom_tool_call;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event_match;
 use praxis_features::Feature;
 use praxis_protocol::protocol::EventMsg;
@@ -107,7 +107,7 @@ async fn run_js_repl_sequence(
         "js_repl test must include at least one call"
     );
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::JsRepl)
@@ -182,7 +182,7 @@ async fn assert_failed_cell_followup(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn js_repl_is_not_advertised_when_startup_node_is_incompatible() -> Result<()> {
     skip_if_no_network!(Ok(()));
-    if std::env::var_os("CODEX_JS_REPL_NODE_PATH").is_some() {
+    if std::env::var_os("PRAXIS_JS_REPL_NODE_PATH").is_some() {
         return Ok(());
     }
 
@@ -190,7 +190,7 @@ async fn js_repl_is_not_advertised_when_startup_node_is_incompatible() -> Result
     let temp = tempdir()?;
     let old_node = write_too_old_node_script(temp.path())?;
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config
             .features
             .enable(Feature::JsRepl)
@@ -198,7 +198,7 @@ async fn js_repl_is_not_advertised_when_startup_node_is_incompatible() -> Result
         config.js_repl_node_path = Some(old_node);
     });
     let test = builder.build(&server).await?;
-    let warning = wait_for_event_match(&test.codex, |event| match event {
+    let warning = wait_for_event_match(&test.thread, |event| match event {
         EventMsg::Warning(ev) if ev.message.contains("Disabled `js_repl` for this session") => {
             Some(ev.message.clone())
         }
@@ -577,7 +577,7 @@ async fn js_repl_can_invoke_builtin_tools() -> Result<()> {
         "use js_repl to call a tool",
         &[(
             "call-1",
-            "const toolOut = await codex.tool(\"list_mcp_resources\", {}); console.log(toolOut.type);",
+            "const toolOut = await praxis.tool(\"list_mcp_resources\", {}); console.log(toolOut.type);",
         )],
     )
     .await?;
@@ -606,7 +606,7 @@ async fn js_repl_tool_call_rejects_recursive_js_repl_invocation() -> Result<()> 
             "call-1",
             r#"
 try {
-  await codex.tool("js_repl", "console.log('recursive')");
+  await praxis.tool("js_repl", "console.log('recursive')");
   console.log("unexpected-success");
 } catch (err) {
   console.log(String(err));
@@ -669,7 +669,7 @@ async fn js_repl_exposes_praxis_path_helpers() -> Result<()> {
         "check codex path helpers",
         &[(
             "call-1",
-            "console.log(`cwd:${typeof codex.cwd}:${codex.cwd.length > 0}`); console.log(`home:${codex.homeDir === null || typeof codex.homeDir === \"string\"}`);",
+            "console.log(`cwd:${typeof praxis.cwd}:${praxis.cwd.length > 0}`); console.log(`home:${praxis.homeDir === null || typeof praxis.homeDir === \"string\"}`);",
         )],
     )
     .await?;

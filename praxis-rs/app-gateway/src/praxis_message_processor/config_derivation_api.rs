@@ -125,25 +125,6 @@ pub(crate) fn collect_resume_override_mismatches(
         ));
     }
 
-    if request.config.is_some() {
-        mismatch_details
-            .push("config overrides were provided and ignored while running".to_string());
-    }
-    if request.base_instructions.is_some() {
-        mismatch_details
-            .push("baseInstructions override was provided and ignored while running".to_string());
-    }
-    if request.developer_instructions.is_some() {
-        mismatch_details.push(
-            "developerInstructions override was provided and ignored while running".to_string(),
-        );
-    }
-    if request.persist_extended_history {
-        mismatch_details.push(
-            "persistExtendedHistory override was provided and ignored while running".to_string(),
-        );
-    }
-
     mismatch_details
 }
 

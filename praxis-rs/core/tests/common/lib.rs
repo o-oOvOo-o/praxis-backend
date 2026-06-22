@@ -22,7 +22,7 @@ pub mod context_snapshot;
 pub mod process;
 pub mod responses;
 pub mod streaming_sse;
-pub mod test_codex;
+pub mod test_praxis;
 pub mod test_praxis_exec;
 pub mod tracing;
 pub mod zsh_fork;
@@ -272,26 +272,26 @@ pub fn load_sse_fixture_with_id_from_str(raw: &str, id: &str) -> String {
 }
 
 pub async fn wait_for_event<F>(
-    codex: &PraxisThread,
+    thread: &PraxisThread,
     predicate: F,
 ) -> praxis_protocol::protocol::EventMsg
 where
     F: FnMut(&praxis_protocol::protocol::EventMsg) -> bool,
 {
     use tokio::time::Duration;
-    wait_for_event_with_timeout(codex, predicate, Duration::from_secs(1)).await
+    wait_for_event_with_timeout(thread, predicate, Duration::from_secs(1)).await
 }
 
-pub async fn wait_for_event_match<T, F>(codex: &PraxisThread, matcher: F) -> T
+pub async fn wait_for_event_match<T, F>(thread: &PraxisThread, matcher: F) -> T
 where
     F: Fn(&praxis_protocol::protocol::EventMsg) -> Option<T>,
 {
-    let ev = wait_for_event(codex, |ev| matcher(ev).is_some()).await;
+    let ev = wait_for_event(thread, |ev| matcher(ev).is_some()).await;
     matcher(&ev).expect("EventMsg should match matcher predicate")
 }
 
 pub async fn wait_for_event_with_timeout<F>(
-    codex: &PraxisThread,
+    thread: &PraxisThread,
     mut predicate: F,
     wait_time: tokio::time::Duration,
 ) -> praxis_protocol::protocol::EventMsg
@@ -302,7 +302,7 @@ where
     use tokio::time::timeout;
     loop {
         // Allow a bit more time to accommodate async startup work (e.g. config IO, tool discovery)
-        let ev = timeout(wait_time.max(Duration::from_secs(10)), codex.next_event())
+        let ev = timeout(wait_time.max(Duration::from_secs(10)), thread.next_event())
             .await
             .expect("timeout waiting for event")
             .expect("stream ended unexpectedly");
@@ -313,15 +313,15 @@ where
 }
 
 pub fn sandbox_env_var() -> &'static str {
-    praxis_core::spawn::CODEX_SANDBOX_ENV_VAR
+    praxis_core::spawn::PRAXIS_SANDBOX_ENV_VAR
 }
 
 pub fn sandbox_network_env_var() -> &'static str {
-    praxis_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR
+    praxis_core::spawn::PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR
 }
 
 const REMOTE_ENV_ENV_VAR: &str = "PRAXIS_TEST_REMOTE_ENV";
-const LEGACY_REMOTE_ENV_ENV_VAR: &str = "CODEX_TEST_REMOTE_ENV";
+const LEGACY_REMOTE_ENV_ENV_VAR: &str = "PRAXIS_TEST_REMOTE_ENV";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteEnvConfig {

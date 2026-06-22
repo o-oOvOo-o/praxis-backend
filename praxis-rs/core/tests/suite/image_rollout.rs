@@ -6,8 +6,8 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use image::ImageBuffer;
 use image::Rgba;
@@ -87,13 +87,13 @@ async fn copy_paste_local_image_persists_rollout_request_shape() -> anyhow::Resu
 
     let server = start_mock_server().await;
 
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         home: _home,
         ..
-    } = test_codex().build(&server).await?;
+    } = test_praxis().build(&server).await?;
 
     let rel_path = "images/paste.png";
     let abs_path = cwd.path().join(rel_path);
@@ -173,13 +173,13 @@ async fn drag_drop_image_persists_rollout_request_shape() -> anyhow::Result<()> 
 
     let server = start_mock_server().await;
 
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         home: _home,
         ..
-    } = test_codex().build(&server).await?;
+    } = test_praxis().build(&server).await?;
 
     let image_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=".to_string();
 

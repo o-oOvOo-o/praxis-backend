@@ -15,8 +15,8 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_features::Feature;
 use praxis_protocol::plan_tool::StepStatus;
@@ -51,9 +51,9 @@ async fn shell_tool_executes_command_and_streams_output() -> anyhow::Result<()> 
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_model("gpt-5");
-    let TestCodex {
-        codex,
+    let mut builder = test_praxis().with_model("gpt-5");
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -114,9 +114,9 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
-    let TestCodex {
-        codex,
+    let mut builder = test_praxis();
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -199,9 +199,9 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
-    let TestCodex {
-        codex,
+    let mut builder = test_praxis();
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -286,14 +286,14 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ApplyPatchFreeform)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -395,14 +395,14 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ApplyPatchFreeform)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..

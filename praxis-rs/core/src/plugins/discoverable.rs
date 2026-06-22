@@ -2,25 +2,15 @@ use anyhow::Context;
 use std::collections::HashSet;
 use tracing::warn;
 
-use super::OPENAI_CURATED_MARKETPLACE_NAME;
 use super::PluginCapabilitySummary;
 use super::PluginReadRequest;
 use super::PluginsManager;
+use super::curated::is_openai_curated_marketplace;
+use super::curated::is_openai_curated_tool_suggest_discoverable_plugin;
 use crate::config::Config;
 use praxis_config::types::ToolSuggestDiscoverableType;
 use praxis_features::Feature;
 use praxis_tools::DiscoverablePluginInfo;
-
-const TOOL_SUGGEST_DISCOVERABLE_PLUGIN_ALLOWLIST: &[&str] = &[
-    "github@openai-curated",
-    "notion@openai-curated",
-    "slack@openai-curated",
-    "gmail@openai-curated",
-    "google-calendar@openai-curated",
-    "google-drive@openai-curated",
-    "linear@openai-curated",
-    "figma@openai-curated",
-];
 
 pub(crate) fn list_tool_suggest_discoverable_plugins(
     config: &Config,
@@ -43,7 +33,7 @@ pub(crate) fn list_tool_suggest_discoverable_plugins(
         .marketplaces;
     let Some(curated_marketplace) = marketplaces
         .into_iter()
-        .find(|marketplace| marketplace.name == OPENAI_CURATED_MARKETPLACE_NAME)
+        .find(|marketplace| is_openai_curated_marketplace(&marketplace.name))
     else {
         return Ok(Vec::new());
     };
@@ -51,7 +41,7 @@ pub(crate) fn list_tool_suggest_discoverable_plugins(
     let mut discoverable_plugins = Vec::<DiscoverablePluginInfo>::new();
     for plugin in curated_marketplace.plugins {
         if plugin.installed
-            || (!TOOL_SUGGEST_DISCOVERABLE_PLUGIN_ALLOWLIST.contains(&plugin.id.as_str())
+            || (!is_openai_curated_tool_suggest_discoverable_plugin(&plugin.name)
                 && !configured_plugin_ids.contains(plugin.id.as_str()))
         {
             continue;

@@ -5,14 +5,18 @@ set positional-arguments
 help:
     just -l
 
-# `codex`
-alias c := codex
+# `praxis`
+alias p := praxis
+praxis *args:
+    cargo run --bin praxis -- "$@"
+
+# Legacy alias for local workflows that still type `just codex`.
 codex *args:
-    cargo run --bin codex -- "$@"
+    cargo run --bin praxis -- "$@"
 
 # `praxis exec`
 exec *args:
-    cargo run --bin codex -- exec "$@"
+    cargo run --bin praxis -- exec "$@"
 
 # Start praxis-exec-server and run praxis-tui.
 [no-cd]
@@ -51,9 +55,14 @@ install:
 test:
     cargo nextest run --no-fail-fast
 
-# Build and run Codex from source using Bazel.
+# Build and run Praxis from source using Bazel.
 # Note we have to use the combination of `[no-cd]` and `--run_under="cd $PWD &&"`
 # to ensure that Bazel runs the command in the current working directory.
+[no-cd]
+bazel-praxis *args:
+    bazel run //praxis-rs/cli:codex --run_under="cd $PWD &&" -- "$@"
+
+# Legacy alias while the Bazel binary target is still named `codex`.
 [no-cd]
 bazel-codex *args:
     bazel run //praxis-rs/cli:codex --run_under="cd $PWD &&" -- "$@"

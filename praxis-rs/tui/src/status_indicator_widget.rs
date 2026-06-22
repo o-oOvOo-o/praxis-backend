@@ -4,7 +4,6 @@
 //! context (for example, the unified-exec background-process summary). Keeping
 //! these pieces on one line avoids vertical layout churn in the bottom pane.
 
-use std::borrow::Cow;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -33,9 +32,6 @@ use crate::shimmer::shimmer_spans;
 use crate::status_runtime::GENERIC_STATUS_HEADER;
 use crate::status_runtime::STATUS_ANIMATION_FRAME_DELAY_FOCUSED;
 use crate::status_runtime::STATUS_ANIMATION_FRAME_DELAY_UNFOCUSED;
-use crate::status_runtime::StatusAlert;
-use crate::status_runtime::generic_status_verb;
-use crate::status_runtime::status_alert;
 use crate::text_formatting::capitalize_first;
 use crate::thinking_persona::ThinkingPersona;
 use crate::tui::FrameRequester;
@@ -54,7 +50,7 @@ pub(crate) enum StatusDetailsCapitalization {
 
 /// Displays a single-line in-progress status with optional wrapped details.
 pub(crate) struct StatusIndicatorWidget {
-    /// Live header text (defaults to the active turn state).
+    /// Live header text supplied by the runtime status snapshot.
     header: String,
     details: Option<String>,
     activity_message: Option<String>,
@@ -254,14 +250,6 @@ impl StatusIndicatorWidget {
         }
     }
 
-    fn rendered_header<'a>(&'a self, elapsed: Duration) -> Cow<'a, str> {
-        if self.header != GENERIC_STATUS_HEADER {
-            return Cow::Borrowed(self.header.as_str());
-        }
-
-        Cow::Borrowed(generic_status_verb(elapsed, self.terminal_focused))
-    }
-
     fn elapsed_seconds_at(&self, now: Instant) -> u64 {
         self.elapsed_duration_at(now).as_secs()
     }
@@ -384,35 +372,23 @@ impl Renderable for StatusIndicatorWidget {
         let now = Instant::now();
         let elapsed_duration = self.elapsed_duration_at(now);
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
-        let rendered_header = self.rendered_header(elapsed_duration);
-        let alert = status_alert(elapsed_duration);
-        let alert_style = match alert {
-            StatusAlert::LongRunning => ratatui::style::Style::default().red().bold(),
-            StatusAlert::Slow => ratatui::style::Style::default().yellow().bold(),
-            StatusAlert::None => ratatui::style::Style::default(),
-        };
+        let rendered_header = self.header.as_str();
 
         let mut spans = Vec::with_capacity(5);
-        spans.push(
-            spinner(Some(self.last_resume_at), self.animations_enabled).patch_style(alert_style),
-        );
+        spans.push(spinner(Some(self.last_resume_at), self.animations_enabled));
         spans.push(" ".into());
         if self.animations_enabled {
-            spans.extend(
-                shimmer_spans(rendered_header.as_ref())
-                    .into_iter()
-                    .map(|span| span.patch_style(alert_style)),
-            );
+            spans.extend(shimmer_spans(rendered_header));
         } else if !rendered_header.is_empty() {
-            spans.push(Span::styled(rendered_header.into_owned(), alert_style));
+            spans.push(rendered_header.to_string().into());
         }
         spans.push(" ".into());
         spans.push("· ".dim());
-        spans.push(Span::styled(pretty_elapsed, alert_style));
+        spans.push(pretty_elapsed.into());
         if self.show_interrupt_hint {
             spans.push(" · ".dim());
             spans.push(key_hint::plain(KeyCode::Esc).into());
-            spans.push(Span::styled(" to interrupt", alert_style));
+            spans.push(" to interrupt".into());
         }
         if let Some(message) = &self.inline_message {
             // Keep optional context after elapsed/interrupt text so that core

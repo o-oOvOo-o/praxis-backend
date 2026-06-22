@@ -1,6 +1,6 @@
 use super::*;
 use praxis_config::Constrained;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_plugin::AppConnectorId;
 use praxis_plugin::PluginCapabilitySummary;
 use praxis_protocol::protocol::AskForApproval;
@@ -158,20 +158,20 @@ fn praxis_apps_mcp_url_uses_legacy_praxis_apps_path() {
 #[test]
 fn praxis_apps_server_config_uses_legacy_praxis_apps_path() {
     let mut config = test_mcp_config(PathBuf::from("/tmp"));
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
 
     let mut servers = with_praxis_apps_mcp(HashMap::new(), /*auth*/ None, &config);
-    assert!(!servers.contains_key(CODEX_APPS_MCP_SERVER_NAME));
+    assert!(!servers.contains_key(PRAXIS_APPS_MCP_SERVER_NAME));
 
     config.apps_enabled = true;
 
     servers = with_praxis_apps_mcp(servers, Some(&auth), &config);
     let server = servers
-        .get(CODEX_APPS_MCP_SERVER_NAME)
-        .expect("codex apps should be present when apps is enabled");
+        .get(PRAXIS_APPS_MCP_SERVER_NAME)
+        .expect("Praxis apps should be present when apps is enabled");
     let url = match &server.transport {
         McpServerTransportConfig::StreamableHttp { url, .. } => url,
-        _ => panic!("expected streamable http transport for codex apps"),
+        _ => panic!("expected streamable http transport for Praxis apps"),
     };
 
     assert_eq!(url, "https://chatgpt.com/backend-api/wham/apps");
@@ -182,7 +182,7 @@ async fn effective_mcp_servers_preserve_user_servers_and_add_praxis_apps() {
     let praxis_home = tempfile::tempdir().expect("tempdir");
     let mut config = test_mcp_config(praxis_home.path().to_path_buf());
     config.apps_enabled = true;
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
 
     config.configured_mcp_servers.insert(
         "sample".to_string(),
@@ -234,8 +234,8 @@ async fn effective_mcp_servers_preserve_user_servers_and_add_praxis_apps() {
         .get("docs")
         .expect("configured server should exist");
     let praxis_apps = effective
-        .get(CODEX_APPS_MCP_SERVER_NAME)
-        .expect("codex apps server should exist");
+        .get(PRAXIS_APPS_MCP_SERVER_NAME)
+        .expect("Praxis apps server should exist");
 
     match &sample.transport {
         McpServerTransportConfig::StreamableHttp { url, .. } => {

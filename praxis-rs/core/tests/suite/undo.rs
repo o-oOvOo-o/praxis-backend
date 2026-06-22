@@ -15,8 +15,8 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodexHarness;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxisHarness;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event_match;
 use praxis_core::PraxisThread;
 use praxis_features::Feature;
@@ -26,15 +26,15 @@ use praxis_protocol::protocol::UndoCompletedEvent;
 use pretty_assertions::assert_eq;
 
 #[allow(clippy::expect_used)]
-async fn undo_harness() -> Result<TestCodexHarness> {
-    let builder = test_codex().with_model("gpt-5.1").with_config(|config| {
+async fn undo_harness() -> Result<TestPraxisHarness> {
+    let builder = test_praxis().with_model("gpt-5.1").with_config(|config| {
         config.include_apply_patch_tool = true;
         config
             .features
             .enable(Feature::GhostCommit)
             .expect("test config should allow feature update");
     });
-    TestCodexHarness::with_builder(builder).await
+    TestPraxisHarness::with_builder(builder).await
 }
 
 fn git(path: &Path, args: &[&str]) -> Result<()> {
@@ -97,7 +97,7 @@ fn apply_patch_responses(call_id: &str, patch: &str, assistant_msg: &str) -> Vec
 }
 
 async fn run_apply_patch_turn(
-    harness: &TestCodexHarness,
+    harness: &TestPraxisHarness,
     prompt: &str,
     call_id: &str,
     patch: &str,
@@ -159,7 +159,7 @@ async fn undo_removes_new_file_created_during_turn() -> Result<()> {
     let new_path = harness.path("new_file.txt");
     assert_eq!(fs::read_to_string(&new_path)?, "from turn\n");
 
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     let completed = expect_successful_undo(&codex).await?;
     assert!(completed.success, "undo failed: {:?}", completed.message);
 
@@ -196,7 +196,7 @@ async fn undo_restores_tracked_file_edit() -> Result<()> {
 
     assert_eq!(fs::read_to_string(&tracked)?, "after\n");
 
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     let completed = expect_successful_undo(&codex).await?;
     assert!(completed.success, "undo failed: {:?}", completed.message);
 
@@ -233,7 +233,7 @@ async fn undo_restores_untracked_file_edit() -> Result<()> {
 
     assert_eq!(fs::read_to_string(&notes)?, "modified\n");
 
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     let completed = expect_successful_undo(&codex).await?;
     assert!(completed.success, "undo failed: {:?}", completed.message);
 
@@ -260,7 +260,7 @@ async fn undo_reverts_only_latest_turn() -> Result<()> {
     run_apply_patch_turn(&harness, "revise story", call_id_two, update_patch, "done").await?;
     assert_eq!(fs::read_to_string(&story)?, "second version\n");
 
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     let completed = expect_successful_undo(&codex).await?;
     assert!(completed.success, "undo failed: {:?}", completed.message);
 
@@ -306,7 +306,7 @@ async fn undo_does_not_touch_unrelated_files() -> Result<()> {
     assert_eq!(fs::read_to_string(&target)?, "edited\n");
     assert_eq!(fs::read_to_string(&temp)?, "ephemeral\n");
 
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     let completed = expect_successful_undo(&codex).await?;
     assert!(completed.success, "undo failed: {:?}", completed.message);
 
@@ -364,7 +364,7 @@ async fn undo_sequential_turns_consumes_snapshots() -> Result<()> {
     .await?;
     assert_eq!(fs::read_to_string(&story)?, "turn three\n");
 
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     expect_successful_undo(&codex).await?;
     assert_eq!(fs::read_to_string(&story)?, "turn two\n");
 
@@ -384,7 +384,7 @@ async fn undo_without_snapshot_reports_failure() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let harness = undo_harness().await?;
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
 
     expect_failed_undo(&codex).await?;
 
@@ -410,7 +410,7 @@ async fn undo_restores_moves_and_renames() -> Result<()> {
     assert!(!source.exists());
     assert_eq!(fs::read_to_string(&destination)?, "renamed content\n");
 
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     expect_successful_undo(&codex).await?;
 
     assert_eq!(fs::read_to_string(&source)?, "original\n");
@@ -448,7 +448,7 @@ async fn undo_does_not_touch_ignored_directory_contents() -> Result<()> {
     let new_log = logs_dir.join("session.log");
     assert_eq!(fs::read_to_string(&new_log)?, "ephemeral log\n");
 
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     expect_successful_undo(&codex).await?;
 
     assert!(new_log.exists());
@@ -482,7 +482,7 @@ async fn undo_overwrites_manual_edits_after_turn() -> Result<()> {
     fs::write(&tracked, "manual edit\n")?;
     assert_eq!(fs::read_to_string(&tracked)?, "manual edit\n");
 
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     expect_successful_undo(&codex).await?;
 
     assert_eq!(fs::read_to_string(&tracked)?, "baseline\n");
@@ -522,7 +522,7 @@ async fn undo_preserves_unrelated_staged_changes() -> Result<()> {
     assert!(status_before.contains("M  user_file.txt")); // M in index
 
     // UNDO
-    let codex = Arc::clone(&harness.test().codex);
+    let codex = Arc::clone(&harness.test().thread);
     // checks that undo succeeded
     expect_successful_undo(&codex).await?;
 

@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 use core_test_support::load_default_config_for_test;
 use core_test_support::responses;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use futures::StreamExt;
 use praxis_core::ModelClient;
 use praxis_core::ModelProviderInfo;
 use praxis_core::Prompt;
 use praxis_core::ResponseEvent;
 use praxis_core::WireApi;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_otel::SessionTelemetry;
 use praxis_otel::TelemetryAuthMode;
 use praxis_protocol::ThreadId;
@@ -296,10 +296,11 @@ async fn responses_respects_model_info_overrides_from_config() {
     let config = Arc::new(config);
 
     let conversation_id = ThreadId::new();
-    let auth_mode =
-        praxis_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("Test API Key"))
-            .auth_mode()
-            .map(TelemetryAuthMode::from);
+    let auth_mode = praxis_core::test_support::auth_manager_from_auth(
+        OpenAiAccountAuth::from_api_key("Test API Key"),
+    )
+    .auth_mode()
+    .map(TelemetryAuthMode::from);
     let session_source =
         SessionSource::SubAgent(SubAgentSource::Other("override-check".to_string()));
     let model_info =
@@ -389,7 +390,10 @@ async fn responses_stream_includes_turn_metadata_header_for_git_workspace_e2e() 
         responses::ev_completed("resp-1"),
     ]);
 
-    let test = test_codex().build(&server).await.expect("build test codex");
+    let test = test_praxis()
+        .build(&server)
+        .await
+        .expect("build test codex");
     let cwd = test.cwd_path();
 
     let first_request = responses::mount_sse_once(&server, response_body.clone()).await;

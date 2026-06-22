@@ -239,10 +239,10 @@ async fn shutdown_all_threads_bounded_submits_shutdown_to_every_thread() {
     let mut config = test_config();
     config.praxis_home = temp_dir.path().join("praxis-home");
     config.cwd = config.praxis_home.abs();
-    std::fs::create_dir_all(&config.praxis_home).expect("create codex home");
+    std::fs::create_dir_all(&config.praxis_home).expect("create Praxis home");
 
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
-        CodexAuth::from_api_key("dummy"),
+        OpenAiAccountAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.praxis_home.clone(),
         Arc::new(praxis_exec_server::EnvironmentManager::new(
@@ -281,7 +281,7 @@ async fn new_uses_current_model_provider_for_model_refresh() {
     let mut config = test_config();
     config.praxis_home = temp_dir.path().join("praxis-home");
     config.cwd = config.praxis_home.abs();
-    std::fs::create_dir_all(&config.praxis_home).expect("create codex home");
+    std::fs::create_dir_all(&config.praxis_home).expect("create Praxis home");
     config.model_catalog = None;
     let mut current_provider = config.model_provider.clone();
     current_provider.name = "my-provider".to_string();
@@ -293,8 +293,9 @@ async fn new_uses_current_model_provider_for_model_refresh() {
         .model_providers
         .insert("my_provider".to_string(), current_provider);
 
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
     let manager = ThreadManager::new(
         &config,
         auth_manager,
@@ -421,10 +422,11 @@ async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_for_legacy_histor
     let mut config = test_config();
     config.praxis_home = temp_dir.path().join("praxis-home");
     config.cwd = config.praxis_home.abs();
-    std::fs::create_dir_all(&config.praxis_home).expect("create codex home");
+    std::fs::create_dir_all(&config.praxis_home).expect("create Praxis home");
 
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
     let manager = ThreadManager::new(
         &config,
         auth_manager.clone(),
@@ -521,10 +523,11 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
     let mut config = test_config();
     config.praxis_home = temp_dir.path().join("praxis-home");
     config.cwd = config.praxis_home.abs();
-    std::fs::create_dir_all(&config.praxis_home).expect("create codex home");
+    std::fs::create_dir_all(&config.praxis_home).expect("create Praxis home");
 
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
     let manager = ThreadManager::new(
         &config,
         auth_manager.clone(),
@@ -610,10 +613,11 @@ async fn interrupted_fork_snapshot_uses_persisted_mid_turn_history_without_live_
     let mut config = test_config();
     config.praxis_home = temp_dir.path().join("praxis-home");
     config.cwd = config.praxis_home.abs();
-    std::fs::create_dir_all(&config.praxis_home).expect("create codex home");
+    std::fs::create_dir_all(&config.praxis_home).expect("create Praxis home");
 
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
     let manager = ThreadManager::new(
         &config,
         auth_manager.clone(),

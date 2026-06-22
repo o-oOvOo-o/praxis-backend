@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_mcp::mcp::PRAXIS_APPS_MCP_SERVER_NAME;
 use praxis_protocol::apps::AppInfo;
 use praxis_rmcp_client::ElicitationAction;
 use praxis_tools::DiscoverableTool;
@@ -111,7 +111,7 @@ impl ToolHandler for ToolSuggestHandler {
 
         let request_id = RequestId::String(format!("tool_suggestion_{call_id}").into());
         let params = build_tool_suggestion_elicitation_request(
-            CODEX_APPS_MCP_SERVER_NAME,
+            PRAXIS_APPS_MCP_SERVER_NAME,
             session.conversation_id.to_string(),
             turn.sub_id.clone(),
             &args,
@@ -160,7 +160,7 @@ async fn verify_tool_suggestion_completed(
     session: &crate::praxis::Session,
     turn: &crate::praxis::TurnContext,
     tool: &DiscoverableTool,
-    auth: Option<&praxis_login::CodexAuth>,
+    auth: Option<&praxis_login::OpenAiAccountAuth>,
 ) -> bool {
     match tool {
         DiscoverableTool::Connector(connector) => refresh_missing_suggested_connectors(
@@ -198,7 +198,7 @@ async fn verify_tool_suggestion_completed(
 async fn refresh_missing_suggested_connectors(
     session: &crate::praxis::Session,
     turn: &crate::praxis::TurnContext,
-    auth: Option<&praxis_login::CodexAuth>,
+    auth: Option<&praxis_login::OpenAiAccountAuth>,
     expected_connector_ids: &[String],
     tool_id: &str,
 ) -> Option<Vec<AppInfo>> {
@@ -231,7 +231,7 @@ async fn refresh_missing_suggested_connectors(
         }
         Err(err) => {
             warn!(
-                "failed to refresh codex apps tools cache after tool suggestion for {tool_id}: {err:#}"
+                "failed to refresh Praxis apps tools cache after tool suggestion for {tool_id}: {err:#}"
             );
             None
         }

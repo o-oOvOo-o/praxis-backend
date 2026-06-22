@@ -18,9 +18,9 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_sandbox;
 use core_test_support::skip_if_windows;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::TestCodexHarness;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::TestPraxisHarness;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use core_test_support::wait_for_event_with_timeout;
@@ -143,7 +143,7 @@ async fn unified_exec_intercepts_apply_patch_exec_command() -> Result<()> {
     skip_if_sandbox!(Ok(()));
     skip_if_windows!(Ok(()));
 
-    let builder = test_codex().with_config(|config| {
+    let builder = test_praxis().with_config(|config| {
         config.include_apply_patch_tool = true;
         config.use_experimental_unified_exec_tool = true;
         config
@@ -151,7 +151,7 @@ async fn unified_exec_intercepts_apply_patch_exec_command() -> Result<()> {
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let harness = TestCodexHarness::with_builder(builder).await?;
+    let harness = TestPraxisHarness::with_builder(builder).await?;
 
     let patch =
         "*** Begin Patch\n*** Add File: uexec_apply.txt\n+hello from unified exec\n*** End Patch";
@@ -179,7 +179,7 @@ async fn unified_exec_intercepts_apply_patch_exec_command() -> Result<()> {
     mount_sse_sequence(harness.server(), responses).await;
 
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let cwd = test.cwd_path().to_path_buf();
     let session_model = test.session_configured.model.clone();
 
@@ -280,15 +280,15 @@ async fn unified_exec_emits_exec_command_begin_event() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_model("gpt-5").with_config(|config| {
+    let mut builder = test_praxis().with_model("gpt-5").with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -360,15 +360,15 @@ async fn unified_exec_resolves_relative_workdir() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_model("gpt-5").with_config(|config| {
+    let mut builder = test_praxis().with_model("gpt-5").with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -446,15 +446,15 @@ async fn unified_exec_respects_workdir_override() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_model("gpt-5").with_config(|config| {
+    let mut builder = test_praxis().with_model("gpt-5").with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -533,15 +533,15 @@ async fn unified_exec_emits_exec_command_end_event() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -628,15 +628,15 @@ async fn unified_exec_emits_output_delta_for_exec_command() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -708,15 +708,15 @@ async fn unified_exec_full_lifecycle_with_background_end_event() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -823,15 +823,15 @@ async fn unified_exec_emits_terminal_interaction_for_write_stdin() -> Result<()>
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -931,15 +931,15 @@ async fn unified_exec_terminal_interaction_captures_delayed_output() -> Result<(
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -1130,15 +1130,15 @@ async fn unified_exec_emits_one_begin_and_one_end_event() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -1265,14 +1265,14 @@ async fn exec_command_reports_chunk_and_exit_metadata() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -1388,14 +1388,14 @@ async fn unified_exec_defaults_to_pipe() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -1482,14 +1482,14 @@ async fn unified_exec_can_enable_tty() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -1570,14 +1570,14 @@ async fn unified_exec_respects_early_exit_notifications() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -1670,14 +1670,14 @@ async fn write_stdin_returns_exit_metadata_and_clears_session() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -1840,15 +1840,15 @@ async fn unified_exec_emits_end_event_when_session_dies_via_stdin() -> Result<()
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -1954,15 +1954,15 @@ async fn unified_exec_keeps_long_running_session_after_turn_end() -> Result<()> 
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -2054,15 +2054,15 @@ async fn unified_exec_interrupt_preserves_long_running_session() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -2142,14 +2142,14 @@ async fn unified_exec_reuses_session_via_stdin() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -2262,15 +2262,15 @@ async fn unified_exec_streams_after_lagged_output() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -2402,14 +2402,14 @@ async fn unified_exec_timeout_and_followup_poll() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -2516,14 +2516,14 @@ async fn unified_exec_formats_large_output_summary() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -2623,14 +2623,14 @@ async fn unified_exec_runs_under_sandbox() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -2710,15 +2710,15 @@ async fn unified_exec_python_prompt_under_seatbelt() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -2834,14 +2834,14 @@ async fn unified_exec_runs_on_all_platforms() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -2914,15 +2914,15 @@ async fn unified_exec_prunes_exited_sessions_first() -> Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.use_experimental_unified_exec_tool = true;
         config
             .features
             .enable(Feature::UnifiedExec)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..

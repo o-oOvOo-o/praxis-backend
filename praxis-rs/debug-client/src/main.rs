@@ -26,11 +26,11 @@ use crate::state::ReaderEvent;
 #[derive(Parser)]
 #[command(author = "Praxis", version, about = "Minimal app-gateway client")]
 struct Cli {
-    /// Path to the `codex` CLI binary.
-    #[arg(long, default_value = "codex")]
+    /// Path to the `praxis` CLI binary.
+    #[arg(long, default_value = "praxis")]
     praxis_bin: String,
 
-    /// Forwarded to the `codex` CLI as `--config key=value`. Repeatable.
+    /// Forwarded to the `praxis` CLI as `--config key=value`. Repeatable.
     #[arg(short = 'c', long = "config", value_name = "key=value", action = ArgAction::Append)]
     config_overrides: Vec<String>,
 

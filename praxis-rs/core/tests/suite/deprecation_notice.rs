@@ -4,8 +4,8 @@ use anyhow::Ok;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_absolute_path;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event_match;
 use praxis_core::config_loader::ConfigLayerEntry;
 use praxis_core::config_loader::ConfigLayerStack;
@@ -25,7 +25,7 @@ async fn emits_deprecation_notice_for_legacy_feature_flag() -> anyhow::Result<()
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         let mut features = config.features.get().clone();
         features.enable(Feature::UnifiedExec);
         features
@@ -37,7 +37,7 @@ async fn emits_deprecation_notice_for_legacy_feature_flag() -> anyhow::Result<()
         config.use_experimental_unified_exec_tool = true;
     });
 
-    let TestCodex { codex, .. } = builder.build(&server).await?;
+    let TestPraxis { thread: codex, .. } = builder.build(&server).await?;
 
     let notice = wait_for_event_match(&codex, |event| match event {
         EventMsg::DeprecationNotice(ev) => Some(ev.clone()),
@@ -52,9 +52,7 @@ async fn emits_deprecation_notice_for_legacy_feature_flag() -> anyhow::Result<()
     );
     assert_eq!(
         details.as_deref(),
-        Some(
-            "Enable it with `--enable unified_exec` or `[features].unified_exec` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details."
-        ),
+        Some("Enable it with `--enable unified_exec` or `[features].unified_exec` in config.toml."),
     );
 
     Ok(())
@@ -66,7 +64,7 @@ async fn emits_deprecation_notice_for_experimental_instructions_file() -> anyhow
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         let mut table = toml::map::Map::new();
         table.insert(
             "experimental_instructions_file".to_string(),
@@ -87,7 +85,7 @@ async fn emits_deprecation_notice_for_experimental_instructions_file() -> anyhow
         config.config_layer_stack = config_layer_stack;
     });
 
-    let TestCodex { codex, .. } = builder.build(&server).await?;
+    let TestPraxis { thread: codex, .. } = builder.build(&server).await?;
 
     let notice = wait_for_event_match(&codex, |event| match event {
         EventMsg::DeprecationNotice(ev)
@@ -122,7 +120,7 @@ async fn emits_deprecation_notice_for_web_search_feature_flag_values() -> anyhow
     for enabled in [true, false] {
         let server = start_mock_server().await;
 
-        let mut builder = test_codex().with_config(move |config| {
+        let mut builder = test_praxis().with_config(move |config| {
             let mut entries = BTreeMap::new();
             entries.insert("web_search_request".to_string(), enabled);
             let mut features = config.features.get().clone();
@@ -133,7 +131,7 @@ async fn emits_deprecation_notice_for_web_search_feature_flag_values() -> anyhow
                 .expect("test config should allow managed feature map updates");
         });
 
-        let TestCodex { codex, .. } = builder.build(&server).await?;
+        let TestPraxis { thread: codex, .. } = builder.build(&server).await?;
 
         let notice = wait_for_event_match(&codex, |event| match event {
             EventMsg::DeprecationNotice(ev)

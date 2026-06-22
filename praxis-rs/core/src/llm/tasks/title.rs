@@ -9,7 +9,7 @@ pub(crate) const DEEPSEEK_AUTO_TITLE_MODEL: &str = "deepseek-v4-flash";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AutoTitleProfile {
-    CodexResponses,
+    OpenAiResponses,
     Common,
     DeepSeekFlash,
     ProviderDefault,
@@ -18,7 +18,7 @@ pub(crate) enum AutoTitleProfile {
 impl AutoTitleProfile {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::CodexResponses => "codex/responses",
+            Self::OpenAiResponses => "codex/responses",
             Self::Common => "common/current",
             Self::DeepSeekFlash => "deepseek/flash",
             Self::ProviderDefault => "provider/current",
@@ -39,11 +39,7 @@ pub(crate) fn select_auto_title_model(
     provider_id: &str,
     provider: &ModelProviderInfo,
 ) -> AutoTitleModelSelection {
-    let ctx = ProfileMatchContext {
-        model_info: current_model,
-        provider_id,
-        provider,
-    };
+    let ctx = ProfileMatchContext::new(current_model, provider_id, provider);
     let default_selection = || AutoTitleModelSelection {
         model_slug: current_model.slug.clone(),
         profile: AutoTitleProfile::ProviderDefault,
@@ -126,7 +122,7 @@ mod tests {
         let selection = select_auto_title_model(&model("gpt-5.2-codex"), &provider_id, &provider);
 
         assert_eq!(selection.model_slug, "gpt-5.2-codex");
-        assert_eq!(selection.profile, AutoTitleProfile::CodexResponses);
+        assert_eq!(selection.profile, AutoTitleProfile::OpenAiResponses);
         assert!(!selection.suppress_model_default_reasoning);
     }
 

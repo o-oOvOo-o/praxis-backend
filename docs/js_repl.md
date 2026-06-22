@@ -19,7 +19,7 @@ js_repl = true
 js_repl_tools_only = true
 ```
 
-When enabled, direct model tool calls are restricted to `js_repl` and `js_repl_reset`; other tools remain available via `await codex.tool(...)` inside js_repl.
+When enabled, direct model tool calls are restricted to `js_repl` and `js_repl_reset`; other tools remain available via `await praxis.tool(...)` inside js_repl.
 
 ## Node runtime
 
@@ -27,8 +27,8 @@ When enabled, direct model tool calls are restricted to `js_repl` and `js_repl_r
 
 Runtime resolution order:
 
-1. `CODEX_JS_REPL_NODE_PATH` environment variable
-2. `js_repl_node_path` in config/profile
+1. `js_repl_node_path` in config/profile
+2. `CODEX_JS_REPL_NODE_PATH` legacy compatibility environment variable, when supported by the host runtime
 3. `node` discovered on `PATH`
 
 You can configure an explicit runtime path:
@@ -45,11 +45,12 @@ search path. Local file imports are also supported for relative paths, absolute 
 
 Module resolution proceeds in the following order:
 
-1. `CODEX_JS_REPL_NODE_MODULE_DIRS` (PATH-delimited list)
-2. `js_repl_node_module_dirs` in config/profile (array of absolute paths)
-3. Thread working directory (cwd, always included as the last fallback)
+1. `PRAXIS_JS_REPL_NODE_MODULE_DIRS` (PATH-delimited list)
+2. `CODEX_JS_REPL_NODE_MODULE_DIRS` legacy compatibility environment variable
+3. `js_repl_node_module_dirs` in config/profile (array of absolute paths)
+4. Thread working directory (cwd, always included as the last fallback)
 
-For `CODEX_JS_REPL_NODE_MODULE_DIRS` and `js_repl_node_module_dirs`, module resolution is attempted in the order provided with earlier entries taking precedence.
+For `PRAXIS_JS_REPL_NODE_MODULE_DIRS`, `CODEX_JS_REPL_NODE_MODULE_DIRS`, and `js_repl_node_module_dirs`, module resolution is attempted in the order provided with earlier entries taking precedence.
 
 Bare package imports always use this REPL-wide search path, even when they originate from an
 imported local file. They are not resolved relative to the imported file's location.
@@ -74,27 +75,28 @@ imported local file. They are not resolved relative to the imported file's locat
 
 `js_repl` exposes these globals:
 
-- `codex.cwd`: REPL working directory path.
-- `codex.homeDir`: effective home directory path from the kernel environment.
-- `codex.tmpDir`: per-session scratch directory path.
-- `codex.tool(name, args?)`: executes a normal Codex tool call from inside `js_repl` (including shell tools like `shell` / `shell_command` when available).
-- `codex.emitImage(imageLike)`: explicitly adds one image to the outer `js_repl` function output each time you call it.
-- `codex.tool(...)` and `codex.emitImage(...)` keep stable helper identities across cells. Saved references and persisted objects can reuse them in later cells, but async callbacks that fire after a cell finishes still fail because no exec is active.
-- Imported local files run in the same VM context, so they can also access `codex.*`, the captured `console`, and Node-like `import.meta` helpers.
-- Each `codex.tool(...)` call emits a bounded summary at `info` level from the `praxis_core::tools::js_repl` logger. At `trace` level, the same path also logs the exact raw response object or error string seen by JavaScript.
-- Nested `codex.tool(...)` outputs stay inside JavaScript unless you emit them explicitly.
-- `codex.emitImage(...)` accepts a data URL, a single `input_image` item, an object like `{ bytes, mimeType }`, or a raw tool response object that contains exactly one image and no text. Call it multiple times if you want to emit multiple images.
-- `codex.emitImage(...)` rejects mixed text-and-image content.
-- Request full-resolution image processing with `detail: "original"` only when the `view_image` tool schema includes a `detail` argument. The same availability applies to `codex.emitImage(...)`: if `view_image.detail` is present, you may also pass `detail: "original"` there. Use this when high-fidelity image perception or precise localization is needed, especially for CUA agents.
-- Example of sharing an in-memory Playwright screenshot: `await codex.emitImage({ bytes: await page.screenshot({ type: "jpeg", quality: 85 }), mimeType: "image/jpeg", detail: "original" })`.
-- Example of sharing a local image tool result: `await codex.emitImage(codex.tool("view_image", { path: "/absolute/path", detail: "original" }))`.
-- When encoding an image to send with `codex.emitImage(...)` or `view_image`, prefer JPEG at about 85 quality when lossy compression is acceptable; use PNG when transparency or lossless detail matters. Smaller uploads are faster and less likely to hit size limits.
+- `praxis.cwd`: REPL working directory path.
+- `praxis.homeDir`: effective home directory path from the kernel environment.
+- `praxis.tmpDir`: per-session scratch directory path.
+- `praxis.tool(name, args?)`: executes a normal Praxis tool call from inside `js_repl` (including shell tools like `shell` / `shell_command` when available).
+- `praxis.emitImage(imageLike)`: explicitly adds one image to the outer `js_repl` function output each time you call it.
+- `praxis.tool(...)` and `praxis.emitImage(...)` keep stable helper identities across cells. Saved references and persisted objects can reuse them in later cells, but async callbacks that fire after a cell finishes still fail because no exec is active.
+- Imported local files run in the same VM context, so they can also access `praxis.*`, the captured `console`, and Node-like `import.meta` helpers.
+- `codex.*` remains available as a legacy compatibility alias for existing snippets and imported local files.
+- Each `praxis.tool(...)` call emits a bounded summary at `info` level from the `praxis_core::tools::js_repl` logger. At `trace` level, the same path also logs the exact raw response object or error string seen by JavaScript.
+- Nested `praxis.tool(...)` outputs stay inside JavaScript unless you emit them explicitly.
+- `praxis.emitImage(...)` accepts a data URL, a single `input_image` item, an object like `{ bytes, mimeType }`, or a raw tool response object that contains exactly one image and no text. Call it multiple times if you want to emit multiple images.
+- `praxis.emitImage(...)` rejects mixed text-and-image content.
+- Request full-resolution image processing with `detail: "original"` only when the `view_image` tool schema includes a `detail` argument. The same availability applies to `praxis.emitImage(...)`: if `view_image.detail` is present, you may also pass `detail: "original"` there. Use this when high-fidelity image perception or precise localization is needed, especially for CUA agents.
+- Example of sharing an in-memory Playwright screenshot: `await praxis.emitImage({ bytes: await page.screenshot({ type: "jpeg", quality: 85 }), mimeType: "image/jpeg", detail: "original" })`.
+- Example of sharing a local image tool result: `await praxis.emitImage(praxis.tool("view_image", { path: "/absolute/path", detail: "original" }))`.
+- When encoding an image to send with `praxis.emitImage(...)` or `view_image`, prefer JPEG at about 85 quality when lossy compression is acceptable; use PNG when transparency or lossless detail matters. Smaller uploads are faster and less likely to hit size limits.
 
 Avoid writing directly to `process.stdout` / `process.stderr` / `process.stdin`; the kernel uses a JSON-line transport over stdio.
 
 ## Debug logging
 
-Nested `codex.tool(...)` diagnostics are emitted through normal `tracing` output instead of rollout history.
+Nested `praxis.tool(...)` diagnostics are emitted through normal `tracing` output instead of rollout history.
 
 - `info` level logs a bounded summary.
 - `trace` level also logs the exact serialized response object or error string seen by JavaScript.

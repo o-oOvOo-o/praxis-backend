@@ -52,10 +52,16 @@ use praxis_app_gateway_protocol::ThreadGoalSetResponse;
 use praxis_app_gateway_protocol::ThreadGoalStatus;
 use praxis_app_gateway_protocol::ThreadGoalUpdateParams;
 use praxis_app_gateway_protocol::ThreadGoalUpdateResponse;
+use praxis_app_gateway_protocol::ThreadHistoryAppendParams;
+use praxis_app_gateway_protocol::ThreadHistoryAppendResponse;
+use praxis_app_gateway_protocol::ThreadHistoryEntryGetParams;
+use praxis_app_gateway_protocol::ThreadHistoryEntryGetResponse;
 use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadListResponse;
 use praxis_app_gateway_protocol::ThreadLoadedListParams;
 use praxis_app_gateway_protocol::ThreadLoadedListResponse;
+use praxis_app_gateway_protocol::ThreadLookupParams;
+use praxis_app_gateway_protocol::ThreadLookupResponse;
 use praxis_app_gateway_protocol::ThreadMetadataUpdateParams;
 use praxis_app_gateway_protocol::ThreadMetadataUpdateResponse;
 use praxis_app_gateway_protocol::ThreadReadParams;
@@ -92,7 +98,6 @@ use praxis_app_gateway_protocol::TurnStartResponse;
 use praxis_app_gateway_protocol::TurnSteerParams;
 use praxis_app_gateway_protocol::TurnSteerResponse;
 use praxis_core::config::Config;
-use praxis_core::message_history;
 use praxis_otel::TelemetryAuthMode;
 use praxis_protocol::ThreadId;
 use praxis_protocol::openai_models::ModelAvailabilityNux;
@@ -221,6 +226,7 @@ impl AppGatewaySession {
             client_version: env!("CARGO_PKG_VERSION").to_string(),
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
+            host_extensions: Vec::new(),
             channel_capacity: crate::TUI_APP_GATEWAY_CHANNEL_CAPACITY,
         })
         .await
@@ -461,6 +467,19 @@ impl AppGatewaySession {
             .request_typed(ClientRequest::ThreadList { request_id, params })
             .await
             .wrap_err("thread/list failed during TUI session lookup")
+    }
+
+    pub(crate) async fn thread_lookup(
+        &mut self,
+        params: ThreadLookupParams,
+    ) -> Result<Option<Thread>> {
+        let request_id = self.next_request_id();
+        let response: ThreadLookupResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadLookup { request_id, params })
+            .await
+            .wrap_err("thread/lookup failed during TUI session lookup")?;
+        Ok(response.thread)
     }
 
     /// Lists thread ids that the app gateway currently holds in memory.
@@ -814,6 +833,48 @@ impl AppGatewaySession {
             })
             .await
             .wrap_err("thread/shellCommand failed in TUI")?;
+        Ok(())
+    }
+
+    pub(crate) async fn thread_history_append(
+        &mut self,
+        thread_id: ThreadId,
+        text: String,
+    ) -> Result<()> {
+        let request_id = self.next_request_id();
+        let _: ThreadHistoryAppendResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadHistoryAppend {
+                request_id,
+                params: ThreadHistoryAppendParams {
+                    thread_id: thread_id.to_string(),
+                    text,
+                },
+            })
+            .await
+            .wrap_err("thread/history/append failed in TUI")?;
+        Ok(())
+    }
+
+    pub(crate) async fn thread_history_entry_get(
+        &mut self,
+        thread_id: ThreadId,
+        offset: usize,
+        log_id: u64,
+    ) -> Result<()> {
+        let request_id = self.next_request_id();
+        let _: ThreadHistoryEntryGetResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadHistoryEntryGet {
+                request_id,
+                params: ThreadHistoryEntryGetParams {
+                    thread_id: thread_id.to_string(),
+                    offset,
+                    log_id,
+                },
+            })
+            .await
+            .wrap_err("thread/history/get failed in TUI")?;
         Ok(())
     }
 
@@ -1223,7 +1284,7 @@ async fn started_thread_from_fork_response(
 
 async fn thread_session_state_from_thread_start_response(
     response: &ThreadStartResponse,
-    config: &Config,
+    _config: &Config,
 ) -> Result<ThreadSessionState, String> {
     thread_session_state_from_thread_response(
         &response.thread.id,
@@ -1238,14 +1299,14 @@ async fn thread_session_state_from_thread_start_response(
         response.cwd.clone(),
         response.reasoning_effort,
         response.thread.selfwork_plan_path.clone(),
-        config,
+        response.history_log_id,
+        response.history_entry_count,
     )
-    .await
 }
 
 async fn thread_session_state_from_thread_resume_response(
     response: &ThreadResumeResponse,
-    config: &Config,
+    _config: &Config,
 ) -> Result<ThreadSessionState, String> {
     thread_session_state_from_thread_response(
         &response.thread.id,
@@ -1260,14 +1321,14 @@ async fn thread_session_state_from_thread_resume_response(
         response.cwd.clone(),
         response.reasoning_effort,
         response.thread.selfwork_plan_path.clone(),
-        config,
+        response.history_log_id,
+        response.history_entry_count,
     )
-    .await
 }
 
 async fn thread_session_state_from_thread_fork_response(
     response: &ThreadForkResponse,
-    config: &Config,
+    _config: &Config,
 ) -> Result<ThreadSessionState, String> {
     thread_session_state_from_thread_response(
         &response.thread.id,
@@ -1282,9 +1343,9 @@ async fn thread_session_state_from_thread_fork_response(
         response.cwd.clone(),
         response.reasoning_effort,
         response.thread.selfwork_plan_path.clone(),
-        config,
+        response.history_log_id,
+        response.history_entry_count,
     )
-    .await
 }
 
 fn review_target_to_app_gateway(
@@ -1310,7 +1371,7 @@ fn review_target_to_app_gateway(
     clippy::too_many_arguments,
     reason = "session mapping keeps explicit fields"
 )]
-async fn thread_session_state_from_thread_response(
+fn thread_session_state_from_thread_response(
     thread_id: &str,
     thread_name: Option<String>,
     rollout_path: Option<PathBuf>,
@@ -1323,12 +1384,11 @@ async fn thread_session_state_from_thread_response(
     cwd: PathBuf,
     reasoning_effort: Option<praxis_protocol::openai_models::ReasoningEffort>,
     selfwork_plan_path: Option<PathBuf>,
-    config: &Config,
+    history_log_id: u64,
+    history_entry_count: u64,
 ) -> Result<ThreadSessionState, String> {
     let thread_id = ThreadId::from_string(thread_id)
         .map_err(|err| format!("thread id `{thread_id}` is invalid: {err}"))?;
-    let (history_log_id, history_entry_count) = message_history::history_metadata(config).await;
-    let history_entry_count = u64::try_from(history_entry_count).unwrap_or(u64::MAX);
 
     Ok(ThreadSessionState {
         thread_id,
@@ -1506,6 +1566,8 @@ mod tests {
             approvals_reviewer: praxis_app_gateway_protocol::ApprovalsReviewer::User,
             sandbox: praxis_protocol::protocol::SandboxPolicy::new_read_only_policy().into(),
             reasoning_effort: None,
+            history_log_id: 0,
+            history_entry_count: 0,
         };
 
         let started = started_thread_from_resume_response(response.clone(), &config)
@@ -1517,16 +1579,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_configured_populates_history_metadata() {
-        let temp_dir = tempfile::tempdir().expect("tempdir");
-        let config = build_config(&temp_dir).await;
         let thread_id = ThreadId::new();
-
-        message_history::append_entry("older", &thread_id, &config)
-            .await
-            .expect("history append should succeed");
-        message_history::append_entry("newer", &thread_id, &config)
-            .await
-            .expect("history append should succeed");
 
         let session = thread_session_state_from_thread_response(
             &thread_id.to_string(),
@@ -1541,12 +1594,12 @@ mod tests {
             PathBuf::from("/tmp/project"),
             /*reasoning_effort*/ None,
             /*selfwork_plan_path*/ None,
-            &config,
+            /*history_log_id*/ 42,
+            /*history_entry_count*/ 2,
         )
-        .await
         .expect("session should map");
 
-        assert_ne!(session.history_log_id, 0);
+        assert_eq!(session.history_log_id, 42);
         assert_eq!(session.history_entry_count, 2);
     }
 

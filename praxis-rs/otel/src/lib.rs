@@ -2,8 +2,9 @@ pub mod config;
 mod events;
 pub mod metrics;
 pub mod provider;
-pub mod trace_context;
+mod trace_context;
 
+mod naming;
 mod otlp;
 mod targets;
 

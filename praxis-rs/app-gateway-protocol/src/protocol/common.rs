@@ -75,6 +75,7 @@ pub enum GatewayCapabilityKind {
     HostSurface,
     MetraCommand,
     MetraSurface,
+    ProductBridge,
     SemanticTree,
     Input,
 }
@@ -428,6 +429,10 @@ client_request_definitions! {
         params: api::ThreadRegenerateNameParams,
         response: api::ThreadRegenerateNameResponse,
     },
+    ThreadModelSet => "thread/model/set" {
+        params: api::ThreadModelSetParams,
+        response: api::ThreadModelSetResponse,
+    },
     ThreadMetadataUpdate => "thread/metadata/update" {
         params: api::ThreadMetadataUpdateParams,
         response: api::ThreadMetadataUpdateResponse,
@@ -444,6 +449,14 @@ client_request_definitions! {
         params: api::ThreadShellCommandParams,
         response: api::ThreadShellCommandResponse,
     },
+    ThreadHistoryAppend => "thread/history/append" {
+        params: api::ThreadHistoryAppendParams,
+        response: api::ThreadHistoryAppendResponse,
+    },
+    ThreadHistoryEntryGet => "thread/history/get" {
+        params: api::ThreadHistoryEntryGetParams,
+        response: api::ThreadHistoryEntryGetResponse,
+    },
     #[experimental("thread/backgroundTerminals/clean")]
     ThreadBackgroundTerminalsClean => "thread/backgroundTerminals/clean" {
         params: api::ThreadBackgroundTerminalsCleanParams,
@@ -456,6 +469,10 @@ client_request_definitions! {
     ThreadList => "thread/list" {
         params: api::ThreadListParams,
         response: api::ThreadListResponse,
+    },
+    ThreadLookup => "thread/lookup" {
+        params: api::ThreadLookupParams,
+        response: api::ThreadLookupResponse,
     },
     ThreadLoadedList => "thread/loaded/list" {
         params: api::ThreadLoadedListParams,
@@ -585,6 +602,11 @@ client_request_definitions! {
     ThreadRealtimeAppendAudio => "thread/realtime/appendAudio" {
         params: api::ThreadRealtimeAppendAudioParams,
         response: api::ThreadRealtimeAppendAudioResponse,
+    },
+    #[experimental("audio/transcribe")]
+    AudioTranscribe => "audio/transcribe" {
+        params: api::AudioTranscribeParams,
+        response: api::AudioTranscribeResponse,
     },
     #[experimental("thread/realtime/appendText")]
     ThreadRealtimeAppendText => "thread/realtime/appendText" {
@@ -973,6 +995,12 @@ server_request_definitions! {
         response: api::DynamicToolCallResponse,
     },
 
+    /// Execute a product-level bridge command on an attached host extension.
+    Cunning3dBridgeCall => "cunning3d/bridge/call" {
+        params: api::Cunning3dBridgeCallParams,
+        response: api::Cunning3dBridgeCallResponse,
+    },
+
     ChatgptAuthTokensRefresh => "account/chatgptAuthTokens/refresh" {
         params: api::ChatgptAuthTokensRefreshParams,
         response: api::ChatgptAuthTokensRefreshResponse,
@@ -1076,6 +1104,7 @@ server_notification_definitions! {
     ThreadControlChanged => "thread/control/changed" (api::ThreadControlChangedNotification),
     ThreadGoalUpdated => "thread/goal/updated" (api::ThreadGoalUpdatedNotification),
     ThreadGoalCleared => "thread/goal/cleared" (api::ThreadGoalClearedNotification),
+    ThreadModelChanged => "thread/model/changed" (api::ThreadModelChangedNotification),
     TurnStarted => "turn/started" (api::TurnStartedNotification),
     HookStarted => "hook/started" (api::HookStartedNotification),
     TurnCompleted => "turn/completed" (api::TurnCompletedNotification),
@@ -1182,6 +1211,7 @@ mod tests {
                         "item/agentMessage/delta".to_string(),
                     ]),
                 }),
+                host_extensions: Vec::new(),
             },
         };
 
@@ -1247,6 +1277,7 @@ mod tests {
                             "item/agentMessage/delta".to_string(),
                         ]),
                     }),
+                    host_extensions: Vec::new(),
                 },
             }
         );
@@ -1426,6 +1457,8 @@ mod tests {
                 approvals_reviewer: api::ApprovalsReviewer::User,
                 sandbox: api::SandboxPolicy::DangerFullAccess,
                 reasoning_effort: None,
+                history_log_id: 0,
+                history_entry_count: 0,
             },
         };
 
@@ -1465,7 +1498,9 @@ mod tests {
                     "sandbox": {
                         "type": "dangerFullAccess"
                     },
-                    "reasoningEffort": null
+                    "reasoningEffort": null,
+                    "historyLogId": 0,
+                    "historyEntryCount": 0
                 }
             }),
             serde_json::to_value(&response)?,

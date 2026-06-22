@@ -5,10 +5,11 @@ use crate::types::RateLimitStatusPayload;
 use crate::types::TurnAttemptsSiblingTurnsResponse;
 use anyhow::Result;
 use praxis_client::build_reqwest_client_with_custom_ca;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::default_client::get_praxis_user_agent;
 use praxis_protocol::account::PlanType as AccountPlanType;
 use praxis_protocol::protocol::CreditsSnapshot;
+use praxis_protocol::protocol::OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID;
 use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_protocol::protocol::RateLimitWindow;
 use reqwest::StatusCode;
@@ -81,8 +82,8 @@ impl From<anyhow::Error> for RequestError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathStyle {
-    /// /api/codex/…
-    CodexApi,
+    /// Hosted agent API; currently served under the legacy /api/codex/... route.
+    HostedAgentApi,
     /// /wham/…
     ChatGptApi,
 }
@@ -92,7 +93,7 @@ impl PathStyle {
         if base_url.contains("/backend-api") {
             PathStyle::ChatGptApi
         } else {
-            PathStyle::CodexApi
+            PathStyle::HostedAgentApi
         }
     }
 }
@@ -133,7 +134,7 @@ impl Client {
         })
     }
 
-    pub fn from_auth(base_url: impl Into<String>, auth: &CodexAuth) -> Result<Self> {
+    pub fn from_auth(base_url: impl Into<String>, auth: &OpenAiAccountAuth) -> Result<Self> {
         let token = auth.get_token().map_err(anyhow::Error::from)?;
         let mut client = Self::new(base_url)?
             .with_user_agent(get_praxis_user_agent())
@@ -249,14 +250,16 @@ impl Client {
         let snapshots = self.get_rate_limits_many().await?;
         let preferred = snapshots
             .iter()
-            .find(|snapshot| snapshot.limit_id.as_deref() == Some("codex"))
+            .find(|snapshot| {
+                snapshot.limit_id.as_deref() == Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
+            })
             .cloned();
         Ok(preferred.unwrap_or_else(|| snapshots[0].clone()))
     }
 
     pub async fn get_rate_limits_many(&self) -> Result<Vec<RateLimitSnapshot>> {
         let url = match self.path_style {
-            PathStyle::CodexApi => format!("{}/api/codex/usage", self.base_url),
+            PathStyle::HostedAgentApi => format!("{}/api/codex/usage", self.base_url),
             PathStyle::ChatGptApi => format!("{}/wham/usage", self.base_url),
         };
         let req = self.http.get(&url).headers(self.headers());
@@ -273,7 +276,7 @@ impl Client {
         cursor: Option<&str>,
     ) -> Result<PaginatedListTaskListItem> {
         let url = match self.path_style {
-            PathStyle::CodexApi => format!("{}/api/codex/tasks/list", self.base_url),
+            PathStyle::HostedAgentApi => format!("{}/api/codex/tasks/list", self.base_url),
             PathStyle::ChatGptApi => format!("{}/wham/tasks/list", self.base_url),
         };
         let req = self.http.get(&url).headers(self.headers());
@@ -311,7 +314,7 @@ impl Client {
         task_id: &str,
     ) -> Result<(CodeTaskDetailsResponse, String, String)> {
         let url = match self.path_style {
-            PathStyle::CodexApi => format!("{}/api/codex/tasks/{}", self.base_url, task_id),
+            PathStyle::HostedAgentApi => format!("{}/api/codex/tasks/{}", self.base_url, task_id),
             PathStyle::ChatGptApi => format!("{}/wham/tasks/{}", self.base_url, task_id),
         };
         let req = self.http.get(&url).headers(self.headers());
@@ -326,7 +329,7 @@ impl Client {
         turn_id: &str,
     ) -> Result<TurnAttemptsSiblingTurnsResponse> {
         let url = match self.path_style {
-            PathStyle::CodexApi => format!(
+            PathStyle::HostedAgentApi => format!(
                 "{}/api/codex/tasks/{}/turns/{}/sibling_turns",
                 self.base_url, task_id, turn_id
             ),
@@ -348,7 +351,7 @@ impl Client {
         &self,
     ) -> std::result::Result<ConfigFileResponse, RequestError> {
         let url = match self.path_style {
-            PathStyle::CodexApi => format!("{}/api/codex/config/requirements", self.base_url),
+            PathStyle::HostedAgentApi => format!("{}/api/codex/config/requirements", self.base_url),
             PathStyle::ChatGptApi => format!("{}/wham/config/requirements", self.base_url),
         };
         let req = self.http.get(&url).headers(self.headers());
@@ -361,7 +364,7 @@ impl Client {
     /// based on `path_style`. Returns the created task id.
     pub async fn create_task(&self, request_body: serde_json::Value) -> Result<String> {
         let url = match self.path_style {
-            PathStyle::CodexApi => format!("{}/api/codex/tasks", self.base_url),
+            PathStyle::HostedAgentApi => format!("{}/api/codex/tasks", self.base_url),
             PathStyle::ChatGptApi => format!("{}/wham/tasks", self.base_url),
         };
         let req = self
@@ -398,7 +401,7 @@ impl Client {
     ) -> Vec<RateLimitSnapshot> {
         let plan_type = Some(Self::map_plan_type(payload.plan_type));
         let mut snapshots = vec![Self::make_rate_limit_snapshot(
-            Some("codex".to_string()),
+            Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string()),
             /*limit_name*/ None,
             payload.rate_limit.flatten().map(|details| *details),
             payload.credits.flatten().map(|details| *details),
@@ -561,7 +564,10 @@ mod tests {
         let snapshots = Client::rate_limit_snapshots_from_payload(payload);
         assert_eq!(snapshots.len(), 2);
 
-        assert_eq!(snapshots[0].limit_id.as_deref(), Some("codex"));
+        assert_eq!(
+            snapshots[0].limit_id.as_deref(),
+            Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
+        );
         assert_eq!(snapshots[0].limit_name, None);
         assert_eq!(
             snapshots[0].primary.as_ref().map(|w| w.used_percent),
@@ -606,7 +612,10 @@ mod tests {
 
         let snapshots = Client::rate_limit_snapshots_from_payload(payload);
         assert_eq!(snapshots.len(), 2);
-        assert_eq!(snapshots[0].limit_id.as_deref(), Some("codex"));
+        assert_eq!(
+            snapshots[0].limit_id.as_deref(),
+            Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
+        );
         assert_eq!(snapshots[0].limit_name, None);
         assert_eq!(snapshots[0].primary, None);
         assert_eq!(snapshots[1].limit_id.as_deref(), Some("praxis_other"));
@@ -629,8 +638,8 @@ mod tests {
                 plan_type: Some(AccountPlanType::Pro),
             },
             RateLimitSnapshot {
-                limit_id: Some("codex".to_string()),
-                limit_name: Some("codex".to_string()),
+                limit_id: Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string()),
+                limit_name: Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string()),
                 primary: Some(RateLimitWindow {
                     used_percent: 10.0,
                     window_minutes: Some(60),
@@ -644,9 +653,14 @@ mod tests {
 
         let preferred = snapshots
             .iter()
-            .find(|snapshot| snapshot.limit_id.as_deref() == Some("codex"))
+            .find(|snapshot| {
+                snapshot.limit_id.as_deref() == Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
+            })
             .cloned()
             .unwrap_or_else(|| snapshots[0].clone());
-        assert_eq!(preferred.limit_id.as_deref(), Some("codex"));
+        assert_eq!(
+            preferred.limit_id.as_deref(),
+            Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
+        );
     }
 }

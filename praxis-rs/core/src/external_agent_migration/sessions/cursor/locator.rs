@@ -4,8 +4,8 @@ const CURSOR_WORKSPACE_STORAGE: &str = "workspaceStorage";
 const CURSOR_GLOBAL_STORAGE: &str = "globalStorage";
 
 pub(super) struct CursorPaths {
-    pub workspace_storage: PathBuf,
-    pub global_db: PathBuf,
+    pub(super) workspace_storage: PathBuf,
+    pub(super) global_db: PathBuf,
 }
 
 pub(super) fn locate_cursor_paths() -> Option<CursorPaths> {

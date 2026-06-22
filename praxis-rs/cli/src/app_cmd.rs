@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::path::PathBuf;
 
-const DEFAULT_CODEX_DMG_URL: &str = "https://persistent.oaistatic.com/praxis-app-prod/Praxis.dmg";
+const DEFAULT_PRAXIS_DMG_URL: &str = "https://persistent.oaistatic.com/praxis-app-prod/Praxis.dmg";
 
 #[derive(Debug, Parser)]
 pub struct AppCommand {
@@ -10,7 +10,7 @@ pub struct AppCommand {
     pub path: PathBuf,
 
     /// Override the macOS DMG download URL (advanced).
-    #[arg(long, default_value = DEFAULT_CODEX_DMG_URL)]
+    #[arg(long, default_value = DEFAULT_PRAXIS_DMG_URL)]
     pub download_url: String,
 }
 

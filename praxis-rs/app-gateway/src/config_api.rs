@@ -195,7 +195,7 @@ impl ConfigApi {
         params: ConfigReadParams,
     ) -> Result<ConfigReadResponse, JSONRPCErrorError> {
         let fallback_cwd = params.cwd.as_ref().map(PathBuf::from);
-        let mut response = self
+        let response = self
             .config_service()
             .read(core_config_read_params(params))
             .await
@@ -353,7 +353,7 @@ impl ConfigApi {
     }
 }
 
-pub(crate) fn protected_feature_keys(
+fn protected_feature_keys(
     config_layer_stack: &praxis_core::config_loader::ConfigLayerStack,
 ) -> BTreeSet<String> {
     let mut protected_features = config_layer_stack
@@ -771,7 +771,7 @@ mod tests {
     use praxis_core::config_loader::NetworkUnixSocketPermissionsToml as CoreNetworkUnixSocketPermissionsToml;
     use praxis_features::Feature;
     use praxis_login::AuthManager;
-    use praxis_login::CodexAuth;
+    use praxis_login::OpenAiAccountAuth;
     use praxis_protocol::protocol::AskForApproval as CoreAskForApproval;
     use pretty_assertions::assert_eq;
     use serde_json::json;
@@ -1047,7 +1047,8 @@ mod tests {
                 .await
                 .expect("load analytics config"),
         );
-        let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("test"));
+        let auth_manager =
+            AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("test"));
         let config_api = ConfigApi::new(
             praxis_home.path().to_path_buf(),
             Arc::new(RwLock::new(Vec::new())),

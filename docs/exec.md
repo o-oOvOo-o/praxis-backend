@@ -1,3 +1,6 @@
 # Non-interactive mode
 
-For information about non-interactive mode, see [this documentation](https://developers.openai.com/codex/noninteractive).
+Use `praxis exec` for non-interactive mode.
+
+The command runs a single prompt or resumed task and prints output inline,
+making it suitable for scripts and CI workflows.

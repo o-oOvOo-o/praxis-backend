@@ -15,7 +15,7 @@ use praxis_api::Provider as ApiProvider;
 use praxis_api::provider::RetryConfig as ApiRetryConfig;
 use praxis_login::AuthManager;
 use praxis_login::AuthMode;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::read_openai_api_key_from_env;
 
 use crate::api_bridge::CoreAuthProvider;
@@ -29,7 +29,7 @@ use crate::model_provider_info::WireApi;
 use crate::provider_auth::auth_manager_for_provider;
 
 const OPENAI_API_BASE_URL: &str = "https://api.openai.com/v1";
-const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+const CHATGPT_HOSTED_RESPONSES_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AuthRequestPurpose {
@@ -40,7 +40,7 @@ pub(crate) enum AuthRequestPurpose {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ProviderInterface {
-    CodexResponsesLogin,
+    OpenAiResponsesLogin,
     ResponsesApiKey,
     OpenAiCompatible,
     ClaudeCode,
@@ -74,7 +74,7 @@ pub(crate) enum ProviderHeaderSource {
 
 #[derive(Clone)]
 pub(crate) struct AuthResolution {
-    auth: Option<CodexAuth>,
+    auth: Option<OpenAiAccountAuth>,
     auth_mode: Option<AuthMode>,
     api_auth: CoreAuthProvider,
     source: AuthDecisionSource,
@@ -83,7 +83,7 @@ pub(crate) struct AuthResolution {
 }
 
 pub(crate) struct ProviderRequestSetup {
-    pub(crate) auth: Option<CodexAuth>,
+    pub(crate) auth: Option<OpenAiAccountAuth>,
     pub(crate) auth_mode: Option<AuthMode>,
     pub(crate) api_provider: ApiProvider,
     pub(crate) api_auth: CoreAuthProvider,
@@ -238,14 +238,14 @@ impl ProviderDecisionCenter {
     }
 
     fn may_use_managed_auth(&self, provider: &ModelProviderInfo) -> bool {
-        provider.has_command_auth() || provider.requires_openai_auth || provider.is_openai()
+        provider.can_use_managed_auth()
     }
 
     fn resolve_from_managed_auth(
         &self,
         provider: &ModelProviderInfo,
         purpose: AuthRequestPurpose,
-        auth: CodexAuth,
+        auth: OpenAiAccountAuth,
     ) -> Result<AuthResolution> {
         let auth_mode = auth.auth_mode();
         let source = if provider.has_command_auth() {
@@ -293,12 +293,8 @@ impl ProviderInterface {
     fn from_provider(provider: &ModelProviderInfo, auth_mode: Option<AuthMode>) -> Self {
         match provider.wire_api {
             WireApi::Responses => {
-                if matches!(
-                    auth_mode,
-                    Some(AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens)
-                ) || provider.requires_openai_auth
-                {
-                    Self::CodexResponsesLogin
+                if is_chatgpt_auth_mode(auth_mode) || provider.requires_openai_auth {
+                    Self::OpenAiResponsesLogin
                 } else {
                     Self::ResponsesApiKey
                 }
@@ -314,11 +310,8 @@ fn resolve_provider_endpoint(
     auth_mode: Option<AuthMode>,
 ) -> Result<ProviderEndpointResolution> {
     let headers = resolve_provider_headers(provider)?;
-    let default_base_url = if matches!(
-        auth_mode,
-        Some(AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens)
-    ) {
-        CHATGPT_CODEX_BASE_URL
+    let default_base_url = if is_chatgpt_auth_mode(auth_mode) {
+        CHATGPT_HOSTED_RESPONSES_BASE_URL
     } else {
         OPENAI_API_BASE_URL
     };
@@ -345,6 +338,13 @@ fn resolve_provider_endpoint(
         api_provider,
         header_sources: headers.sources,
     })
+}
+
+fn is_chatgpt_auth_mode(auth_mode: Option<AuthMode>) -> bool {
+    matches!(
+        auth_mode,
+        Some(AuthMode::Chatgpt | AuthMode::ChatgptAuthTokens)
+    )
 }
 
 fn resolve_provider_headers(provider: &ModelProviderInfo) -> Result<ProviderHeaderResolution> {

@@ -209,7 +209,7 @@ pub(crate) async fn maybe_emit_implicit_skill_invocation(
     }
 
     turn_context.session_telemetry.counter(
-        "codex.skill.injected",
+        "praxis.skill.injected",
         /*inc*/ 1,
         &[
             ("status", "ok"),

@@ -216,11 +216,12 @@ impl ToolHandler for UnifiedExecHandler {
 
                 let workdir = workdir.map(|dir| context.turn.resolve_path(Some(dir)));
                 let cwd = workdir.clone().unwrap_or(cwd);
+                let permissions = context.turn.effective_permissions();
                 let managed_permissions = prepare_managed_execution_permissions(
                     context.session.as_ref(),
                     sandbox_permissions,
                     additional_permissions,
-                    context.turn.approval_policy.value(),
+                    permissions.approval_policy.value(),
                     &cwd,
                 )
                 .await?;

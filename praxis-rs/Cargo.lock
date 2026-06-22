@@ -6632,6 +6632,7 @@ dependencies = [
  "assert_cmd",
  "assert_matches",
  "async-channel",
+ "async-stream",
  "async-trait",
  "base64 0.22.1",
  "bm25",
@@ -6679,6 +6680,7 @@ dependencies = [
  "praxis-hooks",
  "praxis-instructions",
  "praxis-login",
+ "praxis-loop",
  "praxis-mcp",
  "praxis-network-proxy",
  "praxis-otel",
@@ -7055,6 +7057,18 @@ dependencies = [
  "urlencoding",
  "webbrowser",
  "wiremock",
+]
+
+[[package]]
+name = "praxis-loop"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -8737,6 +8751,7 @@ dependencies = [
  "js-sys",
  "log",
  "mime",
+ "mime_guess",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",

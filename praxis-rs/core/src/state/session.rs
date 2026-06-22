@@ -10,6 +10,7 @@ use crate::context_manager::ContextManager;
 use crate::praxis::PreviousTurnSettings;
 use crate::praxis::SessionConfiguration;
 use crate::session_startup_prewarm::SessionStartupPrewarmHandle;
+use praxis_protocol::protocol::OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID;
 use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_protocol::protocol::TokenUsage;
 use praxis_protocol::protocol::TokenUsageInfo;
@@ -220,13 +221,13 @@ impl SessionState {
 
 // Sometimes new snapshots don't include credits or plan information.
 // Preserve those from the previous snapshot when missing. For `limit_id`, treat
-// missing values as the default `"codex"` bucket.
+// missing values as the OpenAI default bucket.
 fn merge_rate_limit_fields(
     previous: Option<&RateLimitSnapshot>,
     mut snapshot: RateLimitSnapshot,
 ) -> RateLimitSnapshot {
     if snapshot.limit_id.is_none() {
-        snapshot.limit_id = Some("codex".to_string());
+        snapshot.limit_id = Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string());
     }
     if snapshot.credits.is_none() {
         snapshot.credits = previous.and_then(|prior| prior.credits.clone());

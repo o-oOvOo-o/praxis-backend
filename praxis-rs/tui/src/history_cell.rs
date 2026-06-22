@@ -228,16 +228,8 @@ impl HistoryCellMouseTarget {
     pub(crate) fn contains_row(&self, row: u16) -> bool {
         row >= self.row_start && row <= self.row_end
     }
-
-    fn offset(mut self, row_offset: u16) -> Self {
-        self.row_start = self.row_start.saturating_add(row_offset);
-        self.row_end = self.row_end.saturating_add(row_offset);
-        self
-    }
 }
 
-pub(crate) const REASONING_TOGGLE_KEY_HINT: &str = "F6";
-pub(crate) const TOOL_OUTPUT_TOGGLE_KEY_HINT: &str = "F7";
 pub(crate) const DIFF_TOGGLE_KEY_HINT: &str = "F8";
 
 pub(crate) fn history_presentation_revision() -> u64 {
@@ -598,14 +590,12 @@ impl HistoryCell for ResumeReplayHistoryCell {
     }
 }
 
-#[cfg_attr(debug_assertions, allow(dead_code))]
 #[derive(Debug)]
 pub(crate) struct UpdateAvailableHistoryCell {
     latest_version: String,
     update_action: Option<UpdateAction>,
 }
 
-#[cfg_attr(debug_assertions, allow(dead_code))]
 impl UpdateAvailableHistoryCell {
     pub(crate) fn new(latest_version: String, update_action: Option<UpdateAction>) -> Self {
         Self {
@@ -624,7 +614,9 @@ impl HistoryCell for UpdateAvailableHistoryCell {
         } else {
             line![
                 "See ",
-                "https://github.com/openai/codex".cyan().underlined(),
+                "https://github.com/o-oOvOo-o/praxis-backend"
+                    .cyan()
+                    .underlined(),
                 " for installation options."
             ]
         };
@@ -639,7 +631,7 @@ impl HistoryCell for UpdateAvailableHistoryCell {
             update_instruction,
             "",
             "See full release notes:",
-            "https://github.com/openai/codex/releases/latest"
+            "https://github.com/o-oOvOo-o/praxis-backend/releases/latest"
                 .cyan()
                 .underlined(),
         ];
@@ -660,7 +652,7 @@ pub(crate) struct PrefixedWrappedHistoryCell {
 }
 
 impl PrefixedWrappedHistoryCell {
-    pub(crate) fn new(
+    fn new(
         text: impl Into<Text<'static>>,
         initial_prefix: impl Into<Line<'static>>,
         subsequent_prefix: impl Into<Line<'static>>,
@@ -902,7 +894,7 @@ fn exec_snippet(command: &[String]) -> String {
     truncate_exec_snippet(&full_cmd)
 }
 
-pub fn new_approval_decision_cell(
+pub(crate) fn new_approval_decision_cell(
     command: Vec<String>,
     decision: praxis_protocol::protocol::ReviewDecision,
     actor: ApprovalDecisionActor,
@@ -918,7 +910,7 @@ pub fn new_approval_decision_cell(
                 vec![
                     actor.subject().into(),
                     "approved".bold(),
-                    " codex to run ".into(),
+                    " Praxis to run ".into(),
                     snippet,
                     " this time".bold(),
                 ],
@@ -933,7 +925,7 @@ pub fn new_approval_decision_cell(
                 vec![
                     actor.subject().into(),
                     "approved".bold(),
-                    " codex to always run commands that start with ".into(),
+                    " Praxis to always run commands that start with ".into(),
                     snippet,
                 ],
             )
@@ -945,7 +937,7 @@ pub fn new_approval_decision_cell(
                 vec![
                     actor.subject().into(),
                     "approved".bold(),
-                    " codex to run ".into(),
+                    " Praxis to run ".into(),
                     snippet,
                     " every time this session".bold(),
                 ],
@@ -968,7 +960,7 @@ pub fn new_approval_decision_cell(
                 vec![
                     actor.subject().into(),
                     "denied".bold(),
-                    " codex network access to ".into(),
+                    " Praxis network access to ".into(),
                     Span::from(network_policy_amendment.host).dim(),
                     " and saved that rule".into(),
                 ],
@@ -980,13 +972,13 @@ pub fn new_approval_decision_cell(
                 ApprovalDecisionActor::User => vec![
                     actor.subject().into(),
                     "did not approve".bold(),
-                    " codex to run ".into(),
+                    " Praxis to run ".into(),
                     snippet,
                 ],
                 ApprovalDecisionActor::Guardian => vec![
                     "Request ".into(),
                     "denied".bold(),
-                    " for codex to run ".into(),
+                    " for Praxis to run ".into(),
                     snippet,
                 ],
             };
@@ -1014,7 +1006,7 @@ pub fn new_approval_decision_cell(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApprovalDecisionActor {
+pub(crate) enum ApprovalDecisionActor {
     User,
     Guardian,
 }
@@ -1028,11 +1020,11 @@ impl ApprovalDecisionActor {
     }
 }
 
-pub fn new_guardian_denied_patch_request(files: Vec<String>) -> Box<dyn HistoryCell> {
+pub(crate) fn new_guardian_denied_patch_request(files: Vec<String>) -> Box<dyn HistoryCell> {
     let mut summary = vec![
         "Request ".into(),
         "denied".bold(),
-        " for codex to apply ".into(),
+        " for Praxis to apply ".into(),
     ];
     if files.len() == 1 {
         summary.push("a patch touching ".into());
@@ -1050,7 +1042,7 @@ pub fn new_guardian_denied_patch_request(files: Vec<String>) -> Box<dyn HistoryC
     ))
 }
 
-pub fn new_guardian_denied_action_request(summary: String) -> Box<dyn HistoryCell> {
+pub(crate) fn new_guardian_denied_action_request(summary: String) -> Box<dyn HistoryCell> {
     let line = Line::from(vec![
         "Request ".into(),
         "denied".bold(),
@@ -1060,7 +1052,7 @@ pub fn new_guardian_denied_action_request(summary: String) -> Box<dyn HistoryCel
     Box::new(PrefixedWrappedHistoryCell::new(line, "✗ ".red(), "  "))
 }
 
-pub fn new_guardian_approved_action_request(summary: String) -> Box<dyn HistoryCell> {
+pub(crate) fn new_guardian_approved_action_request(summary: String) -> Box<dyn HistoryCell> {
     let line = Line::from(vec![
         "Request ".into(),
         "approved".bold(),
@@ -1207,7 +1199,7 @@ pub(crate) fn padded_emoji(emoji: &str) -> String {
 }
 
 #[derive(Debug)]
-pub struct SessionInfoCell(CompositeHistoryCell);
+pub(crate) struct SessionInfoCell(CompositeHistoryCell);
 
 impl HistoryCell for SessionInfoCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -1332,7 +1324,8 @@ const RESTING_PUPPY_FRAME: PuppyAnimationFrame = PuppyAnimationFrame {
 };
 
 impl SessionHeaderHistoryCell {
-    pub(crate) fn new(
+    #[cfg(test)]
+    fn new(
         model: String,
         reasoning_effort: Option<ReasoningEffortConfig>,
         show_fast_status: bool,
@@ -1350,7 +1343,8 @@ impl SessionHeaderHistoryCell {
         )
     }
 
-    pub(crate) fn new_animated(
+    #[cfg(test)]
+    fn new_animated(
         model: String,
         reasoning_effort: Option<ReasoningEffortConfig>,
         show_fast_status: bool,
@@ -1368,44 +1362,7 @@ impl SessionHeaderHistoryCell {
         )
     }
 
-    pub(crate) fn new_with_style(
-        model: String,
-        model_style: Style,
-        reasoning_effort: Option<ReasoningEffortConfig>,
-        show_fast_status: bool,
-        directory: PathBuf,
-        version: &'static str,
-    ) -> Self {
-        Self::new_with_style_internal(
-            model,
-            model_style,
-            reasoning_effort,
-            show_fast_status,
-            directory,
-            version,
-            /*animations_enabled*/ false,
-        )
-    }
-
-    pub(crate) fn new_with_style_animated(
-        model: String,
-        model_style: Style,
-        reasoning_effort: Option<ReasoningEffortConfig>,
-        show_fast_status: bool,
-        directory: PathBuf,
-        version: &'static str,
-    ) -> Self {
-        Self::new_with_style_internal(
-            model,
-            model_style,
-            reasoning_effort,
-            show_fast_status,
-            directory,
-            version,
-            /*animations_enabled*/ true,
-        )
-    }
-
+    #[cfg(test)]
     fn new_with_style_internal(
         model: String,
         model_style: Style,
@@ -1432,18 +1389,8 @@ impl SessionHeaderHistoryCell {
         }
     }
 
-    pub(crate) fn apply_startup_context(
-        &mut self,
-        _praxis_home: &Path,
-        _current_session_id: Option<ThreadId>,
-        auth_plan: Option<PlanType>,
-        _recent_activity_limit: usize,
-    ) {
-        self.billing_label = plan_type_display(auth_plan);
-        self.recent_activity = Vec::new();
-    }
-
-    pub(crate) fn set_startup_notice(&mut self, notice: Option<String>) {
+    #[cfg(test)]
+    fn set_startup_notice(&mut self, notice: Option<String>) {
         self.startup_notice = notice.and_then(|notice| {
             let trimmed = notice.trim();
             (!trimmed.is_empty()).then(|| trimmed.to_string())
@@ -2201,22 +2148,6 @@ impl HistoryCell for SessionHeaderHistoryCell {
     }
 }
 
-fn plan_type_display(plan: Option<PlanType>) -> String {
-    match plan {
-        Some(PlanType::Free) => "Free".to_string(),
-        Some(PlanType::Go) => "Go".to_string(),
-        Some(PlanType::Plus) => "Plus".to_string(),
-        Some(PlanType::Pro) => "Pro".to_string(),
-        Some(PlanType::Team) => "Team".to_string(),
-        Some(PlanType::SelfServeBusinessUsageBased) => "Business Usage".to_string(),
-        Some(PlanType::Business) => "Business".to_string(),
-        Some(PlanType::EnterpriseCbpUsageBased) => "Enterprise Usage".to_string(),
-        Some(PlanType::Enterprise) => "Enterprise".to_string(),
-        Some(PlanType::Edu) => "Edu".to_string(),
-        Some(PlanType::Unknown) | None => "API Usage Billing".to_string(),
-    }
-}
-
 #[derive(Debug)]
 pub(crate) struct CompositeHistoryCell {
     parts: Vec<Box<dyn HistoryCell>>,
@@ -2674,7 +2605,7 @@ pub(crate) fn empty_mcp_output() -> PlainHistoryCell {
         "  • No MCP servers configured.".italic().into(),
         Line::from(vec![
             "    See the ".into(),
-            "\u{1b}]8;;https://developers.openai.com/codex/mcp\u{7}MCP docs\u{1b}]8;;\u{7}"
+            "\u{1b}]8;;https://github.com/o-oOvOo-o/praxis-backend/blob/main/docs/config.md#connecting-to-mcp-servers\u{7}MCP docs\u{1b}]8;;\u{7}"
                 .underlined(),
             " to configure them.".into(),
         ])
@@ -4327,7 +4258,7 @@ mod tests {
         let summary = Line::from(vec![
             "You ".into(),
             "approved".bold(),
-            " codex to run ".into(),
+            " Praxis to run ".into(),
             "echo something really long to ensure wrapping happens".dim(),
             " this time".bold(),
         ]);
@@ -4336,7 +4267,7 @@ mod tests {
         assert_eq!(
             rendered,
             vec![
-                "✔ You approved codex to".to_string(),
+                "✔ You approved Praxis to".to_string(),
                 "  run echo something".to_string(),
                 "  really long to ensure".to_string(),
                 "  wrapping happens this".to_string(),

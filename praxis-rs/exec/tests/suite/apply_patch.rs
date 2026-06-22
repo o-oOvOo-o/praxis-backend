@@ -8,7 +8,7 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
-use praxis_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
+use praxis_apply_patch::PRAXIS_RUN_AS_APPLY_PATCH_ARG1;
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
@@ -24,7 +24,7 @@ fn test_standalone_exec_cli_can_use_apply_patch() -> anyhow::Result<()> {
     fs::write(&absolute_path, "original content\n")?;
 
     Command::new(praxis_utils_cargo_bin::cargo_bin("praxis-exec")?)
-        .arg(CODEX_CORE_APPLY_PATCH_ARG1)
+        .arg(PRAXIS_RUN_AS_APPLY_PATCH_ARG1)
         .arg(
             r#"*** Begin Patch
 *** Update File: source.txt

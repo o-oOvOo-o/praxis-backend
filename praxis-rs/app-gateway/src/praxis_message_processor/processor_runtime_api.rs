@@ -1,3 +1,4 @@
+use super::thread_rollout_locator::find_thread_rollout_path;
 use super::*;
 
 impl PraxisMessageProcessor {
@@ -41,6 +42,66 @@ impl PraxisMessageProcessor {
         ThreadId::from_string(thread_id).map_err(|err| {
             crate::json_rpc_error::invalid_request(format!("invalid thread id: {err}"))
         })
+    }
+
+    pub(crate) async fn ensure_thread_id_for_request(
+        &self,
+        thread_id: &str,
+        request_id: &ConnectionRequestId,
+    ) -> Option<ThreadId> {
+        match self.parse_thread_id(thread_id) {
+            Ok(id) => Some(id),
+            Err(error) => {
+                self.outgoing.send_error(request_id.clone(), error).await;
+                None
+            }
+        }
+    }
+
+    async fn ensure_thread_rollout_path_for_request(
+        &self,
+        thread_id: ThreadId,
+        scope: ThreadRolloutScope,
+        request_id: &ConnectionRequestId,
+    ) -> Option<PathBuf> {
+        match find_thread_rollout_path(&self.config, thread_id, scope).await {
+            Ok(path) => Some(path),
+            Err(error) => {
+                self.outgoing.send_error(request_id.clone(), error).await;
+                None
+            }
+        }
+    }
+
+    pub(super) async fn ensure_thread_rollout_for_request(
+        &self,
+        thread_id: &str,
+        scope: ThreadRolloutScope,
+        request_id: &ConnectionRequestId,
+    ) -> Option<(ThreadId, PathBuf)> {
+        let thread_id = self
+            .ensure_thread_id_for_request(thread_id, request_id)
+            .await?;
+        let rollout_path = self
+            .ensure_thread_rollout_path_for_request(thread_id, scope, request_id)
+            .await?;
+        Some((thread_id, rollout_path))
+    }
+
+    /// Load a thread by id, sending the error to the client on failure.
+    /// Returns None when the thread could not be loaded (error already sent).
+    pub(crate) async fn ensure_thread_for_request(
+        &self,
+        thread_id: &str,
+        request_id: &ConnectionRequestId,
+    ) -> Option<(ThreadId, Arc<PraxisThread>)> {
+        match self.load_thread(thread_id).await {
+            Ok(v) => Some(v),
+            Err(error) => {
+                self.outgoing.send_error(request_id.clone(), error).await;
+                None
+            }
+        }
     }
 
     pub(crate) async fn load_latest_config(

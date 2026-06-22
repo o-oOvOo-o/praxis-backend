@@ -1,6 +1,6 @@
 use anyhow::Result;
 use core_test_support::get_remote_test_env;
-use core_test_support::test_codex::test_env;
+use core_test_support::test_praxis::test_env;
 use praxis_exec_server::RemoveOptions;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;

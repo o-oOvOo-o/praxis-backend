@@ -28,6 +28,7 @@ use futures::SinkExt;
 use futures::StreamExt;
 use praxis_app_gateway_protocol::ClientNotification;
 use praxis_app_gateway_protocol::ClientRequest;
+use praxis_app_gateway_protocol::HostExtensionInfo;
 use praxis_app_gateway_protocol::InitializeParams;
 use praxis_app_gateway_protocol::JSONRPCError;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
@@ -65,6 +66,7 @@ pub struct RemoteAppGatewayConnectArgs {
     pub client_version: String,
     pub experimental_api: bool,
     pub opt_out_notification_methods: Vec<String>,
+    pub host_extensions: Vec<HostExtensionInfo>,
     pub channel_capacity: usize,
 }
 
@@ -75,6 +77,7 @@ impl RemoteAppGatewayConnectArgs {
             self.client_version.as_str(),
             self.experimental_api,
             &self.opt_out_notification_methods,
+            self.host_extensions.clone(),
         )
     }
 }

@@ -3,7 +3,7 @@
 
 use core_test_support::responses;
 use core_test_support::test_praxis_exec::test_praxis_exec;
-use praxis_login::default_client::CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
+use praxis_login::default_client::PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
 use wiremock::matchers::header;
 
 /// Verify that when the server reports an error, `praxis-exec` exits with a
@@ -21,7 +21,7 @@ async fn send_praxis_exec_originator() -> anyhow::Result<()> {
     responses::mount_sse_once_match(&server, header("Originator", "praxis_exec"), body).await;
 
     test.cmd_with_server(&server)
-        .env_remove(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
+        .env_remove(PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR)
         .arg("--skip-git-repo-check")
         .arg("tell me something")
         .assert()
@@ -44,7 +44,10 @@ async fn supports_originator_override() -> anyhow::Result<()> {
         .await;
 
     test.cmd_with_server(&server)
-        .env("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", "praxis_exec_override")
+        .env(
+            "PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE",
+            "praxis_exec_override",
+        )
         .arg("--skip-git-repo-check")
         .arg("tell me something")
         .assert()

@@ -1,10 +1,13 @@
 use super::*;
 use crate::config::CONFIG_TOML_FILE;
+use crate::plugins::curated::curated_plugins_github_api_url;
+use crate::plugins::curated::curated_plugins_sha_path;
+use crate::plugins::marketplace::marketplace_manifest_path;
 use crate::plugins::test_support::TEST_CURATED_PLUGIN_SHA;
+use crate::plugins::test_support::write_curated_marketplace;
 use crate::plugins::test_support::write_curated_plugin_sha;
 use crate::plugins::test_support::write_file;
-use crate::plugins::test_support::write_openai_curated_marketplace;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use pretty_assertions::assert_eq;
 use std::io::Write;
 use std::path::Path;
@@ -17,6 +20,18 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
+
+fn curated_repo_api_path() -> String {
+    curated_plugins_github_api_url("")
+}
+
+fn curated_repo_git_ref_path() -> String {
+    format!("{}/git/ref/heads/main", curated_repo_api_path())
+}
+
+fn curated_repo_zipball_path(sha: &str) -> String {
+    format!("{}/zipball/{sha}", curated_repo_api_path())
+}
 
 fn has_plugins_clone_dirs(praxis_home: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(praxis_home.join(".tmp")) else {
@@ -46,7 +61,7 @@ fn curated_plugins_repo_path_uses_praxis_home_tmp_dir() {
 fn read_curated_plugins_sha_reads_trimmed_sha_file() {
     let tmp = tempdir().expect("tempdir");
     std::fs::create_dir_all(tmp.path().join(".tmp")).expect("create tmp");
-    std::fs::write(tmp.path().join(".tmp/plugins.sha"), "abc123\n").expect("write sha");
+    std::fs::write(curated_plugins_sha_path(tmp.path()), "abc123\n").expect("write sha");
 
     assert_eq!(
         read_curated_plugins_sha(tmp.path()).as_deref(),
@@ -99,7 +114,7 @@ fn remove_stale_curated_repo_temp_dirs_removes_only_matching_directories() {
 
 #[cfg(unix)]
 #[test]
-fn sync_openai_plugins_repo_prefers_git_when_available() {
+fn sync_curated_plugins_repo_prefers_git_when_available() {
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempdir().expect("tempdir");
@@ -143,7 +158,7 @@ exit 1
     permissions.set_mode(0o755);
     std::fs::set_permissions(&git_path, permissions).expect("chmod");
 
-    let synced_sha = sync_openai_plugins_repo_with_transport_overrides(
+    let synced_sha = sync_curated_plugins_repo_with_transport_overrides(
         tmp.path(),
         git_path.to_str().expect("utf8 path"),
         "http://127.0.0.1:9",
@@ -152,27 +167,23 @@ exit 1
 
     assert_eq!(synced_sha, sha);
     assert!(curated_plugins_repo_path(tmp.path()).join(".git").is_dir());
-    assert!(
-        curated_plugins_repo_path(tmp.path())
-            .join(".agents/plugins/marketplace.json")
-            .is_file()
-    );
+    assert!(marketplace_manifest_path(&curated_plugins_repo_path(tmp.path())).is_file());
     assert_eq!(read_curated_plugins_sha(tmp.path()).as_deref(), Some(sha));
 }
 
 #[tokio::test]
-async fn sync_openai_plugins_repo_falls_back_to_http_when_git_is_unavailable() {
+async fn sync_curated_plugins_repo_falls_back_to_http_when_git_is_unavailable() {
     let tmp = tempdir().expect("tempdir");
     let server = MockServer::start().await;
     let sha = "0123456789abcdef0123456789abcdef01234567";
 
     Mock::given(method("GET"))
-        .and(path("/repos/openai/plugins"))
+        .and(path(curated_repo_api_path()))
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"default_branch":"main"}"#))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/repos/openai/plugins/git/ref/heads/main"))
+        .and(path(curated_repo_git_ref_path()))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_string(format!(r#"{{"object":{{"sha":"{sha}"}}}}"#)),
@@ -180,7 +191,7 @@ async fn sync_openai_plugins_repo_falls_back_to_http_when_git_is_unavailable() {
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path(format!("/repos/openai/plugins/zipball/{sha}")))
+        .and(path(curated_repo_zipball_path(sha)))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("content-type", "application/zip")
@@ -192,7 +203,7 @@ async fn sync_openai_plugins_repo_falls_back_to_http_when_git_is_unavailable() {
     let server_uri = server.uri();
     let tmp_path = tmp.path().to_path_buf();
     let synced_sha = tokio::task::spawn_blocking(move || {
-        sync_openai_plugins_repo_with_transport_overrides(
+        sync_curated_plugins_repo_with_transport_overrides(
             tmp_path.as_path(),
             "missing-git-for-test",
             &server_uri,
@@ -204,7 +215,7 @@ async fn sync_openai_plugins_repo_falls_back_to_http_when_git_is_unavailable() {
 
     let repo_path = curated_plugins_repo_path(tmp.path());
     assert_eq!(synced_sha, sha);
-    assert!(repo_path.join(".agents/plugins/marketplace.json").is_file());
+    assert!(marketplace_manifest_path(&repo_path).is_file());
     assert!(
         repo_path
             .join("plugins/gmail/.praxis-plugin/plugin.json")
@@ -215,7 +226,7 @@ async fn sync_openai_plugins_repo_falls_back_to_http_when_git_is_unavailable() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn sync_openai_plugins_repo_falls_back_to_http_when_git_sync_fails() {
+async fn sync_curated_plugins_repo_falls_back_to_http_when_git_sync_fails() {
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempdir().expect("tempdir");
@@ -242,12 +253,12 @@ exit 1
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/repos/openai/plugins"))
+        .and(path(curated_repo_api_path()))
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"default_branch":"main"}"#))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/repos/openai/plugins/git/ref/heads/main"))
+        .and(path(curated_repo_git_ref_path()))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_string(format!(r#"{{"object":{{"sha":"{sha}"}}}}"#)),
@@ -255,7 +266,7 @@ exit 1
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path(format!("/repos/openai/plugins/zipball/{sha}")))
+        .and(path(curated_repo_zipball_path(sha)))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("content-type", "application/zip")
@@ -267,7 +278,7 @@ exit 1
     let server_uri = server.uri();
     let tmp_path = tmp.path().to_path_buf();
     let synced_sha = tokio::task::spawn_blocking(move || {
-        sync_openai_plugins_repo_with_transport_overrides(
+        sync_curated_plugins_repo_with_transport_overrides(
             tmp_path.as_path(),
             git_path.to_str().expect("utf8 path"),
             &server_uri,
@@ -279,7 +290,7 @@ exit 1
 
     let repo_path = curated_plugins_repo_path(tmp.path());
     assert_eq!(synced_sha, sha);
-    assert!(repo_path.join(".agents/plugins/marketplace.json").is_file());
+    assert!(marketplace_manifest_path(&repo_path).is_file());
     assert!(
         repo_path
             .join("plugins/gmail/.praxis-plugin/plugin.json")
@@ -290,7 +301,7 @@ exit 1
 
 #[cfg(unix)]
 #[test]
-fn sync_openai_plugins_repo_via_git_cleans_up_staged_dir_on_clone_failure() {
+fn sync_curated_plugins_repo_via_git_cleans_up_staged_dir_on_clone_failure() {
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempdir().expect("tempdir");
@@ -327,7 +338,7 @@ exit 1
     permissions.set_mode(0o755);
     std::fs::set_permissions(&git_path, permissions).expect("chmod");
 
-    let err = sync_openai_plugins_repo_via_git(tmp.path(), git_path.to_str().expect("utf8 path"))
+    let err = sync_curated_plugins_repo_via_git(tmp.path(), git_path.to_str().expect("utf8 path"))
         .expect_err("git sync should fail");
 
     assert!(err.contains("fatal: early EOF"));
@@ -335,18 +346,18 @@ exit 1
 }
 
 #[tokio::test]
-async fn sync_openai_plugins_repo_via_http_cleans_up_staged_dir_on_extract_failure() {
+async fn sync_curated_plugins_repo_via_http_cleans_up_staged_dir_on_extract_failure() {
     let tmp = tempdir().expect("tempdir");
     let server = MockServer::start().await;
     let sha = "0123456789abcdef0123456789abcdef01234567";
 
     Mock::given(method("GET"))
-        .and(path("/repos/openai/plugins"))
+        .and(path(curated_repo_api_path()))
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"default_branch":"main"}"#))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/repos/openai/plugins/git/ref/heads/main"))
+        .and(path(curated_repo_git_ref_path()))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_string(format!(r#"{{"object":{{"sha":"{sha}"}}}}"#)),
@@ -354,7 +365,7 @@ async fn sync_openai_plugins_repo_via_http_cleans_up_staged_dir_on_extract_failu
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path(format!("/repos/openai/plugins/zipball/{sha}")))
+        .and(path(curated_repo_zipball_path(sha)))
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("content-type", "application/zip")
@@ -366,7 +377,7 @@ async fn sync_openai_plugins_repo_via_http_cleans_up_staged_dir_on_extract_failu
     let server_uri = server.uri();
     let tmp_path = tmp.path().to_path_buf();
     let err = tokio::task::spawn_blocking(move || {
-        sync_openai_plugins_repo_via_http(tmp_path.as_path(), &server_uri)
+        sync_curated_plugins_repo_via_http(tmp_path.as_path(), &server_uri)
     })
     .await
     .expect("sync task should join")
@@ -377,27 +388,27 @@ async fn sync_openai_plugins_repo_via_http_cleans_up_staged_dir_on_extract_failu
 }
 
 #[tokio::test]
-async fn sync_openai_plugins_repo_skips_archive_download_when_sha_matches() {
+async fn sync_curated_plugins_repo_skips_archive_download_when_sha_matches() {
     let tmp = tempdir().expect("tempdir");
     let repo_path = curated_plugins_repo_path(tmp.path());
     std::fs::create_dir_all(repo_path.join(".agents/plugins")).expect("create repo");
     std::fs::write(
-        repo_path.join(".agents/plugins/marketplace.json"),
+        marketplace_manifest_path(&repo_path),
         r#"{"name":"openai-curated","plugins":[]}"#,
     )
     .expect("write marketplace");
     std::fs::create_dir_all(tmp.path().join(".tmp")).expect("create tmp");
     let sha = "fedcba9876543210fedcba9876543210fedcba98";
-    std::fs::write(tmp.path().join(".tmp/plugins.sha"), format!("{sha}\n")).expect("write sha");
+    std::fs::write(curated_plugins_sha_path(tmp.path()), format!("{sha}\n")).expect("write sha");
 
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/repos/openai/plugins"))
+        .and(path(curated_repo_api_path()))
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"{"default_branch":"main"}"#))
         .mount(&server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/repos/openai/plugins/git/ref/heads/main"))
+        .and(path(curated_repo_git_ref_path()))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_string(format!(r#"{{"object":{{"sha":"{sha}"}}}}"#)),
@@ -408,7 +419,7 @@ async fn sync_openai_plugins_repo_skips_archive_download_when_sha_matches() {
     let server_uri = server.uri();
     let tmp_path = tmp.path().to_path_buf();
     tokio::task::spawn_blocking(move || {
-        sync_openai_plugins_repo_with_transport_overrides(
+        sync_curated_plugins_repo_with_transport_overrides(
             tmp_path.as_path(),
             "missing-git-for-test",
             &server_uri,
@@ -419,14 +430,14 @@ async fn sync_openai_plugins_repo_skips_archive_download_when_sha_matches() {
     .expect("sync should succeed");
 
     assert_eq!(read_curated_plugins_sha(tmp.path()).as_deref(), Some(sha));
-    assert!(repo_path.join(".agents/plugins/marketplace.json").is_file());
+    assert!(marketplace_manifest_path(&repo_path).is_file());
 }
 
 #[tokio::test]
 async fn startup_remote_plugin_sync_writes_marker_and_reconciles_state() {
     let tmp = tempdir().expect("tempdir");
     let curated_root = curated_plugins_repo_path(tmp.path());
-    write_openai_curated_marketplace(&curated_root, &["linear"]);
+    write_curated_marketplace(&curated_root, &["linear"]);
     write_curated_plugin_sha(tmp.path());
     write_file(
         &tmp.path().join(CONFIG_TOML_FILE),
@@ -454,8 +465,9 @@ enabled = false
     let mut config = crate::plugins::test_support::load_plugins_config(tmp.path()).await;
     config.chatgpt_base_url = format!("{}/backend-api/", server.uri());
     let manager = Arc::new(PluginsManager::new(tmp.path().to_path_buf()));
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
 
     start_startup_remote_plugin_sync_once(
         Arc::clone(&manager),

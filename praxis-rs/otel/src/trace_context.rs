@@ -14,6 +14,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const TRACEPARENT_ENV_VAR: &str = "TRACEPARENT";
 const TRACESTATE_ENV_VAR: &str = "TRACESTATE";
+const W3C_TRACEPARENT_HEADER: &str = "traceparent";
+const W3C_TRACESTATE_HEADER: &str = "tracestate";
 static TRACEPARENT_CONTEXT: OnceLock<Option<Context>> = OnceLock::new();
 
 pub fn current_span_w3c_trace_context() -> Option<W3cTraceContext> {
@@ -30,8 +32,8 @@ pub fn span_w3c_trace_context(span: &Span) -> Option<W3cTraceContext> {
     TraceContextPropagator::new().inject_context(&context, &mut headers);
 
     Some(W3cTraceContext {
-        traceparent: headers.remove("traceparent"),
-        tracestate: headers.remove("tracestate"),
+        traceparent: headers.remove(W3C_TRACEPARENT_HEADER),
+        tracestate: headers.remove(W3C_TRACESTATE_HEADER),
     })
 }
 
@@ -75,9 +77,9 @@ pub(crate) fn context_from_trace_headers(
 ) -> Option<Context> {
     let traceparent = traceparent?;
     let mut headers = HashMap::new();
-    headers.insert("traceparent".to_string(), traceparent.to_string());
+    headers.insert(W3C_TRACEPARENT_HEADER.to_string(), traceparent.to_string());
     if let Some(tracestate) = tracestate {
-        headers.insert("tracestate".to_string(), tracestate.to_string());
+        headers.insert(W3C_TRACESTATE_HEADER.to_string(), tracestate.to_string());
     }
 
     let context = TraceContextPropagator::new().extract(&headers);

@@ -44,7 +44,6 @@ use crate::multi_agents::next_agent_shortcut_matches;
 use crate::multi_agents::previous_agent_shortcut_matches;
 use crate::multi_agents::subagent_display_name;
 use crate::pager_overlay::Overlay;
-use crate::read_session_model;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::resume_picker::SessionPickerAction;
 use crate::resume_picker::SessionSelection;
@@ -52,9 +51,7 @@ use crate::resume_picker::SessionTarget;
 use crate::status::format_tokens_compact;
 #[cfg(test)]
 use crate::test_support::PathBufExt;
-use crate::thread_pagination::all_thread_source_kinds;
 use crate::thread_pagination::loaded_thread_list_params;
-use crate::thread_pagination::thread_list_params;
 use crate::thread_replay_policy::compact_visible_replay_turns;
 use crate::tui;
 use crate::tui::TuiEvent;
@@ -64,13 +61,9 @@ use crate::tui2::InputVisual;
 use crate::ui_language::UiLanguage;
 use crate::update_action::UpdateAction;
 use crate::version::PRAXIS_CLI_VERSION;
-use crate::workspace::AgentPickerEffect;
 use crate::workspace::AgentPickerRow;
-use crate::workspace::AgentPickerState;
-use crate::workspace::SessionPickerEffect;
 use crate::workspace::SessionPickerOpenRequest;
 use crate::workspace::SessionPickerPageRequest;
-use crate::workspace::SessionPickerState;
 use crate::workspace::ThreadListRow;
 use crate::workspace::WORKSPACE_CHROME_HEIGHT;
 use crate::workspace::WORKSPACE_SUBAGENT_INDENT_STEP;
@@ -81,20 +74,21 @@ use crate::workspace::WorkspaceChromeMenu;
 use crate::workspace::WorkspaceChromeMenuState;
 use crate::workspace::WorkspaceContextMenuState;
 use crate::workspace::WorkspaceDeleteConfirmState;
+use crate::workspace::WorkspaceGatewayEffect;
+use crate::workspace::WorkspaceMainPaneEffect;
 use crate::workspace::WorkspaceMenuAction;
 use crate::workspace::WorkspaceOpenFolderState;
 use crate::workspace::WorkspaceOverlay;
-use crate::workspace::WorkspacePane;
+use crate::workspace::WorkspaceOverlayButtonTarget;
+use crate::workspace::WorkspacePaneSplit;
 use crate::workspace::WorkspaceRenameState;
 use crate::workspace::WorkspaceState;
 use crate::workspace::WorkspaceTheme;
 use crate::workspace::WorkspaceVisibleItem;
 use crate::workspace::parse_workspace_thread_id;
 use crate::workspace::refresh_workspace_subagent_summaries;
-use crate::workspace::render_agent_picker;
-use crate::workspace::render_session_picker;
-use crate::workspace::session_picker_thread_list_params;
 use crate::workspace::sort_workspace_thread_rows;
+use crate::workspace::workspace_archive_target_at;
 use crate::workspace::workspace_chrome_action_at;
 use crate::workspace::workspace_chrome_action_label;
 use crate::workspace::workspace_chrome_action_shortcut;
@@ -107,6 +101,16 @@ use crate::workspace::workspace_closed_subagents_detail;
 use crate::workspace::workspace_closed_subagents_label;
 use crate::workspace::workspace_context_subagent_lines;
 use crate::workspace::workspace_control_detail;
+use crate::workspace::workspace_delete_target_at;
+use crate::workspace::workspace_dialog_area;
+use crate::workspace::workspace_menu_action_at;
+use crate::workspace::workspace_menu_action_disabled;
+use crate::workspace::workspace_menu_action_label;
+use crate::workspace::workspace_menu_actions;
+use crate::workspace::workspace_open_folder_target_at;
+use crate::workspace::workspace_pane_split;
+use crate::workspace::workspace_popup_area;
+use crate::workspace::workspace_rename_target_at;
 use crate::workspace::workspace_row_control_marker;
 use crate::workspace::workspace_row_is_controlled;
 use crate::workspace::workspace_row_should_auto_observe;
@@ -117,6 +121,10 @@ use crate::workspace::workspace_row_tree_prefix;
 use crate::workspace::workspace_single_line;
 use crate::workspace::workspace_status_without_control;
 use crate::workspace::workspace_thread_display_name;
+use crate::workspace::workspace_thread_list_params;
+use crate::workspace::workspace_token_usage_thread_list_params;
+use crate::workspace::workspace_toolbar_areas;
+use crate::workspace::workspace_window_inner_area;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
 use crossterm::event::KeyCode;
@@ -130,7 +138,6 @@ use praxis_ansi_escape::ansi_escape_line;
 use praxis_app_gateway_client::AppGatewayRequestHandle;
 use praxis_app_gateway_client::TypedRequestError;
 use praxis_app_gateway_protocol::ClientRequest;
-use praxis_app_gateway_protocol::CodexErrorInfo as AppGatewayCodexErrorInfo;
 use praxis_app_gateway_protocol::FeedbackUploadParams;
 use praxis_app_gateway_protocol::FeedbackUploadResponse;
 use praxis_app_gateway_protocol::GetAccountRateLimitsResponse;
@@ -145,16 +152,16 @@ use praxis_app_gateway_protocol::PluginReadParams;
 use praxis_app_gateway_protocol::PluginReadResponse;
 use praxis_app_gateway_protocol::PluginUninstallParams;
 use praxis_app_gateway_protocol::PluginUninstallResponse;
+use praxis_app_gateway_protocol::PraxisErrorInfo as AppGatewayPraxisErrorInfo;
 use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::SkillsListResponse;
 use praxis_app_gateway_protocol::ThreadGoalStatus;
 use praxis_app_gateway_protocol::ThreadItem;
-use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadListResponse;
+use praxis_app_gateway_protocol::ThreadModelChangedNotification;
 use praxis_app_gateway_protocol::ThreadRollbackResponse;
-use praxis_app_gateway_protocol::ThreadSortKey;
 use praxis_app_gateway_protocol::ThreadStatus;
 use praxis_app_gateway_protocol::Turn;
 use praxis_app_gateway_protocol::TurnError as AppGatewayTurnError;
@@ -168,10 +175,9 @@ use praxis_core::config::ConfigOverrides;
 use praxis_core::config::edit::ConfigEdit;
 use praxis_core::config::edit::ConfigEditsBuilder;
 use praxis_core::config_loader::ConfigLayerStackOrdering;
-use praxis_core::message_history;
 use praxis_core::models_manager::collaboration_mode_presets::CollaborationModesConfig;
-use praxis_core::models_manager::model_presets::HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG;
 use praxis_core::models_manager::model_presets::HIDE_GPT5_1_MIGRATION_PROMPT_CONFIG;
+use praxis_core::models_manager::model_presets::HIDE_LEGACY_OPENAI_MODEL_MIGRATION_PROMPT_CONFIG;
 #[cfg(target_os = "windows")]
 use praxis_core::windows_sandbox::WindowsSandboxLevelExt;
 use praxis_features::Feature;
@@ -620,6 +626,13 @@ impl ThreadEventStore {
     fn push_notification(&mut self, notification: ServerNotification) {
         self.pending_interactive_replay
             .note_server_notification(&notification);
+        if let Some(session) = self.session.as_mut()
+            && let ServerNotification::ThreadModelChanged(notification) = &notification
+        {
+            session.model_provider_id = notification.model_provider.clone();
+            session.model = notification.model.clone();
+            session.reasoning_effort = notification.reasoning_effort;
+        }
         match &notification {
             ServerNotification::TurnStarted(turn) => {
                 self.active_turn_id = Some(turn.turn.id.clone());
@@ -788,7 +801,7 @@ fn should_show_model_migration_prompt(
 
 fn migration_prompt_hidden(config: &Config, migration_config_key: &str) -> bool {
     match migration_config_key {
-        HIDE_GPT_5_1_CODEX_MAX_MIGRATION_PROMPT_CONFIG => config
+        HIDE_LEGACY_OPENAI_MODEL_MIGRATION_PROMPT_CONFIG => config
             .notices
             .hide_gpt_5_1_praxis_max_migration_prompt
             .unwrap_or(false),
@@ -1055,8 +1068,6 @@ pub(crate) struct App {
     pending_app_gateway_requests: PendingAppGatewayRequests,
     workspace: WorkspaceState,
     workspace_observed_thread_ids: HashSet<ThreadId>,
-    workspace_session_picker_loaders:
-        HashMap<crate::SessionLookupSource, mpsc::UnboundedSender<SessionPickerPageRequest>>,
     mouse: MouseInteractionState,
     mouse_capture_resume_at: Option<Instant>,
 }
@@ -1131,6 +1142,25 @@ impl WorkspaceMouseTarget {
     }
 }
 
+impl From<WorkspaceOverlayButtonTarget> for WorkspaceMouseTarget {
+    fn from(target: WorkspaceOverlayButtonTarget) -> Self {
+        match target {
+            WorkspaceOverlayButtonTarget::OpenFolderConfirm => {
+                WorkspaceMouseTarget::OpenFolderConfirm
+            }
+            WorkspaceOverlayButtonTarget::OpenFolderCancel => {
+                WorkspaceMouseTarget::OpenFolderCancel
+            }
+            WorkspaceOverlayButtonTarget::RenameSave => WorkspaceMouseTarget::RenameSave,
+            WorkspaceOverlayButtonTarget::RenameCancel => WorkspaceMouseTarget::RenameCancel,
+            WorkspaceOverlayButtonTarget::ArchiveConfirm => WorkspaceMouseTarget::ArchiveConfirm,
+            WorkspaceOverlayButtonTarget::ArchiveCancel => WorkspaceMouseTarget::ArchiveCancel,
+            WorkspaceOverlayButtonTarget::DeleteConfirm => WorkspaceMouseTarget::DeleteConfirm,
+            WorkspaceOverlayButtonTarget::DeleteCancel => WorkspaceMouseTarget::DeleteCancel,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct MouseDownState {
     pane: MousePane,
@@ -1161,14 +1191,6 @@ fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
         && column < area.right()
         && row >= area.y
         && row < area.bottom()
-}
-
-fn offset_usize(value: usize, delta: isize) -> usize {
-    if delta < 0 {
-        value.saturating_sub(delta.unsigned_abs())
-    } else {
-        value.saturating_add(delta as usize)
-    }
 }
 
 fn capture_pane_text(buf: &ratatui::buffer::Buffer, area: Rect) -> Vec<String> {
@@ -1274,77 +1296,10 @@ const WORKSPACE_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
 const WORKSPACE_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
 const WORKSPACE_LIST_TOP_PADDING: u16 = 4;
 const WORKSPACE_ROW_HEIGHT: u16 = 3;
-const WORKSPACE_SPLIT_GAP: u16 = 1;
-const WORKSPACE_LIST_MIN_WIDTH: u16 = 32;
-const WORKSPACE_LIST_MAX_WIDTH: u16 = 58;
-const WORKSPACE_CHAT_MIN_WIDTH: u16 = 48;
 const WORKSPACE_CONTEXT_MENU_WIDTH: u16 = 36;
 const WORKSPACE_RENAME_POPUP_WIDTH: u16 = 34;
 const WORKSPACE_CONFIRM_POPUP_WIDTH: u16 = 30;
 const WORKSPACE_STATUS_LABEL_WIDTH: usize = 10;
-
-fn workspace_thread_list_params(
-    search_term: Option<String>,
-    cursor: Option<String>,
-) -> ThreadListParams {
-    thread_list_params(
-        cursor,
-        ThreadSortKey::UpdatedAt,
-        Some(all_thread_source_kinds()),
-        search_term,
-    )
-}
-
-fn token_usage_thread_list_params(limit: usize) -> ThreadListParams {
-    ThreadListParams {
-        cursor: None,
-        limit: Some(limit as u32),
-        sort_key: Some(ThreadSortKey::UpdatedAt),
-        model_providers: None,
-        source_kinds: Some(all_thread_source_kinds()),
-        archived: Some(false),
-        cwd: None,
-        search_term: None,
-    }
-}
-
-fn workspace_list_width(total_width: u16) -> u16 {
-    if total_width <= WORKSPACE_SPLIT_GAP.saturating_add(1) {
-        return total_width;
-    }
-    let desired = (total_width / 4).clamp(WORKSPACE_LIST_MIN_WIDTH, WORKSPACE_LIST_MAX_WIDTH);
-    let chat_floor = WORKSPACE_CHAT_MIN_WIDTH.min(total_width / 2).max(1);
-    desired
-        .min(total_width.saturating_sub(WORKSPACE_SPLIT_GAP + chat_floor))
-        .max(1)
-}
-
-fn workspace_window_inner_area(area: Rect) -> Rect {
-    if area.width <= 2 || area.height <= 2 {
-        return Rect::new(area.x, area.y, 0, 0);
-    }
-    Rect::new(
-        area.x.saturating_add(1),
-        area.y.saturating_add(1),
-        area.width.saturating_sub(2),
-        area.height.saturating_sub(2),
-    )
-}
-
-fn workspace_toolbar_areas(area: Rect) -> (Rect, Rect) {
-    if area.width <= 4 || area.height <= 2 {
-        return (Rect::default(), Rect::default());
-    }
-    let inner_x = area.x.saturating_add(1);
-    let inner_width = area.width.saturating_sub(2);
-    let y = area.y.saturating_add(1);
-    let new_width = inner_width.min(12);
-    let new_area = Rect::new(inner_x, y, new_width, 1);
-    let search_x = inner_x.saturating_add(new_width).saturating_add(1);
-    let search_width = area.right().saturating_sub(1).saturating_sub(search_x);
-    let search_area = Rect::new(search_x, y, search_width, 1);
-    (new_area, search_area)
-}
 
 fn workspace_row_style(
     theme: WorkspaceTheme,
@@ -1399,217 +1354,9 @@ fn workspace_status_style(theme: WorkspaceTheme, color: Color, controlled: bool)
     )
 }
 
-fn workspace_popup_area(
-    list_area: Rect,
-    anchor_column: u16,
-    anchor_row: u16,
-    width: u16,
-    height: u16,
-) -> Rect {
-    if list_area.is_empty() || width == 0 || height == 0 {
-        return Rect::default();
-    }
-    let width = width.min(list_area.width.saturating_sub(2).max(1));
-    let height = height.min(list_area.height.saturating_sub(2).max(1));
-    let min_x = list_area.x.saturating_add(1);
-    let min_y = list_area.y.saturating_add(1);
-    let max_x = list_area
-        .right()
-        .saturating_sub(width)
-        .saturating_sub(1)
-        .max(min_x);
-    let max_y = list_area
-        .bottom()
-        .saturating_sub(height)
-        .saturating_sub(1)
-        .max(min_y);
-    let x = anchor_column.clamp(min_x, max_x);
-    let y = anchor_row.clamp(min_y, max_y);
-    Rect::new(x, y, width, height)
-}
-
-fn workspace_dialog_area(list_area: Rect, width: u16, height: u16) -> Rect {
-    if list_area.is_empty() || width == 0 || height == 0 {
-        return Rect::default();
-    }
-    let width = width.min(list_area.width.saturating_sub(2).max(1));
-    let height = height.min(list_area.height.saturating_sub(2).max(1));
-    let x = list_area.x + list_area.width.saturating_sub(width) / 2;
-    let y = list_area.y + list_area.height.saturating_sub(height) / 2;
-    Rect::new(x, y, width, height)
-}
-
 fn workspace_search_term(query: &str) -> Option<String> {
     let query = query.trim();
     (!query.is_empty()).then(|| query.to_string())
-}
-
-fn workspace_menu_actions() -> &'static [WorkspaceMenuAction] {
-    &[
-        WorkspaceMenuAction::Open,
-        WorkspaceMenuAction::TogglePin,
-        WorkspaceMenuAction::Rename,
-        WorkspaceMenuAction::Archive,
-        WorkspaceMenuAction::Delete,
-        WorkspaceMenuAction::ForkLocal,
-        WorkspaceMenuAction::CopyThreadId,
-    ]
-}
-
-fn workspace_menu_action_label(
-    action: WorkspaceMenuAction,
-    pinned: bool,
-    locked: bool,
-    language: UiLanguage,
-) -> &'static str {
-    match language {
-        UiLanguage::En => match action {
-            WorkspaceMenuAction::Open if locked => "View locked",
-            WorkspaceMenuAction::Open => "Open",
-            WorkspaceMenuAction::TogglePin if pinned => "Unpin",
-            WorkspaceMenuAction::TogglePin => "Pin",
-            WorkspaceMenuAction::Rename if locked => "Rename locked",
-            WorkspaceMenuAction::Rename => "Rename...",
-            WorkspaceMenuAction::Archive if locked => "Archive locked",
-            WorkspaceMenuAction::Archive => "Archive",
-            WorkspaceMenuAction::Delete if locked => "Delete locked",
-            WorkspaceMenuAction::Delete => "Delete...",
-            WorkspaceMenuAction::ForkLocal if locked => "Fork locked",
-            WorkspaceMenuAction::ForkLocal => "Fork local",
-            WorkspaceMenuAction::CopyThreadId => "Copy thread id",
-        },
-        UiLanguage::Cn => match action {
-            WorkspaceMenuAction::Open if locked => "查看锁定线程",
-            WorkspaceMenuAction::Open => "打开",
-            WorkspaceMenuAction::TogglePin if pinned => "取消置顶",
-            WorkspaceMenuAction::TogglePin => "置顶",
-            WorkspaceMenuAction::Rename if locked => "重命名被锁定",
-            WorkspaceMenuAction::Rename => "重命名...",
-            WorkspaceMenuAction::Archive if locked => "归档被锁定",
-            WorkspaceMenuAction::Archive => "归档",
-            WorkspaceMenuAction::Delete if locked => "删除被锁定",
-            WorkspaceMenuAction::Delete => "删除...",
-            WorkspaceMenuAction::ForkLocal if locked => "派生被锁定",
-            WorkspaceMenuAction::ForkLocal => "派生到本地",
-            WorkspaceMenuAction::CopyThreadId => "复制线程 id",
-        },
-    }
-}
-
-fn workspace_menu_action_disabled(action: WorkspaceMenuAction, locked: bool) -> bool {
-    locked
-        && matches!(
-            action,
-            WorkspaceMenuAction::Rename
-                | WorkspaceMenuAction::Archive
-                | WorkspaceMenuAction::Delete
-                | WorkspaceMenuAction::ForkLocal
-        )
-}
-
-fn workspace_menu_action_at(
-    area: Option<Rect>,
-    column: u16,
-    row: u16,
-) -> Option<WorkspaceMenuAction> {
-    let area = area?;
-    if !rect_contains(area, column, row) {
-        return None;
-    }
-    let line_index = row.checked_sub(area.y.saturating_add(1))?;
-    workspace_menu_actions().get(line_index as usize).copied()
-}
-
-fn workspace_open_folder_target_at(
-    area: Option<Rect>,
-    column: u16,
-    row: u16,
-) -> Option<WorkspaceMouseTarget> {
-    let area = area?;
-    if !rect_contains(area, column, row) {
-        return None;
-    }
-    let action_y = area.bottom().saturating_sub(2);
-    if row != action_y {
-        return None;
-    }
-    let open_area = Rect::new(area.x.saturating_add(2), action_y, 10, 1);
-    let cancel_area = Rect::new(area.x.saturating_add(14), action_y, 12, 1);
-    if rect_contains(open_area, column, row) {
-        Some(WorkspaceMouseTarget::OpenFolderConfirm)
-    } else if rect_contains(cancel_area, column, row) {
-        Some(WorkspaceMouseTarget::OpenFolderCancel)
-    } else {
-        None
-    }
-}
-
-fn workspace_rename_target_at(
-    area: Option<Rect>,
-    column: u16,
-    row: u16,
-) -> Option<WorkspaceMouseTarget> {
-    let area = area?;
-    if !rect_contains(area, column, row) {
-        return None;
-    }
-    let action_y = area.bottom().saturating_sub(2);
-    if row != action_y {
-        return None;
-    }
-    let save_area = Rect::new(area.x.saturating_add(2), action_y, 8, 1);
-    let cancel_area = Rect::new(area.x.saturating_add(12), action_y, 10, 1);
-    if rect_contains(save_area, column, row) {
-        Some(WorkspaceMouseTarget::RenameSave)
-    } else if rect_contains(cancel_area, column, row) {
-        Some(WorkspaceMouseTarget::RenameCancel)
-    } else {
-        None
-    }
-}
-
-fn workspace_archive_target_at(
-    area: Option<Rect>,
-    column: u16,
-    row: u16,
-) -> Option<WorkspaceMouseTarget> {
-    let area = area?;
-    if !rect_contains(area, column, row) {
-        return None;
-    }
-    let action_y = area.bottom().saturating_sub(2);
-    if row != action_y {
-        return None;
-    }
-    let confirm_area = Rect::new(area.x.saturating_add(2), action_y, 10, 1);
-    let cancel_area = Rect::new(area.x.saturating_add(14), action_y, 10, 1);
-    if rect_contains(confirm_area, column, row) {
-        Some(WorkspaceMouseTarget::ArchiveConfirm)
-    } else if rect_contains(cancel_area, column, row) {
-        Some(WorkspaceMouseTarget::ArchiveCancel)
-    } else {
-        None
-    }
-}
-
-fn workspace_delete_target_at(
-    area: Option<Rect>,
-    column: u16,
-    row: u16,
-) -> Option<WorkspaceMouseTarget> {
-    let area = area?;
-    if !rect_contains(area, column, row) {
-        return None;
-    }
-    let confirm_area = Rect::new(area.x + 2, area.y + 3, 10, 1);
-    let cancel_area = Rect::new(area.x + 14, area.y + 3, 10, 1);
-    if rect_contains(confirm_area, column, row) {
-        Some(WorkspaceMouseTarget::DeleteConfirm)
-    } else if rect_contains(cancel_area, column, row) {
-        Some(WorkspaceMouseTarget::DeleteCancel)
-    } else {
-        None
-    }
 }
 
 fn previous_char_boundary(value: &str, cursor: usize) -> usize {
@@ -1730,7 +1477,7 @@ fn active_turn_not_steerable_turn_error(error: &TypedRequestError) -> Option<App
     let turn_error: AppGatewayTurnError = serde_json::from_value(source.data.clone()?).ok()?;
     matches!(
         turn_error.praxis_error_info,
-        Some(AppGatewayCodexErrorInfo::ActiveTurnNotSteerable { .. })
+        Some(AppGatewayPraxisErrorInfo::ActiveTurnNotSteerable { .. })
     )
     .then_some(turn_error)
 }
@@ -2632,7 +2379,10 @@ impl App {
     ) -> Result<()> {
         crate::session_log::log_outbound_op(&op);
 
-        if self.try_handle_local_history_op(thread_id, &op).await? {
+        if self
+            .try_submit_history_op_via_app_gateway(app_gateway, thread_id, &op)
+            .await?
+        {
             return Ok(());
         }
 
@@ -2932,60 +2682,23 @@ impl App {
         }
     }
 
-    /// Intercept composer-history operations and handle them locally against
-    /// `$PRAXIS_HOME/history.jsonl`, bypassing the app-gateway RPC layer.
-    async fn try_handle_local_history_op(
+    async fn try_submit_history_op_via_app_gateway(
         &mut self,
+        app_gateway: &mut AppGatewaySession,
         thread_id: ThreadId,
         op: &AppCommand,
     ) -> Result<bool> {
         match op.view() {
             AppCommandView::Other(Op::AddToHistory { text }) => {
-                let text = text.clone();
-                let config = self.chat_widget.config_ref().clone();
-                tokio::spawn(async move {
-                    if let Err(err) =
-                        message_history::append_entry(&text, &thread_id, &config).await
-                    {
-                        tracing::warn!(
-                            thread_id = %thread_id,
-                            error = %err,
-                            "failed to append to message history"
-                        );
-                    }
-                });
+                app_gateway
+                    .thread_history_append(thread_id, text.clone())
+                    .await?;
                 Ok(true)
             }
             AppCommandView::Other(Op::GetHistoryEntryRequest { offset, log_id }) => {
-                let offset = *offset;
-                let log_id = *log_id;
-                let config = self.chat_widget.config_ref().clone();
-                let app_event_tx = self.app_event_tx.clone();
-                tokio::spawn(async move {
-                    let entry_opt = tokio::task::spawn_blocking(move || {
-                        message_history::lookup(log_id, offset, &config)
-                    })
-                    .await
-                    .unwrap_or_else(|err| {
-                        tracing::warn!(error = %err, "history lookup task failed");
-                        None
-                    });
-
-                    app_event_tx.send(AppEvent::ThreadHistoryEntryResponse {
-                        thread_id,
-                        event: GetHistoryEntryResponseEvent {
-                            offset,
-                            log_id,
-                            entry: entry_opt.map(|entry| {
-                                praxis_protocol::message_history::HistoryEntry {
-                                    conversation_id: entry.session_id,
-                                    ts: entry.ts,
-                                    text: entry.text,
-                                }
-                            }),
-                        },
-                    });
-                });
+                app_gateway
+                    .thread_history_entry_get(thread_id, *offset, *log_id)
+                    .await?;
                 Ok(true)
             }
             _ => Ok(false),
@@ -3334,9 +3047,7 @@ impl App {
         session.model_provider_id = notification.thread.model_provider.clone();
         session.cwd = notification.thread.cwd.clone();
         let rollout_path = notification.thread.path.clone();
-        if let Some(model) =
-            read_session_model(&self.config, thread_id, rollout_path.as_deref()).await
-        {
+        if let Some(model) = notification.thread.model.clone() {
             session.model = model;
         } else if rollout_path.is_some() {
             session.model.clear();
@@ -3649,11 +3360,11 @@ impl App {
             })
             .collect();
 
-        self.workspace.open_agent_picker(AgentPickerState::new(
+        self.workspace.open_agent_picker(
             rows,
             initial_selected_idx,
             AgentNavigationState::picker_subtitle(),
-        ));
+        );
     }
 
     fn is_terminal_thread_read_error(err: &color_eyre::Report) -> bool {
@@ -3818,9 +3529,7 @@ impl App {
         session.cwd = thread.cwd.clone();
         session.rollout_path = thread.path.clone();
         session.selfwork_plan_path = thread.selfwork_plan_path.clone();
-        if let Some(model) =
-            read_session_model(&self.config, thread_id, thread.path.as_deref()).await
-        {
+        if let Some(model) = thread.model.clone() {
             session.model = model;
         } else if thread.path.is_some() {
             session.model.clear();
@@ -4580,7 +4289,7 @@ impl App {
             .as_ref()
             .is_some_and(|cmd| !cmd.is_empty())
         {
-            session_telemetry.counter("codex.status_line", /*inc*/ 1, &[]);
+            session_telemetry.counter("praxis.status_line", /*inc*/ 1, &[]);
         }
 
         let status_line_invalid_items_warned = Arc::new(AtomicBool::new(false));
@@ -4674,7 +4383,7 @@ impl App {
             }
             SessionSelection::Fork(target_session) => {
                 session_telemetry.counter(
-                    "codex.thread.fork",
+                    "praxis.thread.fork",
                     /*inc*/ 1,
                     &[("source", "cli_subcommand")],
                 );
@@ -4792,7 +4501,6 @@ impl App {
             pending_app_gateway_requests: PendingAppGatewayRequests::default(),
             workspace: WorkspaceState::new(workspace_mode),
             workspace_observed_thread_ids: HashSet::new(),
-            workspace_session_picker_loaders: HashMap::new(),
             mouse: MouseInteractionState::default(),
             mouse_capture_resume_at: None,
         };
@@ -5237,9 +4945,9 @@ impl App {
         let Some(thread_id) = self.workspace.rows.get(index).map(|row| row.thread_id) else {
             return;
         };
-        self.workspace.selected = visible_index;
         let visible_rows = self.workspace_visible_row_capacity();
-        self.workspace.ensure_selected_visible(visible_rows);
+        self.workspace
+            .select_visible_index(visible_index, visible_rows);
         self.workspace.clear_search_focus();
         self.workspace.overlay = WorkspaceOverlay::ContextMenu(WorkspaceContextMenuState {
             thread_id,
@@ -5313,19 +5021,12 @@ impl App {
         if self.workspace.enabled {
             if down.pane == MousePane::Chat
                 && self.mouse_pane_at(column, row) == Some(MousePane::Chat)
-                && self.workspace.session_picker().is_some()
             {
-                return self
-                    .handle_workspace_session_picker_mouse_up(tui, app_gateway, column, row)
-                    .await;
-            }
-            if down.pane == MousePane::Chat
-                && self.mouse_pane_at(column, row) == Some(MousePane::Chat)
-                && self.workspace.agent_picker().is_some()
-            {
-                return self
-                    .handle_workspace_agent_picker_mouse_up(tui, app_gateway, column, row)
-                    .await;
+                if let Some(effect) = self.workspace.handle_main_pane_mouse_up(column, row) {
+                    return self
+                        .handle_workspace_main_pane_effect(tui, app_gateway, effect)
+                        .await;
+                }
             }
             if down.pane == MousePane::Chat
                 && self.mouse_pane_at(column, row) == Some(MousePane::Chat)
@@ -5357,73 +5058,12 @@ impl App {
                         path: None,
                         thread_id,
                         thread_name: Some(thread_name),
+                        cwd: None,
                     },
                 )
                 .await
             }
         }
-    }
-
-    async fn handle_workspace_session_picker_mouse_up(
-        &mut self,
-        tui: &mut tui::Tui,
-        app_gateway: &mut AppGatewaySession,
-        column: u16,
-        row: u16,
-    ) -> Result<Option<AppRunControl>> {
-        let Some(chat_area) = self.workspace.chat_area else {
-            return Ok(None);
-        };
-        if !rect_contains(chat_area, column, row) {
-            return Ok(None);
-        }
-        let list_y = chat_area.y.saturating_add(4);
-        if row < list_y {
-            return Ok(None);
-        }
-        let effect = {
-            let Some(picker) = self.workspace.session_picker_mut() else {
-                return Ok(None);
-            };
-            let Some(index) = picker.selected_index_at_row(row.saturating_sub(list_y)) else {
-                return Ok(None);
-            };
-            picker.set_selected(index);
-            picker.activate_selected()
-        };
-        self.handle_workspace_session_picker_effect(tui, app_gateway, effect)
-            .await
-    }
-
-    async fn handle_workspace_agent_picker_mouse_up(
-        &mut self,
-        tui: &mut tui::Tui,
-        app_gateway: &mut AppGatewaySession,
-        column: u16,
-        row: u16,
-    ) -> Result<Option<AppRunControl>> {
-        let Some(chat_area) = self.workspace.chat_area else {
-            return Ok(None);
-        };
-        if !rect_contains(chat_area, column, row) {
-            return Ok(None);
-        }
-        let list_y = chat_area.y.saturating_add(4);
-        if row < list_y {
-            return Ok(None);
-        }
-        let effect = {
-            let Some(picker) = self.workspace.agent_picker_mut() else {
-                return Ok(None);
-            };
-            let Some(index) = picker.selected_index_at_row(row.saturating_sub(list_y)) else {
-                return Ok(None);
-            };
-            picker.set_selected(index);
-            picker.activate_selected()
-        };
-        self.handle_workspace_agent_picker_effect(tui, app_gateway, effect)
-            .await
     }
 
     async fn handle_workspace_chrome_mouse_up(
@@ -5621,9 +5261,8 @@ impl App {
                 self.workspace.clear_search_focus();
                 let visible_index = self.workspace.visible_index_for_row(index).unwrap_or(0);
                 self.workspace.toggle_subagents(index);
-                self.workspace.selected = visible_index;
                 self.workspace
-                    .ensure_selected_visible(self.workspace_visible_row_capacity());
+                    .select_visible_index(visible_index, self.workspace_visible_row_capacity());
                 Ok(None)
             }
             (
@@ -5637,9 +5276,8 @@ impl App {
                     .visible_index_for_closed_subagents(index)
                     .unwrap_or(0);
                 self.workspace.toggle_closed_subagents(index);
-                self.workspace.selected = visible_index;
                 self.workspace
-                    .ensure_selected_visible(self.workspace_visible_row_capacity());
+                    .select_visible_index(visible_index, self.workspace_visible_row_capacity());
                 Ok(None)
             }
             (
@@ -5724,14 +5362,16 @@ impl App {
             return Ok(None);
         };
         if down.workspace_thread_index != Some(up_index) {
-            self.workspace.selected = self.workspace_visible_index_at(column, row).unwrap_or(0);
-            self.workspace
-                .ensure_selected_visible(self.workspace_visible_row_capacity());
+            self.workspace.select_visible_index(
+                self.workspace_visible_index_at(column, row).unwrap_or(0),
+                self.workspace_visible_row_capacity(),
+            );
             return Ok(None);
         }
-        self.workspace.selected = self.workspace_visible_index_at(column, row).unwrap_or(0);
-        self.workspace
-            .ensure_selected_visible(self.workspace_visible_row_capacity());
+        self.workspace.select_visible_index(
+            self.workspace_visible_index_at(column, row).unwrap_or(0),
+            self.workspace_visible_row_capacity(),
+        );
         self.workspace.clear_search_focus();
         self.workspace.clear_overlay();
         let Some(row) = self.workspace.rows.get(up_index).cloned() else {
@@ -5744,6 +5384,7 @@ impl App {
                 path: row.path,
                 thread_id: row.thread_id,
                 thread_name: Some(row.name),
+                cwd: Some(row.cwd),
             },
         )
         .await
@@ -5792,6 +5433,7 @@ impl App {
                         path: row.path.clone(),
                         thread_id: row.thread_id,
                         thread_name: Some(row.name.clone()),
+                        cwd: Some(row.cwd.clone()),
                     },
                 )
                 .await
@@ -6076,20 +5718,7 @@ impl App {
                 .chat_area
                 .is_some_and(|area| rect_contains(area, column, row))
             {
-                let amount = delta_rows.unsigned_abs();
-                let previous = self.workspace.chat_scroll_from_bottom;
-                if delta_rows < 0 {
-                    self.workspace.chat_scroll_from_bottom = self
-                        .workspace
-                        .chat_scroll_from_bottom
-                        .saturating_add(amount);
-                } else {
-                    self.workspace.chat_scroll_from_bottom = self
-                        .workspace
-                        .chat_scroll_from_bottom
-                        .saturating_sub(amount);
-                }
-                return self.workspace.chat_scroll_from_bottom != previous;
+                return self.workspace.scroll_chat(delta_rows);
             }
             return false;
         }
@@ -6099,19 +5728,12 @@ impl App {
             .is_some_and(|area| rect_contains(area, column, row))
         {
             let visible_rows = self.workspace_visible_row_capacity();
-            let max_scroll = self
-                .workspace
-                .list_item_count()
-                .saturating_sub(visible_rows);
-            let previous_scroll = self.workspace.list_scroll;
             let previous_hover_thread = self.mouse.hover_workspace_thread_index;
             let previous_hover_target = self.mouse.hover_workspace_target;
-            self.workspace.list_scroll =
-                offset_usize(self.workspace.list_scroll, delta_rows).min(max_scroll);
-            self.workspace.clamp_list_scroll(visible_rows);
+            let scrolled = self.workspace.scroll_list(delta_rows, visible_rows);
             self.mouse.hover_workspace_thread_index = self.workspace_thread_index_at(column, row);
             self.mouse.hover_workspace_target = self.workspace_mouse_target_at(column, row);
-            return self.workspace.list_scroll != previous_scroll
+            return scrolled
                 || self.mouse.hover_workspace_thread_index != previous_hover_thread
                 || self.mouse.hover_workspace_target != previous_hover_target;
         }
@@ -6120,26 +5742,10 @@ impl App {
             .chat_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
-            if let Some(picker) = self.workspace.session_picker_mut() {
-                return picker.scroll_by(delta_rows);
+            if let Some(scrolled) = self.workspace.handle_main_pane_scroll(delta_rows) {
+                return scrolled;
             }
-            if let Some(picker) = self.workspace.agent_picker_mut() {
-                return picker.scroll_by(delta_rows);
-            }
-            let amount = delta_rows.unsigned_abs();
-            let previous = self.workspace.chat_scroll_from_bottom;
-            if delta_rows < 0 {
-                self.workspace.chat_scroll_from_bottom = self
-                    .workspace
-                    .chat_scroll_from_bottom
-                    .saturating_add(amount);
-            } else {
-                self.workspace.chat_scroll_from_bottom = self
-                    .workspace
-                    .chat_scroll_from_bottom
-                    .saturating_sub(amount);
-            }
-            return self.workspace.chat_scroll_from_bottom != previous;
+            return self.workspace.scroll_chat(delta_rows);
         }
         false
     }
@@ -6189,7 +5795,7 @@ impl App {
             }
             WorkspaceOverlay::OpenFolder(prompt) => {
                 if let Some(target) = workspace_open_folder_target_at(prompt.area, column, row) {
-                    return Some(target);
+                    return Some(target.into());
                 }
             }
             WorkspaceOverlay::ContextMenu(menu) => {
@@ -6199,17 +5805,17 @@ impl App {
             }
             WorkspaceOverlay::Rename(rename) => {
                 if let Some(target) = workspace_rename_target_at(rename.area, column, row) {
-                    return Some(target);
+                    return Some(target.into());
                 }
             }
             WorkspaceOverlay::ConfirmArchive(confirm) => {
                 if let Some(target) = workspace_archive_target_at(confirm.area, column, row) {
-                    return Some(target);
+                    return Some(target.into());
                 }
             }
             WorkspaceOverlay::ConfirmDelete(confirm) => {
                 if let Some(target) = workspace_delete_target_at(confirm.area, column, row) {
-                    return Some(target);
+                    return Some(target.into());
                 }
             }
             WorkspaceOverlay::None => {}
@@ -6284,7 +5890,7 @@ impl App {
         if thread_row.subagents.is_empty() {
             return false;
         }
-        let relative_index = visible_index.saturating_sub(self.workspace.list_scroll);
+        let relative_index = visible_index.saturating_sub(self.workspace.list_scroll());
         let row_y = area
             .y
             .saturating_add(WORKSPACE_LIST_TOP_PADDING)
@@ -6318,7 +5924,7 @@ impl App {
         }
 
         let visible_index = usize::from(relative_row / WORKSPACE_ROW_HEIGHT);
-        let index = self.workspace.list_scroll.saturating_add(visible_index);
+        let index = self.workspace.list_scroll().saturating_add(visible_index);
         (index < self.workspace.list_item_count()).then_some(index)
     }
 
@@ -6630,6 +6236,25 @@ impl App {
                 );
                 false
             }
+            ServerNotification::ThreadModelChanged(notification) => {
+                let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
+                    return true;
+                };
+                if !self.update_workspace_thread_row(
+                    thread_id,
+                    /*resort_after_update*/ false,
+                    |row| {
+                        if row.preview.trim().is_empty()
+                            || row.preview == notification.previous_model_provider
+                        {
+                            row.preview = notification.model_provider.clone();
+                        }
+                    },
+                ) {
+                    return true;
+                }
+                false
+            }
             ServerNotification::ThreadArchived(notification) => {
                 let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
                     return true;
@@ -6670,7 +6295,7 @@ impl App {
                 WORKSPACE_REFRESH_TIMEOUT,
                 request_handle.request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
                     request_id: RequestId::String(format!("praxis-token-usage-{}", Uuid::new_v4())),
-                    params: token_usage_thread_list_params(limit),
+                    params: workspace_token_usage_thread_list_params(limit),
                 }),
             )
             .await
@@ -6816,17 +6441,13 @@ impl App {
         self.workspace
             .expanded_closed_subagent_parent_ids
             .retain(|thread_id| loaded_thread_ids.contains(thread_id));
-        self.workspace.selected = if selected_was_load_more && self.workspace.rows.len() > old_len {
-            first_incoming_thread_id
-                .and_then(|thread_id| self.workspace.visible_index_for_thread(thread_id))
-                .unwrap_or_else(|| {
-                    old_visible_len.min(self.workspace.list_item_count().saturating_sub(1))
-                })
-        } else {
-            selected_thread_id
-                .and_then(|thread_id| self.workspace.visible_index_for_thread(thread_id))
-                .unwrap_or(0)
-        };
+        self.workspace.reconcile_selection_after_thread_refresh(
+            selected_was_load_more,
+            old_len,
+            old_visible_len,
+            first_incoming_thread_id,
+            selected_thread_id,
+        );
         let visible_rows = self.workspace_visible_row_capacity();
         if visible_rows > 0 {
             if was_empty
@@ -6866,7 +6487,7 @@ impl App {
                 area,
                 buf,
                 &self.transcript_cells,
-                self.workspace.chat_scroll_from_bottom,
+                self.workspace.chat_scroll_from_bottom(),
                 &self.workspace.launch,
             );
             self.update_mouse_pane_snapshot(MousePane::Chat, area, buf);
@@ -6895,46 +6516,25 @@ impl App {
                 .saturating_sub(content_y)
                 .saturating_sub(0),
         );
-        let list_width = workspace_list_width(content_area.width);
-        let gap_width = if list_width < content_area.width {
-            WORKSPACE_SPLIT_GAP.min(content_area.width.saturating_sub(list_width))
-        } else {
-            0
-        };
-        let list_area = Rect::new(
-            content_area.x,
-            content_area.y,
-            list_width,
-            content_area.height,
-        );
-        let gap_x = content_area.x.saturating_add(list_width);
-        let chat_x = gap_x.saturating_add(gap_width);
-        let chat_area = Rect::new(
-            chat_x,
-            content_area.y,
-            content_area
-                .right()
-                .saturating_sub(chat_x)
-                .saturating_sub(0),
-            content_area.height,
-        );
-        let gap_area = Rect::new(gap_x, content_area.y, gap_width, content_area.height);
+        let WorkspacePaneSplit {
+            list_area,
+            gap_area,
+            chat_area,
+        } = workspace_pane_split(content_area);
         self.workspace.list_area = Some(list_area);
         self.workspace.chat_area = (!chat_area.is_empty()).then_some(chat_area);
         self.workspace
             .clamp_list_scroll(self.workspace_visible_row_capacity());
-        let max_chat_scroll =
-            if chat_area.is_empty() || !matches!(self.workspace.main_pane, WorkspacePane::Chat) {
-                0
-            } else {
-                self.chat_widget.workspace_chat_scroll_limit_embedded(
-                    chat_area,
-                    &self.transcript_cells,
-                    self.workspace.chat_scroll_from_bottom,
-                )
-            };
-        self.workspace.chat_scroll_from_bottom =
-            self.workspace.chat_scroll_from_bottom.min(max_chat_scroll);
+        let max_chat_scroll = if chat_area.is_empty() || !self.workspace.chat_pane_is_active() {
+            0
+        } else {
+            self.chat_widget.workspace_chat_scroll_limit_embedded(
+                chat_area,
+                &self.transcript_cells,
+                self.workspace.chat_scroll_from_bottom(),
+            )
+        };
+        self.workspace.clamp_chat_scroll(max_chat_scroll);
         if !gap_area.is_empty() {
             buf.set_style(
                 gap_area,
@@ -6949,26 +6549,14 @@ impl App {
         }
         self.render_workspace_list(list_area, buf, false);
         if !chat_area.is_empty() {
-            match &mut self.workspace.main_pane {
-                WorkspacePane::SessionPicker(picker) => {
-                    let view_rows = usize::from(chat_area.height.saturating_sub(4)) / 3;
-                    picker.set_view_rows(view_rows.max(1));
-                    render_session_picker(chat_area, buf, picker);
-                }
-                WorkspacePane::AgentPicker(picker) => {
-                    let view_rows = usize::from(chat_area.height.saturating_sub(4)) / 3;
-                    picker.set_view_rows(view_rows.max(1));
-                    render_agent_picker(chat_area, buf, picker);
-                }
-                WorkspacePane::Chat | WorkspacePane::WorkerBoard(_) => {
-                    self.chat_widget.render_workspace_chat_embedded(
-                        chat_area,
-                        buf,
-                        &self.transcript_cells,
-                        self.workspace.chat_scroll_from_bottom,
-                        &self.workspace.launch,
-                    );
-                }
+            if !self.workspace.render_picker_pane(chat_area, buf) {
+                self.chat_widget.render_workspace_chat_embedded(
+                    chat_area,
+                    buf,
+                    &self.transcript_cells,
+                    self.workspace.chat_scroll_from_bottom(),
+                    &self.workspace.launch,
+                );
             }
             self.update_mouse_pane_snapshot(MousePane::Chat, chat_area, buf);
         } else {
@@ -7274,7 +6862,7 @@ impl App {
         let max_rows = ((area.height - WORKSPACE_LIST_TOP_PADDING) / WORKSPACE_ROW_HEIGHT) as usize;
         let visible_items = self.workspace.visible_items();
         let item_count = visible_items.len() + usize::from(self.workspace.has_load_more_row());
-        let first_visible_index = self.workspace.list_scroll.min(item_count);
+        let first_visible_index = self.workspace.list_scroll().min(item_count);
         let last_visible_index = first_visible_index.saturating_add(max_rows).min(item_count);
         let text_width = area.width.saturating_sub(4) as usize;
         for (screen_index, visible_item_index) in
@@ -7613,7 +7201,7 @@ impl App {
             .max(1)
             .min(track_height as usize) as u16;
         let max_scroll = total.saturating_sub(visible_rows).max(1);
-        let thumb_offset = ((self.workspace.list_scroll
+        let thumb_offset = ((self.workspace.list_scroll()
             * track_height.saturating_sub(thumb_height) as usize)
             / max_scroll) as u16;
         for offset in 0..thumb_height {
@@ -7895,10 +7483,8 @@ impl App {
             let allow_cwd_prompt = !self.workspace.enabled;
             match crate::resolve_cwd_for_resume_or_fork(
                 tui,
-                &self.config,
                 &current_cwd,
-                target_session.thread_id,
-                target_session.path.as_deref(),
+                target_session.cwd.as_deref(),
                 CwdPromptAction::Resume,
                 allow_cwd_prompt,
             )
@@ -7994,10 +7580,8 @@ impl App {
         } else {
             match crate::resolve_cwd_for_resume_or_fork(
                 tui,
-                &self.config,
                 &current_cwd,
-                target_session.thread_id,
-                target_session.path.as_deref(),
+                target_session.cwd.as_deref(),
                 CwdPromptAction::Resume,
                 /*allow_prompt*/ false,
             )
@@ -8092,7 +7676,7 @@ impl App {
         );
         self.replace_chat_widget(ChatWidget::new_with_app_event(init));
         self.reset_for_thread_switch(tui)?;
-        self.workspace.chat_scroll_from_bottom = 0;
+        self.workspace.reset_chat_scroll();
         self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
         self.chat_widget
             .set_thread_control_state(control_state.as_ref());
@@ -8247,50 +7831,25 @@ impl App {
             tracing::warn!(error = %err, "failed to enable mouse capture for Workspace picker");
         }
         self.workspace.enabled = true;
-        self.workspace_session_picker_loaders.clear();
-        let mut picker = SessionPickerState::new(SessionPickerOpenRequest {
-            source,
-            action,
-            include_non_interactive: false,
-        });
-        let effect = picker.start_initial_load();
-        self.workspace.open_session_picker(picker);
-        self.handle_workspace_session_picker_effect(tui, app_gateway, effect)
+        self.workspace.clear_session_picker_page_loaders();
+        let effect = self
+            .workspace
+            .open_session_picker(SessionPickerOpenRequest {
+                source,
+                action,
+                include_non_interactive: false,
+            });
+        self.handle_workspace_main_pane_effect(tui, app_gateway, effect)
             .await
-    }
-
-    async fn handle_workspace_session_picker_effect(
-        &mut self,
-        tui: &mut tui::Tui,
-        app_gateway: &mut AppGatewaySession,
-        effect: SessionPickerEffect,
-    ) -> Result<Option<AppRunControl>> {
-        match effect {
-            SessionPickerEffect::None => Ok(None),
-            SessionPickerEffect::Close => {
-                self.workspace.close_main_pane();
-                tui.frame_requester().schedule_frame();
-                Ok(None)
-            }
-            SessionPickerEffect::LoadPage(request) => {
-                self.queue_workspace_session_picker_page(request).await;
-                tui.frame_requester().schedule_frame();
-                Ok(None)
-            }
-            SessionPickerEffect::Select(selection) => {
-                self.workspace.close_main_pane();
-                self.apply_session_selection(tui, app_gateway, selection)
-                    .await
-            }
-        }
     }
 
     async fn queue_workspace_session_picker_page(&mut self, request: SessionPickerPageRequest) {
         let source = request.source;
-        if !self.workspace_session_picker_loaders.contains_key(&source) {
+        if !self.workspace.session_picker_page_loader_is_ready(source) {
             match self.spawn_workspace_session_picker_loader(source).await {
                 Ok(sender) => {
-                    self.workspace_session_picker_loaders.insert(source, sender);
+                    self.workspace
+                        .register_session_picker_page_loader(source, sender);
                 }
                 Err(err) => {
                     self.app_event_tx
@@ -8306,17 +7865,11 @@ impl App {
             }
         }
 
-        if let Some(sender) = self.workspace_session_picker_loaders.get(&source)
-            && sender.send(request.clone()).is_err()
-        {
-            self.workspace_session_picker_loaders.remove(&source);
+        if let Some((request, message)) = self.workspace.queue_session_picker_page(request) {
             self.app_event_tx
                 .send(AppEvent::WorkspaceSessionPickerPageLoaded {
                     request,
-                    result: Err(format!(
-                        "{} picker worker stopped before loading threads.",
-                        source.display_name()
-                    )),
+                    result: Err(message),
                 });
         }
     }
@@ -8343,7 +7896,7 @@ impl App {
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
             while let Some(request) = receiver.recv().await {
-                let params = session_picker_thread_list_params(&request);
+                let params = request.thread_list_params();
                 let result = picker_app_gateway
                     .thread_list(params)
                     .await
@@ -8379,10 +7932,8 @@ impl App {
                 } else {
                     match crate::resolve_cwd_for_resume_or_fork(
                         tui,
-                        &self.config,
                         &current_cwd,
-                        target_session.thread_id,
-                        target_session.path.as_deref(),
+                        target_session.cwd.as_deref(),
                         CwdPromptAction::Fork,
                         /*allow_prompt*/ true,
                     )
@@ -8530,7 +8081,7 @@ impl App {
             }
             AppEvent::ForkCurrentSession => {
                 self.session_telemetry.counter(
-                    "codex.thread.fork",
+                    "praxis.thread.fork",
                     /*inc*/ 1,
                     &[("source", "slash_command")],
                 );
@@ -8882,10 +8433,7 @@ impl App {
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::WorkspaceSessionPickerPageLoaded { request, result } => {
-                if let Some(picker) = self.workspace.session_picker_mut()
-                    && picker.source == request.source
-                {
-                    picker.apply_page(request.request_id, result);
+                if self.workspace.apply_session_picker_page(&request, result) {
                     tui.frame_requester().schedule_frame();
                 }
             }
@@ -9008,14 +8556,14 @@ impl App {
             }
             AppEvent::OpenWindowsSandboxFallbackPrompt { preset } => {
                 self.session_telemetry.counter(
-                    "codex.windows_sandbox.fallback_prompt_shown",
+                    "praxis.windows_sandbox.fallback_prompt_shown",
                     /*inc*/ 1,
                     &[],
                 );
                 self.chat_widget.clear_windows_sandbox_setup_status();
                 if let Some(started_at) = self.windows_sandbox.setup_started_at.take() {
                     self.session_telemetry.record_duration(
-                        "codex.windows_sandbox.elevated_setup_duration_ms",
+                        "praxis.windows_sandbox.elevated_setup_duration_ms",
                         started_at.elapsed(),
                         &[("result", "failure")],
                     );
@@ -9060,7 +8608,7 @@ impl App {
                         let event = match result {
                             Ok(()) => {
                                 session_telemetry.counter(
-                                    "codex.windows_sandbox.elevated_setup_success",
+                                    "praxis.windows_sandbox.elevated_setup_success",
                                     /*inc*/ 1,
                                     &[],
                                 );
@@ -9131,7 +8679,7 @@ impl App {
                             praxis_home.as_path(),
                         ) {
                             session_telemetry.counter(
-                                "codex.windows_sandbox.legacy_setup_preflight_failed",
+                                "praxis.windows_sandbox.legacy_setup_preflight_failed",
                                 /*inc*/ 1,
                                 &[],
                             );
@@ -9214,7 +8762,7 @@ impl App {
                     self.chat_widget.clear_windows_sandbox_setup_status();
                     if let Some(started_at) = self.windows_sandbox.setup_started_at.take() {
                         self.session_telemetry.record_duration(
-                            "codex.windows_sandbox.elevated_setup_duration_ms",
+                            "praxis.windows_sandbox.elevated_setup_duration_ms",
                             started_at.elapsed(),
                             &[("result", "success")],
                         );
@@ -10143,6 +9691,9 @@ impl App {
         self.remember_workspace_token_usage_from_event(&event);
         match event {
             ThreadBufferedEvent::Notification(notification) => {
+                if let ServerNotification::ThreadModelChanged(notification) = &notification {
+                    self.apply_thread_model_changed_to_runtime_config(notification);
+                }
                 self.chat_widget
                     .handle_server_notification(notification, /*replay_kind*/ None);
             }
@@ -10165,9 +9716,13 @@ impl App {
     fn handle_thread_event_replay(&mut self, event: ThreadBufferedEvent) {
         self.remember_workspace_token_usage_from_event(&event);
         match event {
-            ThreadBufferedEvent::Notification(notification) => self
-                .chat_widget
-                .handle_server_notification(notification, Some(ReplayKind::ThreadSnapshot)),
+            ThreadBufferedEvent::Notification(notification) => {
+                if let ServerNotification::ThreadModelChanged(notification) = &notification {
+                    self.apply_thread_model_changed_to_runtime_config(notification);
+                }
+                self.chat_widget
+                    .handle_server_notification(notification, Some(ReplayKind::ThreadSnapshot));
+            }
             ThreadBufferedEvent::Request(request) => self
                 .chat_widget
                 .handle_server_request(request, Some(ReplayKind::ThreadSnapshot)),
@@ -10197,6 +9752,32 @@ impl App {
             thread_id,
             token_usage_info_from_app_gateway(notification.token_usage.clone()),
         );
+    }
+
+    fn apply_thread_model_changed_to_runtime_config(
+        &mut self,
+        notification: &ThreadModelChangedNotification,
+    ) {
+        self.config.model_provider_id = notification.model_provider.clone();
+        self.config.model = Some(notification.model.clone());
+        self.config.model_reasoning_effort = notification.reasoning_effort;
+        if let Some(provider) = self
+            .config
+            .model_providers
+            .get(&notification.model_provider)
+            .cloned()
+        {
+            self.config.model_provider = provider;
+        }
+        if self
+            .primary_thread_id
+            .is_some_and(|thread_id| thread_id.to_string() == notification.thread_id.as_str())
+            && let Some(session) = self.primary_session_configured.as_mut()
+        {
+            session.model_provider_id = notification.model_provider.clone();
+            session.model = notification.model.clone();
+            session.reasoning_effort = notification.reasoning_effort;
+        }
     }
 
     /// Handles an event emitted by the currently active thread.
@@ -10571,16 +10152,17 @@ impl App {
                 .await;
         }
 
-        if self.workspace.session_picker().is_some() {
-            return self
-                .handle_workspace_session_picker_key(tui, app_gateway, key_event)
-                .await;
-        }
-
-        if self.workspace.agent_picker().is_some() {
-            return self
-                .handle_workspace_agent_picker_key(tui, app_gateway, key_event)
-                .await;
+        if let Some(effect) = self.workspace.handle_main_pane_key(key_event) {
+            let error_context = effect.error_context();
+            if let Err(err) = self
+                .handle_workspace_main_pane_effect(tui, app_gateway, effect)
+                .await
+            {
+                self.chat_widget
+                    .add_error_message(format!("{error_context} failed: {err}"));
+            }
+            tui.frame_requester().schedule_frame();
+            return true;
         }
 
         if self.workspace.search_focused {
@@ -10629,43 +10211,22 @@ impl App {
         let visible_rows = self.workspace_visible_row_capacity();
         let item_count = self.workspace.list_item_count();
         match key_event.code {
-            KeyCode::Up => {
-                self.workspace.selected = self.workspace.selected.saturating_sub(1);
-            }
-            KeyCode::Down => {
-                self.workspace.selected = self
-                    .workspace
-                    .selected
-                    .saturating_add(1)
-                    .min(item_count.saturating_sub(1));
-            }
-            KeyCode::PageUp => {
-                self.workspace.selected =
-                    self.workspace.selected.saturating_sub(visible_rows.max(1));
-            }
-            KeyCode::PageDown => {
-                self.workspace.selected = self
-                    .workspace
-                    .selected
-                    .saturating_add(visible_rows.max(1))
-                    .min(item_count.saturating_sub(1));
-            }
-            KeyCode::Home => self.workspace.selected = 0,
-            KeyCode::End => {
-                self.workspace.selected = item_count.saturating_sub(1);
-            }
+            KeyCode::Up => self.workspace.select_previous(),
+            KeyCode::Down => self.workspace.select_next(item_count),
+            KeyCode::PageUp => self.workspace.page_selection_up(visible_rows),
+            KeyCode::PageDown => self.workspace.page_selection_down(visible_rows, item_count),
+            KeyCode::Home => self.workspace.select_first(),
+            KeyCode::End => self.workspace.select_last(item_count),
             KeyCode::Enter => {
                 if self.workspace.is_load_more_index(self.workspace.selected) {
                     self.load_more_workspace_threads(app_gateway);
                     tui.frame_requester().schedule_frame();
                     return true;
                 }
-                if let Some(WorkspaceVisibleItem::ClosedSubagents { parent_index }) =
-                    self.workspace.visible_item_at(self.workspace.selected)
+                if self
+                    .workspace
+                    .toggle_selected_closed_subagents(self.workspace_visible_row_capacity())
                 {
-                    self.workspace.toggle_closed_subagents(parent_index);
-                    self.workspace
-                        .ensure_selected_visible(self.workspace_visible_row_capacity());
                     tui.frame_requester().schedule_frame();
                     return true;
                 }
@@ -10686,6 +10247,7 @@ impl App {
                             path: row.path,
                             thread_id: row.thread_id,
                             thread_name: Some(row.name),
+                            cwd: Some(row.cwd),
                         },
                     )
                     .await;
@@ -10703,63 +10265,41 @@ impl App {
         true
     }
 
-    async fn handle_workspace_session_picker_key(
+    async fn handle_workspace_main_pane_effect(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
-        key_event: KeyEvent,
-    ) -> bool {
-        let Some(picker) = self.workspace.session_picker_mut() else {
-            return false;
+        effect: WorkspaceMainPaneEffect,
+    ) -> Result<Option<AppRunControl>> {
+        let Some(effect) = effect.into_gateway_effect() else {
+            return Ok(None);
         };
-        let effect = picker.handle_key(key_event);
-        if let Err(err) = self
-            .handle_workspace_session_picker_effect(tui, app_gateway, effect)
-            .await
-        {
-            self.chat_widget
-                .add_error_message(format!("Session picker failed: {err}"));
+        let schedules_frame = effect.schedules_frame_after_apply();
+        let result = self
+            .handle_workspace_gateway_effect(tui, app_gateway, effect)
+            .await;
+        if schedules_frame {
+            tui.frame_requester().schedule_frame();
         }
-        tui.frame_requester().schedule_frame();
-        true
+        result
     }
 
-    async fn handle_workspace_agent_picker_key(
+    async fn handle_workspace_gateway_effect(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
-        key_event: KeyEvent,
-    ) -> bool {
-        let Some(picker) = self.workspace.agent_picker_mut() else {
-            return false;
-        };
-        let effect = picker.handle_key(key_event);
-        if let Err(err) = self
-            .handle_workspace_agent_picker_effect(tui, app_gateway, effect)
-            .await
-        {
-            self.chat_widget
-                .add_error_message(format!("Agent picker failed: {err}"));
-        }
-        tui.frame_requester().schedule_frame();
-        true
-    }
-
-    async fn handle_workspace_agent_picker_effect(
-        &mut self,
-        tui: &mut tui::Tui,
-        app_gateway: &mut AppGatewaySession,
-        effect: AgentPickerEffect,
+        effect: WorkspaceGatewayEffect,
     ) -> Result<Option<AppRunControl>> {
         match effect {
-            AgentPickerEffect::None => Ok(None),
-            AgentPickerEffect::Close => {
-                self.workspace.close_main_pane();
-                tui.frame_requester().schedule_frame();
+            WorkspaceGatewayEffect::LoadSessionPickerPage(request) => {
+                self.queue_workspace_session_picker_page(request).await;
                 Ok(None)
             }
-            AgentPickerEffect::Select(thread_id) => {
-                self.workspace.close_main_pane();
+            WorkspaceGatewayEffect::SelectSession(selection) => {
+                self.apply_session_selection(tui, app_gateway, selection)
+                    .await
+            }
+            WorkspaceGatewayEffect::SelectAgent(thread_id) => {
                 self.select_agent_thread(tui, app_gateway, thread_id)
                     .await?;
                 Ok(None)
@@ -10809,8 +10349,7 @@ impl App {
         }
 
         if changed {
-            self.workspace.selected = 0;
-            self.workspace.list_scroll = 0;
+            self.workspace.reset_selection_and_list_scroll();
             self.workspace.refresh_in_flight = false;
             self.workspace.last_refresh_at = None;
             self.refresh_workspace_threads(app_gateway, true);
@@ -11484,6 +11023,7 @@ mod tests {
                     path: Some(PathBuf::from("/tmp/restore")),
                     thread_id: ThreadId::new(),
                     thread_name: None,
+                    cwd: None,
                 }
             )),
             false
@@ -11494,6 +11034,7 @@ mod tests {
                     path: Some(PathBuf::from("/tmp/fork")),
                     thread_id: ThreadId::new(),
                     thread_name: None,
+                    cwd: None,
                 }
             )),
             false
@@ -11544,6 +11085,7 @@ mod tests {
                 path: Some(PathBuf::from("/tmp/restore")),
                 thread_id: ThreadId::new(),
                 thread_name: None,
+                cwd: None,
             },
         ));
         assert_eq!(
@@ -11558,6 +11100,7 @@ mod tests {
                 path: Some(PathBuf::from("/tmp/fork")),
                 thread_id: ThreadId::new(),
                 thread_name: None,
+                cwd: None,
             },
         ));
         assert_eq!(
@@ -11735,44 +11278,6 @@ mod tests {
             .await
             .expect("timed out waiting for listener task abort")
             .expect("listener task drop notification should succeed");
-    }
-
-    #[tokio::test]
-    async fn history_lookup_response_is_routed_to_requesting_thread() -> Result<()> {
-        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
-        let thread_id = ThreadId::new();
-
-        let handled = app
-            .try_handle_local_history_op(
-                thread_id,
-                &Op::GetHistoryEntryRequest {
-                    offset: 0,
-                    log_id: 1,
-                }
-                .into(),
-            )
-            .await?;
-
-        assert!(handled);
-
-        let app_event = tokio::time::timeout(Duration::from_secs(1), app_event_rx.recv())
-            .await
-            .expect("history lookup should emit an app event")
-            .expect("app event channel should stay open");
-
-        let AppEvent::ThreadHistoryEntryResponse {
-            thread_id: routed_thread_id,
-            event,
-        } = app_event
-        else {
-            panic!("expected thread-routed history response");
-        };
-        assert_eq!(routed_thread_id, thread_id);
-        assert_eq!(event.offset, 0);
-        assert_eq!(event.log_id, 1);
-        assert!(event.entry.is_none());
-
-        Ok(())
     }
 
     #[tokio::test]
@@ -14252,7 +13757,6 @@ guardian_approval = true
             pending_app_gateway_requests: PendingAppGatewayRequests::default(),
             workspace: WorkspaceState::new(false),
             workspace_observed_thread_ids: HashSet::new(),
-            workspace_session_picker_loaders: HashMap::new(),
             mouse: MouseInteractionState::default(),
             mouse_capture_resume_at: None,
         }
@@ -14316,7 +13820,6 @@ guardian_approval = true
                 pending_app_gateway_requests: PendingAppGatewayRequests::default(),
                 workspace: WorkspaceState::new(false),
                 workspace_observed_thread_ids: HashSet::new(),
-                workspace_session_picker_loaders: HashMap::new(),
                 mouse: MouseInteractionState::default(),
                 mouse_capture_resume_at: None,
             },
@@ -14924,7 +14427,7 @@ guardian_approval = true
     fn active_turn_not_steerable_turn_error_extracts_structured_server_error() {
         let turn_error = AppGatewayTurnError {
             message: "cannot steer a review turn".to_string(),
-            praxis_error_info: Some(AppGatewayCodexErrorInfo::ActiveTurnNotSteerable {
+            praxis_error_info: Some(AppGatewayPraxisErrorInfo::ActiveTurnNotSteerable {
                 turn_kind: AppGatewayNonSteerableTurnKind::Review,
             }),
             additional_details: None,
@@ -15077,7 +14580,7 @@ guardian_approval = true
 
     #[tokio::test]
     async fn model_migration_prompt_shows_for_hidden_model() {
-        let praxis_home = tempdir().expect("temp codex home");
+        let praxis_home = tempdir().expect("temp Praxis home");
         let config = ConfigBuilder::default()
             .praxis_home(praxis_home.path().to_path_buf())
             .build()

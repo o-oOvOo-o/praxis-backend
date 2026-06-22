@@ -16,8 +16,8 @@ use praxis_protocol::num_format::format_with_separators;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionConfiguredEvent;
 
-use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
+use crate::event_processor::PraxisStatus;
 use crate::event_processor::handle_last_message;
 
 pub(crate) struct EventProcessorWithHumanOutput {
@@ -100,7 +100,7 @@ impl EventProcessorWithHumanOutput {
             ThreadItem::AgentMessage { text, .. } => {
                 eprintln!(
                     "{}\n{}",
-                    "codex".style(self.italic).style(self.magenta),
+                    "praxis".style(self.italic).style(self.magenta),
                     text
                 );
                 self.final_message = Some(text);
@@ -224,7 +224,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         eprintln!("{}\n{}", "user".style(self.cyan), prompt);
     }
 
-    fn process_server_notification(&mut self, notification: ServerNotification) -> CodexStatus {
+    fn process_server_notification(&mut self, notification: ServerNotification) -> PraxisStatus {
         match notification {
             ServerNotification::ConfigWarning(notification) => {
                 let details = notification
@@ -237,7 +237,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     notification.summary,
                     details
                 );
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::Error(notification) => {
                 eprintln!(
@@ -245,7 +245,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     "ERROR:".style(self.red).style(self.bold),
                     notification.error
                 );
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::DeprecationNotice(notification) => {
                 eprintln!(
@@ -256,7 +256,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                 if let Some(details) = notification.details {
                     eprintln!("{}", details.style(self.dimmed));
                 }
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::HookStarted(notification) => {
                 eprintln!(
@@ -264,7 +264,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     "hook:".style(self.bold),
                     format!("{:?}", notification.run.event_name).style(self.dimmed)
                 );
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::HookCompleted(notification) => {
                 eprintln!(
@@ -273,15 +273,15 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     format!("{:?}", notification.run.event_name).style(self.dimmed),
                     notification.run.status
                 );
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::ItemStarted(notification) => {
                 self.render_item_started(&notification.item);
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::ItemCompleted(notification) => {
                 self.render_item_completed(notification.item);
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::ModelRerouted(notification) => {
                 eprintln!(
@@ -290,11 +290,11 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     notification.from_model,
                     notification.to_model
                 );
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
                 self.last_total_token_usage = Some(notification.token_usage);
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::TurnCompleted(notification) => match notification.turn.status {
                 TurnStatus::Completed => {
@@ -310,7 +310,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                         self.final_message = Some(final_message);
                     }
                     self.emit_final_message_on_shutdown = true;
-                    CodexStatus::InitiateShutdown
+                    PraxisStatus::InitiateShutdown
                 }
                 TurnStatus::Failed => {
                     self.final_message = None;
@@ -319,22 +319,22 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                     if let Some(error) = notification.turn.error {
                         eprintln!("{} {}", "ERROR:".style(self.red).style(self.bold), error);
                     }
-                    CodexStatus::InitiateShutdown
+                    PraxisStatus::InitiateShutdown
                 }
                 TurnStatus::Interrupted => {
                     self.final_message = None;
                     self.final_message_rendered = false;
                     self.emit_final_message_on_shutdown = false;
                     eprintln!("{}", "turn interrupted".style(self.dimmed));
-                    CodexStatus::InitiateShutdown
+                    PraxisStatus::InitiateShutdown
                 }
-                TurnStatus::InProgress => CodexStatus::Running,
+                TurnStatus::InProgress => PraxisStatus::Running,
             },
             ServerNotification::TurnDiffUpdated(notification) => {
                 if !notification.diff.trim().is_empty() {
                     eprintln!("{}", notification.diff);
                 }
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::TurnPlanUpdated(notification) => {
                 if let Some(explanation) = notification.explanation {
@@ -357,19 +357,19 @@ impl EventProcessor for EventProcessorWithHumanOutput {
                         }
                     }
                 }
-                CodexStatus::Running
+                PraxisStatus::Running
             }
-            ServerNotification::TurnStarted(_) => CodexStatus::Running,
-            _ => CodexStatus::Running,
+            ServerNotification::TurnStarted(_) => PraxisStatus::Running,
+            _ => PraxisStatus::Running,
         }
     }
 
-    fn process_warning(&mut self, message: String) -> CodexStatus {
+    fn process_warning(&mut self, message: String) -> PraxisStatus {
         eprintln!(
             "{} {message}",
             "warning:".style(self.yellow).style(self.bold)
         );
-        CodexStatus::Running
+        PraxisStatus::Running
     }
 
     fn print_final_output(&mut self) {
@@ -408,7 +408,7 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         {
             eprintln!(
                 "{}\n{}",
-                "codex".style(self.italic).style(self.magenta),
+                "praxis".style(self.italic).style(self.magenta),
                 message
             );
         }
@@ -739,7 +739,7 @@ mod tests {
 
         assert_eq!(
             status,
-            crate::event_processor::CodexStatus::InitiateShutdown
+            crate::event_processor::PraxisStatus::InitiateShutdown
         );
         assert_eq!(processor.final_message.as_deref(), Some("final answer"));
     }
@@ -783,7 +783,7 @@ mod tests {
 
         assert_eq!(
             status,
-            crate::event_processor::CodexStatus::InitiateShutdown
+            crate::event_processor::PraxisStatus::InitiateShutdown
         );
         assert_eq!(processor.final_message.as_deref(), Some("final answer"));
         assert!(!processor.final_message_rendered);
@@ -823,7 +823,7 @@ mod tests {
 
         assert_eq!(
             status,
-            crate::event_processor::CodexStatus::InitiateShutdown
+            crate::event_processor::PraxisStatus::InitiateShutdown
         );
         assert_eq!(processor.final_message.as_deref(), Some("streamed answer"));
         assert!(processor.emit_final_message_on_shutdown);
@@ -863,7 +863,7 @@ mod tests {
 
         assert_eq!(
             status,
-            crate::event_processor::CodexStatus::InitiateShutdown
+            crate::event_processor::PraxisStatus::InitiateShutdown
         );
         assert_eq!(processor.final_message, None);
         assert!(!processor.final_message_rendered);
@@ -904,7 +904,7 @@ mod tests {
 
         assert_eq!(
             status,
-            crate::event_processor::CodexStatus::InitiateShutdown
+            crate::event_processor::PraxisStatus::InitiateShutdown
         );
         assert_eq!(processor.final_message, None);
         assert!(!processor.final_message_rendered);

@@ -759,7 +759,7 @@ mod tests {
             "item": {
                 "id": "item_123",
                 "type": "function_call",
-                "name": "codex",
+                "name": "praxis",
                 "call_id": "call_123",
                 "arguments": "{\"prompt\":\"delegate this\"}"
             }
@@ -880,7 +880,7 @@ mod tests {
                 "output": [{
                     "id": "item_123",
                     "type": "function_call",
-                    "name": "codex",
+                    "name": "praxis",
                     "call_id": "call_123",
                     "arguments": "{\"prompt\":\"delegate from done\"}"
                 }]
@@ -1163,7 +1163,7 @@ mod tests {
             assert_eq!(fourth_json["handoff_id"], "handoff_1");
             assert_eq!(
                 fourth_json["output_text"],
-                "\"Agent Final Message\":\n\nhello from codex"
+                "\"Agent Final Message\":\n\nhello from praxis"
             );
 
             ws.send(Message::Text(
@@ -1286,7 +1286,7 @@ mod tests {
         connection
             .send_conversation_handoff_append(
                 "handoff_1".to_string(),
-                "hello from codex".to_string(),
+                "hello from praxis".to_string(),
             )
             .await
             .expect("send handoff");
@@ -1432,7 +1432,7 @@ mod tests {
             );
             assert_eq!(
                 first_json["session"]["tools"][0]["name"],
-                Value::String("codex".to_string())
+                Value::String("praxis".to_string())
             );
             assert_eq!(
                 first_json["session"]["tools"][0]["parameters"]["required"],

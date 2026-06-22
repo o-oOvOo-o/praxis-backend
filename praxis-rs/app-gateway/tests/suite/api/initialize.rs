@@ -72,7 +72,7 @@ async fn initialize_respects_originator_override_env_var() -> Result<()> {
     let mut mcp = McpProcess::new_with_env(
         praxis_home.path(),
         &[(
-            "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
+            "PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE",
             Some("praxis_originator_via_env_var"),
         )],
     )
@@ -113,7 +113,7 @@ async fn initialize_rejects_invalid_client_name() -> Result<()> {
     create_config_toml(praxis_home.path(), &server.uri(), "never")?;
     let mut mcp = McpProcess::new_with_env(
         praxis_home.path(),
-        &[("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", None)],
+        &[("PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE", None)],
     )
     .await?;
 

@@ -9,7 +9,7 @@ use http::StatusCode;
 use praxis_api::TransportError;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_login::AuthManager;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::config_types::ModelProviderAuthInfo;
 use praxis_protocol::openai_models::ModelsResponse;
 use pretty_assertions::assert_eq;
@@ -234,7 +234,8 @@ async fn get_model_info_tracks_fallback_usage() {
         .build()
         .await
         .expect("load default test config");
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let manager = ModelsManager::new(
         praxis_home.path().to_path_buf(),
         auth_manager,
@@ -263,7 +264,8 @@ async fn get_model_info_tracks_fallback_usage() {
 #[tokio::test]
 async fn list_models_includes_known_gpt55_picker_models() {
     let praxis_home = tempdir().expect("temp dir");
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let manager = ModelsManager::new(
         praxis_home.path().to_path_buf(),
         auth_manager,
@@ -302,7 +304,8 @@ async fn get_model_info_uses_custom_catalog() {
     let mut overlay = remote_model("gpt-overlay", "Overlay", /*priority*/ 0);
     overlay.supports_image_detail_original = true;
 
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let manager = ModelsManager::new(
         praxis_home.path().to_path_buf(),
         auth_manager,
@@ -334,7 +337,8 @@ async fn get_model_info_matches_namespaced_suffix() {
         .expect("load default test config");
     let mut remote = remote_model("gpt-image", "Image", /*priority*/ 0);
     remote.supports_image_detail_original = true;
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let manager = ModelsManager::new(
         praxis_home.path().to_path_buf(),
         auth_manager,
@@ -360,7 +364,8 @@ async fn get_model_info_rejects_multi_segment_namespace_suffix_matching() {
         .build()
         .await
         .expect("load default test config");
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let manager = ModelsManager::new(
         praxis_home.path().to_path_buf(),
         auth_manager,
@@ -398,8 +403,9 @@ async fn refresh_available_models_sorts_by_priority() {
     .await;
 
     let praxis_home = tempdir().expect("temp dir");
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
     let provider = provider_for(server.uri());
     let manager = ModelsManager::with_provider_for_tests(
         praxis_home.path().to_path_buf(),
@@ -459,7 +465,8 @@ async fn refresh_available_models_uses_provider_auth_token() {
         .await;
 
     let praxis_home = tempdir().expect("temp dir");
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("unused"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("unused"));
     let provider = ModelProviderInfo {
         auth: Some(auth_script.auth_config()),
         ..provider_for(server.uri())
@@ -491,8 +498,9 @@ async fn refresh_available_models_uses_cache_when_fresh() {
     .await;
 
     let praxis_home = tempdir().expect("temp dir");
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
     let provider = provider_for(server.uri());
     let manager = ModelsManager::with_provider_for_tests(
         praxis_home.path().to_path_buf(),
@@ -532,8 +540,9 @@ async fn refresh_available_models_refetches_when_cache_stale() {
     .await;
 
     let praxis_home = tempdir().expect("temp dir");
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
     let provider = provider_for(server.uri());
     let manager = ModelsManager::with_provider_for_tests(
         praxis_home.path().to_path_buf(),
@@ -595,8 +604,9 @@ async fn refresh_available_models_refetches_when_version_mismatch() {
     .await;
 
     let praxis_home = tempdir().expect("temp dir");
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
     let provider = provider_for(server.uri());
     let manager = ModelsManager::with_provider_for_tests(
         praxis_home.path().to_path_buf(),
@@ -662,8 +672,9 @@ async fn refresh_available_models_drops_removed_remote_models() {
     .await;
 
     let praxis_home = tempdir().expect("temp dir");
-    let auth_manager =
-        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let auth_manager = AuthManager::from_auth_for_testing(
+        OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
+    );
     let provider = provider_for(server.uri());
     let mut manager = ModelsManager::with_provider_for_tests(
         praxis_home.path().to_path_buf(),
@@ -863,7 +874,8 @@ fn models_request_telemetry_emits_auth_env_feedback_tags_on_failure() {
 #[test]
 fn build_available_models_picks_default_after_hiding_hidden_models() {
     let praxis_home = tempdir().expect("temp dir");
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let provider = provider_for("http://example.test".to_string());
     let manager = ModelsManager::with_provider_for_tests(
         praxis_home.path().to_path_buf(),

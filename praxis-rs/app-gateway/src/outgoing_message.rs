@@ -46,6 +46,15 @@ pub(crate) struct ConnectionRequestId {
     pub(crate) request_id: RequestId,
 }
 
+impl ConnectionRequestId {
+    pub(crate) fn new(connection_id: ConnectionId, request_id: RequestId) -> Self {
+        Self {
+            connection_id,
+            request_id,
+        }
+    }
+}
+
 /// Trace data we keep for an incoming request until we send its final
 /// response or error.
 #[derive(Clone)]
@@ -662,6 +671,7 @@ mod tests {
     use praxis_app_gateway_protocol::RateLimitWindow;
     use praxis_app_gateway_protocol::ToolRequestUserInputParams;
     use praxis_protocol::ThreadId;
+    use praxis_protocol::protocol::OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID;
     use pretty_assertions::assert_eq;
     use serde_json::json;
     use std::sync::Arc;
@@ -725,7 +735,7 @@ mod tests {
         let notification =
             ServerNotification::AccountRateLimitsUpdated(AccountRateLimitsUpdatedNotification {
                 rate_limits: RateLimitSnapshot {
-                    limit_id: Some("codex".to_string()),
+                    limit_id: Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string()),
                     limit_name: None,
                     primary: Some(RateLimitWindow {
                         used_percent: 25,
@@ -744,7 +754,7 @@ mod tests {
                 "method": "account/rateLimits/updated",
                 "params": {
                         "rateLimits": {
-                        "limitId": "codex",
+                        "limitId": OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID,
                         "limitName": null,
                         "primary": {
                             "usedPercent": 25,

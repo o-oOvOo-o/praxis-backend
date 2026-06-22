@@ -251,7 +251,6 @@ pub(super) async fn make_chatwidget_manual(
         selfwork_turn_in_flight: false,
         current_status: StatusIndicatorState::turn_running(),
         turn_status_snapshot: TurnRuntimeState::default(),
-        status_activity_trail: ActivityTrail::default(),
         retry_status_header: None,
         pending_status_indicator_restore: false,
         suppress_queue_autosend: false,

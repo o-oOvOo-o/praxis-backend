@@ -25,7 +25,7 @@ use crate::tools::sandboxing::ToolRuntime;
 use crate::tools::sandboxing::with_cached_approval;
 use futures::future::BoxFuture;
 use praxis_apply_patch::ApplyPatchAction;
-use praxis_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
+use praxis_apply_patch::PRAXIS_RUN_AS_APPLY_PATCH_ARG1;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::FileChange;
@@ -104,7 +104,7 @@ impl ApplyPatchRuntime {
         SandboxCommand {
             program: exe.into_os_string(),
             args: vec![
-                CODEX_CORE_APPLY_PATCH_ARG1.to_string(),
+                PRAXIS_RUN_AS_APPLY_PATCH_ARG1.to_string(),
                 req.action.patch.clone(),
             ],
             cwd: req.action.cwd.clone(),

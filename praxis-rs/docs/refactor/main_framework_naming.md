@@ -270,7 +270,7 @@ Behavior preserved:
 
 - Raw events still go through `send_event_raw`, preserving rollout persistence and direct client delivery.
 - Turn events still go through `send_event`, preserving legacy event mirroring, realtime handoff handling, parent completion notifications, and rollout persistence.
-- Existing event ids, turn ids, warning text, error text, and `CodexErrorInfo` payloads are unchanged for migrated call sites.
+- Existing event ids, turn ids, warning text, error text, and `PraxisErrorInfo` payloads are unchanged for migrated call sites.
 - Stream error events, pattern matches over event variants, hook started/completed events, model reroute events, thread rollback notifications, and thread-name update notifications remain explicit because they are not simple warning/error/deprecation payload construction.
 
 ## Main Framework Refactor Pass 9

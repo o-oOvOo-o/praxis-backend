@@ -7,7 +7,8 @@ use crate::function_tool::FunctionCallError;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
-pub(crate) use crate::tools::handlers::multi_agents_common::*;
+pub(crate) use crate::tools::handlers::multi_agents_common::build_agent_spawn_config;
+use crate::tools::handlers::multi_agents_common::*;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
@@ -44,6 +45,6 @@ mod spawn;
 mod submit_worker_request;
 mod update_runtime_command;
 mod update_worker_request;
-pub(crate) mod wait;
+mod wait;
 
-pub(super) use events::*;
+use events::*;

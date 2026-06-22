@@ -1,12 +1,12 @@
+use super::curated::OPENAI_CURATED_MARKETPLACE_NAME;
 use crate::config::Config;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::default_client::build_reqwest_client;
 use praxis_protocol::protocol::Product;
 use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
 
-const DEFAULT_REMOTE_MARKETPLACE_NAME: &str = "openai-curated";
 const REMOTE_PLUGIN_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 const REMOTE_FEATURED_PLUGIN_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_PLUGIN_MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
@@ -118,7 +118,7 @@ pub enum RemotePluginFetchError {
 
 pub(crate) async fn fetch_remote_plugin_status(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
 ) -> Result<Vec<RemotePluginStatusSummary>, RemotePluginFetchError> {
     let Some(auth) = auth else {
         return Err(RemotePluginFetchError::AuthRequired);
@@ -160,9 +160,9 @@ pub(crate) async fn fetch_remote_plugin_status(
     })
 }
 
-pub async fn fetch_remote_featured_plugin_ids(
+pub(crate) async fn fetch_remote_featured_plugin_ids(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
     product: Option<Product>,
 ) -> Result<Vec<String>, RemotePluginFetchError> {
     let base_url = config.chatgpt_base_url.trim_end_matches('/');
@@ -207,7 +207,7 @@ pub async fn fetch_remote_featured_plugin_ids(
 
 pub(crate) async fn enable_remote_plugin(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
     plugin_id: &str,
 ) -> Result<(), RemotePluginMutationError> {
     post_remote_plugin_mutation(config, auth, plugin_id, "enable").await?;
@@ -216,14 +216,16 @@ pub(crate) async fn enable_remote_plugin(
 
 pub(crate) async fn uninstall_remote_plugin(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
     plugin_id: &str,
 ) -> Result<(), RemotePluginMutationError> {
     post_remote_plugin_mutation(config, auth, plugin_id, "uninstall").await?;
     Ok(())
 }
 
-fn ensure_chatgpt_auth(auth: Option<&CodexAuth>) -> Result<&CodexAuth, RemotePluginMutationError> {
+fn ensure_chatgpt_auth(
+    auth: Option<&OpenAiAccountAuth>,
+) -> Result<&OpenAiAccountAuth, RemotePluginMutationError> {
     let Some(auth) = auth else {
         return Err(RemotePluginMutationError::AuthRequired);
     };
@@ -234,12 +236,12 @@ fn ensure_chatgpt_auth(auth: Option<&CodexAuth>) -> Result<&CodexAuth, RemotePlu
 }
 
 fn default_remote_marketplace_name() -> String {
-    DEFAULT_REMOTE_MARKETPLACE_NAME.to_string()
+    OPENAI_CURATED_MARKETPLACE_NAME.to_string()
 }
 
 async fn post_remote_plugin_mutation(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
     plugin_id: &str,
     action: &str,
 ) -> Result<RemotePluginMutationResponse, RemotePluginMutationError> {

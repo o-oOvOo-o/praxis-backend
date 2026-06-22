@@ -23,8 +23,8 @@ use praxis_feedback::PraxisFeedback;
 use praxis_protocol::protocol::SessionSource;
 use toml::Value as TomlValue;
 
-pub use praxis_app_gateway::in_process::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
 pub use praxis_app_gateway::AppGatewayWebsocketAuthSettings as NativeControlAuthSettings;
+pub use praxis_app_gateway::in_process::DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY;
 
 pub type NativeGatewayRequestResult = std::result::Result<
     praxis_app_gateway_protocol::Result,

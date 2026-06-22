@@ -14,11 +14,11 @@ use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::stdio_server_bin;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_with_timeout;
 use praxis_features::Feature;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::Op;
 use tempfile::TempDir;
@@ -97,28 +97,28 @@ fn write_plugin_app_plugin(home: &TempDir) {
     .expect("write plugin app config");
 }
 
-async fn build_plugin_test_codex(
+async fn build_plugin_test_praxis(
     server: &MockServer,
     praxis_home: Arc<TempDir>,
 ) -> Result<Arc<praxis_core::PraxisThread>> {
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_home(praxis_home)
-        .with_auth(CodexAuth::from_api_key("Test API Key"));
+        .with_auth(OpenAiAccountAuth::from_api_key("Test API Key"));
     Ok(builder
         .build(server)
         .await
         .expect("create new conversation")
-        .codex)
+        .thread)
 }
 
-async fn build_analytics_plugin_test_codex(
+async fn build_analytics_plugin_test_praxis(
     server: &MockServer,
     praxis_home: Arc<TempDir>,
 ) -> Result<Arc<praxis_core::PraxisThread>> {
     let chatgpt_base_url = server.uri();
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_home(praxis_home)
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model("gpt-5")
         .with_config(move |config| {
             config.chatgpt_base_url = chatgpt_base_url;
@@ -127,17 +127,17 @@ async fn build_analytics_plugin_test_codex(
         .build(server)
         .await
         .expect("create new conversation")
-        .codex)
+        .thread)
 }
 
-async fn build_apps_enabled_plugin_test_codex(
+async fn build_apps_enabled_plugin_test_praxis(
     server: &MockServer,
     praxis_home: Arc<TempDir>,
     chatgpt_base_url: String,
 ) -> Result<Arc<praxis_core::PraxisThread>> {
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_home(praxis_home)
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             config
                 .features
@@ -149,7 +149,7 @@ async fn build_apps_enabled_plugin_test_codex(
         .build(server)
         .await
         .expect("create new conversation")
-        .codex)
+        .thread)
 }
 
 fn tool_names(body: &serde_json::Value) -> Vec<String> {
@@ -200,7 +200,7 @@ async fn capability_sections_render_in_developer_message_in_order() -> Result<()
     let praxis_home = Arc::new(TempDir::new()?);
     write_plugin_skill_plugin(praxis_home.as_ref());
     write_plugin_app_plugin(praxis_home.as_ref());
-    let codex = build_apps_enabled_plugin_test_codex(
+    let codex = build_apps_enabled_plugin_test_praxis(
         &server,
         Arc::clone(&praxis_home),
         apps_server.chatgpt_base_url,
@@ -279,7 +279,7 @@ async fn explicit_plugin_mentions_inject_plugin_guidance() -> Result<()> {
     write_plugin_app_plugin(praxis_home.as_ref());
 
     let codex =
-        build_apps_enabled_plugin_test_codex(&server, praxis_home, apps_server.chatgpt_base_url)
+        build_apps_enabled_plugin_test_praxis(&server, praxis_home, apps_server.chatgpt_base_url)
             .await?;
 
     codex
@@ -352,7 +352,7 @@ async fn explicit_plugin_mentions_track_plugin_used_analytics() -> Result<()> {
 
     let praxis_home = Arc::new(TempDir::new()?);
     write_plugin_skill_plugin(praxis_home.as_ref());
-    let codex = build_analytics_plugin_test_codex(&server, praxis_home).await?;
+    let codex = build_analytics_plugin_test_praxis(&server, praxis_home).await?;
 
     codex
         .submit(Op::UserInput {
@@ -417,7 +417,7 @@ async fn plugin_mcp_tools_are_listed() -> Result<()> {
     let praxis_home = Arc::new(TempDir::new()?);
     let rmcp_test_server_bin = stdio_server_bin()?;
     write_plugin_mcp_plugin(praxis_home.as_ref(), &rmcp_test_server_bin);
-    let codex = build_plugin_test_codex(&server, praxis_home).await?;
+    let codex = build_plugin_test_praxis(&server, praxis_home).await?;
 
     let tools_ready_deadline = Instant::now() + Duration::from_secs(30);
     loop {

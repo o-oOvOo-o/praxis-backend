@@ -5,7 +5,7 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::ThreadForkSnapshot;
 use praxis_core::config::Constrained;
@@ -55,12 +55,12 @@ async fn permissions_message_sent_once_on_start() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
     });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -69,7 +69,7 @@ async fn permissions_message_sent_once_on_start() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = req.single_request();
     let body = request.body_json();
@@ -96,12 +96,12 @@ async fn permissions_message_added_on_override_change() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
     });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 1".into(),
@@ -110,9 +110,9 @@ async fn permissions_message_added_on_override_change() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: Some(AskForApproval::Never),
@@ -129,7 +129,7 @@ async fn permissions_message_added_on_override_change() -> Result<()> {
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 2".into(),
@@ -138,7 +138,7 @@ async fn permissions_message_added_on_override_change() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let body1 = req1.single_request().body_json();
     let body2 = req2.single_request().body_json();
@@ -171,12 +171,12 @@ async fn permissions_message_not_added_when_no_change() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
     });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 1".into(),
@@ -185,9 +185,9 @@ async fn permissions_message_not_added_when_no_change() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 2".into(),
@@ -196,7 +196,7 @@ async fn permissions_message_not_added_when_no_change() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let body1 = req1.single_request().body_json();
     let body2 = req2.single_request().body_json();
@@ -233,7 +233,7 @@ async fn resume_replays_permissions_messages() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
     });
     let initial = builder.build(&server).await?;
@@ -245,7 +245,7 @@ async fn resume_replays_permissions_messages() -> Result<()> {
     let home = initial.home.clone();
 
     initial
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 1".into(),
@@ -254,10 +254,13 @@ async fn resume_replays_permissions_messages() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     initial
-        .codex
+        .thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: Some(AskForApproval::Never),
@@ -275,7 +278,7 @@ async fn resume_replays_permissions_messages() -> Result<()> {
         .await?;
 
     initial
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 2".into(),
@@ -284,11 +287,14 @@ async fn resume_replays_permissions_messages() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     let resumed = builder.resume(&server, home, rollout_path).await?;
     resumed
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "after resume".into(),
@@ -297,7 +303,10 @@ async fn resume_replays_permissions_messages() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&resumed.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&resumed.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     let body3 = req3.single_request().body_json();
     let input = body3["input"].as_array().expect("input array");
@@ -335,7 +344,7 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
     });
     let initial = builder.build(&server).await?;
@@ -347,7 +356,7 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
     let home = initial.home.clone();
 
     initial
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 1".into(),
@@ -356,10 +365,13 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     initial
-        .codex
+        .thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: Some(AskForApproval::Never),
@@ -377,7 +389,7 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
         .await?;
 
     initial
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 2".into(),
@@ -386,7 +398,10 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     let body2 = req2.single_request().body_json();
     let input2 = body2["input"].as_array().expect("input array");
@@ -398,7 +413,7 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
     });
     let resumed = builder.resume(&server, home, rollout_path.clone()).await?;
     resumed
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "after resume".into(),
@@ -407,7 +422,10 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&resumed.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&resumed.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     let body3 = req3.single_request().body_json();
     let input3 = body3["input"].as_array().expect("input array");
@@ -480,13 +498,13 @@ async fn permissions_message_includes_writable_roots() -> Result<()> {
     };
     let sandbox_policy_for_config = sandbox_policy.clone();
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(AskForApproval::OnRequest);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy_for_config);
     });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -495,7 +513,7 @@ async fn permissions_message_includes_writable_roots() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let body = req.single_request().body_json();
     let input = body["input"].as_array().expect("input array");

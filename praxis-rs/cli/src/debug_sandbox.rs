@@ -12,8 +12,8 @@ use praxis_core::config::ConfigOverrides;
 use praxis_core::config::NetworkProxyAuditMetadata;
 use praxis_core::exec_env::create_env;
 #[cfg(target_os = "macos")]
-use praxis_core::spawn::CODEX_SANDBOX_ENV_VAR;
-use praxis_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use praxis_core::spawn::PRAXIS_SANDBOX_ENV_VAR;
+use praxis_core::spawn::PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use praxis_protocol::config_types::SandboxMode;
 use praxis_protocol::permissions::NetworkSandboxPolicy;
 use praxis_sandboxing::landlock::create_linux_sandbox_command_args_for_policies;
@@ -266,7 +266,7 @@ async fn run_command_under_sandbox(
                 network_policy,
                 env,
                 |env_map| {
-                    env_map.insert(CODEX_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
+                    env_map.insert(PRAXIS_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
                     if let Some(network) = network.as_ref() {
                         network.apply_to_env(env_map);
                     }
@@ -363,7 +363,7 @@ async fn spawn_debug_sandbox_child(
     cmd.envs(env);
 
     if !network_sandbox_policy.is_enabled() {
-        cmd.env(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR, "1");
+        cmd.env(PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR, "1");
     }
 
     cmd.stdin(Stdio::inherit())
@@ -406,7 +406,7 @@ async fn load_debug_sandbox_config_with_praxis_home(
     if config_uses_permission_profiles(&config) {
         if full_auto {
             anyhow::bail!(
-                "`codex sandbox --full-auto` is only supported for legacy `sandbox_mode` configs; choose a writable `[permissions]` profile instead"
+                "`praxis sandbox --full-auto` is only supported for legacy `sandbox_mode` configs; choose a writable `[permissions]` profile instead"
             );
         }
         return Ok(config);

@@ -5,8 +5,8 @@ use std::os::unix::fs::PermissionsExt;
 use core_test_support::fs_wait;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::Op;
@@ -49,7 +49,7 @@ mv "${tmp_path}" "${payload_path}""#,
     let notify_file = notify_dir.path().join("notify.txt");
     let notify_script_str = notify_script.to_str().unwrap().to_string();
 
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_config(move |cfg| cfg.notify = Some(vec![notify_script_str]))
         .build(&server)
         .await?;

@@ -9,8 +9,11 @@ use praxis_features::Feature;
 use praxis_protocol::config_types::ApprovalsReviewer;
 use praxis_protocol::config_types::Personality;
 use praxis_protocol::config_types::ServiceTier;
+#[cfg(test)]
 use praxis_protocol::models::ContentItem;
+#[cfg(test)]
 use praxis_protocol::models::ResponseInputItem;
+#[cfg(test)]
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::protocol::AskForApproval;
@@ -133,6 +136,7 @@ impl PraxisThread {
     }
 
     /// Records a user-role session-prefix message without creating a new user turn boundary.
+    #[cfg(test)]
     pub(crate) async fn inject_user_message_without_turn(&self, message: String) {
         let message = ResponseItem::Message {
             id: None,
@@ -287,6 +291,7 @@ impl PraxisThread {
     }
 }
 
+#[cfg(test)]
 fn pending_message_input_item(message: &ResponseItem) -> PraxisResult<ResponseInputItem> {
     match message {
         ResponseItem::Message { role, content, .. } => Ok(ResponseInputItem::Message {

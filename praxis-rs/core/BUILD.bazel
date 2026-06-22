@@ -61,6 +61,6 @@ praxis_rust_crate(
         "//praxis-rs/linux-sandbox:praxis-linux-sandbox",
         "//praxis-rs/rmcp-client:test_stdio_server",
         "//praxis-rs/rmcp-client:test_streamable_http_server",
-        "//praxis-rs/cli:codex",
+        "//praxis-rs/cli:praxis",
     ],
 )

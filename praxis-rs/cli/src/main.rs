@@ -391,7 +391,7 @@ struct AppGatewayCommand {
     /// enabled = false
     /// ```
     ///
-    /// See https://developers.openai.com/codex/config-advanced/#metrics for more details.
+    /// See the local configuration documentation for more details.
     #[arg(long = "analytics-default-enabled")]
     analytics_default_enabled: bool,
 
@@ -819,7 +819,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             praxis_exec::run_main(exec_cli, arg0_paths.clone(), remote_app_gateway).await?;
         }
         Some(Subcommand::Review(review_args)) => {
-            let mut exec_cli = ExecCli::try_parse_from(["codex", "exec"])?;
+            let mut exec_cli = ExecCli::try_parse_from(["praxis", "exec"])?;
             exec_cli.command = Some(ExecCommand::Review(review_args));
             prepend_config_flags(
                 &mut exec_cli.config_overrides,
@@ -916,7 +916,8 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 dev_interactive,
             );
             let exit_info =
-                run_interactive_tui(interactive, None, None, true, None, arg0_paths.clone()).await?;
+                run_interactive_tui(interactive, None, None, true, None, arg0_paths.clone())
+                    .await?;
             handle_app_exit(exit_info)?;
         }
         #[cfg(target_os = "macos")]
@@ -1425,9 +1426,7 @@ fn reject_control_options_for_noninteractive_subcommand(
     let control_option = control_listen
         .map(|addr| format!("--control-listen {addr}"))
         .unwrap_or_else(|| "--no-control-listen".to_string());
-    anyhow::bail!(
-        "`{control_option}` is only supported for Praxis Center/TUI commands"
-    )
+    anyhow::bail!("`{control_option}` is only supported for Praxis Center/TUI commands")
 }
 
 fn merge_control_listen_options(
@@ -1841,7 +1840,7 @@ mod tests {
     #[test]
     fn exec_resume_last_accepts_prompt_positional() {
         let cli =
-            MultitoolCli::try_parse_from(["codex", "exec", "--json", "resume", "--last", "2+2"])
+            MultitoolCli::try_parse_from(["praxis", "exec", "--json", "resume", "--last", "2+2"])
                 .expect("parse should succeed");
 
         let Some(Subcommand::Exec(exec)) = cli.subcommand else {
@@ -1970,7 +1969,7 @@ mod tests {
     #[test]
     fn resume_model_flag_applies_when_no_root_flags() {
         let interactive =
-            finalize_resume_from_args(["codex", "resume", "-m", "gpt-5.1-test"].as_ref());
+            finalize_resume_from_args(["praxis", "resume", "-m", "gpt-5.1-test"].as_ref());
 
         assert_eq!(interactive.model.as_deref(), Some("gpt-5.1-test"));
         assert!(interactive.resume_picker);
@@ -1981,7 +1980,7 @@ mod tests {
 
     #[test]
     fn resume_picker_logic_none_and_not_last() {
-        let interactive = finalize_resume_from_args(["codex", "resume"].as_ref());
+        let interactive = finalize_resume_from_args(["praxis", "resume"].as_ref());
         assert!(interactive.resume_picker);
         assert!(!interactive.resume_last);
         assert_eq!(interactive.resume_session_id, None);
@@ -1991,7 +1990,7 @@ mod tests {
 
     #[test]
     fn resume_picker_logic_last() {
-        let interactive = finalize_resume_from_args(["codex", "resume", "--last"].as_ref());
+        let interactive = finalize_resume_from_args(["praxis", "resume", "--last"].as_ref());
         assert!(!interactive.resume_picker);
         assert!(interactive.resume_last);
         assert_eq!(interactive.resume_session_id, None);
@@ -2001,7 +2000,7 @@ mod tests {
 
     #[test]
     fn resume_picker_logic_with_session_id() {
-        let interactive = finalize_resume_from_args(["codex", "resume", "1234"].as_ref());
+        let interactive = finalize_resume_from_args(["praxis", "resume", "1234"].as_ref());
         assert!(!interactive.resume_picker);
         assert!(!interactive.resume_last);
         assert_eq!(interactive.resume_session_id.as_deref(), Some("1234"));
@@ -2011,7 +2010,7 @@ mod tests {
 
     #[test]
     fn resume_codex_without_session_id_opens_codex_picker() {
-        let interactive = finalize_resume_from_args(["codex", "resume", "codex"].as_ref());
+        let interactive = finalize_resume_from_args(["praxis", "resume", "codex"].as_ref());
         assert!(interactive.resume_picker);
         assert_eq!(interactive.resume_source, SessionLookupSource::Codex);
         assert_eq!(interactive.resume_session_id, None);
@@ -2019,7 +2018,7 @@ mod tests {
 
     #[test]
     fn resume_codex_with_session_id_targets_codex_lookup() {
-        let interactive = finalize_resume_from_args(["codex", "resume", "codex", "1234"].as_ref());
+        let interactive = finalize_resume_from_args(["praxis", "resume", "codex", "1234"].as_ref());
         assert!(!interactive.resume_picker);
         assert_eq!(interactive.resume_source, SessionLookupSource::Codex);
         assert_eq!(interactive.resume_session_id.as_deref(), Some("1234"));
@@ -2028,7 +2027,7 @@ mod tests {
     #[test]
     fn resume_codex_last_keeps_codex_lookup_source() {
         let cli =
-            MultitoolCli::try_parse_from(["codex", "resume", "codex", "--last"]).expect("parse");
+            MultitoolCli::try_parse_from(["praxis", "resume", "codex", "--last"]).expect("parse");
         let Subcommand::Resume(ResumeCommand {
             target,
             target_extra,
@@ -2051,7 +2050,7 @@ mod tests {
 
     #[test]
     fn resume_all_flag_sets_show_all() {
-        let interactive = finalize_resume_from_args(["codex", "resume", "--all"].as_ref());
+        let interactive = finalize_resume_from_args(["praxis", "resume", "--all"].as_ref());
         assert!(interactive.resume_picker);
         assert!(interactive.resume_show_all);
         assert_eq!(interactive.resume_source, SessionLookupSource::Praxis);
@@ -2060,7 +2059,7 @@ mod tests {
     #[test]
     fn resume_include_non_interactive_flag_sets_source_filter_override() {
         let interactive =
-            finalize_resume_from_args(["codex", "resume", "--include-non-interactive"].as_ref());
+            finalize_resume_from_args(["praxis", "resume", "--include-non-interactive"].as_ref());
 
         assert!(interactive.resume_picker);
         assert!(interactive.resume_include_non_interactive);
@@ -2144,7 +2143,7 @@ mod tests {
 
     #[test]
     fn fork_picker_logic_none_and_not_last() {
-        let interactive = finalize_fork_from_args(["codex", "fork"].as_ref());
+        let interactive = finalize_fork_from_args(["praxis", "fork"].as_ref());
         assert!(interactive.fork_picker);
         assert!(!interactive.fork_last);
         assert_eq!(interactive.fork_session_id, None);
@@ -2154,7 +2153,7 @@ mod tests {
 
     #[test]
     fn fork_picker_logic_last() {
-        let interactive = finalize_fork_from_args(["codex", "fork", "--last"].as_ref());
+        let interactive = finalize_fork_from_args(["praxis", "fork", "--last"].as_ref());
         assert!(!interactive.fork_picker);
         assert!(interactive.fork_last);
         assert_eq!(interactive.fork_session_id, None);
@@ -2164,7 +2163,7 @@ mod tests {
 
     #[test]
     fn fork_picker_logic_with_session_id() {
-        let interactive = finalize_fork_from_args(["codex", "fork", "1234"].as_ref());
+        let interactive = finalize_fork_from_args(["praxis", "fork", "1234"].as_ref());
         assert!(!interactive.fork_picker);
         assert!(!interactive.fork_last);
         assert_eq!(interactive.fork_session_id.as_deref(), Some("1234"));
@@ -2174,7 +2173,7 @@ mod tests {
 
     #[test]
     fn fork_codex_without_session_id_opens_codex_picker() {
-        let interactive = finalize_fork_from_args(["codex", "fork", "codex"].as_ref());
+        let interactive = finalize_fork_from_args(["praxis", "fork", "codex"].as_ref());
         assert!(interactive.fork_picker);
         assert_eq!(interactive.fork_source, SessionLookupSource::Codex);
         assert_eq!(interactive.fork_session_id, None);
@@ -2194,7 +2193,7 @@ mod tests {
 
     #[test]
     fn fork_all_flag_sets_show_all() {
-        let interactive = finalize_fork_from_args(["codex", "fork", "--all"].as_ref());
+        let interactive = finalize_fork_from_args(["praxis", "fork", "--all"].as_ref());
         assert!(interactive.fork_picker);
         assert!(interactive.fork_show_all);
         assert_eq!(interactive.fork_source, SessionLookupSource::Praxis);
@@ -2202,7 +2201,7 @@ mod tests {
 
     #[test]
     fn app_gateway_analytics_default_disabled_without_flag() {
-        let app_gateway = app_gateway_from_args(["codex", "app-gateway"].as_ref());
+        let app_gateway = app_gateway_from_args(["praxis", "app-gateway"].as_ref());
         assert!(!app_gateway.analytics_default_enabled);
         assert_eq!(
             app_gateway.listen,
@@ -2213,13 +2212,13 @@ mod tests {
     #[test]
     fn app_gateway_analytics_default_enabled_with_flag() {
         let app_gateway =
-            app_gateway_from_args(["codex", "app-gateway", "--analytics-default-enabled"].as_ref());
+            app_gateway_from_args(["praxis", "app-gateway", "--analytics-default-enabled"].as_ref());
         assert!(app_gateway.analytics_default_enabled);
     }
 
     #[test]
     fn remote_flag_parses_for_interactive_root() {
-        let cli = MultitoolCli::try_parse_from(["codex", "--remote", "ws://127.0.0.1:4500"])
+        let cli = MultitoolCli::try_parse_from(["praxis", "--remote", "ws://127.0.0.1:4500"])
             .expect("parse");
         assert_eq!(cli.remote.remote.as_deref(), Some("ws://127.0.0.1:4500"));
     }
@@ -2227,7 +2226,7 @@ mod tests {
     #[test]
     fn control_listen_flag_parses_for_interactive_root() {
         let cli =
-            MultitoolCli::try_parse_from(["codex", "--control-listen", "ws://127.0.0.1:4222"])
+            MultitoolCli::try_parse_from(["praxis", "--control-listen", "ws://127.0.0.1:4222"])
                 .expect("parse");
         assert_eq!(
             cli.remote.control_listen.as_deref(),
@@ -2237,8 +2236,7 @@ mod tests {
 
     #[test]
     fn no_control_listen_flag_parses_for_interactive_root() {
-        let cli =
-            MultitoolCli::try_parse_from(["codex", "--no-control-listen"]).expect("parse");
+        let cli = MultitoolCli::try_parse_from(["praxis", "--no-control-listen"]).expect("parse");
         assert!(cli.remote.no_control_listen);
     }
 
@@ -2247,21 +2245,21 @@ mod tests {
         let cli = MultitoolCli::try_parse_from([
             "codex",
             "--remote-auth-token-env",
-            "CODEX_REMOTE_AUTH_TOKEN",
+            "PRAXIS_REMOTE_AUTH_TOKEN",
             "--remote",
             "ws://127.0.0.1:4500",
         ])
         .expect("parse");
         assert_eq!(
             cli.remote.remote_auth_token_env.as_deref(),
-            Some("CODEX_REMOTE_AUTH_TOKEN")
+            Some("PRAXIS_REMOTE_AUTH_TOKEN")
         );
     }
 
     #[test]
     fn remote_flag_parses_for_resume_subcommand() {
         let cli =
-            MultitoolCli::try_parse_from(["codex", "resume", "--remote", "ws://127.0.0.1:4500"])
+            MultitoolCli::try_parse_from(["praxis", "resume", "--remote", "ws://127.0.0.1:4500"])
                 .expect("parse");
         let Subcommand::Resume(ResumeCommand { remote, .. }) =
             cli.subcommand.expect("resume present")
@@ -2289,7 +2287,7 @@ mod tests {
     fn reject_remote_auth_token_env_for_non_interactive_subcommands() {
         let err = reject_remote_mode_for_subcommand(
             /*remote*/ None,
-            Some("CODEX_REMOTE_AUTH_TOKEN"),
+            Some("PRAXIS_REMOTE_AUTH_TOKEN"),
             "mcp-server",
         )
         .expect_err("non-interactive subcommands should reject --remote-auth-token-env");
@@ -2340,7 +2338,7 @@ mod tests {
             });
         let err = reject_remote_mode_for_app_gateway_subcommand(
             /*remote*/ None,
-            Some("CODEX_REMOTE_AUTH_TOKEN"),
+            Some("PRAXIS_REMOTE_AUTH_TOKEN"),
             Some(&subcommand),
         )
         .expect_err(
@@ -2351,7 +2349,7 @@ mod tests {
 
     #[test]
     fn read_remote_auth_token_from_env_var_reports_missing_values() {
-        let err = read_remote_auth_token_from_env_var_with("CODEX_REMOTE_AUTH_TOKEN", |_| {
+        let err = read_remote_auth_token_from_env_var_with("PRAXIS_REMOTE_AUTH_TOKEN", |_| {
             Err(std::env::VarError::NotPresent)
         })
         .expect_err("missing env vars should be rejected");
@@ -2361,7 +2359,7 @@ mod tests {
     #[test]
     fn read_remote_auth_token_from_env_var_trims_values() {
         let auth_token =
-            read_remote_auth_token_from_env_var_with("CODEX_REMOTE_AUTH_TOKEN", |_| {
+            read_remote_auth_token_from_env_var_with("PRAXIS_REMOTE_AUTH_TOKEN", |_| {
                 Ok("  bearer-token  ".to_string())
             })
             .expect("env var should parse");
@@ -2370,7 +2368,7 @@ mod tests {
 
     #[test]
     fn read_remote_auth_token_from_env_var_rejects_empty_values() {
-        let err = read_remote_auth_token_from_env_var_with("CODEX_REMOTE_AUTH_TOKEN", |_| {
+        let err = read_remote_auth_token_from_env_var_with("PRAXIS_REMOTE_AUTH_TOKEN", |_| {
             Ok(" \n\t ".to_string())
         })
         .expect_err("empty env vars should be rejected");
@@ -2380,7 +2378,7 @@ mod tests {
     #[test]
     fn app_gateway_listen_websocket_url_parses() {
         let app_gateway = app_gateway_from_args(
-            ["codex", "app-gateway", "--listen", "ws://127.0.0.1:4500"].as_ref(),
+            ["praxis", "app-gateway", "--listen", "ws://127.0.0.1:4500"].as_ref(),
         );
         assert_eq!(
             app_gateway.listen,
@@ -2393,7 +2391,7 @@ mod tests {
     #[test]
     fn app_gateway_listen_stdio_url_parses() {
         let app_gateway =
-            app_gateway_from_args(["codex", "app-gateway", "--listen", "stdio://"].as_ref());
+            app_gateway_from_args(["praxis", "app-gateway", "--listen", "stdio://"].as_ref());
         assert_eq!(
             app_gateway.listen,
             praxis_app_gateway::AppGatewayTransport::Stdio
@@ -2403,7 +2401,7 @@ mod tests {
     #[test]
     fn app_gateway_listen_invalid_url_fails_to_parse() {
         let parse_result =
-            MultitoolCli::try_parse_from(["codex", "app-gateway", "--listen", "http://foo"]);
+            MultitoolCli::try_parse_from(["praxis", "app-gateway", "--listen", "http://foo"]);
         assert!(parse_result.is_err());
     }
 
@@ -2474,7 +2472,7 @@ mod tests {
 
     #[test]
     fn features_enable_parses_feature_name() {
-        let cli = MultitoolCli::try_parse_from(["codex", "features", "enable", "unified_exec"])
+        let cli = MultitoolCli::try_parse_from(["praxis", "features", "enable", "unified_exec"])
             .expect("parse should succeed");
         let Some(Subcommand::Features(FeaturesCli { sub })) = cli.subcommand else {
             panic!("expected features subcommand");
@@ -2487,7 +2485,7 @@ mod tests {
 
     #[test]
     fn features_disable_parses_feature_name() {
-        let cli = MultitoolCli::try_parse_from(["codex", "features", "disable", "shell_tool"])
+        let cli = MultitoolCli::try_parse_from(["praxis", "features", "disable", "shell_tool"])
             .expect("parse should succeed");
         let Some(Subcommand::Features(FeaturesCli { sub })) = cli.subcommand else {
             panic!("expected features subcommand");

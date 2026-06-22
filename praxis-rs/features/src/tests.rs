@@ -170,10 +170,10 @@ fn apps_require_feature_flag_and_chatgpt_auth() {
     features.enable(Feature::Apps);
     assert!(!features.apps_enabled_for_auth(/*auth*/ None));
 
-    let api_key_auth = praxis_login::CodexAuth::from_api_key("test-api-key");
+    let api_key_auth = praxis_login::OpenAiAccountAuth::from_api_key("test-api-key");
     assert!(!features.apps_enabled_for_auth(Some(&api_key_auth)));
 
-    let chatgpt_auth = praxis_login::CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let chatgpt_auth = praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
     assert!(features.apps_enabled_for_auth(Some(&chatgpt_auth)));
 }
 

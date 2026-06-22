@@ -300,7 +300,7 @@ async fn exec_cli_profile_applies_model_instructions_file() {
 /// Tests streaming responses through the CLI using a local SSE fixture file.
 /// This test:
 /// 1. Uses a pre-recorded SSE response fixture instead of a live server
-/// 2. Configures codex to read from this fixture via CODEX_RS_SSE_FIXTURE env var
+/// 2. Configures Praxis to read from this fixture via PRAXIS_RS_SSE_FIXTURE env var
 /// 3. Sends a "hello?" prompt and verifies the response
 /// 4. Ensures the fixture content is correctly streamed through the CLI
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -322,7 +322,7 @@ async fn responses_api_stream_cli() {
         .arg("hello?");
     cmd.env("CODEX_HOME", home.path())
         .env("OPENAI_API_KEY", "dummy")
-        .env("CODEX_RS_SSE_FIXTURE", fixture);
+        .env("PRAXIS_RS_SSE_FIXTURE", fixture);
 
     let output = cmd.output().unwrap();
     assert!(output.status.success());
@@ -347,7 +347,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
     let fixture = cli_responses_fixture();
     let repo_root = repo_root();
 
-    // 4. Run the codex CLI and invoke `exec`, which is what records a session.
+    // 4. Run the Praxis CLI and invoke `exec`, which is what records a session.
     let bin = praxis_utils_cargo_bin::cargo_bin("praxis").unwrap();
     let mut cmd = AssertCommand::new(bin);
     cmd.arg("exec")
@@ -359,7 +359,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg(&prompt);
     cmd.env("CODEX_HOME", home.path())
         .env(PRAXIS_API_KEY_ENV_VAR, "dummy")
-        .env("CODEX_RS_SSE_FIXTURE", &fixture);
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture);
 
     let output = cmd.output().unwrap();
     assert!(
@@ -482,7 +482,7 @@ async fn integration_creates_and_checks_session_file() -> anyhow::Result<()> {
         .arg("--last");
     cmd2.env("CODEX_HOME", home.path())
         .env("OPENAI_API_KEY", "dummy")
-        .env("CODEX_RS_SSE_FIXTURE", &fixture);
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture);
 
     let output2 = cmd2.output().unwrap();
     assert!(output2.status.success(), "resume praxis-cli run failed");

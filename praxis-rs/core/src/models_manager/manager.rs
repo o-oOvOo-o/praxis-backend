@@ -101,7 +101,7 @@ impl RequestTelemetry for ModelsRequestTelemetry {
         tracing::event!(
             target: "praxis_otel.log_only",
             tracing::Level::INFO,
-            event.name = "codex.api_request",
+            event.name = "praxis.api_request",
             duration_ms = %duration.as_millis(),
             http.response.status_code = status,
             success = success,
@@ -125,7 +125,7 @@ impl RequestTelemetry for ModelsRequestTelemetry {
         tracing::event!(
             target: "praxis_otel.trace_safe",
             tracing::Level::INFO,
-            event.name = "codex.api_request",
+            event.name = "praxis.api_request",
             duration_ms = %duration.as_millis(),
             http.response.status_code = status,
             success = success,
@@ -569,7 +569,7 @@ impl ModelsManager {
 
     async fn fetch_and_update_models(&self) -> CoreResult<()> {
         let _timer =
-            praxis_otel::start_global_timer("codex.remote_models.fetch_update.duration_ms", &[]);
+            praxis_otel::start_global_timer("praxis.remote_models.fetch_update.duration_ms", &[]);
         let auth_manager = self.auth_manager_for_provider(&self.provider);
         let setup = ProviderDecisionCenter::new(Some(Arc::clone(&auth_manager)))
             .setup_provider(&self.provider, AuthRequestPurpose::ModelList)
@@ -659,7 +659,7 @@ impl ModelsManager {
     /// Attempt to satisfy the refresh from the cache when it matches the provider and TTL.
     async fn try_load_cache(&self) -> bool {
         let _timer =
-            praxis_otel::start_global_timer("codex.remote_models.load_cache.duration_ms", &[]);
+            praxis_otel::start_global_timer("praxis.remote_models.load_cache.duration_ms", &[]);
         let client_version = crate::models_manager::client_version_to_whole();
         info!(client_version, "models cache: evaluating cache eligibility");
         let cache = match self.cache_manager.load_fresh(&client_version).await {

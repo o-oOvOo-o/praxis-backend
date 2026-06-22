@@ -6,8 +6,8 @@ use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::ModelProviderInfo;
 use praxis_core::WireApi;
@@ -68,7 +68,7 @@ async fn retries_on_early_close() {
         supports_websockets: false,
     };
 
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_config(move |config| {
             config.model_provider = model_provider;
         })

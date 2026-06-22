@@ -119,7 +119,7 @@ mod tests {
         assert_eq!(
             detect_update_action(
                 /*is_macos*/ true,
-                std::path::Path::new("/opt/homebrew/bin/codex"),
+                std::path::Path::new("/opt/homebrew/bin/other"),
                 /*managed_by_npm*/ false,
                 /*managed_by_bun*/ false
             ),

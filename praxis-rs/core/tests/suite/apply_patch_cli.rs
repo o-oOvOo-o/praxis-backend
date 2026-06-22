@@ -6,7 +6,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use core_test_support::responses::ev_apply_patch_call;
 use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_shell_command_call;
-use core_test_support::test_codex::ApplyPatchModelOutput;
+use core_test_support::test_praxis::ApplyPatchModelOutput;
 use pretty_assertions::assert_eq;
 use std::fs;
 use std::sync::atomic::AtomicI32;
@@ -22,9 +22,9 @@ use core_test_support::responses::ev_shell_command_call_with_args;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodexBuilder;
-use core_test_support::test_codex::TestCodexHarness;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxisBuilder;
+use core_test_support::test_praxis::TestPraxisHarness;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_features::Feature;
 use praxis_protocol::protocol::AskForApproval;
@@ -33,7 +33,7 @@ use praxis_protocol::protocol::Op;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::user_input::UserInput;
 #[cfg(target_os = "linux")]
-use praxis_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
+use praxis_sandboxing::landlock::PRAXIS_LINUX_SANDBOX_ARG0;
 use serde_json::json;
 use test_case::test_case;
 use wiremock::Mock;
@@ -42,23 +42,23 @@ use wiremock::ResponseTemplate;
 use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
 
-pub async fn apply_patch_harness() -> Result<TestCodexHarness> {
+pub async fn apply_patch_harness() -> Result<TestPraxisHarness> {
     apply_patch_harness_with(|builder| builder).await
 }
 
 async fn apply_patch_harness_with(
-    configure: impl FnOnce(TestCodexBuilder) -> TestCodexBuilder,
-) -> Result<TestCodexHarness> {
-    let builder = configure(test_codex()).with_config(|config| {
+    configure: impl FnOnce(TestPraxisBuilder) -> TestPraxisBuilder,
+) -> Result<TestPraxisHarness> {
+    let builder = configure(test_praxis()).with_config(|config| {
         config.include_apply_patch_tool = true;
     });
     // Box harness construction so apply_patch_cli tests do not inline the
     // full test-thread startup path into each test future.
-    Box::pin(TestCodexHarness::with_builder(builder)).await
+    Box::pin(TestPraxisHarness::with_builder(builder)).await
 }
 
 pub async fn mount_apply_patch(
-    harness: &TestCodexHarness,
+    harness: &TestPraxisHarness,
     call_id: &str,
     patch: &str,
     assistant_msg: &str,
@@ -106,7 +106,7 @@ async fn apply_patch_cli_uses_praxis_self_exe_with_linux_sandbox_helper_alias() 
         praxis_linux_sandbox_exe
             .file_name()
             .and_then(|name| name.to_str()),
-        Some(CODEX_LINUX_SANDBOX_ARG0),
+        Some(PRAXIS_LINUX_SANDBOX_ARG0),
     );
 
     let patch = "*** Begin Patch\n*** Add File: helper-alias.txt\n+hello\n*** End Patch";
@@ -338,7 +338,7 @@ async fn apply_patch_cli_move_without_content_change_has_no_turn_diff(
 
     let harness = apply_patch_harness().await?;
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let cwd = test.cwd.clone();
 
     let original = harness.path("old/name.txt");
@@ -935,7 +935,7 @@ async fn apply_patch_shell_command_heredoc_with_cd_emits_turn_diff() -> Result<(
 
     let harness = apply_patch_harness_with(|builder| builder.with_model("gpt-5.1")).await?;
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let cwd = test.cwd.clone();
 
     // Prepare a file inside a subdir; update it via cd && apply_patch heredoc form.
@@ -1020,7 +1020,7 @@ async fn apply_patch_shell_command_failure_propagates_error_and_skips_diff() -> 
 
     let harness = apply_patch_harness_with(|builder| builder.with_model("gpt-5.1")).await?;
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let cwd = test.cwd.clone();
 
     let target = cwd.path().join("invalid.txt");
@@ -1186,7 +1186,7 @@ async fn apply_patch_emits_turn_diff_event_with_unified_diff(
 
     let harness = apply_patch_harness().await?;
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let cwd = test.cwd.clone();
 
     let call_id = "apply-diff-event";
@@ -1247,7 +1247,7 @@ async fn apply_patch_turn_diff_for_rename_with_content_change(
 
     let harness = apply_patch_harness().await?;
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let cwd = test.cwd.clone();
 
     // Seed original file
@@ -1308,7 +1308,7 @@ async fn apply_patch_aggregates_diff_across_multiple_tool_calls() -> Result<()> 
 
     let harness = apply_patch_harness().await?;
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let cwd = test.cwd.clone();
 
     let call1 = "agg-1";
@@ -1378,7 +1378,7 @@ async fn apply_patch_aggregates_diff_preserves_success_after_failure() -> Result
 
     let harness = apply_patch_harness().await?;
     let test = harness.test();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let cwd = test.cwd.clone();
 
     let call_success = "agg-success";

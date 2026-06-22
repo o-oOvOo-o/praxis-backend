@@ -17,7 +17,6 @@ use crate::ThreadId;
 use crate::approvals::ElicitationRequestEvent;
 use crate::config_types::ApprovalsReviewer;
 use crate::config_types::CollaborationMode;
-use crate::config_types::ModeKind;
 use crate::config_types::Personality;
 use crate::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use crate::config_types::ServiceTier;
@@ -40,7 +39,6 @@ use crate::models::MessagePhase;
 use crate::models::ResponseInputItem;
 use crate::models::ResponseItem;
 use crate::models::WebSearchAction;
-use crate::num_format::format_with_separators;
 use crate::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use crate::parse_command::ParsedCommand;
 use crate::permissions::default_read_only_subpaths_for_writable_root;
@@ -73,6 +71,7 @@ pub use crate::approvals::NetworkApprovalContext;
 pub use crate::approvals::NetworkApprovalProtocol;
 pub use crate::approvals::NetworkPolicyAmendment;
 pub use crate::approvals::NetworkPolicyRuleAction;
+pub use crate::events::turn::*;
 pub use crate::permissions::FileSystemAccessMode;
 pub use crate::permissions::FileSystemPath;
 pub use crate::permissions::FileSystemSandboxEntry;
@@ -82,6 +81,7 @@ pub use crate::permissions::FileSystemSpecialPath;
 pub use crate::permissions::NetworkSandboxPolicy;
 pub use crate::request_permissions::RequestPermissionsArgs;
 pub use crate::request_user_input::RequestUserInputEvent;
+pub use crate::token::*;
 
 /// Open/close tags for special user-input blocks. Used across crates to avoid
 /// duplicated hardcoded strings.
@@ -1536,9 +1536,11 @@ pub enum NonSteerableTurnKind {
 
 /// Praxis errors that we expose to clients.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema, TS)]
+#[schemars(rename = "PraxisErrorInfo")]
 #[serde(rename_all = "snake_case")]
+#[ts(rename = "PraxisErrorInfo")]
 #[ts(rename_all = "snake_case")]
-pub enum CodexErrorInfo {
+pub enum PraxisErrorInfo {
     ContextWindowExceeded,
     UsageLimitExceeded,
     ServerOverloaded,
@@ -1553,7 +1555,7 @@ pub enum CodexErrorInfo {
     Unauthorized,
     BadRequest,
     SandboxError,
-    /// The response SSE stream disconnected in the middle of a turnbefore completion.
+    /// The response SSE stream disconnected in the middle of a turn before completion.
     ResponseStreamDisconnected {
         http_status_code: Option<u16>,
     },
@@ -1570,7 +1572,10 @@ pub enum CodexErrorInfo {
     Other,
 }
 
-impl CodexErrorInfo {
+// Compatibility alias for callers that have not migrated to the Praxis name yet.
+pub use self::PraxisErrorInfo as CodexErrorInfo;
+
+impl PraxisErrorInfo {
     /// Whether this error should mark the current turn as failed when replaying history.
     pub fn affects_turn_status(&self) -> bool {
         match self {
@@ -1730,7 +1735,7 @@ pub struct ExitedReviewModeEvent {
 pub struct ErrorEvent {
     pub message: String,
     #[serde(default)]
-    pub praxis_error_info: Option<CodexErrorInfo>,
+    pub praxis_error_info: Option<PraxisErrorInfo>,
 }
 
 impl ErrorEvent {
@@ -1738,7 +1743,7 @@ impl ErrorEvent {
     pub fn affects_turn_status(&self) -> bool {
         self.praxis_error_info
             .as_ref()
-            .is_none_or(CodexErrorInfo::affects_turn_status)
+            .is_none_or(PraxisErrorInfo::affects_turn_status)
     }
 }
 
@@ -1764,127 +1769,6 @@ pub struct ModelRerouteEvent {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct ContextCompactedEvent;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
-pub struct TurnCompleteEvent {
-    pub turn_id: String,
-    pub last_agent_message: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
-pub struct TurnStartedEvent {
-    pub turn_id: String,
-    // TODO(aibrahim): make this not optional
-    pub model_context_window: Option<i64>,
-    #[serde(default)]
-    pub collaboration_mode_kind: ModeKind,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq, JsonSchema, TS)]
-pub struct TokenUsage {
-    #[serde(default)]
-    #[ts(type = "number")]
-    pub input_tokens: i64,
-    #[serde(default)]
-    #[ts(type = "number")]
-    pub cached_input_tokens: i64,
-    #[serde(default)]
-    #[ts(type = "number")]
-    pub cache_reported_input_tokens: i64,
-    #[serde(default)]
-    #[ts(type = "number")]
-    pub output_tokens: i64,
-    #[serde(default)]
-    #[ts(type = "number")]
-    pub reasoning_output_tokens: i64,
-    #[serde(default)]
-    #[ts(type = "number")]
-    pub total_tokens: i64,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct TokenUsageInfo {
-    pub total_token_usage: TokenUsage,
-    pub last_token_usage: TokenUsage,
-    // TODO(aibrahim): make this not optional
-    #[ts(type = "number | null")]
-    pub model_context_window: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional, type = "number | null")]
-    pub model_auto_compact_token_limit: Option<i64>,
-}
-
-impl TokenUsageInfo {
-    pub fn new_or_append(
-        info: &Option<TokenUsageInfo>,
-        last: &Option<TokenUsage>,
-        model_context_window: Option<i64>,
-        model_auto_compact_token_limit: Option<i64>,
-    ) -> Option<Self> {
-        if info.is_none() && last.is_none() {
-            return None;
-        }
-
-        let mut info = match info {
-            Some(info) => info.clone(),
-            None => Self {
-                total_token_usage: TokenUsage::default(),
-                last_token_usage: TokenUsage::default(),
-                model_context_window,
-                model_auto_compact_token_limit,
-            },
-        };
-        if let Some(last) = last {
-            info.append_last_usage(last);
-        }
-        if let Some(model_context_window) = model_context_window {
-            info.model_context_window = Some(model_context_window);
-        }
-        if let Some(model_auto_compact_token_limit) = model_auto_compact_token_limit {
-            info.model_auto_compact_token_limit = Some(model_auto_compact_token_limit);
-        }
-        Some(info)
-    }
-
-    pub fn append_last_usage(&mut self, last: &TokenUsage) {
-        self.total_token_usage.add_assign(last);
-        self.last_token_usage = last.clone();
-    }
-
-    pub fn fill_to_context_window(&mut self, context_window: i64) {
-        let previous_total = self.total_token_usage.total_tokens;
-        let delta = (context_window - previous_total).max(0);
-
-        self.model_context_window = Some(context_window);
-        self.total_token_usage = TokenUsage {
-            input_tokens: context_window,
-            total_tokens: context_window,
-            ..TokenUsage::default()
-        };
-        self.last_token_usage = TokenUsage {
-            input_tokens: delta,
-            total_tokens: delta,
-            ..TokenUsage::default()
-        };
-    }
-
-    pub fn full_context_window(context_window: i64) -> Self {
-        let mut info = Self {
-            total_token_usage: TokenUsage::default(),
-            last_token_usage: TokenUsage::default(),
-            model_context_window: Some(context_window),
-            model_auto_compact_token_limit: None,
-        };
-        info.fill_to_context_window(context_window);
-        info
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
-pub struct TokenCountEvent {
-    pub info: Option<TokenUsageInfo>,
-    pub rate_limits: Option<RateLimitSnapshot>,
-}
-
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
 pub struct RateLimitSnapshot {
     pub limit_id: Option<String>,
@@ -1893,6 +1777,13 @@ pub struct RateLimitSnapshot {
     pub secondary: Option<RateLimitWindow>,
     pub credits: Option<CreditsSnapshot>,
     pub plan_type: Option<crate::account::PlanType>,
+}
+
+pub const OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID: &str = "codex";
+pub const OPENAI_HOSTED_RATE_LIMIT_EVENT_KIND: &str = "codex.rate_limits";
+
+pub fn is_openai_hosted_primary_rate_limit(limit_id: &str) -> bool {
+    limit_id.eq_ignore_ascii_case(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
@@ -1912,137 +1803,6 @@ pub struct CreditsSnapshot {
     pub has_credits: bool,
     pub unlimited: bool,
     pub balance: Option<String>,
-}
-
-// Includes prompts, tools and space to call compact.
-const BASELINE_TOKENS: i64 = 12000;
-
-impl TokenUsage {
-    pub fn is_zero(&self) -> bool {
-        self.total_tokens == 0
-    }
-
-    pub fn cached_input(&self) -> i64 {
-        self.cached_input_tokens.max(0)
-    }
-
-    pub fn cache_reported_input(&self) -> i64 {
-        let input_tokens = self.input_tokens.max(0);
-        let reported_input_tokens = self.cache_reported_input_tokens.max(0);
-        if input_tokens == 0 {
-            reported_input_tokens
-        } else if reported_input_tokens == 0 {
-            0
-        } else {
-            reported_input_tokens.min(input_tokens)
-        }
-    }
-
-    pub fn non_cached_input(&self) -> i64 {
-        (self.input_tokens - self.cached_input()).max(0)
-    }
-
-    pub fn cache_hit_percent(&self) -> Option<i64> {
-        let cache_reported_input = self.cache_reported_input();
-        if cache_reported_input == 0 {
-            return None;
-        }
-
-        let cached_input = self.cached_input().min(cache_reported_input);
-        Some(
-            ((cached_input as f64 / cache_reported_input as f64) * 100.0)
-                .round()
-                .clamp(0.0, 100.0) as i64,
-        )
-    }
-
-    /// Primary count for display as a single absolute value: non-cached input + output.
-    pub fn blended_total(&self) -> i64 {
-        (self.non_cached_input() + self.output_tokens.max(0)).max(0)
-    }
-
-    pub fn tokens_in_context_window(&self) -> i64 {
-        let input_tokens = self.input_tokens.max(0);
-        if input_tokens > 0 {
-            input_tokens
-        } else {
-            self.total_tokens.max(0)
-        }
-    }
-
-    /// Estimate the remaining user-controllable percentage of the model's context window.
-    ///
-    /// `context_window` is the total size of the model's context window.
-    /// `BASELINE_TOKENS` should capture tokens that are always present in
-    /// the context (e.g., system prompt and fixed tool instructions) so that
-    /// the percentage reflects the portion the user can influence.
-    ///
-    /// This normalizes both the numerator and denominator by subtracting the
-    /// baseline, so immediately after the first prompt the UI shows 100% left
-    /// and trends toward 0% as the user fills the effective window.
-    pub fn percent_of_context_window_remaining(&self, context_window: i64) -> i64 {
-        if context_window <= BASELINE_TOKENS {
-            return 0;
-        }
-
-        let effective_window = context_window - BASELINE_TOKENS;
-        let used = (self.tokens_in_context_window() - BASELINE_TOKENS).max(0);
-        let remaining = (effective_window - used).max(0);
-        ((remaining as f64 / effective_window as f64) * 100.0)
-            .clamp(0.0, 100.0)
-            .round() as i64
-    }
-
-    /// In-place element-wise sum of token counts.
-    pub fn add_assign(&mut self, other: &TokenUsage) {
-        self.input_tokens += other.input_tokens;
-        self.cached_input_tokens += other.cached_input_tokens;
-        self.cache_reported_input_tokens += other.cache_reported_input_tokens;
-        self.output_tokens += other.output_tokens;
-        self.reasoning_output_tokens += other.reasoning_output_tokens;
-        self.total_tokens += other.total_tokens;
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-pub struct FinalOutput {
-    pub token_usage: TokenUsage,
-}
-
-impl From<TokenUsage> for FinalOutput {
-    fn from(token_usage: TokenUsage) -> Self {
-        Self { token_usage }
-    }
-}
-
-impl fmt::Display for FinalOutput {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let token_usage = &self.token_usage;
-
-        write!(
-            f,
-            "Token usage: total={} input={}{} output={}{}",
-            format_with_separators(token_usage.blended_total()),
-            format_with_separators(token_usage.non_cached_input()),
-            if token_usage.cached_input() > 0 {
-                format!(
-                    " (+ {} cached)",
-                    format_with_separators(token_usage.cached_input())
-                )
-            } else {
-                String::new()
-            },
-            format_with_separators(token_usage.output_tokens),
-            if token_usage.reasoning_output_tokens > 0 {
-                format!(
-                    " (reasoning {})",
-                    format_with_separators(token_usage.reasoning_output_tokens)
-                )
-            } else {
-                String::new()
-            }
-        )
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
@@ -2959,7 +2719,7 @@ pub struct ThreadRolledBackEvent {
 pub struct StreamErrorEvent {
     pub message: String,
     #[serde(default)]
-    pub praxis_error_info: Option<CodexErrorInfo>,
+    pub praxis_error_info: Option<PraxisErrorInfo>,
     /// Optional details about the underlying stream failure (often the same
     /// human-readable message that is surfaced as the terminal error if retries
     /// are exhausted).
@@ -3013,11 +2773,6 @@ pub enum PatchApplyStatus {
     Completed,
     Failed,
     Declined,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
-pub struct TurnDiffEvent {
-    pub unified_diff: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
@@ -3426,20 +3181,6 @@ pub struct Chunk {
     pub orig_index: u32,
     pub deleted_lines: Vec<String>,
     pub inserted_lines: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
-pub struct TurnAbortedEvent {
-    pub turn_id: Option<String>,
-    pub reason: TurnAbortReason,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum TurnAbortReason {
-    Interrupted,
-    Replaced,
-    ReviewEnded,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
@@ -4489,7 +4230,7 @@ mod tests {
     fn rollback_failed_error_does_not_affect_turn_status() {
         let event = ErrorEvent {
             message: "rollback failed".into(),
-            praxis_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
+            praxis_error_info: Some(PraxisErrorInfo::ThreadRollbackFailed),
         };
         assert!(!event.affects_turn_status());
     }
@@ -4498,7 +4239,7 @@ mod tests {
     fn active_turn_not_steerable_error_does_not_affect_turn_status() {
         let event = ErrorEvent {
             message: "cannot steer a review turn".into(),
-            praxis_error_info: Some(CodexErrorInfo::ActiveTurnNotSteerable {
+            praxis_error_info: Some(PraxisErrorInfo::ActiveTurnNotSteerable {
                 turn_kind: NonSteerableTurnKind::Review,
             }),
         };
@@ -4509,7 +4250,7 @@ mod tests {
     fn generic_error_affects_turn_status() {
         let event = ErrorEvent {
             message: "generic".into(),
-            praxis_error_info: Some(CodexErrorInfo::Other),
+            praxis_error_info: Some(PraxisErrorInfo::Other),
         };
         assert!(event.affects_turn_status());
     }

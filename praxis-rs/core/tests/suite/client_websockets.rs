@@ -8,7 +8,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::start_websocket_server;
 use core_test_support::responses::start_websocket_server_with_headers;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::tracing::install_test_tracing;
 use core_test_support::wait_for_event;
 use futures::StreamExt;
@@ -23,7 +23,7 @@ use praxis_core::ResponseEvent;
 use praxis_core::WireApi;
 use praxis_core::X_RESPONSESAPI_INCLUDE_TIMING_METRICS_HEADER;
 use praxis_features::Feature;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_otel::SessionTelemetry;
 use praxis_otel::TelemetryAuthMode;
 use praxis_otel::current_span_w3c_trace_context;
@@ -981,17 +981,17 @@ async fn responses_websocket_usage_limit_error_emits_rate_limit_event() {
         vec![usage_limit_error],
     ]])
     .await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.model_provider.request_max_retries = Some(0);
         config.model_provider.stream_max_retries = Some(0);
     });
     let test = builder
         .build_with_websocket_server(&server)
         .await
-        .expect("build websocket codex");
+        .expect("build websocket praxis thread");
 
     let submission_id = test
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -1003,7 +1003,7 @@ async fn responses_websocket_usage_limit_error_emits_rate_limit_event() {
         .expect("submission should succeed while emitting usage limit error events");
 
     let token_event =
-        wait_for_event(&test.codex, |msg| matches!(msg, EventMsg::TokenCount(_))).await;
+        wait_for_event(&test.thread, |msg| matches!(msg, EventMsg::TokenCount(_))).await;
     let EventMsg::TokenCount(event) = token_event else {
         unreachable!();
     };
@@ -1032,7 +1032,7 @@ async fn responses_websocket_usage_limit_error_emits_rate_limit_event() {
         })
     );
 
-    let error_event = wait_for_event(&test.codex, |msg| matches!(msg, EventMsg::Error(_))).await;
+    let error_event = wait_for_event(&test.thread, |msg| matches!(msg, EventMsg::Error(_))).await;
     let EventMsg::Error(error_event) = error_event else {
         unreachable!();
     };
@@ -1066,17 +1066,17 @@ async fn responses_websocket_invalid_request_error_with_status_is_forwarded() {
         vec![invalid_request_error],
     ]])
     .await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.model_provider.request_max_retries = Some(0);
         config.model_provider.stream_max_retries = Some(0);
     });
     let test = builder
         .build_with_websocket_server(&server)
         .await
-        .expect("build websocket codex");
+        .expect("build websocket praxis thread");
 
     let submission_id = test
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -1087,7 +1087,7 @@ async fn responses_websocket_invalid_request_error_with_status_is_forwarded() {
         .await
         .expect("submission should succeed while emitting invalid request events");
 
-    let error_event = wait_for_event(&test.codex, |msg| matches!(msg, EventMsg::Error(_))).await;
+    let error_event = wait_for_event(&test.thread, |msg| matches!(msg, EventMsg::Error(_))).await;
     let EventMsg::Error(error_event) = error_event else {
         unreachable!();
     };
@@ -1122,14 +1122,14 @@ async fn responses_websocket_connection_limit_error_reconnects_and_completes() {
         vec![vec![ev_response_created("resp-1"), ev_completed("resp-1")]],
     ])
     .await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.model_provider.request_max_retries = Some(0);
         config.model_provider.stream_max_retries = Some(1);
     });
     let test = builder
         .build_with_websocket_server(&server)
         .await
-        .expect("build websocket codex");
+        .expect("build websocket praxis thread");
 
     test.submit_turn("hello")
         .await
@@ -1731,8 +1731,9 @@ async fn websocket_harness_with_provider_options(
     let config = Arc::new(config);
     let model_info = praxis_core::test_support::construct_model_info_offline(MODEL, &config);
     let conversation_id = ThreadId::new();
-    let auth_manager =
-        praxis_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager = praxis_core::test_support::auth_manager_from_auth(
+        OpenAiAccountAuth::from_api_key("Test API Key"),
+    );
     let exporter = InMemoryMetricExporter::default();
     let metrics = MetricsClient::new(
         MetricsConfig::in_memory("test", "praxis-core", env!("CARGO_PKG_VERSION"), exporter)

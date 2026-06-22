@@ -12,8 +12,8 @@ use core_test_support::responses::mount_models_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_with_timeout;
 use image::DynamicImage;
@@ -23,7 +23,7 @@ use image::Rgba;
 use image::load_from_memory;
 use praxis_exec_server::CreateDirectoryOptions;
 use praxis_features::Feature;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::config_types::ReasoningSummary;
 use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::InputModality;
@@ -84,7 +84,7 @@ fn png_bytes(width: u32, height: u32, rgba: [u8; 4]) -> anyhow::Result<Vec<u8>> 
     Ok(cursor.into_inner())
 }
 
-async fn create_workspace_directory(test: &TestCodex, rel_path: &str) -> anyhow::Result<PathBuf> {
+async fn create_workspace_directory(test: &TestPraxis, rel_path: &str) -> anyhow::Result<PathBuf> {
     let abs_path = test.config.cwd.join(rel_path)?;
     test.fs()
         .create_directory(&abs_path, CreateDirectoryOptions { recursive: true })
@@ -93,7 +93,7 @@ async fn create_workspace_directory(test: &TestCodex, rel_path: &str) -> anyhow:
 }
 
 async fn write_workspace_file(
-    test: &TestCodex,
+    test: &TestPraxis,
     rel_path: &str,
     contents: Vec<u8>,
 ) -> anyhow::Result<PathBuf> {
@@ -108,7 +108,7 @@ async fn write_workspace_file(
 }
 
 async fn write_workspace_png(
-    test: &TestCodex,
+    test: &TestPraxis,
     rel_path: &str,
     width: u32,
     height: u32,
@@ -123,10 +123,10 @@ async fn user_turn_with_local_image_attaches_image() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
@@ -215,10 +215,10 @@ async fn view_image_tool_attaches_local_image() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         session_configured,
         config,
         ..
@@ -351,7 +351,7 @@ async fn view_image_tool_can_preserve_original_resolution_when_requested_on_gpt5
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.3-codex")
         .with_config(|config| {
             config
@@ -360,8 +360,8 @@ async fn view_image_tool_can_preserve_original_resolution_when_requested_on_gpt5
                 .expect("test config should allow feature update");
         });
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
@@ -459,7 +459,7 @@ async fn view_image_tool_errors_clearly_for_unsupported_detail_values() -> anyho
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.3-codex")
         .with_config(|config| {
             config
@@ -468,8 +468,8 @@ async fn view_image_tool_errors_clearly_for_unsupported_detail_values() -> anyho
                 .expect("test config should allow feature update");
         });
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
@@ -549,7 +549,7 @@ async fn view_image_tool_treats_null_detail_as_omitted() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.3-codex")
         .with_config(|config| {
             config
@@ -558,8 +558,8 @@ async fn view_image_tool_treats_null_detail_as_omitted() -> anyhow::Result<()> {
                 .expect("test config should allow feature update");
         });
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
@@ -651,15 +651,15 @@ async fn view_image_tool_resizes_when_model_lacks_original_detail_support() -> a
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.2").with_config(|config| {
+    let mut builder = test_praxis().with_model("gpt-5.2").with_config(|config| {
         config
             .features
             .enable(Feature::ImageDetailOriginal)
             .expect("test config should allow feature update");
     });
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
@@ -760,7 +760,7 @@ async fn view_image_tool_does_not_force_original_resolution_with_capability_feat
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.3-codex")
         .with_config(|config| {
             config
@@ -769,8 +769,8 @@ async fn view_image_tool_does_not_force_original_resolution_with_capability_feat
                 .expect("test config should allow feature update");
         });
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
@@ -867,14 +867,14 @@ async fn js_repl_emit_image_attaches_local_image() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::JsRepl)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -884,14 +884,14 @@ async fn js_repl_emit_image_attaches_local_image() -> anyhow::Result<()> {
     let js_input = r#"
 const fs = await import("node:fs/promises");
 const path = await import("node:path");
-const imagePath = path.join(codex.tmpDir, "js-repl-view-image.png");
+const imagePath = path.join(praxis.tmpDir, "js-repl-view-image.png");
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
   "base64"
 );
 await fs.writeFile(imagePath, png);
-const out = await codex.tool("view_image", { path: imagePath });
-await codex.emitImage(out);
+const out = await praxis.tool("view_image", { path: imagePath });
+await praxis.emitImage(out);
 "#;
 
     let first_response = sse(vec![
@@ -987,14 +987,14 @@ async fn js_repl_view_image_requires_explicit_emit() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
     #[allow(clippy::expect_used)]
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::JsRepl)
             .expect("test config should allow feature update");
     });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -1004,13 +1004,13 @@ async fn js_repl_view_image_requires_explicit_emit() -> anyhow::Result<()> {
     let js_input = r#"
 const fs = await import("node:fs/promises");
 const path = await import("node:path");
-const imagePath = path.join(codex.tmpDir, "js-repl-view-image-no-emit.png");
+const imagePath = path.join(praxis.tmpDir, "js-repl-view-image-no-emit.png");
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
   "base64"
 );
 await fs.writeFile(imagePath, png);
-const out = await codex.tool("view_image", { path: imagePath });
+const out = await praxis.tool("view_image", { path: imagePath });
 console.log(out.type);
 "#;
 
@@ -1091,10 +1091,10 @@ async fn view_image_tool_errors_when_path_is_directory() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
@@ -1166,10 +1166,10 @@ async fn view_image_tool_errors_for_non_image_files() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
@@ -1248,10 +1248,10 @@ async fn view_image_tool_errors_when_file_missing() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
@@ -1375,13 +1375,17 @@ async fn view_image_tool_returns_unsupported_message_for_text_only_model() -> an
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some(model_slug.to_string());
         });
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex { codex, config, .. } = &test;
+    let TestPraxis {
+        thread: codex,
+        config,
+        ..
+    } = &test;
 
     let rel_path = "assets/example.png";
     write_workspace_png(
@@ -1470,10 +1474,10 @@ async fn replaces_invalid_local_image_after_bad_request() -> anyhow::Result<()> 
 
     let completion_mock = responses::mount_sse_once(&server, success_response).await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_remote_aware(&server).await?;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..

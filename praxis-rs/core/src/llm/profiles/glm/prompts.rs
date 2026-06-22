@@ -1,1 +1,1 @@
-pub(crate) const BASE: &str = include_str!("../../../../templates/prompt_profiles/glm/base.md");
+pub(super) const BASE: &str = include_str!("../../../../templates/prompt_profiles/glm/base.md");

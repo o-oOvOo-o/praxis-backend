@@ -1,6 +1,5 @@
-use super::ExternalAgentSource;
+use super::source::ExternalAgentSource;
 use crate::config::Config;
-use async_trait::async_trait;
 use std::io;
 
 #[derive(Debug, Clone, Default)]
@@ -11,7 +10,7 @@ pub struct ExternalSessionSyncStats {
 }
 
 impl ExternalSessionSyncStats {
-    pub(crate) fn discovered(discovered: usize) -> Self {
+    pub(super) fn discovered(discovered: usize) -> Self {
         Self {
             discovered,
             imported: 0,
@@ -19,27 +18,13 @@ impl ExternalSessionSyncStats {
         }
     }
 
-    pub(crate) fn skip_one(&mut self) {
+    pub(super) fn skip_one(&mut self) {
         self.skipped += 1;
     }
 
-    pub(crate) fn import_one(&mut self) {
+    pub(super) fn import_one(&mut self) {
         self.imported += 1;
     }
-}
-
-pub struct ExternalSessionSyncContext<'a> {
-    pub config: &'a Config,
-}
-
-#[async_trait]
-pub trait ExternalAgentSessionProvider {
-    fn source(&self) -> ExternalAgentSource;
-
-    async fn sync_to_store(
-        &self,
-        ctx: ExternalSessionSyncContext<'_>,
-    ) -> io::Result<ExternalSessionSyncStats>;
 }
 
 pub async fn sync_external_agent_sessions_to_praxis_home(
@@ -47,11 +32,7 @@ pub async fn sync_external_agent_sessions_to_praxis_home(
     config: &Config,
 ) -> io::Result<ExternalSessionSyncStats> {
     match source {
-        ExternalAgentSource::Codex => Ok(ExternalSessionSyncStats::default()),
-        ExternalAgentSource::Cursor => {
-            super::cursor::CursorSessionProvider
-                .sync_to_store(ExternalSessionSyncContext { config })
-                .await
-        }
+        ExternalAgentSource::Codex => super::codex::sync_sessions_to_store(),
+        ExternalAgentSource::Cursor => super::cursor::sync_sessions_to_store(config).await,
     }
 }

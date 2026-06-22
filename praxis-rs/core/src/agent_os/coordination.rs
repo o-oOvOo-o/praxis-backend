@@ -1,4 +1,15 @@
-use super::*;
+use chrono::DateTime;
+use chrono::Utc;
+
+use crate::error::PraxisErr;
+use crate::error::Result as PraxisResult;
+
+use super::instance::AgentOs;
+use super::model::ActiveCoordinatorLease;
+use super::model::ThreadRegistryEntry;
+use super::policy::AgentOsPolicy;
+use super::policy::COORDINATOR_RANK;
+use super::state::AgentOsState;
 
 impl AgentOs {
     pub(super) fn claim_or_renew_active_coordinator_locked(

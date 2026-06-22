@@ -14,12 +14,12 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodexBuilder;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxisBuilder;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::config::Config;
 use praxis_features::Feature;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::openai_models::ModelsResponse;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::EventMsg;
@@ -113,9 +113,9 @@ fn configure_apps(config: &mut Config, apps_base_url: &str) {
         .expect("test config should allow feature update");
 }
 
-fn configured_builder(apps_base_url: String) -> TestCodexBuilder {
-    test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+fn configured_builder(apps_base_url: String) -> TestPraxisBuilder {
+    test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| configure_apps(config, apps_base_url.as_str()))
 }
 
@@ -193,8 +193,8 @@ async fn tool_search_disabled_by_default_exposes_apps_tools_directly() -> Result
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             configure_apps_without_tool_search(config, apps_server.chatgpt_base_url.as_str())
         });
@@ -232,8 +232,8 @@ async fn search_tool_is_hidden_for_api_key_auth() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::from_api_key("Test API Key"))
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::from_api_key("Test API Key"))
         .with_config(move |config| configure_apps(config, apps_server.chatgpt_base_url.as_str()));
     let test = builder.build(&server).await?;
 
@@ -420,7 +420,7 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
 
     let mut builder = configured_builder(apps_server.chatgpt_base_url.clone());
     let test = builder.build(&server).await?;
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "Find the calendar create tool".to_string(),
@@ -430,7 +430,7 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
         })
         .await?;
 
-    let EventMsg::McpToolCallEnd(end) = wait_for_event(&test.codex, |event| {
+    let EventMsg::McpToolCallEnd(end) = wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::McpToolCallEnd(_))
     })
     .await
@@ -463,7 +463,7 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
         }))
     );
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;

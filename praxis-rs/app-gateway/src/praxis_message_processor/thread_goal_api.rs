@@ -143,12 +143,11 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         thread_id: &str,
     ) -> Option<Arc<PraxisThread>> {
-        let thread_uuid = match self.parse_thread_id(thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return None;
-            }
+        let Some(thread_uuid) = self
+            .ensure_thread_id_for_request(thread_id, &request_id)
+            .await
+        else {
+            return None;
         };
         match self.thread_manager.get_thread(thread_uuid).await {
             Ok(thread) => Some(thread),

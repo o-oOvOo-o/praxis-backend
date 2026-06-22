@@ -9,8 +9,10 @@ use praxis_plugin::PluginLlmProfile;
 use praxis_plugin::PluginLlmPromptSlot;
 use praxis_plugin::PluginLlmToolPolicy;
 
+use crate::config::Config;
 use crate::llm::ids::BehaviorProfileId;
 use crate::llm::ids::ProductProfileId;
+use crate::llm::local_models::LocalModelHostRegistry;
 use crate::llm::profiles::plugin::ProfileAutoTitleModel;
 use crate::llm::profiles::plugin::ProfileDescriptor;
 use crate::llm::profiles::plugin::ProfileMatchContext;
@@ -18,6 +20,7 @@ use crate::llm::profiles::plugin::ProfileTaskPolicyDescriptor;
 use crate::llm::prompts::LlmPromptPurpose;
 use crate::llm::registry::LlmProfileRegistry;
 use crate::llm::tasks::compact::CompactExecutionPolicy;
+use crate::llm::transcription::TranscriptionRuntime;
 use crate::model_provider_info::ModelProviderInfo;
 use praxis_protocol::config_types::ReasoningSummary;
 use praxis_protocol::config_types::Verbosity;
@@ -26,6 +29,7 @@ use praxis_protocol::openai_models::ApplyPatchToolType;
 use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelVisibility;
+use praxis_protocol::openai_models::ModelsResponse;
 use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::openai_models::TruncationPolicyConfig;
 use praxis_protocol::openai_models::WebSearchToolType;
@@ -39,6 +43,21 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LlmRuntimeCatalog {
     plugin_manifests: Vec<PluginLlmManifest>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LlmRuntimeSubstrate {
+    pub(crate) local_model_hosts: LocalModelHostRegistry,
+    pub(crate) transcription: TranscriptionRuntime,
+}
+
+impl LlmRuntimeSubstrate {
+    pub(crate) fn from_config(config: &Config) -> Self {
+        Self {
+            local_model_hosts: LocalModelHostRegistry::new(config.local_model_hosts.clone()),
+            transcription: TranscriptionRuntime::new(config.transcription.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -282,17 +301,39 @@ impl LlmRuntimeCatalog {
         models
     }
 
+    pub(crate) fn merge_model_catalog_into_config(&self, config: &mut Config) {
+        let plugin_models =
+            self.model_infos_for_provider(&config.model_provider_id, &config.model_provider);
+        if plugin_models.is_empty() {
+            return;
+        }
+
+        let model_catalog = config
+            .model_catalog
+            .get_or_insert_with(ModelsResponse::default);
+        for plugin_model in plugin_models {
+            if let Some(existing) = model_catalog
+                .models
+                .iter_mut()
+                .find(|model| model.slug == plugin_model.slug)
+            {
+                *existing = plugin_model;
+            } else {
+                model_catalog.models.push(plugin_model);
+            }
+        }
+        model_catalog
+            .models
+            .sort_by(|left, right| left.priority.cmp(&right.priority));
+    }
+
     pub(crate) fn resolve_builtin_profile(
         &self,
         model_info: &ModelInfo,
         provider_id: &str,
         provider: &ModelProviderInfo,
     ) -> Option<ProfileDescriptor> {
-        let ctx = ProfileMatchContext {
-            model_info,
-            provider_id,
-            provider,
-        };
+        let ctx = ProfileMatchContext::new(model_info, provider_id, provider);
         LlmProfileRegistry::builtin_static().resolve(&ctx)
     }
 
@@ -355,7 +396,7 @@ impl LlmRuntimeCatalog {
                     read_plugin_prompt(
                         slot,
                         plugin_product.id.as_str(),
-                        product.as_behavior_id(),
+                        product.policy_reader_behavior_id(),
                         purpose,
                     )
                 })
@@ -463,7 +504,7 @@ impl LlmRuntimeCatalog {
             && let Some(path) = self.product_tools_policy_path(product)
             && let Some(product_policy) = read_tool_visibility_policy(
                 path.as_path(),
-                product.as_behavior_id(),
+                product.policy_reader_behavior_id(),
                 "product.tools",
             )
         {
@@ -508,7 +549,7 @@ impl LlmRuntimeCatalog {
             && let Some(path) = self.product_tools_policy_path(product)
             && let Some(product_capabilities) = read_tool_capability_policy(
                 path.as_path(),
-                product.as_behavior_id(),
+                product.policy_reader_behavior_id(),
                 "product.tools",
             )
         {
@@ -578,7 +619,8 @@ impl LlmRuntimeCatalog {
         }
         if let Some(product) = product
             && let Some(path) = self.product_task_policy_path(product)
-            && let Some(product_policy) = read_task_policy(path.as_path(), product.as_behavior_id())
+            && let Some(product_policy) =
+                read_task_policy(path.as_path(), product.policy_reader_behavior_id())
         {
             policy.merge(product_policy);
         }
@@ -698,7 +740,7 @@ fn profile_id_matches(plugin_profile_id: &str, behavior_id: BehaviorProfileId) -
 
 fn behavior_profile_aliases(behavior_id: BehaviorProfileId) -> &'static [&'static str] {
     match behavior_id {
-        BehaviorProfileId::CodexResponses => &["codex/responses", "codex/responses/base"],
+        BehaviorProfileId::OpenAiResponses => &["codex/responses", "codex/responses/base"],
         BehaviorProfileId::Common => &["common", "common/base"],
         BehaviorProfileId::DeepSeek => &["deepseek", "deepseek/base"],
         BehaviorProfileId::Gemini => &["gemini", "gemini/base"],
@@ -1034,18 +1076,6 @@ fn normalize_non_empty_string(value: &str) -> Option<String> {
 
 fn normalize_tool_name(value: &str) -> String {
     value.trim().to_string()
-}
-
-trait ProductPromptBehaviorId {
-    fn as_behavior_id(self) -> BehaviorProfileId;
-}
-
-impl ProductPromptBehaviorId for ProductProfileId {
-    fn as_behavior_id(self) -> BehaviorProfileId {
-        match self {
-            ProductProfileId::Praxis | ProductProfileId::Cunning3d => BehaviorProfileId::Common,
-        }
-    }
 }
 
 #[cfg(test)]

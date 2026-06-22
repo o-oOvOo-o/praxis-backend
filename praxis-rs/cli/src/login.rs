@@ -11,7 +11,7 @@ use praxis_core::config::Config;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_login::AuthMode;
 use praxis_login::CLIENT_ID;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::ServerOptions;
 use praxis_login::login_with_api_key;
 use praxis_login::logout;
@@ -316,7 +316,7 @@ pub async fn run_login_with_device_code_fallback_to_browser(
 pub async fn run_login_status(cli_config_overrides: CliConfigOverrides) -> ! {
     let config = load_config_or_exit(cli_config_overrides).await;
 
-    match CodexAuth::from_auth_storage(&config.praxis_home, config.cli_auth_credentials_store_mode)
+    match OpenAiAccountAuth::from_auth_storage(&config.praxis_home, config.cli_auth_credentials_store_mode)
     {
         Ok(Some(auth)) => match auth.auth_mode() {
             AuthMode::ApiKey => match auth.get_token() {

@@ -5,7 +5,7 @@ This crate contains the Unix shell-escalation protocol implementation and the
 
 `praxis-execve-wrapper` receives the arguments to an intercepted `execve(2)` call and delegates the
 decision to the shell-escalation protocol over a shared file descriptor (specified by the
-`CODEX_ESCALATE_SOCKET` environment variable). The server on the other side replies with one of:
+`PRAXIS_ESCALATE_SOCKET` environment variable). The server on the other side replies with one of:
 
 - `Run`: `praxis-execve-wrapper` should invoke `execve(2)` on itself to run the original command
   within the sandboxed shell.

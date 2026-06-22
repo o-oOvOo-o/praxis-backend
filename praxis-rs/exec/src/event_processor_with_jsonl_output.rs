@@ -18,8 +18,8 @@ use praxis_protocol::models::WebSearchAction;
 use praxis_protocol::protocol::SessionConfiguredEvent;
 use serde_json::json;
 
-pub use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
+pub use crate::event_processor::PraxisStatus;
 use crate::event_processor::handle_last_message;
 use crate::exec_events::AgentMessageItem;
 use crate::exec_events::CollabAgentState;
@@ -75,7 +75,7 @@ struct RunningTodoList {
 #[derive(Debug, PartialEq)]
 pub struct CollectedThreadEvents {
     pub events: Vec<ThreadEvent>,
-    pub status: CodexStatus,
+    pub status: PraxisStatus,
 }
 
 impl EventProcessorWithJsonOutput {
@@ -405,7 +405,7 @@ impl EventProcessorWithJsonOutput {
                     details: ThreadItemDetails::Error(ErrorItem { message }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     }
 
@@ -428,7 +428,7 @@ impl EventProcessorWithJsonOutput {
                         details: ThreadItemDetails::Error(ErrorItem { message }),
                     },
                 }));
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::Error(notification) => {
                 let message = match notification.error.additional_details {
@@ -440,7 +440,7 @@ impl EventProcessorWithJsonOutput {
                 let error = ThreadErrorEvent { message };
                 self.last_critical_error = Some(error.clone());
                 events.push(ThreadEvent::Error(error));
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::DeprecationNotice(notification) => {
                 let message = match notification.details {
@@ -455,16 +455,16 @@ impl EventProcessorWithJsonOutput {
                         details: ThreadItemDetails::Error(ErrorItem { message }),
                     },
                 }));
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::HookStarted(_) | ServerNotification::HookCompleted(_) => {
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::ItemStarted(notification) => {
                 if let Some(item) = self.map_started_item(notification.item) {
                     events.push(ThreadEvent::ItemStarted(ItemStartedEvent { item }));
                 }
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::ItemCompleted(notification) => {
                 if let Some(item) = self.map_completed_item_mut(notification.item) {
@@ -475,7 +475,7 @@ impl EventProcessorWithJsonOutput {
                     }
                     events.push(ThreadEvent::ItemCompleted(ItemCompletedEvent { item }));
                 }
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::ModelRerouted(notification) => {
                 events.push(ThreadEvent::ItemCompleted(ItemCompletedEvent {
@@ -489,11 +489,11 @@ impl EventProcessorWithJsonOutput {
                         }),
                     },
                 }));
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
                 self.last_total_token_usage = Some(notification.token_usage);
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::TurnCompleted(notification) => {
                 if let Some(running) = self.running_todo_list.take() {
@@ -518,7 +518,7 @@ impl EventProcessorWithJsonOutput {
                         events.push(ThreadEvent::TurnCompleted(TurnCompletedEvent {
                             usage: self.usage_from_last_total(),
                         }));
-                        CodexStatus::InitiateShutdown
+                        PraxisStatus::InitiateShutdown
                     }
                     TurnStatus::Failed => {
                         self.final_message = None;
@@ -539,17 +539,17 @@ impl EventProcessorWithJsonOutput {
                                 message: "turn failed".to_string(),
                             });
                         events.push(ThreadEvent::TurnFailed(TurnFailedEvent { error }));
-                        CodexStatus::InitiateShutdown
+                        PraxisStatus::InitiateShutdown
                     }
                     TurnStatus::Interrupted => {
                         self.final_message = None;
                         self.emit_final_message_on_shutdown = false;
-                        CodexStatus::InitiateShutdown
+                        PraxisStatus::InitiateShutdown
                     }
-                    TurnStatus::InProgress => CodexStatus::Running,
+                    TurnStatus::InProgress => PraxisStatus::Running,
                 }
             }
-            ServerNotification::TurnDiffUpdated(_) => CodexStatus::Running,
+            ServerNotification::TurnDiffUpdated(_) => PraxisStatus::Running,
             ServerNotification::TurnPlanUpdated(notification) => {
                 let items = Self::map_todo_items(&notification.plan);
                 if let Some(running) = self.running_todo_list.as_mut() {
@@ -574,13 +574,13 @@ impl EventProcessorWithJsonOutput {
                         },
                     }));
                 }
-                CodexStatus::Running
+                PraxisStatus::Running
             }
             ServerNotification::TurnStarted(_) => {
                 events.push(ThreadEvent::TurnStarted(TurnStartedEvent {}));
-                CodexStatus::Running
+                PraxisStatus::Running
             }
-            _ => CodexStatus::Running,
+            _ => PraxisStatus::Running,
         };
 
         CollectedThreadEvents { events, status }
@@ -597,7 +597,7 @@ impl EventProcessor for EventProcessorWithJsonOutput {
         self.emit(Self::thread_started_event(session_configured));
     }
 
-    fn process_server_notification(&mut self, notification: ServerNotification) -> CodexStatus {
+    fn process_server_notification(&mut self, notification: ServerNotification) -> PraxisStatus {
         let collected = self.collect_thread_events(notification);
         for event in collected.events {
             self.emit(event);
@@ -605,7 +605,7 @@ impl EventProcessor for EventProcessorWithJsonOutput {
         collected.status
     }
 
-    fn process_warning(&mut self, message: String) -> CodexStatus {
+    fn process_warning(&mut self, message: String) -> PraxisStatus {
         let collected = self.collect_warning(message);
         for event in collected.events {
             self.emit(event);
@@ -649,7 +649,7 @@ mod tests {
             },
         ));
 
-        assert_eq!(collected.status, CodexStatus::Running);
+        assert_eq!(collected.status, PraxisStatus::Running);
         assert_eq!(processor.final_message(), Some("partial answer"));
 
         let status = processor.process_server_notification(ServerNotification::TurnCompleted(
@@ -668,7 +668,7 @@ mod tests {
             },
         ));
 
-        assert_eq!(status, CodexStatus::InitiateShutdown);
+        assert_eq!(status, PraxisStatus::InitiateShutdown);
         assert_eq!(processor.final_message(), None);
 
         EventProcessor::print_final_output(&mut processor);

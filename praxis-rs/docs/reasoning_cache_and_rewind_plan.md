@@ -14,7 +14,7 @@ Absorb now:
 Do not absorb now:
 
 - `4`: Reasonix checkpoint/rewind.
-- Generic provider matrices. Codex/Responses keeps its native path. GLM/Qwen/common can be derived later after the DeepSeek specialization is stable.
+- Generic provider matrices. OpenAI Responses keeps its native path. GLM/Qwen/common can be derived later after the DeepSeek specialization is stable.
 - Google-style cache handling. It is not part of the current Praxis product path.
 
 Reasonix checkpoint/rewind is too small for Praxis. It is closer to message truncation plus file snapshots, and it does not cleanly cover shell side effects, git state, external processes, multi-thread control, or future GUI thread management. Praxis should eventually solve rewind through its own thread history, event log, diff, and workspace state model.
@@ -46,14 +46,14 @@ If a provider does not report cache accounting, `cache_reported_input_tokens` mu
 
 ## Provider Usage Fields To Normalize Now
 
-Codex / OpenAI Responses native path:
+OpenAI Responses native path:
 
 - `prompt_tokens`
 - `completion_tokens`
 - `prompt_tokens_details.cached_tokens`
 - `completion_tokens_details.reasoning_tokens`
 
-Praxis keeps this path working, but this document does not expand it. Codex already has a strong native implementation.
+Praxis keeps this path working, but this document does not expand it. The upstream Responses implementation is already strong.
 
 DeepSeek-style common API:
 
@@ -70,10 +70,10 @@ Goal: DeepSeek thinking should be visible and persisted correctly without pollut
 
 Required behavior:
 
-- OpenAI Responses/Codex reasoning summaries remain their own path.
+- OpenAI Responses reasoning summaries remain their own path.
 - DeepSeek can emit full thinking when the provider returns `reasoning_content` or equivalent fields.
 - GUI/TUI should distinguish summary reasoning from full reasoning:
-  - `Summary`: OpenAI Responses/Codex reasoning summary.
+  - `Summary`: OpenAI Responses reasoning summary.
   - `Full`: DeepSeek when real full thinking is returned.
 - Full DeepSeek thinking should be shown to the user, but must not be replayed back into later DeepSeek requests.
 

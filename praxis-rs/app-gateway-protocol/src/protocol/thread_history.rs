@@ -1225,7 +1225,6 @@ mod tests {
     use praxis_protocol::protocol::AgentReasoningEvent;
     use praxis_protocol::protocol::AgentReasoningRawContentEvent;
     use praxis_protocol::protocol::ApplyPatchApprovalRequestEvent;
-    use praxis_protocol::protocol::CodexErrorInfo;
     use praxis_protocol::protocol::CompactedItem;
     use praxis_protocol::protocol::DynamicToolCallResponseEvent;
     use praxis_protocol::protocol::ExecCommandEndEvent;
@@ -1234,6 +1233,7 @@ mod tests {
     use praxis_protocol::protocol::McpInvocation;
     use praxis_protocol::protocol::McpToolCallEndEvent;
     use praxis_protocol::protocol::PatchApplyBeginEvent;
+    use praxis_protocol::protocol::PraxisErrorInfo;
     use praxis_protocol::protocol::ThreadRolledBackEvent;
     use praxis_protocol::protocol::TurnAbortReason;
     use praxis_protocol::protocol::TurnAbortedEvent;
@@ -1808,9 +1808,9 @@ mod tests {
             }),
             EventMsg::WebSearchEnd(WebSearchEndEvent {
                 call_id: "search-1".into(),
-                query: "codex".into(),
+                query: "agent runtime".into(),
                 action: CoreWebSearchAction::Search {
-                    query: Some("codex".into()),
+                    query: Some("agent runtime".into()),
                     queries: None,
                 },
             }),
@@ -1856,9 +1856,9 @@ mod tests {
             turns[0].items[1],
             ThreadItem::WebSearch {
                 id: "search-1".into(),
-                query: "codex".into(),
+                query: "agent runtime".into(),
                 action: Some(WebSearchAction::Search {
-                    query: Some("codex".into()),
+                    query: Some("agent runtime".into()),
                     queries: None,
                 }),
             }
@@ -2667,7 +2667,7 @@ mod tests {
             }),
             EventMsg::Error(ErrorEvent {
                 message: "rollback failed".into(),
-                praxis_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
+                praxis_error_info: Some(PraxisErrorInfo::ThreadRollbackFailed),
             }),
         ];
 
@@ -2701,7 +2701,7 @@ mod tests {
             }),
             EventMsg::Error(ErrorEvent {
                 message: "request-level failure".into(),
-                praxis_error_info: Some(CodexErrorInfo::BadRequest),
+                praxis_error_info: Some(PraxisErrorInfo::BadRequest),
             }),
         ];
 
@@ -2744,7 +2744,7 @@ mod tests {
             }),
             EventMsg::Error(ErrorEvent {
                 message: "stream failure".into(),
-                praxis_error_info: Some(CodexErrorInfo::ResponseStreamDisconnected {
+                praxis_error_info: Some(PraxisErrorInfo::ResponseStreamDisconnected {
                     http_status_code: Some(502),
                 }),
             }),
@@ -2767,7 +2767,7 @@ mod tests {
             Some(TurnError {
                 message: "stream failure".into(),
                 praxis_error_info: Some(
-                    crate::protocol::api::CodexErrorInfo::ResponseStreamDisconnected {
+                    crate::protocol::api::PraxisErrorInfo::ResponseStreamDisconnected {
                         http_status_code: Some(502),
                     }
                 ),

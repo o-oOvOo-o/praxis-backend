@@ -1,3 +1,6 @@
 # Getting started with Praxis CLI
 
-For an overview of Praxis CLI features, see [this documentation](https://developers.openai.com/codex/cli/features#running-in-interactive-mode).
+Install Praxis, then run `praxis` from a workspace directory to start the TUI.
+
+Use `praxis exec` for non-interactive prompts and `praxis resume` to continue
+an existing Praxis thread.

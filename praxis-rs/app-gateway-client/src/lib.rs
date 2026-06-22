@@ -36,6 +36,7 @@ use praxis_app_gateway_protocol::ClientInfo;
 use praxis_app_gateway_protocol::ClientNotification;
 use praxis_app_gateway_protocol::ClientRequest;
 use praxis_app_gateway_protocol::ConfigWarningNotification;
+use praxis_app_gateway_protocol::HostExtensionInfo;
 use praxis_app_gateway_protocol::InitializeCapabilities;
 use praxis_app_gateway_protocol::InitializeParams;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
@@ -188,6 +189,7 @@ fn initialize_params_from_metadata(
     client_version: &str,
     experimental_api: bool,
     opt_out_notification_methods: &[String],
+    host_extensions: Vec<HostExtensionInfo>,
 ) -> InitializeParams {
     let capabilities = InitializeCapabilities {
         experimental_api,
@@ -205,6 +207,7 @@ fn initialize_params_from_metadata(
             version: client_version.to_string(),
         },
         capabilities: Some(capabilities),
+        host_extensions,
     }
 }
 
@@ -318,6 +321,7 @@ pub(crate) fn server_notification_requires_delivery(notification: &ServerNotific
             | ServerNotification::ItemCompleted(_)
             | ServerNotification::ThreadGoalUpdated(_)
             | ServerNotification::ThreadGoalCleared(_)
+            | ServerNotification::ThreadModelChanged(_)
             | ServerNotification::AgentMessageDelta(_)
             | ServerNotification::PlanDelta(_)
             | ServerNotification::ReasoningSummaryTextDelta(_)
@@ -488,6 +492,8 @@ pub struct NativeAppGatewayClientStartArgs {
     pub experimental_api: bool,
     /// Notification methods this client opts out of receiving.
     pub opt_out_notification_methods: Vec<String>,
+    /// Host extensions exposed by this app-gateway client.
+    pub host_extensions: Vec<HostExtensionInfo>,
     /// Queue capacity for command/event channels (clamped to at least 1).
     pub channel_capacity: usize,
     /// Optional websocket listener exposing this native backend to external agents.
@@ -504,6 +510,7 @@ impl NativeAppGatewayClientStartArgs {
             self.client_version.as_str(),
             self.experimental_api,
             &self.opt_out_notification_methods,
+            self.host_extensions.clone(),
         )
     }
 
@@ -1062,6 +1069,7 @@ mod tests {
             client_version: "0.0.0-test".to_string(),
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
+            host_extensions: Vec::new(),
             channel_capacity,
             control_listen: None,
             control_auth: NativeControlAuthSettings::default(),
@@ -1237,6 +1245,7 @@ mod tests {
             client_version: "0.0.0-test".to_string(),
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
+            host_extensions: Vec::new(),
             channel_capacity: 8,
         }
     }
@@ -1681,6 +1690,7 @@ mod tests {
             client_version: "0.0.0-test".to_string(),
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
+            host_extensions: Vec::new(),
             channel_capacity: 1,
         })
         .await
@@ -2059,6 +2069,7 @@ mod tests {
             client_version: "0.0.0-test".to_string(),
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
+            host_extensions: Vec::new(),
             channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
             control_listen: None,
             control_auth: NativeControlAuthSettings::default(),

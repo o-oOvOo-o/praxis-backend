@@ -34,6 +34,12 @@ pub(crate) struct ThreadWatchActiveGuard {
     handle: tokio::runtime::Handle,
 }
 
+#[derive(Debug)]
+pub(crate) struct ThreadRuntimeState {
+    pub(crate) status: ThreadStatus,
+    pub(crate) control_state: Option<ThreadControlState>,
+}
+
 impl ThreadWatchActiveGuard {
     fn new(
         manager: ThreadWatchManager,
@@ -114,45 +120,39 @@ impl ThreadWatchManager {
             .await;
     }
 
-    pub(crate) async fn loaded_status_for_thread(&self, thread_id: &str) -> ThreadStatus {
+    #[cfg(test)]
+    async fn loaded_status_for_thread(&self, thread_id: &str) -> ThreadStatus {
         self.state.lock().await.loaded_status_for_thread(thread_id)
     }
 
-    pub(crate) async fn loaded_control_state_for_thread(
-        &self,
-        thread_id: &str,
-    ) -> Option<ThreadControlState> {
+    #[cfg(test)]
+    async fn loaded_control_state_for_thread(&self, thread_id: &str) -> Option<ThreadControlState> {
         self.state
             .lock()
             .await
             .loaded_control_state_for_thread(thread_id)
     }
 
-    pub(crate) async fn loaded_statuses_for_threads(
+    pub(crate) async fn loaded_runtime_state_for_thread(
+        &self,
+        thread_id: &str,
+    ) -> ThreadRuntimeState {
+        self.state
+            .lock()
+            .await
+            .loaded_runtime_state_for_thread(thread_id)
+    }
+
+    pub(crate) async fn loaded_runtime_states_for_threads(
         &self,
         thread_ids: Vec<String>,
-    ) -> HashMap<String, ThreadStatus> {
+    ) -> HashMap<String, ThreadRuntimeState> {
         let state = self.state.lock().await;
         thread_ids
             .into_iter()
             .map(|thread_id| {
-                let status = state.loaded_status_for_thread(&thread_id);
-                (thread_id, status)
-            })
-            .collect()
-    }
-
-    pub(crate) async fn loaded_control_states_for_threads(
-        &self,
-        thread_ids: Vec<String>,
-    ) -> HashMap<String, ThreadControlState> {
-        let state = self.state.lock().await;
-        thread_ids
-            .into_iter()
-            .filter_map(|thread_id| {
-                state
-                    .loaded_control_state_for_thread(&thread_id)
-                    .map(|control_state| (thread_id, control_state))
+                let runtime_state = state.loaded_runtime_state_for_thread(&thread_id);
+                (thread_id, runtime_state)
             })
             .collect()
     }
@@ -547,6 +547,13 @@ impl ThreadWatchState {
             .and_then(|runtime| runtime.control_state.clone())
     }
 
+    fn loaded_runtime_state_for_thread(&self, thread_id: &str) -> ThreadRuntimeState {
+        ThreadRuntimeState {
+            status: self.loaded_status_for_thread(thread_id),
+            control_state: self.loaded_control_state_for_thread(thread_id),
+        }
+    }
+
     fn running_turn_count(&self) -> usize {
         self.runtime_by_thread_id
             .values()
@@ -863,7 +870,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn loaded_statuses_default_to_not_loaded_for_untracked_threads() {
+    async fn loaded_runtime_states_default_to_not_loaded_for_untracked_threads() {
         let manager = ThreadWatchManager::new();
         manager
             .upsert_thread(test_thread(
@@ -873,21 +880,25 @@ mod tests {
             .await;
         manager.note_turn_started(INTERACTIVE_THREAD_ID).await;
 
-        let statuses = manager
-            .loaded_statuses_for_threads(vec![
+        let runtime_states = manager
+            .loaded_runtime_states_for_threads(vec![
                 INTERACTIVE_THREAD_ID.to_string(),
                 NON_INTERACTIVE_THREAD_ID.to_string(),
             ])
             .await;
 
         assert_eq!(
-            statuses.get(INTERACTIVE_THREAD_ID),
+            runtime_states
+                .get(INTERACTIVE_THREAD_ID)
+                .map(|state| &state.status),
             Some(&ThreadStatus::Active {
                 active_flags: vec![ThreadActiveFlag::Running],
             }),
         );
         assert_eq!(
-            statuses.get(NON_INTERACTIVE_THREAD_ID),
+            runtime_states
+                .get(NON_INTERACTIVE_THREAD_ID)
+                .map(|state| &state.status),
             Some(&ThreadStatus::NotLoaded),
         );
     }

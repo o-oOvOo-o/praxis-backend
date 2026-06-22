@@ -11,8 +11,8 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_features::Feature;
 use praxis_protocol::ThreadId;
@@ -53,7 +53,7 @@ async fn memories_startup_phase2_tracks_added_and_removed_inputs_across_runs() -
     )
     .await;
 
-    let first = build_test_codex(&server, home.clone()).await?;
+    let first = build_test_praxis(&server, home.clone()).await?;
     let first_request = wait_for_single_request(&first_phase2).await;
     let first_prompt = phase2_prompt_text(&first_request);
     assert!(
@@ -87,7 +87,7 @@ async fn memories_startup_phase2_tracks_added_and_removed_inputs_across_runs() -
     assert!(rollout_summaries[0].contains("rollout summary A"));
     assert!(rollout_summaries[0].contains("git_branch: branch-rollout-a"));
 
-    shutdown_test_codex(&first).await?;
+    shutdown_test_praxis(&first).await?;
 
     let thread_b = seed_stage1_output(
         db.as_ref(),
@@ -109,7 +109,7 @@ async fn memories_startup_phase2_tracks_added_and_removed_inputs_across_runs() -
     )
     .await;
 
-    let second = build_test_codex(&server, home.clone()).await?;
+    let second = build_test_praxis(&server, home.clone()).await?;
     let second_request = wait_for_single_request(&second_phase2).await;
     let second_prompt = phase2_prompt_text(&second_request);
     assert!(
@@ -155,7 +155,7 @@ async fn memories_startup_phase2_tracks_added_and_removed_inputs_across_runs() -
             .any(|summary| summary.contains("rollout summary A"))
     );
 
-    shutdown_test_codex(&second).await?;
+    shutdown_test_praxis(&second).await?;
     Ok(())
 }
 
@@ -165,7 +165,7 @@ async fn web_search_pollution_moves_selected_thread_into_removed_phase2_inputs()
     let home = Arc::new(TempDir::new()?);
     let db = init_state_db(&home).await?;
 
-    let mut initial_builder = test_codex().with_home(home.clone()).with_config(|config| {
+    let mut initial_builder = test_praxis().with_home(home.clone()).with_config(|config| {
         config
             .features
             .enable(Feature::Sqlite)
@@ -218,7 +218,7 @@ async fn web_search_pollution_moves_selected_thread_into_removed_phase2_inputs()
     )
     .await?;
 
-    shutdown_test_codex(&initial).await?;
+    shutdown_test_praxis(&initial).await?;
 
     let responses = mount_sse_sequence(
         &server,
@@ -237,7 +237,7 @@ async fn web_search_pollution_moves_selected_thread_into_removed_phase2_inputs()
     )
     .await;
 
-    let mut resumed_builder = test_codex().with_home(home.clone()).with_config(|config| {
+    let mut resumed_builder = test_praxis().with_home(home.clone()).with_config(|config| {
         config
             .features
             .enable(Feature::Sqlite)
@@ -321,13 +321,16 @@ async fn web_search_pollution_moves_selected_thread_into_removed_phase2_inputs()
     assert_eq!(selection.removed.len(), 1);
     assert_eq!(selection.removed[0].thread_id, thread_id);
 
-    shutdown_test_codex(&resumed).await?;
+    shutdown_test_praxis(&resumed).await?;
     Ok(())
 }
 
-async fn build_test_codex(server: &wiremock::MockServer, home: Arc<TempDir>) -> Result<TestCodex> {
+async fn build_test_praxis(
+    server: &wiremock::MockServer,
+    home: Arc<TempDir>,
+) -> Result<TestPraxis> {
     #[allow(clippy::expect_used)]
-    let mut builder = test_codex().with_home(home).with_config(|config| {
+    let mut builder = test_praxis().with_home(home).with_config(|config| {
         config
             .features
             .enable(Feature::Sqlite)
@@ -481,8 +484,8 @@ async fn read_rollout_summary_bodies(memory_root: &Path) -> Result<Vec<String>> 
     Ok(summaries)
 }
 
-async fn shutdown_test_codex(test: &TestCodex) -> Result<()> {
-    test.codex.submit(Op::Shutdown {}).await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
+async fn shutdown_test_praxis(test: &TestPraxis) -> Result<()> {
+    test.thread.submit(Op::Shutdown {}).await?;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
     Ok(())
 }

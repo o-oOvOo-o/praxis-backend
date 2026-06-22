@@ -334,7 +334,7 @@ impl NetworkApprovalService {
             .await;
             return NetworkDecision::deny(REASON_NOT_ALLOWED);
         };
-        if !allows_network_approval_flow(turn_context.approval_policy.value()) {
+        if !allows_network_approval_flow(turn_context.effective_approval_policy()) {
             pending.set_decision(PendingApprovalDecision::Deny).await;
             let mut pending_approvals = self.pending_host_approvals.lock().await;
             pending_approvals.remove(&key);

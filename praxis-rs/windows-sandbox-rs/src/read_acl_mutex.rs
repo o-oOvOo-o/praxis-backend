@@ -12,7 +12,7 @@ use windows_sys::Win32::System::Threading::ReleaseMutex;
 
 use super::to_wide;
 
-const READ_ACL_MUTEX_NAME: &str = "Local\\CodexSandboxReadAcl";
+const READ_ACL_MUTEX_NAME: &str = "Local\\PraxisSandboxReadAcl";
 
 pub struct ReadAclMutexGuard {
     handle: HANDLE,

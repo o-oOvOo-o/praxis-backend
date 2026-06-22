@@ -21,13 +21,13 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::PraxisThread;
 use praxis_core::ThreadManager;
 use praxis_core::compact::SUMMARIZATION_PROMPT;
 use praxis_core::config::Config;
-use praxis_core::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use praxis_core::spawn::PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use praxis_protocol::config_types::CollaborationMode;
 use praxis_protocol::config_types::ModeKind;
 use praxis_protocol::config_types::Settings;
@@ -46,7 +46,7 @@ const AFTER_SECOND_RESUME: &str = "AFTER_SECOND_RESUME";
 const AFTER_ROLLBACK: &str = "AFTER_ROLLBACK";
 
 fn network_disabled() -> bool {
-    std::env::var(CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
+    std::env::var(PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR).is_ok()
 }
 
 fn body_contains_text(body: &str, text: &str) -> bool {
@@ -787,7 +787,7 @@ async fn start_test_conversation(
 ) -> (Arc<TempDir>, Config, Arc<ThreadManager>, Arc<PraxisThread>) {
     let base_url = format!("{}/v1", server.uri());
     let model = model.map(str::to_string);
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider.name = "Non-OpenAI Model provider".to_string();
         config.model_provider.base_url = Some(base_url);
         config.compact_prompt = Some(SUMMARIZATION_PROMPT.to_string());
@@ -798,7 +798,7 @@ async fn start_test_conversation(
     let test = Box::pin(builder.build(server))
         .await
         .expect("create conversation");
-    (test.home, test.config, test.thread_manager, test.codex)
+    (test.home, test.config, test.thread_manager, test.thread)
 }
 
 async fn user_turn(conversation: &Arc<PraxisThread>, text: &str) {
@@ -844,7 +844,7 @@ async fn resume_conversation(
     path: std::path::PathBuf,
 ) -> Arc<PraxisThread> {
     let auth_manager = praxis_core::test_support::auth_manager_from_auth(
-        praxis_login::CodexAuth::from_api_key("dummy"),
+        praxis_login::OpenAiAccountAuth::from_api_key("dummy"),
     );
     Box::pin(manager.resume_thread_from_rollout(
         config.clone(),

@@ -8,7 +8,7 @@ use praxis_shell_command::is_safe_command::is_known_safe_command;
 use praxis_shell_command::parse_command::parse_command;
 use std::path::PathBuf;
 
-const MEMORIES_USAGE_METRIC: &str = "codex.memories.usage";
+const MEMORIES_USAGE_METRIC: &str = "praxis.memories.usage";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum MemoriesUsageKind {

@@ -1,5 +1,6 @@
 use super::*;
 use pretty_assertions::assert_eq;
+use std::fs;
 use tempfile::TempDir;
 
 fn fixture_paths() -> (TempDir, PathBuf, PathBuf) {
@@ -189,7 +190,7 @@ fn import_home_skips_empty_config_migration() {
 fn detect_home_skips_config_when_target_already_has_supported_fields() {
     let (_root, claude_home, praxis_home) = fixture_paths();
     fs::create_dir_all(&claude_home).expect("create claude home");
-    fs::create_dir_all(&praxis_home).expect("create codex home");
+    fs::create_dir_all(&praxis_home).expect("create Praxis home");
     fs::write(
         claude_home.join("settings.json"),
         r#"{"env":{"FOO":"bar"},"sandbox":{"enabled":true}}"#,
@@ -370,7 +371,7 @@ fn import_repo_uses_non_empty_dot_claude_agents_source() {
 #[test]
 fn migration_metric_tags_for_skills_include_skills_count() {
     assert_eq!(
-        migration_metric_tags(ExternalAgentMigrationItemType::Skills, Some(3)),
+        ledger::migration_metric_tags(ExternalAgentMigrationItemType::Skills, Some(3)),
         vec![
             ("migration_type", "skills".to_string()),
             ("skills_count", "3".to_string()),

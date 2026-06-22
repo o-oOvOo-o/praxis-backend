@@ -9,7 +9,7 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::Op;
@@ -36,12 +36,12 @@ async fn interrupt_long_running_tool_emits_turn_aborted() {
     let server = start_mock_server().await;
     mount_sse_once(&server, body).await;
 
-    let codex = test_codex()
+    let codex = test_praxis()
         .with_model("gpt-5.1")
         .build(&server)
         .await
         .unwrap()
-        .codex;
+        .thread;
 
     // Kick off a turn that triggers the function call.
     codex
@@ -91,12 +91,12 @@ async fn interrupt_tool_records_history_entries() {
     let server = start_mock_server().await;
     let response_mock = mount_sse_sequence(&server, vec![first_body, follow_up_body]).await;
 
-    let fixture = test_codex()
+    let fixture = test_praxis()
         .with_model("gpt-5.1")
         .build(&server)
         .await
         .unwrap();
-    let codex = Arc::clone(&fixture.codex);
+    let codex = Arc::clone(&fixture.thread);
 
     codex
         .submit(Op::UserInput {
@@ -189,12 +189,12 @@ async fn interrupt_persists_turn_aborted_marker_in_next_request() {
     let server = start_mock_server().await;
     let response_mock = mount_sse_sequence(&server, vec![first_body, follow_up_body]).await;
 
-    let fixture = test_codex()
+    let fixture = test_praxis()
         .with_model("gpt-5.1")
         .build(&server)
         .await
         .unwrap();
-    let codex = Arc::clone(&fixture.codex);
+    let codex = Arc::clone(&fixture.thread);
 
     codex
         .submit(Op::UserInput {

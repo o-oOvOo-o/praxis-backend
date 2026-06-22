@@ -1,7 +1,8 @@
-use super::thread_listener_api::set_thread_status_and_interrupt_stale_turns;
+use super::thread_runtime_api::project_thread_runtime_state_from_watch;
 use super::thread_store_api::ThreadHistorySource;
-use super::thread_store_api::hydrate_thread_turns;
-use super::thread_store_api::read_thread_turns_from_rollout;
+use super::thread_store_api::ThreadStore;
+use super::thread_store_api::ThreadStoreListQuery;
+use super::thread_store_api::ThreadStoreSummary;
 use super::*;
 use praxis_app_gateway_protocol::THREAD_LIST_DEFAULT_LIMIT;
 use praxis_app_gateway_protocol::THREAD_LIST_MAX_LIMIT;
@@ -12,6 +13,7 @@ struct ThreadListFilters {
     source_kinds: Option<Vec<ApiThreadSourceKind>>,
     archived: bool,
     cwd: Option<PathBuf>,
+    cwd_scope: Option<PathBuf>,
     search_term: Option<String>,
 }
 
@@ -29,6 +31,20 @@ fn map_thread_source_kind(kind: ApiThreadSourceKind) -> praxis_rollout::ThreadSo
         }
         ApiThreadSourceKind::SubAgentOther => praxis_rollout::ThreadSourceKind::SubAgentOther,
         ApiThreadSourceKind::Unknown => praxis_rollout::ThreadSourceKind::Unknown,
+    }
+}
+
+fn project_scope_root(path: &Path) -> PathBuf {
+    praxis_git_utils::resolve_root_git_project_for_trust(path).unwrap_or_else(|| path.to_path_buf())
+}
+
+fn sandbox_policy_from_resume_mode(mode: SandboxMode) -> praxis_protocol::protocol::SandboxPolicy {
+    match mode {
+        SandboxMode::ReadOnly => praxis_protocol::protocol::SandboxPolicy::new_read_only_policy(),
+        SandboxMode::WorkspaceWrite => {
+            praxis_protocol::protocol::SandboxPolicy::new_workspace_write_policy()
+        }
+        SandboxMode::DangerFullAccess => praxis_protocol::protocol::SandboxPolicy::DangerFullAccess,
     }
 }
 
@@ -241,28 +257,16 @@ impl PraxisMessageProcessor {
                     ))
                     .await;
 
-                let loaded_status = listener_task_context
-                    .thread_watch_manager
-                    .loaded_status_for_thread(&thread.id)
-                    .instrument(tracing::info_span!(
-                        "app_gateway.thread_start.resolve_status",
-                        otel.name = "app_gateway.thread_start.resolve_status",
-                    ))
-                    .await;
-                let control_state = listener_task_context
-                    .thread_watch_manager
-                    .loaded_control_state_for_thread(&thread.id)
-                    .instrument(tracing::info_span!(
-                        "app_gateway.thread_start.resolve_status",
-                        otel.name = "app_gateway.thread_start.resolve_status",
-                    ))
-                    .await;
-                thread.status = resolve_thread_status(
-                    loaded_status,
-                    /*has_in_progress_turn*/ false,
-                    control_state.as_ref(),
-                );
-                thread.control_state = control_state;
+                project_thread_runtime_state_from_watch(
+                    &listener_task_context.thread_watch_manager,
+                    &mut thread,
+                    /*has_live_in_progress_turn*/ false,
+                )
+                .instrument(tracing::info_span!(
+                    "app_gateway.thread_start.resolve_status",
+                    otel.name = "app_gateway.thread_start.resolve_status",
+                ))
+                .await;
 
                 let response = ThreadStartResponse {
                     thread: thread.clone(),
@@ -274,6 +278,9 @@ impl PraxisMessageProcessor {
                     approvals_reviewer: config_snapshot.approvals_reviewer.into(),
                     sandbox: config_snapshot.sandbox_policy.into(),
                     reasoning_effort: config_snapshot.reasoning_effort,
+                    history_log_id: session_configured.history_log_id,
+                    history_entry_count: u64::try_from(session_configured.history_entry_count)
+                        .unwrap_or(u64::MAX),
                 };
                 if listener_task_context.general_analytics_enabled {
                     listener_task_context
@@ -326,12 +333,11 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ThreadIncrementElicitationParams,
     ) {
-        let (_, thread) = match self.load_thread(&params.thread_id).await {
-            Ok(value) => value,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((_, thread)) = self
+            .ensure_thread_for_request(&params.thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         match thread.increment_out_of_band_elicitation_count().await {
@@ -361,12 +367,11 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ThreadDecrementElicitationParams,
     ) {
-        let (_, thread) = match self.load_thread(&params.thread_id).await {
-            Ok(value) => value,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((_, thread)) = self
+            .ensure_thread_for_request(&params.thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         match thread.decrement_out_of_band_elicitation_count().await {
@@ -410,15 +415,12 @@ impl PraxisMessageProcessor {
             return;
         }
 
-        let (thread_id, thread) = match self.load_thread(&thread_id).await {
-            Ok(v) => v,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((thread_id, thread)) = self
+            .ensure_thread_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
-
-        let request = request_id.clone();
 
         let rollback_already_in_progress = {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
@@ -426,13 +428,13 @@ impl PraxisMessageProcessor {
             if thread_state.pending_rollbacks.is_some() {
                 true
             } else {
-                thread_state.pending_rollbacks = Some(request.clone());
+                thread_state.pending_rollbacks = Some(request_id.clone());
                 false
             }
         };
         if rollback_already_in_progress {
             self.send_invalid_request_error(
-                request.clone(),
+                request_id,
                 "rollback already in progress for this thread".to_string(),
             )
             .await;
@@ -454,7 +456,7 @@ impl PraxisMessageProcessor {
             thread_state.pending_rollbacks = None;
             drop(thread_state);
 
-            self.send_internal_error(request, format!("failed to start rollback: {err}"))
+            self.send_internal_error(request_id, format!("failed to start rollback: {err}"))
                 .await;
         }
     }
@@ -466,12 +468,11 @@ impl PraxisMessageProcessor {
     ) {
         let ThreadCompactStartParams { thread_id } = params;
 
-        let (_, thread) = match self.load_thread(&thread_id).await {
-            Ok(v) => v,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((_, thread)) = self
+            .ensure_thread_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         match self
@@ -497,12 +498,11 @@ impl PraxisMessageProcessor {
     ) {
         let ThreadBackgroundTerminalsCleanParams { thread_id } = params;
 
-        let (_, thread) = match self.load_thread(&thread_id).await {
-            Ok(v) => v,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((_, thread)) = self
+            .ensure_thread_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         match self
@@ -545,12 +545,11 @@ impl PraxisMessageProcessor {
             return;
         }
 
-        let (_, thread) = match self.load_thread(&thread_id).await {
-            Ok(v) => v,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((_, thread)) = self
+            .ensure_thread_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         match self
@@ -576,6 +575,78 @@ impl PraxisMessageProcessor {
         }
     }
 
+    pub(super) async fn thread_history_append(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadHistoryAppendParams,
+    ) {
+        let ThreadHistoryAppendParams { thread_id, text } = params;
+        let Some((_, thread)) = self
+            .ensure_thread_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
+        };
+
+        match self
+            .submit_core_op(&request_id, thread.as_ref(), Op::AddToHistory { text })
+            .await
+        {
+            Ok(_) => {
+                self.outgoing
+                    .send_response(request_id, ThreadHistoryAppendResponse {})
+                    .await;
+            }
+            Err(err) => {
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to append thread history: {err}"),
+                )
+                .await;
+            }
+        }
+    }
+
+    pub(super) async fn thread_history_entry_get(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadHistoryEntryGetParams,
+    ) {
+        let ThreadHistoryEntryGetParams {
+            thread_id,
+            offset,
+            log_id,
+        } = params;
+        let Some((_, thread)) = self
+            .ensure_thread_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
+        };
+
+        match self
+            .submit_core_op(
+                &request_id,
+                thread.as_ref(),
+                Op::GetHistoryEntryRequest { offset, log_id },
+            )
+            .await
+        {
+            Ok(_) => {
+                self.outgoing
+                    .send_response(request_id, ThreadHistoryEntryGetResponse {})
+                    .await;
+            }
+            Err(err) => {
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to request thread history entry: {err}"),
+                )
+                .await;
+            }
+        }
+    }
+
     pub(super) async fn thread_list(
         &self,
         request_id: ConnectionRequestId,
@@ -589,6 +660,7 @@ impl PraxisMessageProcessor {
             source_kinds,
             archived,
             cwd,
+            cwd_scope,
             search_term,
         } = params;
 
@@ -609,6 +681,7 @@ impl PraxisMessageProcessor {
                     source_kinds,
                     archived: archived.unwrap_or(false),
                     cwd: cwd.map(PathBuf::from),
+                    cwd_scope: cwd_scope.as_deref().map(Path::new).map(project_scope_root),
                     search_term,
                 },
             )
@@ -620,41 +693,8 @@ impl PraxisMessageProcessor {
                 return;
             }
         };
-        let mut threads = Vec::with_capacity(summaries.len());
-        let mut status_ids = Vec::with_capacity(summaries.len());
-
-        for summary in summaries {
-            let thread_name = summary.thread_name.clone();
-            let mut thread = summary_to_thread(thread_summary_to_rollout_summary(summary));
-            thread.name = thread_name;
-            status_ids.push(thread.id.clone());
-            threads.push(thread);
-        }
-
-        let statuses = self
-            .thread_watch_manager
-            .loaded_statuses_for_threads(status_ids.clone())
-            .await;
-        let control_states = self
-            .thread_watch_manager
-            .loaded_control_states_for_threads(status_ids)
-            .await;
-
-        let data = threads
-            .into_iter()
-            .map(|mut thread| {
-                let control_state = control_states.get(&thread.id).cloned();
-                if let Some(status) = statuses.get(&thread.id) {
-                    thread.status = resolve_thread_status(
-                        status.clone(),
-                        /*has_in_progress_turn*/ false,
-                        control_state.as_ref(),
-                    );
-                }
-                thread.control_state = control_state;
-                thread
-            })
-            .collect();
+        let threads: Vec<Thread> = summaries.into_iter().map(summary_to_thread).collect();
+        let data = self.project_thread_runtime_states(threads).await;
         let response = ThreadListResponse { data, next_cursor };
         self.outgoing.send_response(request_id, response).await;
     }
@@ -730,57 +770,178 @@ impl PraxisMessageProcessor {
             include_turns,
         } = params;
 
-        let thread_uuid = match self.parse_thread_id(&thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some(thread_uuid) = self
+            .ensure_thread_id_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
-        let loaded_thread = self.thread_manager.get_thread(thread_uuid).await.ok();
-        let directory = praxis_rollout::ThreadDirectory::open(&self.config).await;
-        let directory_summary = match directory
-            .read_thread_summary(thread_uuid, None, self.config.model_provider_id.as_str())
+        let thread = match self
+            .load_thread_for_projection(thread_uuid, include_turns)
             .await
         {
-            Ok(summary) => summary,
-            Err(err) => {
-                self.send_internal_error(
-                    request_id,
-                    format!("failed to read thread {thread_uuid}: {err}"),
-                )
-                .await;
-                return;
-            }
-        };
-        let mut rollout_path = directory_summary
-            .as_ref()
-            .map(|summary| summary.path.clone());
-
-        let mut thread = if let Some(summary) = directory_summary {
-            let thread_name = summary.thread_name.clone();
-            let mut thread = summary_to_thread(thread_summary_to_rollout_summary(summary));
-            thread.name = thread_name;
-            thread
-        } else {
-            let Some(thread) = loaded_thread.as_ref() else {
+            Ok(Some(thread)) => thread,
+            Ok(None) => {
                 self.send_invalid_request_error(
                     request_id,
                     format!("thread not loaded: {thread_uuid}"),
                 )
                 .await;
                 return;
+            }
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+        let response = ThreadReadResponse { thread };
+        self.outgoing.send_response(request_id, response).await;
+    }
+
+    pub(super) async fn thread_lookup(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadLookupParams,
+    ) {
+        let response = match self.lookup_thread(params).await {
+            Ok(thread) => ThreadLookupResponse { thread },
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+        self.outgoing.send_response(request_id, response).await;
+    }
+
+    async fn lookup_thread(
+        &self,
+        params: ThreadLookupParams,
+    ) -> Result<Option<Thread>, JSONRPCErrorError> {
+        let ThreadLookupParams {
+            selector,
+            include_turns,
+            source_kinds,
+            cwd_scope,
+            archived,
+        } = params;
+
+        match selector {
+            ThreadLookupSelector::IdOrName { value } => {
+                if let Ok(thread_id) = ThreadId::from_string(&value) {
+                    return self
+                        .load_thread_for_projection(thread_id, include_turns)
+                        .await;
+                }
+                self.lookup_thread_from_store_pages(
+                    Some(value.as_str()),
+                    include_turns,
+                    source_kinds,
+                    cwd_scope,
+                    archived.unwrap_or(false),
+                )
+                .await
+            }
+            ThreadLookupSelector::Latest => {
+                self.lookup_thread_from_store_pages(
+                    None,
+                    include_turns,
+                    source_kinds,
+                    cwd_scope,
+                    archived.unwrap_or(false),
+                )
+                .await
+            }
+        }
+    }
+
+    async fn lookup_thread_from_store_pages(
+        &self,
+        exact_name: Option<&str>,
+        include_turns: bool,
+        source_kinds: Option<Vec<ApiThreadSourceKind>>,
+        cwd_scope: Option<String>,
+        archived: bool,
+    ) -> Result<Option<Thread>, JSONRPCErrorError> {
+        let scope_root = cwd_scope
+            .as_deref()
+            .map(|cwd| project_scope_root(Path::new(cwd)));
+        let mut cursor = None;
+        loop {
+            let (summaries, next_cursor) = self
+                .list_threads_common(
+                    THREAD_LIST_MAX_LIMIT as usize,
+                    cursor,
+                    CoreThreadSortKey::UpdatedAt,
+                    ThreadListFilters {
+                        model_providers: None,
+                        source_kinds: source_kinds.clone(),
+                        archived,
+                        cwd: None,
+                        cwd_scope: scope_root.clone(),
+                        search_term: None,
+                    },
+                )
+                .await?;
+
+            for summary in summaries {
+                if let Some(expected_name) = exact_name
+                    && summary.thread_name.as_deref() != Some(expected_name)
+                {
+                    continue;
+                }
+                if let Some(scope_root) = scope_root.as_ref()
+                    && project_scope_root(summary.cwd.as_path()) != *scope_root
+                {
+                    continue;
+                }
+                if let Some(thread) = self
+                    .load_thread_for_projection(summary.conversation_id, include_turns)
+                    .await?
+                {
+                    return Ok(Some(thread));
+                }
+            }
+
+            let Some(next_cursor) = next_cursor else {
+                return Ok(None);
+            };
+            cursor = Some(next_cursor);
+        }
+    }
+
+    async fn load_thread_for_projection(
+        &self,
+        thread_uuid: ThreadId,
+        include_turns: bool,
+    ) -> Result<Option<Thread>, JSONRPCErrorError> {
+        let loaded_thread = self.thread_manager.get_thread(thread_uuid).await.ok();
+        let directory_summary = ThreadStore::new(&self.config)
+            .try_read_directory_summary(thread_uuid)
+            .await
+            .map_err(|err| JSONRPCErrorError {
+                code: INTERNAL_ERROR_CODE,
+                message: format!("failed to read thread {thread_uuid}: {err}"),
+                data: None,
+            })?;
+        let mut rollout_path = directory_summary
+            .as_ref()
+            .map(|summary| summary.path.clone());
+
+        let mut thread = if let Some(summary) = directory_summary {
+            summary_to_thread(summary)
+        } else {
+            let Some(thread) = loaded_thread.as_ref() else {
+                return Ok(None);
             };
             let config_snapshot = thread.config_snapshot().await;
             let loaded_rollout_path = thread.rollout_path();
             if include_turns && loaded_rollout_path.is_none() {
-                self.send_invalid_request_error(
-                    request_id,
-                    "ephemeral threads do not support includeTurns".to_string(),
-                )
-                .await;
-                return;
+                return Err(JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "ephemeral threads do not support includeTurns".to_string(),
+                    data: None,
+                });
             }
             if include_turns {
                 rollout_path = loaded_rollout_path.clone();
@@ -792,30 +953,28 @@ impl PraxisMessageProcessor {
         }
 
         if include_turns && let Some(rollout_path) = rollout_path.as_ref() {
-            match read_thread_turns_from_rollout(rollout_path).await {
+            match ThreadStore::read_turns_from_rollout(rollout_path).await {
                 Ok(turns) => {
                     thread.turns = turns;
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    self.send_invalid_request_error(
-                        request_id,
-                        format!(
+                    return Err(JSONRPCErrorError {
+                        code: INVALID_REQUEST_ERROR_CODE,
+                        message: format!(
                             "thread {thread_uuid} is not materialized yet; includeTurns is unavailable before first user message"
                         ),
-                    )
-                    .await;
-                    return;
+                        data: None,
+                    });
                 }
                 Err(err) => {
-                    self.send_internal_error(
-                        request_id,
-                        format!(
+                    return Err(JSONRPCErrorError {
+                        code: INTERNAL_ERROR_CODE,
+                        message: format!(
                             "failed to load rollout `{}` for thread {thread_uuid}: {err}",
                             rollout_path.display()
                         ),
-                    )
-                    .await;
-                    return;
+                        data: None,
+                    });
                 }
             }
         }
@@ -826,18 +985,9 @@ impl PraxisMessageProcessor {
             false
         };
 
-        self.apply_thread_runtime_state(&mut thread, has_live_in_progress_turn)
+        self.project_thread_runtime_state_with_turn_cleanup(&mut thread, has_live_in_progress_turn)
             .await;
-        let thread_status = thread.status.clone();
-        let control_state = thread.control_state.clone();
-        set_thread_status_and_interrupt_stale_turns(
-            &mut thread,
-            thread_status,
-            has_live_in_progress_turn,
-            control_state.as_ref(),
-        );
-        let response = ThreadReadResponse { thread };
-        self.outgoing.send_response(request_id, response).await;
+        Ok(Some(thread))
     }
 
     pub(crate) fn thread_created_receiver(&self) -> broadcast::Receiver<ThreadId> {
@@ -847,6 +997,16 @@ impl PraxisMessageProcessor {
     pub(crate) async fn connection_initialized(&self, connection_id: ConnectionId) {
         self.thread_state_manager
             .connection_initialized(connection_id)
+            .await;
+    }
+
+    pub(crate) async fn connection_initialized_with_host_extensions(
+        &self,
+        connection_id: ConnectionId,
+        host_extensions: Vec<praxis_app_gateway_protocol::HostExtensionInfo>,
+    ) {
+        self.thread_state_manager
+            .connection_initialized_with_host_extensions(connection_id, host_extensions)
             .await;
     }
 
@@ -1063,19 +1223,11 @@ impl PraxisMessageProcessor {
                     .upsert_thread(thread.clone())
                     .await;
 
-                self.apply_thread_runtime_state(
+                self.project_thread_runtime_state_with_turn_cleanup(
                     &mut thread,
                     /*has_live_in_progress_turn*/ false,
                 )
                 .await;
-                let thread_status = thread.status.clone();
-                let control_state = thread.control_state.clone();
-                set_thread_status_and_interrupt_stale_turns(
-                    &mut thread,
-                    thread_status,
-                    /*has_live_in_progress_turn*/ false,
-                    control_state.as_ref(),
-                );
 
                 let response = ThreadResumeResponse {
                     thread,
@@ -1087,6 +1239,9 @@ impl PraxisMessageProcessor {
                     approvals_reviewer: session_configured.approvals_reviewer.into(),
                     sandbox: session_configured.sandbox_policy.into(),
                     reasoning_effort: session_configured.reasoning_effort,
+                    history_log_id: session_configured.history_log_id,
+                    history_entry_count: u64::try_from(session_configured.history_entry_count)
+                        .unwrap_or(u64::MAX),
                 };
                 if self.config.features.enabled(Feature::GeneralAnalytics) {
                     self.analytics_events_client.track_thread_initialized(
@@ -1129,6 +1284,98 @@ impl PraxisMessageProcessor {
             .flatten()?;
         merge_persisted_resume_metadata(request_overrides, typesafe_overrides, &persisted_metadata);
         Some(persisted_metadata)
+    }
+
+    fn running_resume_context_override(params: &ThreadResumeParams) -> Option<Op> {
+        let has_live_overrides = params.cwd.is_some()
+            || params.approval_policy.is_some()
+            || params.approvals_reviewer.is_some()
+            || params.sandbox.is_some()
+            || params.model_provider.is_some()
+            || params.model.is_some()
+            || params.service_tier.is_some()
+            || params.personality.is_some();
+        if !has_live_overrides {
+            return None;
+        }
+
+        Some(Op::OverrideTurnContext {
+            cwd: params.cwd.as_ref().map(PathBuf::from),
+            approval_policy: params
+                .approval_policy
+                .map(praxis_app_gateway_protocol::AskForApproval::to_core),
+            approvals_reviewer: params
+                .approvals_reviewer
+                .map(praxis_app_gateway_protocol::ApprovalsReviewer::to_core),
+            sandbox_policy: params.sandbox.map(sandbox_policy_from_resume_mode),
+            windows_sandbox_level: None,
+            model_provider: params.model_provider.clone(),
+            model: params.model.clone(),
+            effort: None,
+            summary: None,
+            service_tier: params.service_tier,
+            collaboration_mode: None,
+            personality: params.personality,
+        })
+    }
+
+    async fn apply_running_resume_overrides_or_send_error(
+        &self,
+        request_id: &ConnectionRequestId,
+        thread_id: ThreadId,
+        thread: &PraxisThread,
+        params: &ThreadResumeParams,
+    ) -> Option<ThreadConfigSnapshot> {
+        let Some(override_op) = Self::running_resume_context_override(params) else {
+            return Some(thread.config_snapshot().await);
+        };
+
+        let before = thread.config_snapshot().await;
+        let before_mismatches = collect_resume_override_mismatches(params, &before);
+        if before_mismatches.is_empty() {
+            return Some(before);
+        }
+
+        tracing::info!(
+            thread_id = %thread_id,
+            mismatches = %before_mismatches.join("; "),
+            "applying thread/resume overrides to running thread"
+        );
+        if let Err(err) = self.submit_core_op(request_id, thread, override_op).await {
+            self.send_internal_error(
+                request_id.clone(),
+                format!("failed to apply running thread resume overrides: {err}"),
+            )
+            .await;
+            return None;
+        }
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            let snapshot = thread.config_snapshot().await;
+            let mismatches = collect_resume_override_mismatches(params, &snapshot);
+            if mismatches.is_empty() {
+                tracing::info!(
+                    thread_id = %thread_id,
+                    approval_policy = ?snapshot.approval_policy,
+                    sandbox_policy = ?snapshot.sandbox_policy,
+                    "thread/resume overrides applied to running thread"
+                );
+                return Some(snapshot);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                self.send_invalid_request_error(
+                    request_id.clone(),
+                    format!(
+                        "thread/resume overrides did not become effective for running thread {thread_id}: {}",
+                        mismatches.join("; ")
+                    ),
+                )
+                .await;
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
     }
 
     async fn resume_running_thread(
@@ -1190,15 +1437,17 @@ impl PraxisMessageProcessor {
             )
             .await;
 
-            let config_snapshot = existing_thread.config_snapshot().await;
-            let mismatch_details = collect_resume_override_mismatches(params, &config_snapshot);
-            if !mismatch_details.is_empty() {
-                tracing::warn!(
-                    "thread/resume overrides ignored for running thread {}: {}",
+            let Some(config_snapshot) = self
+                .apply_running_resume_overrides_or_send_error(
+                    &request_id,
                     existing_thread_id,
-                    mismatch_details.join("; ")
-                );
-            }
+                    existing_thread.as_ref(),
+                    params,
+                )
+                .await
+            else {
+                return true;
+            };
             let thread_summary = match load_thread_summary_for_rollout(
                 &self.config,
                 existing_thread_id,
@@ -1282,30 +1531,16 @@ impl PraxisMessageProcessor {
         let rollout_path = if let Some(path) = path {
             path.clone()
         } else {
-            let existing_thread_id = match self.parse_thread_id(thread_id) {
-                Ok(id) => id,
-                Err(error) => {
-                    self.outgoing.send_error(request_id, error).await;
-                    return None;
-                }
+            let Some((_, rollout_path)) = self
+                .ensure_thread_rollout_for_request(thread_id, ThreadRolloutScope::Any, &request_id)
+                .await
+            else {
+                return None;
             };
-
-            match find_thread_rollout_path(
-                &self.config,
-                existing_thread_id,
-                ThreadRolloutScope::Any,
-            )
-            .await
-            {
-                Ok(path) => path,
-                Err(error) => {
-                    self.outgoing.send_error(request_id, error).await;
-                    return None;
-                }
-            }
+            rollout_path
         };
 
-        match RolloutRecorder::get_rollout_history(&rollout_path).await {
+        match ThreadStore::read_initial_history(&rollout_path).await {
             Ok(initial_history) => Some(initial_history),
             Err(err) => {
                 self.send_invalid_request_error(
@@ -1345,7 +1580,7 @@ impl PraxisMessageProcessor {
                     &config_snapshot,
                     Some(rollout_path.into()),
                 );
-                thread.preview = preview_from_rollout_items(items);
+                thread.preview = ThreadStore::preview_from_rollout_items(items);
                 Ok(thread)
             }
             InitialHistory::New => Err(format!(
@@ -1356,7 +1591,7 @@ impl PraxisMessageProcessor {
         thread.id = thread_id.to_string();
         thread.path = Some(rollout_path.to_path_buf());
         let history_items = thread_history.get_rollout_items();
-        hydrate_thread_turns(
+        ThreadStore::hydrate_turns(
             &mut thread,
             ThreadHistorySource::RolloutItems(&history_items),
             /*active_turn*/ None,
@@ -1391,31 +1626,16 @@ impl PraxisMessageProcessor {
         let (rollout_path, source_thread_id) = if let Some(path) = path {
             (path, None)
         } else {
-            let existing_thread_id = match self.parse_thread_id(&thread_id) {
-                Ok(id) => id,
-                Err(error) => {
-                    self.outgoing.send_error(request_id, error).await;
-                    return;
-                }
+            let Some((existing_thread_id, path)) = self
+                .ensure_thread_rollout_for_request(&thread_id, ThreadRolloutScope::Any, &request_id)
+                .await
+            else {
+                return;
             };
-
-            match find_thread_rollout_path(
-                &self.config,
-                existing_thread_id,
-                ThreadRolloutScope::Any,
-            )
-            .await
-            {
-                Ok(path) => (path, Some(existing_thread_id)),
-                Err(error) => {
-                    self.outgoing.send_error(request_id, error).await;
-                    return;
-                }
-            }
+            (path, Some(existing_thread_id))
         };
 
-        let directory = praxis_rollout::ThreadDirectory::open(&self.config).await;
-        let history_cwd = directory
+        let history_cwd = ThreadStore::new(&self.config)
             .read_history_cwd(source_thread_id, rollout_path.as_path())
             .await;
 
@@ -1537,22 +1757,20 @@ impl PraxisMessageProcessor {
         // Persistent forks materialize their own rollout immediately. Ephemeral forks stay
         // pathless, so they rebuild their visible history from the copied source rollout instead.
         let mut thread = if let Some(fork_rollout_path) = session_configured.rollout_path.as_ref() {
-            match read_summary_from_rollout(
+            match load_thread_summary_for_rollout(
+                &self.config,
+                thread_id,
                 fork_rollout_path.as_path(),
                 fallback_model_provider.as_str(),
+                None,
             )
             .await
             {
-                Ok(summary) => summary_to_thread(
-                    hydrate_rollout_summary_with_state_db(&self.config, summary).await,
-                ),
+                Ok(thread) => thread,
                 Err(err) => {
                     self.send_internal_error(
                         request_id,
-                        format!(
-                            "failed to load rollout `{}` for thread {thread_id}: {err}",
-                            fork_rollout_path.display()
-                        ),
+                        format!("failed to load forked thread {thread_id}: {err}"),
                     )
                     .await;
                     return;
@@ -1563,7 +1781,8 @@ impl PraxisMessageProcessor {
             // forked thread names do not inherit the source thread name
             let mut thread =
                 build_thread_from_snapshot(thread_id, &config_snapshot, /*path*/ None);
-            let history_items = match read_thread_rollout_items(rollout_path.as_path()).await {
+            let source_rollout_path = rollout_path.as_path();
+            let history_items = match ThreadStore::read_rollout_items(source_rollout_path).await {
                 Ok(items) => items,
                 Err(err) => {
                     self.send_internal_error(
@@ -1577,8 +1796,8 @@ impl PraxisMessageProcessor {
                     return;
                 }
             };
-            thread.preview = preview_from_rollout_items(&history_items);
-            if let Err(message) = hydrate_thread_turns(
+            thread.preview = ThreadStore::preview_from_rollout_items(&history_items);
+            if let Err(message) = ThreadStore::hydrate_turns(
                 &mut thread,
                 ThreadHistorySource::RolloutItems(&history_items),
                 /*active_turn*/ None,
@@ -1592,7 +1811,7 @@ impl PraxisMessageProcessor {
         };
 
         if let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
-            && let Err(message) = hydrate_thread_turns(
+            && let Err(message) = ThreadStore::hydrate_turns(
                 &mut thread,
                 ThreadHistorySource::RolloutPath(fork_rollout_path.as_path()),
                 /*active_turn*/ None,
@@ -1608,7 +1827,7 @@ impl PraxisMessageProcessor {
             .upsert_thread_silently(thread.clone())
             .await;
 
-        self.apply_thread_runtime_state(&mut thread, /*has_live_in_progress_turn*/ false)
+        self.project_thread_runtime_state(&mut thread, /*has_live_in_progress_turn*/ false)
             .await;
 
         let response = ThreadForkResponse {
@@ -1621,6 +1840,9 @@ impl PraxisMessageProcessor {
             approvals_reviewer: session_configured.approvals_reviewer.into(),
             sandbox: session_configured.sandbox_policy.into(),
             reasoning_effort: session_configured.reasoning_effort,
+            history_log_id: session_configured.history_log_id,
+            history_entry_count: u64::try_from(session_configured.history_entry_count)
+                .unwrap_or(u64::MAX),
         };
         if self.config.features.enabled(Feature::GeneralAnalytics) {
             self.analytics_events_client.track_thread_initialized(
@@ -1647,12 +1869,13 @@ impl PraxisMessageProcessor {
         cursor: Option<String>,
         sort_key: CoreThreadSortKey,
         filters: ThreadListFilters,
-    ) -> Result<(Vec<praxis_rollout::ThreadSummary>, Option<String>), JSONRPCErrorError> {
+    ) -> Result<(Vec<ThreadStoreSummary>, Option<String>), JSONRPCErrorError> {
         let ThreadListFilters {
             model_providers,
             source_kinds,
             archived,
             cwd,
+            cwd_scope,
             search_term,
         } = filters;
         let cursor_obj: Option<RolloutCursor> = match cursor.as_ref() {
@@ -1667,9 +1890,8 @@ impl PraxisMessageProcessor {
         };
         let model_provider_filter =
             model_providers.and_then(|providers| (!providers.is_empty()).then_some(providers));
-        let directory = praxis_rollout::ThreadDirectory::open(&self.config).await;
-        let page = directory
-            .list_threads(praxis_rollout::ListThreadsQuery {
+        let page = ThreadStore::new(&self.config)
+            .list_summaries(ThreadStoreListQuery {
                 page_size: requested_page_size.min(THREAD_LIST_MAX_LIMIT as usize),
                 cursor: cursor_obj,
                 sort_key,
@@ -1677,7 +1899,7 @@ impl PraxisMessageProcessor {
                 source_kinds: source_kinds
                     .map(|kinds| kinds.into_iter().map(map_thread_source_kind).collect()),
                 archived,
-                cwd,
+                cwd: cwd_scope.or(cwd),
                 search_term,
                 fallback_provider: self.config.model_provider_id.clone(),
             })
@@ -1724,12 +1946,11 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ThreadUnsubscribeParams,
     ) {
-        let thread_id = match self.parse_thread_id(&params.thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some(thread_id) = self
+            .ensure_thread_id_for_request(&params.thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         let Ok(thread) = self.thread_manager.get_thread(thread_id).await else {

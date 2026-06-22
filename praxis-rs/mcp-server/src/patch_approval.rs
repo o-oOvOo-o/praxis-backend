@@ -47,7 +47,7 @@ pub(crate) async fn handle_patch_approval_request(
     grant_root: Option<PathBuf>,
     changes: HashMap<PathBuf, FileChange>,
     outgoing: Arc<OutgoingMessageSender>,
-    codex: Arc<PraxisThread>,
+    praxis_thread: Arc<PraxisThread>,
     request_id: RequestId,
     tool_call_id: String,
     event_id: String,
@@ -92,10 +92,10 @@ pub(crate) async fn handle_patch_approval_request(
 
     // Listen for the response on a separate task so we don't block the main agent loop.
     {
-        let codex = codex.clone();
+        let praxis_thread = praxis_thread.clone();
         let approval_id = approval_id.clone();
         tokio::spawn(async move {
-            on_patch_approval_response(approval_id, on_response, codex).await;
+            on_patch_approval_response(approval_id, on_response, praxis_thread).await;
         });
     }
 }
@@ -103,14 +103,14 @@ pub(crate) async fn handle_patch_approval_request(
 pub(crate) async fn on_patch_approval_response(
     approval_id: String,
     receiver: tokio::sync::oneshot::Receiver<serde_json::Value>,
-    codex: Arc<PraxisThread>,
+    praxis_thread: Arc<PraxisThread>,
 ) {
     let response = receiver.await;
     let value = match response {
         Ok(value) => value,
         Err(err) => {
             error!("request failed: {err:?}");
-            if let Err(submit_err) = codex
+            if let Err(submit_err) = praxis_thread
                 .submit(Op::PatchApproval {
                     id: approval_id.clone(),
                     decision: ReviewDecision::Denied,
@@ -130,7 +130,7 @@ pub(crate) async fn on_patch_approval_response(
         }
     });
 
-    if let Err(err) = codex
+    if let Err(err) = praxis_thread
         .submit(Op::PatchApproval {
             id: approval_id,
             decision: response.decision,

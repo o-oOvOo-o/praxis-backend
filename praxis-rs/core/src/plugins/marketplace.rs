@@ -1,6 +1,6 @@
 use super::PluginManifestInterface;
 use super::PluginManifestLlm;
-use super::load_plugin_manifest;
+use super::manifest::load_plugin_manifest;
 use dirs::home_dir;
 use praxis_git_utils::get_git_repo_root;
 use praxis_plugin::PluginId;
@@ -16,6 +16,10 @@ use std::path::PathBuf;
 use tracing::warn;
 
 const MARKETPLACE_RELATIVE_PATH: &str = ".agents/plugins/marketplace.json";
+
+pub(crate) fn marketplace_manifest_path(root: &Path) -> PathBuf {
+    root.join(MARKETPLACE_RELATIVE_PATH)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedMarketplacePlugin {
@@ -273,7 +277,7 @@ fn discover_marketplace_paths_from_roots(
     let mut paths = Vec::new();
 
     if let Some(home) = home_dir {
-        let path = home.join(MARKETPLACE_RELATIVE_PATH);
+        let path = marketplace_manifest_path(home);
         if path.is_file()
             && let Ok(path) = AbsolutePathBuf::try_from(path)
         {
@@ -284,7 +288,7 @@ fn discover_marketplace_paths_from_roots(
     for root in additional_roots {
         // Curated marketplaces can now come from an HTTP-downloaded directory that is not a git
         // checkout, so check the root directly before falling back to repo-root discovery.
-        if let Ok(path) = root.join(MARKETPLACE_RELATIVE_PATH)
+        if let Ok(path) = AbsolutePathBuf::try_from(marketplace_manifest_path(root.as_path()))
             && path.as_path().is_file()
             && !paths.contains(&path)
         {
@@ -293,7 +297,8 @@ fn discover_marketplace_paths_from_roots(
         }
         if let Some(repo_root) = get_git_repo_root(root.as_path())
             && let Ok(repo_root) = AbsolutePathBuf::try_from(repo_root)
-            && let Ok(path) = repo_root.join(MARKETPLACE_RELATIVE_PATH)
+            && let Ok(path) =
+                AbsolutePathBuf::try_from(marketplace_manifest_path(repo_root.as_path()))
             && path.as_path().is_file()
             && !paths.contains(&path)
         {

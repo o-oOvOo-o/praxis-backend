@@ -260,7 +260,7 @@ async fn returns_empty_when_all_layers_missing() {
     .expect("load layers");
     let user_layer = layers
         .get_user_layer()
-        .expect("expected a user layer even when CODEX_HOME/config.toml does not exist");
+        .expect("expected a user layer even when PRAXIS_HOME/config.toml does not exist");
     assert_eq!(
         &ConfigLayerEntry {
             name: super::ConfigLayerSource::User {

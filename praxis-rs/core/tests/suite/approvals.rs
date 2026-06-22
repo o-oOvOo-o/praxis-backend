@@ -11,8 +11,8 @@ use core_test_support::responses::mount_sse_once_match;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_with_timeout;
 use core_test_support::zsh_fork::build_zsh_fork_test;
@@ -64,7 +64,7 @@ enum TargetPath {
 }
 
 impl TargetPath {
-    fn resolve_for_patch(self, test: &TestCodex) -> (PathBuf, String) {
+    fn resolve_for_patch(self, test: &TestPraxis) -> (PathBuf, String) {
         match self {
             TargetPath::Workspace(name) => {
                 let path = test.cwd.path().join(name);
@@ -117,7 +117,7 @@ const DEFAULT_UNIFIED_EXEC_JUSTIFICATION: &str =
 impl ActionKind {
     async fn prepare(
         &self,
-        test: &TestCodex,
+        test: &TestPraxis,
         server: &MockServer,
         call_id: &str,
         sandbox_permissions: SandboxPermissions,
@@ -349,7 +349,7 @@ enum Expectation {
 }
 
 impl Expectation {
-    fn verify(&self, test: &TestCodex, result: &CommandResult) -> Result<()> {
+    fn verify(&self, test: &TestPraxis, result: &CommandResult) -> Result<()> {
         match self {
             Expectation::FileCreated { target, content } => {
                 let (path, _) = target.resolve_for_patch(test);
@@ -573,14 +573,14 @@ struct CommandResult {
 }
 
 async fn submit_turn(
-    test: &TestCodex,
+    test: &TestPraxis,
     prompt: &str,
     approval_policy: AskForApproval,
     sandbox_policy: SandboxPolicy,
 ) -> Result<()> {
     let session_model = test.session_configured.model.clone();
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: prompt.into(),
@@ -644,10 +644,10 @@ fn parse_result(item: &Value) -> CommandResult {
 }
 
 async fn expect_exec_approval(
-    test: &TestCodex,
+    test: &TestPraxis,
     expected_command: &str,
 ) -> ExecApprovalRequestEvent {
-    let event = wait_for_event(&test.codex, |event| {
+    let event = wait_for_event(&test.thread, |event| {
         matches!(
             event,
             EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
@@ -671,10 +671,10 @@ async fn expect_exec_approval(
 }
 
 async fn expect_patch_approval(
-    test: &TestCodex,
+    test: &TestPraxis,
     expected_call_id: &str,
 ) -> ApplyPatchApprovalRequestEvent {
-    let event = wait_for_event(&test.codex, |event| {
+    let event = wait_for_event(&test.thread, |event| {
         matches!(
             event,
             EventMsg::ApplyPatchApprovalRequest(_) | EventMsg::TurnComplete(_)
@@ -692,8 +692,8 @@ async fn expect_patch_approval(
     }
 }
 
-async fn wait_for_completion_without_approval(test: &TestCodex) {
-    let event = wait_for_event(&test.codex, |event| {
+async fn wait_for_completion_without_approval(test: &TestPraxis) {
+    let event = wait_for_event(&test.thread, |event| {
         matches!(
             event,
             EventMsg::ExecApprovalRequest(_) | EventMsg::TurnComplete(_)
@@ -710,8 +710,8 @@ async fn wait_for_completion_without_approval(test: &TestCodex) {
     }
 }
 
-async fn wait_for_completion(test: &TestCodex) {
-    wait_for_event(&test.codex, |event| {
+async fn wait_for_completion(test: &TestPraxis) {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -737,7 +737,7 @@ fn body_contains(req: &Request, text: &str) -> bool {
         .is_some_and(|body| body.contains(text))
 }
 
-async fn wait_for_spawned_thread(test: &TestCodex) -> Result<Arc<PraxisThread>> {
+async fn wait_for_spawned_thread(test: &TestPraxis) -> Result<Arc<PraxisThread>> {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     loop {
         let ids = test.thread_manager.list_thread_ids().await;
@@ -1675,7 +1675,7 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
     let model_override = scenario.model_override;
     let model = model_override.unwrap_or("gpt-5.1");
 
-    let mut builder = test_codex().with_model(model).with_config(move |config| {
+    let mut builder = test_praxis().with_model(model).with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(approval_policy);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy.clone());
         for feature in features {
@@ -1742,7 +1742,7 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
                     scenario.name
                 );
             }
-            test.codex
+            test.thread
                 .submit(Op::ExecApproval {
                     id: approval.effective_approval_id(),
                     turn_id: None,
@@ -1764,7 +1764,7 @@ async fn run_scenario(scenario: &ScenarioSpec) -> Result<()> {
                     scenario.name
                 );
             }
-            test.codex
+            test.thread
                 .submit(Op::PatchApproval {
                     id: approval.call_id,
                     decision: decision.clone(),
@@ -1801,7 +1801,7 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
     };
     let sandbox_policy_for_config = sandbox_policy.clone();
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.1-codex")
         .with_config(move |config| {
             config.permissions.approval_policy = Constrained::allow_any(approval_policy);
@@ -1847,7 +1847,7 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
     )
     .await?;
     let approval = expect_patch_approval(&test, call_id_1).await;
-    test.codex
+    test.thread
         .submit(Op::PatchApproval {
             id: approval.call_id,
             decision: ReviewDecision::ApprovedForSession,
@@ -1882,7 +1882,7 @@ async fn approving_apply_patch_for_session_skips_future_prompts_for_same_file() 
     )
     .await?;
 
-    let event = wait_for_event(&test.codex, |event| {
+    let event = wait_for_event(&test.thread, |event| {
         matches!(
             event,
             EventMsg::ApplyPatchApprovalRequest(_) | EventMsg::TurnComplete(_)
@@ -1910,7 +1910,7 @@ async fn approving_execpolicy_amendment_persists_policy_and_skips_future_prompts
     let approval_policy = AskForApproval::UnlessTrusted;
     let sandbox_policy = SandboxPolicy::new_read_only_policy();
     let sandbox_policy_for_config = sandbox_policy.clone();
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(approval_policy);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy_for_config);
     });
@@ -1966,7 +1966,7 @@ async fn approving_execpolicy_amendment_persists_policy_and_skips_future_prompts
         Some(expected_execpolicy_amendment.clone())
     );
 
-    test.codex
+    test.thread
         .submit(Op::ExecApproval {
             id: approval.effective_approval_id(),
             turn_id: None,
@@ -2081,7 +2081,7 @@ async fn spawned_subagent_execpolicy_amendment_propagates_to_parent_session() ->
     let approval_policy = AskForApproval::UnlessTrusted;
     let sandbox_policy = SandboxPolicy::new_read_only_policy();
     let sandbox_policy_for_config = sandbox_policy.clone();
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(approval_policy);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy_for_config);
         config
@@ -2342,7 +2342,7 @@ async fn invalid_requested_prefix_rule_falls_back_for_compound_command() -> Resu
     let approval_policy = AskForApproval::OnRequest;
     let sandbox_policy = SandboxPolicy::new_read_only_policy();
     let sandbox_policy_for_config = sandbox_policy.clone();
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(approval_policy);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy_for_config);
     });
@@ -2392,7 +2392,7 @@ async fn approving_fallback_rule_for_compound_command_works() -> Result<()> {
     let approval_policy = AskForApproval::OnRequest;
     let sandbox_policy = SandboxPolicy::new_read_only_policy();
     let sandbox_policy_for_config = sandbox_policy.clone();
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(approval_policy);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy_for_config);
     });
@@ -2433,7 +2433,7 @@ async fn approving_fallback_rule_for_compound_command_works() -> Result<()> {
         .expect("should have a proposed execpolicy amendment");
     assert!(amendment.command.contains(&command.to_string()));
 
-    test.codex
+    test.thread
         .submit(Op::ExecApproval {
             id: approval_id,
             turn_id: None,
@@ -2526,7 +2526,7 @@ allow_local_binding = true
         exclude_slash_tmp: false,
     };
     let sandbox_policy_for_config = sandbox_policy.clone();
-    let mut builder = test_codex().with_home(home).with_config(move |config| {
+    let mut builder = test_praxis().with_home(home).with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(approval_policy);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy_for_config);
         let layers = config
@@ -2614,7 +2614,7 @@ allow_local_binding = true
             .checked_duration_since(std::time::Instant::now())
             .expect("timed out waiting for network approval request");
         let event = wait_for_event_with_timeout(
-            &test.codex,
+            &test.thread,
             |event| {
                 matches!(
                     event,
@@ -2631,7 +2631,7 @@ allow_local_binding = true
                 {
                     break approval;
                 }
-                test.codex
+                test.thread
                     .submit(Op::ExecApproval {
                         id: approval.effective_approval_id(),
                         turn_id: None,
@@ -2669,7 +2669,7 @@ allow_local_binding = true
         .find(|amendment| amendment.action == NetworkPolicyRuleAction::Deny)
         .expect("expected deny network policy amendment");
 
-    test.codex
+    test.thread
         .submit(Op::ExecApproval {
             id: approval.effective_approval_id(),
             turn_id: None,
@@ -2754,7 +2754,7 @@ allow_local_binding = true
             .checked_duration_since(std::time::Instant::now())
             .expect("timed out waiting for second turn completion");
         let event = wait_for_event_with_timeout(
-            &test.codex,
+            &test.thread,
             |event| {
                 matches!(
                     event,
@@ -2774,7 +2774,7 @@ allow_local_binding = true
                         approval.command
                     );
                 }
-                test.codex
+                test.thread
                     .submit(Op::ExecApproval {
                         id: approval.effective_approval_id(),
                         turn_id: None,
@@ -2810,7 +2810,7 @@ async fn compound_command_with_one_safe_command_still_requires_approval() -> Res
     let approval_policy = AskForApproval::UnlessTrusted;
     let sandbox_policy = SandboxPolicy::new_workspace_write_policy();
     let sandbox_policy_for_config = sandbox_policy.clone();
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.permissions.approval_policy = Constrained::allow_any(approval_policy);
         config.permissions.sandbox_policy = Constrained::allow_any(sandbox_policy_for_config);
     });
@@ -2858,7 +2858,7 @@ async fn compound_command_with_one_safe_command_still_requires_approval() -> Res
     .await?;
 
     let approval = expect_exec_approval(&test, expected_command.as_str()).await;
-    test.codex
+    test.thread
         .submit(Op::ExecApproval {
             id: approval.effective_approval_id(),
             turn_id: None,

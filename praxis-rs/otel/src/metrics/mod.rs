@@ -3,7 +3,7 @@ mod config;
 mod error;
 pub mod names;
 pub(crate) mod runtime_metrics;
-pub mod tags;
+pub(crate) mod tags;
 pub(crate) mod timer;
 pub(crate) mod validation;
 

@@ -20,14 +20,17 @@ use praxis_login::AuthManager;
 use praxis_login::default_client::build_reqwest_client;
 
 use super::PluginsManager;
+use super::curated::curated_plugins_git_url;
+use super::curated::curated_plugins_github_api_url;
+use super::curated::curated_plugins_github_zipball_url;
+use super::curated::curated_plugins_marketplace_path;
+use super::curated::curated_plugins_repo_path;
+use super::curated::curated_plugins_sha_path;
+use super::marketplace::marketplace_manifest_path;
 
 const GITHUB_API_BASE_URL: &str = "https://api.github.com";
 const GITHUB_API_ACCEPT_HEADER: &str = "application/vnd.github+json";
 const GITHUB_API_VERSION_HEADER: &str = "2022-11-28";
-const OPENAI_PLUGINS_OWNER: &str = "openai";
-const OPENAI_PLUGINS_REPO: &str = "plugins";
-const CURATED_PLUGINS_RELATIVE_DIR: &str = ".tmp/plugins";
-const CURATED_PLUGINS_SHA_FILE: &str = ".tmp/plugins.sha";
 const CURATED_PLUGINS_GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const CURATED_PLUGINS_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 // Keep this comfortably above a normal sync attempt so we do not race another Praxis process.
@@ -50,24 +53,20 @@ struct GitHubGitRefObject {
     sha: String,
 }
 
-pub(crate) fn curated_plugins_repo_path(praxis_home: &Path) -> PathBuf {
-    praxis_home.join(CURATED_PLUGINS_RELATIVE_DIR)
-}
-
 pub(crate) fn read_curated_plugins_sha(praxis_home: &Path) -> Option<String> {
-    read_sha_file(praxis_home.join(CURATED_PLUGINS_SHA_FILE).as_path())
+    read_sha_file(curated_plugins_sha_path(praxis_home).as_path())
 }
 
-pub(crate) fn sync_openai_plugins_repo(praxis_home: &Path) -> Result<String, String> {
-    sync_openai_plugins_repo_with_transport_overrides(praxis_home, "git", GITHUB_API_BASE_URL)
+pub(crate) fn sync_curated_plugins_repo(praxis_home: &Path) -> Result<String, String> {
+    sync_curated_plugins_repo_with_transport_overrides(praxis_home, "git", GITHUB_API_BASE_URL)
 }
 
-fn sync_openai_plugins_repo_with_transport_overrides(
+fn sync_curated_plugins_repo_with_transport_overrides(
     praxis_home: &Path,
     git_binary: &str,
     api_base_url: &str,
 ) -> Result<String, String> {
-    match sync_openai_plugins_repo_via_git(praxis_home, git_binary) {
+    match sync_curated_plugins_repo_via_git(praxis_home, git_binary) {
         Ok(remote_sha) => {
             emit_curated_plugins_startup_sync_metric("git", "success");
             emit_curated_plugins_startup_sync_final_metric("git", "success");
@@ -80,7 +79,7 @@ fn sync_openai_plugins_repo_with_transport_overrides(
                 git_binary,
                 "git sync failed for curated plugin sync; falling back to GitHub HTTP"
             );
-            let result = sync_openai_plugins_repo_via_http(praxis_home, api_base_url);
+            let result = sync_curated_plugins_repo_via_http(praxis_home, api_base_url);
             let status = if result.is_ok() { "success" } else { "failure" };
             emit_curated_plugins_startup_sync_metric("http", status);
             emit_curated_plugins_startup_sync_final_metric("http", status);
@@ -89,12 +88,12 @@ fn sync_openai_plugins_repo_with_transport_overrides(
     }
 }
 
-fn sync_openai_plugins_repo_via_git(
+fn sync_curated_plugins_repo_via_git(
     praxis_home: &Path,
     git_binary: &str,
 ) -> Result<String, String> {
     let repo_path = curated_plugins_repo_path(praxis_home);
-    let sha_path = praxis_home.join(CURATED_PLUGINS_SHA_FILE);
+    let sha_path = curated_plugins_sha_path(praxis_home);
     let remote_sha = git_ls_remote_head_sha(git_binary)?;
     let local_sha = read_local_git_or_sha_file(&repo_path, &sha_path, git_binary);
 
@@ -109,7 +108,7 @@ fn sync_openai_plugins_repo_via_git(
             .arg("clone")
             .arg("--depth")
             .arg("1")
-            .arg("https://github.com/openai/plugins.git")
+            .arg(curated_plugins_git_url())
             .arg(staged_repo_dir.path()),
         "git clone curated plugins repo",
         CURATED_PLUGINS_GIT_TIMEOUT,
@@ -123,18 +122,16 @@ fn sync_openai_plugins_repo_via_git(
         ));
     }
 
-    ensure_marketplace_manifest_exists(staged_repo_dir.path())?;
-    activate_curated_repo(&repo_path, staged_repo_dir)?;
-    write_curated_plugins_sha(&sha_path, &remote_sha)?;
+    activate_synced_curated_repo(&repo_path, &sha_path, staged_repo_dir, &remote_sha)?;
     Ok(remote_sha)
 }
 
-fn sync_openai_plugins_repo_via_http(
+fn sync_curated_plugins_repo_via_http(
     praxis_home: &Path,
     api_base_url: &str,
 ) -> Result<String, String> {
     let repo_path = curated_plugins_repo_path(praxis_home);
-    let sha_path = praxis_home.join(CURATED_PLUGINS_SHA_FILE);
+    let sha_path = curated_plugins_sha_path(praxis_home);
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -149,9 +146,7 @@ fn sync_openai_plugins_repo_via_http(
     let staged_repo_dir = prepare_curated_repo_parent_and_temp_dir(&repo_path)?;
     let zipball_bytes = runtime.block_on(fetch_curated_repo_zipball(api_base_url, &remote_sha))?;
     extract_zipball_to_dir(&zipball_bytes, staged_repo_dir.path())?;
-    ensure_marketplace_manifest_exists(staged_repo_dir.path())?;
-    activate_curated_repo(&repo_path, staged_repo_dir)?;
-    write_curated_plugins_sha(&sha_path, &remote_sha)?;
+    activate_synced_curated_repo(&repo_path, &sha_path, staged_repo_dir, &remote_sha)?;
     Ok(remote_sha)
 }
 
@@ -217,10 +212,8 @@ fn startup_remote_plugin_sync_marker_path(praxis_home: &Path) -> PathBuf {
 }
 
 fn startup_remote_plugin_sync_prerequisites_ready(praxis_home: &Path) -> bool {
-    praxis_home
-        .join(".tmp/plugins/.agents/plugins/marketplace.json")
-        .is_file()
-        && praxis_home.join(".tmp/plugins.sha").is_file()
+    curated_plugins_marketplace_path(praxis_home).is_file()
+        && curated_plugins_sha_path(praxis_home).is_file()
 }
 
 async fn wait_for_startup_remote_plugin_sync_prerequisites(praxis_home: &Path) -> bool {
@@ -385,13 +378,25 @@ fn emit_curated_plugins_startup_sync_counter(
 }
 
 fn ensure_marketplace_manifest_exists(repo_path: &Path) -> Result<(), String> {
-    if repo_path.join(".agents/plugins/marketplace.json").is_file() {
+    let manifest_path = marketplace_manifest_path(repo_path);
+    if manifest_path.is_file() {
         return Ok(());
     }
     Err(format!(
         "curated plugins archive missing marketplace manifest at {}",
-        repo_path.join(".agents/plugins/marketplace.json").display()
+        manifest_path.display()
     ))
+}
+
+fn activate_synced_curated_repo(
+    repo_path: &Path,
+    sha_path: &Path,
+    staged_repo_dir: TempDir,
+    remote_sha: &str,
+) -> Result<(), String> {
+    ensure_marketplace_manifest_exists(staged_repo_dir.path())?;
+    activate_curated_repo(repo_path, staged_repo_dir)?;
+    write_curated_plugins_sha(sha_path, remote_sha)
 }
 
 fn activate_curated_repo(repo_path: &Path, staged_repo_dir: TempDir) -> Result<(), String> {
@@ -486,7 +491,7 @@ fn git_ls_remote_head_sha(git_binary: &str) -> Result<String, String> {
         Command::new(git_binary)
             .env("GIT_OPTIONAL_LOCKS", "0")
             .arg("ls-remote")
-            .arg("https://github.com/openai/plugins.git")
+            .arg(curated_plugins_git_url())
             .arg("HEAD"),
         "git ls-remote curated plugins repo",
         CURATED_PLUGINS_GIT_TIMEOUT,
@@ -604,8 +609,7 @@ fn ensure_git_success(output: &Output, context: &str) -> Result<(), String> {
 }
 
 async fn fetch_curated_repo_remote_sha(api_base_url: &str) -> Result<String, String> {
-    let api_base_url = api_base_url.trim_end_matches('/');
-    let repo_url = format!("{api_base_url}/repos/{OPENAI_PLUGINS_OWNER}/{OPENAI_PLUGINS_REPO}");
+    let repo_url = curated_plugins_github_api_url(api_base_url);
     let client = build_reqwest_client();
     let repo_body = fetch_github_text(&client, &repo_url, "get curated plugins repository").await?;
     let repo_summary: GitHubRepositorySummary =
@@ -637,9 +641,7 @@ async fn fetch_curated_repo_zipball(
     api_base_url: &str,
     remote_sha: &str,
 ) -> Result<Vec<u8>, String> {
-    let api_base_url = api_base_url.trim_end_matches('/');
-    let repo_url = format!("{api_base_url}/repos/{OPENAI_PLUGINS_OWNER}/{OPENAI_PLUGINS_REPO}");
-    let zipball_url = format!("{repo_url}/zipball/{remote_sha}");
+    let zipball_url = curated_plugins_github_zipball_url(api_base_url, remote_sha);
     let client = build_reqwest_client();
     fetch_github_bytes(&client, &zipball_url, "download curated plugins archive").await
 }

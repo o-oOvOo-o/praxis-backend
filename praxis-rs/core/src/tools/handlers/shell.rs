@@ -252,6 +252,7 @@ impl ShellHandler {
         turn_context: &TurnContext,
         thread_id: ThreadId,
     ) -> ExecParams {
+        let permissions = turn_context.effective_permissions();
         ExecParams {
             command: params.command.clone(),
             cwd: turn_context.resolve_path(params.workdir.clone()),
@@ -260,7 +261,7 @@ impl ShellHandler {
             env: create_env(&turn_context.shell_environment_policy, Some(thread_id)),
             network: turn_context.network.clone(),
             sandbox_permissions: params.sandbox_permissions.unwrap_or_default(),
-            windows_sandbox_level: turn_context.windows_sandbox_level,
+            windows_sandbox_level: permissions.windows_sandbox_level,
             windows_sandbox_private_desktop: turn_context
                 .config
                 .permissions
@@ -306,6 +307,7 @@ impl ShellCommandHandler {
         let shell = session.user_shell();
         let use_login_shell = Self::resolve_use_login_shell(params.login, allow_login_shell)?;
         let command = Self::base_command(shell.as_ref(), &params.command, use_login_shell);
+        let permissions = turn_context.effective_permissions();
 
         Ok(ExecParams {
             command,
@@ -315,7 +317,7 @@ impl ShellCommandHandler {
             env: create_env(&turn_context.shell_environment_policy, Some(thread_id)),
             network: turn_context.network.clone(),
             sandbox_permissions: params.sandbox_permissions.unwrap_or_default(),
-            windows_sandbox_level: turn_context.windows_sandbox_level,
+            windows_sandbox_level: permissions.windows_sandbox_level,
             windows_sandbox_private_desktop: turn_context
                 .config
                 .permissions
@@ -556,6 +558,7 @@ impl ShellHandler {
         } = args;
 
         let mut exec_params = exec_params;
+        let permissions = turn.effective_permissions();
         let dependency_env = session.dependency_env().await;
         if !dependency_env.is_empty() {
             exec_params.env.extend(dependency_env.clone());
@@ -572,7 +575,7 @@ impl ShellHandler {
             session.as_ref(),
             exec_params.sandbox_permissions,
             additional_permissions,
-            turn.approval_policy.value(),
+            permissions.approval_policy.value(),
             &exec_params.cwd,
         )
         .await?;
@@ -622,9 +625,9 @@ impl ShellHandler {
             .exec_policy
             .create_exec_approval_requirement_for_command(ExecApprovalRequest {
                 command: &exec_params.command,
-                approval_policy: turn.approval_policy.value(),
-                sandbox_policy: turn.sandbox_policy.get(),
-                file_system_sandbox_policy: &turn.file_system_sandbox_policy,
+                approval_policy: permissions.approval_policy.value(),
+                sandbox_policy: permissions.sandbox_policy.get(),
+                file_system_sandbox_policy: &permissions.file_system_sandbox_policy,
                 sandbox_permissions: if effective_additional_permissions.permissions_preapproved {
                     praxis_protocol::models::SandboxPermissions::UseDefault
                 } else {
@@ -666,13 +669,7 @@ impl ShellHandler {
             tool_name,
         };
         let out = orchestrator
-            .run(
-                &mut runtime,
-                &req,
-                &tool_ctx,
-                &turn,
-                turn.approval_policy.value(),
-            )
+            .run(&mut runtime, &req, &tool_ctx, &turn)
             .await
             .map(|result| result.output);
         let event_ctx = ToolEventCtx::new(

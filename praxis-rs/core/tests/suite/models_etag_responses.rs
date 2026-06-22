@@ -11,9 +11,9 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_response;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::openai_models::ModelsResponse;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::EventMsg;
@@ -41,8 +41,8 @@ async fn refresh_models_on_models_etag_mismatch_and_avoid_duplicate_models_fetch
     )
     .await;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
-    let mut builder = test_codex()
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
+    let mut builder = test_praxis()
         .with_auth(auth)
         .with_model("gpt-5")
         .with_config(|config| {
@@ -52,7 +52,7 @@ async fn refresh_models_on_models_etag_mismatch_and_avoid_duplicate_models_fetch
         });
 
     let test = builder.build(&server).await?;
-    let codex = Arc::clone(&test.codex);
+    let codex = Arc::clone(&test.thread);
     let cwd = Arc::clone(&test.cwd);
     let session_model = test.session_configured.model.clone();
 

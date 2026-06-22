@@ -111,10 +111,6 @@ impl From<PraxisToolCallSandboxMode> for SandboxMode {
 /// only as a legacy tool-call alias in the message processor.
 #[deprecated(note = "use PraxisToolCallParam")]
 pub type CodexToolCallParam = PraxisToolCallParam;
-#[deprecated(note = "use PraxisToolCallApprovalPolicy")]
-pub type CodexToolCallApprovalPolicy = PraxisToolCallApprovalPolicy;
-#[deprecated(note = "use PraxisToolCallSandboxMode")]
-pub type CodexToolCallSandboxMode = PraxisToolCallSandboxMode;
 
 /// Builds a `Tool` definition (JSON schema etc.) for the Praxis tool-call.
 pub(crate) fn create_tool_for_praxis_tool_call_param() -> Tool {
@@ -241,10 +237,12 @@ impl PraxisToolCallReplyParam {
     }
 }
 
-/// Builds a `Tool` definition for the `praxis-reply` tool-call.
+/// Backward-compatible type alias for MCP clients that still import the old
+/// Codex-named reply type.
 #[deprecated(note = "use PraxisToolCallReplyParam")]
 pub type CodexToolCallReplyParam = PraxisToolCallReplyParam;
 
+/// Builds a `Tool` definition for the `praxis-reply` tool-call.
 pub(crate) fn create_tool_for_praxis_tool_call_reply_param() -> Tool {
     let schema = SchemaSettings::draft2019_09()
         .with(|s| {

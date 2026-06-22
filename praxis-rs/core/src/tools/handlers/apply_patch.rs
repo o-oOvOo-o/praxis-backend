@@ -175,12 +175,13 @@ async fn effective_patch_permissions(
     praxis_protocol::permissions::FileSystemSandboxPolicy,
 ) {
     let file_paths = file_paths_for_action(action);
+    let permissions = turn.effective_permissions();
     let granted_permissions = merge_permission_profiles(
         session.granted_session_permissions().await.as_ref(),
         session.granted_turn_permissions().await.as_ref(),
     );
     let file_system_sandbox_policy = effective_file_system_sandbox_policy(
-        &turn.file_system_sandbox_policy,
+        &permissions.file_system_sandbox_policy,
         granted_permissions.as_ref(),
     );
     let effective_additional_permissions = apply_granted_turn_permissions(
@@ -396,13 +397,7 @@ async fn run_verified_apply_patch(
             let mut orchestrator = ToolOrchestrator::new();
             let mut runtime = ApplyPatchRuntime::new();
             let out = orchestrator
-                .run(
-                    &mut runtime,
-                    &req,
-                    &tool_ctx,
-                    turn.as_ref(),
-                    turn.approval_policy.value(),
-                )
+                .run(&mut runtime, &req, &tool_ctx, turn.as_ref())
                 .await
                 .map(|result| result.output);
             let event_ctx = ToolEventCtx::new(session.as_ref(), turn.as_ref(), call_id, tracker);

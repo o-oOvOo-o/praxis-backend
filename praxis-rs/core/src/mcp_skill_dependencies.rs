@@ -352,9 +352,10 @@ fn format_missing_mcp_dependencies(missing: &HashMap<String, McpServerConfig>) -
 }
 
 fn is_full_access_mode(turn_context: &TurnContext) -> bool {
-    matches!(turn_context.approval_policy.value(), AskForApproval::Never)
+    let permissions = turn_context.effective_permissions();
+    matches!(permissions.approval_policy.value(), AskForApproval::Never)
         && matches!(
-            turn_context.sandbox_policy.get(),
+            permissions.sandbox_policy.get(),
             SandboxPolicy::DangerFullAccess | SandboxPolicy::ExternalSandbox { .. }
         )
 }

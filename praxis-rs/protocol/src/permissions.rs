@@ -1257,7 +1257,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[cfg(unix)]
-    const SYMLINKED_TMPDIR_TEST_ENV: &str = "CODEX_PROTOCOL_TEST_SYMLINKED_TMPDIR";
+    const SYMLINKED_TMPDIR_TEST_ENV: &str = "PRAXIS_PROTOCOL_TEST_SYMLINKED_TMPDIR";
 
     #[cfg(unix)]
     fn symlink_dir(original: &Path, link: &Path) -> std::io::Result<()> {
@@ -1402,7 +1402,7 @@ mod tests {
                 .join(relative_cwd)
                 .join(".praxis"),
         )
-        .expect("absolute dot codex");
+        .expect("absolute dot praxis");
         let policy = SandboxPolicy::WorkspaceWrite {
             writable_roots: vec![],
             read_only_access: ReadOnlyAccess::Restricted {
@@ -1587,7 +1587,7 @@ mod tests {
     fn writable_roots_preserve_symlinked_protected_subpaths() {
         let cwd = TempDir::new().expect("tempdir");
         let root = cwd.path().join("root");
-        let decoy = root.join("decoy-codex");
+        let decoy = root.join("decoy-praxis");
         let dot_praxis = root.join(".praxis");
         fs::create_dir_all(&decoy).expect("create decoy");
         symlink_dir(&decoy, &dot_praxis).expect("create .praxis symlink");

@@ -14,8 +14,8 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
 use core_test_support::stdio_server_bin;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use praxis_config::types::McpServerConfig;
@@ -141,8 +141,8 @@ async fn run_code_mode_turn(
     prompt: &str,
     code: &str,
     include_apply_patch: bool,
-) -> Result<(TestCodex, ResponseMock)> {
-    let mut builder = test_codex()
+) -> Result<(TestPraxis, ResponseMock)> {
+    let mut builder = test_praxis()
         .with_model("test-gpt-5.1-codex")
         .with_config(move |config| {
             let _ = config.features.enable(Feature::CodeMode);
@@ -177,9 +177,9 @@ async fn run_code_mode_turn_with_rmcp(
     server: &MockServer,
     prompt: &str,
     code: &str,
-) -> Result<(TestCodex, ResponseMock)> {
+) -> Result<(TestPraxis, ResponseMock)> {
     let rmcp_test_server_bin = stdio_server_bin()?;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("test-gpt-5.1-codex")
         .with_config(move |config| {
             let _ = config.features.enable(Feature::CodeMode);
@@ -299,7 +299,7 @@ async fn code_mode_only_restricts_prompt_tools() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         let _ = config.features.enable(Feature::CodeModeOnly);
     });
     let test = builder.build(&server).await?;
@@ -345,7 +345,7 @@ text(output.output);
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         let _ = config.features.enable(Feature::CodeModeOnly);
     });
     let test = builder.build(&server).await?;
@@ -402,7 +402,7 @@ async fn code_mode_nested_tool_calls_can_run_in_parallel() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("test-gpt-5.1-codex")
         .with_config(move |config| {
             let _ = config.features.enable(Feature::CodeMode);
@@ -618,7 +618,7 @@ async fn code_mode_can_yield_and_resume_with_wait() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let test = builder.build(&server).await?;
@@ -764,7 +764,7 @@ async fn code_mode_yield_timeout_works_for_busy_loop() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let test = builder.build(&server).await?;
@@ -858,7 +858,7 @@ async fn code_mode_can_run_multiple_yielded_sessions() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let test = builder.build(&server).await?;
@@ -1026,7 +1026,7 @@ async fn code_mode_wait_can_terminate_and_continue() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let test = builder.build(&server).await?;
@@ -1152,7 +1152,7 @@ async fn code_mode_wait_returns_error_for_unknown_session() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let test = builder.build(&server).await?;
@@ -1214,7 +1214,7 @@ async fn code_mode_wait_terminate_returns_completed_session_if_it_finished_after
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let test = builder.build(&server).await?;
@@ -1409,7 +1409,7 @@ async fn code_mode_background_keeps_running_on_later_turn_without_wait() -> Resu
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let test = builder.build(&server).await?;
@@ -1502,7 +1502,7 @@ async fn code_mode_wait_uses_its_own_max_tokens_budget() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let test = builder.build(&server).await?;
@@ -1799,7 +1799,7 @@ async fn code_mode_can_use_view_image_result_with_image_helper() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.3-codex")
         .with_config(move |config| {
             let _ = config.features.enable(Feature::CodeMode);
@@ -2262,7 +2262,7 @@ async fn code_mode_can_call_hidden_dynamic_tools() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let base_test = builder.build(&server).await?;
@@ -2287,7 +2287,7 @@ async fn code_mode_can_call_hidden_dynamic_tools() -> Result<()> {
         )
         .await?;
     let mut test = base_test;
-    test.codex = new_thread.thread;
+    test.thread = new_thread.thread;
     test.session_configured = new_thread.session_configured;
 
     let code = r#"
@@ -2321,7 +2321,7 @@ text(
     )
     .await;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "use exec to inspect and call hidden tools".into(),
@@ -2341,19 +2341,19 @@ text(
         })
         .await?;
 
-    let turn_id = wait_for_event_match(&test.codex, |event| match event {
+    let turn_id = wait_for_event_match(&test.thread, |event| match event {
         EventMsg::TurnStarted(event) => Some(event.turn_id.clone()),
         _ => None,
     })
     .await;
-    let request = wait_for_event_match(&test.codex, |event| match event {
+    let request = wait_for_event_match(&test.thread, |event| match event {
         EventMsg::DynamicToolCallRequest(request) => Some(request.clone()),
         _ => None,
     })
     .await;
     assert_eq!(request.tool, "hidden_dynamic_tool");
     assert_eq!(request.arguments, serde_json::json!({ "city": "Paris" }));
-    test.codex
+    test.thread
         .submit(Op::DynamicToolResponse {
             id: request.call_id,
             response: DynamicToolResponse {
@@ -2364,7 +2364,7 @@ text(
             },
         })
         .await?;
-    wait_for_event(&test.codex, |event| match event {
+    wait_for_event(&test.thread, |event| match event {
         EventMsg::TurnComplete(event) => event.turn_id == turn_id,
         _ => false,
     })
@@ -2491,7 +2491,7 @@ async fn code_mode_can_store_and_load_values_across_turns() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = responses::start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         let _ = config.features.enable(Feature::CodeMode);
     });
     let test = builder.build(&server).await?;

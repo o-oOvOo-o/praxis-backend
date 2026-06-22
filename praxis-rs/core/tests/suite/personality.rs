@@ -5,7 +5,7 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse_completed;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_config::types::Personality;
 use praxis_core::models_manager::manager::ModelsManager;
@@ -84,7 +84,7 @@ async fn user_turn_personality_none_does_not_add_update_message() -> anyhow::Res
 
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.2-codex")
         .with_config(|config| {
             config
@@ -94,7 +94,7 @@ async fn user_turn_personality_none_does_not_add_update_message() -> anyhow::Res
         });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -114,7 +114,7 @@ async fn user_turn_personality_none_does_not_add_update_message() -> anyhow::Res
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
     let developer_texts = request.message_input_texts("developer");
@@ -134,7 +134,7 @@ async fn config_personality_some_sets_instructions_template() -> anyhow::Result<
 
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.2-codex")
         .with_config(|config| {
             config
@@ -145,7 +145,7 @@ async fn config_personality_some_sets_instructions_template() -> anyhow::Result<
         });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -165,7 +165,7 @@ async fn config_personality_some_sets_instructions_template() -> anyhow::Result<
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
     let instructions_text = request.instructions_text();
@@ -192,7 +192,7 @@ async fn config_personality_none_sends_no_personality() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.2-codex")
         .with_config(|config| {
             config
@@ -203,7 +203,7 @@ async fn config_personality_none_sends_no_personality() -> anyhow::Result<()> {
         });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -223,7 +223,7 @@ async fn config_personality_none_sends_no_personality() -> anyhow::Result<()> {
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
     let instructions_text = request.instructions_text();
@@ -257,7 +257,7 @@ async fn default_personality_is_pragmatic_without_config_toml() -> anyhow::Resul
 
     let server = start_mock_server().await;
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.2-codex")
         .with_config(|config| {
             config
@@ -267,7 +267,7 @@ async fn default_personality_is_pragmatic_without_config_toml() -> anyhow::Resul
         });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -287,7 +287,7 @@ async fn default_personality_is_pragmatic_without_config_toml() -> anyhow::Resul
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
     let instructions_text = request.instructions_text();
@@ -309,7 +309,7 @@ async fn user_turn_personality_some_adds_update_message() -> anyhow::Result<()> 
         vec![sse_completed("resp-1"), sse_completed("resp-2")],
     )
     .await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("exp-praxis-personality")
         .with_config(|config| {
             config
@@ -319,7 +319,7 @@ async fn user_turn_personality_some_adds_update_message() -> anyhow::Result<()> 
         });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -339,9 +339,9 @@ async fn user_turn_personality_some_adds_update_message() -> anyhow::Result<()> 
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -358,7 +358,7 @@ async fn user_turn_personality_some_adds_update_message() -> anyhow::Result<()> 
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -378,7 +378,7 @@ async fn user_turn_personality_some_adds_update_message() -> anyhow::Result<()> 
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let requests = resp_mock.requests();
     assert_eq!(requests.len(), 2, "expected two requests");
@@ -414,7 +414,7 @@ async fn user_turn_personality_same_value_does_not_add_update_message() -> anyho
         vec![sse_completed("resp-1"), sse_completed("resp-2")],
     )
     .await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("exp-praxis-personality")
         .with_config(|config| {
             config
@@ -425,7 +425,7 @@ async fn user_turn_personality_same_value_does_not_add_update_message() -> anyho
         });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -445,9 +445,9 @@ async fn user_turn_personality_same_value_does_not_add_update_message() -> anyho
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -464,7 +464,7 @@ async fn user_turn_personality_same_value_does_not_add_update_message() -> anyho
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -484,7 +484,7 @@ async fn user_turn_personality_same_value_does_not_add_update_message() -> anyho
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let requests = resp_mock.requests();
     assert_eq!(requests.len(), 2, "expected two requests");
@@ -534,7 +534,7 @@ async fn user_turn_personality_skips_if_feature_disabled() -> anyhow::Result<()>
         vec![sse_completed("resp-1"), sse_completed("resp-2")],
     )
     .await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("exp-praxis-personality")
         .with_config(|config| {
             config
@@ -544,7 +544,7 @@ async fn user_turn_personality_skips_if_feature_disabled() -> anyhow::Result<()>
         });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -564,9 +564,9 @@ async fn user_turn_personality_skips_if_feature_disabled() -> anyhow::Result<()>
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -583,7 +583,7 @@ async fn user_turn_personality_skips_if_feature_disabled() -> anyhow::Result<()>
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -603,7 +603,7 @@ async fn user_turn_personality_skips_if_feature_disabled() -> anyhow::Result<()>
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let requests = resp_mock.requests();
     assert_eq!(requests.len(), 2, "expected two requests");
@@ -686,8 +686,8 @@ async fn remote_model_friendly_personality_instructions_with_feature() -> anyhow
 
     let resp_mock = mount_sse_once(&server, sse_completed("resp-1")).await;
 
-    let mut builder = test_codex()
-        .with_auth(praxis_login::CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config
                 .features
@@ -700,7 +700,7 @@ async fn remote_model_friendly_personality_instructions_with_feature() -> anyhow
 
     wait_for_model_available(&test.thread_manager.get_models_manager(), remote_slug).await;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -720,7 +720,7 @@ async fn remote_model_friendly_personality_instructions_with_feature() -> anyhow
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
     let instructions_text = request.instructions_text();
@@ -806,8 +806,8 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(praxis_login::CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config
                 .features
@@ -819,7 +819,7 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
 
     wait_for_model_available(&test.thread_manager.get_models_manager(), remote_slug).await;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -839,9 +839,9 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -858,7 +858,7 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -878,7 +878,7 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let requests = resp_mock.requests();
     assert_eq!(requests.len(), 2, "expected two requests");

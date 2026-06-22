@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::config::Config;
 use crate::plugins::PluginsManager;
 use praxis_config::McpServerConfig;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_mcp::mcp::ToolPluginProvenance;
 use praxis_mcp::mcp::configured_mcp_servers;
 use praxis_mcp::mcp::effective_mcp_servers;
@@ -28,7 +28,7 @@ impl McpManager {
     pub fn effective_servers(
         &self,
         config: &Config,
-        auth: Option<&CodexAuth>,
+        auth: Option<&OpenAiAccountAuth>,
     ) -> HashMap<String, McpServerConfig> {
         let mcp_config = config.to_mcp_config(self.plugins_manager.as_ref());
         effective_mcp_servers(&mcp_config, auth)

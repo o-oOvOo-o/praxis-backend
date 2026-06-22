@@ -192,7 +192,7 @@ async fn steer_rejection_queues_review_follow_up_before_existing_queued_messages
         id: "steer-rejected-1".into(),
         msg: EventMsg::Error(ErrorEvent {
             message: "cannot steer a review turn".to_string(),
-            praxis_error_info: Some(CodexErrorInfo::ActiveTurnNotSteerable {
+            praxis_error_info: Some(PraxisErrorInfo::ActiveTurnNotSteerable {
                 turn_kind: NonSteerableTurnKind::Review,
             }),
         }),
@@ -201,7 +201,7 @@ async fn steer_rejection_queues_review_follow_up_before_existing_queued_messages
         id: "steer-rejected-2".into(),
         msg: EventMsg::Error(ErrorEvent {
             message: "cannot steer a review turn".to_string(),
-            praxis_error_info: Some(CodexErrorInfo::ActiveTurnNotSteerable {
+            praxis_error_info: Some(PraxisErrorInfo::ActiveTurnNotSteerable {
                 turn_kind: NonSteerableTurnKind::Review,
             }),
         }),
@@ -1443,7 +1443,7 @@ async fn review_queues_user_messages_snapshot() {
         id: "steer-rejected".into(),
         msg: EventMsg::Error(ErrorEvent {
             message: "cannot steer a review turn".to_string(),
-            praxis_error_info: Some(CodexErrorInfo::ActiveTurnNotSteerable {
+            praxis_error_info: Some(PraxisErrorInfo::ActiveTurnNotSteerable {
                 turn_kind: NonSteerableTurnKind::Review,
             }),
         }),

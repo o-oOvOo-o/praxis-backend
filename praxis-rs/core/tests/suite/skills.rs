@@ -9,7 +9,7 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::Op;
 use praxis_protocol::protocol::SandboxPolicy;
@@ -40,7 +40,7 @@ async fn user_turn_includes_skill_instructions() -> Result<()> {
 
     let server = start_mock_server().await;
     let skill_body = "skill body";
-    let mut builder = test_codex().with_pre_build_hook(|home| {
+    let mut builder = test_praxis().with_pre_build_hook(|home| {
         write_skill(home, "demo", "demo skill", skill_body);
     });
     let test = builder.build(&server).await?;
@@ -59,7 +59,7 @@ async fn user_turn_includes_skill_instructions() -> Result<()> {
     .await;
 
     let session_model = test.session_configured.model.clone();
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![
                 UserInput::Text {
@@ -85,7 +85,7 @@ async fn user_turn_includes_skill_instructions() -> Result<()> {
         })
         .await?;
 
-    core_test_support::wait_for_event(test.codex.as_ref(), |event| {
+    core_test_support::wait_for_event(test.thread.as_ref(), |event| {
         matches!(event, praxis_protocol::protocol::EventMsg::TurnComplete(_))
     })
     .await;
@@ -111,21 +111,21 @@ async fn skill_load_errors_surface_in_session_configured() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_pre_build_hook(|home| {
+    let mut builder = test_praxis().with_pre_build_hook(|home| {
         let skill_dir = home.join("skills").join("broken");
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(skill_dir.join("SKILL.md"), "not yaml").unwrap();
     });
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::ListSkills {
             cwds: Vec::new(),
             force_reload: false,
         })
         .await?;
     let response =
-        core_test_support::wait_for_event_match(test.codex.as_ref(), |event| match event {
+        core_test_support::wait_for_event_match(test.thread.as_ref(), |event| match event {
             praxis_protocol::protocol::EventMsg::ListSkillsResponse(response) => {
                 Some(response.clone())
             }
@@ -167,7 +167,7 @@ async fn list_skills_includes_system_cache_entries() -> Result<()> {
     const SYSTEM_SKILL_NAME: &str = "skill-creator";
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_pre_build_hook(|home| {
+    let mut builder = test_praxis().with_pre_build_hook(|home| {
         let system_skill_path = system_skill_md_path(home, SYSTEM_SKILL_NAME);
         assert!(
             !system_skill_path.exists(),
@@ -188,14 +188,14 @@ async fn list_skills_includes_system_cache_entries() -> Result<()> {
         "expected embedded system skill file, got:\n{system_skill_contents}"
     );
 
-    test.codex
+    test.thread
         .submit(Op::ListSkills {
             cwds: Vec::new(),
             force_reload: true,
         })
         .await?;
     let response =
-        core_test_support::wait_for_event_match(test.codex.as_ref(), |event| match event {
+        core_test_support::wait_for_event_match(test.thread.as_ref(), |event| match event {
             praxis_protocol::protocol::EventMsg::ListSkillsResponse(response) => {
                 Some(response.clone())
             }

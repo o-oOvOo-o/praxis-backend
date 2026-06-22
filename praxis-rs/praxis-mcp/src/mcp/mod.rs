@@ -12,7 +12,7 @@ use async_channel::unbounded;
 use praxis_config::Constrained;
 use praxis_config::McpServerConfig;
 use praxis_config::McpServerTransportConfig;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_plugin::PluginCapabilitySummary;
 use praxis_protocol::mcp::Resource;
 use praxis_protocol::mcp::ResourceTemplate;
@@ -31,8 +31,8 @@ pub type McpManager = McpConnectionManager;
 
 const MCP_TOOL_NAME_PREFIX: &str = "mcp";
 const MCP_TOOL_NAME_DELIMITER: &str = "__";
-pub const CODEX_APPS_MCP_SERVER_NAME: &str = "praxis_apps";
-const CODEX_CONNECTORS_TOKEN_ENV_VAR: &str = "CODEX_CONNECTORS_TOKEN";
+pub const PRAXIS_APPS_MCP_SERVER_NAME: &str = "praxis_apps";
+const PRAXIS_CONNECTORS_TOKEN_ENV_VAR: &str = "PRAXIS_CONNECTORS_TOKEN";
 
 /// The Responses API requires tool names to match `^[a-zA-Z0-9_-]+$`.
 /// MCP server/tool names are user-controlled, so sanitize the fully-qualified
@@ -159,15 +159,15 @@ impl ToolPluginProvenance {
 }
 
 fn praxis_apps_mcp_bearer_token_env_var() -> Option<String> {
-    match env::var(CODEX_CONNECTORS_TOKEN_ENV_VAR) {
-        Ok(value) if !value.trim().is_empty() => Some(CODEX_CONNECTORS_TOKEN_ENV_VAR.to_string()),
+    match env::var(PRAXIS_CONNECTORS_TOKEN_ENV_VAR) {
+        Ok(value) if !value.trim().is_empty() => Some(PRAXIS_CONNECTORS_TOKEN_ENV_VAR.to_string()),
         Ok(_) => None,
         Err(env::VarError::NotPresent) => None,
-        Err(env::VarError::NotUnicode(_)) => Some(CODEX_CONNECTORS_TOKEN_ENV_VAR.to_string()),
+        Err(env::VarError::NotUnicode(_)) => Some(PRAXIS_CONNECTORS_TOKEN_ENV_VAR.to_string()),
     }
 }
 
-fn praxis_apps_mcp_bearer_token(auth: Option<&CodexAuth>) -> Option<String> {
+fn praxis_apps_mcp_bearer_token(auth: Option<&OpenAiAccountAuth>) -> Option<String> {
     let token = auth.and_then(|auth| auth.get_token().ok())?;
     let token = token.trim();
     if token.is_empty() {
@@ -177,12 +177,12 @@ fn praxis_apps_mcp_bearer_token(auth: Option<&CodexAuth>) -> Option<String> {
     }
 }
 
-fn praxis_apps_mcp_http_headers(auth: Option<&CodexAuth>) -> Option<HashMap<String, String>> {
+fn praxis_apps_mcp_http_headers(auth: Option<&OpenAiAccountAuth>) -> Option<HashMap<String, String>> {
     let mut headers = HashMap::new();
     if let Some(token) = praxis_apps_mcp_bearer_token(auth) {
         headers.insert("Authorization".to_string(), format!("Bearer {token}"));
     }
-    if let Some(account_id) = auth.and_then(CodexAuth::get_account_id) {
+    if let Some(account_id) = auth.and_then(OpenAiAccountAuth::get_account_id) {
         headers.insert("ChatGPT-Account-ID".to_string(), account_id);
     }
     if headers.is_empty() {
@@ -218,7 +218,7 @@ pub(crate) fn praxis_apps_mcp_url(config: &McpConfig) -> String {
     praxis_apps_mcp_url_for_base_url(&config.chatgpt_base_url)
 }
 
-fn praxis_apps_mcp_server_config(config: &McpConfig, auth: Option<&CodexAuth>) -> McpServerConfig {
+fn praxis_apps_mcp_server_config(config: &McpConfig, auth: Option<&OpenAiAccountAuth>) -> McpServerConfig {
     let bearer_token_env_var = praxis_apps_mcp_bearer_token_env_var();
     let http_headers = if bearer_token_env_var.is_some() {
         None
@@ -249,16 +249,16 @@ fn praxis_apps_mcp_server_config(config: &McpConfig, auth: Option<&CodexAuth>) -
 
 pub fn with_praxis_apps_mcp(
     mut servers: HashMap<String, McpServerConfig>,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
     config: &McpConfig,
 ) -> HashMap<String, McpServerConfig> {
-    if config.apps_enabled && auth.is_some_and(CodexAuth::is_chatgpt_auth) {
+    if config.apps_enabled && auth.is_some_and(OpenAiAccountAuth::is_chatgpt_auth) {
         servers.insert(
-            CODEX_APPS_MCP_SERVER_NAME.to_string(),
+            PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
             praxis_apps_mcp_server_config(config, auth),
         );
     } else {
-        servers.remove(CODEX_APPS_MCP_SERVER_NAME);
+        servers.remove(PRAXIS_APPS_MCP_SERVER_NAME);
     }
     servers
 }
@@ -269,7 +269,7 @@ pub fn configured_mcp_servers(config: &McpConfig) -> HashMap<String, McpServerCo
 
 pub fn effective_mcp_servers(
     config: &McpConfig,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
 ) -> HashMap<String, McpServerConfig> {
     let servers = configured_mcp_servers(config);
     with_praxis_apps_mcp(servers, auth, config)
@@ -281,7 +281,7 @@ pub fn tool_plugin_provenance(config: &McpConfig) -> ToolPluginProvenance {
 
 pub async fn collect_mcp_snapshot(
     config: &McpConfig,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
     submit_id: String,
 ) -> McpListToolsResponseEvent {
     let mcp_servers = effective_mcp_servers(config, auth);

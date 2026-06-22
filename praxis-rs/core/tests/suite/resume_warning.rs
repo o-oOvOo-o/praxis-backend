@@ -4,7 +4,7 @@ use core::time::Duration;
 use core_test_support::load_default_config_for_test;
 use core_test_support::wait_for_event;
 use praxis_core::ThreadSpawnResult;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::ThreadId;
 use praxis_protocol::config_types::ModeKind;
 use praxis_protocol::config_types::ReasoningSummary;
@@ -87,11 +87,11 @@ async fn emits_warning_when_resumed_model_differs() {
     let initial_history = resume_history(&config, "previous-model", &rollout_path);
 
     let thread_manager = praxis_core::test_support::thread_manager_with_models_provider(
-        CodexAuth::from_api_key("test"),
+        OpenAiAccountAuth::from_api_key("test"),
         config.model_provider.clone(),
     );
     let auth_manager =
-        praxis_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("test"));
+        praxis_core::test_support::auth_manager_from_auth(OpenAiAccountAuth::from_api_key("test"));
 
     // Act: resume the conversation.
     let ThreadSpawnResult {

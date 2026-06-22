@@ -34,9 +34,9 @@ use windows_sys::Win32::Security::CheckTokenMembership;
 use windows_sys::Win32::Security::FreeSid;
 use windows_sys::Win32::Security::SECURITY_NT_AUTHORITY;
 
-pub const SETUP_VERSION: u32 = 5;
-pub const OFFLINE_USERNAME: &str = "CodexSandboxOffline";
-pub const ONLINE_USERNAME: &str = "CodexSandboxOnline";
+pub const SETUP_VERSION: u32 = 6;
+pub const OFFLINE_USERNAME: &str = "PraxisSandboxOffline";
+pub const ONLINE_USERNAME: &str = "PraxisSandboxOnline";
 const ERROR_CANCELLED: u32 = 1223;
 const SECURITY_BUILTIN_DOMAIN_RID: u32 = 0x0000_0020;
 const DOMAIN_ALIAS_RID_ADMINS: u32 = 0x0000_0220;
@@ -480,7 +480,7 @@ const PROXY_ENV_KEYS: &[&str] = &[
     "ws_proxy",
     "wss_proxy",
 ];
-const ALLOW_LOCAL_BINDING_ENV_KEY: &str = "CODEX_NETWORK_ALLOW_LOCAL_BINDING";
+const ALLOW_LOCAL_BINDING_ENV_KEY: &str = "PRAXIS_NETWORK_ALLOW_LOCAL_BINDING";
 
 pub(crate) fn offline_proxy_settings_from_env(
     env_map: &HashMap<String, String>,
@@ -880,7 +880,7 @@ mod tests {
             "http://127.0.0.1:8080".to_string(),
         );
         env.insert(
-            "CODEX_NETWORK_ALLOW_LOCAL_BINDING".to_string(),
+            "PRAXIS_NETWORK_ALLOW_LOCAL_BINDING".to_string(),
             "1".to_string(),
         );
 
@@ -905,7 +905,7 @@ mod tests {
             "socks5h://127.0.0.1:1081".to_string(),
         );
         env.insert(
-            "CODEX_NETWORK_ALLOW_LOCAL_BINDING".to_string(),
+            "PRAXIS_NETWORK_ALLOW_LOCAL_BINDING".to_string(),
             "1".to_string(),
         );
 

@@ -3,8 +3,8 @@ use std::future::Future;
 use std::path::Path;
 use std::path::PathBuf;
 
-use praxis_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
-use praxis_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
+use praxis_apply_patch::PRAXIS_RUN_AS_APPLY_PATCH_ARG1;
+use praxis_sandboxing::landlock::PRAXIS_LINUX_SANDBOX_ARG0;
 use praxis_utils_home_dir::find_praxis_home;
 use praxis_utils_home_dir::scrub_upstream_codex_state_env_for_current_process;
 use praxis_utils_home_dir::set_process_praxis_home_namespace_if_unset_for_current_process;
@@ -90,7 +90,7 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
         }
     }
 
-    if exe_name == CODEX_LINUX_SANDBOX_ARG0 {
+    if exe_name == PRAXIS_LINUX_SANDBOX_ARG0 {
         // Safety: [`run_main`] never returns.
         praxis_linux_sandbox::run_main();
     } else if exe_name == APPLY_PATCH_ARG0 || exe_name == MISSPELLED_APPLY_PATCH_ARG0 {
@@ -98,7 +98,7 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
     }
 
     let argv1 = args.next().unwrap_or_default();
-    if argv1 == CODEX_CORE_APPLY_PATCH_ARG1 {
+    if argv1 == PRAXIS_RUN_AS_APPLY_PATCH_ARG1 {
         let patch_arg = args.next().and_then(|s| s.to_str().map(str::to_owned));
         let exit_code = match patch_arg {
             Some(patch_arg) => {
@@ -110,7 +110,9 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
                 }
             }
             None => {
-                eprintln!("Error: {CODEX_CORE_APPLY_PATCH_ARG1} requires a UTF-8 PATCH argument.");
+                eprintln!(
+                    "Error: {PRAXIS_RUN_AS_APPLY_PATCH_ARG1} requires a UTF-8 PATCH argument."
+                );
                 1
             }
         };
@@ -330,7 +332,7 @@ pub fn prepend_path_entry_for_praxis_aliases() -> std::io::Result<Arg0PathEntryG
         APPLY_PATCH_ARG0,
         MISSPELLED_APPLY_PATCH_ARG0,
         #[cfg(target_os = "linux")]
-        CODEX_LINUX_SANDBOX_ARG0,
+        PRAXIS_LINUX_SANDBOX_ARG0,
         #[cfg(unix)]
         EXECVE_WRAPPER_ARG0,
     ] {
@@ -349,7 +351,7 @@ pub fn prepend_path_entry_for_praxis_aliases() -> std::io::Result<Arg0PathEntryG
                 &batch_script,
                 format!(
                     r#"@echo off
-"{}" {CODEX_CORE_APPLY_PATCH_ARG1} %*
+"{}" {PRAXIS_RUN_AS_APPLY_PATCH_ARG1} %*
 "#,
                     exe.display()
                 ),
@@ -384,7 +386,7 @@ pub fn prepend_path_entry_for_praxis_aliases() -> std::io::Result<Arg0PathEntryG
         praxis_linux_sandbox_exe: {
             #[cfg(target_os = "linux")]
             {
-                Some(path.join(CODEX_LINUX_SANDBOX_ARG0))
+                Some(path.join(PRAXIS_LINUX_SANDBOX_ARG0))
             }
             #[cfg(not(target_os = "linux"))]
             {

@@ -1,3 +1,5 @@
+use super::thread_projection_api::load_thread_summary_from_state_db_context;
+use super::thread_store_api::ThreadStore;
 use super::*;
 use crate::json_rpc_error::internal_error;
 use crate::json_rpc_error::invalid_request;
@@ -9,12 +11,11 @@ impl PraxisMessageProcessor {
         params: ThreadSetNameParams,
     ) {
         let ThreadSetNameParams { thread_id, name } = params;
-        let thread_id = match self.parse_thread_id(&thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some(thread_id) = self
+            .ensure_thread_id_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
         let Some(name) = praxis_core::util::normalize_thread_name(&name) else {
             self.send_invalid_request_error(
@@ -45,8 +46,8 @@ impl PraxisMessageProcessor {
             return;
         }
 
-        let directory = praxis_rollout::ThreadDirectory::open(&self.config).await;
-        let thread_exists = match directory.thread_exists(thread_id, None).await {
+        let thread_store = ThreadStore::new(&self.config);
+        let thread_exists = match thread_store.thread_exists(thread_id, None).await {
             Ok(exists) => exists,
             Err(err) => {
                 self.send_invalid_request_error(
@@ -64,7 +65,7 @@ impl PraxisMessageProcessor {
             return;
         }
 
-        if let Err(err) = directory.write_thread_name(thread_id, &name).await {
+        if let Err(err) = thread_store.write_thread_name(thread_id, &name).await {
             self.send_internal_error(request_id, format!("failed to set thread name: {err}"))
                 .await;
             return;
@@ -88,12 +89,11 @@ impl PraxisMessageProcessor {
         params: ThreadRegenerateNameParams,
     ) {
         let ThreadRegenerateNameParams { thread_id } = params;
-        let thread_id = match self.parse_thread_id(&thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some(thread_id) = self
+            .ensure_thread_id_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         let thread = match self.thread_manager.get_thread(thread_id).await {
@@ -136,12 +136,11 @@ impl PraxisMessageProcessor {
             selfwork_plan_path,
         } = params;
 
-        let thread_uuid = match self.parse_thread_id(&thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some(thread_uuid) = self
+            .ensure_thread_id_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         if git_info.is_none() && selfwork_plan_path.is_none() {
@@ -312,8 +311,8 @@ impl PraxisMessageProcessor {
             }
         }
 
-        let Some(summary) =
-            read_summary_from_state_db_context_by_thread_id(Some(&state_db_ctx), thread_uuid).await
+        let Some(mut thread) =
+            load_thread_summary_from_state_db_context(Some(&state_db_ctx), thread_uuid).await
         else {
             self.send_internal_error(
                 request_id,
@@ -323,9 +322,8 @@ impl PraxisMessageProcessor {
             return;
         };
 
-        let mut thread = summary_to_thread(summary);
         self.attach_thread_name(thread_uuid, &mut thread).await;
-        self.apply_thread_runtime_state(&mut thread, /*has_live_in_progress_turn*/ false)
+        self.project_thread_runtime_state(&mut thread, /*has_live_in_progress_turn*/ false)
             .await;
 
         self.outgoing
@@ -427,7 +425,8 @@ impl PraxisMessageProcessor {
     }
 
     async fn thread_name(&self, thread_id: ThreadId) -> Option<String> {
-        let directory = praxis_rollout::ThreadDirectory::open(&self.config).await;
-        directory.resolve_thread_name(thread_id).await
+        ThreadStore::new(&self.config)
+            .resolve_thread_name(thread_id)
+            .await
     }
 }

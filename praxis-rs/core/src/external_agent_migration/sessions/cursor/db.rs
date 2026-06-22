@@ -9,7 +9,10 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
+const CURSOR_DISK_KV_TABLE: &str = "cursorDiskKV";
 const SQLITE_BIND_CHUNK: usize = 250;
+const WORKSPACE_COMPOSER_DATA_KEY: &str = "composer.composerData";
+const WORKSPACE_ITEM_TABLE: &str = "ItemTable";
 
 pub(super) async fn open_cursor_db(path: &Path) -> io::Result<SqlitePool> {
     let options = SqliteConnectOptions::new()
@@ -24,7 +27,18 @@ pub(super) async fn open_cursor_db(path: &Path) -> io::Result<SqlitePool> {
         .map_err(io_error)
 }
 
-pub(super) async fn read_kv_value(
+pub(super) async fn read_cursor_disk_values(
+    pool: &SqlitePool,
+    keys: &[String],
+) -> io::Result<HashMap<String, String>> {
+    read_kv_values(pool, CURSOR_DISK_KV_TABLE, keys).await
+}
+
+pub(super) async fn read_workspace_composer_data(pool: &SqlitePool) -> io::Result<Option<String>> {
+    read_kv_value(pool, WORKSPACE_ITEM_TABLE, WORKSPACE_COMPOSER_DATA_KEY).await
+}
+
+async fn read_kv_value(
     pool: &SqlitePool,
     table: &'static str,
     key: &str,
@@ -34,7 +48,7 @@ pub(super) async fn read_kv_value(
     Ok(values.remove(key))
 }
 
-pub(super) async fn read_kv_values(
+async fn read_kv_values(
     pool: &SqlitePool,
     table: &'static str,
     keys: &[String],

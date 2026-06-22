@@ -61,7 +61,7 @@ use praxis_api::requests::responses::Compression;
 use praxis_api::response_create_client_metadata;
 use praxis_login::AuthManager;
 use praxis_login::AuthMode;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::RefreshTokenError;
 use praxis_login::UnauthorizedRecovery;
 use praxis_login::default_client::build_reqwest_client;
@@ -103,7 +103,7 @@ use crate::client_common::ResponseStream;
 use crate::error::PraxisErr;
 use crate::error::Result;
 use crate::error::UnexpectedResponseError;
-use crate::flags::CODEX_RS_SSE_FIXTURE;
+use crate::flags::PRAXIS_RS_SSE_FIXTURE;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::response_debug_context::ResponseDebugContext;
@@ -152,7 +152,7 @@ struct ModelClientState {
 /// Keeping this as a single bundle ensures prewarm and normal request paths
 /// share the same auth/provider setup flow.
 struct CurrentClientSetup {
-    auth: Option<CodexAuth>,
+    auth: Option<OpenAiAccountAuth>,
     auth_mode: Option<AuthMode>,
     api_provider: praxis_api::Provider,
     api_auth: CoreAuthProvider,
@@ -497,7 +497,7 @@ impl ModelClient {
         if activated {
             warn!("falling back to HTTP");
             session_telemetry.counter(
-                "codex.transport.fallback_to_http",
+                "praxis.transport.fallback_to_http",
                 /*inc*/ 1,
                 &[("from_wire_api", "responses_websocket")],
             );
@@ -542,7 +542,7 @@ impl ModelClient {
                 .with_telemetry(Some(request_telemetry));
 
         let instructions = prompt.base_instructions.text.clone();
-        let input = prompt.get_formatted_input();
+        let input = sanitize_input_for_responses_api(prompt.get_formatted_input());
         let tools = create_tools_json_for_responses_api(&prompt.tools)?;
         let reasoning = Self::build_reasoning(model_info, effort, summary);
         let verbosity = if model_info.support_verbosity {
@@ -684,7 +684,7 @@ impl ModelClient {
     pub fn responses_websocket_enabled(&self) -> bool {
         if !self.state.provider.supports_websockets
             || self.state.disable_websockets.load(Ordering::Relaxed)
-            || (*CODEX_RS_SSE_FIXTURE).is_some()
+            || (*PRAXIS_RS_SSE_FIXTURE).is_some()
         {
             return false;
         }
@@ -1148,9 +1148,9 @@ impl ModelClientSession {
             ))
     }
 
-    fn responses_request_compression(&self, auth: Option<&CodexAuth>) -> Compression {
+    fn responses_request_compression(&self, auth: Option<&OpenAiAccountAuth>) -> Compression {
         if self.client.state.enable_request_compression
-            && auth.is_some_and(CodexAuth::is_chatgpt_auth)
+            && auth.is_some_and(OpenAiAccountAuth::is_chatgpt_auth)
             && self.client.state.provider.is_openai()
         {
             Compression::Zstd
@@ -1187,7 +1187,7 @@ impl ModelClientSession {
         service_tier: Option<ServiceTier>,
         turn_metadata_header: Option<&str>,
     ) -> Result<ResponseStream> {
-        if let Some(path) = &*CODEX_RS_SSE_FIXTURE {
+        if let Some(path) = &*PRAXIS_RS_SSE_FIXTURE {
             warn!(path, "Streaming from fixture");
             let stream = praxis_api::stream_from_fixture(
                 path,

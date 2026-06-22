@@ -34,18 +34,22 @@ use crate::token_data::PlanType as InternalPlanType;
 use crate::token_data::TokenData;
 use crate::token_data::parse_chatgpt_jwt_claims;
 use crate::token_data::parse_jwt_expiration;
-use praxis_client::CodexHttpClient;
+use praxis_client::PraxisHttpClient;
 use praxis_protocol::account::PlanType as AccountPlanType;
 use serde_json::Value;
 use thiserror::Error;
 
 /// Authentication mechanism used by the current user.
 #[derive(Debug, Clone)]
-pub enum CodexAuth {
+pub enum OpenAiAccountAuth {
     ApiKey(ApiKeyAuth),
     Chatgpt(ChatgptAuth),
     ChatgptAuthTokens(ChatgptAuthTokens),
 }
+
+// Compatibility alias for callers that still use the old login type name.
+#[deprecated(note = "use OpenAiAccountAuth")]
+pub type CodexAuth = OpenAiAccountAuth;
 
 #[derive(Debug, Clone)]
 pub struct ApiKeyAuth {
@@ -66,10 +70,10 @@ pub struct ChatgptAuthTokens {
 #[derive(Debug, Clone)]
 struct ChatgptAuthState {
     auth_dot_json: Arc<Mutex<Option<AuthDotJson>>>,
-    client: CodexHttpClient,
+    client: PraxisHttpClient,
 }
 
-impl PartialEq for CodexAuth {
+impl PartialEq for OpenAiAccountAuth {
     fn eq(&self, other: &Self) -> bool {
         self.api_auth_mode() == other.api_auth_mode()
     }
@@ -84,7 +88,7 @@ const REFRESH_TOKEN_UNKNOWN_MESSAGE: &str =
     "Your access token could not be refreshed. Please log out and sign in again.";
 const REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE: &str = "Your access token could not be refreshed because you have since logged out or signed in to another account. Please sign in again.";
 const REFRESH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
-pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "CODEX_REFRESH_TOKEN_URL_OVERRIDE";
+pub const REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR: &str = "PRAXIS_REFRESH_TOKEN_URL_OVERRIDE";
 
 #[derive(Debug, Error)]
 pub enum RefreshTokenError {
@@ -184,7 +188,7 @@ impl From<RefreshTokenError> for std::io::Error {
     }
 }
 
-impl CodexAuth {
+impl OpenAiAccountAuth {
     fn from_auth_dot_json(
         praxis_home: &Path,
         auth_dot_json: AuthDotJson,
@@ -396,7 +400,7 @@ impl ChatgptAuth {
         &self.storage
     }
 
-    fn client(&self) -> &CodexHttpClient {
+    fn client(&self) -> &PraxisHttpClient {
         &self.state.client
     }
 }
@@ -604,14 +608,14 @@ fn load_auth(
     praxis_home: &Path,
     enable_praxis_api_key_env: bool,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<Option<CodexAuth>> {
+) -> std::io::Result<Option<OpenAiAccountAuth>> {
     let build_auth = |auth_dot_json: AuthDotJson, storage_mode| {
-        CodexAuth::from_auth_dot_json(praxis_home, auth_dot_json, storage_mode)
+        OpenAiAccountAuth::from_auth_dot_json(praxis_home, auth_dot_json, storage_mode)
     };
 
     // API key via env var takes precedence over any other auth method.
     if enable_praxis_api_key_env && let Some(api_key) = read_praxis_api_key_from_env() {
-        return Ok(Some(CodexAuth::from_api_key(api_key.as_str())));
+        return Ok(Some(OpenAiAccountAuth::from_api_key(api_key.as_str())));
     }
 
     // External ChatGPT auth tokens live in the in-memory (ephemeral) store. Always check this
@@ -693,7 +697,7 @@ fn persist_tokens(
 // The caller is responsible for persisting any returned tokens.
 async fn request_chatgpt_token_refresh(
     refresh_token: String,
-    client: &CodexHttpClient,
+    client: &PraxisHttpClient,
 ) -> Result<RefreshResponse, RefreshTokenError> {
     let refresh_request = RefreshRequest {
         client_id: CLIENT_ID,
@@ -880,7 +884,7 @@ impl AuthDotJson {
 /// Internal cached auth state.
 #[derive(Clone)]
 struct CachedAuth {
-    auth: Option<CodexAuth>,
+    auth: Option<OpenAiAccountAuth>,
     /// Permanent refresh failure cached for the current auth snapshot so
     /// later refresh attempts for the same credentials fail fast without network.
     permanent_refresh_failure: Option<AuthScopedRefreshFailure>,
@@ -888,7 +892,7 @@ struct CachedAuth {
 
 #[derive(Clone)]
 struct AuthScopedRefreshFailure {
-    auth: CodexAuth,
+    auth: OpenAiAccountAuth,
     error: RefreshTokenFailedError,
 }
 
@@ -897,7 +901,7 @@ impl Debug for CachedAuth {
         f.debug_struct("CachedAuth")
             .field(
                 "auth_mode",
-                &self.auth.as_ref().map(CodexAuth::api_auth_mode),
+                &self.auth.as_ref().map(OpenAiAccountAuth::api_auth_mode),
             )
             .field(
                 "permanent_refresh_failure",
@@ -971,11 +975,11 @@ impl UnauthorizedRecoveryStepResult {
 impl UnauthorizedRecovery {
     fn new(manager: Arc<AuthManager>) -> Self {
         let cached_auth = manager.auth_cached();
-        let expected_account_id = cached_auth.as_ref().and_then(CodexAuth::get_account_id);
+        let expected_account_id = cached_auth.as_ref().and_then(OpenAiAccountAuth::get_account_id);
         let mode = if manager.has_external_api_key_auth()
             || cached_auth
                 .as_ref()
-                .is_some_and(CodexAuth::is_external_chatgpt_tokens)
+                .is_some_and(OpenAiAccountAuth::is_external_chatgpt_tokens)
         {
             UnauthorizedRecoveryMode::External
         } else {
@@ -1002,7 +1006,7 @@ impl UnauthorizedRecovery {
             .manager
             .auth_cached()
             .as_ref()
-            .is_some_and(CodexAuth::is_chatgpt_auth)
+            .is_some_and(OpenAiAccountAuth::is_chatgpt_auth)
         {
             return false;
         }
@@ -1027,7 +1031,7 @@ impl UnauthorizedRecovery {
             .manager
             .auth_cached()
             .as_ref()
-            .is_some_and(CodexAuth::is_chatgpt_auth)
+            .is_some_and(OpenAiAccountAuth::is_chatgpt_auth)
         {
             return "not_chatgpt_auth";
         }
@@ -1120,7 +1124,7 @@ impl UnauthorizedRecovery {
 
 /// Central manager providing a single source of truth for auth.json derived
 /// authentication data. It loads once (or on preference change) and then
-/// hands out cloned `CodexAuth` values so the rest of the program has a
+/// hands out cloned `OpenAiAccountAuth` values so the rest of the program has a
 /// consistent snapshot.
 ///
 /// External modifications to `auth.json` will NOT be observed until
@@ -1186,8 +1190,8 @@ impl AuthManager {
         }
     }
 
-    /// Create an AuthManager with a specific CodexAuth, for testing only.
-    pub fn from_auth_for_testing(auth: CodexAuth) -> Arc<Self> {
+    /// Create an AuthManager with a specific OpenAiAccountAuth, for testing only.
+    pub fn from_auth_for_testing(auth: OpenAiAccountAuth) -> Arc<Self> {
         let cached = CachedAuth {
             auth: Some(auth),
             permanent_refresh_failure: None,
@@ -1204,8 +1208,8 @@ impl AuthManager {
         })
     }
 
-    /// Create an AuthManager with a specific CodexAuth and codex home, for testing only.
-    pub fn from_auth_for_testing_with_home(auth: CodexAuth, praxis_home: PathBuf) -> Arc<Self> {
+    /// Create an AuthManager with a specific OpenAiAccountAuth and Praxis home, for testing only.
+    pub fn from_auth_for_testing_with_home(auth: OpenAiAccountAuth, praxis_home: PathBuf) -> Arc<Self> {
         let cached = CachedAuth {
             auth: Some(auth),
             permanent_refresh_failure: None,
@@ -1239,11 +1243,11 @@ impl AuthManager {
     }
 
     /// Current cached auth (clone) without attempting a refresh.
-    pub fn auth_cached(&self) -> Option<CodexAuth> {
+    pub fn auth_cached(&self) -> Option<OpenAiAccountAuth> {
         self.inner.read().ok().and_then(|c| c.auth.clone())
     }
 
-    pub fn refresh_failure_for_auth(&self, auth: &CodexAuth) -> Option<RefreshTokenFailedError> {
+    pub fn refresh_failure_for_auth(&self, auth: &OpenAiAccountAuth) -> Option<RefreshTokenFailedError> {
         self.inner.read().ok().and_then(|cached| {
             cached
                 .permanent_refresh_failure
@@ -1256,7 +1260,7 @@ impl AuthManager {
     /// Current cached auth (clone). May be `None` if not logged in or load failed.
     /// For stale managed ChatGPT auth, first performs a guarded reload and then
     /// refreshes only if the on-disk auth is unchanged.
-    pub async fn auth(&self) -> Option<CodexAuth> {
+    pub async fn auth(&self) -> Option<OpenAiAccountAuth> {
         if let Some(auth) = self.resolve_external_api_key_auth().await {
             return Some(auth);
         }
@@ -1289,7 +1293,7 @@ impl AuthManager {
         };
 
         let new_auth = self.load_auth_from_storage();
-        let new_account_id = new_auth.as_ref().and_then(CodexAuth::get_account_id);
+        let new_account_id = new_auth.as_ref().and_then(OpenAiAccountAuth::get_account_id);
 
         if new_account_id.as_deref() != Some(expected_account_id) {
             let found_account_id = new_account_id.as_deref().unwrap_or("unknown");
@@ -1311,7 +1315,7 @@ impl AuthManager {
         }
     }
 
-    fn auths_equal_for_refresh(a: Option<&CodexAuth>, b: Option<&CodexAuth>) -> bool {
+    fn auths_equal_for_refresh(a: Option<&OpenAiAccountAuth>, b: Option<&OpenAiAccountAuth>) -> bool {
         match (a, b) {
             (None, None) => true,
             (Some(a), Some(b)) => match (a.api_auth_mode(), b.api_auth_mode()) {
@@ -1326,7 +1330,7 @@ impl AuthManager {
         }
     }
 
-    fn auths_equal(a: Option<&CodexAuth>, b: Option<&CodexAuth>) -> bool {
+    fn auths_equal(a: Option<&OpenAiAccountAuth>, b: Option<&OpenAiAccountAuth>) -> bool {
         match (a, b) {
             (None, None) => true,
             (Some(a), Some(b)) => a == b,
@@ -1338,7 +1342,7 @@ impl AuthManager {
     /// attempted against the auth snapshot that is still cached.
     fn record_permanent_refresh_failure_if_unchanged(
         &self,
-        attempted_auth: &CodexAuth,
+        attempted_auth: &OpenAiAccountAuth,
         error: &RefreshTokenFailedError,
     ) {
         if let Ok(mut guard) = self.inner.write() {
@@ -1353,7 +1357,7 @@ impl AuthManager {
         }
     }
 
-    fn load_auth_from_storage(&self) -> Option<CodexAuth> {
+    fn load_auth_from_storage(&self) -> Option<OpenAiAccountAuth> {
         load_auth(
             &self.praxis_home,
             self.enable_praxis_api_key_env,
@@ -1363,7 +1367,7 @@ impl AuthManager {
         .flatten()
     }
 
-    fn set_cached_auth(&self, new_auth: Option<CodexAuth>) -> bool {
+    fn set_cached_auth(&self, new_auth: Option<OpenAiAccountAuth>) -> bool {
         if let Ok(mut guard) = self.inner.write() {
             let previous = guard.auth.as_ref();
             let changed = !AuthManager::auths_equal(previous, new_auth.as_ref());
@@ -1412,7 +1416,7 @@ impl AuthManager {
     pub fn is_external_chatgpt_auth_active(&self) -> bool {
         self.auth_cached()
             .as_ref()
-            .is_some_and(CodexAuth::is_external_chatgpt_tokens)
+            .is_some_and(OpenAiAccountAuth::is_external_chatgpt_tokens)
     }
 
     pub fn praxis_api_key_env_enabled(&self) -> bool {
@@ -1468,7 +1472,7 @@ impl AuthManager {
         self.external_auth_mode() == Some(crate::AuthMode::ApiKey)
     }
 
-    async fn resolve_external_api_key_auth(&self) -> Option<CodexAuth> {
+    async fn resolve_external_api_key_auth(&self) -> Option<OpenAiAccountAuth> {
         if !self.has_external_api_key_auth() {
             return None;
         }
@@ -1476,7 +1480,7 @@ impl AuthManager {
         let external_auth = self.external_auth()?;
 
         match external_auth.resolve().await {
-            Ok(Some(tokens)) => Some(CodexAuth::from_api_key(&tokens.access_token)),
+            Ok(Some(tokens)) => Some(OpenAiAccountAuth::from_api_key(&tokens.access_token)),
             Ok(None) => None,
             Err(err) => {
                 tracing::error!("Failed to resolve external API key auth: {err}");
@@ -1495,13 +1499,13 @@ impl AuthManager {
         let auth_before_reload = self.auth_cached();
         if auth_before_reload
             .as_ref()
-            .is_some_and(CodexAuth::is_api_key_auth)
+            .is_some_and(OpenAiAccountAuth::is_api_key_auth)
         {
             return Ok(());
         }
         let expected_account_id = auth_before_reload
             .as_ref()
-            .and_then(CodexAuth::get_account_id);
+            .and_then(OpenAiAccountAuth::get_account_id);
 
         match self.reload_if_account_id_matches(expected_account_id.as_deref()) {
             ReloadOutcome::ReloadedChanged => {
@@ -1540,12 +1544,12 @@ impl AuthManager {
 
         let attempted_auth = auth.clone();
         let result = match auth {
-            CodexAuth::ChatgptAuthTokens(_) if self.has_external_auth() => {
+            OpenAiAccountAuth::ChatgptAuthTokens(_) if self.has_external_auth() => {
                 self.refresh_external_auth(ExternalAuthRefreshReason::Unauthorized)
                     .await
             }
-            CodexAuth::ChatgptAuthTokens(_) => Ok(()),
-            CodexAuth::Chatgpt(chatgpt_auth) => {
+            OpenAiAccountAuth::ChatgptAuthTokens(_) => Ok(()),
+            OpenAiAccountAuth::Chatgpt(chatgpt_auth) => {
                 let token_data = chatgpt_auth.current_token_data().ok_or_else(|| {
                     RefreshTokenError::Transient(std::io::Error::other(
                         "Token data is not available.",
@@ -1554,7 +1558,7 @@ impl AuthManager {
                 self.refresh_and_persist_chatgpt_token(&chatgpt_auth, token_data.refresh_token)
                     .await
             }
-            CodexAuth::ApiKey(_) => Ok(()),
+            OpenAiAccountAuth::ApiKey(_) => Ok(()),
         };
         if let Err(RefreshTokenError::Permanent(error)) = &result {
             self.record_permanent_refresh_failure_if_unchanged(&attempted_auth, error);
@@ -1577,19 +1581,19 @@ impl AuthManager {
         if self.has_external_api_key_auth() {
             return Some(ApiAuthMode::ApiKey);
         }
-        self.auth_cached().as_ref().map(CodexAuth::api_auth_mode)
+        self.auth_cached().as_ref().map(OpenAiAccountAuth::api_auth_mode)
     }
 
     pub fn auth_mode(&self) -> Option<crate::AuthMode> {
         if self.has_external_api_key_auth() {
             return Some(crate::AuthMode::ApiKey);
         }
-        self.auth_cached().as_ref().map(CodexAuth::auth_mode)
+        self.auth_cached().as_ref().map(OpenAiAccountAuth::auth_mode)
     }
 
-    fn is_stale_for_proactive_refresh(auth: &CodexAuth) -> bool {
+    fn is_stale_for_proactive_refresh(auth: &OpenAiAccountAuth) -> bool {
         let chatgpt_auth = match auth {
-            CodexAuth::Chatgpt(chatgpt_auth) => chatgpt_auth,
+            OpenAiAccountAuth::Chatgpt(chatgpt_auth) => chatgpt_auth,
             _ => return false,
         };
 
@@ -1622,7 +1626,7 @@ impl AuthManager {
         let previous_account_id = self
             .auth_cached()
             .as_ref()
-            .and_then(CodexAuth::get_account_id);
+            .and_then(OpenAiAccountAuth::get_account_id);
         let context = ExternalAuthRefreshContext {
             reason,
             previous_account_id,

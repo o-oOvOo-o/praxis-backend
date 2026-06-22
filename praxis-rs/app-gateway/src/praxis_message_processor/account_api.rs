@@ -26,7 +26,7 @@ use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_login::AuthManager;
 use praxis_login::AuthMode as CoreAuthMode;
 use praxis_login::CLIENT_ID;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::ServerOptions as LoginServerOptions;
 use praxis_login::ShutdownHandle;
 use praxis_login::auth::login_with_chatgpt_auth_tokens;
@@ -36,6 +36,7 @@ use praxis_login::login_with_api_key;
 use praxis_login::request_device_code;
 use praxis_login::run_login_server;
 use praxis_protocol::config_types::ForcedLoginMethod;
+use praxis_protocol::protocol::OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID;
 use praxis_protocol::protocol::RateLimitSnapshot as CoreRateLimitSnapshot;
 use tokio_util::sync::CancellationToken;
 use toml::Value as TomlValue;
@@ -102,8 +103,8 @@ impl PraxisMessageProcessor {
     fn current_account_updated_notification(&self) -> AccountUpdatedNotification {
         let auth = self.auth_manager.auth_cached();
         AccountUpdatedNotification {
-            auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
-            plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+            auth_mode: auth.as_ref().map(OpenAiAccountAuth::api_auth_mode),
+            plan_type: auth.as_ref().and_then(OpenAiAccountAuth::account_plan_type),
         }
     }
 
@@ -341,8 +342,10 @@ impl PraxisMessageProcessor {
 
                             let auth = auth_manager.auth_cached();
                             let payload = AccountUpdatedNotification {
-                                auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
-                                plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+                                auth_mode: auth.as_ref().map(OpenAiAccountAuth::api_auth_mode),
+                                plan_type: auth
+                                    .as_ref()
+                                    .and_then(OpenAiAccountAuth::account_plan_type),
                             };
                             outgoing_clone
                                 .send_server_notification(ServerNotification::AccountUpdated(
@@ -452,8 +455,10 @@ impl PraxisMessageProcessor {
 
                             let auth = auth_manager.auth_cached();
                             let payload = AccountUpdatedNotification {
-                                auth_mode: auth.as_ref().map(CodexAuth::api_auth_mode),
-                                plan_type: auth.as_ref().and_then(CodexAuth::account_plan_type),
+                                auth_mode: auth.as_ref().map(OpenAiAccountAuth::api_auth_mode),
+                                plan_type: auth
+                                    .as_ref()
+                                    .and_then(OpenAiAccountAuth::account_plan_type),
                             };
                             outgoing_clone
                                 .send_server_notification(ServerNotification::AccountUpdated(
@@ -629,7 +634,7 @@ impl PraxisMessageProcessor {
             .auth_manager
             .auth_cached()
             .as_ref()
-            .map(CodexAuth::api_auth_mode))
+            .map(OpenAiAccountAuth::api_auth_mode))
     }
 
     pub(super) async fn logout_account(&mut self, request_id: ConnectionRequestId) {
@@ -746,7 +751,7 @@ impl PraxisMessageProcessor {
         let Some(auth) = self.auth_manager.auth().await else {
             return Err(JSONRPCErrorError {
                 code: INVALID_REQUEST_ERROR_CODE,
-                message: "codex account authentication required to read rate limits".to_string(),
+                message: "OpenAI account authentication required to read rate limits".to_string(),
                 data: None,
             });
         };
@@ -754,7 +759,7 @@ impl PraxisMessageProcessor {
         if !auth.is_chatgpt_auth() {
             return Err(JSONRPCErrorError {
                 code: INVALID_REQUEST_ERROR_CODE,
-                message: "chatgpt authentication required to read rate limits".to_string(),
+                message: "ChatGPT authentication required to read rate limits".to_string(),
                 data: None,
             });
         }
@@ -771,13 +776,13 @@ impl PraxisMessageProcessor {
             .await
             .map_err(|err| JSONRPCErrorError {
                 code: INTERNAL_ERROR_CODE,
-                message: format!("failed to fetch codex rate limits: {err}"),
+                message: format!("failed to fetch OpenAI rate limits: {err}"),
                 data: None,
             })?;
         if snapshots.is_empty() {
             return Err(JSONRPCErrorError {
                 code: INTERNAL_ERROR_CODE,
-                message: "failed to fetch codex rate limits: no snapshots returned".to_string(),
+                message: "failed to fetch OpenAI rate limits: no snapshots returned".to_string(),
                 data: None,
             });
         }
@@ -789,7 +794,7 @@ impl PraxisMessageProcessor {
                 let limit_id = snapshot
                     .limit_id
                     .clone()
-                    .unwrap_or_else(|| "codex".to_string());
+                    .unwrap_or_else(|| OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string());
                 (limit_id, snapshot)
             })
             .collect();

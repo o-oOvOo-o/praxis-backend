@@ -2,7 +2,7 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::ThreadForkSnapshot;
 use praxis_core::ThreadSpawnResult;
@@ -38,9 +38,9 @@ async fn fork_thread_twice_drops_to_first_message() {
         .mount(&server)
         .await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build(&server).await.expect("create conversation");
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let thread_manager = test.thread_manager.clone();
     let config_for_fork = test.config.clone();
 

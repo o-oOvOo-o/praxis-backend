@@ -22,9 +22,7 @@ use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::mcp_tool_event_bridge::construct_mcp_tool_call_end_item;
 use crate::mcp_tool_event_bridge::construct_mcp_tool_call_item;
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
-use crate::praxis_message_processor::read_summary_from_rollout;
-use crate::praxis_message_processor::read_thread_turns_from_rollout;
-use crate::praxis_message_processor::summary_to_thread;
+use crate::praxis_message_processor::project_rollback_thread_from_rollout;
 use crate::realtime_event_bridge::send_realtime_closed;
 use crate::realtime_event_bridge::send_realtime_event;
 use crate::realtime_event_bridge::send_realtime_started;
@@ -38,7 +36,6 @@ use crate::thread_status::ThreadWatchManager;
 use praxis_app_gateway_protocol::AccountRateLimitsUpdatedNotification;
 use praxis_app_gateway_protocol::AdditionalPermissionProfile as ApiAdditionalPermissionProfile;
 use praxis_app_gateway_protocol::AgentMessageDeltaNotification;
-use praxis_app_gateway_protocol::CodexErrorInfo as ApiCodexErrorInfo;
 use praxis_app_gateway_protocol::CommandAction as ApiParsedCommand;
 use praxis_app_gateway_protocol::CommandExecutionApprovalDecision;
 use praxis_app_gateway_protocol::CommandExecutionOutputDeltaNotification;
@@ -74,6 +71,7 @@ use praxis_app_gateway_protocol::PatchApplyStatus;
 use praxis_app_gateway_protocol::PermissionsRequestApprovalParams;
 use praxis_app_gateway_protocol::PermissionsRequestApprovalResponse;
 use praxis_app_gateway_protocol::PlanDeltaNotification;
+use praxis_app_gateway_protocol::PraxisErrorInfo as ApiPraxisErrorInfo;
 use praxis_app_gateway_protocol::RawResponseItemCompletedNotification;
 use praxis_app_gateway_protocol::ReasoningSummaryPartAddedNotification;
 use praxis_app_gateway_protocol::ReasoningSummaryTextDeltaNotification;
@@ -116,13 +114,13 @@ use praxis_protocol::dynamic_tools::DynamicToolResponse as CoreDynamicToolRespon
 use praxis_protocol::items::parse_hook_prompt_message;
 use praxis_protocol::plan_tool::UpdatePlanArgs;
 use praxis_protocol::protocol::ApplyPatchApprovalRequestEvent;
-use praxis_protocol::protocol::CodexErrorInfo as CoreCodexErrorInfo;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::ExecApprovalRequestEvent;
 use praxis_protocol::protocol::ExecCommandEndEvent;
 use praxis_protocol::protocol::GuardianAssessmentEvent;
 use praxis_protocol::protocol::Op;
+use praxis_protocol::protocol::PraxisErrorInfo as CorePraxisErrorInfo;
 use praxis_protocol::protocol::ReviewOutputEvent;
 use praxis_protocol::protocol::TokenCountEvent;
 use praxis_protocol::protocol::TurnDiffEvent;
@@ -876,7 +874,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             // Don't send a notification for this error.
             if matches!(
                 praxis_error_info,
-                Some(CoreCodexErrorInfo::ThreadRollbackFailed)
+                Some(CorePraxisErrorInfo::ThreadRollbackFailed)
             ) {
                 return handle_thread_rollback_failed(
                     conversation_id,
@@ -893,7 +891,7 @@ pub(crate) async fn apply_bespoke_event_handling(
 
             let turn_error = TurnError {
                 message: ev.message,
-                praxis_error_info: ev.praxis_error_info.map(ApiCodexErrorInfo::from),
+                praxis_error_info: ev.praxis_error_info.map(ApiPraxisErrorInfo::from),
                 additional_details: None,
             };
             handle_error(conversation_id, turn_error.clone(), &thread_state).await;
@@ -911,7 +909,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             // but we notify the client.
             let turn_error = TurnError {
                 message: ev.message,
-                praxis_error_info: ev.praxis_error_info.map(ApiCodexErrorInfo::from),
+                praxis_error_info: ev.praxis_error_info.map(ApiPraxisErrorInfo::from),
                 additional_details: ev.additional_details,
             };
             outgoing
@@ -1228,53 +1226,29 @@ pub(crate) async fn apply_bespoke_event_handling(
                     outgoing.send_error(request_id, error).await;
                     return;
                 };
-                let response = match read_summary_from_rollout(
+                let response = match project_rollback_thread_from_rollout(
                     rollout_path.as_path(),
                     fallback_model_provider.as_str(),
+                    praxis_home,
+                    &conversation_id,
                 )
                 .await
                 {
-                    Ok(summary) => {
-                        let mut thread = summary_to_thread(summary);
-                        match read_thread_turns_from_rollout(rollout_path.as_path()).await {
-                            Ok(turns) => {
-                                thread.turns = turns;
-                                thread.status = thread_watch_manager
-                                    .loaded_status_for_thread(&thread.id)
-                                    .await;
-                                let state_db =
-                                    praxis_rollout::state_db::open_if_present(praxis_home, "")
-                                        .await;
-                                thread.name =
-                                    praxis_rollout::ThreadNameResolver::new(state_db.as_deref())
-                                        .resolve_name(conversation_id)
-                                        .await;
-                                ThreadRollbackResponse { thread }
-                            }
-                            Err(err) => {
-                                let error = JSONRPCErrorError {
-                                    code: INTERNAL_ERROR_CODE,
-                                    message: format!(
-                                        "failed to load rollout `{}`: {err}",
-                                        rollout_path.display()
-                                    ),
-                                    data: None,
-                                };
-                                outgoing.send_error(request_id.clone(), error).await;
-                                return;
-                            }
-                        }
+                    Ok(mut thread) => {
+                        let runtime_state = thread_watch_manager
+                            .loaded_runtime_state_for_thread(&thread.id)
+                            .await;
+                        thread.status = runtime_state.status;
+                        thread.control_state = runtime_state.control_state;
+                        ThreadRollbackResponse { thread }
                     }
-                    Err(err) => {
+                    Err(message) => {
                         let error = JSONRPCErrorError {
                             code: INTERNAL_ERROR_CODE,
-                            message: format!(
-                                "failed to load rollout `{}`: {err}",
-                                rollout_path.display()
-                            ),
+                            message,
                             data: None,
                         };
-                        outgoing.send_error(request_id.clone(), error).await;
+                        outgoing.send_error(request_id, error).await;
                         return;
                     }
                 };
@@ -1746,7 +1720,7 @@ async fn on_file_change_request_approval_response(
     item_id: String,
     changes: Vec<FileUpdateChange>,
     pending_request: PendingServerRequest,
-    codex: Arc<PraxisThread>,
+    conversation: Arc<PraxisThread>,
     outgoing: ThreadScopedOutgoingMessageSender,
     thread_state: Arc<Mutex<ThreadState>>,
     permission_guard: ThreadWatchActiveGuard,
@@ -1772,7 +1746,7 @@ async fn on_file_change_request_approval_response(
         .await;
     }
 
-    if let Err(err) = codex
+    if let Err(err) = conversation
         .submit(Op::PatchApproval {
             id: item_id,
             decision,
@@ -1877,6 +1851,7 @@ mod tests {
     use praxis_protocol::protocol::CollabResumeBeginEvent;
     use praxis_protocol::protocol::CollabResumeEndEvent;
     use praxis_protocol::protocol::CreditsSnapshot;
+    use praxis_protocol::protocol::OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID;
     use praxis_protocol::protocol::RateLimitSnapshot;
     use praxis_protocol::protocol::RateLimitWindow;
     use praxis_protocol::protocol::ReviewDecision;
@@ -2256,7 +2231,7 @@ mod tests {
             conversation_id,
             TurnError {
                 message: "boom".to_string(),
-                praxis_error_info: Some(ApiCodexErrorInfo::InternalServerError),
+                praxis_error_info: Some(ApiPraxisErrorInfo::InternalServerError),
                 additional_details: None,
             },
             &thread_state,
@@ -2268,7 +2243,7 @@ mod tests {
             turn_summary.last_error,
             Some(TurnError {
                 message: "boom".to_string(),
-                praxis_error_info: Some(ApiCodexErrorInfo::InternalServerError),
+                praxis_error_info: Some(ApiPraxisErrorInfo::InternalServerError),
                 additional_details: None,
             })
         );
@@ -2362,7 +2337,7 @@ mod tests {
             conversation_id,
             TurnError {
                 message: "bad".to_string(),
-                praxis_error_info: Some(ApiCodexErrorInfo::Other),
+                praxis_error_info: Some(ApiPraxisErrorInfo::Other),
                 additional_details: None,
             },
             &thread_state,
@@ -2393,7 +2368,7 @@ mod tests {
                     n.turn.error,
                     Some(TurnError {
                         message: "bad".to_string(),
-                        praxis_error_info: Some(ApiCodexErrorInfo::Other),
+                        praxis_error_info: Some(ApiPraxisErrorInfo::Other),
                         additional_details: None,
                     })
                 );
@@ -2482,7 +2457,7 @@ mod tests {
             model_auto_compact_token_limit: Some(3600),
         };
         let rate_limits = RateLimitSnapshot {
-            limit_id: Some("codex".to_string()),
+            limit_id: Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string()),
             limit_name: None,
             primary: Some(RateLimitWindow {
                 used_percent: 42.5,
@@ -2531,7 +2506,10 @@ mod tests {
             OutgoingMessage::AppGatewayNotification(
                 ServerNotification::AccountRateLimitsUpdated(payload),
             ) => {
-                assert_eq!(payload.rate_limits.limit_id.as_deref(), Some("codex"));
+                assert_eq!(
+                    payload.rate_limits.limit_id.as_deref(),
+                    Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
+                );
                 assert_eq!(payload.rate_limits.limit_name, None);
                 assert!(payload.rate_limits.primary.is_some());
                 assert!(payload.rate_limits.credits.is_some());
@@ -2592,7 +2570,7 @@ mod tests {
             conversation_a,
             TurnError {
                 message: "a1".to_string(),
-                praxis_error_info: Some(ApiCodexErrorInfo::BadRequest),
+                praxis_error_info: Some(ApiPraxisErrorInfo::BadRequest),
                 additional_details: None,
             },
             &thread_state,
@@ -2628,7 +2606,7 @@ mod tests {
                     n.turn.error,
                     Some(TurnError {
                         message: "a1".to_string(),
-                        praxis_error_info: Some(ApiCodexErrorInfo::BadRequest),
+                        praxis_error_info: Some(ApiPraxisErrorInfo::BadRequest),
                         additional_details: None,
                     })
                 );

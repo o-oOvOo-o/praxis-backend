@@ -66,7 +66,7 @@ fn server_overloaded_maps_to_protocol() {
     let err = PraxisErr::ServerOverloaded;
     assert_eq!(
         err.to_praxis_protocol_error(),
-        CodexErrorInfo::ServerOverloaded
+        PraxisErrorInfo::ServerOverloaded
     );
 }
 
@@ -154,7 +154,7 @@ fn to_error_event_handles_response_stream_failed() {
     );
     assert_eq!(
         event.praxis_error_info,
-        Some(CodexErrorInfo::ResponseStreamConnectionFailed {
+        Some(PraxisErrorInfo::ResponseStreamConnectionFailed {
             http_status_code: Some(429)
         })
     );

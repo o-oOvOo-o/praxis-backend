@@ -10,7 +10,7 @@ fn create_test_tool(server_name: &str, tool_name: &str) -> ToolInfo {
     ToolInfo {
         server_name: server_name.to_string(),
         tool_name: tool_name.to_string(),
-        tool_namespace: if server_name == CODEX_APPS_MCP_SERVER_NAME {
+        tool_namespace: if server_name == PRAXIS_APPS_MCP_SERVER_NAME {
             format!("mcp__{server_name}__")
         } else {
             server_name.to_string()
@@ -49,10 +49,10 @@ fn create_praxis_apps_tools_cache_context(
     praxis_home: PathBuf,
     account_id: Option<&str>,
     chatgpt_user_id: Option<&str>,
-) -> CodexAppsToolsCacheContext {
-    CodexAppsToolsCacheContext {
+) -> PraxisAppsToolsCacheContext {
+    PraxisAppsToolsCacheContext {
         praxis_home,
-        user_key: CodexAppsToolsCacheKey {
+        user_key: PraxisAppsToolsCacheKey {
             account_id: account_id.map(ToOwned::to_owned),
             chatgpt_user_id: chatgpt_user_id.map(ToOwned::to_owned),
             is_workspace_account: false,
@@ -256,8 +256,8 @@ fn praxis_apps_tools_cache_is_overwritten_by_last_write() {
         Some("account-one"),
         Some("user-one"),
     );
-    let tools_gateway_1 = vec![create_test_tool(CODEX_APPS_MCP_SERVER_NAME, "one")];
-    let tools_gateway_2 = vec![create_test_tool(CODEX_APPS_MCP_SERVER_NAME, "two")];
+    let tools_gateway_1 = vec![create_test_tool(PRAXIS_APPS_MCP_SERVER_NAME, "one")];
+    let tools_gateway_2 = vec![create_test_tool(PRAXIS_APPS_MCP_SERVER_NAME, "two")];
 
     write_cached_praxis_apps_tools(&cache_context, &tools_gateway_1);
     let cached_gateway_1 =
@@ -283,8 +283,8 @@ fn praxis_apps_tools_cache_is_scoped_per_user() {
         Some("account-two"),
         Some("user-two"),
     );
-    let tools_user_1 = vec![create_test_tool(CODEX_APPS_MCP_SERVER_NAME, "one")];
-    let tools_user_2 = vec![create_test_tool(CODEX_APPS_MCP_SERVER_NAME, "two")];
+    let tools_user_1 = vec![create_test_tool(PRAXIS_APPS_MCP_SERVER_NAME, "one")];
+    let tools_user_2 = vec![create_test_tool(PRAXIS_APPS_MCP_SERVER_NAME, "two")];
 
     write_cached_praxis_apps_tools(&cache_context_user_1, &tools_user_1);
     write_cached_praxis_apps_tools(&cache_context_user_2, &tools_user_2);
@@ -313,13 +313,13 @@ fn praxis_apps_tools_cache_filters_disallowed_connectors() {
     );
     let tools = vec![
         create_test_tool_with_connector(
-            CODEX_APPS_MCP_SERVER_NAME,
+            PRAXIS_APPS_MCP_SERVER_NAME,
             "blocked_tool",
             "connector_openai_hidden",
             Some("Hidden"),
         ),
         create_test_tool_with_connector(
-            CODEX_APPS_MCP_SERVER_NAME,
+            PRAXIS_APPS_MCP_SERVER_NAME,
             "allowed_tool",
             "calendar",
             Some("Calendar"),
@@ -348,8 +348,8 @@ fn praxis_apps_tools_cache_is_ignored_when_schema_version_mismatches() {
         std::fs::create_dir_all(parent).expect("create parent");
     }
     let bytes = serde_json::to_vec_pretty(&serde_json::json!({
-        "schema_version": CODEX_APPS_TOOLS_CACHE_SCHEMA_VERSION + 1,
-        "tools": [create_test_tool(CODEX_APPS_MCP_SERVER_NAME, "one")],
+        "schema_version": PRAXIS_APPS_TOOLS_CACHE_SCHEMA_VERSION + 1,
+        "tools": [create_test_tool(PRAXIS_APPS_MCP_SERVER_NAME, "one")],
     }))
     .expect("serialize");
     std::fs::write(cache_path, bytes).expect("write");
@@ -383,26 +383,26 @@ fn startup_cached_praxis_apps_tools_loads_from_disk_cache() {
         Some("user-one"),
     );
     let cached_tools = vec![create_test_tool(
-        CODEX_APPS_MCP_SERVER_NAME,
+        PRAXIS_APPS_MCP_SERVER_NAME,
         "calendar_search",
     )];
     write_cached_praxis_apps_tools(&cache_context, &cached_tools);
 
     let startup_snapshot = load_startup_cached_praxis_apps_tools_snapshot(
-        CODEX_APPS_MCP_SERVER_NAME,
+        PRAXIS_APPS_MCP_SERVER_NAME,
         Some(&cache_context),
     );
     let startup_tools = startup_snapshot.expect("expected startup snapshot to load from cache");
 
     assert_eq!(startup_tools.len(), 1);
-    assert_eq!(startup_tools[0].server_name, CODEX_APPS_MCP_SERVER_NAME);
+    assert_eq!(startup_tools[0].server_name, PRAXIS_APPS_MCP_SERVER_NAME);
     assert_eq!(startup_tools[0].tool_name, "calendar_search");
 }
 
 #[tokio::test]
 async fn list_all_tools_uses_startup_snapshot_while_client_is_pending() {
     let startup_tools = vec![create_test_tool(
-        CODEX_APPS_MCP_SERVER_NAME,
+        PRAXIS_APPS_MCP_SERVER_NAME,
         "calendar_create_event",
     )];
     let pending_client = futures::future::pending::<Result<ManagedClient, StartupOutcomeError>>()
@@ -411,7 +411,7 @@ async fn list_all_tools_uses_startup_snapshot_while_client_is_pending() {
     let approval_policy = Constrained::allow_any(AskForApproval::OnFailure);
     let mut manager = McpConnectionManager::new_uninitialized(&approval_policy);
     manager.clients.insert(
-        CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         AsyncManagedClient {
             client: pending_client,
             startup_snapshot: Some(startup_tools),
@@ -424,7 +424,7 @@ async fn list_all_tools_uses_startup_snapshot_while_client_is_pending() {
     let tool = tools
         .get("mcp__praxis_apps__calendar_create_event")
         .expect("tool from startup cache");
-    assert_eq!(tool.server_name, CODEX_APPS_MCP_SERVER_NAME);
+    assert_eq!(tool.server_name, PRAXIS_APPS_MCP_SERVER_NAME);
     assert_eq!(tool.tool_name, "calendar_create_event");
 }
 
@@ -436,7 +436,7 @@ async fn list_all_tools_blocks_while_client_is_pending_without_startup_snapshot(
     let approval_policy = Constrained::allow_any(AskForApproval::OnFailure);
     let mut manager = McpConnectionManager::new_uninitialized(&approval_policy);
     manager.clients.insert(
-        CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         AsyncManagedClient {
             client: pending_client,
             startup_snapshot: None,
@@ -458,7 +458,7 @@ async fn list_all_tools_does_not_block_when_startup_snapshot_cache_hit_is_empty(
     let approval_policy = Constrained::allow_any(AskForApproval::OnFailure);
     let mut manager = McpConnectionManager::new_uninitialized(&approval_policy);
     manager.clients.insert(
-        CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         AsyncManagedClient {
             client: pending_client,
             startup_snapshot: Some(Vec::new()),
@@ -476,7 +476,7 @@ async fn list_all_tools_does_not_block_when_startup_snapshot_cache_hit_is_empty(
 #[tokio::test]
 async fn list_all_tools_uses_startup_snapshot_when_client_startup_fails() {
     let startup_tools = vec![create_test_tool(
-        CODEX_APPS_MCP_SERVER_NAME,
+        PRAXIS_APPS_MCP_SERVER_NAME,
         "calendar_create_event",
     )];
     let failed_client = futures::future::ready::<Result<ManagedClient, StartupOutcomeError>>(Err(
@@ -490,7 +490,7 @@ async fn list_all_tools_uses_startup_snapshot_when_client_startup_fails() {
     let mut manager = McpConnectionManager::new_uninitialized(&approval_policy);
     let startup_complete = Arc::new(std::sync::atomic::AtomicBool::new(true));
     manager.clients.insert(
-        CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         AsyncManagedClient {
             client: failed_client,
             startup_snapshot: Some(startup_tools),
@@ -503,13 +503,13 @@ async fn list_all_tools_uses_startup_snapshot_when_client_startup_fails() {
     let tool = tools
         .get("mcp__praxis_apps__calendar_create_event")
         .expect("tool from startup cache");
-    assert_eq!(tool.server_name, CODEX_APPS_MCP_SERVER_NAME);
+    assert_eq!(tool.server_name, PRAXIS_APPS_MCP_SERVER_NAME);
     assert_eq!(tool.tool_name, "calendar_create_event");
 }
 
 #[test]
 fn elicitation_capability_enabled_only_for_praxis_apps() {
-    let praxis_apps_capability = elicitation_capability_for_server(CODEX_APPS_MCP_SERVER_NAME);
+    let praxis_apps_capability = elicitation_capability_for_server(PRAXIS_APPS_MCP_SERVER_NAME);
     assert!(matches!(
         praxis_apps_capability,
         Some(ElicitationCapability {
@@ -552,7 +552,7 @@ fn mcp_init_error_display_prompts_for_github_pat() {
     let display = mcp_init_error_display(server_name, Some(&entry), &err);
 
     let expected = format!(
-        "GitHub MCP does not support OAuth. Log in by adding a personal access token (https://github.com/settings/personal-access-tokens) to your environment and config.toml:\n[mcp_servers.{server_name}]\nbearer_token_env_var = CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
+        "GitHub MCP does not support OAuth. Log in by adding a personal access token (https://github.com/settings/personal-access-tokens) to your environment and config.toml:\n[mcp_servers.{server_name}]\nbearer_token_env_var = PRAXIS_GITHUB_PERSONAL_ACCESS_TOKEN"
     );
 
     assert_eq!(expected, display);

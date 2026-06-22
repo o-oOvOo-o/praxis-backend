@@ -76,7 +76,7 @@ pub(crate) enum StatusLineItem {
     WeeklyLimit,
 
     /// Praxis application version.
-    CodexVersion,
+    PraxisVersion,
 
     /// Total context window size in tokens.
     ContextWindowSize,
@@ -121,7 +121,7 @@ impl StatusLineItem {
             StatusLineItem::WeeklyLimit => {
                 "Remaining usage on weekly usage limit (omitted when unavailable)"
             }
-            StatusLineItem::CodexVersion => "Praxis application version",
+            StatusLineItem::PraxisVersion => "Praxis application version",
             StatusLineItem::ContextWindowSize => {
                 "Total context window size in tokens (omitted when unknown)"
             }

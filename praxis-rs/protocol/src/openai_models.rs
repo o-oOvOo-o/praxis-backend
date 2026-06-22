@@ -366,13 +366,13 @@ pub fn provider_neutral_reasoning_levels() -> (Option<ReasoningEffort>, Vec<Reas
 pub fn known_openai_compatible_model_info(model_id: &str) -> Option<ModelInfo> {
     let normalized = model_id.to_ascii_lowercase();
     match normalized.as_str() {
-        "gpt-5.5" => Some(openai_codex_model_info(
+        "gpt-5.5" => Some(openai_first_party_model_info(
             model_id,
             "GPT-5.5",
             "Latest frontier agentic coding model.",
             /*priority*/ 0,
         )),
-        "gpt-5.5-pro" => Some(openai_codex_model_info(
+        "gpt-5.5-pro" => Some(openai_first_party_model_info(
             model_id,
             "GPT-5.5 Pro",
             "Latest frontier agentic coding model for the hardest tasks.",
@@ -418,7 +418,7 @@ pub fn known_openai_compatible_picker_model_infos() -> Vec<ModelInfo> {
         .collect()
 }
 
-fn openai_codex_model_info(
+fn openai_first_party_model_info(
     model_id: &str,
     display_name: &str,
     description: &str,
@@ -429,7 +429,7 @@ fn openai_codex_model_info(
         display_name: display_name.to_string(),
         description: Some(description.to_string()),
         default_reasoning_level: Some(ReasoningEffort::Medium),
-        supported_reasoning_levels: codex_reasoning_levels(),
+        supported_reasoning_levels: frontier_reasoning_levels(),
         shell_type: ConfigShellToolType::ShellCommand,
         visibility: ModelVisibility::List,
         supported_in_api: true,
@@ -457,7 +457,7 @@ fn openai_codex_model_info(
     }
 }
 
-fn codex_reasoning_levels() -> Vec<ReasoningEffortPreset> {
+fn frontier_reasoning_levels() -> Vec<ReasoningEffortPreset> {
     vec![
         ReasoningEffortPreset {
             effort: ReasoningEffort::Low,

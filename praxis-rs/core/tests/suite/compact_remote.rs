@@ -12,13 +12,13 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_websocket_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodexBuilder;
-use core_test_support::test_codex::TestCodexHarness;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxisBuilder;
+use core_test_support::test_praxis::TestPraxisHarness;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use praxis_core::compact::SUMMARY_PREFIX;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::items::TurnItem;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
@@ -84,10 +84,10 @@ fn compacted_summary_only_output(summary: &str) -> Vec<ResponseItem> {
 
 fn remote_realtime_test_praxis_builder(
     realtime_server: &responses::WebSocketTestServer,
-) -> TestCodexBuilder {
+) -> TestPraxisBuilder {
     let realtime_base_url = realtime_server.uri().to_string();
-    test_codex()
-        .with_auth(CodexAuth::from_api_key("dummy"))
+    test_praxis()
+        .with_auth(OpenAiAccountAuth::from_api_key("dummy"))
         .with_config(move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
         })
@@ -197,11 +197,11 @@ fn assert_request_contains_realtime_end(request: &responses::ResponsesRequest) {
 async fn remote_compact_replaces_history_for_followups() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
     let session_id = harness.test().session_configured.session_id.to_string();
 
     let responses_mock = responses::mount_sse_sequence(
@@ -342,11 +342,11 @@ async fn remote_compact_replaces_history_for_followups() -> Result<()> {
 async fn remote_compact_runs_automatically() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
     let session_id = harness.test().session_configured.session_id.to_string();
 
     mount_sse_once(
@@ -416,16 +416,16 @@ async fn remote_compact_trims_function_call_history_to_fit_context_window() -> R
     let retained_command = "echo retained-shell-output";
     let trimmed_command = "yes x | head -n 3000";
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(|config| {
                 config.model_context_window = Some(2_000);
                 config.model_auto_compact_token_limit = Some(200_000);
             }),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     responses::mount_sse_sequence(
         harness.server(),
@@ -532,16 +532,16 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
     let trimmed_call_id = "trimmed-call";
     let retained_command = "echo retained-shell-output";
     let trimmed_command = "yes x | head -n 3000";
-    let harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(|config| {
                 config.model_context_window = Some(2_000);
                 config.model_auto_compact_token_limit = Some(200_000);
             }),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     responses::mount_sse_sequence(
         harness.server(),
@@ -664,15 +664,15 @@ async fn auto_remote_compact_trims_function_call_history_to_fit_context_window()
 async fn auto_remote_compact_failure_stops_agent_loop() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(|config| {
                 config.model_auto_compact_token_limit = Some(120);
             }),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     mount_sse_once(
         harness.server(),
@@ -767,15 +767,15 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     let retained_command = "printf retained-shell-output";
     let trailing_command = "printf trailing-shell-output";
 
-    let baseline_harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let baseline_harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(|config| {
                 config.model_context_window = Some(200_000);
             }),
     )
     .await?;
-    let baseline_codex = baseline_harness.test().codex.clone();
+    let baseline_codex = baseline_harness.test().thread.clone();
 
     responses::mount_sse_sequence(
         baseline_harness.server(),
@@ -862,9 +862,9 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
         "expected override instructions to push pre-trim estimate past the context window"
     );
 
-    let override_harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let override_harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config({
                 let override_base_instructions = override_base_instructions.clone();
                 move |config| {
@@ -874,7 +874,7 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
             }),
     )
     .await?;
-    let override_codex = override_harness.test().codex.clone();
+    let override_codex = override_harness.test().thread.clone();
 
     responses::mount_sse_sequence(
         override_harness.server(),
@@ -959,11 +959,11 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
 async fn remote_manual_compact_emits_context_compaction_items() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     mount_sse_once(
         harness.server(),
@@ -1037,11 +1037,11 @@ async fn remote_manual_compact_emits_context_compaction_items() -> Result<()> {
 async fn remote_manual_compact_failure_emits_task_error_event() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     mount_sse_once(
         harness.server(),
@@ -1099,11 +1099,11 @@ async fn remote_manual_compact_failure_emits_task_error_event() -> Result<()> {
 async fn remote_compact_persists_replacement_history_in_rollout() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
     let rollout_path = harness
         .test()
         .session_configured
@@ -1232,7 +1232,7 @@ async fn remote_compact_and_resume_refresh_stale_developer_instructions() -> Res
     let stale_developer_message = "STALE_DEVELOPER_INSTRUCTIONS_SHOULD_BE_REMOVED";
 
     let mut start_builder =
-        test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing());
     let initial = start_builder.build(&server).await?;
     let home = initial.home.clone();
     let rollout_path = initial
@@ -1281,7 +1281,7 @@ async fn remote_compact_and_resume_refresh_stale_developer_instructions() -> Res
     .await;
 
     initial
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "start remote compact flow".into(),
@@ -1290,13 +1290,19 @@ async fn remote_compact_and_resume_refresh_stale_developer_instructions() -> Res
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
-    initial.codex.submit(Op::Compact).await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    initial.thread.submit(Op::Compact).await?;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     initial
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "after compact in same session".into(),
@@ -1305,20 +1311,23 @@ async fn remote_compact_and_resume_refresh_stale_developer_instructions() -> Res
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
-    initial.codex.submit(Op::Shutdown).await?;
-    wait_for_event(&initial.codex, |ev| {
+    initial.thread.submit(Op::Shutdown).await?;
+    wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::ShutdownComplete)
     })
     .await;
 
     let mut resume_builder =
-        test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing());
     let resumed = resume_builder.resume(&server, home, rollout_path).await?;
 
     resumed
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "after resume".into(),
@@ -1327,7 +1336,10 @@ async fn remote_compact_and_resume_refresh_stale_developer_instructions() -> Res
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&resumed.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&resumed.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1374,7 +1386,8 @@ async fn remote_compact_refreshes_stale_developer_instructions_without_resume() 
     let server = wiremock::MockServer::start().await;
     let stale_developer_message = "STALE_DEVELOPER_INSTRUCTIONS_SHOULD_BE_REMOVED";
 
-    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let mut builder =
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing());
     let test = builder.build(&server).await?;
 
     let responses_mock = responses::mount_sse_sequence(
@@ -1412,7 +1425,7 @@ async fn remote_compact_refreshes_stale_developer_instructions_without_resume() 
     )
     .await;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "start remote compact flow".into(),
@@ -1421,12 +1434,12 @@ async fn remote_compact_refreshes_stale_developer_instructions_without_resume() 
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    test.thread.submit(Op::Compact).await?;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "after compact in same session".into(),
@@ -1435,7 +1448,7 @@ async fn remote_compact_refreshes_stale_developer_instructions_without_resume() 
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1493,9 +1506,9 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_sta
     )
     .await;
 
-    start_realtime_conversation(test.codex.as_ref()).await?;
+    start_realtime_conversation(test.thread.as_ref()).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
@@ -1504,9 +1517,9 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_sta
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_TWO".to_string(),
@@ -1515,7 +1528,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_sta
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1539,7 +1552,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_sta
         )
     );
 
-    close_realtime_conversation(test.codex.as_ref()).await?;
+    close_realtime_conversation(test.thread.as_ref()).await?;
     realtime_server.shutdown().await;
     Ok(())
 }
@@ -1568,9 +1581,9 @@ async fn remote_request_uses_custom_experimental_realtime_start_instructions() -
     )
     .await;
 
-    start_realtime_conversation(test.codex.as_ref()).await?;
+    start_realtime_conversation(test.thread.as_ref()).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
@@ -1579,14 +1592,14 @@ async fn remote_request_uses_custom_experimental_realtime_start_instructions() -
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_request_contains_custom_realtime_start(
         &responses_mock.single_request(),
         custom_instructions,
     );
 
-    close_realtime_conversation(test.codex.as_ref()).await?;
+    close_realtime_conversation(test.thread.as_ref()).await?;
     realtime_server.shutdown().await;
     Ok(())
 }
@@ -1626,9 +1639,9 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_end
     )
     .await;
 
-    start_realtime_conversation(test.codex.as_ref()).await?;
+    start_realtime_conversation(test.thread.as_ref()).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
@@ -1637,11 +1650,11 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_end
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    close_realtime_conversation(test.codex.as_ref()).await?;
+    close_realtime_conversation(test.thread.as_ref()).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_TWO".to_string(),
@@ -1650,7 +1663,7 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_restates_realtime_end
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1711,9 +1724,9 @@ async fn snapshot_request_shape_remote_manual_compact_restates_realtime_start() 
     )
     .await;
 
-    start_realtime_conversation(test.codex.as_ref()).await?;
+    start_realtime_conversation(test.thread.as_ref()).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
@@ -1722,12 +1735,12 @@ async fn snapshot_request_shape_remote_manual_compact_restates_realtime_start() 
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex.submit(Op::Compact).await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    test.thread.submit(Op::Compact).await?;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_TWO".to_string(),
@@ -1736,7 +1749,7 @@ async fn snapshot_request_shape_remote_manual_compact_restates_realtime_start() 
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1760,7 +1773,7 @@ async fn snapshot_request_shape_remote_manual_compact_restates_realtime_start() 
         )
     );
 
-    close_realtime_conversation(test.codex.as_ref()).await?;
+    close_realtime_conversation(test.thread.as_ref()).await?;
     realtime_server.shutdown().await;
     Ok(())
 }
@@ -1805,9 +1818,9 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_does_not_restate_real
     )
     .await;
 
-    start_realtime_conversation(test.codex.as_ref()).await?;
+    start_realtime_conversation(test.thread.as_ref()).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "SETUP_USER".to_string(),
@@ -1816,11 +1829,11 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_does_not_restate_real
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    close_realtime_conversation(test.codex.as_ref()).await?;
+    close_realtime_conversation(test.thread.as_ref()).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_TWO".to_string(),
@@ -1829,7 +1842,7 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_does_not_restate_real
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1905,10 +1918,10 @@ async fn snapshot_request_shape_remote_compact_resume_restates_realtime_end() ->
     )
     .await;
 
-    start_realtime_conversation(initial.codex.as_ref()).await?;
+    start_realtime_conversation(initial.thread.as_ref()).await?;
 
     initial
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
@@ -1917,25 +1930,31 @@ async fn snapshot_request_shape_remote_compact_resume_restates_realtime_end() ->
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
-    close_realtime_conversation(initial.codex.as_ref()).await?;
+    close_realtime_conversation(initial.thread.as_ref()).await?;
 
-    initial.codex.submit(Op::Compact).await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    initial.thread.submit(Op::Compact).await?;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
-    initial.codex.submit(Op::Shutdown).await?;
-    wait_for_event(&initial.codex, |ev| {
+    initial.thread.submit(Op::Shutdown).await?;
+    wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::ShutdownComplete)
     })
     .await;
 
     let mut resume_builder =
-        test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing());
     let resumed = resume_builder.resume(&server, home, rollout_path).await?;
 
     resumed
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "USER_TWO".to_string(),
@@ -1944,7 +1963,10 @@ async fn snapshot_request_shape_remote_compact_resume_restates_realtime_end() ->
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&resumed.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&resumed.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     assert_eq!(compact_mock.requests().len(), 1);
     let requests = responses_mock.requests();
@@ -1975,15 +1997,15 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_including_incoming_us
 -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(|config| {
                 config.model_auto_compact_token_limit = Some(200);
             }),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     let responses_mock = responses::mount_sse_sequence(
         harness.server(),
@@ -2080,16 +2102,16 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_strips_incoming_model
 
     let previous_model = "gpt-5.1-codex-max";
     let next_model = "gpt-5.2-codex";
-    let harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_model(previous_model)
             .with_config(|config| {
                 config.model_auto_compact_token_limit = Some(200);
             }),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     let initial_turn_request_mock = responses::mount_sse_once(
         harness.server(),
@@ -2218,15 +2240,15 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_strips_incoming_model
 async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceeded() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(|config| {
                 config.model_auto_compact_token_limit = Some(200);
             }),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     let responses_mock = responses::mount_sse_sequence(
         harness.server(),
@@ -2318,15 +2340,15 @@ async fn snapshot_request_shape_remote_pre_turn_compaction_context_window_exceed
 async fn snapshot_request_shape_remote_mid_turn_continuation_compaction() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(|config| {
                 config.model_auto_compact_token_limit = Some(200);
             }),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     let responses_mock = responses::mount_sse_sequence(
         harness.server(),
@@ -2388,15 +2410,15 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_summary_only_reinject
 -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(|config| {
                 config.model_auto_compact_token_limit = Some(200);
             }),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     let initial_turn_request_mock = responses::mount_sse_once(
         harness.server(),
@@ -2471,15 +2493,15 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_multi_summary_reinjec
 -> Result<()> {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex()
-            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis()
+            .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
             .with_config(|config| {
                 config.model_auto_compact_token_limit = Some(200);
             }),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     let setup_turn_request_mock = responses::mount_sse_once(
         harness.server(),
@@ -2578,11 +2600,11 @@ async fn snapshot_request_shape_remote_manual_compact_without_previous_user_mess
 {
     skip_if_no_network!(Ok(()));
 
-    let harness = TestCodexHarness::with_builder(
-        test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+    let harness = TestPraxisHarness::with_builder(
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
     )
     .await?;
-    let codex = harness.test().codex.clone();
+    let codex = harness.test().thread.clone();
 
     let responses_mock = responses::mount_sse_once(
         harness.server(),

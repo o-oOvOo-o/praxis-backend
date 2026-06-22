@@ -7,7 +7,7 @@ use core_test_support::responses::ev_shell_command_call;
 use core_test_support::responses::start_websocket_server;
 use core_test_support::responses::start_websocket_server_with_headers;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use praxis_features::Feature;
 use praxis_protocol::config_types::ServiceTier;
 use pretty_assertions::assert_eq;
@@ -35,7 +35,7 @@ async fn websocket_test_praxis_shell_chain() -> Result<()> {
     ]])
     .await;
 
-    let mut builder = test_codex().with_windows_cmd_shell();
+    let mut builder = test_praxis().with_windows_cmd_shell();
 
     let test = builder.build_with_websocket_server(&server).await?;
     test.submit_turn_with_policy(
@@ -83,7 +83,7 @@ async fn websocket_first_turn_uses_startup_prewarm_and_create() -> Result<()> {
     ]])
     .await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_with_websocket_server(&server).await?;
     test.submit_turn_with_policy(
         "hello",
@@ -133,7 +133,7 @@ async fn websocket_first_turn_handles_handshake_delay_with_startup_prewarm() -> 
     }])
     .await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_with_websocket_server(&server).await?;
     test.submit_turn_with_policy(
         "hello",
@@ -183,12 +183,14 @@ async fn websocket_v2_test_praxis_shell_chain() -> Result<()> {
     ]])
     .await;
 
-    let mut builder = test_codex().with_windows_cmd_shell().with_config(|config| {
-        config
-            .features
-            .enable(Feature::ResponsesWebsocketsV2)
-            .expect("test config should allow feature update");
-    });
+    let mut builder = test_praxis()
+        .with_windows_cmd_shell()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::ResponsesWebsocketsV2)
+                .expect("test config should allow feature update");
+        });
 
     let test = builder.build_with_websocket_server(&server).await?;
     test.submit_turn_with_policy(
@@ -265,7 +267,7 @@ async fn websocket_v2_first_turn_uses_updated_fast_tier_after_startup_prewarm() 
     ]])
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ResponsesWebsocketsV2)
@@ -320,7 +322,7 @@ async fn websocket_v2_first_turn_drops_fast_tier_after_startup_prewarm() -> Resu
     ]])
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ResponsesWebsocketsV2)
@@ -381,7 +383,7 @@ async fn websocket_v2_next_turn_uses_updated_service_tier() -> Result<()> {
     ]])
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ResponsesWebsocketsV2)

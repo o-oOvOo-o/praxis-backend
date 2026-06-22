@@ -390,22 +390,10 @@ async fn replayed_user_message_with_only_local_images_does_not_render_history_ce
 #[tokio::test]
 async fn forked_thread_history_line_includes_name_and_id_snapshot() {
     let (chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let mut chat = chat;
-    let temp = tempdir().expect("tempdir");
-    chat.config.praxis_home = temp.path().to_path_buf();
 
     let forked_from_id =
         ThreadId::from_string("e9f18a88-8081-4e51-9d4e-8af5cde2d8dd").expect("forked id");
-    let state_runtime =
-        praxis_state::StateRuntime::init(temp.path().to_path_buf(), "test-provider".to_string())
-            .await
-            .expect("state runtime");
-    state_runtime
-        .set_thread_name(forked_from_id, "named-thread")
-        .await
-        .expect("write thread name");
-
-    chat.emit_forked_thread_event(forked_from_id);
+    chat.emit_forked_thread_event(forked_from_id, Some(String::from("named-thread")));
 
     let history_cell = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
@@ -430,13 +418,10 @@ async fn forked_thread_history_line_includes_name_and_id_snapshot() {
 #[tokio::test]
 async fn forked_thread_history_line_without_name_shows_id_once_snapshot() {
     let (chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let mut chat = chat;
-    let temp = tempdir().expect("tempdir");
-    chat.config.praxis_home = temp.path().to_path_buf();
 
     let forked_from_id =
         ThreadId::from_string("019c2d47-4935-7423-a190-05691f566092").expect("forked id");
-    chat.emit_forked_thread_event(forked_from_id);
+    chat.emit_forked_thread_event(forked_from_id, None);
 
     let history_cell = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
@@ -879,7 +864,7 @@ async fn replayed_stream_error_does_not_set_retry_status_or_status_indicator() {
 
     chat.replay_initial_messages(vec![EventMsg::StreamError(StreamErrorEvent {
         message: "Reconnecting... 2/5".to_string(),
-        praxis_error_info: Some(CodexErrorInfo::Other),
+        praxis_error_info: Some(PraxisErrorInfo::Other),
         additional_details: Some("Idle timeout waiting for SSE".to_string()),
     })]);
 
@@ -911,7 +896,7 @@ async fn thread_snapshot_replayed_stream_recovery_restores_previous_status_heade
         id: "retry".into(),
         msg: EventMsg::StreamError(StreamErrorEvent {
             message: "Reconnecting... 1/5".to_string(),
-            praxis_error_info: Some(CodexErrorInfo::Other),
+            praxis_error_info: Some(PraxisErrorInfo::Other),
             additional_details: None,
         }),
     });
@@ -946,7 +931,7 @@ async fn resume_replay_interrupted_reconnect_does_not_leave_stale_working_state(
         }),
         EventMsg::StreamError(StreamErrorEvent {
             message: "Reconnecting... 1/5".to_string(),
-            praxis_error_info: Some(CodexErrorInfo::Other),
+            praxis_error_info: Some(PraxisErrorInfo::Other),
             additional_details: None,
         }),
         EventMsg::AgentMessageDelta(AgentMessageDeltaEvent {
@@ -977,7 +962,7 @@ async fn replayed_interrupted_reconnect_footer_row_snapshot() {
         }),
         EventMsg::StreamError(StreamErrorEvent {
             message: "Reconnecting... 2/5".to_string(),
-            praxis_error_info: Some(CodexErrorInfo::Other),
+            praxis_error_info: Some(PraxisErrorInfo::Other),
             additional_details: Some("Idle timeout waiting for SSE".to_string()),
         }),
     ]);
@@ -1006,7 +991,7 @@ async fn stream_recovery_restores_previous_status_header() {
         id: "retry".into(),
         msg: EventMsg::StreamError(StreamErrorEvent {
             message: "Reconnecting... 1/5".to_string(),
-            praxis_error_info: Some(CodexErrorInfo::Other),
+            praxis_error_info: Some(PraxisErrorInfo::Other),
             additional_details: None,
         }),
     });

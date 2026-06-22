@@ -1,22 +1,30 @@
-pub(crate) mod codex;
-pub(crate) mod common;
-pub(crate) mod common_branches;
-pub(crate) mod deepseek;
-pub(crate) mod gemini;
-pub(crate) mod glm;
-pub(crate) mod qwen;
-pub(crate) mod web_search;
+mod common;
+mod common_branches;
+mod deepseek;
+mod gemini;
+mod glm;
+mod openai_responses;
+mod qwen;
+#[cfg(test)]
+mod web_search;
 
+#[cfg(test)]
 use crate::llm::ids::BehaviorProfileId;
+#[cfg(test)]
 use crate::llm::ids::WireId;
 use crate::llm::profiles::plugin::FirstPartyModelMatcher;
 use crate::llm::profiles::plugin::FirstPartyProviderMatcher;
 use crate::llm::profiles::plugin::ProfileDescriptor;
+#[cfg(test)]
 use crate::llm::wire::plugin::WireDescriptor;
 use crate::model_provider_info::ModelProviderInfo;
 
+#[cfg(test)]
+const OPENAI_COMPAT_WIRE_LABEL: &str = "OpenAI-compatible Chat Completions";
+
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum LlmExtensionKind {
+enum LlmExtensionKind {
     Wire,
     Provider,
     ModelCatalog,
@@ -28,23 +36,26 @@ pub(crate) enum LlmExtensionKind {
     ToolBackend,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LlmExtensionDescriptor {
-    pub(crate) kind: LlmExtensionKind,
-    pub(crate) id: &'static str,
-    pub(crate) label: &'static str,
+struct LlmExtensionDescriptor {
+    kind: LlmExtensionKind,
+    id: &'static str,
+    label: &'static str,
 }
 
+#[cfg(test)]
 impl LlmExtensionDescriptor {
-    pub(crate) const fn new(kind: LlmExtensionKind, id: &'static str, label: &'static str) -> Self {
+    const fn new(kind: LlmExtensionKind, id: &'static str, label: &'static str) -> Self {
         Self { kind, id, label }
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LlmPluginDescriptor {
-    pub(crate) id: &'static str,
-    pub(crate) label: &'static str,
+struct LlmPluginDescriptor {
+    id: &'static str,
+    label: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,27 +84,33 @@ impl LlmModelCatalogDescriptor {
     }
 }
 
-pub(crate) trait LlmPlugin {
+trait LlmPlugin {
+    #[cfg(test)]
     fn descriptor(&self) -> LlmPluginDescriptor;
     fn build(&self, registry: &mut LlmPluginRegistryBuilder);
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct LlmPluginRegistryBuilder {
+struct LlmPluginRegistryBuilder {
+    #[cfg(test)]
     plugins: Vec<LlmPluginDescriptor>,
+    #[cfg(test)]
     extensions: Vec<LlmExtensionDescriptor>,
     model_catalogs: Vec<LlmModelCatalogDescriptor>,
+    #[cfg(test)]
     wires: Vec<WireDescriptor>,
     profiles: Vec<ProfileDescriptor>,
 }
 
 impl LlmPluginRegistryBuilder {
-    pub(crate) fn add_plugin<P: LlmPlugin>(&mut self, plugin: P) {
+    fn add_plugin<P: LlmPlugin>(&mut self, plugin: P) {
+        #[cfg(test)]
         self.plugins.push(plugin.descriptor());
         plugin.build(self);
     }
 
-    pub(crate) fn add_extension(&mut self, extension: LlmExtensionDescriptor) {
+    #[cfg(test)]
+    fn add_extension(&mut self, extension: LlmExtensionDescriptor) {
         if !self
             .extensions
             .iter()
@@ -103,7 +120,95 @@ impl LlmPluginRegistryBuilder {
         }
     }
 
-    pub(crate) fn add_model_catalog(&mut self, catalog: LlmModelCatalogDescriptor) {
+    #[cfg(test)]
+    fn add_provider_extension(&mut self, id: &'static str, label: &'static str) {
+        #[cfg(test)]
+        self.add_extension(LlmExtensionDescriptor::new(
+            LlmExtensionKind::Provider,
+            id,
+            label,
+        ));
+    }
+
+    #[cfg(test)]
+    fn add_profile_provider_extension(&mut self, profile: ProfileDescriptor, label: &'static str) {
+        let id = profile
+            .provider_policy
+            .and_then(|policy| policy.canonical_provider_id())
+            .expect("first-party profile must declare a canonical provider id");
+        self.add_provider_extension(id, label);
+    }
+
+    #[cfg(test)]
+    fn add_prompt_layer_extension(&mut self, id: &'static str, label: &'static str) {
+        #[cfg(test)]
+        self.add_extension(LlmExtensionDescriptor::new(
+            LlmExtensionKind::PromptLayer,
+            id,
+            label,
+        ));
+    }
+
+    #[cfg(test)]
+    fn add_task_policy_extension(&mut self, id: &'static str, label: &'static str) {
+        #[cfg(test)]
+        self.add_extension(LlmExtensionDescriptor::new(
+            LlmExtensionKind::TaskPolicy,
+            id,
+            label,
+        ));
+    }
+
+    #[cfg(test)]
+    fn add_tool_policy_extension(&mut self, id: &'static str, label: &'static str) {
+        #[cfg(test)]
+        self.add_extension(LlmExtensionDescriptor::new(
+            LlmExtensionKind::ToolPolicy,
+            id,
+            label,
+        ));
+    }
+
+    #[cfg(test)]
+    fn add_tool_capability_extension(&mut self, id: &'static str, label: &'static str) {
+        #[cfg(test)]
+        self.add_extension(LlmExtensionDescriptor::new(
+            LlmExtensionKind::ToolCapability,
+            id,
+            label,
+        ));
+    }
+
+    #[cfg(test)]
+    fn add_tool_backend_extension(&mut self, id: &'static str, label: &'static str) {
+        #[cfg(test)]
+        self.add_extension(LlmExtensionDescriptor::new(
+            LlmExtensionKind::ToolBackend,
+            id,
+            label,
+        ));
+    }
+
+    #[cfg(test)]
+    fn add_profile_extension_bundle(
+        &mut self,
+        profile: ProfileDescriptor,
+        prompt: (&'static str, &'static str),
+        task: (&'static str, &'static str),
+        tool: (&'static str, &'static str),
+    ) {
+        #[cfg(test)]
+        self.add_extension(LlmExtensionDescriptor::new(
+            LlmExtensionKind::BehaviorProfile,
+            profile.id.as_str(),
+            profile.label,
+        ));
+        self.add_prompt_layer_extension(prompt.0, prompt.1);
+        self.add_task_policy_extension(task.0, task.1);
+        self.add_tool_policy_extension(tool.0, tool.1);
+    }
+
+    fn add_model_catalog(&mut self, catalog: LlmModelCatalogDescriptor) {
         if !self
             .model_catalogs
             .iter()
@@ -111,6 +216,7 @@ impl LlmPluginRegistryBuilder {
         {
             self.model_catalogs.push(catalog);
         }
+        #[cfg(test)]
         self.add_extension(LlmExtensionDescriptor::new(
             LlmExtensionKind::ModelCatalog,
             catalog.id,
@@ -118,13 +224,27 @@ impl LlmPluginRegistryBuilder {
         ));
     }
 
-    pub(crate) fn add_wire(&mut self, wire: WireDescriptor) {
-        if !self.wires.iter().any(|existing| existing.id == wire.id) {
-            self.wires.push(wire);
+    #[cfg(test)]
+    fn add_wire_descriptor(&mut self, id: WireId, name: &'static str) {
+        #[cfg(test)]
+        {
+            if !self.wires.iter().any(|existing| existing.id == id) {
+                self.wires.push(WireDescriptor { id, name });
+            }
+            self.add_extension(LlmExtensionDescriptor::new(
+                LlmExtensionKind::Wire,
+                id.as_str(),
+                name,
+            ));
         }
     }
 
-    pub(crate) fn add_profile(&mut self, profile: ProfileDescriptor) {
+    #[cfg(test)]
+    fn add_openai_compat_wire(&mut self) {
+        self.add_wire_descriptor(WireId::OpenAiCompat, OPENAI_COMPAT_WIRE_LABEL);
+    }
+
+    fn add_profile(&mut self, profile: ProfileDescriptor) {
         if !self
             .profiles
             .iter()
@@ -136,9 +256,12 @@ impl LlmPluginRegistryBuilder {
 
     fn build(self) -> LlmPluginRegistry {
         LlmPluginRegistry {
+            #[cfg(test)]
             plugins: self.plugins,
+            #[cfg(test)]
             extensions: self.extensions,
             model_catalogs: self.model_catalogs,
+            #[cfg(test)]
             wires: self.wires,
             profiles: self.profiles,
         }
@@ -147,19 +270,24 @@ impl LlmPluginRegistryBuilder {
 
 #[derive(Debug, Clone)]
 pub(crate) struct LlmPluginRegistry {
+    #[cfg(test)]
     plugins: Vec<LlmPluginDescriptor>,
+    #[cfg(test)]
     extensions: Vec<LlmExtensionDescriptor>,
     model_catalogs: Vec<LlmModelCatalogDescriptor>,
+    #[cfg(test)]
     wires: Vec<WireDescriptor>,
     profiles: Vec<ProfileDescriptor>,
 }
 
 impl LlmPluginRegistry {
-    pub(crate) fn plugins(&self) -> &[LlmPluginDescriptor] {
+    #[cfg(test)]
+    fn plugins(&self) -> &[LlmPluginDescriptor] {
         &self.plugins
     }
 
-    pub(crate) fn extensions(&self) -> &[LlmExtensionDescriptor] {
+    #[cfg(test)]
+    fn extensions(&self) -> &[LlmExtensionDescriptor] {
         &self.extensions
     }
 
@@ -167,7 +295,8 @@ impl LlmPluginRegistry {
         &self.model_catalogs
     }
 
-    pub(crate) fn wires(&self) -> &[WireDescriptor] {
+    #[cfg(test)]
+    fn wires(&self) -> &[WireDescriptor] {
         &self.wires
     }
 
@@ -176,7 +305,7 @@ impl LlmPluginRegistry {
     }
 }
 
-pub(crate) fn exclusive_model_catalog(
+fn exclusive_model_catalog(
     id: &'static str,
     label: &'static str,
     provider_matches: FirstPartyProviderMatcher,
@@ -191,7 +320,7 @@ pub(crate) fn exclusive_model_catalog(
     }
 }
 
-pub(crate) fn provider_model_catalog(
+fn provider_model_catalog(
     id: &'static str,
     label: &'static str,
     provider_matches: FirstPartyProviderMatcher,
@@ -206,7 +335,7 @@ pub(crate) fn provider_model_catalog(
     }
 }
 
-pub(crate) fn generic_model_catalog(
+fn generic_model_catalog(
     id: &'static str,
     label: &'static str,
     provider_matches: FirstPartyProviderMatcher,
@@ -223,39 +352,15 @@ pub(crate) fn generic_model_catalog(
 
 pub(crate) fn builtin_registry() -> LlmPluginRegistry {
     let mut builder = LlmPluginRegistryBuilder::default();
+    #[cfg(test)]
     builder.add_plugin(web_search::WebSearchLlmPlugin);
-    builder.add_plugin(codex::CodexLlmPlugin);
+    builder.add_plugin(openai_responses::OpenAiResponsesLlmPlugin);
     builder.add_plugin(common::CommonOpenAiCompatLlmPlugin);
     builder.add_plugin(deepseek::DeepSeekLlmPlugin);
     builder.add_plugin(gemini::GeminiLlmPlugin);
     builder.add_plugin(glm::GlmLlmPlugin);
     builder.add_plugin(qwen::QwenLlmPlugin);
     builder.build()
-}
-
-pub(crate) fn behavior_extension(
-    profile: BehaviorProfileId,
-    label: &'static str,
-) -> LlmExtensionDescriptor {
-    LlmExtensionDescriptor::new(LlmExtensionKind::BehaviorProfile, profile.as_str(), label)
-}
-
-pub(crate) fn wire_extension(wire: WireId, label: &'static str) -> LlmExtensionDescriptor {
-    LlmExtensionDescriptor::new(LlmExtensionKind::Wire, wire.as_str(), label)
-}
-
-pub(crate) fn tool_capability_extension(
-    capability: &'static str,
-    label: &'static str,
-) -> LlmExtensionDescriptor {
-    LlmExtensionDescriptor::new(LlmExtensionKind::ToolCapability, capability, label)
-}
-
-pub(crate) fn tool_backend_extension(
-    backend: &'static str,
-    label: &'static str,
-) -> LlmExtensionDescriptor {
-    LlmExtensionDescriptor::new(LlmExtensionKind::ToolBackend, backend, label)
 }
 
 #[cfg(test)]
@@ -274,7 +379,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "web_search",
-                "codex",
+                "openai_responses",
                 "openai_compat",
                 "deepseek",
                 "gemini",
@@ -286,7 +391,7 @@ mod tests {
             registry
                 .profiles()
                 .iter()
-                .any(|profile| profile.id == BehaviorProfileId::CodexResponses)
+                .any(|profile| profile.id == BehaviorProfileId::OpenAiResponses)
         );
         assert!(
             registry
@@ -345,19 +450,21 @@ mod tests {
     }
 
     #[test]
-    fn codex_plugin_registers_codex_specific_extension_bundle() {
+    fn openai_responses_plugin_registers_profile_extension_bundle() {
         let registry = builtin_registry();
-        let codex_extension_ids = registry
+        let openai_responses_extension_ids = registry
             .extensions()
             .iter()
-            .filter(|extension| extension.id.starts_with("codex"))
+            .filter(|extension| extension.id.starts_with("openai_responses"))
             .map(|extension| extension.kind)
             .collect::<std::collections::HashSet<_>>();
 
-        assert!(codex_extension_ids.contains(&LlmExtensionKind::BehaviorProfile));
-        assert!(codex_extension_ids.contains(&LlmExtensionKind::PromptLayer));
-        assert!(codex_extension_ids.contains(&LlmExtensionKind::TaskPolicy));
-        assert!(codex_extension_ids.contains(&LlmExtensionKind::ToolPolicy));
+        assert!(openai_responses_extension_ids.contains(&LlmExtensionKind::PromptLayer));
+        assert!(openai_responses_extension_ids.contains(&LlmExtensionKind::TaskPolicy));
+        assert!(openai_responses_extension_ids.contains(&LlmExtensionKind::ToolPolicy));
+        assert!(registry.extensions().iter().any(|extension| extension.kind
+            == LlmExtensionKind::BehaviorProfile
+            && extension.id == BehaviorProfileId::OpenAiResponses.as_str()));
     }
 
     #[test]
@@ -553,7 +660,7 @@ mod tests {
 
         assert_eq!(
             common.instructions,
-            Some(crate::llm::profiles::common::prompts::BASE)
+            crate::llm::profiles::common::profile().instructions
         );
     }
 }

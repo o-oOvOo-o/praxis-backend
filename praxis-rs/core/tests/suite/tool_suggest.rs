@@ -10,12 +10,12 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use praxis_config::types::ToolSuggestDiscoverable;
 use praxis_config::types::ToolSuggestDiscoverableType;
 use praxis_core::config::Config;
 use praxis_features::Feature;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::openai_models::ModelsResponse;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
@@ -105,8 +105,8 @@ async fn tool_suggest_is_available_without_search_tool_after_discovery_attempts(
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             configure_apps_without_search_tool(config, apps_server.chatgpt_base_url.as_str())
         });

@@ -12,7 +12,7 @@ use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
-use crate::praxis::built_tools;
+use crate::praxis::model_request::built_tools;
 use futures::TryFutureExt;
 use praxis_protocol::items::ContextCompactionItem;
 use praxis_protocol::items::TurnItem;

@@ -1,7 +1,7 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used)]
 use praxis_config::types::ShellEnvironmentPolicy;
-use praxis_core::error::CodexErr;
+use praxis_core::error::PraxisErr;
 use praxis_core::error::Result;
 use praxis_core::error::SandboxErr;
 use praxis_core::exec::ExecCapturePolicy;
@@ -170,12 +170,12 @@ async fn should_skip_bwrap_tests() -> bool {
     .await
     {
         Ok(output) => is_bwrap_unavailable_output(&output),
-        Err(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => {
+        Err(PraxisErr::Sandbox(SandboxErr::Denied { output, .. })) => {
             is_bwrap_unavailable_output(&output)
         }
         // Probe timeouts are not actionable for the bwrap-specific assertions below;
         // skip rather than fail the whole suite.
-        Err(CodexErr::Sandbox(SandboxErr::Timeout { .. })) => true,
+        Err(PraxisErr::Sandbox(SandboxErr::Timeout { .. })) => true,
         Err(err) => panic!("bwrap availability probe failed unexpectedly: {err:?}"),
     }
 }
@@ -189,7 +189,7 @@ fn expect_denied(
             assert_ne!(output.exit_code, 0, "{context}: expected nonzero exit code");
             output
         }
-        Err(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => *output,
+        Err(PraxisErr::Sandbox(SandboxErr::Denied { output, .. })) => *output,
         Err(err) => panic!("{context}: {err:?}"),
     }
 }
@@ -410,7 +410,7 @@ async fn assert_network_blocked(cmd: &[&str]) {
 
     let output = match result {
         Ok(output) => output,
-        Err(CodexErr::Sandbox(SandboxErr::Denied { output, .. })) => *output,
+        Err(PraxisErr::Sandbox(SandboxErr::Denied { output, .. })) => *output,
         _ => {
             panic!("expected sandbox denied error, got: {result:?}");
         }

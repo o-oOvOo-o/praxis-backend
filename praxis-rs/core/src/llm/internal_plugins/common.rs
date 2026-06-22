@@ -1,19 +1,14 @@
-use crate::llm::ids::BehaviorProfileId;
-use crate::llm::ids::WireId;
-use crate::llm::internal_plugins::LlmExtensionDescriptor;
-use crate::llm::internal_plugins::LlmExtensionKind;
 use crate::llm::internal_plugins::LlmPlugin;
+#[cfg(test)]
 use crate::llm::internal_plugins::LlmPluginDescriptor;
 use crate::llm::internal_plugins::LlmPluginRegistryBuilder;
-use crate::llm::internal_plugins::behavior_extension;
 use crate::llm::internal_plugins::generic_model_catalog;
-use crate::llm::internal_plugins::wire_extension;
 use crate::llm::profiles::common;
-use crate::llm::wire::plugin::WireDescriptor;
 
-pub(crate) struct CommonOpenAiCompatLlmPlugin;
+pub(super) struct CommonOpenAiCompatLlmPlugin;
 
 impl LlmPlugin for CommonOpenAiCompatLlmPlugin {
+    #[cfg(test)]
     fn descriptor(&self) -> LlmPluginDescriptor {
         LlmPluginDescriptor {
             id: "openai_compat",
@@ -22,40 +17,23 @@ impl LlmPlugin for CommonOpenAiCompatLlmPlugin {
     }
 
     fn build(&self, registry: &mut LlmPluginRegistryBuilder) {
-        registry.add_wire(WireDescriptor {
-            id: WireId::OpenAiCompat,
-            name: "OpenAI-compatible Chat Completions",
-        });
-        registry.add_extension(wire_extension(
-            WireId::OpenAiCompat,
-            "OpenAI-compatible Chat Completions",
-        ));
+        let profile = common::profile();
+        #[cfg(test)]
+        registry.add_openai_compat_wire();
         registry.add_model_catalog(generic_model_catalog(
             "openai_compat/model_catalog",
             "OpenAI-compatible model catalog",
-            common::provider::is_generic_provider,
-            common::provider::is_generic_model,
+            common::is_generic_provider,
+            common::is_generic_model,
         ));
-        registry.add_extension(behavior_extension(
-            BehaviorProfileId::Common,
-            "OpenAI-compatible",
-        ));
-        registry.add_extension(LlmExtensionDescriptor::new(
-            LlmExtensionKind::PromptLayer,
-            "openai_compat/prompts",
-            "OpenAI-compatible prompt layer",
-        ));
-        registry.add_extension(LlmExtensionDescriptor::new(
-            LlmExtensionKind::TaskPolicy,
-            "openai_compat/tasks",
-            "OpenAI-compatible task policy",
-        ));
-        registry.add_extension(LlmExtensionDescriptor::new(
-            LlmExtensionKind::ToolPolicy,
-            "openai_compat/tools",
-            "OpenAI-compatible tool dialect",
-        ));
-        registry.add_profile(common::profile());
+        #[cfg(test)]
+        registry.add_profile_extension_bundle(
+            profile,
+            ("openai_compat/prompts", "OpenAI-compatible prompt layer"),
+            ("openai_compat/tasks", "OpenAI-compatible task policy"),
+            ("openai_compat/tools", "OpenAI-compatible tool dialect"),
+        );
+        registry.add_profile(profile);
         super::common_branches::register_common_branches(registry);
     }
 }

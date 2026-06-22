@@ -8,7 +8,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use praxis_core::seatbelt::spawn_command_under_seatbelt;
-use praxis_core::spawn::CODEX_SANDBOX_ENV_VAR;
+use praxis_core::spawn::PRAXIS_SANDBOX_ENV_VAR;
 use praxis_core::spawn::StdioPolicy;
 use praxis_protocol::protocol::SandboxPolicy;
 use tempfile::TempDir;
@@ -29,8 +29,8 @@ struct TestExpectations {
 
 impl TestScenario {
     async fn run_test(&self, policy: &SandboxPolicy, expectations: TestExpectations) {
-        if std::env::var(CODEX_SANDBOX_ENV_VAR) == Ok("seatbelt".to_string()) {
-            eprintln!("{CODEX_SANDBOX_ENV_VAR} is set to 'seatbelt', skipping test.");
+        if std::env::var(PRAXIS_SANDBOX_ENV_VAR) == Ok("seatbelt".to_string()) {
+            eprintln!("{PRAXIS_SANDBOX_ENV_VAR} is set to 'seatbelt', skipping test.");
             return;
         }
 
@@ -163,8 +163,8 @@ async fn read_only_forbids_all_writes() {
 
 #[tokio::test]
 async fn openpty_works_under_seatbelt() {
-    if std::env::var(CODEX_SANDBOX_ENV_VAR) == Ok("seatbelt".to_string()) {
-        eprintln!("{CODEX_SANDBOX_ENV_VAR} is set to 'seatbelt', skipping test.");
+    if std::env::var(PRAXIS_SANDBOX_ENV_VAR) == Ok("seatbelt".to_string()) {
+        eprintln!("{PRAXIS_SANDBOX_ENV_VAR} is set to 'seatbelt', skipping test.");
         return;
     }
 
@@ -207,8 +207,8 @@ assert os.read(master, 4) == b"ping""#
 
 #[tokio::test]
 async fn java_home_finds_runtime_under_seatbelt() {
-    if std::env::var(CODEX_SANDBOX_ENV_VAR) == Ok("seatbelt".to_string()) {
-        eprintln!("{CODEX_SANDBOX_ENV_VAR} is set to 'seatbelt', skipping test.");
+    if std::env::var(PRAXIS_SANDBOX_ENV_VAR) == Ok("seatbelt".to_string()) {
+        eprintln!("{PRAXIS_SANDBOX_ENV_VAR} is set to 'seatbelt', skipping test.");
         return;
     }
 
@@ -237,7 +237,7 @@ async fn java_home_finds_runtime_under_seatbelt() {
 
     let mut env: HashMap<String, String> = std::env::vars().collect();
     env.remove("JAVA_HOME");
-    env.remove(CODEX_SANDBOX_ENV_VAR);
+    env.remove(PRAXIS_SANDBOX_ENV_VAR);
 
     let child = spawn_command_under_seatbelt(
         vec![java_home_path.to_string_lossy().to_string()],

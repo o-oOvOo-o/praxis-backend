@@ -31,7 +31,7 @@ use praxis_core::config_loader::ConfigRequirementsToml;
 use praxis_core::util::backoff;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_login::AuthManager;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::RefreshTokenError;
 use praxis_protocol::account::PlanType;
 use serde::Deserialize;
@@ -54,13 +54,13 @@ const CLOUD_REQUIREMENTS_MAX_ATTEMPTS: usize = 5;
 const CLOUD_REQUIREMENTS_CACHE_FILENAME: &str = "cloud-requirements-cache.json";
 const CLOUD_REQUIREMENTS_CACHE_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const CLOUD_REQUIREMENTS_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
-const CLOUD_REQUIREMENTS_FETCH_ATTEMPT_METRIC: &str = "codex.cloud_requirements.fetch_attempt";
-const CLOUD_REQUIREMENTS_FETCH_FINAL_METRIC: &str = "codex.cloud_requirements.fetch_final";
-const CLOUD_REQUIREMENTS_LOAD_METRIC: &str = "codex.cloud_requirements.load";
+const CLOUD_REQUIREMENTS_FETCH_ATTEMPT_METRIC: &str = "praxis.cloud_requirements.fetch_attempt";
+const CLOUD_REQUIREMENTS_FETCH_FINAL_METRIC: &str = "praxis.cloud_requirements.fetch_final";
+const CLOUD_REQUIREMENTS_LOAD_METRIC: &str = "praxis.cloud_requirements.load";
 const CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE: &str = "failed to load your workspace-managed config";
 const CLOUD_REQUIREMENTS_AUTH_RECOVERY_FAILED_MESSAGE: &str = "Your authentication session could not be refreshed automatically. Please log out and sign in again.";
-const OPENAI_CODEX_REQUIREMENTS_FRAGMENT_ID: &str = "openai-codex-cloud-requirements";
-const OPENAI_CODEX_REQUIREMENTS_FRAGMENT_NAME: &str = "OpenAI Codex cloud requirements";
+const OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_ID: &str = "openai-praxis-cloud-requirements";
+const OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_NAME: &str = "OpenAI Praxis cloud requirements";
 const CLOUD_REQUIREMENTS_CACHE_WRITE_HMAC_KEY: &[u8] =
     b"praxis-cloud-requirements-cache-v3-064f8542-75b4-494c-a294-97d3ce597271";
 const CLOUD_REQUIREMENTS_CACHE_READ_HMAC_KEYS: &[&[u8]] =
@@ -84,11 +84,11 @@ impl ConfigBundleProvider for NoopConfigBundleProvider {
 }
 
 #[derive(Clone)]
-pub struct OpenAiCodexConfigBundleProvider {
+pub struct OpenAiHostedConfigBundleProvider {
     service: CloudRequirementsService,
 }
 
-impl OpenAiCodexConfigBundleProvider {
+impl OpenAiHostedConfigBundleProvider {
     pub fn new(
         auth_manager: Arc<AuthManager>,
         chatgpt_base_url: String,
@@ -106,11 +106,14 @@ impl OpenAiCodexConfigBundleProvider {
 }
 
 #[async_trait]
-impl ConfigBundleProvider for OpenAiCodexConfigBundleProvider {
+impl ConfigBundleProvider for OpenAiHostedConfigBundleProvider {
     async fn load_bundle(&self) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError> {
         self.service.fetch_bundle_with_timeout().await
     }
 }
+
+#[deprecated(note = "use OpenAiHostedConfigBundleProvider")]
+pub type OpenAiCodexConfigBundleProvider = OpenAiHostedConfigBundleProvider;
 
 #[derive(Clone, Debug)]
 pub struct LocalFileConfigBundleProvider {
@@ -291,7 +294,7 @@ fn verify_cache_signature(payload_bytes: &[u8], signature: &str) -> bool {
         .any(|key| verify_cache_signature_with_key(payload_bytes, &signature_bytes, key))
 }
 
-fn auth_identity(auth: &CodexAuth) -> (Option<String>, Option<String>) {
+fn auth_identity(auth: &OpenAiAccountAuth) -> (Option<String>, Option<String>) {
     let token_data = auth.get_token_data().ok();
     let chatgpt_user_id = token_data
         .as_ref()
@@ -312,7 +315,7 @@ trait RequirementsFetcher: Send + Sync {
     /// Returning `Err` indicates cloud requirements could not be fetched.
     async fn fetch_requirements(
         &self,
-        auth: &CodexAuth,
+        auth: &OpenAiAccountAuth,
     ) -> Result<Option<String>, FetchAttemptError>;
 }
 
@@ -330,7 +333,7 @@ impl BackendRequirementsFetcher {
 impl RequirementsFetcher for BackendRequirementsFetcher {
     async fn fetch_requirements(
         &self,
-        auth: &CodexAuth,
+        auth: &OpenAiAccountAuth,
     ) -> Result<Option<String>, FetchAttemptError> {
         let client = BackendClient::from_auth(self.base_url.clone(), auth)
             .inspect_err(|err| {
@@ -413,7 +416,7 @@ impl CloudRequirementsService {
         &self,
     ) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError> {
         let _timer =
-            praxis_otel::start_global_timer("codex.cloud_requirements.fetch.duration_ms", &[]);
+            praxis_otel::start_global_timer("praxis.cloud_requirements.fetch.duration_ms", &[]);
         let started_at = Instant::now();
         let fetch_result = timeout(self.timeout, self.fetch_bundle())
             .await
@@ -525,7 +528,7 @@ impl CloudRequirementsService {
 
     async fn fetch_bundle_with_retries(
         &self,
-        mut auth: CodexAuth,
+        mut auth: OpenAiAccountAuth,
         trigger: &'static str,
     ) -> Result<Option<CloudConfigBundle>, CloudConfigBundleLoadError> {
         let mut attempt = 1;
@@ -892,7 +895,7 @@ pub fn cloud_config_bundle_loader(
     praxis_home: PathBuf,
 ) -> CloudConfigBundleLoader {
     let provider =
-        OpenAiCodexConfigBundleProvider::new(auth_manager, chatgpt_base_url, praxis_home);
+        OpenAiHostedConfigBundleProvider::new(auth_manager, chatgpt_base_url, praxis_home);
     let refresh_service = provider.service.clone();
     let refresh_task =
         tokio::spawn(async move { refresh_service.refresh_cache_in_background().await });
@@ -965,8 +968,8 @@ fn bundle_from_requirements_contents(
         config_toml: CloudConfigTomlBundle::default(),
         requirements_toml: CloudRequirementsTomlBundle {
             enterprise_managed: vec![CloudRequirementsFragment {
-                id: OPENAI_CODEX_REQUIREMENTS_FRAGMENT_ID.to_string(),
-                name: OPENAI_CODEX_REQUIREMENTS_FRAGMENT_NAME.to_string(),
+                id: OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_ID.to_string(),
+                name: OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_NAME.to_string(),
                 contents,
             }],
             ..Default::default()
@@ -1275,7 +1278,7 @@ mod tests {
     impl RequirementsFetcher for StaticFetcher {
         async fn fetch_requirements(
             &self,
-            _auth: &CodexAuth,
+            _auth: &OpenAiAccountAuth,
         ) -> Result<Option<String>, FetchAttemptError> {
             Ok(self.contents.clone())
         }
@@ -1287,7 +1290,7 @@ mod tests {
     impl RequirementsFetcher for PendingFetcher {
         async fn fetch_requirements(
             &self,
-            _auth: &CodexAuth,
+            _auth: &OpenAiAccountAuth,
         ) -> Result<Option<String>, FetchAttemptError> {
             pending::<()>().await;
             Ok(None)
@@ -1312,7 +1315,7 @@ mod tests {
     impl RequirementsFetcher for SequenceFetcher {
         async fn fetch_requirements(
             &self,
-            _auth: &CodexAuth,
+            _auth: &OpenAiAccountAuth,
         ) -> Result<Option<String>, FetchAttemptError> {
             self.request_count.fetch_add(1, Ordering::SeqCst);
             let mut responses = self.responses.lock().await;
@@ -1330,7 +1333,7 @@ mod tests {
     impl RequirementsFetcher for TokenFetcher {
         async fn fetch_requirements(
             &self,
-            auth: &CodexAuth,
+            auth: &OpenAiAccountAuth,
         ) -> Result<Option<String>, FetchAttemptError> {
             self.request_count.fetch_add(1, Ordering::SeqCst);
             if matches!(
@@ -1356,7 +1359,7 @@ mod tests {
     impl RequirementsFetcher for UnauthorizedFetcher {
         async fn fetch_requirements(
             &self,
-            _auth: &CodexAuth,
+            _auth: &OpenAiAccountAuth,
         ) -> Result<Option<String>, FetchAttemptError> {
             self.request_count.fetch_add(1, Ordering::SeqCst);
             Err(FetchAttemptError::Unauthorized {

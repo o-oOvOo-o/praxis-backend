@@ -70,7 +70,7 @@ mod tests {
         let begin_event = McpToolCallBeginEvent {
             call_id: "call_123".to_string(),
             invocation: McpInvocation {
-                server: "codex".to_string(),
+                server: "praxis".to_string(),
                 tool: "list_mcp_resources".to_string(),
                 arguments: Some(serde_json::json!({"server": ""})),
             },
@@ -97,7 +97,7 @@ mod tests {
         let begin_event = McpToolCallBeginEvent {
             call_id: "call_456".to_string(),
             invocation: McpInvocation {
-                server: "codex".to_string(),
+                server: "praxis".to_string(),
                 tool: "list_mcp_resources".to_string(),
                 arguments: None,
             },
@@ -135,7 +135,7 @@ mod tests {
         let end_event = McpToolCallEndEvent {
             call_id: "call_789".to_string(),
             invocation: McpInvocation {
-                server: "codex".to_string(),
+                server: "praxis".to_string(),
                 tool: "list_mcp_resources".to_string(),
                 arguments: Some(serde_json::json!({"server": ""})),
             },
@@ -167,7 +167,7 @@ mod tests {
         let end_event = McpToolCallEndEvent {
             call_id: "call_err".to_string(),
             invocation: McpInvocation {
-                server: "codex".to_string(),
+                server: "praxis".to_string(),
                 tool: "list_mcp_resources".to_string(),
                 arguments: None,
             },

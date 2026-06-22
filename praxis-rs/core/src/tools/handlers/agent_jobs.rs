@@ -1031,8 +1031,8 @@ After the tool call succeeds, stop.",
 }
 
 fn render_instruction_template(instruction: &str, row_json: &Value) -> String {
-    const OPEN_BRACE_SENTINEL: &str = "__CODEX_OPEN_BRACE__";
-    const CLOSE_BRACE_SENTINEL: &str = "__CODEX_CLOSE_BRACE__";
+    const OPEN_BRACE_SENTINEL: &str = "__PRAXIS_OPEN_BRACE__";
+    const CLOSE_BRACE_SENTINEL: &str = "__PRAXIS_CLOSE_BRACE__";
 
     let mut rendered = instruction
         .replace("{{", OPEN_BRACE_SENTINEL)
@@ -1101,6 +1101,7 @@ fn default_output_csv_path(input_csv_path: &Path, job_id: &str) -> PathBuf {
     input_csv_path.with_file_name(format!("{stem}.agent-job-{job_suffix}.csv"))
 }
 
+#[cfg(test)]
 fn parse_csv(content: &str) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
     parse_csv_reader(content.as_bytes())
 }

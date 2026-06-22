@@ -12,7 +12,7 @@ use crate::patch_approval::handle_patch_approval_request;
 use praxis_core::PraxisThread;
 use praxis_core::ThreadManager;
 use praxis_core::ThreadSpawnResult;
-use praxis_core::config::Config as CodexConfig;
+use praxis_core::config::Config;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::AgentMessageEvent;
 use praxis_protocol::protocol::ApplyPatchApprovalRequestEvent;
@@ -59,7 +59,7 @@ pub(crate) fn create_call_tool_result_with_thread_id(
 pub async fn run_praxis_tool_session(
     id: RequestId,
     initial_prompt: String,
-    config: CodexConfig,
+    config: Config,
     outgoing: Arc<OutgoingMessageSender>,
     thread_manager: Arc<ThreadManager>,
     running_requests_id_to_praxis_uuid: Arc<Mutex<HashMap<RequestId, ThreadId>>>,

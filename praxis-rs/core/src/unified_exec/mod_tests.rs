@@ -11,7 +11,7 @@ use crate::unified_exec::WriteStdinRequest;
 use crate::unified_exec::process::OutputHandles;
 use core_test_support::get_remote_test_env;
 use core_test_support::skip_if_sandbox;
-use core_test_support::test_codex::test_env as remote_test_env;
+use core_test_support::test_praxis::test_env as remote_test_env;
 use praxis_sandboxing::SandboxType;
 use praxis_utils_output_truncation::approx_token_count;
 use pretty_assertions::assert_eq;
@@ -244,7 +244,7 @@ async fn unified_exec_persists_across_requests() -> anyhow::Result<()> {
     write_stdin(
         &session,
         process_id,
-        "export CODEX_INTERACTIVE_SHELL_VAR=codex\n",
+        "export PRAXIS_INTERACTIVE_SHELL_VAR=codex\n",
         /*yield_time_ms*/ 2_500,
     )
     .await?;
@@ -252,7 +252,7 @@ async fn unified_exec_persists_across_requests() -> anyhow::Result<()> {
     let out_2 = write_stdin(
         &session,
         process_id,
-        "echo $CODEX_INTERACTIVE_SHELL_VAR\n",
+        "echo $PRAXIS_INTERACTIVE_SHELL_VAR\n",
         /*yield_time_ms*/ 2_500,
     )
     .await?;
@@ -279,7 +279,7 @@ async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
     write_stdin(
         &session,
         session_a,
-        "export CODEX_INTERACTIVE_SHELL_VAR=codex\n",
+        "export PRAXIS_INTERACTIVE_SHELL_VAR=codex\n",
         /*yield_time_ms*/ 2_500,
     )
     .await?;
@@ -287,7 +287,7 @@ async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
     let out_2 = exec_command(
         &session,
         &turn,
-        "echo $CODEX_INTERACTIVE_SHELL_VAR",
+        "echo $PRAXIS_INTERACTIVE_SHELL_VAR",
         /*yield_time_ms*/ 2_500,
         /*workdir*/ None,
     )
@@ -305,7 +305,7 @@ async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
     let out_3 = write_stdin(
         &session,
         shell_a.process_id.expect("expected process id"),
-        "echo $CODEX_INTERACTIVE_SHELL_VAR\n",
+        "echo $PRAXIS_INTERACTIVE_SHELL_VAR\n",
         /*yield_time_ms*/ 2_500,
     )
     .await?;
@@ -334,7 +334,7 @@ async fn unified_exec_timeouts() -> anyhow::Result<()> {
     write_stdin(
         &session,
         process_id,
-        format!("export CODEX_INTERACTIVE_SHELL_VAR={TEST_VAR_VALUE}\n").as_str(),
+        format!("export PRAXIS_INTERACTIVE_SHELL_VAR={TEST_VAR_VALUE}\n").as_str(),
         /*yield_time_ms*/ 2_500,
     )
     .await?;
@@ -342,7 +342,7 @@ async fn unified_exec_timeouts() -> anyhow::Result<()> {
     let out_2 = write_stdin(
         &session,
         process_id,
-        "sleep 5 && echo $CODEX_INTERACTIVE_SHELL_VAR\n",
+        "sleep 5 && echo $PRAXIS_INTERACTIVE_SHELL_VAR\n",
         /*yield_time_ms*/ 10,
     )
     .await?;

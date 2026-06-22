@@ -12,10 +12,10 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::ApplyPatchModelOutput;
-use core_test_support::test_codex::ShellModelOutput;
-use core_test_support::test_codex::TestCodexBuilder;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::ApplyPatchModelOutput;
+use core_test_support::test_praxis::ShellModelOutput;
+use core_test_support::test_praxis::TestPraxisBuilder;
+use core_test_support::test_praxis::test_praxis;
 use praxis_protocol::protocol::SandboxPolicy;
 use pretty_assertions::assert_eq;
 use regex_lite::Regex;
@@ -99,10 +99,10 @@ fn shell_responses(
 }
 
 fn configure_shell_model(
-    builder: TestCodexBuilder,
+    builder: TestPraxisBuilder,
     output_type: ShellModelOutput,
     include_apply_patch_tool: bool,
-) -> TestCodexBuilder {
+) -> TestPraxisBuilder {
     let builder = match (output_type, include_apply_patch_tool) {
         (ShellModelOutput::ShellCommand, _) => builder.with_model("test-gpt-5-codex"),
         (ShellModelOutput::LocalShell, true) => builder.with_model("gpt-5.1-codex"),
@@ -126,7 +126,7 @@ async fn shell_output_stays_json_without_freeform_apply_patch(
 
     let server = start_mock_server().await;
     let mut builder = configure_shell_model(
-        test_codex(),
+        test_praxis(),
         output_type,
         /*include_apply_patch_tool*/ false,
     );
@@ -182,7 +182,7 @@ async fn shell_output_is_structured_with_freeform_apply_patch(
 
     let server = start_mock_server().await;
     let mut builder = configure_shell_model(
-        test_codex(),
+        test_praxis(),
         output_type,
         /*include_apply_patch_tool*/ true,
     );
@@ -231,7 +231,7 @@ async fn shell_output_preserves_fixture_json_without_serialization(
 
     let server = start_mock_server().await;
     let mut builder = configure_shell_model(
-        test_codex(),
+        test_praxis(),
         output_type,
         /*include_apply_patch_tool*/ false,
     );
@@ -299,7 +299,7 @@ async fn shell_output_structures_fixture_with_serialization(
 
     let server = start_mock_server().await;
     let mut builder = configure_shell_model(
-        test_codex(),
+        test_praxis(),
         output_type,
         /*include_apply_patch_tool*/ true,
     );
@@ -362,7 +362,7 @@ async fn shell_output_for_freeform_tool_records_duration(
 
     let server = start_mock_server().await;
     let mut builder = configure_shell_model(
-        test_codex(),
+        test_praxis(),
         output_type,
         /*include_apply_patch_tool*/ true,
     );
@@ -416,7 +416,7 @@ async fn shell_output_reserializes_truncated_content(output_type: ShellModelOutp
 
     let server = start_mock_server().await;
     let mut builder = configure_shell_model(
-        test_codex(),
+        test_praxis(),
         output_type,
         /*include_apply_patch_tool*/ true,
     )
@@ -718,7 +718,7 @@ async fn shell_output_is_structured_for_nonzero_exit(output_type: ShellModelOutp
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.1-codex")
         .with_config(move |config| {
             config.include_apply_patch_tool = true;
@@ -756,7 +756,7 @@ async fn shell_command_output_is_freeform() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.include_apply_patch_tool = true;
     });
     let test = builder.build(&server).await?;
@@ -810,7 +810,7 @@ async fn shell_command_output_is_not_truncated_under_10k_bytes() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.1");
+    let mut builder = test_praxis().with_model("gpt-5.1");
     let test = builder.build(&server).await?;
 
     let call_id = "shell-command";
@@ -861,7 +861,7 @@ async fn shell_command_output_is_not_truncated_over_10k_bytes() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.1");
+    let mut builder = test_praxis().with_model("gpt-5.1");
     let test = builder.build(&server).await?;
 
     let call_id = "shell-command";
@@ -912,7 +912,7 @@ async fn local_shell_call_output_is_structured() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.1-codex")
         .with_config(|config| {
             config.include_apply_patch_tool = true;

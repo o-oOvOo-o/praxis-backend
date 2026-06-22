@@ -669,8 +669,8 @@ fn load_location_suffix_regexes() {
 #[test]
 fn file_link_hides_destination() {
     let text = render_markdown_text_for_cwd(
-        "[praxis-rs/tui/src/markdown_render.rs](/Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs)",
-        Path::new("/Users/example/code/codex"),
+        "[praxis-rs/tui/src/markdown_render.rs](/Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs)",
+        Path::new("/Users/example/code/praxis"),
     );
     let expected = Text::from(Line::from_iter([
         "praxis-rs/tui/src/markdown_render.rs".cyan()
@@ -681,8 +681,8 @@ fn file_link_hides_destination() {
 #[test]
 fn file_link_appends_line_number_when_label_lacks_it() {
     let text = render_markdown_text_for_cwd(
-        "[markdown_render.rs](/Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs:74)",
-        Path::new("/Users/example/code/codex"),
+        "[markdown_render.rs](/Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs:74)",
+        Path::new("/Users/example/code/praxis"),
     );
     let expected = Text::from(Line::from_iter([
         "praxis-rs/tui/src/markdown_render.rs:74".cyan()
@@ -693,11 +693,11 @@ fn file_link_appends_line_number_when_label_lacks_it() {
 #[test]
 fn file_link_keeps_absolute_paths_outside_cwd() {
     let text = render_markdown_text_for_cwd(
-        "[README.md:74](/Users/example/code/codex/README.md:74)",
-        Path::new("/Users/example/code/codex/praxis-rs/tui"),
+        "[README.md:74](/Users/example/code/praxis/README.md:74)",
+        Path::new("/Users/example/code/praxis/praxis-rs/tui"),
     );
     let expected = Text::from(Line::from_iter([
-        "/Users/example/code/codex/README.md:74".cyan()
+        "/Users/example/code/praxis/README.md:74".cyan()
     ]));
     assert_eq!(text, expected);
 }
@@ -705,8 +705,8 @@ fn file_link_keeps_absolute_paths_outside_cwd() {
 #[test]
 fn file_link_appends_hash_anchor_when_label_lacks_it() {
     let text = render_markdown_text_for_cwd(
-        "[markdown_render.rs](file:///Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs#L74C3)",
-        Path::new("/Users/example/code/codex"),
+        "[markdown_render.rs](file:///Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs#L74C3)",
+        Path::new("/Users/example/code/praxis"),
     );
     let expected = Text::from(Line::from_iter([
         "praxis-rs/tui/src/markdown_render.rs:74:3".cyan(),
@@ -717,8 +717,8 @@ fn file_link_appends_hash_anchor_when_label_lacks_it() {
 #[test]
 fn file_link_uses_target_path_for_hash_anchor() {
     let text = render_markdown_text_for_cwd(
-        "[markdown_render.rs#L74C3](file:///Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs#L74C3)",
-        Path::new("/Users/example/code/codex"),
+        "[markdown_render.rs#L74C3](file:///Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs#L74C3)",
+        Path::new("/Users/example/code/praxis"),
     );
     let expected = Text::from(Line::from_iter([
         "praxis-rs/tui/src/markdown_render.rs:74:3".cyan(),
@@ -729,8 +729,8 @@ fn file_link_uses_target_path_for_hash_anchor() {
 #[test]
 fn file_link_appends_range_when_label_lacks_it() {
     let text = render_markdown_text_for_cwd(
-        "[markdown_render.rs](/Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs:74:3-76:9)",
-        Path::new("/Users/example/code/codex"),
+        "[markdown_render.rs](/Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs:74:3-76:9)",
+        Path::new("/Users/example/code/praxis"),
     );
     let expected = Text::from(Line::from_iter([
         "praxis-rs/tui/src/markdown_render.rs:74:3-76:9".cyan(),
@@ -741,8 +741,8 @@ fn file_link_appends_range_when_label_lacks_it() {
 #[test]
 fn file_link_uses_target_path_for_range() {
     let text = render_markdown_text_for_cwd(
-        "[markdown_render.rs:74:3-76:9](/Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs:74:3-76:9)",
-        Path::new("/Users/example/code/codex"),
+        "[markdown_render.rs:74:3-76:9](/Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs:74:3-76:9)",
+        Path::new("/Users/example/code/praxis"),
     );
     let expected = Text::from(Line::from_iter([
         "praxis-rs/tui/src/markdown_render.rs:74:3-76:9".cyan(),
@@ -753,8 +753,8 @@ fn file_link_uses_target_path_for_range() {
 #[test]
 fn file_link_appends_hash_range_when_label_lacks_it() {
     let text = render_markdown_text_for_cwd(
-        "[markdown_render.rs](file:///Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs#L74C3-L76C9)",
-        Path::new("/Users/example/code/codex"),
+        "[markdown_render.rs](file:///Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs#L74C3-L76C9)",
+        Path::new("/Users/example/code/praxis"),
     );
     let expected = Text::from(Line::from_iter([
         "praxis-rs/tui/src/markdown_render.rs:74:3-76:9".cyan(),
@@ -765,8 +765,8 @@ fn file_link_appends_hash_range_when_label_lacks_it() {
 #[test]
 fn multiline_file_link_label_after_styled_prefix_does_not_panic() {
     let text = render_markdown_text_for_cwd(
-        "**bold** plain [foo\nbar](file:///Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs#L74C3)",
-        Path::new("/Users/example/code/codex"),
+        "**bold** plain [foo\nbar](file:///Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs#L74C3)",
+        Path::new("/Users/example/code/praxis"),
     );
     let expected = Text::from(Line::from_iter([
         "bold".bold(),
@@ -779,8 +779,8 @@ fn multiline_file_link_label_after_styled_prefix_does_not_panic() {
 #[test]
 fn file_link_uses_target_path_for_hash_range() {
     let text = render_markdown_text_for_cwd(
-        "[markdown_render.rs#L74C3-L76C9](file:///Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs#L74C3-L76C9)",
-        Path::new("/Users/example/code/codex"),
+        "[markdown_render.rs#L74C3-L76C9](file:///Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs#L74C3-L76C9)",
+        Path::new("/Users/example/code/praxis"),
     );
     let expected = Text::from(Line::from_iter([
         "praxis-rs/tui/src/markdown_render.rs:74:3-76:9".cyan(),
@@ -828,8 +828,8 @@ fn relative_local_link_hyperlink_target_resolves_against_cwd() {
 #[test]
 fn markdown_render_file_link_snapshot() {
     let text = render_markdown_text_for_cwd(
-        "See [markdown_render.rs:74](/Users/example/code/codex/praxis-rs/tui/src/markdown_render.rs:74).",
-        Path::new("/Users/example/code/codex"),
+        "See [markdown_render.rs:74](/Users/example/code/praxis/praxis-rs/tui/src/markdown_render.rs:74).",
+        Path::new("/Users/example/code/praxis"),
     );
     let rendered = text
         .lines
@@ -849,9 +849,9 @@ fn markdown_render_file_link_snapshot() {
 #[test]
 fn unordered_list_local_file_link_stays_inline_with_following_text() {
     let text = render_markdown_text_with_width_and_cwd(
-        "- [binary](/Users/example/code/codex/praxis-rs/README.md:93): core is the agent/business logic, tui is the terminal UI, exec is the headless automation surface, and cli is the top-level multitool binary.",
+        "- [binary](/Users/example/code/praxis/praxis-rs/README.md:93): core is the agent/business logic, tui is the terminal UI, exec is the headless automation surface, and cli is the top-level multitool binary.",
         Some(72),
-        Some(Path::new("/Users/example/code/codex")),
+        Some(Path::new("/Users/example/code/praxis")),
     );
     let rendered = text
         .lines
@@ -876,9 +876,9 @@ fn unordered_list_local_file_link_stays_inline_with_following_text() {
 #[test]
 fn unordered_list_local_file_link_soft_break_before_colon_stays_inline() {
     let text = render_markdown_text_with_width_and_cwd(
-        "- [binary](/Users/example/code/codex/praxis-rs/README.md:93)\n  : core is the agent/business logic.",
+        "- [binary](/Users/example/code/praxis/praxis-rs/README.md:93)\n  : core is the agent/business logic.",
         Some(72),
-        Some(Path::new("/Users/example/code/codex")),
+        Some(Path::new("/Users/example/code/praxis")),
     );
     let rendered = text
         .lines
@@ -899,9 +899,9 @@ fn unordered_list_local_file_link_soft_break_before_colon_stays_inline() {
 #[test]
 fn consecutive_unordered_list_local_file_links_do_not_detach_paths() {
     let text = render_markdown_text_with_width_and_cwd(
-        "- [binary](/Users/example/code/codex/praxis-rs/README.md:93)\n  : cli is the top-level multitool binary.\n- [expectations](/Users/example/code/codex/praxis-rs/core/README.md:1)\n  : praxis-core owns the real runtime behavior.",
+        "- [binary](/Users/example/code/praxis/praxis-rs/README.md:93)\n  : cli is the top-level multitool binary.\n- [expectations](/Users/example/code/praxis/praxis-rs/core/README.md:1)\n  : praxis-core owns the real runtime behavior.",
         Some(72),
-        Some(Path::new("/Users/example/code/codex")),
+        Some(Path::new("/Users/example/code/praxis")),
     );
     let rendered = text
         .lines

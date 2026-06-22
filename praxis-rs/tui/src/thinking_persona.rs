@@ -6,7 +6,7 @@ use ratatui::text::Line;
 pub(crate) enum ThinkingPersona {
     #[default]
     None,
-    CodexSummary,
+    PraxisSummary,
     DeepSeekFull,
 }
 

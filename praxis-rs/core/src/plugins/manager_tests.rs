@@ -8,12 +8,13 @@ use crate::config_loader::ConfigRequirementsToml;
 use crate::plugins::LoadedPlugin;
 use crate::plugins::MarketplacePluginInstallPolicy;
 use crate::plugins::PluginLoadOutcome;
+use crate::plugins::curated::openai_curated_marketplace_display_name;
 use crate::plugins::test_support::TEST_CURATED_PLUGIN_SHA;
+use crate::plugins::test_support::write_curated_marketplace;
 use crate::plugins::test_support::write_curated_plugin_sha_with as write_curated_plugin_sha;
 use crate::plugins::test_support::write_file;
-use crate::plugins::test_support::write_openai_curated_marketplace;
 use praxis_config::types::McpServerTransportConfig;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_protocol::protocol::Product;
 use pretty_assertions::assert_eq;
@@ -1453,7 +1454,10 @@ plugins = true
             path: AbsolutePathBuf::try_from(curated_root.join(".agents/plugins/marketplace.json"))
                 .unwrap(),
             interface: Some(MarketplaceInterface {
-                display_name: Some(OPENAI_CURATED_MARKETPLACE_DISPLAY_NAME.to_string()),
+                display_name: openai_curated_marketplace_display_name(
+                    OPENAI_CURATED_MARKETPLACE_NAME,
+                )
+                .map(str::to_string),
             }),
             plugins: vec![ConfiguredMarketplacePlugin {
                 id: "linear@openai-curated".to_string(),
@@ -1698,7 +1702,7 @@ enabled = true
 async fn sync_plugins_from_remote_reconciles_cache_and_config() {
     let tmp = tempfile::tempdir().unwrap();
     let curated_root = curated_plugins_repo_path(tmp.path());
-    write_openai_curated_marketplace(&curated_root, &["linear", "gmail", "calendar"]);
+    write_curated_marketplace(&curated_root, &["linear", "gmail", "calendar"]);
     write_curated_plugin_sha(tmp.path(), TEST_CURATED_PLUGIN_SHA);
     write_plugin(
         &tmp.path().join("plugins/cache/openai-curated"),
@@ -1751,7 +1755,7 @@ enabled = true
     let result = manager
         .sync_plugins_from_remote(
             &config,
-            Some(&CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+            Some(&OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
             /*additive_only*/ false,
         )
         .await
@@ -1818,7 +1822,7 @@ enabled = true
 async fn sync_plugins_from_remote_additive_only_keeps_existing_plugins() {
     let tmp = tempfile::tempdir().unwrap();
     let curated_root = curated_plugins_repo_path(tmp.path());
-    write_openai_curated_marketplace(&curated_root, &["linear", "gmail", "calendar"]);
+    write_curated_marketplace(&curated_root, &["linear", "gmail", "calendar"]);
     write_curated_plugin_sha(tmp.path(), TEST_CURATED_PLUGIN_SHA);
     write_plugin(
         &tmp.path().join("plugins/cache/openai-curated"),
@@ -1871,7 +1875,7 @@ enabled = true
     let result = manager
         .sync_plugins_from_remote(
             &config,
-            Some(&CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+            Some(&OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
             /*additive_only*/ true,
         )
         .await
@@ -1914,7 +1918,7 @@ enabled = true
 async fn sync_plugins_from_remote_ignores_unknown_remote_plugins() {
     let tmp = tempfile::tempdir().unwrap();
     let curated_root = curated_plugins_repo_path(tmp.path());
-    write_openai_curated_marketplace(&curated_root, &["linear"]);
+    write_curated_marketplace(&curated_root, &["linear"]);
     write_curated_plugin_sha(tmp.path(), TEST_CURATED_PLUGIN_SHA);
     write_file(
         &tmp.path().join(CONFIG_TOML_FILE),
@@ -1943,7 +1947,7 @@ enabled = false
     let result = manager
         .sync_plugins_from_remote(
             &config,
-            Some(&CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+            Some(&OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
             /*additive_only*/ false,
         )
         .await
@@ -1971,7 +1975,7 @@ enabled = false
 async fn sync_plugins_from_remote_keeps_existing_plugins_when_install_fails() {
     let tmp = tempfile::tempdir().unwrap();
     let curated_root = curated_plugins_repo_path(tmp.path());
-    write_openai_curated_marketplace(&curated_root, &["linear", "gmail"]);
+    write_curated_marketplace(&curated_root, &["linear", "gmail"]);
     write_curated_plugin_sha(tmp.path(), TEST_CURATED_PLUGIN_SHA);
     fs::remove_dir_all(curated_root.join("plugins/gmail")).unwrap();
     write_plugin(
@@ -2006,7 +2010,7 @@ enabled = false
     let err = manager
         .sync_plugins_from_remote(
             &config,
-            Some(&CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+            Some(&OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
             /*additive_only*/ false,
         )
         .await
@@ -2095,7 +2099,7 @@ plugins = true
     let result = manager
         .sync_plugins_from_remote(
             &config,
-            Some(&CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+            Some(&OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
             /*additive_only*/ false,
         )
         .await
@@ -2149,7 +2153,7 @@ plugins = true
     let featured_plugin_ids = manager
         .featured_plugin_ids_for_config(
             &config,
-            Some(&CodexAuth::create_dummy_chatgpt_auth_for_testing()),
+            Some(&OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()),
         )
         .await
         .unwrap();
@@ -2194,7 +2198,7 @@ plugins = true
 fn refresh_curated_plugin_cache_replaces_existing_local_version_with_sha() {
     let tmp = tempfile::tempdir().unwrap();
     let curated_root = curated_plugins_repo_path(tmp.path());
-    write_openai_curated_marketplace(&curated_root, &["slack"]);
+    write_curated_marketplace(&curated_root, &["slack"]);
     write_curated_plugin_sha(tmp.path(), TEST_CURATED_PLUGIN_SHA);
     let plugin_id = PluginId::new(
         "slack".to_string(),
@@ -2230,7 +2234,7 @@ fn refresh_curated_plugin_cache_replaces_existing_local_version_with_sha() {
 fn refresh_curated_plugin_cache_reinstalls_missing_configured_plugin_with_current_sha() {
     let tmp = tempfile::tempdir().unwrap();
     let curated_root = curated_plugins_repo_path(tmp.path());
-    write_openai_curated_marketplace(&curated_root, &["slack"]);
+    write_curated_marketplace(&curated_root, &["slack"]);
     write_curated_plugin_sha(tmp.path(), TEST_CURATED_PLUGIN_SHA);
     let plugin_id = PluginId::new(
         "slack".to_string(),
@@ -2293,7 +2297,7 @@ plugins = true
 fn refresh_curated_plugin_cache_returns_false_when_configured_plugins_are_current() {
     let tmp = tempfile::tempdir().unwrap();
     let curated_root = curated_plugins_repo_path(tmp.path());
-    write_openai_curated_marketplace(&curated_root, &["slack"]);
+    write_curated_marketplace(&curated_root, &["slack"]);
     let plugin_id = PluginId::new(
         "slack".to_string(),
         OPENAI_CURATED_MARKETPLACE_NAME.to_string(),

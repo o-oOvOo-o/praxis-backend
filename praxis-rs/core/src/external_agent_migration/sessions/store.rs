@@ -1,8 +1,6 @@
-use super::ExternalAgentSource;
+use super::record::ExternalSessionRecord;
+use super::source::ExternalAgentSource;
 use crate::config::Config;
-use chrono::DateTime;
-use chrono::Utc;
-use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::RolloutItem;
 use praxis_protocol::protocol::RolloutLine;
 use std::io;
@@ -11,21 +9,14 @@ use std::path::PathBuf;
 use tokio::fs;
 use tracing::warn;
 
-pub(crate) struct ExternalSessionRecord {
-    pub thread_id: ThreadId,
-    pub title: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub items: Vec<(String, RolloutItem)>,
-}
-
-pub(crate) struct ExternalSessionStore<'a> {
+pub(super) struct ExternalSessionStore<'a> {
     config: &'a Config,
     source: ExternalAgentSource,
     state_db: Option<praxis_rollout::state_db::StateDbHandle>,
 }
 
 impl<'a> ExternalSessionStore<'a> {
-    pub async fn open(config: &'a Config, source: ExternalAgentSource) -> Self {
+    pub(super) async fn open(config: &'a Config, source: ExternalAgentSource) -> Self {
         let state_db = praxis_rollout::state_db::try_get_state_db(config)
             .await
             .ok();
@@ -36,7 +27,7 @@ impl<'a> ExternalSessionStore<'a> {
         }
     }
 
-    pub async fn persist(&self, record: &ExternalSessionRecord) -> io::Result<()> {
+    pub(super) async fn persist(&self, record: &ExternalSessionRecord) -> io::Result<()> {
         let path = self.rollout_path(record);
         write_rollout(&path, &record.items).await?;
         let rollout_items = record
@@ -47,7 +38,7 @@ impl<'a> ExternalSessionStore<'a> {
         praxis_rollout::state_db::reconcile_rollout(
             self.state_db.as_deref(),
             &path,
-            self.source.provider_id(),
+            self.source.import_model_provider_id(),
             None,
             &rollout_items,
             Some(false),
@@ -89,7 +80,7 @@ impl<'a> ExternalSessionStore<'a> {
         {
             warn!(
                 "failed to persist {} external thread name for {}: {err}",
-                self.source.provider_id(),
+                self.source.import_model_provider_id(),
                 record.thread_id
             );
         }

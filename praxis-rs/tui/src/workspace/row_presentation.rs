@@ -14,6 +14,9 @@ const WORKSPACE_SUBAGENT_INDENT_MAX: u16 = 9;
 
 pub(crate) fn workspace_row_status_label(row: &ThreadListRow) -> String {
     let activity = match &row.status {
+        ThreadStatus::Active { .. } if workspace_row_is_controlled(row) => "LOCK",
+        ThreadStatus::Idle if workspace_row_is_controlled(row) => "LOCK",
+        ThreadStatus::NotLoaded if workspace_row_is_controlled(row) => "LOCK",
         ThreadStatus::Active { active_flags }
             if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval)
                 || active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) =>
@@ -21,12 +24,9 @@ pub(crate) fn workspace_row_status_label(row: &ThreadListRow) -> String {
             "WAIT"
         }
         ThreadStatus::Active { .. } if workspace_status_has_running_flag(&row.status) => "RUN",
-        ThreadStatus::Active { .. } if workspace_row_is_controlled(row) => "LOCK",
         ThreadStatus::Active { .. } => "RUN",
-        ThreadStatus::Idle if workspace_row_is_controlled(row) => "LOCK",
         ThreadStatus::Idle => "IDLE",
         ThreadStatus::SystemError => "ERR",
-        ThreadStatus::NotLoaded if workspace_row_is_controlled(row) => "LOCK",
         ThreadStatus::NotLoaded => "COLD",
     };
     let Some(control_label) = workspace_row_control_label(row) else {

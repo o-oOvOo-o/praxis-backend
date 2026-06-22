@@ -17,8 +17,8 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::EventMsg;
@@ -30,10 +30,10 @@ use serde_json::Value;
 use serde_json::json;
 use tokio::sync::oneshot;
 
-async fn run_test_turn(test: &TestCodex, prompt: &str) -> anyhow::Result<()> {
+async fn run_test_turn(test: &TestPraxis, prompt: &str) -> anyhow::Result<()> {
     let session_model = test.session_configured.model.clone();
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: prompt.into(),
@@ -53,20 +53,20 @@ async fn run_test_turn(test: &TestCodex, prompt: &str) -> anyhow::Result<()> {
         })
         .await?;
 
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     Ok(())
 }
 
-async fn run_test_turn_and_measure(test: &TestCodex, prompt: &str) -> anyhow::Result<Duration> {
+async fn run_test_turn_and_measure(test: &TestPraxis, prompt: &str) -> anyhow::Result<Duration> {
     let start = Instant::now();
     run_test_turn(test, prompt).await?;
     Ok(start.elapsed())
 }
 
 #[allow(clippy::expect_used)]
-async fn build_praxis_with_test_tool(server: &wiremock::MockServer) -> anyhow::Result<TestCodex> {
-    let mut builder = test_codex().with_model("test-gpt-5.1-codex");
+async fn build_praxis_with_test_tool(server: &wiremock::MockServer) -> anyhow::Result<TestPraxis> {
+    let mut builder = test_praxis().with_model("test-gpt-5.1-codex");
     builder.build(server).await
 }
 
@@ -145,7 +145,7 @@ async fn shell_tools_run_in_parallel() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.1");
+    let mut builder = test_praxis().with_model("gpt-5.1");
     let test = builder.build(&server).await?;
 
     let shell_args = json!({
@@ -344,13 +344,13 @@ async fn shell_tools_start_before_response_completed_when_stream_delayed() -> an
     ])
     .await;
 
-    let mut builder = test_codex().with_model("gpt-5.1");
+    let mut builder = test_praxis().with_model("gpt-5.1");
     let test = builder
         .build_with_streaming_server(&streaming_server)
         .await?;
 
     let session_model = test.session_configured.model.clone();
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "stream delayed completion".into(),
@@ -394,7 +394,7 @@ async fn shell_tools_start_before_response_completed_when_stream_delayed() -> an
     .await??;
 
     let _ = completion_gate_tx.send(());
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let mut completion_iter = completion_receivers.into_iter();
     let completed_at = completion_iter

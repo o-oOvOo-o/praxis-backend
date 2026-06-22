@@ -1,6 +1,6 @@
 # praxis-network-proxy
 
-`praxis-network-proxy` is Codex's local network policy enforcement proxy. It runs:
+`praxis-network-proxy` is Praxis's local network policy enforcement proxy. It runs:
 
 - an HTTP proxy (default `127.0.0.1:3128`)
 - a SOCKS5 proxy (default `127.0.0.1:8081`, enabled by default)
@@ -11,7 +11,7 @@ It enforces an allow/deny policy and a "limited" mode intended for read-only net
 
 ### 1) Configure
 
-`praxis-network-proxy` reads from Codex's merged `config.toml` (via `praxis-core` config loading).
+`praxis-network-proxy` reads from Praxis's merged `config.toml` (via `praxis-core` config loading).
 
 Network settings live under the selected permissions profile. Example config:
 
@@ -145,12 +145,12 @@ the decider can auto-allow network requests originating from that command.
 
 ## OTEL Audit Events (embedded/managed)
 
-When `praxis-network-proxy` is embedded in managed Codex runtime, policy decisions emit structured
+When `praxis-network-proxy` is embedded in managed Praxis runtime, policy decisions emit structured
 OTEL-compatible events with `target=praxis_otel.network_proxy`.
 
 Event name:
 
-- `codex.network_proxy.policy_decision`
+- `praxis.network_proxy.policy_decision`
   - emitted for each policy decision (`domain` and `non_domain`).
   - `network.policy.scope = "domain"` for host-policy evaluations (`evaluate_host_policy`).
   - `network.policy.scope = "non_domain"` for mode-guard/proxy-state checks (including unix-socket guard paths and unix-socket allow decisions).

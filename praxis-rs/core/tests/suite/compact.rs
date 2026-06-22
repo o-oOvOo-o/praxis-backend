@@ -6,7 +6,7 @@ use core_test_support::responses::ev_local_shell_call;
 use core_test_support::responses::ev_reasoning_item;
 use core_test_support::responses::mount_models_once;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use praxis_core::ModelProviderInfo;
@@ -15,7 +15,7 @@ use praxis_core::compact::SUMMARIZATION_PROMPT;
 use praxis_core::compact::SUMMARY_PREFIX;
 use praxis_core::config::Config;
 use praxis_features::Feature;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::items::TurnItem;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelsResponse;
@@ -229,13 +229,13 @@ async fn summarize_context_three_requests_and_instructions() {
 
     // Build config pointing to the mock server and spawn Praxis.
     let model_provider = non_openai_model_provider(&server);
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
         config.model_auto_compact_token_limit = Some(200_000);
     });
     let test = builder.build(&server).await.unwrap();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let rollout_path = test.session_configured.rollout_path.expect("rollout path");
 
     // 1) Normal user input – should hit server once.
@@ -427,7 +427,7 @@ async fn manual_compact_uses_custom_prompt() {
     let custom_prompt = "Use this compact prompt instead";
 
     let model_provider = non_openai_model_provider(&server);
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         config.compact_prompt = Some(custom_prompt.to_string());
     });
@@ -435,7 +435,7 @@ async fn manual_compact_uses_custom_prompt() {
         .build(&server)
         .await
         .expect("create conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -516,11 +516,11 @@ async fn manual_compact_emits_api_and_local_token_usage_events() {
     mount_sse_once(&server, sse_compact).await;
 
     let model_provider = non_openai_model_provider(&server);
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
     });
-    let codex = builder.build(&server).await.unwrap().codex;
+    let codex = builder.build(&server).await.unwrap().thread;
 
     // Trigger manual compact and collect TokenCount events for the compact turn.
     codex.submit(Op::Compact).await.unwrap();
@@ -575,11 +575,11 @@ async fn manual_compact_emits_context_compaction_items() {
     mount_sse_sequence(&server, vec![sse1, sse2]).await;
 
     let model_provider = non_openai_model_provider(&server);
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
     });
-    let codex = builder.build(&server).await.unwrap().codex;
+    let codex = builder.build(&server).await.unwrap().thread;
 
     codex
         .submit(Op::UserInput {
@@ -639,14 +639,14 @@ async fn multiple_auto_compact_per_task_runs_after_token_limit_hit() {
     let server = start_mock_server().await;
 
     let non_openai_provider_name = non_openai_model_provider(&server).name;
-    let codex = test_codex()
+    let codex = test_praxis()
         .with_config(move |config| {
             config.model_provider.name = non_openai_provider_name;
         })
         .build(&server)
         .await
         .expect("build codex")
-        .codex;
+        .thread;
 
     // user message
     let user_message = "create an app";
@@ -1236,12 +1236,12 @@ async fn auto_compact_runs_after_token_limit_hit() {
 
     let model_provider = non_openai_model_provider(&server);
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
         config.model_auto_compact_token_limit = Some(200_000);
     });
-    let codex = builder.build(&server).await.unwrap().codex;
+    let codex = builder.build(&server).await.unwrap().thread;
 
     codex
         .submit(Op::UserInput {
@@ -1425,12 +1425,12 @@ async fn auto_compact_emits_context_compaction_items() {
     mount_sse_sequence(&server, vec![sse1, sse2, sse3, sse4]).await;
 
     let model_provider = non_openai_model_provider(&server);
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
         config.model_auto_compact_token_limit = Some(200_000);
     });
-    let codex = builder.build(&server).await.unwrap().codex;
+    let codex = builder.build(&server).await.unwrap().thread;
 
     let mut started_item = None;
     let mut completed_item = None;
@@ -1508,12 +1508,12 @@ async fn auto_compact_starts_after_turn_started() {
     mount_sse_sequence(&server, vec![sse1, sse2, sse3, sse4]).await;
 
     let model_provider = non_openai_model_provider(&server);
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
         config.model_auto_compact_token_limit = Some(200_000);
     });
-    let codex = builder.build(&server).await.unwrap().codex;
+    let codex = builder.build(&server).await.unwrap().thread;
 
     codex
         .submit(Op::UserInput {
@@ -1602,7 +1602,7 @@ async fn auto_compact_runs_after_resume_when_token_usage_is_over_limit() {
     let compact_mock =
         mount_compact_json_once(&server, serde_json::json!({ "output": compacted_history })).await;
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         set_test_compact_prompt(config);
         config.model_auto_compact_token_limit = Some(limit);
     });
@@ -1630,7 +1630,7 @@ async fn auto_compact_runs_after_resume_when_token_usage_is_over_limit() {
         "remote compaction should not run before the next user message"
     );
 
-    let mut resume_builder = test_codex().with_config(move |config| {
+    let mut resume_builder = test_praxis().with_config(move |config| {
         set_test_compact_prompt(config);
         config.model_auto_compact_token_limit = Some(limit);
     });
@@ -1652,7 +1652,7 @@ async fn auto_compact_runs_after_resume_when_token_usage_is_over_limit() {
     mount_sse_once_match(&server, follow_up_matcher, sse_follow_up).await;
 
     resumed
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: follow_up_user.into(),
@@ -1673,11 +1673,11 @@ async fn auto_compact_runs_after_resume_when_token_usage_is_over_limit() {
         .await
         .unwrap();
 
-    wait_for_event(&resumed.codex, |event| {
+    wait_for_event(&resumed.thread, |event| {
         matches!(event, EventMsg::ContextCompacted(_))
     })
     .await;
-    wait_for_event(&resumed.codex, |event| {
+    wait_for_event(&resumed.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -1734,8 +1734,8 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
     .await;
 
     let model_provider = non_openai_model_provider(&server);
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -1743,7 +1743,7 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
         });
     let test = builder.build(&server).await.expect("build test codex");
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "before switch".into(),
@@ -1763,12 +1763,12 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
         })
         .await
         .expect("submit first user turn");
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "after switch".into(),
@@ -1788,7 +1788,7 @@ async fn pre_sampling_compact_runs_on_switch_to_smaller_context_model() {
         })
         .await
         .expect("submit second user turn");
-    assert_compaction_uses_turn_lifecycle_id(&test.codex).await;
+    assert_compaction_uses_turn_lifecycle_id(&test.thread).await;
 
     let requests = request_log.requests();
     assert_eq!(models_mock.requests().len(), 1);
@@ -1860,8 +1860,8 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
     .await;
 
     let model_provider = non_openai_model_provider(&server);
-    let mut initial_builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut initial_builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -1879,7 +1879,7 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
         .expect("rollout path");
 
     initial
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "before resume".into(),
@@ -1899,24 +1899,24 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
         })
         .await
         .expect("submit pre-resume turn");
-    wait_for_event(&initial.codex, |event| {
+    wait_for_event(&initial.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
 
     initial
-        .codex
+        .thread
         .submit(Op::Shutdown)
         .await
         .expect("shutdown initial session");
-    wait_for_event(&initial.codex, |event| {
+    wait_for_event(&initial.thread, |event| {
         matches!(event, EventMsg::ShutdownComplete)
     })
     .await;
 
     let model_provider = non_openai_model_provider(&server);
-    let mut resumed_builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut resumed_builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -1928,7 +1928,7 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
         .expect("resume codex");
 
     resumed
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "after resume".into(),
@@ -1948,7 +1948,7 @@ async fn pre_sampling_compact_runs_after_resume_and_switch_to_smaller_model() {
         })
         .await
         .expect("submit resumed user turn");
-    assert_compaction_uses_turn_lifecycle_id(&resumed.codex).await;
+    assert_compaction_uses_turn_lifecycle_id(&resumed.thread).await;
 
     let requests = request_log.requests();
     assert_eq!(models_mock.requests().len(), 1);
@@ -2022,13 +2022,13 @@ async fn auto_compact_persists_rollout_entries() {
 
     let model_provider = non_openai_model_provider(&server);
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
         config.model_auto_compact_token_limit = Some(200_000);
     });
     let test = builder.build(&server).await.unwrap();
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let session_configured = test.session_configured;
 
     codex
@@ -2134,12 +2134,12 @@ async fn manual_compact_retries_after_context_window_error() {
 
     let model_provider = non_openai_model_provider(&server);
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
         config.model_auto_compact_token_limit = Some(200_000);
     });
-    let codex = builder.build(&server).await.unwrap().codex;
+    let codex = builder.build(&server).await.unwrap().thread;
 
     codex
         .submit(Op::UserInput {
@@ -2241,7 +2241,7 @@ async fn manual_compact_non_context_failure_retries_then_emits_task_error() {
     let mut model_provider = non_openai_model_provider(&server);
     model_provider.stream_max_retries = Some(1);
 
-    let codex = test_codex()
+    let codex = test_praxis()
         .with_config(move |config| {
             config.model_provider = model_provider;
             set_test_compact_prompt(config);
@@ -2250,7 +2250,7 @@ async fn manual_compact_non_context_failure_retries_then_emits_task_error() {
         .build(&server)
         .await
         .expect("build codex")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -2338,11 +2338,11 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
 
     let model_provider = non_openai_model_provider(&server);
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
     });
-    let codex = builder.build(&server).await.unwrap().codex;
+    let codex = builder.build(&server).await.unwrap().thread;
 
     codex
         .submit(Op::UserInput {
@@ -2526,12 +2526,12 @@ async fn auto_compact_allows_multiple_attempts_when_interleaved_with_other_turn_
 
     let model_provider = non_openai_model_provider(&server);
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
         config.model_auto_compact_token_limit = Some(200);
     });
-    let codex = builder.build(&server).await.unwrap().codex;
+    let codex = builder.build(&server).await.unwrap().thread;
 
     let mut auto_compact_lifecycle_events = Vec::new();
     for user in [MULTI_AUTO_MSG, follow_up_user, final_user] {
@@ -2629,13 +2629,13 @@ async fn snapshot_request_shape_mid_turn_continuation_compaction() {
 
     let model_provider = non_openai_model_provider(&server);
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
         config.model_context_window = Some(context_window);
         config.model_auto_compact_token_limit = Some(limit);
     });
-    let codex = builder.build(&server).await.unwrap().codex;
+    let codex = builder.build(&server).await.unwrap().thread;
 
     codex
         .submit(Op::UserInput {
@@ -2730,7 +2730,7 @@ async fn auto_compact_clamps_config_limit_to_context_window() {
     mount_sse_once(&server, post_auto_compact_turn).await;
 
     let model_provider = non_openai_model_provider(&server);
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.model_provider = model_provider;
         set_test_compact_prompt(config);
         config.model_context_window = Some(context_window);
@@ -2818,8 +2818,8 @@ async fn auto_compact_counts_encrypted_reasoning_before_last_user() {
     let compact_mock =
         mount_compact_json_once(&server, serde_json::json!({ "output": compacted_history })).await;
 
-    let codex = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let codex = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             set_test_compact_prompt(config);
             config.model_auto_compact_token_limit = Some(300);
@@ -2827,7 +2827,7 @@ async fn auto_compact_counts_encrypted_reasoning_before_last_user() {
         .build(&server)
         .await
         .expect("build codex")
-        .codex;
+        .thread;
 
     for (idx, user) in [first_user, second_user, third_user]
         .into_iter()
@@ -2938,8 +2938,8 @@ async fn auto_compact_runs_when_reasoning_header_clears_between_turns() {
     let compact_mock =
         mount_compact_json_once(&server, serde_json::json!({ "output": compacted_history })).await;
 
-    let codex = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let codex = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             set_test_compact_prompt(config);
             config.model_auto_compact_token_limit = Some(300);
@@ -2947,7 +2947,7 @@ async fn auto_compact_runs_when_reasoning_header_clears_between_turns() {
         .build(&server)
         .await
         .expect("build codex")
-        .codex;
+        .thread;
 
     for user in [first_user, second_user, third_user] {
         codex
@@ -2997,7 +2997,7 @@ async fn snapshot_request_shape_pre_turn_compaction_including_incoming_user_mess
     let request_log = mount_sse_sequence(&server, vec![sse1, sse2, sse3, sse4]).await;
 
     let model_provider = non_openai_model_provider(&server);
-    let codex = test_codex()
+    let codex = test_praxis()
         .with_config(move |config| {
             config.model_provider = model_provider;
             set_test_compact_prompt(config);
@@ -3006,7 +3006,7 @@ async fn snapshot_request_shape_pre_turn_compaction_including_incoming_user_mess
         .build(&server)
         .await
         .expect("build codex")
-        .codex;
+        .thread;
 
     for user in ["USER_ONE", "USER_TWO"] {
         codex
@@ -3121,8 +3121,8 @@ async fn snapshot_request_shape_pre_turn_compaction_strips_incoming_model_switch
     .await;
 
     let model_provider = non_openai_model_provider(&server);
-    let test = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let test = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model(previous_model)
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -3134,7 +3134,7 @@ async fn snapshot_request_shape_pre_turn_compaction_strips_incoming_model_switch
         .await
         .expect("build codex");
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "BEFORE_SWITCH_USER".into(),
@@ -3154,12 +3154,12 @@ async fn snapshot_request_shape_pre_turn_compaction_strips_incoming_model_switch
         })
         .await
         .expect("submit first user turn");
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "AFTER_SWITCH_USER".into(),
@@ -3179,7 +3179,7 @@ async fn snapshot_request_shape_pre_turn_compaction_strips_incoming_model_switch
         })
         .await
         .expect("submit second user turn");
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -3244,7 +3244,7 @@ async fn snapshot_request_shape_pre_turn_compaction_context_window_exceeded() {
 
     let mut model_provider = non_openai_model_provider(&server);
     model_provider.stream_max_retries = Some(0);
-    let codex = test_codex()
+    let codex = test_praxis()
         .with_config(move |config| {
             config.model_provider = model_provider;
             set_test_compact_prompt(config);
@@ -3253,7 +3253,7 @@ async fn snapshot_request_shape_pre_turn_compaction_context_window_exceeded() {
         .build(&server)
         .await
         .expect("build codex")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -3324,7 +3324,7 @@ async fn snapshot_request_shape_manual_compact_without_previous_user_messages() 
     let request_log = mount_sse_sequence(&server, vec![compact_turn, follow_up_turn]).await;
 
     let model_provider = non_openai_model_provider(&server);
-    let codex = test_codex()
+    let codex = test_praxis()
         .with_config(move |config| {
             config.model_provider = model_provider;
             set_test_compact_prompt(config);
@@ -3332,7 +3332,7 @@ async fn snapshot_request_shape_manual_compact_without_previous_user_messages() 
         .build(&server)
         .await
         .expect("build codex")
-        .codex;
+        .thread;
 
     codex.submit(Op::Compact).await.expect("run /compact");
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;

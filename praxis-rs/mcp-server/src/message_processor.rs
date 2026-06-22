@@ -489,7 +489,7 @@ impl MessageProcessor {
         let outgoing = self.outgoing.clone();
         let running_requests_id_to_praxis_uuid = self.running_requests_id_to_praxis_uuid.clone();
 
-        let codex = match self.thread_manager.get_thread(thread_id).await {
+        let praxis_thread = match self.thread_manager.get_thread(thread_id).await {
             Ok(c) => c,
             Err(_) => {
                 tracing::warn!("Session not found for thread_id: {thread_id}");
@@ -512,7 +512,7 @@ impl MessageProcessor {
             async move {
                 crate::praxis_tool_runner::run_praxis_tool_session_reply(
                     thread_id,
-                    codex,
+                    praxis_thread,
                     outgoing,
                     request_id,
                     prompt,

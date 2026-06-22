@@ -347,7 +347,6 @@ pub struct Config {
     /// Preferred store for MCP OAuth credentials.
     /// keyring: Use an OS-specific keyring service.
     ///          Credentials stored in the keyring will only be readable by Praxis unless the user explicitly grants access via OS-level keyring access.
-    ///          https://github.com/openai/codex/blob/main/praxis-rs/rmcp-client/src/oauth.rs#L2
     /// file: PRAXIS_HOME/.credentials.json
     ///       This file will be readable to Praxis and other applications running as the same user.
     /// auto (default): keyring if available, otherwise file.
@@ -367,6 +366,12 @@ pub struct Config {
 
     /// Combined provider map (defaults plus user-defined providers).
     pub model_providers: HashMap<String, ModelProviderInfo>,
+
+    /// Machine-local or managed local model hosts registered with the LLM runtime.
+    pub local_model_hosts: BTreeMap<String, LocalModelHostConfig>,
+
+    /// Generic speech-to-text configuration used by voice input surfaces.
+    pub transcription: TranscriptionConfig,
 
     /// Maximum number of bytes to include from an AGENTS.md project doc file.
     pub project_doc_max_bytes: usize,
@@ -1185,7 +1190,6 @@ pub struct ConfigToml {
 
     /// Preferred backend for storing MCP OAuth credentials.
     /// keyring: Use an OS-specific keyring service.
-    ///          https://github.com/openai/codex/blob/main/praxis-rs/rmcp-client/src/oauth.rs#L2
     /// file: Use a file in the Praxis home directory.
     /// auto (default): Use the OS-specific keyring service if available, otherwise use a file.
     #[serde(default)]
@@ -1205,6 +1209,14 @@ pub struct ConfigToml {
     /// IDs cannot be overridden.
     #[serde(default, deserialize_with = "deserialize_model_providers")]
     pub model_providers: HashMap<String, ModelProviderInfo>,
+
+    /// Local model hosts available to the Praxis LLM runtime.
+    #[serde(default)]
+    pub local_model_hosts: BTreeMap<String, LocalModelHostConfig>,
+
+    /// Speech-to-text providers and default behavior for voice input.
+    #[serde(default)]
+    pub transcription: Option<TranscriptionConfig>,
 
     /// Maximum number of bytes to include from an AGENTS.md project doc file.
     pub project_doc_max_bytes: Option<usize>,
@@ -1457,6 +1469,81 @@ impl ProjectConfig {
 pub struct RealtimeAudioConfig {
     pub microphone: Option<String>,
     pub speaker: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalModelHostKind {
+    ExternalHttp,
+    ManagedServer,
+    NativeEngine,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct LocalModelHostConfig {
+    pub kind: LocalModelHostKind,
+    pub base_url: Option<String>,
+    pub api_key_env: Option<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    pub health_path: Option<String>,
+    pub model_path: Option<AbsolutePathBuf>,
+    pub tokenizer_path: Option<AbsolutePathBuf>,
+    pub idle_timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptionProviderKind {
+    OpenAi,
+    DashScopeQwen,
+    LocalHttp,
+    LocalProcess,
+    NativeEngine,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptionSubmitMode {
+    #[default]
+    InsertIntoComposer,
+    AutoSubmit,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TranscriptionProviderConfig {
+    pub kind: TranscriptionProviderKind,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub api_key_env: Option<String>,
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct TranscriptionConfig {
+    pub default_provider: Option<String>,
+    pub default_model: Option<String>,
+    #[serde(default)]
+    pub submit_mode: TranscriptionSubmitMode,
+    #[serde(default)]
+    pub providers: BTreeMap<String, TranscriptionProviderConfig>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema)]
@@ -2636,6 +2723,8 @@ impl Config {
             mcp_oauth_callback_port: cfg.mcp_oauth_callback_port,
             mcp_oauth_callback_url: cfg.mcp_oauth_callback_url.clone(),
             model_providers,
+            local_model_hosts: cfg.local_model_hosts,
+            transcription: cfg.transcription.unwrap_or_default(),
             project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
             project_doc_fallback_filenames: cfg
                 .project_doc_fallback_filenames

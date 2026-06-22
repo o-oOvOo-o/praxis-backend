@@ -1,4 +1,4 @@
-use super::load_plugin_manifest;
+use super::manifest::load_plugin_manifest;
 use praxis_plugin::PluginId;
 use praxis_plugin::validate_plugin_segment;
 use praxis_utils_absolute_path::AbsolutePathBuf;

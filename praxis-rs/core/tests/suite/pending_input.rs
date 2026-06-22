@@ -5,7 +5,7 @@ use core_test_support::responses::ev_output_text_delta;
 use core_test_support::responses::ev_response_created;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::Op;
@@ -90,12 +90,12 @@ async fn injected_user_input_triggers_follow_up_request_with_deltas() {
     let (server, _completions) =
         start_streaming_sse_server(vec![first_chunks, second_chunks]).await;
 
-    let codex = test_codex()
+    let codex = test_praxis()
         .with_model("gpt-5.1")
         .build_with_streaming_server(&server)
         .await
         .unwrap()
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {

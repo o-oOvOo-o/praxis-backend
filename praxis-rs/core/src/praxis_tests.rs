@@ -1,3 +1,6 @@
+use super::model_request::collect_explicit_app_ids_from_skill_items;
+use super::model_request::filter_connectors_for_input;
+use super::model_request::filter_praxis_apps_mcp_tools;
 use super::*;
 use crate::config::ConfigBuilder;
 use crate::config::test_config;
@@ -16,7 +19,7 @@ use crate::shell::default_user_shell;
 use crate::tools::format_exec_output_str;
 
 use praxis_features::Features;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_mcp::mcp_connection_manager::ToolInfo;
 use praxis_protocol::ThreadId;
 use praxis_protocol::models::FunctionCallOutputBody;
@@ -47,6 +50,8 @@ use crate::tools::handlers::ShellHandler;
 use crate::tools::handlers::UnifiedExecHandler;
 use crate::tools::registry::ToolHandler;
 use crate::tools::router::ToolCallSource;
+use crate::turn_completed_output::CompletedOutputCtx;
+use crate::turn_completed_output::handle_completed_output_item;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use core_test_support::PathBufExt;
 use core_test_support::context_snapshot;
@@ -57,7 +62,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::tracing::install_test_tracing;
 use core_test_support::wait_for_event;
 use opentelemetry::trace::TraceContextExt;
@@ -383,7 +388,7 @@ fn make_mcp_tool(
     connector_id: Option<&str>,
     connector_name: Option<&str>,
 ) -> ToolInfo {
-    let tool_namespace = if server_name == CODEX_APPS_MCP_SERVER_NAME {
+    let tool_namespace = if server_name == PRAXIS_APPS_MCP_SERVER_NAME {
         connector_name
             .map(crate::connectors::sanitize_name)
             .map(|connector_name| format!("mcp__{server_name}__{connector_name}"))
@@ -587,7 +592,7 @@ async fn get_base_instructions_no_user_content() {
 async fn reload_user_config_layer_updates_effective_apps_config() {
     let (session, _turn_context) = make_session_and_context().await;
     let praxis_home = session.praxis_home().await;
-    std::fs::create_dir_all(&praxis_home).expect("create codex home");
+    std::fs::create_dir_all(&praxis_home).expect("create Praxis home");
     let config_toml_path = praxis_home.join(CONFIG_TOML_FILE);
     std::fs::write(
         &config_toml_path,
@@ -733,7 +738,7 @@ fn non_app_mcp_tools_remain_visible_without_search_selection() {
         (
             "mcp__praxis_apps__calendar_create_event".to_string(),
             make_mcp_tool(
-                CODEX_APPS_MCP_SERVER_NAME,
+                PRAXIS_APPS_MCP_SERVER_NAME,
                 "calendar_create_event",
                 Some("calendar"),
                 Some("Calendar"),
@@ -749,7 +754,7 @@ fn non_app_mcp_tools_remain_visible_without_search_selection() {
 
     let mut selected_mcp_tools = mcp_tools
         .iter()
-        .filter(|(_, tool)| tool.server_name != CODEX_APPS_MCP_SERVER_NAME)
+        .filter(|(_, tool)| tool.server_name != PRAXIS_APPS_MCP_SERVER_NAME)
         .map(|(name, tool)| (name.clone(), tool.clone()))
         .collect::<HashMap<_, _>>();
 
@@ -783,7 +788,7 @@ fn search_tool_selection_keeps_praxis_apps_tools_without_mentions() {
         (
             "mcp__praxis_apps__calendar_create_event".to_string(),
             make_mcp_tool(
-                CODEX_APPS_MCP_SERVER_NAME,
+                PRAXIS_APPS_MCP_SERVER_NAME,
                 "calendar_create_event",
                 Some("calendar"),
                 Some("Calendar"),
@@ -835,7 +840,7 @@ fn apps_mentions_add_praxis_apps_tools_to_search_selected_set() {
         (
             "mcp__praxis_apps__calendar_create_event".to_string(),
             make_mcp_tool(
-                CODEX_APPS_MCP_SERVER_NAME,
+                PRAXIS_APPS_MCP_SERVER_NAME,
                 "calendar_create_event",
                 Some("calendar"),
                 Some("Calendar"),
@@ -1165,7 +1170,7 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.permissions.approval_policy =
             praxis_config::Constrained::allow_any(AskForApproval::OnRequest);
     });
@@ -1177,7 +1182,7 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
         .expect("rollout path");
 
     initial
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "fork seed".into(),
@@ -1186,11 +1191,14 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
     // Forking reads the persisted rollout JSONL, so force the completed source turn to disk
     // before snapshotting from it.
-    initial.codex.ensure_rollout_materialized().await;
-    initial.codex.flush_rollout().await;
+    initial.thread.ensure_rollout_materialized().await;
+    initial.thread.flush_rollout().await;
 
     let mut fork_config = initial.config.clone();
     fork_config.permissions.approval_policy =
@@ -1449,7 +1457,7 @@ async fn thread_rollback_fails_without_persisted_rollout_path() {
     );
     assert_eq!(
         error_event.praxis_error_info,
-        Some(CodexErrorInfo::ThreadRollbackFailed)
+        Some(PraxisErrorInfo::ThreadRollbackFailed)
     );
     assert_eq!(sess.clone_history().await.raw_items(), initial_context);
 }
@@ -1763,7 +1771,7 @@ async fn thread_rollback_fails_when_turn_in_progress() {
     let error_event = wait_for_thread_rollback_failed(&rx).await;
     assert_eq!(
         error_event.praxis_error_info,
-        Some(CodexErrorInfo::ThreadRollbackFailed)
+        Some(PraxisErrorInfo::ThreadRollbackFailed)
     );
 
     let history = sess.clone_history().await;
@@ -1784,7 +1792,7 @@ async fn thread_rollback_fails_when_num_turns_is_zero() {
     assert_eq!(error_event.message, "num_turns must be >= 1");
     assert_eq!(
         error_event.praxis_error_info,
-        Some(CodexErrorInfo::ThreadRollbackFailed)
+        Some(PraxisErrorInfo::ThreadRollbackFailed)
     );
 
     let history = sess.clone_history().await;
@@ -2164,7 +2172,7 @@ async fn wait_for_thread_rollback_failed(rx: &async_channel::Receiver<Event>) ->
             .expect("event");
         match evt.msg {
             EventMsg::Error(payload)
-                if payload.praxis_error_info == Some(CodexErrorInfo::ThreadRollbackFailed) =>
+                if payload.praxis_error_info == Some(PraxisErrorInfo::ThreadRollbackFailed) =>
             {
                 return payload;
             }
@@ -2496,7 +2504,8 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
     config.zsh_path = None;
     let config = Arc::new(config);
 
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let models_manager = Arc::new(ModelsManager::new(
         config.praxis_home.clone(),
         auth_manager.clone(),
@@ -2591,7 +2600,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     let config = build_test_config(praxis_home.path()).await;
     let config = Arc::new(config);
     let conversation_id = ThreadId::default();
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let models_manager = Arc::new(ModelsManager::new(
         config.praxis_home.clone(),
         auth_manager.clone(),
@@ -3437,7 +3447,8 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
     let config = build_test_config(praxis_home.path()).await;
     let config = Arc::new(config);
     let conversation_id = ThreadId::default();
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let models_manager = Arc::new(ModelsManager::new(
         config.praxis_home.clone(),
         auth_manager.clone(),
@@ -3994,12 +4005,12 @@ async fn build_initial_context_omits_default_image_save_location_without_image_h
 }
 
 #[tokio::test]
-async fn handle_output_item_done_records_image_save_history_message() {
+async fn handle_completed_output_item_records_image_save_history_message() {
     let (session, turn_context) = make_session_and_context().await;
     let session = Arc::new(session);
     let turn_context = Arc::new(turn_context);
     let call_id = "ig_history_records_message";
-    let expected_saved_path = crate::stream_events_utils::image_generation_artifact_path(
+    let expected_saved_path = crate::turn_image_output::image_generation_artifact_path(
         turn_context.config.praxis_home.as_path(),
         &session.conversation_id.to_string(),
         call_id,
@@ -4012,18 +4023,18 @@ async fn handle_output_item_done_records_image_save_history_message() {
         result: "Zm9v".to_string(),
     };
 
-    let mut ctx = HandleOutputCtx {
+    let mut ctx = CompletedOutputCtx {
         sess: Arc::clone(&session),
         turn_context: Arc::clone(&turn_context),
         tool_runtime: test_tool_runtime(Arc::clone(&session), Arc::clone(&turn_context)),
         cancellation_token: CancellationToken::new(),
     };
-    handle_output_item_done(&mut ctx, item.clone(), /*previously_active_item*/ None)
+    handle_completed_output_item(&mut ctx, item.clone(), /*previously_active_item*/ None)
         .await
         .expect("image generation item should succeed");
 
     let history = session.clone_history().await;
-    let image_output_path = crate::stream_events_utils::image_generation_artifact_path(
+    let image_output_path = crate::turn_image_output::image_generation_artifact_path(
         turn_context.config.praxis_home.as_path(),
         &session.conversation_id.to_string(),
         "<image_id>",
@@ -4051,12 +4062,12 @@ async fn handle_output_item_done_records_image_save_history_message() {
 }
 
 #[tokio::test]
-async fn handle_output_item_done_skips_image_save_message_when_save_fails() {
+async fn handle_completed_output_item_skips_image_save_message_when_save_fails() {
     let (session, turn_context) = make_session_and_context().await;
     let session = Arc::new(session);
     let turn_context = Arc::new(turn_context);
     let call_id = "ig_history_no_message";
-    let expected_saved_path = crate::stream_events_utils::image_generation_artifact_path(
+    let expected_saved_path = crate::turn_image_output::image_generation_artifact_path(
         turn_context.config.praxis_home.as_path(),
         &session.conversation_id.to_string(),
         call_id,
@@ -4069,13 +4080,13 @@ async fn handle_output_item_done_skips_image_save_message_when_save_fails() {
         result: "_-8".to_string(),
     };
 
-    let mut ctx = HandleOutputCtx {
+    let mut ctx = CompletedOutputCtx {
         sess: Arc::clone(&session),
         turn_context: Arc::clone(&turn_context),
         tool_runtime: test_tool_runtime(Arc::clone(&session), Arc::clone(&turn_context)),
         cancellation_token: CancellationToken::new(),
     };
-    handle_output_item_done(&mut ctx, item.clone(), /*previously_active_item*/ None)
+    handle_completed_output_item(&mut ctx, item.clone(), /*previously_active_item*/ None)
         .await
         .expect("image generation item should still complete");
 

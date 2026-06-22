@@ -56,7 +56,7 @@ fn guardian_risk_level_str(level: GuardianRiskLevel) -> &'static str {
 /// guardian reviewer instead of surfacing them to the user. ARC may still
 /// block actions earlier in the flow.
 pub(crate) fn routes_approval_to_guardian(turn: &TurnContext) -> bool {
-    turn.approval_policy.value() == AskForApproval::OnRequest
+    turn.effective_approval_policy() == AskForApproval::OnRequest
         && turn.config.approvals_reviewer == ApprovalsReviewer::GuardianSubagent
 }
 

@@ -12,3 +12,10 @@ pub(crate) fn praxis_product_profile() -> ProductProfile {
         name: "Praxis",
     }
 }
+
+pub(crate) fn cunning3d_product_profile() -> ProductProfile {
+    ProductProfile {
+        id: ProductProfileId::Cunning3d,
+        name: "Cunning3D",
+    }
+}

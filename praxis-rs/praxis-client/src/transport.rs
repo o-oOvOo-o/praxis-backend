@@ -1,5 +1,5 @@
-use crate::default_client::CodexHttpClient;
-use crate::default_client::CodexRequestBuilder;
+use crate::default_client::PraxisHttpClient;
+use crate::default_client::PraxisRequestBuilder;
 use crate::error::TransportError;
 use crate::request::Request;
 use crate::request::RequestCompression;
@@ -31,17 +31,17 @@ pub trait HttpTransport: Send + Sync {
 
 #[derive(Clone, Debug)]
 pub struct ReqwestTransport {
-    client: CodexHttpClient,
+    client: PraxisHttpClient,
 }
 
 impl ReqwestTransport {
     pub fn new(client: reqwest::Client) -> Self {
         Self {
-            client: CodexHttpClient::new(client),
+            client: PraxisHttpClient::new(client),
         }
     }
 
-    fn build(&self, req: Request) -> Result<CodexRequestBuilder, TransportError> {
+    fn build(&self, req: Request) -> Result<PraxisRequestBuilder, TransportError> {
         let Request {
             method,
             url,

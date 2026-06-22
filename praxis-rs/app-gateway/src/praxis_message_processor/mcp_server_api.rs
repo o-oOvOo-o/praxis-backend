@@ -11,7 +11,7 @@ use praxis_app_gateway_protocol::McpServerStatus;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_config::types::McpServerTransportConfig;
 use praxis_core::config::Config;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_mcp::mcp::auth::discover_supported_scopes;
 use praxis_mcp::mcp::auth::resolve_oauth_scopes;
 use praxis_mcp::mcp::collect_mcp_snapshot;
@@ -211,7 +211,7 @@ impl PraxisMessageProcessor {
         params: ListMcpServerStatusParams,
         config: Config,
         mcp_config: praxis_mcp::mcp::McpConfig,
-        auth: Option<CodexAuth>,
+        auth: Option<OpenAiAccountAuth>,
     ) {
         let snapshot = collect_mcp_snapshot(
             &mcp_config,

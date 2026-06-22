@@ -10,8 +10,8 @@ use core_test_support::responses::sse;
 use core_test_support::responses::sse_response;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use praxis_core::ThreadConfigSnapshot;
 use praxis_core::config::AgentRoleConfig;
 use praxis_features::Feature;
@@ -101,7 +101,7 @@ fn role_block(description: &str, role_name: &str) -> Option<String> {
     Some(block.join("\n"))
 }
 
-async fn wait_for_spawned_thread_id(test: &TestCodex) -> Result<String> {
+async fn wait_for_spawned_thread_id(test: &TestPraxis) -> Result<String> {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let ids = test.thread_manager.list_thread_ids().await;
@@ -137,7 +137,7 @@ async fn wait_for_requests(
 async fn setup_turn_one_with_spawned_child(
     server: &MockServer,
     child_response_delay: Option<Duration>,
-) -> Result<(TestCodex, String)> {
+) -> Result<(TestPraxis, String)> {
     setup_turn_one_with_custom_spawned_child(
         server,
         json!({
@@ -156,9 +156,9 @@ async fn setup_turn_one_with_custom_spawned_child(
     child_response_delay: Option<Duration>,
     wait_for_parent_notification: bool,
     configure_test: impl FnOnce(
-        core_test_support::test_codex::TestCodexBuilder,
-    ) -> core_test_support::test_codex::TestCodexBuilder,
-) -> Result<(TestCodex, String)> {
+        core_test_support::test_praxis::TestPraxisBuilder,
+    ) -> core_test_support::test_praxis::TestPraxisBuilder,
+) -> Result<(TestPraxis, String)> {
     let spawn_args = serde_json::to_string(&spawn_args)?;
 
     mount_sse_once_match(
@@ -209,7 +209,7 @@ async fn setup_turn_one_with_custom_spawned_child(
     .await;
 
     #[allow(clippy::expect_used)]
-    let mut builder = configure_test(test_codex().with_config(|config| {
+    let mut builder = configure_test(test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::Collab)
@@ -222,7 +222,7 @@ async fn setup_turn_one_with_custom_spawned_child(
     if child_response_delay.is_none() && wait_for_parent_notification {
         let _ = wait_for_requests(&child_request_log).await?;
         let rollout_path = test
-            .codex
+            .thread
             .rollout_path()
             .ok_or_else(|| anyhow::anyhow!("expected parent rollout path"))?;
         let deadline = Instant::now() + Duration::from_secs(6);
@@ -250,8 +250,8 @@ async fn spawn_child_and_capture_snapshot(
     server: &MockServer,
     spawn_args: serde_json::Value,
     configure_test: impl FnOnce(
-        core_test_support::test_codex::TestCodexBuilder,
-    ) -> core_test_support::test_codex::TestCodexBuilder,
+        core_test_support::test_praxis::TestPraxisBuilder,
+    ) -> core_test_support::test_praxis::TestPraxisBuilder,
 ) -> Result<ThreadConfigSnapshot> {
     let (test, spawned_id) = setup_turn_one_with_custom_spawned_child(
         server,
@@ -350,7 +350,7 @@ async fn spawned_child_receives_forked_parent_context() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::Collab)
@@ -496,7 +496,7 @@ async fn spawn_agent_tool_description_mentions_role_locked_settings() -> Result<
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::Collab)

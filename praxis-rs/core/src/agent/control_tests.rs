@@ -10,7 +10,7 @@ use crate::contextual_user_message::SUBAGENT_NOTIFICATION_OPEN_TAG;
 use assert_matches::assert_matches;
 use chrono::Utc;
 use praxis_features::Feature;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::AgentPath;
 use praxis_protocol::config_types::ModeKind;
 use praxis_protocol::models::ContentItem;
@@ -117,7 +117,7 @@ impl AgentControlHarness {
     async fn new() -> Self {
         let (home, config) = test_config().await;
         let manager = ThreadManager::with_models_provider_and_home_for_tests(
-            CodexAuth::from_api_key("dummy"),
+            OpenAiAccountAuth::from_api_key("dummy"),
             config.model_provider.clone(),
             config.praxis_home.clone(),
             std::sync::Arc::new(praxis_exec_server::EnvironmentManager::new(
@@ -999,7 +999,7 @@ async fn spawn_agent_respects_max_threads_limit() {
     )])
     .await;
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
-        CodexAuth::from_api_key("dummy"),
+        OpenAiAccountAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.praxis_home.clone(),
         std::sync::Arc::new(praxis_exec_server::EnvironmentManager::new(
@@ -1053,7 +1053,7 @@ async fn spawn_agent_releases_slot_after_shutdown() {
     )])
     .await;
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
-        CodexAuth::from_api_key("dummy"),
+        OpenAiAccountAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.praxis_home.clone(),
         std::sync::Arc::new(praxis_exec_server::EnvironmentManager::new(
@@ -1098,7 +1098,7 @@ async fn spawn_agent_limit_shared_across_clones() {
     )])
     .await;
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
-        CodexAuth::from_api_key("dummy"),
+        OpenAiAccountAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.praxis_home.clone(),
         std::sync::Arc::new(praxis_exec_server::EnvironmentManager::new(
@@ -1145,7 +1145,7 @@ async fn resume_thread_respects_max_threads_limit() {
     )])
     .await;
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
-        CodexAuth::from_api_key("dummy"),
+        OpenAiAccountAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.praxis_home.clone(),
         std::sync::Arc::new(praxis_exec_server::EnvironmentManager::new(
@@ -1203,7 +1203,7 @@ async fn resume_thread_releases_slot_after_resume_failure() {
     )])
     .await;
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
-        CodexAuth::from_api_key("dummy"),
+        OpenAiAccountAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.praxis_home.clone(),
         std::sync::Arc::new(praxis_exec_server::EnvironmentManager::new(
@@ -1611,7 +1611,7 @@ async fn resume_thread_subagent_restores_stored_nickname_and_role() {
         .enable(Feature::Sqlite)
         .expect("test config should allow sqlite");
     let manager = ThreadManager::with_models_provider_and_home_for_tests(
-        CodexAuth::from_api_key("dummy"),
+        OpenAiAccountAuth::from_api_key("dummy"),
         config.model_provider.clone(),
         config.praxis_home.clone(),
         std::sync::Arc::new(praxis_exec_server::EnvironmentManager::new(

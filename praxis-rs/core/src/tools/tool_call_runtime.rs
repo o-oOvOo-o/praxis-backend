@@ -20,6 +20,7 @@ use crate::tools::registry::AnyToolResult;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
 use crate::tools::router::ToolRouter;
+use praxis_loop::tool::ConcurrencyMode;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_tools::ToolSpec;
 
@@ -52,6 +53,10 @@ impl ToolCallRuntime {
         self.router.find_spec(tool_name)
     }
 
+    pub(crate) fn tool_concurrency_mode(&self, tool_name: &str) -> ConcurrencyMode {
+        self.router.tool_concurrency_mode(tool_name)
+    }
+
     #[instrument(level = "trace", skip_all)]
     pub(crate) fn handle_tool_call(
         self,
@@ -81,7 +86,7 @@ impl ToolCallRuntime {
         self.turn_context
             .tool_loop_guard
             .record_tool_call(call.tool_name.as_str());
-        let supports_parallel = self.router.tool_supports_parallel(&call.tool_name);
+        let concurrency_mode = self.router.tool_concurrency_mode(&call.tool_name);
         let router = Arc::clone(&self.router);
         let session = Arc::clone(&self.session);
         let turn = Arc::clone(&self.turn_context);
@@ -106,10 +111,11 @@ impl ToolCallRuntime {
                         Ok(Self::aborted_response(&call, secs))
                     },
                     res = async {
-                        let _guard = if supports_parallel {
-                            Either::Left(lock.read().await)
-                        } else {
-                            Either::Right(lock.write().await)
+                        let _guard = match concurrency_mode {
+                            ConcurrencyMode::Parallel => Either::Left(lock.read().await),
+                            ConcurrencyMode::Exclusive | ConcurrencyMode::Blocking => {
+                                Either::Right(lock.write().await)
+                            }
                         };
 
                         router

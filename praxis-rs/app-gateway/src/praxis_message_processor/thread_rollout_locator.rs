@@ -1,4 +1,8 @@
-use super::*;
+use super::thread_store_api::ThreadStore;
+use praxis_app_gateway_protocol::JSONRPCErrorError;
+use praxis_core::config::Config;
+use praxis_protocol::ThreadId;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum ThreadRolloutScope {
@@ -8,14 +12,6 @@ pub(super) enum ThreadRolloutScope {
 }
 
 impl ThreadRolloutScope {
-    fn archived_filter(self) -> Option<bool> {
-        match self {
-            Self::Active => Some(false),
-            Self::Any => None,
-            Self::Archived => Some(true),
-        }
-    }
-
     fn missing_message(self, thread_id: ThreadId) -> String {
         match self {
             Self::Archived => format!("no archived rollout found for thread id {thread_id}"),
@@ -31,40 +27,80 @@ impl ThreadRolloutScope {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ThreadRolloutLookupMode {
+    Scoped(ThreadRolloutScope),
+    NotFound,
+    NoRollout,
+}
+
+impl ThreadRolloutLookupMode {
+    async fn lookup_rollout_path(
+        self,
+        config: &Config,
+        thread_id: ThreadId,
+    ) -> std::io::Result<Option<PathBuf>> {
+        let store = ThreadStore::new(config);
+        match self {
+            Self::Scoped(ThreadRolloutScope::Active) => {
+                store.find_active_rollout_path(thread_id).await
+            }
+            Self::Scoped(ThreadRolloutScope::Any) | Self::NotFound | Self::NoRollout => {
+                store.find_any_rollout_path(thread_id).await
+            }
+            Self::Scoped(ThreadRolloutScope::Archived) => {
+                store.find_archived_rollout_path(thread_id).await
+            }
+        }
+    }
+
+    fn missing_error(self, thread_id: ThreadId) -> JSONRPCErrorError {
+        match self {
+            Self::Scoped(scope) => {
+                crate::json_rpc_error::invalid_request(scope.missing_message(thread_id))
+            }
+            Self::NotFound => {
+                crate::json_rpc_error::invalid_request(format!("thread not found: {thread_id}"))
+            }
+            Self::NoRollout => crate::json_rpc_error::invalid_request(format!(
+                "no rollout found for thread id {thread_id}"
+            )),
+        }
+    }
+
+    fn locate_error(self, thread_id: ThreadId, err: impl std::fmt::Display) -> JSONRPCErrorError {
+        match self {
+            Self::Scoped(scope) => {
+                crate::json_rpc_error::invalid_request(scope.locate_failed_message(thread_id, err))
+            }
+            Self::NotFound | Self::NoRollout => crate::json_rpc_error::internal_error(format!(
+                "failed to locate thread id {thread_id}: {err}"
+            )),
+        }
+    }
+}
+
 pub(super) async fn find_thread_rollout_path(
     config: &Config,
     thread_id: ThreadId,
     scope: ThreadRolloutScope,
 ) -> Result<PathBuf, JSONRPCErrorError> {
-    let directory = praxis_rollout::ThreadDirectory::open(config).await;
-    match directory
-        .find_rollout_path(thread_id, scope.archived_filter())
+    find_required_thread_rollout_path(config, thread_id, ThreadRolloutLookupMode::Scoped(scope))
         .await
-    {
-        Ok(Some(path)) => Ok(path),
-        Ok(None) => Err(crate::json_rpc_error::invalid_request(
-            scope.missing_message(thread_id),
-        )),
-        Err(err) => Err(crate::json_rpc_error::invalid_request(
-            scope.locate_failed_message(thread_id, err),
-        )),
-    }
 }
 
 pub(super) async fn find_thread_rollout_path_or_not_found(
     config: &Config,
     thread_id: ThreadId,
 ) -> Result<PathBuf, JSONRPCErrorError> {
-    let directory = praxis_rollout::ThreadDirectory::open(config).await;
-    match directory.find_rollout_path(thread_id, None).await {
-        Ok(Some(path)) => Ok(path),
-        Ok(None) => Err(crate::json_rpc_error::invalid_request(format!(
-            "thread not found: {thread_id}"
-        ))),
-        Err(err) => Err(crate::json_rpc_error::internal_error(format!(
-            "failed to locate thread id {thread_id}: {err}"
-        ))),
-    }
+    find_required_thread_rollout_path(config, thread_id, ThreadRolloutLookupMode::NotFound).await
+}
+
+pub(super) async fn find_thread_rollout_path_or_no_rollout(
+    config: &Config,
+    thread_id: ThreadId,
+) -> Result<PathBuf, JSONRPCErrorError> {
+    find_required_thread_rollout_path(config, thread_id, ThreadRolloutLookupMode::NoRollout).await
 }
 
 pub(super) async fn resolve_thread_rollout_path(
@@ -79,4 +115,16 @@ pub(super) async fn resolve_thread_rollout_path(
     }
 
     find_thread_rollout_path(config, thread_id, ThreadRolloutScope::Any).await
+}
+
+async fn find_required_thread_rollout_path(
+    config: &Config,
+    thread_id: ThreadId,
+    mode: ThreadRolloutLookupMode,
+) -> Result<PathBuf, JSONRPCErrorError> {
+    match mode.lookup_rollout_path(config, thread_id).await {
+        Ok(Some(path)) => Ok(path),
+        Ok(None) => Err(mode.missing_error(thread_id)),
+        Err(err) => Err(mode.locate_error(thread_id, err)),
+    }
 }

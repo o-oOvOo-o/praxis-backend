@@ -427,7 +427,7 @@ mod phase2 {
     use chrono::Utc;
     use core_test_support::PathBufExt;
     use praxis_config::Constrained;
-    use praxis_login::CodexAuth;
+    use praxis_login::OpenAiAccountAuth;
     use praxis_protocol::ThreadId;
     use praxis_protocol::protocol::AskForApproval;
     use praxis_protocol::protocol::Op;
@@ -467,7 +467,7 @@ mod phase2 {
 
     impl DispatchHarness {
         async fn new() -> Self {
-            let praxis_home = tempfile::tempdir().expect("create temp codex home");
+            let praxis_home = tempfile::tempdir().expect("create temp Praxis home");
             let mut config = test_config();
             config.praxis_home = praxis_home.path().to_path_buf();
             config.cwd = config.praxis_home.abs();
@@ -481,7 +481,7 @@ mod phase2 {
             .expect("initialize state db");
 
             let manager = ThreadManager::with_models_provider_and_home_for_tests(
-                CodexAuth::from_api_key("dummy"),
+                OpenAiAccountAuth::from_api_key("dummy"),
                 config.model_provider.clone(),
                 config.praxis_home.clone(),
                 std::sync::Arc::new(praxis_exec_server::EnvironmentManager::new(
@@ -886,7 +886,7 @@ mod phase2 {
 
     #[tokio::test]
     async fn dispatch_marks_job_for_retry_when_spawn_agent_fails() {
-        let praxis_home = tempfile::tempdir().expect("create temp codex home");
+        let praxis_home = tempfile::tempdir().expect("create temp Praxis home");
         let mut config = test_config();
         config.praxis_home = praxis_home.path().to_path_buf();
         config.cwd = config.praxis_home.abs();

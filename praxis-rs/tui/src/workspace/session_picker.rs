@@ -43,6 +43,17 @@ pub(crate) struct SessionPickerPageRequest {
     pub(crate) include_non_interactive: bool,
 }
 
+impl SessionPickerPageRequest {
+    pub(crate) fn thread_list_params(&self) -> praxis_app_gateway_protocol::ThreadListParams {
+        thread_list_params(
+            self.cursor.clone(),
+            ThreadSortKey::UpdatedAt,
+            interactive_thread_source_kinds(self.include_non_interactive),
+            self.search_term.clone(),
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum SessionPickerEffect {
     None,
@@ -268,6 +279,7 @@ impl SessionPickerState {
             row.path,
             row.thread_id,
             row.thread_name,
+            Some(row.cwd),
         ))
     }
 
@@ -358,18 +370,7 @@ impl SessionPickerState {
     }
 }
 
-pub(crate) fn session_picker_thread_list_params(
-    request: &SessionPickerPageRequest,
-) -> praxis_app_gateway_protocol::ThreadListParams {
-    thread_list_params(
-        request.cursor.clone(),
-        ThreadSortKey::UpdatedAt,
-        interactive_thread_source_kinds(request.include_non_interactive),
-        request.search_term.clone(),
-    )
-}
-
-pub(crate) fn render_session_picker(area: Rect, buf: &mut Buffer, state: &SessionPickerState) {
+pub(super) fn render_session_picker(area: Rect, buf: &mut Buffer, state: &SessionPickerState) {
     if area.is_empty() {
         return;
     }

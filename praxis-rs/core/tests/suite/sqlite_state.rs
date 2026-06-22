@@ -9,7 +9,7 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::stdio_server_bin;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use praxis_config::types::McpServerConfig;
@@ -39,7 +39,7 @@ use uuid::Uuid;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn new_thread_is_recorded_in_state_db() -> Result<()> {
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::Sqlite)
@@ -48,7 +48,7 @@ async fn new_thread_is_recorded_in_state_db() -> Result<()> {
     let test = builder.build(&server).await?;
 
     let thread_id = test.session_configured.session_id;
-    let rollout_path = test.codex.rollout_path().expect("rollout path");
+    let rollout_path = test.thread.rollout_path().expect("rollout path");
     let db_path = praxis_state::state_db_path(test.config.sqlite_home.as_path());
 
     for _ in 0..100 {
@@ -58,7 +58,7 @@ async fn new_thread_is_recorded_in_state_db() -> Result<()> {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    let db = test.codex.state_db().expect("state db enabled");
+    let db = test.thread.state_db().expect("state db enabled");
     assert!(
         !rollout_path.exists(),
         "fresh thread rollout should not be materialized before first user message"
@@ -125,7 +125,7 @@ async fn backfill_scans_existing_rollouts() -> Result<()> {
     ];
     let dynamic_tools_for_hook = dynamic_tools.clone();
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(move |praxis_home| {
             let rollout_path = praxis_home.join(&rollout_rel_path_for_hook);
             let parent = rollout_path
@@ -195,7 +195,7 @@ async fn backfill_scans_existing_rollouts() -> Result<()> {
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 
-    let db = test.codex.state_db().expect("state db enabled");
+    let db = test.thread.state_db().expect("state db enabled");
 
     let mut metadata = None;
     for _ in 0..40 {
@@ -238,7 +238,7 @@ async fn user_messages_persist_in_state_db() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::Sqlite)
@@ -257,7 +257,7 @@ async fn user_messages_persist_in_state_db() -> Result<()> {
     test.submit_turn("hello from sqlite").await?;
     test.submit_turn("another message").await?;
 
-    let db = test.codex.state_db().expect("state db enabled");
+    let db = test.thread.state_db().expect("state db enabled");
     let thread_id = test.session_configured.session_id;
 
     let mut metadata = None;
@@ -292,7 +292,7 @@ async fn web_search_marks_thread_memory_mode_polluted_when_configured() -> Resul
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::Sqlite)
@@ -300,7 +300,7 @@ async fn web_search_marks_thread_memory_mode_polluted_when_configured() -> Resul
         config.memories.no_memories_if_mcp_or_web_search = true;
     });
     let test = builder.build(&server).await?;
-    let db = test.codex.state_db().expect("state db enabled");
+    let db = test.thread.state_db().expect("state db enabled");
     let thread_id = test.session_configured.session_id;
 
     test.submit_turn("search the web").await?;
@@ -345,7 +345,7 @@ async fn mcp_call_marks_thread_memory_mode_polluted_when_configured() -> Result<
     .await;
 
     let rmcp_test_server_bin = stdio_server_bin()?;
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config
             .features
             .enable(Feature::Sqlite)
@@ -384,10 +384,10 @@ async fn mcp_call_marks_thread_memory_mode_polluted_when_configured() -> Result<
             .expect("test mcp servers should accept any configuration");
     });
     let test = builder.build(&server).await?;
-    let db = test.codex.state_db().expect("state db enabled");
+    let db = test.thread.state_db().expect("state db enabled");
     let thread_id = test.session_configured.session_id;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "call the rmcp echo tool".to_string(),
@@ -406,11 +406,11 @@ async fn mcp_call_marks_thread_memory_mode_polluted_when_configured() -> Result<
             personality: None,
         })
         .await?;
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::McpToolCallEnd(_))
     })
     .await;
-    wait_for_event_match(&test.codex, |event| match event {
+    wait_for_event_match(&test.thread, |event| match event {
         EventMsg::Error(err) => Some(Err(anyhow::anyhow!(err.message.clone()))),
         EventMsg::TurnComplete(_) => Some(Ok(())),
         _ => None,
@@ -453,14 +453,14 @@ async fn tool_call_logs_include_thread_id() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::Sqlite)
             .expect("test config should allow feature update");
     });
     let test = builder.build(&server).await?;
-    let db = test.codex.state_db().expect("state db enabled");
+    let db = test.thread.state_db().expect("state db enabled");
     let expected_thread_id = test.session_configured.session_id.to_string();
 
     let subscriber = tracing_subscriber::registry().with(praxis_state::log_db::start(db.clone()));

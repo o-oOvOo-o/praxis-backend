@@ -100,7 +100,7 @@ mod tests {
     fn equivalent_cwd_spellings_share_workspace_sid_key() {
         let temp = tempfile::tempdir().expect("tempdir");
         let praxis_home = temp.path().join("praxis-home");
-        std::fs::create_dir_all(&praxis_home).expect("create codex home");
+        std::fs::create_dir_all(&praxis_home).expect("create Praxis home");
 
         let workspace = temp.path().join("WorkspaceRoot");
         std::fs::create_dir_all(&workspace).expect("create workspace root");

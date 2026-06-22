@@ -118,7 +118,7 @@ async fn mount_streamable_http_json_rpc(
 ) {
     Mock::given(method("POST"))
         .and(path_regex("^/api/codex/apps/?$"))
-        .respond_with(CodexAppsJsonRpcResponder {
+        .respond_with(PraxisAppsJsonRpcResponder {
             connector_name,
             connector_description,
             searchable,
@@ -127,13 +127,13 @@ async fn mount_streamable_http_json_rpc(
         .await;
 }
 
-struct CodexAppsJsonRpcResponder {
+struct PraxisAppsJsonRpcResponder {
     connector_name: String,
     connector_description: String,
     searchable: bool,
 }
 
-impl Respond for CodexAppsJsonRpcResponder {
+impl Respond for PraxisAppsJsonRpcResponder {
     fn respond(&self, request: &Request) -> ResponseTemplate {
         let body: Value = match serde_json::from_slice(&request.body) {
             Ok(body) => body,

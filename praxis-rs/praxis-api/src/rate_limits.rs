@@ -1,8 +1,11 @@
 use http::HeaderMap;
 use praxis_protocol::account::PlanType;
 use praxis_protocol::protocol::CreditsSnapshot;
+use praxis_protocol::protocol::OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID;
+use praxis_protocol::protocol::OPENAI_HOSTED_RATE_LIMIT_EVENT_KIND;
 use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_protocol::protocol::RateLimitWindow;
+use praxis_protocol::protocol::is_openai_hosted_primary_rate_limit;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::fmt::Display;
@@ -35,7 +38,7 @@ pub fn parse_all_rate_limits(headers: &HeaderMap) -> Vec<RateLimitSnapshot> {
     for name in headers.keys() {
         let header_name = name.as_str().to_ascii_lowercase();
         if let Some(limit_id) = header_name_to_limit_id(&header_name)
-            && limit_id != "codex"
+            && !is_openai_hosted_primary_rate_limit(&limit_id)
         {
             limit_ids.insert(limit_id);
         }
@@ -51,8 +54,8 @@ pub fn parse_all_rate_limits(headers: &HeaderMap) -> Vec<RateLimitSnapshot> {
 
 /// Parses rate-limit headers for the provided limit id.
 ///
-/// `limit_id` should match the server-provided metered limit id (e.g. `codex`,
-/// `praxis_other`). When omitted, this defaults to the legacy `codex` header family.
+/// `limit_id` should match the server-provided metered limit id. When omitted, this defaults to
+/// the OpenAI hosted primary agent limit header family.
 pub fn parse_rate_limit_for_limit(
     headers: &HeaderMap,
     limit_id: Option<&str>,
@@ -60,7 +63,7 @@ pub fn parse_rate_limit_for_limit(
     let normalized_limit = limit_id
         .map(str::trim)
         .filter(|name| !name.is_empty())
-        .unwrap_or("codex")
+        .unwrap_or(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
         .to_ascii_lowercase()
         .replace('_', "-");
     let prefix = format!("x-{normalized_limit}");
@@ -129,7 +132,7 @@ struct RateLimitEvent {
 
 pub fn parse_rate_limit_event(payload: &str) -> Option<RateLimitSnapshot> {
     let event: RateLimitEvent = serde_json::from_str(payload).ok()?;
-    if event.kind != "codex.rate_limits" {
+    if event.kind != OPENAI_HOSTED_RATE_LIMIT_EVENT_KIND {
         return None;
     }
     let (primary, secondary) = if let Some(details) = event.rate_limits.as_ref() {
@@ -150,7 +153,9 @@ pub fn parse_rate_limit_event(payload: &str) -> Option<RateLimitSnapshot> {
         .or(event.limit_name)
         .map(normalize_limit_id);
     Some(RateLimitSnapshot {
-        limit_id: Some(limit_id.unwrap_or_else(|| "codex".to_string())),
+        limit_id: Some(
+            limit_id.unwrap_or_else(|| OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string()),
+        ),
         limit_name: None,
         primary,
         secondary,
@@ -278,7 +283,10 @@ mod tests {
         );
 
         let snapshot = parse_rate_limit_for_limit(&headers, /*limit_id*/ None).expect("snapshot");
-        assert_eq!(snapshot.limit_id.as_deref(), Some("codex"));
+        assert_eq!(
+            snapshot.limit_id.as_deref(),
+            Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
+        );
         assert_eq!(snapshot.limit_name, None);
         let primary = snapshot.primary.expect("primary");
         assert_eq!(primary.used_percent, 12.5);
@@ -345,7 +353,10 @@ mod tests {
 
         let updates = parse_all_rate_limits(&headers);
         assert_eq!(updates.len(), 2);
-        assert_eq!(updates[0].limit_id.as_deref(), Some("codex"));
+        assert_eq!(
+            updates[0].limit_id.as_deref(),
+            Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
+        );
         assert_eq!(updates[1].limit_id.as_deref(), Some("praxis_secondary"));
         assert_eq!(updates[0].limit_name, None);
         assert_eq!(updates[1].limit_name, None);
@@ -357,7 +368,10 @@ mod tests {
 
         let updates = parse_all_rate_limits(&headers);
         assert_eq!(updates.len(), 1);
-        assert_eq!(updates[0].limit_id.as_deref(), Some("codex"));
+        assert_eq!(
+            updates[0].limit_id.as_deref(),
+            Some(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
+        );
         assert_eq!(updates[0].limit_name, None);
         assert_eq!(updates[0].primary, None);
         assert_eq!(updates[0].secondary, None);

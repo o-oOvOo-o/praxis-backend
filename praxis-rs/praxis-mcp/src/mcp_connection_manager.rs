@@ -19,8 +19,8 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::mcp::CODEX_APPS_MCP_SERVER_NAME;
 use crate::mcp::McpConfig;
+use crate::mcp::PRAXIS_APPS_MCP_SERVER_NAME;
 use crate::mcp::ToolPluginProvenance;
 use crate::mcp::auth::McpAuthStatusEntry;
 use crate::mcp::configured_mcp_servers;
@@ -85,7 +85,7 @@ use url::Url;
 
 use praxis_config::McpServerConfig;
 use praxis_config::McpServerTransportConfig;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_utils_plugins::mcp_connector::is_connector_id_allowed;
 use praxis_utils_plugins::mcp_connector::sanitize_name;
 
@@ -103,11 +103,12 @@ pub const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Default timeout for individual tool calls.
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(120);
 
-const CODEX_APPS_TOOLS_CACHE_SCHEMA_VERSION: u8 = 1;
-const CODEX_APPS_TOOLS_CACHE_DIR: &str = "cache/praxis_apps_tools";
-const MCP_TOOLS_LIST_DURATION_METRIC: &str = "codex.mcp.tools.list.duration_ms";
-const MCP_TOOLS_FETCH_UNCACHED_DURATION_METRIC: &str = "codex.mcp.tools.fetch_uncached.duration_ms";
-const MCP_TOOLS_CACHE_WRITE_DURATION_METRIC: &str = "codex.mcp.tools.cache_write.duration_ms";
+const PRAXIS_APPS_TOOLS_CACHE_SCHEMA_VERSION: u8 = 1;
+const PRAXIS_APPS_TOOLS_CACHE_DIR: &str = "cache/praxis_apps_tools";
+const MCP_TOOLS_LIST_DURATION_METRIC: &str = "praxis.mcp.tools.list.duration_ms";
+const MCP_TOOLS_FETCH_UNCACHED_DURATION_METRIC: &str =
+    "praxis.mcp.tools.fetch_uncached.duration_ms";
+const MCP_TOOLS_CACHE_WRITE_DURATION_METRIC: &str = "praxis.mcp.tools.cache_write.duration_ms";
 
 fn sha1_hex(s: &str) -> String {
     let mut hasher = Sha1::new();
@@ -116,7 +117,7 @@ fn sha1_hex(s: &str) -> String {
     format!("{sha1:x}")
 }
 
-pub fn praxis_apps_tools_cache_key(auth: Option<&CodexAuth>) -> CodexAppsToolsCacheKey {
+pub fn praxis_apps_tools_cache_key(auth: Option<&OpenAiAccountAuth>) -> PraxisAppsToolsCacheKey {
     let token_data = auth.and_then(|auth| auth.get_token_data().ok());
     let account_id = token_data
         .as_ref()
@@ -128,7 +129,7 @@ pub fn praxis_apps_tools_cache_key(auth: Option<&CodexAuth>) -> CodexAppsToolsCa
         .as_ref()
         .is_some_and(|token_data| token_data.id_token.is_workspace_account());
 
-    CodexAppsToolsCacheKey {
+    PraxisAppsToolsCacheKey {
         account_id,
         chatgpt_user_id,
         is_workspace_account,
@@ -143,7 +144,7 @@ where
     let mut seen_raw_names = HashSet::new();
     let mut qualified_tools = HashMap::new();
     for tool in tools {
-        let qualified_name_raw = if tool.server_name != CODEX_APPS_MCP_SERVER_NAME {
+        let qualified_name_raw = if tool.server_name != PRAXIS_APPS_MCP_SERVER_NAME {
             format!(
                 "mcp{}{}{}{}",
                 MCP_TOOL_NAME_DELIMITER, tool.server_name, MCP_TOOL_NAME_DELIMITER, tool.tool_name
@@ -195,35 +196,35 @@ pub struct ToolInfo {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CodexAppsToolsCacheKey {
+pub struct PraxisAppsToolsCacheKey {
     account_id: Option<String>,
     chatgpt_user_id: Option<String>,
     is_workspace_account: bool,
 }
 
 #[derive(Clone)]
-struct CodexAppsToolsCacheContext {
+struct PraxisAppsToolsCacheContext {
     praxis_home: PathBuf,
-    user_key: CodexAppsToolsCacheKey,
+    user_key: PraxisAppsToolsCacheKey,
 }
 
-impl CodexAppsToolsCacheContext {
+impl PraxisAppsToolsCacheContext {
     fn cache_path(&self) -> PathBuf {
         let user_key_json = serde_json::to_string(&self.user_key).unwrap_or_default();
         let user_key_hash = sha1_hex(&user_key_json);
         self.praxis_home
-            .join(CODEX_APPS_TOOLS_CACHE_DIR)
+            .join(PRAXIS_APPS_TOOLS_CACHE_DIR)
             .join(format!("{user_key_hash}.json"))
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CodexAppsToolsDiskCache {
+struct PraxisAppsToolsDiskCache {
     schema_version: u8,
     tools: Vec<ToolInfo>,
 }
 
-enum CachedCodexAppsToolsLoad {
+enum CachedPraxisAppsToolsLoad {
     Hit(Vec<ToolInfo>),
     Missing,
     Invalid,
@@ -356,15 +357,15 @@ struct ManagedClient {
     tools: Vec<ToolInfo>,
     tool_filter: ToolFilter,
     tool_timeout: Option<Duration>,
-    server_supports_sandbox_state_capability: bool,
-    praxis_apps_tools_cache_context: Option<CodexAppsToolsCacheContext>,
+    sandbox_state_method: Option<&'static str>,
+    praxis_apps_tools_cache_context: Option<PraxisAppsToolsCacheContext>,
 }
 
 impl ManagedClient {
     fn listed_tools(&self) -> Vec<ToolInfo> {
         let total_start = Instant::now();
         if let Some(cache_context) = self.praxis_apps_tools_cache_context.as_ref()
-            && let CachedCodexAppsToolsLoad::Hit(tools) =
+            && let CachedPraxisAppsToolsLoad::Hit(tools) =
                 load_cached_praxis_apps_tools(cache_context)
         {
             emit_duration(
@@ -388,14 +389,14 @@ impl ManagedClient {
 
     /// Returns once the server has ack'd the sandbox state update.
     async fn notify_sandbox_state_change(&self, sandbox_state: &SandboxState) -> Result<()> {
-        if !self.server_supports_sandbox_state_capability {
+        let Some(sandbox_state_method) = self.sandbox_state_method else {
             return Ok(());
-        }
+        };
 
         let _response = self
             .client
             .send_custom_request(
-                MCP_SANDBOX_STATE_METHOD,
+                sandbox_state_method,
                 Some(serde_json::to_value(sandbox_state)?),
             )
             .await?;
@@ -422,7 +423,7 @@ impl AsyncManagedClient {
         cancel_token: CancellationToken,
         tx_event: Sender<Event>,
         elicitation_requests: ElicitationRequestManager,
-        praxis_apps_tools_cache_context: Option<CodexAppsToolsCacheContext>,
+        praxis_apps_tools_cache_context: Option<PraxisAppsToolsCacheContext>,
         tool_plugin_provenance: Arc<ToolPluginProvenance>,
     ) -> Self {
         let tool_filter = ToolFilter::from_config(&config);
@@ -561,11 +562,13 @@ impl AsyncManagedClient {
     }
 }
 
-pub const MCP_SANDBOX_STATE_CAPABILITY: &str = "codex/sandbox-state";
+pub const MCP_SANDBOX_STATE_CAPABILITY: &str = "praxis/sandbox-state";
+const LEGACY_CODEX_MCP_SANDBOX_STATE_CAPABILITY: &str = "codex/sandbox-state";
 
 /// Custom MCP request to push sandbox state updates.
 /// When used, the `params` field of the notification is [`SandboxState`].
-pub const MCP_SANDBOX_STATE_METHOD: &str = "codex/sandbox-state/update";
+pub const MCP_SANDBOX_STATE_METHOD: &str = "praxis/sandbox-state/update";
+const LEGACY_CODEX_MCP_SANDBOX_STATE_METHOD: &str = "codex/sandbox-state/update";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -592,7 +595,7 @@ impl McpConnectionManager {
     pub fn effective_servers(
         &self,
         config: &McpConfig,
-        auth: Option<&CodexAuth>,
+        auth: Option<&OpenAiAccountAuth>,
     ) -> HashMap<String, McpServerConfig> {
         effective_mcp_servers(config, auth)
     }
@@ -633,7 +636,7 @@ impl McpConnectionManager {
         tx_event: Sender<Event>,
         initial_sandbox_state: SandboxState,
         praxis_home: PathBuf,
-        praxis_apps_tools_cache_key: CodexAppsToolsCacheKey,
+        praxis_apps_tools_cache_key: PraxisAppsToolsCacheKey,
         tool_plugin_provenance: ToolPluginProvenance,
     ) -> (Self, CancellationToken) {
         let cancel_token = CancellationToken::new();
@@ -658,8 +661,8 @@ impl McpConnectionManager {
                 },
             )
             .await;
-            let praxis_apps_tools_cache_context = if server_name == CODEX_APPS_MCP_SERVER_NAME {
-                Some(CodexAppsToolsCacheContext {
+            let praxis_apps_tools_cache_context = if server_name == PRAXIS_APPS_MCP_SERVER_NAME {
+                Some(PraxisAppsToolsCacheContext {
                     praxis_home: praxis_home.clone(),
                     user_key: praxis_apps_tools_cache_key.clone(),
                 })
@@ -822,7 +825,7 @@ impl McpConnectionManager {
         tools
     }
 
-    /// Force-refresh codex apps tools by bypassing the in-process cache.
+    /// Force-refresh Praxis apps tools by bypassing the in-process cache.
     ///
     /// On success, the refreshed tools replace the cache contents and the
     /// latest filtered tool map is returned directly to the caller. On
@@ -830,8 +833,8 @@ impl McpConnectionManager {
     pub async fn hard_refresh_praxis_apps_tools_cache(&self) -> Result<HashMap<String, ToolInfo>> {
         let managed_client = self
             .clients
-            .get(CODEX_APPS_MCP_SERVER_NAME)
-            .ok_or_else(|| anyhow!("unknown MCP server '{CODEX_APPS_MCP_SERVER_NAME}'"))?
+            .get(PRAXIS_APPS_MCP_SERVER_NAME)
+            .ok_or_else(|| anyhow!("unknown MCP server '{PRAXIS_APPS_MCP_SERVER_NAME}'"))?
             .client()
             .await
             .context("failed to get client")?;
@@ -839,13 +842,13 @@ impl McpConnectionManager {
         let list_start = Instant::now();
         let fetch_start = Instant::now();
         let tools = list_tools_for_client_uncached(
-            CODEX_APPS_MCP_SERVER_NAME,
+            PRAXIS_APPS_MCP_SERVER_NAME,
             &managed_client.client,
             managed_client.tool_timeout,
         )
         .await
         .with_context(|| {
-            format!("failed to refresh tools for MCP server '{CODEX_APPS_MCP_SERVER_NAME}'")
+            format!("failed to refresh tools for MCP server '{PRAXIS_APPS_MCP_SERVER_NAME}'")
         })?;
         emit_duration(
             MCP_TOOLS_FETCH_UNCACHED_DURATION_METRIC,
@@ -854,7 +857,7 @@ impl McpConnectionManager {
         );
 
         write_cached_praxis_apps_tools_if_needed(
-            CODEX_APPS_MCP_SERVER_NAME,
+            PRAXIS_APPS_MCP_SERVER_NAME,
             managed_client.praxis_apps_tools_cache_context.as_ref(),
             &tools,
         );
@@ -1188,7 +1191,7 @@ pub fn filter_non_praxis_apps_mcp_tools_only(
 ) -> HashMap<String, ToolInfo> {
     mcp_tools
         .iter()
-        .filter(|(_, tool)| tool.server_name != CODEX_APPS_MCP_SERVER_NAME)
+        .filter(|(_, tool)| tool.server_name != PRAXIS_APPS_MCP_SERVER_NAME)
         .map(|(name, tool)| (name.clone(), tool.clone()))
         .collect()
 }
@@ -1198,7 +1201,7 @@ fn normalize_praxis_apps_tool_title(
     connector_name: Option<&str>,
     value: &str,
 ) -> String {
-    if server_name != CODEX_APPS_MCP_SERVER_NAME {
+    if server_name != PRAXIS_APPS_MCP_SERVER_NAME {
         return value.to_string();
     }
 
@@ -1225,7 +1228,7 @@ fn normalize_praxis_apps_tool_name(
     connector_id: Option<&str>,
     connector_name: Option<&str>,
 ) -> String {
-    if server_name != CODEX_APPS_MCP_SERVER_NAME {
+    if server_name != PRAXIS_APPS_MCP_SERVER_NAME {
         return tool_name.to_string();
     }
 
@@ -1255,7 +1258,7 @@ fn normalize_praxis_apps_tool_name(
 }
 
 fn normalize_praxis_apps_namespace(server_name: &str, connector_name: Option<&str>) -> String {
-    if server_name != CODEX_APPS_MCP_SERVER_NAME {
+    if server_name != PRAXIS_APPS_MCP_SERVER_NAME {
         server_name.to_string()
     } else if let Some(connector_name) = connector_name {
         format!(
@@ -1316,7 +1319,7 @@ impl From<anyhow::Error> for StartupOutcomeError {
 }
 
 fn elicitation_capability_for_server(server_name: &str) -> Option<ElicitationCapability> {
-    if server_name == CODEX_APPS_MCP_SERVER_NAME {
+    if server_name == PRAXIS_APPS_MCP_SERVER_NAME {
         // https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation#capabilities
         // indicates this should be an empty object.
         Some(ElicitationCapability {
@@ -1387,7 +1390,7 @@ async fn start_server_task(
         praxis_apps_tools_cache_context.as_ref(),
         &tools,
     );
-    if server_name == CODEX_APPS_MCP_SERVER_NAME {
+    if server_name == PRAXIS_APPS_MCP_SERVER_NAME {
         emit_duration(
             MCP_TOOLS_LIST_DURATION_METRIC,
             list_start.elapsed(),
@@ -1396,18 +1399,25 @@ async fn start_server_task(
     }
     let tools = filter_tools(tools, &tool_filter);
 
-    let server_supports_sandbox_state_capability = initialize_result
+    let sandbox_state_method = initialize_result
         .capabilities
         .experimental
         .as_ref()
-        .and_then(|exp| exp.get(MCP_SANDBOX_STATE_CAPABILITY))
-        .is_some();
+        .and_then(|exp| {
+            if exp.get(MCP_SANDBOX_STATE_CAPABILITY).is_some() {
+                Some(MCP_SANDBOX_STATE_METHOD)
+            } else if exp.get(LEGACY_CODEX_MCP_SANDBOX_STATE_CAPABILITY).is_some() {
+                Some(LEGACY_CODEX_MCP_SANDBOX_STATE_METHOD)
+            } else {
+                None
+            }
+        });
     let managed = ManagedClient {
         client: Arc::clone(&client),
         tools,
         tool_timeout: Some(tool_timeout),
         tool_filter,
-        server_supports_sandbox_state_capability,
+        sandbox_state_method,
         praxis_apps_tools_cache_context,
     };
 
@@ -1420,7 +1430,7 @@ struct StartServerTaskParams {
     tool_filter: ToolFilter,
     tx_event: Sender<Event>,
     elicitation_requests: ElicitationRequestManager,
-    praxis_apps_tools_cache_context: Option<CodexAppsToolsCacheContext>,
+    praxis_apps_tools_cache_context: Option<PraxisAppsToolsCacheContext>,
 }
 
 async fn make_rmcp_client(
@@ -1474,10 +1484,10 @@ async fn make_rmcp_client(
 
 fn write_cached_praxis_apps_tools_if_needed(
     server_name: &str,
-    cache_context: Option<&CodexAppsToolsCacheContext>,
+    cache_context: Option<&PraxisAppsToolsCacheContext>,
     tools: &[ToolInfo],
 ) {
-    if server_name != CODEX_APPS_MCP_SERVER_NAME {
+    if server_name != PRAXIS_APPS_MCP_SERVER_NAME {
         return;
     }
 
@@ -1494,52 +1504,52 @@ fn write_cached_praxis_apps_tools_if_needed(
 
 fn load_startup_cached_praxis_apps_tools_snapshot(
     server_name: &str,
-    cache_context: Option<&CodexAppsToolsCacheContext>,
+    cache_context: Option<&PraxisAppsToolsCacheContext>,
 ) -> Option<Vec<ToolInfo>> {
-    if server_name != CODEX_APPS_MCP_SERVER_NAME {
+    if server_name != PRAXIS_APPS_MCP_SERVER_NAME {
         return None;
     }
 
     let cache_context = cache_context?;
 
     match load_cached_praxis_apps_tools(cache_context) {
-        CachedCodexAppsToolsLoad::Hit(tools) => Some(tools),
-        CachedCodexAppsToolsLoad::Missing | CachedCodexAppsToolsLoad::Invalid => None,
+        CachedPraxisAppsToolsLoad::Hit(tools) => Some(tools),
+        CachedPraxisAppsToolsLoad::Missing | CachedPraxisAppsToolsLoad::Invalid => None,
     }
 }
 
 #[cfg(test)]
 fn read_cached_praxis_apps_tools(
-    cache_context: &CodexAppsToolsCacheContext,
+    cache_context: &PraxisAppsToolsCacheContext,
 ) -> Option<Vec<ToolInfo>> {
     match load_cached_praxis_apps_tools(cache_context) {
-        CachedCodexAppsToolsLoad::Hit(tools) => Some(tools),
-        CachedCodexAppsToolsLoad::Missing | CachedCodexAppsToolsLoad::Invalid => None,
+        CachedPraxisAppsToolsLoad::Hit(tools) => Some(tools),
+        CachedPraxisAppsToolsLoad::Missing | CachedPraxisAppsToolsLoad::Invalid => None,
     }
 }
 
 fn load_cached_praxis_apps_tools(
-    cache_context: &CodexAppsToolsCacheContext,
-) -> CachedCodexAppsToolsLoad {
+    cache_context: &PraxisAppsToolsCacheContext,
+) -> CachedPraxisAppsToolsLoad {
     let cache_path = cache_context.cache_path();
     let bytes = match std::fs::read(cache_path) {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return CachedCodexAppsToolsLoad::Missing;
+            return CachedPraxisAppsToolsLoad::Missing;
         }
-        Err(_) => return CachedCodexAppsToolsLoad::Invalid,
+        Err(_) => return CachedPraxisAppsToolsLoad::Invalid,
     };
-    let cache: CodexAppsToolsDiskCache = match serde_json::from_slice(&bytes) {
+    let cache: PraxisAppsToolsDiskCache = match serde_json::from_slice(&bytes) {
         Ok(cache) => cache,
-        Err(_) => return CachedCodexAppsToolsLoad::Invalid,
+        Err(_) => return CachedPraxisAppsToolsLoad::Invalid,
     };
-    if cache.schema_version != CODEX_APPS_TOOLS_CACHE_SCHEMA_VERSION {
-        return CachedCodexAppsToolsLoad::Invalid;
+    if cache.schema_version != PRAXIS_APPS_TOOLS_CACHE_SCHEMA_VERSION {
+        return CachedPraxisAppsToolsLoad::Invalid;
     }
-    CachedCodexAppsToolsLoad::Hit(filter_disallowed_praxis_apps_tools(cache.tools))
+    CachedPraxisAppsToolsLoad::Hit(filter_disallowed_praxis_apps_tools(cache.tools))
 }
 
-fn write_cached_praxis_apps_tools(cache_context: &CodexAppsToolsCacheContext, tools: &[ToolInfo]) {
+fn write_cached_praxis_apps_tools(cache_context: &PraxisAppsToolsCacheContext, tools: &[ToolInfo]) {
     let cache_path = cache_context.cache_path();
     if let Some(parent) = cache_path.parent()
         && std::fs::create_dir_all(parent).is_err()
@@ -1547,8 +1557,8 @@ fn write_cached_praxis_apps_tools(cache_context: &CodexAppsToolsCacheContext, to
         return;
     }
     let tools = filter_disallowed_praxis_apps_tools(tools.to_vec());
-    let Ok(bytes) = serde_json::to_vec_pretty(&CodexAppsToolsDiskCache {
-        schema_version: CODEX_APPS_TOOLS_CACHE_SCHEMA_VERSION,
+    let Ok(bytes) = serde_json::to_vec_pretty(&PraxisAppsToolsDiskCache {
+        schema_version: PRAXIS_APPS_TOOLS_CACHE_SCHEMA_VERSION,
         tools,
     }) else {
         return;
@@ -1625,7 +1635,7 @@ async fn list_tools_for_client_uncached(
             }
         })
         .collect();
-    if server_name == CODEX_APPS_MCP_SERVER_NAME {
+    if server_name == PRAXIS_APPS_MCP_SERVER_NAME {
         return Ok(filter_disallowed_praxis_apps_tools(tools));
     }
     Ok(tools)
@@ -1658,7 +1668,7 @@ fn mcp_init_error_display(
         && http_headers.as_ref().map(HashMap::is_empty).unwrap_or(true)
     {
         format!(
-            "GitHub MCP does not support OAuth. Log in by adding a personal access token (https://github.com/settings/personal-access-tokens) to your environment and config.toml:\n[mcp_servers.{server_name}]\nbearer_token_env_var = CODEX_GITHUB_PERSONAL_ACCESS_TOKEN"
+            "GitHub MCP does not support OAuth. Log in by adding a personal access token (https://github.com/settings/personal-access-tokens) to your environment and config.toml:\n[mcp_servers.{server_name}]\nbearer_token_env_var = PRAXIS_GITHUB_PERSONAL_ACCESS_TOKEN"
         )
     } else if is_mcp_client_auth_required_error(err) {
         format!(

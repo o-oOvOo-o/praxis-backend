@@ -1,4 +1,4 @@
-use crate::landlock::CODEX_LINUX_SANDBOX_ARG0;
+use crate::landlock::PRAXIS_LINUX_SANDBOX_ARG0;
 use crate::landlock::allow_network_for_proxy;
 use crate::landlock::create_linux_sandbox_command_args_for_policies;
 use crate::policy_transforms::EffectiveSandboxPermissions;
@@ -272,10 +272,10 @@ fn os_string_to_command_component(value: OsString) -> String {
 }
 
 fn linux_sandbox_arg0_override(exe: &Path) -> String {
-    if exe.file_name().and_then(|name| name.to_str()) == Some(CODEX_LINUX_SANDBOX_ARG0) {
+    if exe.file_name().and_then(|name| name.to_str()) == Some(PRAXIS_LINUX_SANDBOX_ARG0) {
         os_string_to_command_component(exe.as_os_str().to_owned())
     } else {
-        CODEX_LINUX_SANDBOX_ARG0.to_string()
+        PRAXIS_LINUX_SANDBOX_ARG0.to_string()
     }
 }
 

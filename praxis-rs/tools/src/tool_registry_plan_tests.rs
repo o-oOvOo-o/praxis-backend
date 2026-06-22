@@ -32,7 +32,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-const CODEX_APPS_MCP_SERVER_NAME: &str = "praxis_apps";
+const PRAXIS_APPS_MCP_SERVER_NAME: &str = "praxis_apps";
 const DEFAULT_AGENT_TYPE_DESCRIPTION: &str = "Test agent type description.";
 const DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
 const MIN_WAIT_TIMEOUT_MS: i64 = 10_000;
@@ -1260,21 +1260,21 @@ fn search_tool_description_lists_each_praxis_apps_connector_once() {
             app_tool(
                 "_create_event",
                 "mcp__praxis_apps__calendar",
-                CODEX_APPS_MCP_SERVER_NAME,
+                PRAXIS_APPS_MCP_SERVER_NAME,
                 Some("Calendar"),
                 Some("Plan events and manage your calendar."),
             ),
             app_tool(
                 "_list_events",
                 "mcp__praxis_apps__calendar",
-                CODEX_APPS_MCP_SERVER_NAME,
+                PRAXIS_APPS_MCP_SERVER_NAME,
                 Some("Calendar"),
                 Some("Plan events and manage your calendar."),
             ),
             app_tool(
                 "_search_threads",
                 "mcp__praxis_apps__gmail",
-                CODEX_APPS_MCP_SERVER_NAME,
+                PRAXIS_APPS_MCP_SERVER_NAME,
                 Some("Gmail"),
                 Some("Find and summarize email threads."),
             ),
@@ -1308,7 +1308,7 @@ fn search_tool_requires_model_capability_and_feature_flag() {
     let app_tools = Some(vec![app_tool(
         "calendar_create_event",
         "mcp__praxis_apps__calendar",
-        CODEX_APPS_MCP_SERVER_NAME,
+        PRAXIS_APPS_MCP_SERVER_NAME,
         Some("Calendar"),
         /*connector_description*/ None,
     )]);
@@ -1785,7 +1785,7 @@ fn build_specs_with_discoverable_tools<'a>(
             dynamic_tools,
             default_agent_type_description: DEFAULT_AGENT_TYPE_DESCRIPTION,
             wait_agent_timeouts: wait_agent_timeout_options(),
-            praxis_apps_mcp_server_name: CODEX_APPS_MCP_SERVER_NAME,
+            praxis_apps_mcp_server_name: PRAXIS_APPS_MCP_SERVER_NAME,
         },
     );
     (plan.specs, plan.handlers)

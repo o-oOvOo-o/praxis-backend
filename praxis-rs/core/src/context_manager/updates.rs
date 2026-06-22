@@ -34,15 +34,16 @@ fn build_permissions_update_item(
     exec_policy: &Policy,
 ) -> Option<DeveloperInstructions> {
     let prev = previous?;
-    if prev.sandbox_policy == *next.sandbox_policy.get()
-        && prev.approval_policy == next.approval_policy.value()
+    let permissions = next.effective_permissions();
+    if prev.sandbox_policy == *permissions.sandbox_policy.get()
+        && prev.approval_policy == permissions.approval_policy.value()
     {
         return None;
     }
 
     Some(DeveloperInstructions::from_policy(
-        next.sandbox_policy.get(),
-        next.approval_policy.value(),
+        permissions.sandbox_policy.get(),
+        permissions.approval_policy.value(),
         next.config.approvals_reviewer,
         exec_policy,
         &next.cwd,

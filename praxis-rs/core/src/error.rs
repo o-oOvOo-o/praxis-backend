@@ -10,9 +10,12 @@ pub use praxis_login::auth::RefreshTokenFailedReason;
 use praxis_login::token_data::KnownPlan;
 use praxis_login::token_data::PlanType;
 use praxis_protocol::ThreadId;
-use praxis_protocol::protocol::CodexErrorInfo;
 use praxis_protocol::protocol::ErrorEvent;
+use praxis_protocol::protocol::PraxisErrorInfo as PraxisProtocolErrorInfo;
+#[cfg(test)]
+use praxis_protocol::protocol::PraxisErrorInfo;
 use praxis_protocol::protocol::RateLimitSnapshot;
+use praxis_protocol::protocol::is_openai_hosted_primary_rate_limit;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::truncate_text;
 use reqwest::StatusCode;
@@ -417,7 +420,7 @@ impl std::fmt::Display for UsageLimitReachedError {
             .and_then(|snapshot| snapshot.limit_name.as_deref())
             .map(str::trim)
             .filter(|name| !name.is_empty())
-            && !limit_name.eq_ignore_ascii_case("codex")
+            && !is_openai_hosted_primary_rate_limit(limit_name)
         {
             return write!(
                 f,
@@ -563,31 +566,33 @@ impl PraxisErr {
     }
 
     /// Translate core error to client-facing protocol error.
-    pub fn to_praxis_protocol_error(&self) -> CodexErrorInfo {
+    pub fn to_praxis_protocol_error(&self) -> PraxisProtocolErrorInfo {
         match self {
-            PraxisErr::ContextWindowExceeded => CodexErrorInfo::ContextWindowExceeded,
+            PraxisErr::ContextWindowExceeded => PraxisProtocolErrorInfo::ContextWindowExceeded,
             PraxisErr::UsageLimitReached(_)
             | PraxisErr::QuotaExceeded
-            | PraxisErr::UsageNotIncluded => CodexErrorInfo::UsageLimitExceeded,
-            PraxisErr::ServerOverloaded => CodexErrorInfo::ServerOverloaded,
-            PraxisErr::RetryLimit(_) => CodexErrorInfo::ResponseTooManyFailedAttempts {
+            | PraxisErr::UsageNotIncluded => PraxisProtocolErrorInfo::UsageLimitExceeded,
+            PraxisErr::ServerOverloaded => PraxisProtocolErrorInfo::ServerOverloaded,
+            PraxisErr::RetryLimit(_) => PraxisProtocolErrorInfo::ResponseTooManyFailedAttempts {
                 http_status_code: self.http_status_code_value(),
             },
-            PraxisErr::ConnectionFailed(_) => CodexErrorInfo::HttpConnectionFailed {
+            PraxisErr::ConnectionFailed(_) => PraxisProtocolErrorInfo::HttpConnectionFailed {
                 http_status_code: self.http_status_code_value(),
             },
-            PraxisErr::ResponseStreamFailed(_) => CodexErrorInfo::ResponseStreamConnectionFailed {
-                http_status_code: self.http_status_code_value(),
-            },
-            PraxisErr::RefreshTokenFailed(_) => CodexErrorInfo::Unauthorized,
+            PraxisErr::ResponseStreamFailed(_) => {
+                PraxisProtocolErrorInfo::ResponseStreamConnectionFailed {
+                    http_status_code: self.http_status_code_value(),
+                }
+            }
+            PraxisErr::RefreshTokenFailed(_) => PraxisProtocolErrorInfo::Unauthorized,
             PraxisErr::SessionConfiguredNotFirstEvent
             | PraxisErr::InternalServerError
-            | PraxisErr::InternalAgentDied => CodexErrorInfo::InternalServerError,
+            | PraxisErr::InternalAgentDied => PraxisProtocolErrorInfo::InternalServerError,
             PraxisErr::UnsupportedOperation(_)
             | PraxisErr::ThreadNotFound(_)
-            | PraxisErr::AgentLimitReached { .. } => CodexErrorInfo::BadRequest,
-            PraxisErr::Sandbox(_) => CodexErrorInfo::SandboxError,
-            _ => CodexErrorInfo::Other,
+            | PraxisErr::AgentLimitReached { .. } => PraxisProtocolErrorInfo::BadRequest,
+            PraxisErr::Sandbox(_) => PraxisProtocolErrorInfo::SandboxError,
+            _ => PraxisProtocolErrorInfo::Other,
         }
     }
 

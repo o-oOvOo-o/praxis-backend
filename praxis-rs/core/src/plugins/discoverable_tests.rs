@@ -1,9 +1,11 @@
 use super::*;
 use crate::plugins::PluginInstallRequest;
+use crate::plugins::curated::curated_plugins_repo_path;
+use crate::plugins::marketplace::marketplace_manifest_path;
 use crate::plugins::test_support::load_plugins_config;
+use crate::plugins::test_support::write_curated_marketplace;
 use crate::plugins::test_support::write_curated_plugin_sha;
 use crate::plugins::test_support::write_file;
-use crate::plugins::test_support::write_openai_curated_marketplace;
 use crate::plugins::test_support::write_plugins_feature_config;
 use praxis_tools::DiscoverablePluginInfo;
 use praxis_utils_absolute_path::AbsolutePathBuf;
@@ -13,8 +15,8 @@ use tempfile::tempdir;
 #[tokio::test]
 async fn list_tool_suggest_discoverable_plugins_returns_uninstalled_curated_plugins() {
     let praxis_home = tempdir().expect("tempdir should succeed");
-    let curated_root = crate::plugins::curated_plugins_repo_path(praxis_home.path());
-    write_openai_curated_marketplace(&curated_root, &["sample", "slack"]);
+    let curated_root = curated_plugins_repo_path(praxis_home.path());
+    write_curated_marketplace(&curated_root, &["sample", "slack"]);
     write_plugins_feature_config(praxis_home.path());
 
     let config = load_plugins_config(praxis_home.path()).await;
@@ -39,8 +41,8 @@ async fn list_tool_suggest_discoverable_plugins_returns_uninstalled_curated_plug
 #[tokio::test]
 async fn list_tool_suggest_discoverable_plugins_returns_empty_when_plugins_feature_disabled() {
     let praxis_home = tempdir().expect("tempdir should succeed");
-    let curated_root = crate::plugins::curated_plugins_repo_path(praxis_home.path());
-    write_openai_curated_marketplace(&curated_root, &["slack"]);
+    let curated_root = curated_plugins_repo_path(praxis_home.path());
+    write_curated_marketplace(&curated_root, &["slack"]);
     write_file(
         &praxis_home.path().join(crate::config::CONFIG_TOML_FILE),
         r#"[features]
@@ -57,8 +59,8 @@ plugins = false
 #[tokio::test]
 async fn list_tool_suggest_discoverable_plugins_normalizes_description() {
     let praxis_home = tempdir().expect("tempdir should succeed");
-    let curated_root = crate::plugins::curated_plugins_repo_path(praxis_home.path());
-    write_openai_curated_marketplace(&curated_root, &["slack"]);
+    let curated_root = curated_plugins_repo_path(praxis_home.path());
+    write_curated_marketplace(&curated_root, &["slack"]);
     write_plugins_feature_config(praxis_home.path());
     write_file(
         &curated_root.join("plugins/slack/.praxis-plugin/plugin.json"),
@@ -88,18 +90,16 @@ async fn list_tool_suggest_discoverable_plugins_normalizes_description() {
 #[tokio::test]
 async fn list_tool_suggest_discoverable_plugins_omits_installed_curated_plugins() {
     let praxis_home = tempdir().expect("tempdir should succeed");
-    let curated_root = crate::plugins::curated_plugins_repo_path(praxis_home.path());
-    write_openai_curated_marketplace(&curated_root, &["slack"]);
+    let curated_root = curated_plugins_repo_path(praxis_home.path());
+    write_curated_marketplace(&curated_root, &["slack"]);
     write_curated_plugin_sha(praxis_home.path());
     write_plugins_feature_config(praxis_home.path());
 
     PluginsManager::new(praxis_home.path().to_path_buf())
         .install_plugin(PluginInstallRequest {
             plugin_name: "slack".to_string(),
-            marketplace_path: AbsolutePathBuf::try_from(
-                curated_root.join(".agents/plugins/marketplace.json"),
-            )
-            .expect("marketplace path"),
+            marketplace_path: AbsolutePathBuf::try_from(marketplace_manifest_path(&curated_root))
+                .expect("marketplace path"),
         })
         .await
         .expect("plugin should install");
@@ -113,8 +113,8 @@ async fn list_tool_suggest_discoverable_plugins_omits_installed_curated_plugins(
 #[tokio::test]
 async fn list_tool_suggest_discoverable_plugins_includes_configured_plugin_ids() {
     let praxis_home = tempdir().expect("tempdir should succeed");
-    let curated_root = crate::plugins::curated_plugins_repo_path(praxis_home.path());
-    write_openai_curated_marketplace(&curated_root, &["sample"]);
+    let curated_root = curated_plugins_repo_path(praxis_home.path());
+    write_curated_marketplace(&curated_root, &["sample"]);
     write_file(
         &praxis_home.path().join(crate::config::CONFIG_TOML_FILE),
         r#"[features]

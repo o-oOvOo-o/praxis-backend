@@ -324,6 +324,7 @@ fn server_request_thread_id(request: &ServerRequest) -> Option<ThreadId> {
         }
         ServerRequest::PermissionsRequestApproval { params, .. } => Some(params.thread_id.as_str()),
         ServerRequest::DynamicToolCall { params, .. } => Some(params.thread_id.as_str()),
+        ServerRequest::Cunning3dBridgeCall { .. } => None,
         ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
     }?;
     parse_app_gateway_thread_id(thread_id)
@@ -371,6 +372,9 @@ fn server_notification_thread_id(notification: &ServerNotification) -> Option<&s
             Some(notification.thread_id.as_str())
         }
         ServerNotification::ThreadGoalCleared(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::ThreadModelChanged(notification) => {
             Some(notification.thread_id.as_str())
         }
         ServerNotification::TurnStarted(notification) => Some(notification.thread_id.as_str()),
@@ -992,8 +996,8 @@ fn command_execution_snapshot_events(turn_id: &str, item: &ThreadItem) -> Option
 
 #[cfg(test)]
 fn app_gateway_praxis_error_info_to_core(
-    value: praxis_app_gateway_protocol::CodexErrorInfo,
-) -> Option<praxis_protocol::protocol::CodexErrorInfo> {
+    value: praxis_app_gateway_protocol::PraxisErrorInfo,
+) -> Option<praxis_protocol::protocol::PraxisErrorInfo> {
     serde_json::from_value(serde_json::to_value(value).ok()?).ok()
 }
 
@@ -1004,13 +1008,13 @@ mod tests {
     use super::thread_snapshot_events;
     use super::turn_snapshot_events;
     use praxis_app_gateway_protocol::AgentMessageDeltaNotification;
-    use praxis_app_gateway_protocol::CodexErrorInfo;
     use praxis_app_gateway_protocol::CommandAction;
     use praxis_app_gateway_protocol::CommandExecutionOutputDeltaNotification;
     use praxis_app_gateway_protocol::CommandExecutionSource;
     use praxis_app_gateway_protocol::CommandExecutionStatus;
     use praxis_app_gateway_protocol::ItemCompletedNotification;
     use praxis_app_gateway_protocol::ItemStartedNotification;
+    use praxis_app_gateway_protocol::PraxisErrorInfo;
     use praxis_app_gateway_protocol::ReasoningSummaryTextDeltaNotification;
     use praxis_app_gateway_protocol::ServerNotification;
     use praxis_app_gateway_protocol::Thread;
@@ -1350,7 +1354,7 @@ mod tests {
                     status: TurnStatus::Failed,
                     error: Some(TurnError {
                         message: "request failed".to_string(),
-                        praxis_error_info: Some(CodexErrorInfo::Other),
+                        praxis_error_info: Some(PraxisErrorInfo::Other),
                         additional_details: None,
                     }),
                 },
@@ -1476,7 +1480,7 @@ mod tests {
                         status: TurnStatus::Failed,
                         error: Some(TurnError {
                             message: "request failed".to_string(),
-                            praxis_error_info: Some(CodexErrorInfo::Other),
+                            praxis_error_info: Some(PraxisErrorInfo::Other),
                             additional_details: None,
                         }),
                     },
@@ -1503,7 +1507,7 @@ mod tests {
         assert_eq!(error.message, "request failed");
         assert_eq!(
             error.praxis_error_info,
-            Some(praxis_protocol::protocol::CodexErrorInfo::Other)
+            Some(praxis_protocol::protocol::PraxisErrorInfo::Other)
         );
         assert!(matches!(events[8].msg, EventMsg::TurnComplete(_)));
     }

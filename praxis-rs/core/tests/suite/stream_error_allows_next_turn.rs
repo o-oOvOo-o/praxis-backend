@@ -2,8 +2,8 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::ModelProviderInfo;
 use praxis_core::WireApi;
@@ -83,7 +83,7 @@ async fn continue_after_stream_error() {
         supports_websockets: false,
     };
 
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_config(move |config| {
             config.base_instructions = Some("You are a helpful assistant".to_string());
             config.model_provider = provider;

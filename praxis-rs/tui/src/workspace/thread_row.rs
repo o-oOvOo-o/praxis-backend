@@ -290,11 +290,11 @@ pub(crate) fn workspace_row_is_controlled(row: &ThreadListRow) -> bool {
     row.control_state.is_some() || workspace_status_has_controlled_flag(&row.status)
 }
 
-pub(crate) fn workspace_row_is_closed(row: &ThreadListRow) -> bool {
+pub(in crate::workspace) fn workspace_row_is_closed(row: &ThreadListRow) -> bool {
     matches!(row.status, ThreadStatus::NotLoaded)
 }
 
-pub(crate) fn workspace_status_has_controlled_flag(status: &ThreadStatus) -> bool {
+pub(in crate::workspace) fn workspace_status_has_controlled_flag(status: &ThreadStatus) -> bool {
     matches!(
         status,
         ThreadStatus::Active { active_flags }
@@ -302,7 +302,7 @@ pub(crate) fn workspace_status_has_controlled_flag(status: &ThreadStatus) -> boo
     )
 }
 
-pub(crate) fn workspace_status_has_running_flag(status: &ThreadStatus) -> bool {
+pub(in crate::workspace) fn workspace_status_has_running_flag(status: &ThreadStatus) -> bool {
     matches!(
         status,
         ThreadStatus::Active { active_flags }

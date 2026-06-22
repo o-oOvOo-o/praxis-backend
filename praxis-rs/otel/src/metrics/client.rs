@@ -4,6 +4,7 @@ use crate::metrics::MetricsError;
 use crate::metrics::Result;
 use crate::metrics::config::MetricsConfig;
 use crate::metrics::config::MetricsExporter;
+use crate::metrics::names::METRICS_METER_NAME;
 use crate::metrics::timer::Timer;
 use crate::metrics::validation::validate_metric_name;
 use crate::metrics::validation::validate_tag_key;
@@ -41,7 +42,6 @@ use std::time::Duration;
 use tracing::debug;
 
 const ENV_ATTRIBUTE: &str = "env";
-const METER_NAME: &str = "codex";
 const DURATION_UNIT: &str = "ms";
 const DURATION_DESCRIPTION: &str = "Duration in milliseconds.";
 
@@ -325,7 +325,7 @@ where
         provider_builder = provider_builder.with_reader(SharedManualReader::new(reader));
     }
     let provider = provider_builder.with_reader(reader).build();
-    let meter = provider.meter(METER_NAME);
+    let meter = provider.meter(METRICS_METER_NAME);
     (provider, meter)
 }
 

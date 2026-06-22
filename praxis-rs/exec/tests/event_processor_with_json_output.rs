@@ -37,9 +37,9 @@ use praxis_protocol::protocol::SessionConfiguredEvent;
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
-use praxis_exec::event_processor_with_jsonl_output::CodexStatus;
 use praxis_exec::event_processor_with_jsonl_output::CollectedThreadEvents;
 use praxis_exec::event_processor_with_jsonl_output::EventProcessorWithJsonOutput;
+use praxis_exec::event_processor_with_jsonl_output::PraxisStatus;
 use praxis_exec::exec_events::AgentMessageItem;
 use praxis_exec::exec_events::CollabAgentState;
 use praxis_exec::exec_events::CollabAgentStatus;
@@ -152,7 +152,7 @@ fn turn_started_emits_turn_started_event() {
         collected,
         CollectedThreadEvents {
             events: vec![ThreadEvent::TurnStarted(TurnStartedEvent {})],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -193,7 +193,7 @@ fn command_execution_started_and_completed_translate_to_thread_events() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 
@@ -229,7 +229,7 @@ fn command_execution_started_and_completed_translate_to_thread_events() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -254,7 +254,7 @@ fn empty_reasoning_items_are_ignored() {
         collected,
         CollectedThreadEvents {
             events: Vec::new(),
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -278,7 +278,7 @@ fn unsupported_items_do_not_consume_synthetic_ids() {
         ignored,
         CollectedThreadEvents {
             events: Vec::new(),
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 
@@ -306,7 +306,7 @@ fn unsupported_items_do_not_consume_synthetic_ids() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -338,7 +338,7 @@ fn reasoning_items_emit_summary_not_raw_content() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -378,7 +378,7 @@ fn web_search_completion_preserves_query_and_action() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -426,7 +426,7 @@ fn web_search_start_and_completion_reuse_item_id() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
     assert_eq!(
@@ -445,7 +445,7 @@ fn web_search_start_and_completion_reuse_item_id() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -505,7 +505,7 @@ fn mcp_tool_call_begin_and_end_emit_item_events() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
     assert_eq!(
@@ -527,7 +527,7 @@ fn mcp_tool_call_begin_and_end_emit_item_events() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -573,7 +573,7 @@ fn mcp_tool_call_failure_sets_failed_status() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -636,7 +636,7 @@ fn mcp_tool_call_defaults_arguments_and_preserves_structured_content() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
     assert_eq!(
@@ -661,7 +661,7 @@ fn mcp_tool_call_defaults_arguments_and_preserves_structured_content() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -726,7 +726,7 @@ fn collab_spawn_begin_and_end_emit_item_events() {
                     },),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
     assert_eq!(
@@ -751,7 +751,7 @@ fn collab_spawn_begin_and_end_emit_item_events() {
                     },),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -813,7 +813,7 @@ fn file_change_completion_maps_change_kinds() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -853,7 +853,7 @@ fn file_change_declined_maps_to_failed_status() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -886,7 +886,7 @@ fn agent_message_item_updates_final_message() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
     assert_eq!(processor.final_message(), Some("hello"));
@@ -912,7 +912,7 @@ fn agent_message_item_started_is_ignored() {
         collected,
         CollectedThreadEvents {
             events: Vec::new(),
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -944,7 +944,7 @@ fn reasoning_item_completed_uses_synthetic_id() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -968,7 +968,7 @@ fn warning_event_produces_error_item() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -1014,7 +1014,7 @@ fn plan_update_emits_started_then_updated_then_completed() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 
@@ -1055,7 +1055,7 @@ fn plan_update_emits_started_then_updated_then_completed() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 
@@ -1095,7 +1095,7 @@ fn plan_update_emits_started_then_updated_then_completed() {
                     usage: Usage::default(),
                 }),
             ],
-            status: CodexStatus::InitiateShutdown,
+            status: PraxisStatus::InitiateShutdown,
         }
     );
 }
@@ -1153,7 +1153,7 @@ fn plan_update_after_completion_starts_new_todo_list_with_new_id() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 }
@@ -1192,7 +1192,7 @@ fn token_usage_update_is_emitted_on_turn_completion() {
         usage_update,
         CollectedThreadEvents {
             events: Vec::new(),
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 
@@ -1217,7 +1217,7 @@ fn token_usage_update_is_emitted_on_turn_completion() {
                     output_tokens: 29,
                 },
             })],
-            status: CodexStatus::InitiateShutdown,
+            status: PraxisStatus::InitiateShutdown,
         }
     );
 }
@@ -1249,7 +1249,7 @@ fn turn_completion_recovers_final_message_from_turn_items() {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
             })],
-            status: CodexStatus::InitiateShutdown,
+            status: PraxisStatus::InitiateShutdown,
         }
     );
     assert_eq!(processor.final_message(), Some("final answer"));
@@ -1290,7 +1290,7 @@ fn turn_completion_reconciles_started_items_from_turn_items() {
                     }),
                 },
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 
@@ -1336,7 +1336,7 @@ fn turn_completion_reconciles_started_items_from_turn_items() {
                     usage: Usage::default(),
                 }),
             ],
-            status: CodexStatus::InitiateShutdown,
+            status: PraxisStatus::InitiateShutdown,
         }
     );
 }
@@ -1380,7 +1380,7 @@ fn turn_completion_overwrites_stale_final_message_from_turn_items() {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
             })],
-            status: CodexStatus::InitiateShutdown,
+            status: PraxisStatus::InitiateShutdown,
         }
     );
     assert_eq!(processor.final_message(), Some("final answer"));
@@ -1420,7 +1420,7 @@ fn turn_completion_preserves_streamed_final_message_when_turn_items_are_empty() 
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
             })],
-            status: CodexStatus::InitiateShutdown,
+            status: PraxisStatus::InitiateShutdown,
         }
     );
     assert_eq!(processor.final_message(), Some("streamed answer"));
@@ -1443,7 +1443,7 @@ fn failed_turn_clears_stale_final_message() {
         },
     ));
 
-    assert_eq!(collected.status, CodexStatus::Running);
+    assert_eq!(collected.status, PraxisStatus::Running);
     assert_eq!(processor.final_message(), Some("partial answer"));
 
     let collected = processor.collect_thread_events(ServerNotification::TurnCompleted(
@@ -1462,7 +1462,7 @@ fn failed_turn_clears_stale_final_message() {
         },
     ));
 
-    assert_eq!(collected.status, CodexStatus::InitiateShutdown);
+    assert_eq!(collected.status, PraxisStatus::InitiateShutdown);
     assert_eq!(processor.final_message(), None);
 }
 
@@ -1491,7 +1491,7 @@ fn turn_completion_falls_back_to_final_plan_text() {
             events: vec![ThreadEvent::TurnCompleted(TurnCompletedEvent {
                 usage: Usage::default(),
             })],
-            status: CodexStatus::InitiateShutdown,
+            status: PraxisStatus::InitiateShutdown,
         }
     );
     assert_eq!(processor.final_message(), Some("ship the typed adapter"));
@@ -1517,7 +1517,7 @@ fn turn_failure_prefers_structured_error_message() {
             events: vec![ThreadEvent::Error(ThreadErrorEvent {
                 message: "backend failed (request id abc)".to_string(),
             })],
-            status: CodexStatus::Running,
+            status: PraxisStatus::Running,
         }
     );
 
@@ -1540,7 +1540,7 @@ fn turn_failure_prefers_structured_error_message() {
                     message: "backend failed (request id abc)".to_string(),
                 },
             })],
-            status: CodexStatus::InitiateShutdown,
+            status: PraxisStatus::InitiateShutdown,
         }
     );
 }
@@ -1559,7 +1559,7 @@ fn model_reroute_surfaces_as_error_item() {
         },
     ));
 
-    assert_eq!(collected.status, CodexStatus::Running);
+    assert_eq!(collected.status, PraxisStatus::Running);
     assert_eq!(collected.events.len(), 1);
     let ThreadEvent::ItemCompleted(ItemCompletedEvent { item }) = &collected.events[0] else {
         panic!("expected ItemCompleted");

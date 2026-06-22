@@ -12,8 +12,8 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_failed;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use dunce::canonicalize as normalize_path;
 use futures::StreamExt;
@@ -30,7 +30,7 @@ use praxis_core::models_manager::collaboration_mode_presets::CollaborationModesC
 use praxis_features::Feature;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_login::AuthManager;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::default_client::originator;
 use praxis_otel::SessionTelemetry;
 use praxis_otel::TelemetryAuthMode;
@@ -341,7 +341,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
 
     // Configure Praxis to resume from our file
     let praxis_home = Arc::new(TempDir::new().unwrap());
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_home(praxis_home.clone())
         .with_config(|config| {
             // Ensure user instructions are NOT delivered on resume.
@@ -351,7 +351,7 @@ async fn resume_includes_initial_messages_and_sends_prior_items() {
         .resume(&server, praxis_home, session_path.clone())
         .await
         .expect("resume conversation");
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let session_configured = test.session_configured;
 
     // 1) Assert initial_messages only includes existing EventMsg entries; response items are not converted
@@ -518,7 +518,7 @@ async fn resume_replays_legacy_js_repl_image_rollout_shapes() {
     .await;
 
     let praxis_home = Arc::new(TempDir::new().unwrap());
-    let mut builder = test_codex().with_model("gpt-5.1");
+    let mut builder = test_praxis().with_model("gpt-5.1");
     let test = builder
         .resume(&server, praxis_home, session_path.clone())
         .await
@@ -670,7 +670,7 @@ async fn resume_replays_image_tool_outputs_with_detail() {
     .await;
 
     let praxis_home = Arc::new(TempDir::new().unwrap());
-    let mut builder = test_codex().with_model("gpt-5.1");
+    let mut builder = test_praxis().with_model("gpt-5.1");
     let test = builder
         .resume(&server, praxis_home, session_path.clone())
         .await
@@ -719,12 +719,12 @@ async fn includes_conversation_id_and_model_headers_in_request() {
     )
     .await;
 
-    let mut builder = test_codex().with_auth(CodexAuth::from_api_key("Test API Key"));
+    let mut builder = test_praxis().with_auth(OpenAiAccountAuth::from_api_key("Test API Key"));
     let test = builder
         .build(&server)
         .await
         .expect("create new conversation");
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let session_id = test.session_configured.session_id;
 
     codex
@@ -852,9 +852,9 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
         SessionSource::Exec,
     );
     let client = ModelClient::new(
-        Some(AuthManager::from_auth_for_testing(CodexAuth::from_api_key(
-            "unused-api-key",
-        ))),
+        Some(AuthManager::from_auth_for_testing(
+            OpenAiAccountAuth::from_api_key("unused-api-key"),
+        )),
         conversation_id,
         provider,
         SessionSource::Exec,
@@ -906,8 +906,8 @@ async fn includes_base_instructions_override_in_request() {
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::from_api_key("Test API Key"))
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::from_api_key("Test API Key"))
         .with_config(|config| {
             config.base_instructions = Some("test instructions".to_string());
         });
@@ -915,7 +915,7 @@ async fn includes_base_instructions_override_in_request() {
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -958,7 +958,7 @@ async fn chatgpt_auth_sends_correct_request() {
         built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone();
     model_provider.base_url = Some(format!("{}/api/codex", server.uri()));
     model_provider.supports_websockets = false;
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_auth(create_dummy_praxis_auth())
         .with_config(move |config| {
             config.model_provider = model_provider;
@@ -967,7 +967,7 @@ async fn chatgpt_auth_sends_correct_request() {
         .build(&server)
         .await
         .expect("create new conversation");
-    let codex = test.codex.clone();
+    let codex = test.thread.clone();
     let thread_id = test.session_configured.session_id;
 
     codex
@@ -1051,12 +1051,14 @@ async fn prefers_apikey_when_config_prefers_apikey_even_with_chatgpt_tokens() {
     let mut config = load_default_config_for_test(&praxis_home).await;
     config.model_provider = model_provider;
 
-    let auth_manager =
-        match CodexAuth::from_auth_storage(praxis_home.path(), AuthCredentialsStoreMode::File) {
-            Ok(Some(auth)) => praxis_core::test_support::auth_manager_from_auth(auth),
-            Ok(None) => panic!("No CodexAuth found in praxis_home"),
-            Err(e) => panic!("Failed to load CodexAuth: {e}"),
-        };
+    let auth_manager = match OpenAiAccountAuth::from_auth_storage(
+        praxis_home.path(),
+        AuthCredentialsStoreMode::File,
+    ) {
+        Ok(Some(auth)) => praxis_core::test_support::auth_manager_from_auth(auth),
+        Ok(None) => panic!("No OpenAiAccountAuth found in praxis_home"),
+        Err(e) => panic!("Failed to load OpenAiAccountAuth: {e}"),
+    };
     let thread_manager = ThreadManager::new(
         &config,
         auth_manager,
@@ -1100,8 +1102,8 @@ async fn includes_user_instructions_message_in_request() {
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::from_api_key("Test API Key"))
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::from_api_key("Test API Key"))
         .with_config(|config| {
             config.user_instructions = Some("be nice".to_string());
         });
@@ -1109,7 +1111,7 @@ async fn includes_user_instructions_message_in_request() {
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -1181,7 +1183,7 @@ async fn includes_apps_guidance_as_developer_message_for_chatgpt_auth() {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_auth(create_dummy_praxis_auth())
         .with_config(move |config| {
             config
@@ -1194,7 +1196,7 @@ async fn includes_apps_guidance_as_developer_message_for_chatgpt_auth() {
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -1269,8 +1271,8 @@ async fn omits_apps_guidance_for_api_key_auth_even_when_feature_enabled() {
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::from_api_key("Test API Key"))
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::from_api_key("Test API Key"))
         .with_config(move |config| {
             config
                 .features
@@ -1282,7 +1284,7 @@ async fn omits_apps_guidance_for_api_key_auth_even_when_feature_enabled() {
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -1342,9 +1344,9 @@ async fn skills_append_to_developer_message() {
     .expect("write skill");
 
     let praxis_home_path = praxis_home.path().to_path_buf();
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_home(praxis_home.clone())
-        .with_auth(CodexAuth::from_api_key("Test API Key"))
+        .with_auth(OpenAiAccountAuth::from_api_key("Test API Key"))
         .with_config(move |config| {
             config.cwd = praxis_home_path.abs();
         });
@@ -1352,7 +1354,7 @@ async fn skills_append_to_developer_message() {
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -1397,7 +1399,7 @@ async fn includes_configured_effort_in_request() -> anyhow::Result<()> {
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_model("gpt-5.1-codex")
         .with_config(|config| {
             config.model_reasoning_effort = Some(ReasoningEffort::Medium);
@@ -1442,7 +1444,7 @@ async fn includes_no_effort_in_request() -> anyhow::Result<()> {
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_model("gpt-5.1-codex")
         .build(&server)
         .await?;
@@ -1485,7 +1487,8 @@ async fn includes_default_reasoning_effort_in_request_when_defined_by_model_info
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let TestCodex { codex, .. } = test_codex().with_model("gpt-5.1").build(&server).await?;
+    let TestPraxis { thread: codex, .. } =
+        test_praxis().with_model("gpt-5.1").build(&server).await?;
 
     codex
         .submit(Op::UserInput {
@@ -1524,12 +1527,12 @@ async fn user_turn_collaboration_mode_overrides_model_and_effort() -> anyhow::Re
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
-    } = test_codex()
+    } = test_praxis()
         .with_model("gpt-5.1-codex")
         .build(&server)
         .await?;
@@ -1592,7 +1595,7 @@ async fn configured_reasoning_summary_is_sent() -> anyhow::Result<()> {
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_config(|config| {
             config.model_reasoning_summary = Some(ReasoningSummary::Concise);
         })
@@ -1648,12 +1651,12 @@ async fn user_turn_explicit_reasoning_summary_overrides_model_catalog_default() 
     model.supports_reasoning_summaries = true;
     model.default_reasoning_summary = ReasoningSummary::Detailed;
 
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         config,
         session_configured,
         ..
-    } = test_codex()
+    } = test_praxis()
         .with_model("gpt-5.1")
         .with_config(move |config| {
             config.model_catalog = Some(model_catalog);
@@ -1707,7 +1710,7 @@ async fn reasoning_summary_is_omitted_when_disabled() -> anyhow::Result<()> {
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_config(|config| {
             config.model_reasoning_summary = Some(ReasoningSummary::None);
         })
@@ -1761,7 +1764,7 @@ async fn reasoning_summary_none_overrides_model_catalog_default() -> anyhow::Res
     model.supports_reasoning_summaries = true;
     model.default_reasoning_summary = ReasoningSummary::Detailed;
 
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_model("gpt-5.1")
         .with_config(move |config| {
             config.model_reasoning_summary = Some(ReasoningSummary::None);
@@ -1804,7 +1807,8 @@ async fn includes_default_verbosity_in_request() -> anyhow::Result<()> {
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let TestCodex { codex, .. } = test_codex().with_model("gpt-5.1").build(&server).await?;
+    let TestPraxis { thread: codex, .. } =
+        test_praxis().with_model("gpt-5.1").build(&server).await?;
 
     codex
         .submit(Op::UserInput {
@@ -1843,7 +1847,7 @@ async fn configured_verbosity_not_sent_for_models_without_support() -> anyhow::R
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_model("gpt-5.1-codex")
         .with_config(|config| {
             config.model_verbosity = Some(Verbosity::High);
@@ -1887,7 +1891,7 @@ async fn configured_verbosity_is_sent() -> anyhow::Result<()> {
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_model("gpt-5.1")
         .with_config(|config| {
             config.model_verbosity = Some(Verbosity::High);
@@ -1932,8 +1936,8 @@ async fn includes_developer_instructions_message_in_request() {
         sse(vec![ev_response_created("resp1"), ev_completed("resp1")]),
     )
     .await;
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::from_api_key("Test API Key"))
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::from_api_key("Test API Key"))
         .with_config(|config| {
             config.user_instructions = Some("be nice".to_string());
             config.developer_instructions = Some("be useful".to_string());
@@ -1942,7 +1946,7 @@ async fn includes_developer_instructions_message_in_request() {
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -2058,8 +2062,9 @@ async fn azure_responses_request_includes_store_and_reasoning_ids() {
     let model_info =
         praxis_core::test_support::construct_model_info_offline(model.as_str(), &config);
     let conversation_id = ThreadId::new();
-    let auth_manager =
-        praxis_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager = praxis_core::test_support::auth_manager_from_auth(
+        OpenAiAccountAuth::from_api_key("Test API Key"),
+    );
     let session_telemetry = SessionTelemetry::new(
         conversation_id,
         model.as_str(),
@@ -2224,8 +2229,8 @@ async fn token_count_includes_rate_limits_snapshot() {
     provider.base_url = Some(format!("{}/v1", server.uri()));
     provider.supports_websockets = false;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::from_api_key("test"))
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::from_api_key("test"))
         .with_config(move |config| {
             config.model_provider = provider;
         });
@@ -2233,7 +2238,7 @@ async fn token_count_includes_rate_limits_snapshot() {
         .build(&server)
         .await
         .expect("create conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -2379,9 +2384,9 @@ async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
         .mount(&server)
         .await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let praxis_fixture = builder.build(&server).await?;
-    let codex = praxis_fixture.codex.clone();
+    let codex = praxis_fixture.thread.clone();
 
     let expected_limits = json!({
         "limit_id": "codex",
@@ -2466,7 +2471,7 @@ async fn context_window_error_sets_total_tokens_to_model_window() -> anyhow::Res
     )
     .await;
 
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_config(|config| {
             config.model = Some("gpt-5.1".to_string());
             config.model_context_window = Some(272_000);
@@ -2562,7 +2567,7 @@ async fn incomplete_response_emits_content_filter_error_message() -> anyhow::Res
 
     let responses_mock = mount_sse_once(&server, incomplete_response).await;
 
-    let TestCodex { codex, .. } = test_codex()
+    let TestPraxis { thread: codex, .. } = test_praxis()
         .with_config(|config| {
             config.model_provider.stream_max_retries = Some(0);
         })
@@ -2657,7 +2662,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
     };
 
     // Init session
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_auth(create_dummy_praxis_auth())
         .with_config(move |config| {
             config.model_provider = provider;
@@ -2666,7 +2671,7 @@ async fn azure_overrides_assign_properties_used_for_responses_url() {
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -2744,7 +2749,7 @@ async fn env_var_overrides_loaded_auth() {
     };
 
     // Init session
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_auth(create_dummy_praxis_auth())
         .with_config(move |config| {
             config.model_provider = provider;
@@ -2753,7 +2758,7 @@ async fn env_var_overrides_loaded_auth() {
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     codex
         .submit(Op::UserInput {
@@ -2769,8 +2774,8 @@ async fn env_var_overrides_loaded_auth() {
     wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 }
 
-fn create_dummy_praxis_auth() -> CodexAuth {
-    CodexAuth::create_dummy_chatgpt_auth_for_testing()
+fn create_dummy_praxis_auth() -> OpenAiAccountAuth {
+    OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing()
 }
 
 /// Scenario:
@@ -2808,12 +2813,12 @@ async fn history_dedupes_streamed_and_final_messages_across_turns() {
 
     let request_log = mount_sse_sequence(&server, vec![sse1.clone(), sse1.clone(), sse1]).await;
 
-    let mut builder = test_codex().with_auth(CodexAuth::from_api_key("Test API Key"));
+    let mut builder = test_praxis().with_auth(OpenAiAccountAuth::from_api_key("Test API Key"));
     let codex = builder
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     // Turn 1: user sends U1; wait for completion.
     codex

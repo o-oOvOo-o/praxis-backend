@@ -16,7 +16,7 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_config::types::Personality;
 use praxis_features::Feature;
@@ -99,7 +99,7 @@ async fn snapshot_model_visible_layout_turn_overrides() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.2-codex")
         .with_config(|config| {
             config
@@ -112,7 +112,7 @@ async fn snapshot_model_visible_layout_turn_overrides() -> Result<()> {
     let preturn_context_diff_cwd = test.cwd_path().join(PRETURN_CONTEXT_DIFF_CWD);
     fs::create_dir_all(&preturn_context_diff_cwd)?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "first turn".into(),
@@ -131,12 +131,12 @@ async fn snapshot_model_visible_layout_turn_overrides() -> Result<()> {
             personality: None,
         })
         .await?;
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "second turn with context updates".into(),
@@ -155,7 +155,7 @@ async fn snapshot_model_visible_layout_turn_overrides() -> Result<()> {
             personality: Some(Personality::Friendly),
         })
         .await?;
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -200,7 +200,7 @@ async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> R
     )
     .await;
 
-    let mut builder = test_codex().with_model("gpt-5.2-codex");
+    let mut builder = test_praxis().with_model("gpt-5.2-codex");
     let test = builder.build(&server).await?;
     let cwd_one = test.cwd_path().join("agents_one");
     let cwd_two = test.cwd_path().join("agents_two");
@@ -215,7 +215,7 @@ async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> R
         "# AGENTS two\n\n<INSTRUCTIONS>\nTurn two agents instructions.\n</INSTRUCTIONS>\n",
     )?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "first turn in agents_one".into(),
@@ -234,12 +234,12 @@ async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> R
             personality: None,
         })
         .await?;
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "second turn in agents_two".into(),
@@ -258,7 +258,7 @@ async fn snapshot_model_visible_layout_cwd_change_does_not_refresh_agents() -> R
             personality: None,
         })
         .await?;
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -294,11 +294,11 @@ async fn snapshot_model_visible_layout_resume_with_personality_change() -> Resul
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut initial_builder = test_codex().with_config(|config| {
+    let mut initial_builder = test_praxis().with_config(|config| {
         config.model = Some("gpt-5.2".to_string());
     });
     let initial = initial_builder.build(&server).await?;
-    let codex = Arc::clone(&initial.codex);
+    let codex = Arc::clone(&initial.thread);
     let home = initial.home.clone();
     let rollout_path = initial
         .session_configured
@@ -337,7 +337,7 @@ async fn snapshot_model_visible_layout_resume_with_personality_change() -> Resul
     )
     .await;
 
-    let mut resume_builder = test_codex().with_config(|config| {
+    let mut resume_builder = test_praxis().with_config(|config| {
         config.model = Some("gpt-5.2-codex".to_string());
         config
             .features
@@ -349,7 +349,7 @@ async fn snapshot_model_visible_layout_resume_with_personality_change() -> Resul
     let resume_override_cwd = resumed.cwd_path().join(PRETURN_CONTEXT_DIFF_CWD);
     fs::create_dir_all(&resume_override_cwd)?;
     resumed
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "resume and change personality".into(),
@@ -368,7 +368,7 @@ async fn snapshot_model_visible_layout_resume_with_personality_change() -> Resul
             personality: Some(Personality::Friendly),
         })
         .await?;
-    wait_for_event(&resumed.codex, |event| {
+    wait_for_event(&resumed.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -393,11 +393,11 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut initial_builder = test_codex().with_config(|config| {
+    let mut initial_builder = test_praxis().with_config(|config| {
         config.model = Some("gpt-5.2".to_string());
     });
     let initial = initial_builder.build(&server).await?;
-    let codex = Arc::clone(&initial.codex);
+    let codex = Arc::clone(&initial.thread);
     let home = initial.home.clone();
     let rollout_path = initial
         .session_configured
@@ -436,14 +436,14 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
     )
     .await;
 
-    let mut resume_builder = test_codex().with_config(|config| {
+    let mut resume_builder = test_praxis().with_config(|config| {
         config.model = Some("gpt-5.2-codex".to_string());
     });
     let resumed = resume_builder.resume(&server, home, rollout_path).await?;
     let resume_override_cwd = resumed.cwd_path().join(PRETURN_CONTEXT_DIFF_CWD);
     fs::create_dir_all(&resume_override_cwd)?;
     resumed
-        .codex
+        .thread
         .submit(Op::OverrideTurnContext {
             cwd: Some(resume_override_cwd),
             approval_policy: None,
@@ -460,7 +460,7 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
         })
         .await?;
     resumed
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "first resumed turn after model override".into(),
@@ -469,7 +469,7 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&resumed.codex, |event| {
+    wait_for_event(&resumed.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;

@@ -20,7 +20,7 @@ pub(crate) enum InternalApplyPatchInvocation {
     /// The `apply_patch` call was approved, either automatically because it
     /// appears that it should be allowed based on the user's sandbox policy
     /// *or* because the user explicitly approved it. In either case, we use
-    /// exec with [`praxis_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1`] to realize
+    /// exec with [`praxis_apply_patch::PRAXIS_RUN_AS_APPLY_PATCH_ARG1`] to realize
     /// the `apply_patch` call,
     /// but [`ApplyPatchExec::auto_approved`] is used to determine the sandbox
     /// used with the `exec()`.
@@ -42,13 +42,14 @@ pub(crate) async fn apply_patch(
     file_system_sandbox_policy: &FileSystemSandboxPolicy,
     action: ApplyPatchAction,
 ) -> InternalApplyPatchInvocation {
+    let permissions = turn_context.effective_permissions();
     match assess_patch_safety(
         &action,
-        turn_context.approval_policy.value(),
-        turn_context.sandbox_policy.get(),
+        permissions.approval_policy.value(),
+        permissions.sandbox_policy.get(),
         file_system_sandbox_policy,
         &turn_context.cwd,
-        turn_context.windows_sandbox_level,
+        permissions.windows_sandbox_level,
     ) {
         SafetyCheck::AutoApprove {
             user_explicitly_approved,

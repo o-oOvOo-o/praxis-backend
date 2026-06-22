@@ -18,6 +18,7 @@ use http::HeaderValue;
 use http::StatusCode;
 use praxis_client::TransportError;
 use praxis_client::maybe_build_rustls_client_config_with_custom_ca;
+use praxis_protocol::protocol::OPENAI_HOSTED_RATE_LIMIT_EVENT_KIND;
 use praxis_utils_rustls_provider::ensure_rustls_crypto_provider;
 use serde::Deserialize;
 use serde_json::Value;
@@ -591,7 +592,7 @@ async fn run_websocket_response_stream(
                         continue;
                     }
                 };
-                if event.kind() == "codex.rate_limits" {
+                if event.kind() == OPENAI_HOSTED_RATE_LIMIT_EVENT_KIND {
                     if let Some(snapshot) = parse_rate_limit_event(&text) {
                         let _ = tx_event.send(Ok(ResponseEvent::RateLimits(snapshot))).await;
                     }

@@ -11,7 +11,7 @@ Memory prompt templates live under `praxis-rs/core/templates/memories/`.
   - `stage_one_input.md`
   - `consolidation.md`
   - `read_path.md`
-- In `codex`, edit those undated template files in place.
+- In Praxis, edit those undated template files in place.
 - The dated snapshot-copy workflow is used in the separate `openai/project/agent_memory/write` harness repo, not here.
 
 ## When it runs

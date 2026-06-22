@@ -15,8 +15,8 @@ use crate::exec::StdoutStream;
 use crate::exec::WindowsRestrictedTokenFilesystemOverlay;
 use crate::exec::execute_exec_request;
 #[cfg(target_os = "macos")]
-use crate::spawn::CODEX_SANDBOX_ENV_VAR;
-use crate::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
+use crate::spawn::PRAXIS_SANDBOX_ENV_VAR;
+use crate::spawn::PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use praxis_network_proxy::NetworkProxy;
 use praxis_protocol::config_types::WindowsSandboxLevel;
 pub use praxis_protocol::models::SandboxPermissions;
@@ -113,13 +113,13 @@ impl ExecRequest {
         } = options;
         if !network_sandbox_policy.is_enabled() {
             env.insert(
-                CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR.to_string(),
+                PRAXIS_SANDBOX_NETWORK_DISABLED_ENV_VAR.to_string(),
                 "1".to_string(),
             );
         }
         #[cfg(target_os = "macos")]
         if sandbox == SandboxType::MacosSeatbelt {
-            env.insert(CODEX_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
+            env.insert(PRAXIS_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
         }
         Self {
             command,

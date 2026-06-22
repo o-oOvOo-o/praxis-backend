@@ -3,7 +3,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use praxis_features::Feature;
 
 const HIERARCHICAL_AGENTS_SNIPPET: &str =
@@ -18,7 +18,7 @@ async fn hierarchical_agents_appends_to_project_doc_in_user_instructions() {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ChildAgentsMd)
@@ -67,7 +67,7 @@ async fn hierarchical_agents_emits_when_no_project_doc() {
     )
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config
             .features
             .enable(Feature::ChildAgentsMd)

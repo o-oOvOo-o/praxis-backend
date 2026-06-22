@@ -62,7 +62,7 @@ const UNIFIED_EXEC_ENV: [(&str, &str); 10] = [
     ("PAGER", "cat"),
     ("GIT_PAGER", "cat"),
     ("GH_PAGER", "cat"),
-    ("CODEX_CI", "1"),
+    ("PRAXIS_CI", "1"),
 ];
 
 /// Test-only override for deterministic unified exec process IDs.
@@ -675,15 +675,16 @@ impl UnifiedExecProcessManager {
             self,
             context.turn.tools_config.unified_exec_shell_mode.clone(),
         );
+        let permissions = context.turn.effective_permissions();
         let exec_approval_requirement = context
             .session
             .services
             .exec_policy
             .create_exec_approval_requirement_for_command(ExecApprovalRequest {
                 command: &request.command,
-                approval_policy: context.turn.approval_policy.value(),
-                sandbox_policy: context.turn.sandbox_policy.get(),
-                file_system_sandbox_policy: &context.turn.file_system_sandbox_policy,
+                approval_policy: permissions.approval_policy.value(),
+                sandbox_policy: permissions.sandbox_policy.get(),
+                file_system_sandbox_policy: &permissions.file_system_sandbox_policy,
                 sandbox_permissions: if request.additional_permissions_preapproved {
                     crate::sandboxing::SandboxPermissions::UseDefault
                 } else {
@@ -714,13 +715,7 @@ impl UnifiedExecProcessManager {
             tool_name: "exec_command".to_string(),
         };
         orchestrator
-            .run(
-                &mut runtime,
-                &req,
-                &tool_ctx,
-                &context.turn,
-                context.turn.approval_policy.value(),
-            )
+            .run(&mut runtime, &req, &tool_ctx, &context.turn)
             .await
             .map(|result| (result.output, result.deferred_network_approval))
             .map_err(|e| UnifiedExecError::create_process(format!("{e:?}")))

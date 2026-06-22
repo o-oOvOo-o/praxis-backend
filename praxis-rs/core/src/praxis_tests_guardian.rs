@@ -378,7 +378,7 @@ async fn shell_handler_allows_sticky_turn_permissions_without_inline_request_per
 
 #[tokio::test]
 async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
-    let praxis_home = tempdir().expect("create codex home");
+    let praxis_home = tempdir().expect("create Praxis home");
     let project_dir = tempdir().expect("create project dir");
     let rules_dir = project_dir.path().join("rules");
     fs::create_dir_all(&rules_dir).expect("create rules dir");
@@ -421,7 +421,8 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
         }
     );
 
-    let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("Test API Key"));
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
     let models_manager = Arc::new(ModelsManager::new(
         config.praxis_home.clone(),
         auth_manager.clone(),

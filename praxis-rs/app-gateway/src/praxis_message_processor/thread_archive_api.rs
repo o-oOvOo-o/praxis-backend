@@ -9,24 +9,16 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ThreadArchiveParams,
     ) {
-        let thread_id = match self.parse_thread_id(&params.thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((thread_id, rollout_path)) = self
+            .ensure_thread_rollout_for_request(
+                &params.thread_id,
+                ThreadRolloutScope::Active,
+                &request_id,
+            )
+            .await
+        else {
+            return;
         };
-
-        let rollout_path =
-            match find_thread_rollout_path(&self.config, thread_id, ThreadRolloutScope::Active)
-                .await
-            {
-                Ok(path) => path,
-                Err(error) => {
-                    self.outgoing.send_error(request_id, error).await;
-                    return;
-                }
-            };
 
         let thread_id_str = thread_id.to_string();
         match self.archive_thread_common(thread_id, &rollout_path).await {
@@ -51,26 +43,15 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ThreadDeleteParams,
     ) {
-        let thread_id = match self.parse_thread_id(&params.thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
-        };
-
-        let rollout_path = match find_thread_rollout_path(
-            &self.config,
-            thread_id,
-            ThreadRolloutScope::Any,
-        )
-        .await
-        {
-            Ok(path) => path,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((thread_id, rollout_path)) = self
+            .ensure_thread_rollout_for_request(
+                &params.thread_id,
+                ThreadRolloutScope::Any,
+                &request_id,
+            )
+            .await
+        else {
+            return;
         };
 
         let thread_id_str = thread_id.to_string();
@@ -98,24 +79,16 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ThreadUnarchiveParams,
     ) {
-        let thread_id = match self.parse_thread_id(&params.thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((thread_id, archived_path)) = self
+            .ensure_thread_rollout_for_request(
+                &params.thread_id,
+                ThreadRolloutScope::Archived,
+                &request_id,
+            )
+            .await
+        else {
+            return;
         };
-
-        let archived_path =
-            match find_thread_rollout_path(&self.config, thread_id, ThreadRolloutScope::Archived)
-                .await
-            {
-                Ok(path) => path,
-                Err(error) => {
-                    self.outgoing.send_error(request_id, error).await;
-                    return;
-                }
-            };
 
         let rollout_path_display = archived_path.display().to_string();
         let fallback_provider = self.config.model_provider_id.clone();
@@ -201,22 +174,21 @@ impl PraxisMessageProcessor {
                     .mark_unarchived(thread_id, restored_path.as_path())
                     .await;
             }
-            let summary = hydrate_rollout_summary_with_state_db(
+            load_thread_summary_for_rollout(
                 &self.config,
-                read_summary_from_rollout(restored_path.as_path(), fallback_provider.as_str())
-                    .await
-                    .map_err(|err| {
-                        internal_error(format!("failed to read unarchived thread: {err}"))
-                    })?,
+                thread_id,
+                restored_path.as_path(),
+                fallback_provider.as_str(),
+                None,
             )
-            .await;
-            Ok(summary_to_thread(summary))
+            .await
+            .map_err(|err| internal_error(format!("failed to read unarchived thread: {err}")))
         }
         .await;
 
         match result {
             Ok(mut thread) => {
-                self.apply_thread_runtime_state(
+                self.project_thread_runtime_state(
                     &mut thread,
                     /*has_live_in_progress_turn*/ false,
                 )

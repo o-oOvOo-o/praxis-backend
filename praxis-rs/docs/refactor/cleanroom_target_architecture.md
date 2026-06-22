@@ -321,12 +321,12 @@ Implementations:
 
 ```text
 NoopConfigBundleProvider
-OpenAiCodexConfigBundleProvider
+OpenAiHostedConfigBundleProvider
 CunningOrgConfigBundleProvider
 LocalFileConfigBundleProvider
 ```
 
-API keys are not cloud bundle login. OpenAI/Codex login compatibility remains a compatibility provider, not the identity of Praxis config.
+API keys are not cloud bundle login. OpenAI hosted login compatibility remains a compatibility provider, not the identity of Praxis config.
 
 ### ThreadStore
 
@@ -516,7 +516,7 @@ Do not suggest a move just because a file is large. Move code when ownership, de
 | # | Battle | Goal |
 |---:|---|---|
 | 1 | Main Agent Loop slimming | Make the session loop readable in 30 seconds. |
-| 2 | Agent Turn Loop clarification | Keep one turn of model/tool execution explicit. |
+| 2 | Agent Turn Loop clarification | Keep one turn of model/tool execution explicit. Detailed plan: [`praxis-loop-cleanroom.md`](./praxis-loop-cleanroom.md) — extract the turn loop into a standalone `praxis-loop` crate (mini-ECS: TurnState=Component, TurnServices=Resource, TurnHooks=System). |
 | 3 | Agent Task Layer | Separate regular, review, compact, undo, snapshot, and shell tasks. |
 | 4 | Agent Session boundary | Centralize state, services, history, and event sink. |
 | 5 | ThreadManager / ThreadRegistry | Keep spawn, load, lookup, close, fork, and resume ownership clear. |
@@ -556,7 +556,7 @@ These 24 battles cover the Praxis runtime architecture. Items that appear outsid
 | state crate memories/jobs | ThreadStore + Context/Memory Engine. |
 | crash logs / perf timing | Observability / Diagnostics. |
 | legacy conversation names | Protocol/API Governance. |
-| `CodexErrorInfo` / `CodexOp` / `CODEX_HOME` | Brand cleanup, with compatibility exceptions. |
+| legacy Codex aliases / `CODEX_HOME` | Brand cleanup, with compatibility exceptions. |
 | release/build/dev tooling | Engineering tooling, not core runtime architecture. |
 
 If code cannot fit any target boundary, treat it as one of:

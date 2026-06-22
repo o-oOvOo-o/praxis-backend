@@ -14,7 +14,7 @@ use crate::llm::tasks::compact::CompactExecutionPolicy;
 use crate::praxis::PreviousTurnSettings;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
-use crate::praxis::get_last_assistant_message_from_turn;
+use crate::turn_assistant_text::last_assistant_message_from_turn;
 use crate::util::backoff;
 use futures::prelude::*;
 use praxis_protocol::items::ContextCompactionItem;
@@ -231,7 +231,7 @@ async fn run_compact_task_inner(
 
         match attempt_result {
             Ok(output_items) => {
-                compact_plan.summary_output = get_last_assistant_message_from_turn(&output_items)
+                compact_plan.summary_output = last_assistant_message_from_turn(&output_items)
                     .map(|text| text.trim().to_string());
                 if truncated_count > 0 {
                     sess.notify_background_event(

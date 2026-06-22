@@ -1514,7 +1514,7 @@ mod tests {
     #[test]
     fn thread_search_fts_query_uses_prefix_tokens() {
         assert_eq!(
-            thread_search_fts_query("Legacy Codex").as_deref(),
+            thread_search_fts_query("Legacy Praxis").as_deref(),
             Some("legacy* AND codex*")
         );
         assert_eq!(thread_search_fts_query("///"), None);

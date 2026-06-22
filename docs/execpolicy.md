@@ -1,3 +1,7 @@
 # Execution policy
 
-For an overview of execution policy rules, see [this documentation](https://developers.openai.com/codex/exec-policy).
+Execution policy rules control what commands and network accesses Praxis may
+run without additional approval.
+
+See `praxis-rs/execpolicy` and the generated configuration schema for the
+current rule shapes.

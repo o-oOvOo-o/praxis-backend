@@ -34,7 +34,7 @@ use praxis_analytics::InvocationType;
 use praxis_analytics::build_track_events_context;
 use praxis_config::types::AppToolApproval;
 use praxis_features::Feature;
-use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_mcp::mcp::PRAXIS_APPS_MCP_SERVER_NAME;
 use praxis_otel::sanitize_metric_tag_value;
 use praxis_protocol::mcp::CallToolResult;
 use praxis_protocol::openai_models::InputModality;
@@ -61,8 +61,8 @@ use tracing::Span;
 use tracing::field::Empty;
 use url::Url;
 
-const MCP_CALL_COUNT_METRIC: &str = "codex.mcp.call";
-const MCP_CALL_DURATION_METRIC: &str = "codex.mcp.call.duration_ms";
+const MCP_CALL_COUNT_METRIC: &str = "praxis.mcp.call";
+const MCP_CALL_DURATION_METRIC: &str = "praxis.mcp.call.duration_ms";
 
 /// Handles the specified tool call dispatches the appropriate
 /// `McpToolCallBegin` and `McpToolCallEnd` events to the `Session`.
@@ -102,7 +102,7 @@ pub(crate) async fn handle_mcp_tool_call(
 
     let metadata =
         lookup_mcp_tool_metadata(sess.as_ref(), turn_context.as_ref(), &server, &tool_name).await;
-    let app_tool_policy = if server == CODEX_APPS_MCP_SERVER_NAME {
+    let app_tool_policy = if server == PRAXIS_APPS_MCP_SERVER_NAME {
         connectors::app_tool_policy(
             &turn_context.config,
             metadata
@@ -119,13 +119,13 @@ pub(crate) async fn handle_mcp_tool_call(
     } else {
         connectors::AppToolPolicy::default()
     };
-    let approval_mode = if server == CODEX_APPS_MCP_SERVER_NAME {
+    let approval_mode = if server == PRAXIS_APPS_MCP_SERVER_NAME {
         app_tool_policy.approval
     } else {
         custom_mcp_tool_approval_mode(turn_context.as_ref(), &server, &tool_name)
     };
 
-    if server == CODEX_APPS_MCP_SERVER_NAME && !app_tool_policy.enabled {
+    if server == PRAXIS_APPS_MCP_SERVER_NAME && !app_tool_policy.enabled {
         let result = notify_mcp_tool_call_skip(
             tool_events,
             invocation,
@@ -485,7 +485,7 @@ async fn maybe_track_praxis_app_used(
     server: &str,
     tool_name: &str,
 ) {
-    if server != CODEX_APPS_MCP_SERVER_NAME {
+    if server != PRAXIS_APPS_MCP_SERVER_NAME {
         return;
     }
     let metadata = lookup_mcp_app_usage_metadata(sess, server, tool_name).await;
@@ -538,7 +538,7 @@ pub(crate) struct McpToolApprovalMetadata {
     praxis_apps_meta: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-const MCP_TOOL_CODEX_APPS_META_KEY: &str = "_praxis_apps";
+const MCP_TOOL_PRAXIS_APPS_META_KEY: &str = "_praxis_apps";
 
 fn custom_mcp_tool_approval_mode(
     turn_context: &TurnContext,
@@ -575,12 +575,12 @@ fn build_mcp_tool_call_request_meta(
         );
     }
 
-    if server == CODEX_APPS_MCP_SERVER_NAME
+    if server == PRAXIS_APPS_MCP_SERVER_NAME
         && let Some(praxis_apps_meta) =
             metadata.and_then(|metadata| metadata.praxis_apps_meta.clone())
     {
         request_meta.insert(
-            MCP_TOOL_CODEX_APPS_META_KEY.to_string(),
+            MCP_TOOL_PRAXIS_APPS_META_KEY.to_string(),
             serde_json::Value::Object(praxis_apps_meta),
         );
     }
@@ -864,7 +864,7 @@ fn session_mcp_tool_approval_key(
     }
 
     let connector_id = metadata.and_then(|metadata| metadata.connector_id.clone());
-    if invocation.server == CODEX_APPS_MCP_SERVER_NAME && connector_id.is_none() {
+    if invocation.server == PRAXIS_APPS_MCP_SERVER_NAME && connector_id.is_none() {
         return None;
     }
 
@@ -919,9 +919,10 @@ fn mcp_tool_approval_decision_from_guardian(decision: ReviewDecision) -> McpTool
 }
 
 fn is_full_access_mode(turn_context: &TurnContext) -> bool {
-    matches!(turn_context.approval_policy.value(), AskForApproval::Never)
+    let permissions = turn_context.effective_permissions();
+    matches!(permissions.approval_policy.value(), AskForApproval::Never)
         && matches!(
-            turn_context.sandbox_policy.get(),
+            permissions.sandbox_policy.get(),
             SandboxPolicy::DangerFullAccess | SandboxPolicy::ExternalSandbox { .. }
         )
 }
@@ -955,7 +956,7 @@ pub(crate) async fn lookup_mcp_tool_metadata(
     let tool_info = tools
         .into_values()
         .find(|tool_info| tool_info.server_name == server && tool_info.tool.name == tool_name)?;
-    let connector_description = if server == CODEX_APPS_MCP_SERVER_NAME {
+    let connector_description = if server == PRAXIS_APPS_MCP_SERVER_NAME {
         let connectors = match connectors::list_cached_accessible_connectors_from_mcp_tools(
             turn_context.config.as_ref(),
         )
@@ -990,7 +991,7 @@ pub(crate) async fn lookup_mcp_tool_metadata(
             .tool
             .meta
             .as_ref()
-            .and_then(|meta| meta.get(MCP_TOOL_CODEX_APPS_META_KEY))
+            .and_then(|meta| meta.get(MCP_TOOL_PRAXIS_APPS_META_KEY))
             .and_then(serde_json::Value::as_object)
             .cloned(),
     })
@@ -1077,7 +1078,7 @@ fn build_mcp_tool_approval_fallback_message(
         .filter(|name| !name.is_empty())
         .map(ToString::to_string)
         .unwrap_or_else(|| {
-            if server == CODEX_APPS_MCP_SERVER_NAME {
+            if server == PRAXIS_APPS_MCP_SERVER_NAME {
                 "this app".to_string()
             } else {
                 format!("the {server} MCP server")
@@ -1189,7 +1190,7 @@ fn build_mcp_tool_approval_elicitation_meta(
                 serde_json::Value::String(tool_description.clone()),
             );
         }
-        if server == CODEX_APPS_MCP_SERVER_NAME
+        if server == PRAXIS_APPS_MCP_SERVER_NAME
             && (metadata.connector_id.is_some()
                 || metadata.connector_name.is_some()
                 || metadata.connector_description.is_some())
@@ -1417,7 +1418,7 @@ async fn maybe_persist_mcp_tool_approval(
 ) {
     let tool_name = key.tool_name.clone();
 
-    let persist_result = if key.server == CODEX_APPS_MCP_SERVER_NAME {
+    let persist_result = if key.server == PRAXIS_APPS_MCP_SERVER_NAME {
         let Some(connector_id) = key.connector_id.clone() else {
             remember_mcp_tool_approval(sess, key).await;
             return;

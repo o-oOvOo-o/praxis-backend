@@ -2,17 +2,11 @@ use praxis_config::types::EnvironmentVariablePattern;
 use praxis_config::types::ShellEnvironmentPolicy;
 use praxis_config::types::ShellEnvironmentPolicyInherit;
 use praxis_protocol::ThreadId;
+use praxis_utils_home_dir::is_upstream_codex_state_env_var;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 pub const PRAXIS_THREAD_ID_ENV_VAR: &str = "PRAXIS_THREAD_ID";
-
-const CODEX_STATE_ENV_VARS: &[&str] = &[
-    "CODEX_HOME",
-    "CODEX_HOME_NAMESPACE",
-    "CODEX_SQLITE_HOME",
-    "CODEX_THREAD_ID",
-];
 
 /// Construct an environment map based on the rules in the specified policy. The
 /// resulting map can be passed directly to `Command::envs()` after calling
@@ -35,16 +29,6 @@ pub fn create_env(
     thread_id: Option<ThreadId>,
 ) -> HashMap<String, String> {
     populate_env(std::env::vars(), policy, thread_id)
-}
-
-fn is_codex_state_env_var(name: &str) -> bool {
-    if cfg!(target_os = "windows") {
-        CODEX_STATE_ENV_VARS
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(name))
-    } else {
-        CODEX_STATE_ENV_VARS.contains(&name)
-    }
 }
 
 fn populate_env<I>(
@@ -103,7 +87,7 @@ where
     // they can make nested official Codex processes attach to the wrong thread
     // or write into a stale state database.  Do this before user-provided
     // overrides so an explicit command policy can still opt back in.
-    env_map.retain(|k, _| !is_codex_state_env_var(k));
+    env_map.retain(|k, _| !is_upstream_codex_state_env_var(k));
 
     // Step 5 – Apply user-provided overrides.
     for (key, val) in &policy.r#set {

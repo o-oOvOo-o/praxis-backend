@@ -35,10 +35,10 @@ model_provider = "ollama"
     );
     std::fs::write(praxis_home.join("config.toml"), config_contents)?;
 
-    let CodexCliOutput { exit_code, output } = run_praxis_cli(praxis_home, cwd).await?;
+    let PraxisCliOutput { exit_code, output } = run_praxis_cli(praxis_home, cwd).await?;
     assert_ne!(0, exit_code, "Praxis CLI should exit nonzero.");
     assert!(
-        output.contains("ERROR: Failed to initialize codex:"),
+        output.contains("ERROR: Failed to initialize session:"),
         "expected startup error in output, got: {output}"
     );
     assert!(
@@ -48,7 +48,7 @@ model_provider = "ollama"
     Ok(())
 }
 
-struct CodexCliOutput {
+struct PraxisCliOutput {
     exit_code: i32,
     output: String,
 }
@@ -56,7 +56,7 @@ struct CodexCliOutput {
 async fn run_praxis_cli(
     praxis_home: impl AsRef<Path>,
     cwd: impl AsRef<Path>,
-) -> anyhow::Result<CodexCliOutput> {
+) -> anyhow::Result<PraxisCliOutput> {
     let praxis_cli = praxis_utils_cargo_bin::cargo_bin("praxis")?;
     let mut env = HashMap::new();
     env.insert(
@@ -111,7 +111,7 @@ async fn run_praxis_cli(
         Ok(Err(err)) => return Err(err.into()),
         Err(_) => {
             session.terminate();
-            anyhow::bail!("timed out waiting for codex CLI to exit");
+            anyhow::bail!("timed out waiting for Praxis CLI to exit");
         }
     };
     // Drain any output that raced with the exit notification.
@@ -120,7 +120,7 @@ async fn run_praxis_cli(
     }
 
     let output = String::from_utf8_lossy(&output);
-    Ok(CodexCliOutput {
+    Ok(PraxisCliOutput {
         exit_code,
         output: output.to_string(),
     })

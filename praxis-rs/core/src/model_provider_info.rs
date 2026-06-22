@@ -24,9 +24,9 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
-const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"responses\"` in your provider config.\nMore info: https://github.com/openai/codex/discussions/7782";
+const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"responses\"` in your provider config.";
 pub(crate) const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
-pub(crate) const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.\nMore info: https://github.com/openai/codex/discussions/7782";
+pub(crate) const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FirstPartyModelOwner {
@@ -38,8 +38,8 @@ pub fn first_party_model_owner(model: &str) -> Option<FirstPartyModelOwner> {
     let policy = crate::llm::registry::LlmProfileRegistry::builtin_static()
         .first_party_policy_for_model(model)?;
     Some(FirstPartyModelOwner {
-        provider_id: policy.canonical_provider_id?,
-        owner_label: policy.owner_label,
+        provider_id: policy.canonical_provider_id()?,
+        owner_label: policy.owner_label(),
     })
 }
 
@@ -335,6 +335,14 @@ impl ModelProviderInfo {
         self.name == OPENAI_PROVIDER_NAME
     }
 
+    pub(crate) fn uses_managed_openai_auth(&self) -> bool {
+        self.requires_openai_auth || self.is_openai()
+    }
+
+    pub(crate) fn can_use_managed_auth(&self) -> bool {
+        self.has_command_auth() || self.uses_managed_openai_auth()
+    }
+
     pub(crate) fn has_command_auth(&self) -> bool {
         self.auth.is_some()
     }
@@ -345,6 +353,9 @@ pub const DEFAULT_OLLAMA_PORT: u16 = 11434;
 
 pub const LMSTUDIO_OSS_PROVIDER_ID: &str = "lmstudio";
 pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
+
+const PRAXIS_OSS_PORT_ENV: &str = "PRAXIS_OSS_PORT";
+const PRAXIS_OSS_BASE_URL_ENV: &str = "PRAXIS_OSS_BASE_URL";
 
 /// Built-in default provider list.
 pub fn built_in_model_providers(
@@ -374,22 +385,22 @@ pub fn built_in_model_providers(
 }
 
 pub fn create_oss_provider(default_provider_port: u16, wire_api: WireApi) -> ModelProviderInfo {
-    // These CODEX_OSS_ environment variables are experimental: we may
-    // switch to reading values from config.toml instead.
     let default_praxis_oss_base_url = format!(
         "http://localhost:{praxis_oss_port}/v1",
-        praxis_oss_port = std::env::var("CODEX_OSS_PORT")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
+        praxis_oss_port = provider_env_value(PRAXIS_OSS_PORT_ENV)
             .and_then(|value| value.parse::<u16>().ok())
             .unwrap_or(default_provider_port)
     );
 
-    let praxis_oss_base_url = std::env::var("CODEX_OSS_BASE_URL")
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .unwrap_or(default_praxis_oss_base_url);
+    let praxis_oss_base_url =
+        provider_env_value(PRAXIS_OSS_BASE_URL_ENV).unwrap_or(default_praxis_oss_base_url);
     create_oss_provider_with_base_url(&praxis_oss_base_url, wire_api)
+}
+
+fn provider_env_value(var: &str) -> Option<String> {
+    std::env::var(var)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
 }
 
 pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> ModelProviderInfo {

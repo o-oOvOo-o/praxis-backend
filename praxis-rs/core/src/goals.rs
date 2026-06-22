@@ -626,8 +626,7 @@ impl Session {
             return;
         };
         if self.active_turn.lock().await.is_some()
-            || self.has_queued_response_items_for_next_turn().await
-            || self.has_trigger_turn_mailbox_items().await
+            || self.has_pending_work_for_idle_turn().await
             || should_ignore_goal_for_mode(self.collaboration_mode().await.mode)
         {
             return;

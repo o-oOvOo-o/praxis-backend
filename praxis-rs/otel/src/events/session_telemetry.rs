@@ -27,6 +27,7 @@ use crate::metrics::names::WEBSOCKET_REQUEST_DURATION_METRIC;
 use crate::metrics::runtime_metrics::RuntimeMetricsSummary;
 use crate::metrics::tags::SessionMetricTagValues;
 use crate::metrics::timer::Timer;
+use crate::naming::praxis_signal_name;
 use crate::provider::OtelProvider;
 use crate::sanitize_metric_tag_value;
 use eventsource_stream::Event as StreamEvent;
@@ -52,6 +53,16 @@ use std::time::Instant;
 use tokio::time::error::Elapsed;
 use tracing::Span;
 
+const EVENT_CONVERSATION_STARTS: &str = praxis_signal_name!("conversation_starts");
+const EVENT_API_REQUEST: &str = praxis_signal_name!("api_request");
+const EVENT_WEBSOCKET_CONNECT: &str = praxis_signal_name!("websocket_connect");
+const EVENT_WEBSOCKET_REQUEST: &str = praxis_signal_name!("websocket_request");
+const EVENT_AUTH_RECOVERY: &str = praxis_signal_name!("auth_recovery");
+const EVENT_WEBSOCKET_EVENT: &str = praxis_signal_name!("websocket_event");
+const EVENT_SSE_EVENT: &str = praxis_signal_name!("sse_event");
+const EVENT_USER_PROMPT: &str = praxis_signal_name!("user_prompt");
+const EVENT_TOOL_DECISION: &str = praxis_signal_name!("tool_decision");
+const EVENT_TOOL_RESULT: &str = praxis_signal_name!("tool_result");
 const SSE_UNKNOWN_KIND: &str = "unknown";
 const WEBSOCKET_UNKNOWN_KIND: &str = "unknown";
 const RESPONSES_WEBSOCKET_TIMING_KIND: &str = "responsesapi.websocket_timing";
@@ -328,7 +339,7 @@ impl SessionTelemetry {
         log_and_trace_event!(
             self,
             common: {
-                event.name = "codex.conversation_starts",
+                event.name = EVENT_CONVERSATION_STARTS,
                 provider_name = %provider_name,
                 auth.env_openai_api_key_present = self.metadata.auth_env.openai_api_key_env_present,
                 auth.env_praxis_api_key_present = self.metadata.auth_env.praxis_api_key_env_present,
@@ -423,7 +434,7 @@ impl SessionTelemetry {
         log_and_trace_event!(
             self,
             common: {
-                event.name = "codex.api_request",
+                event.name = EVENT_API_REQUEST,
                 duration_ms = %duration.as_millis(),
                 http.response.status_code = status,
                 error.message = error,
@@ -476,7 +487,7 @@ impl SessionTelemetry {
         log_and_trace_event!(
             self,
             common: {
-                event.name = "codex.websocket_connect",
+                event.name = EVENT_WEBSOCKET_CONNECT,
                 duration_ms = %duration.as_millis(),
                 http.response.status_code = status,
                 success = success_str,
@@ -524,7 +535,7 @@ impl SessionTelemetry {
         log_and_trace_event!(
             self,
             common: {
-                event.name = "codex.websocket_request",
+                event.name = EVENT_WEBSOCKET_REQUEST,
                 duration_ms = %duration.as_millis(),
                 success = success_str,
                 error.message = error,
@@ -557,7 +568,7 @@ impl SessionTelemetry {
         log_and_trace_event!(
             self,
             common: {
-                event.name = "codex.auth_recovery",
+                event.name = EVENT_AUTH_RECOVERY,
                 auth.mode = mode,
                 auth.step = step,
                 auth.outcome = outcome,
@@ -658,7 +669,7 @@ impl SessionTelemetry {
         log_and_trace_event!(
             self,
             common: {
-                event.name = "codex.websocket_event",
+                event.name = EVENT_WEBSOCKET_EVENT,
                 event.kind = %kind_str,
                 duration_ms = %duration.as_millis(),
                 success = success_str,
@@ -733,7 +744,7 @@ impl SessionTelemetry {
         );
         log_event!(
             self,
-            event.name = "codex.sse_event",
+            event.name = EVENT_SSE_EVENT,
             event.kind = %kind,
             duration_ms = %duration.as_millis(),
         );
@@ -757,21 +768,21 @@ impl SessionTelemetry {
         match kind {
             Some(kind) => log_event!(
                 self,
-                event.name = "codex.sse_event",
+                event.name = EVENT_SSE_EVENT,
                 event.kind = %kind,
                 duration_ms = %duration.as_millis(),
                 error.message = %error,
             ),
             None => log_event!(
                 self,
-                event.name = "codex.sse_event",
+                event.name = EVENT_SSE_EVENT,
                 duration_ms = %duration.as_millis(),
                 error.message = %error,
             ),
         }
         trace_event!(
             self,
-            event.name = "codex.sse_event",
+            event.name = EVENT_SSE_EVENT,
             event.kind = %kind_str,
             duration_ms = %duration.as_millis(),
             error.message = %error,
@@ -785,7 +796,7 @@ impl SessionTelemetry {
         log_and_trace_event!(
             self,
             common: {
-                event.name = "codex.sse_event",
+                event.name = EVENT_SSE_EVENT,
                 event.kind = %"response.completed",
                 error.message = %error,
             },
@@ -805,7 +816,7 @@ impl SessionTelemetry {
         log_and_trace_event!(
             self,
             common: {
-                event.name = "codex.sse_event",
+                event.name = EVENT_SSE_EVENT,
                 event.kind = %"response.completed",
                 input_token_count = %input_token_count,
                 output_token_count = %output_token_count,
@@ -847,13 +858,13 @@ impl SessionTelemetry {
 
         log_event!(
             self,
-            event.name = "codex.user_prompt",
+            event.name = EVENT_USER_PROMPT,
             prompt_length = %prompt.chars().count(),
             prompt = %prompt_to_log,
         );
         trace_event!(
             self,
-            event.name = "codex.user_prompt",
+            event.name = EVENT_USER_PROMPT,
             prompt_length = %prompt.chars().count(),
             text_input_count = text_input_count as i64,
             image_input_count = image_input_count as i64,
@@ -870,7 +881,7 @@ impl SessionTelemetry {
     ) {
         log_event!(
             self,
-            event.name = "codex.tool_decision",
+            event.name = EVENT_TOOL_DECISION,
             tool_name = %tool_name,
             call_id = %call_id,
             decision = %decision.clone().to_string().to_lowercase(),
@@ -921,7 +932,7 @@ impl SessionTelemetry {
     pub fn log_tool_failed(&self, tool_name: &str, error: &str) {
         log_event!(
             self,
-            event.name = "codex.tool_result",
+            event.name = EVENT_TOOL_RESULT,
             tool_name = %tool_name,
             duration_ms = %Duration::ZERO.as_millis(),
             success = %false,
@@ -931,7 +942,7 @@ impl SessionTelemetry {
         );
         trace_event!(
             self,
-            event.name = "codex.tool_result",
+            event.name = EVENT_TOOL_RESULT,
             tool_name = %tool_name,
             duration_ms = %Duration::ZERO.as_millis(),
             success = %false,
@@ -966,7 +977,7 @@ impl SessionTelemetry {
         let mcp_server_origin = mcp_server_origin.unwrap_or("");
         log_event!(
             self,
-            event.name = "codex.tool_result",
+            event.name = EVENT_TOOL_RESULT,
             tool_name = %tool_name,
             call_id = %call_id,
             arguments = %arguments,
@@ -978,7 +989,7 @@ impl SessionTelemetry {
         );
         trace_event!(
             self,
-            event.name = "codex.tool_result",
+            event.name = EVENT_TOOL_RESULT,
             tool_name = %tool_name,
             call_id = %call_id,
             duration_ms = %duration.as_millis(),

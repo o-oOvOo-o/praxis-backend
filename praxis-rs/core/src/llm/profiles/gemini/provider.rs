@@ -1,39 +1,35 @@
 use super::super::plugin::ProfileMatchContext;
-use super::super::plugin::base_url;
-use super::super::plugin::contains_any_text;
+use super::super::plugin::ProfileProviderIdentityRule;
 
-pub(crate) const GEMINI_PROVIDER_ID: &str = "gemini";
+pub(super) const GEMINI_PROVIDER_ID: &str = "gemini";
+const GEMINI_CONTEXT_NEEDLES: &[&str] = &[
+    "gemini",
+    "generativelanguage.googleapis.com",
+    "aiplatform.googleapis.com",
+];
+const GEMINI_BASE_URL_NEEDLES: &[&str] = &[
+    "generativelanguage.googleapis.com",
+    "aiplatform.googleapis.com",
+];
+const GEMINI_PROVIDER_RULE: ProfileProviderIdentityRule = ProfileProviderIdentityRule::new(
+    &[],
+    &[GEMINI_PROVIDER_ID],
+    &[],
+    &["gemini"],
+    GEMINI_BASE_URL_NEEDLES,
+);
 
-pub(crate) fn matches(ctx: &ProfileMatchContext<'_>) -> bool {
-    contains_any_text(
-        &[
-            ctx.model_info.slug.as_str(),
-            ctx.provider_id,
-            ctx.provider.name.as_str(),
-            base_url(ctx.provider),
-        ],
-        &[
-            "gemini",
-            "generativelanguage.googleapis.com",
-            "aiplatform.googleapis.com",
-        ],
-    )
+pub(super) fn matches(ctx: &ProfileMatchContext<'_>) -> bool {
+    ctx.model_and_provider_identity_contains_any(GEMINI_CONTEXT_NEEDLES)
 }
 
-pub(crate) fn is_first_party_provider(
+pub(super) fn is_first_party_provider(
     provider_id: &str,
     provider: &crate::ModelProviderInfo,
 ) -> bool {
-    let provider_name = provider.name.to_ascii_lowercase();
-    provider_id.eq_ignore_ascii_case(GEMINI_PROVIDER_ID)
-        || provider_name.contains("gemini")
-        || provider.base_url.as_deref().is_some_and(|base_url| {
-            let base_url = base_url.to_ascii_lowercase();
-            base_url.contains("generativelanguage.googleapis.com")
-                || base_url.contains("aiplatform.googleapis.com")
-        })
+    GEMINI_PROVIDER_RULE.matches_provider(provider_id, provider)
 }
 
-pub(crate) fn is_first_party_model(model: &str) -> bool {
+pub(super) fn is_first_party_model(model: &str) -> bool {
     model.trim().to_ascii_lowercase().starts_with("gemini-")
 }

@@ -25,13 +25,13 @@ use praxis_api::RealtimeWebsocketClient;
 use praxis_api::endpoint::realtime_websocket::RealtimeWebsocketEvents;
 use praxis_api::endpoint::realtime_websocket::RealtimeWebsocketWriter;
 use praxis_login::default_client::default_headers;
-use praxis_protocol::protocol::CodexErrorInfo;
 use praxis_protocol::protocol::ConversationAudioParams;
 use praxis_protocol::protocol::ConversationStartParams;
 use praxis_protocol::protocol::ConversationTextParams;
 use praxis_protocol::protocol::ErrorEvent;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::EventMsg;
+use praxis_protocol::protocol::PraxisErrorInfo;
 use praxis_protocol::protocol::RealtimeConversationClosedEvent;
 use praxis_protocol::protocol::RealtimeConversationRealtimeEvent;
 use praxis_protocol::protocol::RealtimeConversationStartedEvent;
@@ -616,7 +616,7 @@ pub(crate) async fn handle_audio(
         if sess.conversation.running_state().await.is_some() {
             warn!("realtime audio input failed while the session was already ending");
         } else {
-            send_conversation_error(sess, sub_id, err.to_string(), CodexErrorInfo::BadRequest)
+            send_conversation_error(sess, sub_id, err.to_string(), PraxisErrorInfo::BadRequest)
                 .await;
         }
     }
@@ -668,7 +668,7 @@ pub(crate) async fn handle_text(
         if sess.conversation.running_state().await.is_some() {
             warn!("realtime text input failed while the session was already ending");
         } else {
-            send_conversation_error(sess, sub_id, err.to_string(), CodexErrorInfo::BadRequest)
+            send_conversation_error(sess, sub_id, err.to_string(), PraxisErrorInfo::BadRequest)
                 .await;
         }
     }
@@ -989,7 +989,7 @@ async fn send_conversation_error(
     sess: &Arc<Session>,
     sub_id: String,
     message: String,
-    praxis_error_info: CodexErrorInfo,
+    praxis_error_info: PraxisErrorInfo,
 ) {
     sess.send_event_raw(Event {
         id: sub_id,

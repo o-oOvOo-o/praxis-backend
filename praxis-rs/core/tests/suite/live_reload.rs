@@ -10,8 +10,8 @@ use core_test_support::responses;
 use core_test_support::responses::ResponsesRequest;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::start_mock_server;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::config::ProjectConfig;
 use praxis_protocol::config_types::TrustLevel;
@@ -44,9 +44,9 @@ fn contains_skill_body(request: &ResponsesRequest, skill_body: &str) -> bool {
         .any(|text| text.contains(skill_body) && text.contains("<skill>"))
 }
 
-async fn submit_skill_turn(test: &TestCodex, skill_path: PathBuf, prompt: &str) -> Result<()> {
+async fn submit_skill_turn(test: &TestPraxis, skill_path: PathBuf, prompt: &str) -> Result<()> {
     let session_model = test.session_configured.model.clone();
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![
                 UserInput::Text {
@@ -72,7 +72,7 @@ async fn submit_skill_turn(test: &TestCodex, skill_path: PathBuf, prompt: &str) 
         })
         .await?;
 
-    wait_for_event(test.codex.as_ref(), |event| {
+    wait_for_event(test.thread.as_ref(), |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -93,7 +93,7 @@ async fn live_skills_reload_refreshes_skill_cache_after_skill_change() -> Result
 
     let skill_v1 = "skill body v1";
     let skill_v2 = "skill body v2";
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(move |home| {
             write_skill(home, "demo", "demo skill", skill_v1);
         })
@@ -119,7 +119,7 @@ async fn live_skills_reload_refreshes_skill_cache_after_skill_change() -> Result
 
     let saw_skills_update = timeout(Duration::from_secs(5), async {
         loop {
-            match test.codex.next_event().await {
+            match test.thread.next_event().await {
                 Ok(event) => {
                     if matches!(event.msg, EventMsg::SkillsUpdateAvailable) {
                         break;

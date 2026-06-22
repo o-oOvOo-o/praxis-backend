@@ -20,6 +20,7 @@ use tokio::sync::oneshot;
 use crate::praxis::TurnContext;
 use crate::tasks::AgentTask;
 use praxis_protocol::models::PermissionProfile;
+use praxis_protocol::protocol::NonSteerableTurnKind;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_protocol::protocol::TokenUsage;
 
@@ -43,6 +44,19 @@ pub(crate) enum AgentTaskKind {
     Regular,
     Review,
     Compact,
+    Undo,
+    UserShell,
+    GhostSnapshot,
+}
+
+impl AgentTaskKind {
+    pub(crate) fn non_steerable_turn_kind(self) -> Option<NonSteerableTurnKind> {
+        match self {
+            Self::Review => Some(NonSteerableTurnKind::Review),
+            Self::Compact => Some(NonSteerableTurnKind::Compact),
+            Self::Regular | Self::Undo | Self::UserShell | Self::GhostSnapshot => None,
+        }
+    }
 }
 
 pub(crate) struct RunningAgentTask {

@@ -26,7 +26,6 @@ use crate::tools::sandboxing::ToolError;
 use crate::tools::sandboxing::ToolRuntime;
 use crate::tools::sandboxing::default_exec_approval_requirement;
 use praxis_otel::ToolDecisionSource;
-use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::NetworkPolicyRuleAction;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_sandboxing::SandboxManager;
@@ -104,11 +103,12 @@ impl ToolOrchestrator {
         req: &Rq,
         tool_ctx: &ToolCtx,
         turn_ctx: &crate::praxis::TurnContext,
-        approval_policy: AskForApproval,
     ) -> Result<OrchestratorRunResult<Out>, ToolError>
     where
         T: ToolRuntime<Rq, Out>,
     {
+        let permissions = turn_ctx.effective_permissions();
+        let approval_policy = permissions.approval_policy.value();
         let otel = turn_ctx.session_telemetry.clone();
         let otel_tn = &tool_ctx.tool_name;
         let otel_ci = &tool_ctx.call_id;
@@ -122,7 +122,10 @@ impl ToolOrchestrator {
         tool.preflight(req, tool_ctx).await?;
 
         let requirement = tool.exec_approval_requirement(req).unwrap_or_else(|| {
-            default_exec_approval_requirement(approval_policy, &turn_ctx.file_system_sandbox_policy)
+            default_exec_approval_requirement(
+                approval_policy,
+                &permissions.file_system_sandbox_policy,
+            )
         });
         match requirement {
             ExecApprovalRequirement::Skip { .. } => {
@@ -183,10 +186,10 @@ impl ToolOrchestrator {
         let initial_sandbox = match tool.sandbox_mode_for_first_attempt(req) {
             SandboxOverride::BypassSandboxFirstAttempt => SandboxType::None,
             SandboxOverride::NoOverride => self.sandbox.select_initial(
-                &turn_ctx.file_system_sandbox_policy,
-                turn_ctx.network_sandbox_policy,
+                &permissions.file_system_sandbox_policy,
+                permissions.network_sandbox_policy,
                 tool.sandbox_preference(),
-                turn_ctx.windows_sandbox_level,
+                permissions.windows_sandbox_level,
                 has_managed_network_requirements,
             ),
         };
@@ -195,15 +198,15 @@ impl ToolOrchestrator {
         let use_legacy_landlock = turn_ctx.features.use_legacy_landlock();
         let initial_attempt = SandboxAttempt {
             sandbox: initial_sandbox,
-            policy: &turn_ctx.sandbox_policy,
-            file_system_policy: &turn_ctx.file_system_sandbox_policy,
-            network_policy: turn_ctx.network_sandbox_policy,
+            policy: &permissions.sandbox_policy,
+            file_system_policy: &permissions.file_system_sandbox_policy,
+            network_policy: permissions.network_sandbox_policy,
             enforce_managed_network: has_managed_network_requirements,
             manager: &self.sandbox,
             sandbox_cwd: &turn_ctx.cwd,
             praxis_linux_sandbox_exe: turn_ctx.praxis_linux_sandbox_exe.as_ref(),
             use_legacy_landlock,
-            windows_sandbox_level: turn_ctx.windows_sandbox_level,
+            windows_sandbox_level: permissions.windows_sandbox_level,
             windows_sandbox_private_desktop: turn_ctx
                 .config
                 .permissions
@@ -249,20 +252,23 @@ impl ToolOrchestrator {
                         network_policy_decision,
                     })));
                 }
+                let retry_permissions = turn_ctx.effective_permissions();
+                let retry_approval_policy = retry_permissions.approval_policy.value();
                 // Under `Never` or `OnRequest`, do not retry without sandbox;
                 // surface a concise sandbox denial that preserves the
                 // original output.
-                if !tool.wants_no_sandbox_approval(approval_policy) {
-                    let allow_on_request_network_prompt =
-                        matches!(approval_policy, AskForApproval::OnRequest)
-                            && network_approval_context.is_some()
-                            && matches!(
-                                default_exec_approval_requirement(
-                                    approval_policy,
-                                    &turn_ctx.file_system_sandbox_policy
-                                ),
-                                ExecApprovalRequirement::NeedsApproval { .. }
-                            );
+                if !tool.wants_no_sandbox_approval(retry_approval_policy) {
+                    let allow_on_request_network_prompt = matches!(
+                        retry_approval_policy,
+                        praxis_protocol::protocol::AskForApproval::OnRequest
+                    ) && network_approval_context.is_some()
+                        && matches!(
+                            default_exec_approval_requirement(
+                                retry_approval_policy,
+                                &retry_permissions.file_system_sandbox_policy
+                            ),
+                            ExecApprovalRequirement::NeedsApproval { .. }
+                        );
                     if !allow_on_request_network_prompt {
                         return Err(ToolError::Praxis(PraxisErr::Sandbox(SandboxErr::Denied {
                             output,
@@ -282,7 +288,7 @@ impl ToolOrchestrator {
 
                 // Ask for approval before retrying with the escalated sandbox.
                 let bypass_retry_approval = tool
-                    .should_bypass_approval(approval_policy, already_approved)
+                    .should_bypass_approval(retry_approval_policy, already_approved)
                     && network_approval_context.is_none();
                 if !bypass_retry_approval {
                     let approval_ctx = ApprovalCtx {
@@ -326,15 +332,15 @@ impl ToolOrchestrator {
 
                 let escalated_attempt = SandboxAttempt {
                     sandbox: SandboxType::None,
-                    policy: &turn_ctx.sandbox_policy,
-                    file_system_policy: &turn_ctx.file_system_sandbox_policy,
-                    network_policy: turn_ctx.network_sandbox_policy,
+                    policy: &retry_permissions.sandbox_policy,
+                    file_system_policy: &retry_permissions.file_system_sandbox_policy,
+                    network_policy: retry_permissions.network_sandbox_policy,
                     enforce_managed_network: has_managed_network_requirements,
                     manager: &self.sandbox,
                     sandbox_cwd: &turn_ctx.cwd,
                     praxis_linux_sandbox_exe: None,
                     use_legacy_landlock,
-                    windows_sandbox_level: turn_ctx.windows_sandbox_level,
+                    windows_sandbox_level: retry_permissions.windows_sandbox_level,
                     windows_sandbox_private_desktop: turn_ctx
                         .config
                         .permissions

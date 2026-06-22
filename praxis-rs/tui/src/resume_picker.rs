@@ -1,6 +1,4 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -9,7 +7,6 @@ use crate::app_gateway_session::AppGatewaySession;
 use crate::diff_render::display_path_for;
 use crate::key_hint;
 use crate::text_formatting::truncate_text;
-use crate::thread_pagination::THREAD_PAGE_SIZE;
 use crate::thread_pagination::ThreadListPagination;
 use crate::thread_pagination::interactive_thread_source_kinds;
 use crate::thread_pagination::thread_list_params as common_thread_list_params;
@@ -26,18 +23,9 @@ use praxis_app_gateway_protocol::Thread;
 use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadSortKey as AppGatewayThreadSortKey;
 use praxis_app_gateway_protocol::ThreadSourceKind;
-use praxis_core::Cursor;
-use praxis_core::ListThreadsQuery;
-use praxis_core::ThreadDirectory;
-use praxis_core::ThreadItem;
 use praxis_core::ThreadSortKey;
-use praxis_core::ThreadSummary;
-use praxis_core::ThreadSummaryPage;
-use praxis_core::ThreadsPage;
 use praxis_core::config::Config;
-use praxis_core::path_utils;
 use praxis_protocol::ThreadId;
-use praxis_rollout::StateDbHandle;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
@@ -55,6 +43,7 @@ pub struct SessionTarget {
     pub path: Option<PathBuf>,
     pub thread_id: ThreadId,
     pub thread_name: Option<String>,
+    pub cwd: Option<PathBuf>,
 }
 
 impl SessionTarget {
@@ -100,11 +89,13 @@ impl SessionPickerAction {
         path: Option<PathBuf>,
         thread_id: ThreadId,
         thread_name: Option<String>,
+        cwd: Option<PathBuf>,
     ) -> SessionSelection {
         let target_session = SessionTarget {
             path,
             thread_id,
             thread_name,
+            cwd,
         };
         match self {
             SessionPickerAction::Resume => SessionSelection::Resume(target_session),
@@ -207,12 +198,7 @@ enum BackgroundEvent {
     },
 }
 
-#[derive(Clone)]
-enum PageCursor {
-    #[allow(dead_code)]
-    Rollout(Cursor),
-    AppGateway(String),
-}
+type PageCursor = String;
 
 struct PickerPage {
     rows: Vec<Row>,
@@ -221,30 +207,20 @@ struct PickerPage {
     reached_scan_cap: bool,
 }
 
-/// Interactive session picker that lists recorded rollout files with simple
-/// search and pagination.
+/// Interactive session picker that lists recorded threads with simple search and
+/// pagination.
 ///
 /// The picker displays sessions in a table with timestamp columns (created/updated),
 /// git branch, working directory, and conversation preview. Users can toggle
 /// between sorting by creation time and last-updated time using the Tab key.
 ///
-/// Sessions are loaded on-demand via cursor-based pagination. The backend
-/// `ThreadDirectory::list_threads` returns pages ordered by the selected sort key,
-/// and the picker deduplicates across pages to handle overlapping windows when
-/// new sessions appear during pagination.
+/// Sessions are loaded on-demand via cursor-based pagination. App Gateway
+/// returns pages ordered by the selected sort key, and the picker deduplicates
+/// across pages to handle overlapping windows when new sessions appear during
+/// pagination.
 ///
-/// Filtering happens in two layers:
-/// 1. Provider and source filtering at the backend (only interactive CLI sessions
-///    for the current model provider).
-/// 2. Working-directory filtering at the picker (unless `--all` is passed).
-#[allow(dead_code)]
-pub async fn run_resume_picker(
-    tui: &mut Tui,
-    config: &Config,
-    show_all: bool,
-) -> Result<SessionSelection> {
-    run_session_picker(tui, config, show_all, SessionPickerAction::Resume).await
-}
+/// Filtering happens in two layers: thread source/search at App Gateway, then
+/// optional working-directory filtering in the picker.
 
 pub async fn run_resume_picker_with_app_gateway(
     tui: &mut Tui,
@@ -279,7 +255,6 @@ pub async fn run_resume_picker_with_app_gateway(
         bg_rx,
         active_source,
         source_switcher,
-        /*lookup_missing_thread_names*/ false,
     )
     .await
 }
@@ -322,30 +297,6 @@ pub async fn run_fork_picker_with_app_gateway(
         bg_rx,
         active_source,
         source_switcher,
-        /*lookup_missing_thread_names*/ false,
-    )
-    .await
-}
-
-#[allow(dead_code)]
-async fn run_session_picker(
-    tui: &mut Tui,
-    config: &Config,
-    show_all: bool,
-    action: SessionPickerAction,
-) -> Result<SessionSelection> {
-    let (bg_tx, bg_rx) = mpsc::unbounded_channel();
-    run_session_picker_with_loader(
-        tui,
-        config,
-        show_all,
-        action,
-        /*is_remote*/ false,
-        spawn_rollout_page_loader(config, bg_tx),
-        bg_rx,
-        SessionLookupSource::Praxis,
-        None,
-        /*lookup_missing_thread_names*/ true,
     )
     .await
 }
@@ -360,7 +311,6 @@ async fn run_session_picker_with_loader(
     bg_rx: mpsc::UnboundedReceiver<BackgroundEvent>,
     active_source: SessionLookupSource,
     source_switcher: Option<SourceSwitcher>,
-    lookup_missing_thread_names: bool,
 ) -> Result<SessionSelection> {
     let alt = AltScreenGuard::enter(tui);
     let praxis_home = config.praxis_home.as_path();
@@ -370,7 +320,7 @@ async fn run_session_picker_with_loader(
         // would need an explicit server-side target cwd instead of current_dir().
         None
     } else {
-        Some(project_scope_root(config.cwd.as_path()))
+        Some(config.cwd.as_path().to_path_buf())
     };
 
     let mut state = PickerState::new(
@@ -381,10 +331,6 @@ async fn run_session_picker_with_loader(
         filter_cwd,
         action,
     );
-    state.set_lookup_missing_thread_names(lookup_missing_thread_names);
-    if lookup_missing_thread_names {
-        state.set_thread_name_state_db(praxis_rollout::state_db::get_state_db(config).await);
-    }
     state.set_active_source(active_source);
     if let Some(source_switcher) = source_switcher {
         state.configure_source_switcher(active_source, source_switcher);
@@ -427,54 +373,6 @@ async fn run_session_picker_with_loader(
     Ok(SessionSelection::StartFresh)
 }
 
-#[allow(dead_code)]
-fn spawn_rollout_page_loader(
-    config: &Config,
-    bg_tx: mpsc::UnboundedSender<BackgroundEvent>,
-) -> PageLoader {
-    let config = config.clone();
-    let loader_tx = bg_tx;
-    Arc::new(move |request: PageLoadRequest| {
-        let tx = loader_tx.clone();
-        let config = config.clone();
-        tokio::spawn(async move {
-            let PageLoadRequest {
-                cursor,
-                request_token,
-                search_token,
-                search_term,
-                filter_cwd: _,
-                sort_key,
-            } = request;
-            let cursor = match cursor.as_ref() {
-                Some(PageCursor::Rollout(cursor)) => Some(cursor),
-                Some(PageCursor::AppGateway(_)) => None,
-                None => None,
-            };
-            let directory = ThreadDirectory::open(&config).await;
-            let page = directory
-                .list_threads(ListThreadsQuery {
-                    page_size: THREAD_PAGE_SIZE,
-                    cursor: cursor.cloned(),
-                    sort_key,
-                    model_providers: None,
-                    source_kinds: None,
-                    archived: false,
-                    cwd: None,
-                    search_term,
-                    fallback_provider: String::new(),
-                })
-                .await
-                .map(picker_page_from_thread_summary_page);
-            let _ = tx.send(BackgroundEvent::PageLoaded {
-                request_token,
-                search_token,
-                page,
-            });
-        });
-    })
-}
-
 fn spawn_app_gateway_page_loader(
     app_gateway: AppGatewaySession,
     include_non_interactive: bool,
@@ -485,11 +383,7 @@ fn spawn_app_gateway_page_loader(
     tokio::spawn(async move {
         let mut app_gateway = app_gateway;
         while let Some(request) = request_rx.recv().await {
-            let cursor = match request.cursor {
-                Some(PageCursor::AppGateway(cursor)) => Some(cursor),
-                Some(PageCursor::Rollout(_)) => None,
-                None => None,
-            };
+            let cursor = request.cursor;
             let page = load_app_gateway_page(
                 &mut app_gateway,
                 cursor,
@@ -569,9 +463,6 @@ struct PickerState {
     active_source: SessionLookupSource,
     source_switcher: Option<SourceSwitcher>,
     sort_key: ThreadSortKey,
-    thread_name_cache: HashMap<ThreadId, Option<String>>,
-    lookup_missing_thread_names: bool,
-    thread_name_state_db: Option<StateDbHandle>,
     inline_error: Option<String>,
 }
 
@@ -637,7 +528,7 @@ async fn load_app_gateway_page(
             .into_iter()
             .filter_map(row_from_app_gateway_thread)
             .collect(),
-        next_cursor: response.next_cursor.map(PageCursor::AppGateway),
+        next_cursor: response.next_cursor,
         num_scanned_files,
         reached_scan_cap: false,
     })
@@ -722,9 +613,6 @@ impl PickerState {
             active_source: SessionLookupSource::Praxis,
             source_switcher: None,
             sort_key: ThreadSortKey::UpdatedAt,
-            thread_name_cache: HashMap::new(),
-            lookup_missing_thread_names: true,
-            thread_name_state_db: None,
             inline_error: None,
         }
     }
@@ -735,14 +623,6 @@ impl PickerState {
 
     fn set_active_source(&mut self, source: SessionLookupSource) {
         self.active_source = source;
-    }
-
-    fn set_lookup_missing_thread_names(&mut self, enabled: bool) {
-        self.lookup_missing_thread_names = enabled;
-    }
-
-    fn set_thread_name_state_db(&mut self, state_db: Option<StateDbHandle>) {
-        self.thread_name_state_db = state_db;
     }
 
     fn configure_source_switcher(
@@ -783,7 +663,6 @@ impl PickerState {
         self.active_source = source;
         self.praxis_home = source_config.praxis_home.clone();
         self.page_loader = source_config.page_loader.clone();
-        self.thread_name_cache.clear();
     }
 
     fn switch_source(&mut self, source: SessionLookupSource) {
@@ -815,24 +694,12 @@ impl PickerState {
                 }
                 if let Some(row) = self.filtered_rows.get(self.selected) {
                     let path = row.path.clone();
-                    let thread_id = match row.thread_id {
-                        Some(thread_id) => Some(thread_id),
-                        None => match path.as_ref() {
-                            Some(path) => {
-                                crate::resolve_session_thread_id(
-                                    path.as_path(),
-                                    /*id_str_if_uuid*/ None,
-                                )
-                                .await
-                            }
-                            None => None,
-                        },
-                    };
-                    if let Some(thread_id) = thread_id {
+                    if let Some(thread_id) = row.thread_id {
                         return Ok(Some(self.effective_action().selection(
                             path,
                             thread_id,
                             row.thread_name.clone(),
+                            row.cwd.clone(),
                         )));
                     }
                     self.inline_error = Some(match path {
@@ -974,9 +841,6 @@ impl PickerState {
                 self.pagination.loading = LoadingState::Idle;
                 let page = page.map_err(color_eyre::Report::from)?;
                 self.ingest_page(page);
-                if self.lookup_missing_thread_names {
-                    self.update_thread_names().await;
-                }
                 let completed_token = pending.search_token.or(search_token);
                 self.continue_search_if_token_matches(completed_token);
             }
@@ -1014,64 +878,8 @@ impl PickerState {
         self.apply_filter();
     }
 
-    async fn update_thread_names(&mut self) {
-        let mut missing_ids = HashSet::new();
-        for row in &self.all_rows {
-            let Some(thread_id) = row.thread_id else {
-                continue;
-            };
-            if row.thread_name.is_some() {
-                continue;
-            }
-            if self.thread_name_cache.contains_key(&thread_id) {
-                continue;
-            }
-            missing_ids.insert(thread_id);
-        }
-
-        if missing_ids.is_empty() {
-            return;
-        }
-
-        let names = praxis_rollout::ThreadNameResolver::new(self.thread_name_state_db.as_deref())
-            .resolve_names(&missing_ids)
-            .await;
-        for thread_id in missing_ids {
-            let thread_name = names.get(&thread_id).cloned();
-            self.thread_name_cache.insert(thread_id, thread_name);
-        }
-
-        let mut updated = false;
-        for row in self.all_rows.iter_mut() {
-            let Some(thread_id) = row.thread_id else {
-                continue;
-            };
-            let thread_name = self.thread_name_cache.get(&thread_id).cloned().flatten();
-            if row.thread_name == thread_name {
-                continue;
-            }
-            row.thread_name = thread_name;
-            updated = true;
-        }
-
-        if updated {
-            self.apply_filter();
-        }
-    }
-
     fn apply_filter(&mut self) {
-        let base_iter = self
-            .all_rows
-            .iter()
-            .filter(|row| self.row_matches_filter(row));
-        self.filtered_rows = base_iter.cloned().collect();
-        if self.filtered_rows.is_empty()
-            && !self.show_all
-            && self.filter_cwd.is_some()
-            && !self.all_rows.is_empty()
-        {
-            self.filtered_rows = self.all_rows.clone();
-        }
+        self.filtered_rows = self.all_rows.clone();
         if self.selected >= self.list_item_count() {
             self.selected = self.list_item_count().saturating_sub(1);
         }
@@ -1080,19 +888,6 @@ impl PickerState {
         }
         self.ensure_selected_visible();
         self.request_frame();
-    }
-
-    fn row_matches_filter(&self, row: &Row) -> bool {
-        if self.show_all {
-            return true;
-        }
-        let Some(filter_cwd) = self.filter_cwd.as_ref() else {
-            return true;
-        };
-        let Some(row_cwd) = row.cwd.as_ref() else {
-            return false;
-        };
-        paths_match(project_scope_root(row_cwd).as_path(), filter_cwd)
     }
 
     fn set_query(&mut self, new_query: String) {
@@ -1230,88 +1025,6 @@ impl PickerState {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
-fn picker_page_from_rollout_page(page: ThreadsPage) -> PickerPage {
-    PickerPage {
-        rows: rows_from_items(page.items),
-        next_cursor: page.next_cursor.map(PageCursor::Rollout),
-        num_scanned_files: page.num_scanned_files,
-        reached_scan_cap: page.reached_scan_cap,
-    }
-}
-
-fn picker_page_from_thread_summary_page(page: ThreadSummaryPage) -> PickerPage {
-    PickerPage {
-        rows: rows_from_thread_summaries(page.items),
-        next_cursor: page.next_cursor.map(PageCursor::Rollout),
-        num_scanned_files: page.num_scanned_files,
-        reached_scan_cap: page.reached_scan_cap,
-    }
-}
-
-fn rows_from_thread_summaries(items: Vec<ThreadSummary>) -> Vec<Row> {
-    items.into_iter().map(row_from_thread_summary).collect()
-}
-
-fn row_from_thread_summary(summary: ThreadSummary) -> Row {
-    let created_at = summary.timestamp.as_deref().and_then(parse_timestamp_str);
-    let updated_at = summary
-        .updated_at
-        .as_deref()
-        .and_then(parse_timestamp_str)
-        .or(created_at);
-
-    let preview = summary.preview.trim();
-    Row {
-        path: Some(summary.path),
-        preview: if preview.is_empty() {
-            String::from("(no message yet)")
-        } else {
-            preview.to_string()
-        },
-        thread_id: Some(summary.conversation_id),
-        thread_name: summary.thread_name,
-        created_at,
-        updated_at,
-        cwd: Some(summary.cwd),
-        git_branch: summary.git_info.and_then(|git_info| git_info.branch),
-    }
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn rows_from_items(items: Vec<ThreadItem>) -> Vec<Row> {
-    items.into_iter().map(|item| head_to_row(&item)).collect()
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-fn head_to_row(item: &ThreadItem) -> Row {
-    let created_at = item.created_at.as_deref().and_then(parse_timestamp_str);
-    let updated_at = item
-        .updated_at
-        .as_deref()
-        .and_then(parse_timestamp_str)
-        .or(created_at);
-
-    let preview = item
-        .first_user_message
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| String::from("(no message yet)"));
-
-    Row {
-        path: Some(item.path.clone()),
-        preview,
-        thread_id: item.thread_id,
-        thread_name: None,
-        created_at,
-        updated_at,
-        cwd: item.cwd.clone(),
-        git_branch: item.git_branch.clone(),
-    }
-}
-
 fn row_from_app_gateway_thread(thread: Thread) -> Option<Row> {
     let thread_id = match ThreadId::from_string(&thread.id) {
         Ok(thread_id) => thread_id,
@@ -1344,9 +1057,9 @@ fn thread_list_params(
     sort_key: ThreadSortKey,
     include_non_interactive: bool,
     search_term: Option<String>,
-    _filter_cwd: Option<PathBuf>,
+    filter_cwd: Option<PathBuf>,
 ) -> ThreadListParams {
-    common_thread_list_params(
+    let mut params = common_thread_list_params(
         cursor,
         match sort_key {
             ThreadSortKey::CreatedAt => AppGatewayThreadSortKey::CreatedAt,
@@ -1354,21 +1067,9 @@ fn thread_list_params(
         },
         interactive_thread_source_kinds(include_non_interactive),
         search_term,
-    )
-}
-
-fn paths_match(a: &Path, b: &Path) -> bool {
-    if let (Ok(ca), Ok(cb)) = (
-        path_utils::normalize_for_path_comparison(a),
-        path_utils::normalize_for_path_comparison(b),
-    ) {
-        return ca == cb;
-    }
-    a == b
-}
-
-fn project_scope_root(path: &Path) -> PathBuf {
-    praxis_git_utils::resolve_root_git_project_for_trust(path).unwrap_or_else(|| path.to_path_buf())
+    );
+    params.cwd_scope = filter_cwd.map(|cwd| cwd.to_string_lossy().into_owned());
+    params
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -1991,9 +1692,6 @@ mod tests {
     use crossterm::event::KeyModifiers;
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
-    use std::fs::FileTimes;
-    use std::fs::OpenOptions;
-    use std::path::Path;
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::Mutex;
@@ -2006,190 +1704,36 @@ mod tests {
             .join("")
     }
 
-    fn make_item(path: &str, ts: &str, preview: &str) -> ThreadItem {
-        ThreadItem {
-            path: PathBuf::from(path),
-            first_user_message: Some(preview.to_string()),
-            created_at: Some(ts.to_string()),
-            updated_at: Some(ts.to_string()),
-            ..Default::default()
+    fn make_row(path: &str, ts: &str, preview: &str) -> Row {
+        let timestamp = parse_timestamp_str(ts);
+        Row {
+            path: Some(PathBuf::from(path)),
+            preview: preview.to_string(),
+            thread_id: None,
+            thread_name: None,
+            created_at: timestamp,
+            updated_at: timestamp,
+            cwd: None,
+            git_branch: None,
         }
     }
 
-    fn cursor_from_str(repr: &str) -> Cursor {
-        serde_json::from_str::<Cursor>(&format!("\"{repr}\""))
-            .expect("cursor format should deserialize")
+    fn cursor_from_str(repr: &str) -> PageCursor {
+        repr.to_string()
     }
 
     fn page(
-        items: Vec<ThreadItem>,
-        next_cursor: Option<Cursor>,
+        rows: Vec<Row>,
+        next_cursor: Option<PageCursor>,
         num_scanned_files: usize,
         reached_scan_cap: bool,
     ) -> PickerPage {
-        picker_page_from_rollout_page(ThreadsPage {
-            items,
+        PickerPage {
+            rows,
             next_cursor,
             num_scanned_files,
             reached_scan_cap,
-        })
-    }
-
-    #[allow(dead_code)]
-    fn set_rollout_mtime(path: &Path, updated_at: DateTime<Utc>) {
-        let times = FileTimes::new().set_modified(updated_at.into());
-        OpenOptions::new()
-            .append(true)
-            .open(path)
-            .expect("open rollout")
-            .set_times(times)
-            .expect("set times");
-    }
-
-    // TODO(jif) fix
-    // #[tokio::test]
-    // async fn resume_picker_orders_by_updated_at() {
-    //     use uuid::Uuid;
-    //
-    //     let tempdir = tempfile::tempdir().expect("tempdir");
-    //     let sessions_root = tempdir.path().join("sessions");
-    //     std::fs::create_dir_all(&sessions_root).expect("mkdir sessions root");
-    //
-    //     let now = Utc::now();
-    //
-    //     let write_rollout = |ts: DateTime<Utc>, preview: &str| -> PathBuf {
-    //         let dir = sessions_root
-    //             .join(ts.format("%Y").to_string())
-    //             .join(ts.format("%m").to_string())
-    //             .join(ts.format("%d").to_string());
-    //         std::fs::create_dir_all(&dir).expect("mkdir date dirs");
-    //         let filename = format!(
-    //             "rollout-{}-{}.jsonl",
-    //             ts.format("%Y-%m-%dT%H-%M-%S"),
-    //             Uuid::new_v4()
-    //         );
-    //         let path = dir.join(filename);
-    //         let meta = SessionMeta {
-    //             id: ThreadId::new(),
-    //             forked_from_id: None,
-    //             timestamp: ts.to_rfc3339(),
-    //             cwd: PathBuf::from("/tmp"),
-    //             originator: String::from("user"),
-    //             cli_version: String::from("0.0.0"),
-    //             source: SessionSource::Cli,
-    //             model_provider: Some(String::from("openai")),
-    //             base_instructions: None,
-    //             dynamic_tools: None,
-    //         };
-    //         let meta_line = RolloutLine {
-    //             timestamp: ts.to_rfc3339(),
-    //             item: RolloutItem::SessionMeta(SessionMetaLine { meta, git: None }),
-    //         };
-    //         let user_line = RolloutLine {
-    //             timestamp: ts.to_rfc3339(),
-    //             item: RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
-    //                 message: preview.to_string(),
-    //                 images: None,
-    //                 text_elements: Vec::new(),
-    //                 local_images: Vec::new(),
-    //             })),
-    //         };
-    //         let meta_json = serde_json::to_string(&meta_line).expect("serialize meta");
-    //         let user_json = serde_json::to_string(&user_line).expect("serialize user");
-    //         std::fs::write(&path, format!("{meta_json}\n{user_json}\n")).expect("write rollout");
-    //         path
-    //     };
-    //
-    //     let created_a = now - Duration::minutes(1);
-    //     let created_b = now - Duration::minutes(2);
-    //
-    //     let path_a = write_rollout(created_a, "A (created newer)");
-    //     let path_b = write_rollout(created_b, "B (created older)");
-    //
-    //     set_rollout_mtime(&path_a, now - Duration::minutes(10));
-    //     set_rollout_mtime(&path_b, now - Duration::seconds(10));
-    //
-    //     let page = RolloutRecorder::list_threads(
-    //         tempdir.path(),
-    //         THREAD_PAGE_SIZE,
-    //         None,
-    //         ThreadSortKey::UpdatedAt,
-    //         INTERACTIVE_SESSION_SOURCES,
-    //         Some(&[String::from("openai")]),
-    //         "openai",
-    //     )
-    //     .await
-    //     .expect("list threads");
-    //
-    //     let rows = rows_from_items(page.items);
-    //     let previews: Vec<String> = rows.iter().map(|row| row.preview.clone()).collect();
-    //
-    //     assert_eq!(
-    //         previews,
-    //         vec![
-    //             "B (created older)".to_string(),
-    //             "A (created newer)".to_string()
-    //         ]
-    //     );
-    // }
-
-    #[test]
-    fn head_to_row_uses_first_user_message() {
-        let item = ThreadItem {
-            path: PathBuf::from("/tmp/a.jsonl"),
-            first_user_message: Some("real question".to_string()),
-            created_at: Some("2025-01-01T00:00:00Z".into()),
-            updated_at: Some("2025-01-01T00:00:00Z".into()),
-            ..Default::default()
-        };
-        let row = head_to_row(&item);
-        assert_eq!(row.preview, "real question");
-    }
-
-    #[test]
-    fn rows_from_items_preserves_backend_order() {
-        // Construct two items with different timestamps and real user text.
-        let a = ThreadItem {
-            path: PathBuf::from("/tmp/a.jsonl"),
-            first_user_message: Some("A".to_string()),
-            created_at: Some("2025-01-01T00:00:00Z".into()),
-            updated_at: Some("2025-01-01T00:00:00Z".into()),
-            ..Default::default()
-        };
-        let b = ThreadItem {
-            path: PathBuf::from("/tmp/b.jsonl"),
-            first_user_message: Some("B".to_string()),
-            created_at: Some("2025-01-02T00:00:00Z".into()),
-            updated_at: Some("2025-01-02T00:00:00Z".into()),
-            ..Default::default()
-        };
-        let rows = rows_from_items(vec![a, b]);
-        assert_eq!(rows.len(), 2);
-        // Preserve the given order even if timestamps differ; backend already provides newest-first.
-        assert!(rows[0].preview.contains('A'));
-        assert!(rows[1].preview.contains('B'));
-    }
-
-    #[test]
-    fn row_uses_tail_timestamp_for_updated_at() {
-        let item = ThreadItem {
-            path: PathBuf::from("/tmp/a.jsonl"),
-            first_user_message: Some("Hello".to_string()),
-            created_at: Some("2025-01-01T00:00:00Z".into()),
-            updated_at: Some("2025-01-01T01:00:00Z".into()),
-            ..Default::default()
-        };
-
-        let row = head_to_row(&item);
-        let expected_created = chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let expected_updated = chrono::DateTime::parse_from_rfc3339("2025-01-01T01:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-
-        assert_eq!(row.created_at, Some(expected_created));
-        assert_eq!(row.updated_at, Some(expected_updated));
+        }
     }
 
     #[test]
@@ -2255,7 +1799,7 @@ mod tests {
     }
 
     #[test]
-    fn thread_list_params_do_not_send_cwd_filter() {
+    fn thread_list_params_send_project_scope_without_cwd_filter() {
         let cwd = PathBuf::from("project");
         let params = thread_list_params(
             None,
@@ -2266,35 +1810,11 @@ mod tests {
         );
 
         assert_eq!(params.cwd, None);
+        assert_eq!(params.cwd_scope.as_deref(), Some("project"));
     }
 
     #[test]
-    fn remote_picker_does_not_filter_rows_by_local_cwd() {
-        let loader: PageLoader = Arc::new(|_| {});
-        let state = PickerState::new(
-            PathBuf::from("/tmp"),
-            FrameRequester::test_dummy(),
-            loader,
-            /*show_all*/ false,
-            /*filter_cwd*/ None,
-            SessionPickerAction::Resume,
-        );
-        let row = Row {
-            path: None,
-            preview: String::from("remote session"),
-            thread_id: Some(ThreadId::new()),
-            thread_name: None,
-            created_at: None,
-            updated_at: None,
-            cwd: Some(PathBuf::from("/srv/remote-project")),
-            git_branch: None,
-        };
-
-        assert!(state.row_matches_filter(&row));
-    }
-
-    #[test]
-    fn picker_falls_back_to_all_rows_when_cwd_filter_has_no_matches() {
+    fn picker_does_not_filter_rows_by_local_cwd() {
         let loader: PageLoader = Arc::new(|_| {});
         let mut state = PickerState::new(
             PathBuf::from("/tmp"),
@@ -2306,19 +1826,19 @@ mod tests {
         );
         state.all_rows = vec![Row {
             path: None,
-            preview: String::from("old session"),
+            preview: String::from("remote session"),
             thread_id: Some(ThreadId::new()),
             thread_name: None,
             created_at: None,
             updated_at: None,
-            cwd: Some(PathBuf::from("/workspace/other")),
+            cwd: Some(PathBuf::from("/srv/remote-project")),
             git_branch: None,
         }];
 
         state.apply_filter();
 
         assert_eq!(state.filtered_rows.len(), 1);
-        assert_eq!(state.filtered_rows[0].preview, "old session");
+        assert_eq!(state.filtered_rows[0].preview, "remote session");
     }
 
     #[test]
@@ -2435,180 +1955,8 @@ mod tests {
         assert_snapshot!("resume_picker_search_error", snapshot);
     }
 
-    // TODO(jif) fix
-    // #[tokio::test]
-    // async fn resume_picker_screen_snapshot() {
-    //     use crate::custom_terminal::Terminal;
-    //     use crate::test_backend::VT100Backend;
-    //     use uuid::Uuid;
-    //
-    //     // Create real rollout files so the snapshot uses the actual listing pipeline.
-    //     let tempdir = tempfile::tempdir().expect("tempdir");
-    //     let sessions_root = tempdir.path().join("sessions");
-    //     std::fs::create_dir_all(&sessions_root).expect("mkdir sessions root");
-    //
-    //     let now = Utc::now();
-    //
-    //     // Helper to write a rollout file with minimal meta + one user message.
-    //     let write_rollout = |ts: DateTime<Utc>, cwd: &str, branch: &str, preview: &str| {
-    //         let dir = sessions_root
-    //             .join(ts.format("%Y").to_string())
-    //             .join(ts.format("%m").to_string())
-    //             .join(ts.format("%d").to_string());
-    //         std::fs::create_dir_all(&dir).expect("mkdir date dirs");
-    //         let filename = format!(
-    //             "rollout-{}-{}.jsonl",
-    //             ts.format("%Y-%m-%dT%H-%M-%S"),
-    //             Uuid::new_v4()
-    //         );
-    //         let path = dir.join(filename);
-    //         let meta = serde_json::json!({
-    //             "timestamp": ts.to_rfc3339(),
-    //             "item": {
-    //                 "SessionMeta": {
-    //                     "meta": {
-    //                         "id": Uuid::new_v4(),
-    //                         "timestamp": ts.to_rfc3339(),
-    //                         "cwd": cwd,
-    //                         "originator": "user",
-    //                         "cli_version": "0.0.0",
-    //                         "source": "Cli",
-    //                         "model_provider": "openai",
-    //                     }
-    //                 }
-    //             }
-    //         });
-    //         let user = serde_json::json!({
-    //             "timestamp": ts.to_rfc3339(),
-    //             "item": {
-    //                 "EventMsg": {
-    //                     "UserMessage": {
-    //                         "message": preview,
-    //                         "images": null
-    //                     }
-    //                 }
-    //             }
-    //         });
-    //         let branch_meta = serde_json::json!({
-    //             "timestamp": ts.to_rfc3339(),
-    //             "item": {
-    //                 "EventMsg": {
-    //                     "SessionMeta": {
-    //                         "meta": {
-    //                             "git_branch": branch
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //         });
-    //         std::fs::write(&path, format!("{meta}\n{user}\n{branch_meta}\n"))
-    //             .expect("write rollout");
-    //     };
-    //
-    //     write_rollout(
-    //         now - Duration::seconds(42),
-    //         "/tmp/project",
-    //         "feature/resume",
-    //         "Fix resume picker timestamps",
-    //     );
-    //     write_rollout(
-    //         now - Duration::minutes(35),
-    //         "/tmp/other",
-    //         "main",
-    //         "Investigate lazy pagination cap",
-    //     );
-    //
-    //     let loader: PageLoader = Arc::new(|_| {});
-    //     let mut state = PickerState::new(
-    //         PathBuf::from("/tmp"),
-    //         FrameRequester::test_dummy(),
-    //         loader,
-    //         String::from("openai"),
-    //         true,
-    //         None,
-    //         SessionPickerAction::Resume,
-    //     );
-    //
-    //     let page = RolloutRecorder::list_threads(
-    //         &state.praxis_home,
-    //         THREAD_PAGE_SIZE,
-    //         None,
-    //         ThreadSortKey::CreatedAt,
-    //         INTERACTIVE_SESSION_SOURCES,
-    //         Some(&[String::from("openai")]),
-    //         "openai",
-    //     )
-    //     .await
-    //     .expect("list conversations");
-    //
-    //     let rows = rows_from_items(page.items);
-    //     state.all_rows = rows.clone();
-    //     state.filtered_rows = rows;
-    //     state.view_rows = Some(4);
-    //     state.selected = 0;
-    //     state.scroll_top = 0;
-    //     state.update_view_rows(4);
-    //
-    //     let metrics = calculate_column_metrics(&state.filtered_rows, state.show_all);
-    //
-    //     let width: u16 = 80;
-    //     let height: u16 = 9;
-    //     let backend = VT100Backend::new(width, height);
-    //     let mut terminal = Terminal::with_options(backend).expect("terminal");
-    //     terminal.set_viewport_area(Rect::new(0, 0, width, height));
-    //
-    //     {
-    //         let mut frame = terminal.get_frame();
-    //         let area = frame.area();
-    //         let [header, search, columns, list, hint] = Layout::vertical([
-    //             Constraint::Length(1),
-    //             Constraint::Length(1),
-    //             Constraint::Length(1),
-    //             Constraint::Min(area.height.saturating_sub(4)),
-    //             Constraint::Length(1),
-    //         ])
-    //         .areas(area);
-    //
-    //         frame.render_widget_ref(
-    //             Line::from(vec![
-    //                 "Resume a previous session".bold().cyan(),
-    //                 "  ".into(),
-    //                 "Sort:".dim(),
-    //                 " ".into(),
-    //                 "Created at".magenta(),
-    //             ]),
-    //             header,
-    //         );
-    //
-    //         frame.render_widget_ref(Line::from("Type to search".dim()), search);
-    //
-    //         render_column_headers(&mut frame, columns, &metrics, state.sort_key);
-    //         render_list(&mut frame, list, &state, &metrics);
-    //
-    //         let hint_line: Line = vec![
-    //             key_hint::plain(KeyCode::Enter).into(),
-    //             " to resume ".dim(),
-    //             "    ".dim(),
-    //             key_hint::plain(KeyCode::Esc).into(),
-    //             " to start new ".dim(),
-    //             "    ".dim(),
-    //             key_hint::ctrl(KeyCode::Char('c')).into(),
-    //             " to quit ".dim(),
-    //             "    ".dim(),
-    //             key_hint::plain(KeyCode::Tab).into(),
-    //             " to toggle sort ".dim(),
-    //         ]
-    //         .into();
-    //         frame.render_widget_ref(hint_line, hint);
-    //     }
-    //     terminal.flush().expect("flush");
-    //
-    //     let snapshot = terminal.backend().to_string();
-    //     assert_snapshot!("resume_picker_screen", snapshot);
-    // }
-
-    #[tokio::test]
-    async fn resume_picker_thread_names_snapshot() {
+    #[test]
+    fn resume_picker_thread_names_snapshot() {
         use crate::custom_terminal::Terminal;
         use crate::test_backend::VT100Backend;
         use ratatui::layout::Constraint;
@@ -2620,19 +1968,6 @@ mod tests {
             ThreadId::from_string("11111111-1111-1111-1111-111111111111").expect("thread id 1");
         let id2 =
             ThreadId::from_string("22222222-2222-2222-2222-222222222222").expect("thread id 2");
-        let state_db =
-            praxis_state::StateRuntime::init(tempdir.path().to_path_buf(), "openai".to_string())
-                .await
-                .expect("state db");
-        state_db
-            .set_thread_name(id1, "Keep this for now")
-            .await
-            .expect("thread name 1");
-        state_db
-            .set_thread_name(id2, "Named thread")
-            .await
-            .expect("thread name 2");
-
         let loader: PageLoader = Arc::new(|_| {});
         let mut state = PickerState::new(
             tempdir.path().to_path_buf(),
@@ -2642,7 +1977,6 @@ mod tests {
             /*filter_cwd*/ None,
             SessionPickerAction::Resume,
         );
-        state.set_thread_name_state_db(Some(state_db));
 
         let now = Utc::now();
         let rows = vec![
@@ -2650,7 +1984,7 @@ mod tests {
                 path: Some(PathBuf::from("/tmp/a.jsonl")),
                 preview: String::from("First message preview"),
                 thread_id: Some(id1),
-                thread_name: None,
+                thread_name: Some(String::from("Keep this for now")),
                 created_at: None,
                 updated_at: Some(now - Duration::days(2)),
                 cwd: None,
@@ -2660,7 +1994,7 @@ mod tests {
                 path: Some(PathBuf::from("/tmp/b.jsonl")),
                 preview: String::from("Second message preview"),
                 thread_id: Some(id2),
-                thread_name: None,
+                thread_name: Some(String::from("Named thread")),
                 created_at: None,
                 updated_at: Some(now - Duration::days(3)),
                 cwd: None,
@@ -2673,8 +2007,6 @@ mod tests {
         state.selected = 0;
         state.scroll_top = 0;
         state.update_view_rows(/*rows*/ 2);
-
-        state.update_thread_names().await;
 
         let metrics = calculate_column_metrics(&state.filtered_rows, state.show_all);
 
@@ -2713,8 +2045,8 @@ mod tests {
         state.reset_pagination();
         state.ingest_page(page(
             vec![
-                make_item("/tmp/a.jsonl", "2025-01-03T00:00:00Z", "third"),
-                make_item("/tmp/b.jsonl", "2025-01-02T00:00:00Z", "second"),
+                make_row("/tmp/a.jsonl", "2025-01-03T00:00:00Z", "third"),
+                make_row("/tmp/b.jsonl", "2025-01-02T00:00:00Z", "second"),
             ],
             Some(cursor_from_str(
                 "2025-01-02T00-00-00|00000000-0000-0000-0000-000000000000",
@@ -2725,8 +2057,8 @@ mod tests {
 
         state.ingest_page(page(
             vec![
-                make_item("/tmp/a.jsonl", "2025-01-03T00:00:00Z", "duplicate"),
-                make_item("/tmp/c.jsonl", "2025-01-01T00:00:00Z", "first"),
+                make_row("/tmp/a.jsonl", "2025-01-03T00:00:00Z", "duplicate"),
+                make_row("/tmp/c.jsonl", "2025-01-01T00:00:00Z", "first"),
             ],
             Some(cursor_from_str(
                 "2025-01-01T00-00-00|00000000-0000-0000-0000-000000000001",
@@ -2736,11 +2068,7 @@ mod tests {
         ));
 
         state.ingest_page(page(
-            vec![make_item(
-                "/tmp/d.jsonl",
-                "2024-12-31T23:00:00Z",
-                "very old",
-            )],
+            vec![make_row("/tmp/d.jsonl", "2024-12-31T23:00:00Z", "very old")],
             /*next_cursor*/ None,
             /*num_scanned_files*/ 1,
             /*reached_scan_cap*/ false,
@@ -2780,8 +2108,8 @@ mod tests {
         state.reset_pagination();
         state.ingest_page(page(
             vec![
-                make_item("/tmp/a.jsonl", "2025-01-01T00:00:00Z", "one"),
-                make_item("/tmp/b.jsonl", "2025-01-02T00:00:00Z", "two"),
+                make_row("/tmp/a.jsonl", "2025-01-01T00:00:00Z", "one"),
+                make_row("/tmp/b.jsonl", "2025-01-02T00:00:00Z", "two"),
             ],
             Some(cursor_from_str(
                 "2025-01-03T00-00-00|00000000-0000-0000-0000-000000000000",
@@ -2976,7 +2304,7 @@ mod tests {
             thread_name: Some(String::from("Imported")),
             created_at: None,
             updated_at: None,
-            cwd: None,
+            cwd: Some(PathBuf::from("/tmp/imported-project")),
             git_branch: None,
         };
         state.all_rows = vec![row.clone()];
@@ -2992,10 +2320,12 @@ mod tests {
             Some(SessionSelection::Fork(SessionTarget {
                 thread_id: selected_thread_id,
                 thread_name: Some(thread_name),
+                cwd: Some(cwd),
                 ..
             })) => {
                 assert_eq!(selected_thread_id, thread_id);
                 assert_eq!(thread_name, "Imported");
+                assert_eq!(cwd, PathBuf::from("/tmp/imported-project"));
             }
             other => panic!("unexpected selection: {other:?}"),
         }
@@ -3018,7 +2348,7 @@ mod tests {
             let ts = format!("2025-01-{:02}T00:00:00Z", idx + 1);
             let preview = format!("item-{idx}");
             let path = format!("/tmp/item-{idx}.jsonl");
-            items.push(make_item(&path, &ts, &preview));
+            items.push(make_row(&path, &ts, &preview));
         }
 
         state.reset_pagination();
@@ -3122,6 +2452,7 @@ mod tests {
                 path: None,
                 thread_id: selected_thread_id,
                 thread_name: None,
+                cwd: None,
             })) => assert_eq!(selected_thread_id, thread_id),
             other => panic!("unexpected selection: {other:?}"),
         }
@@ -3180,7 +2511,7 @@ mod tests {
             let ts = format!("2025-02-{:02}T00:00:00Z", idx + 1);
             let preview = format!("item-{idx}");
             let path = format!("/tmp/item-{idx}.jsonl");
-            items.push(make_item(&path, &ts, &preview));
+            items.push(make_row(&path, &ts, &preview));
         }
 
         state.reset_pagination();
@@ -3223,7 +2554,7 @@ mod tests {
         );
         state.reset_pagination();
         state.ingest_page(page(
-            vec![make_item(
+            vec![make_row(
                 "/tmp/start.jsonl",
                 "2025-01-01T00:00:00Z",
                 "alpha",
@@ -3261,7 +2592,7 @@ mod tests {
                 request_token: first_request.request_token,
                 search_token: first_request.search_token,
                 page: Ok(page(
-                    vec![make_item(
+                    vec![make_row(
                         "/tmp/stale.jsonl",
                         "2025-01-02T00:00:00Z",
                         "target stale",
@@ -3280,7 +2611,7 @@ mod tests {
                 request_token: active_request.request_token,
                 search_token: active_request.search_token,
                 page: Ok(page(
-                    vec![make_item(
+                    vec![make_row(
                         "/tmp/backend-result.jsonl",
                         "2025-01-03T00:00:00Z",
                         "backend ranked result",

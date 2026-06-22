@@ -354,7 +354,7 @@ fn extract_conversation_summary_prefers_plain_user_messages() -> Result<()> {
     )
     .expect("summary");
 
-    let expected = RolloutSummary {
+    let expected = ThreadStoreSummary {
         conversation_id,
         timestamp: timestamp.clone(),
         updated_at: timestamp,
@@ -371,6 +371,7 @@ fn extract_conversation_summary_prefers_plain_user_messages() -> Result<()> {
         token_usage: None,
         selfwork_plan_path: None,
         git_info: None,
+        thread_name: None,
     };
 
     assert_eq!(summary, expected);
@@ -416,7 +417,7 @@ async fn read_summary_from_rollout_returns_empty_preview_when_no_user_message() 
 
     let summary = read_summary_from_rollout(path.as_path(), "fallback").await?;
 
-    let expected = RolloutSummary {
+    let expected = ThreadStoreSummary {
         conversation_id,
         timestamp: Some(timestamp.clone()),
         updated_at: Some("2025-09-05T16:53:11Z".to_string()),
@@ -433,6 +434,7 @@ async fn read_summary_from_rollout_returns_empty_preview_when_no_user_message() 
         token_usage: None,
         selfwork_plan_path: None,
         git_info: None,
+        thread_name: None,
     };
 
     assert_eq!(summary, expected);

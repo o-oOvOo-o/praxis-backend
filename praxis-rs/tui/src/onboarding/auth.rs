@@ -406,7 +406,7 @@ impl AuthModeWidget {
         let chatgpt_description = if !self.is_chatgpt_login_allowed() {
             "ChatGPT login is disabled"
         } else {
-            "Uses inherited Codex login when available; otherwise starts Praxis login"
+            "Uses ChatGPT/OpenAI login when available; otherwise starts Praxis login"
         };
         let device_code_description = "Sign in from another device with a one-time code";
 
@@ -534,7 +534,7 @@ impl AuthModeWidget {
             "  Decide how much autonomy you want to grant Praxis".into(),
             Line::from(vec![
                 "  For more details see the ".into(),
-                "\u{1b}]8;;https://developers.openai.com/codex/security\u{7}Praxis docs\u{1b}]8;;\u{7}".underlined(),
+                "\u{1b}]8;;https://github.com/o-oOvOo-o/praxis-backend/blob/main/docs/sandbox.md\u{7}Praxis docs\u{1b}]8;;\u{7}".underlined(),
             ])
             .dim(),
             "".into(),
@@ -577,7 +577,7 @@ impl AuthModeWidget {
             ]),
             "".into(),
             "  Praxis saved this provider under model_providers.".into(),
-            "  Codex/OpenAI auth remains inherited from Codex when available."
+            "  ChatGPT/OpenAI auth remains available when configured."
                 .dim()
                 .into(),
         ];
@@ -610,7 +610,7 @@ impl AuthModeWidget {
             ]),
             "".into(),
             "  This writes a Praxis model provider and switches the active model to it.".into(),
-            "  It does not write auth.json or replace inherited Codex/OpenAI credentials."
+            "  It does not write auth.json or replace ChatGPT/OpenAI credentials."
                 .dim()
                 .into(),
             "".into(),
@@ -1117,6 +1117,7 @@ mod tests {
             client_version: "test".to_string(),
             experimental_api: true,
             opt_out_notification_methods: Vec::new(),
+            host_extensions: Vec::new(),
             channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
             control_listen: None,
             control_auth: NativeControlAuthSettings::default(),

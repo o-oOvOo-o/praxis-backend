@@ -14,12 +14,12 @@ fn send_builds_payload_with_tags_and_histograms() -> Result<()> {
         build_metrics_with_defaults(&[("service", "praxis-cli"), ("env", "prod")])?;
 
     metrics.counter(
-        "codex.turns",
+        "praxis.turns",
         /*inc*/ 1,
         &[("model", "gpt-5.1"), ("env", "dev")],
     )?;
     metrics.histogram(
-        "codex.tool_latency",
+        "praxis.tool_latency",
         /*value*/ 25,
         &[("tool", "shell")],
     )?;
@@ -27,7 +27,7 @@ fn send_builds_payload_with_tags_and_histograms() -> Result<()> {
 
     let resource_metrics = latest_metrics(&exporter);
 
-    let counter = find_metric(&resource_metrics, "codex.turns").expect("counter metric missing");
+    let counter = find_metric(&resource_metrics, "praxis.turns").expect("counter metric missing");
     let counter_attributes = match counter.data() {
         opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
             opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {
@@ -49,23 +49,23 @@ fn send_builds_payload_with_tags_and_histograms() -> Result<()> {
     assert_eq!(counter_attributes, expected_counter_attributes);
 
     let (bounds, bucket_counts, sum, count) =
-        histogram_data(&resource_metrics, "codex.tool_latency");
+        histogram_data(&resource_metrics, "praxis.tool_latency");
     assert!(!bounds.is_empty());
     assert_eq!(bucket_counts.iter().sum::<u64>(), 1);
     assert_eq!(sum, 25.0);
     assert_eq!(count, 1);
 
     let histogram_attrs = attributes_to_map(
-        match find_metric(&resource_metrics, "codex.tool_latency").and_then(|metric| {
-            match metric.data() {
-                opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(
-                    opentelemetry_sdk::metrics::data::MetricData::Histogram(histogram),
-                ) => histogram
-                    .data_points()
-                    .next()
-                    .map(opentelemetry_sdk::metrics::data::HistogramDataPoint::attributes),
-                _ => None,
-            }
+        match find_metric(&resource_metrics, "praxis.tool_latency").and_then(|metric| match metric
+            .data()
+        {
+            opentelemetry_sdk::metrics::data::AggregatedMetrics::F64(
+                opentelemetry_sdk::metrics::data::MetricData::Histogram(histogram),
+            ) => histogram
+                .data_points()
+                .next()
+                .map(opentelemetry_sdk::metrics::data::HistogramDataPoint::attributes),
+            _ => None,
         }) {
             Some(attrs) => attrs,
             None => panic!("histogram attributes missing"),
@@ -91,12 +91,12 @@ fn send_merges_default_tags_per_line() -> Result<()> {
     ])?;
 
     metrics.counter(
-        "codex.alpha",
+        "praxis.alpha",
         /*inc*/ 1,
         &[("env", "dev"), ("component", "alpha")],
     )?;
     metrics.counter(
-        "codex.beta",
+        "praxis.beta",
         /*inc*/ 2,
         &[("service", "worker"), ("component", "beta")],
     )?;
@@ -104,7 +104,7 @@ fn send_merges_default_tags_per_line() -> Result<()> {
 
     let resource_metrics = latest_metrics(&exporter);
     let alpha_metric =
-        find_metric(&resource_metrics, "codex.alpha").expect("codex.alpha metric missing");
+        find_metric(&resource_metrics, "praxis.alpha").expect("praxis.alpha metric missing");
     let alpha_point = match alpha_metric.data() {
         opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
             opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {
@@ -127,7 +127,7 @@ fn send_merges_default_tags_per_line() -> Result<()> {
     assert_eq!(alpha_attrs, expected_alpha_attrs);
 
     let beta_metric =
-        find_metric(&resource_metrics, "codex.beta").expect("codex.beta metric missing");
+        find_metric(&resource_metrics, "praxis.beta").expect("praxis.beta metric missing");
     let beta_point = match beta_metric.data() {
         opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
             opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {
@@ -157,11 +157,11 @@ fn send_merges_default_tags_per_line() -> Result<()> {
 fn client_sends_enqueued_metric() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[])?;
 
-    metrics.counter("codex.turns", /*inc*/ 1, &[("model", "gpt-5.1")])?;
+    metrics.counter("praxis.turns", /*inc*/ 1, &[("model", "gpt-5.1")])?;
     metrics.shutdown()?;
 
     let resource_metrics = latest_metrics(&exporter);
-    let counter = find_metric(&resource_metrics, "codex.turns").expect("counter metric missing");
+    let counter = find_metric(&resource_metrics, "praxis.turns").expect("counter metric missing");
     let points = match counter.data() {
         opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
             opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {
@@ -185,11 +185,11 @@ fn client_sends_enqueued_metric() -> Result<()> {
 fn shutdown_flushes_in_memory_exporter() -> Result<()> {
     let (metrics, exporter) = build_metrics_with_defaults(&[])?;
 
-    metrics.counter("codex.turns", /*inc*/ 1, &[])?;
+    metrics.counter("praxis.turns", /*inc*/ 1, &[])?;
     metrics.shutdown()?;
 
     let resource_metrics = latest_metrics(&exporter);
-    let counter = find_metric(&resource_metrics, "codex.turns").expect("counter metric missing");
+    let counter = find_metric(&resource_metrics, "praxis.turns").expect("counter metric missing");
     let points = match counter.data() {
         opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(data) => match data {
             opentelemetry_sdk::metrics::data::MetricData::Sum(sum) => {

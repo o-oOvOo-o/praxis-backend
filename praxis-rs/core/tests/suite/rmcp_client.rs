@@ -12,14 +12,14 @@ use std::time::UNIX_EPOCH;
 use praxis_config::types::McpServerConfig;
 use praxis_config::types::McpServerTransportConfig;
 use praxis_core::models_manager::manager::RefreshStrategy;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 
 use core_test_support::responses;
 use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::skip_if_no_network;
 use core_test_support::stdio_server_bin;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_with_timeout;
 use praxis_protocol::config_types::ReasoningSummary;
@@ -83,7 +83,7 @@ async fn stdio_server_round_trip() -> anyhow::Result<()> {
     let expected_env_value = "propagated-env";
     let rmcp_test_server_bin = stdio_server_bin()?;
 
-    let fixture = test_codex()
+    let fixture = test_praxis()
         .with_config(move |config| {
             let mut servers = config.mcp_servers.get().clone();
             servers.insert(
@@ -121,7 +121,7 @@ async fn stdio_server_round_trip() -> anyhow::Result<()> {
     let session_model = fixture.session_configured.model.clone();
 
     fixture
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "call the rmcp echo tool".into(),
@@ -141,7 +141,7 @@ async fn stdio_server_round_trip() -> anyhow::Result<()> {
         })
         .await?;
 
-    let begin_event = wait_for_event(&fixture.codex, |ev| {
+    let begin_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallBegin(_))
     })
     .await;
@@ -152,7 +152,7 @@ async fn stdio_server_round_trip() -> anyhow::Result<()> {
     assert_eq!(begin.invocation.server, server_name);
     assert_eq!(begin.invocation.tool, "echo");
 
-    let end_event = wait_for_event(&fixture.codex, |ev| {
+    let end_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallEnd(_))
     })
     .await;
@@ -188,7 +188,10 @@ async fn stdio_server_round_trip() -> anyhow::Result<()> {
         .expect("env snapshot inserted");
     assert_eq!(env_value, expected_env_value);
 
-    wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&fixture.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     server.verify().await;
 
@@ -229,7 +232,7 @@ async fn stdio_image_responses_round_trip() -> anyhow::Result<()> {
     // Build the stdio rmcp server and pass the image as data URL so it can construct ImageContent.
     let rmcp_test_server_bin = stdio_server_bin()?;
 
-    let fixture = test_codex()
+    let fixture = test_praxis()
         .with_config(move |config| {
             let mut servers = config.mcp_servers.get().clone();
             servers.insert(
@@ -268,9 +271,9 @@ async fn stdio_image_responses_round_trip() -> anyhow::Result<()> {
 
     let tools_ready_deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        fixture.codex.submit(Op::ListMcpTools).await?;
+        fixture.thread.submit(Op::ListMcpTools).await?;
         let list_event = wait_for_event_with_timeout(
-            &fixture.codex,
+            &fixture.thread,
             |ev| matches!(ev, EventMsg::McpListToolsResponse(_)),
             Duration::from_secs(10),
         )
@@ -292,7 +295,7 @@ async fn stdio_image_responses_round_trip() -> anyhow::Result<()> {
     }
 
     fixture
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "call the rmcp image tool".into(),
@@ -313,7 +316,7 @@ async fn stdio_image_responses_round_trip() -> anyhow::Result<()> {
         .await?;
 
     // Wait for tool begin/end and final completion.
-    let begin_event = wait_for_event(&fixture.codex, |ev| {
+    let begin_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallBegin(_))
     })
     .await;
@@ -332,7 +335,7 @@ async fn stdio_image_responses_round_trip() -> anyhow::Result<()> {
         },
     );
 
-    let end_event = wait_for_event(&fixture.codex, |ev| {
+    let end_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallEnd(_))
     })
     .await;
@@ -359,7 +362,10 @@ async fn stdio_image_responses_round_trip() -> anyhow::Result<()> {
     assert_eq!(entry.get("mimeType"), Some(&json!("image/png")));
     assert_eq!(entry.get("data"), Some(&json!(base64_only)));
 
-    wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&fixture.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     let output_item = final_mock.single_request().function_call_output(call_id);
     assert_eq!(
@@ -452,8 +458,8 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
 
     let rmcp_test_server_bin = stdio_server_bin()?;
 
-    let fixture = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let fixture = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
             let mut servers = config.mcp_servers.get().clone();
             servers.insert(
@@ -497,7 +503,7 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
     assert_eq!(models_mock.requests().len(), 1);
 
     fixture
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "call the rmcp image tool".into(),
@@ -517,15 +523,18 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
         })
         .await?;
 
-    wait_for_event(&fixture.codex, |ev| {
+    wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallBegin(_))
     })
     .await;
-    wait_for_event(&fixture.codex, |ev| {
+    wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallEnd(_))
     })
     .await;
-    wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&fixture.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     let output_item = final_mock.single_request().function_call_output(call_id);
     let output_text = output_item
@@ -578,7 +587,7 @@ async fn stdio_server_propagates_whitelisted_env_vars() -> anyhow::Result<()> {
     let _guard = EnvVarGuard::set("MCP_TEST_VALUE", OsStr::new(expected_env_value));
     let rmcp_test_server_bin = stdio_server_bin()?;
 
-    let fixture = test_codex()
+    let fixture = test_praxis()
         .with_config(move |config| {
             let mut servers = config.mcp_servers.get().clone();
             servers.insert(
@@ -613,7 +622,7 @@ async fn stdio_server_propagates_whitelisted_env_vars() -> anyhow::Result<()> {
     let session_model = fixture.session_configured.model.clone();
 
     fixture
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "call the rmcp echo tool".into(),
@@ -633,7 +642,7 @@ async fn stdio_server_propagates_whitelisted_env_vars() -> anyhow::Result<()> {
         })
         .await?;
 
-    let begin_event = wait_for_event(&fixture.codex, |ev| {
+    let begin_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallBegin(_))
     })
     .await;
@@ -644,7 +653,7 @@ async fn stdio_server_propagates_whitelisted_env_vars() -> anyhow::Result<()> {
     assert_eq!(begin.invocation.server, server_name);
     assert_eq!(begin.invocation.tool, "echo");
 
-    let end_event = wait_for_event(&fixture.codex, |ev| {
+    let end_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallEnd(_))
     })
     .await;
@@ -680,7 +689,10 @@ async fn stdio_server_propagates_whitelisted_env_vars() -> anyhow::Result<()> {
         .expect("env snapshot inserted");
     assert_eq!(env_value, expected_env_value);
 
-    wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&fixture.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     server.verify().await;
 
@@ -742,7 +754,7 @@ async fn streamable_http_tool_call_round_trip() -> anyhow::Result<()> {
     wait_for_streamable_http_server(&mut http_server_child, &bind_addr, Duration::from_secs(5))
         .await?;
 
-    let fixture = test_codex()
+    let fixture = test_praxis()
         .with_config(move |config| {
             let mut servers = config.mcp_servers.get().clone();
             servers.insert(
@@ -776,7 +788,7 @@ async fn streamable_http_tool_call_round_trip() -> anyhow::Result<()> {
     let session_model = fixture.session_configured.model.clone();
 
     fixture
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "call the rmcp streamable http echo tool".into(),
@@ -796,7 +808,7 @@ async fn streamable_http_tool_call_round_trip() -> anyhow::Result<()> {
         })
         .await?;
 
-    let begin_event = wait_for_event(&fixture.codex, |ev| {
+    let begin_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallBegin(_))
     })
     .await;
@@ -807,7 +819,7 @@ async fn streamable_http_tool_call_round_trip() -> anyhow::Result<()> {
     assert_eq!(begin.invocation.server, server_name);
     assert_eq!(begin.invocation.tool, "echo");
 
-    let end_event = wait_for_event(&fixture.codex, |ev| {
+    let end_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallEnd(_))
     })
     .await;
@@ -843,7 +855,10 @@ async fn streamable_http_tool_call_round_trip() -> anyhow::Result<()> {
         .expect("env snapshot inserted");
     assert_eq!(env_value, expected_env_value);
 
-    wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&fixture.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     server.verify().await;
 
@@ -960,7 +975,7 @@ async fn streamable_http_with_oauth_round_trip_impl() -> anyhow::Result<()> {
         refresh_token,
     )?;
 
-    let fixture = test_codex()
+    let fixture = test_praxis()
         .with_home(temp_home.clone())
         .with_config(move |config| {
             // Keep OAuth credentials isolated to this test home because Bazel
@@ -1000,9 +1015,9 @@ async fn streamable_http_with_oauth_round_trip_impl() -> anyhow::Result<()> {
 
     let tools_ready_deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        fixture.codex.submit(Op::ListMcpTools).await?;
+        fixture.thread.submit(Op::ListMcpTools).await?;
         let list_event = wait_for_event_with_timeout(
-            &fixture.codex,
+            &fixture.thread,
             |ev| matches!(ev, EventMsg::McpListToolsResponse(_)),
             Duration::from_secs(10),
         )
@@ -1024,7 +1039,7 @@ async fn streamable_http_with_oauth_round_trip_impl() -> anyhow::Result<()> {
     }
 
     fixture
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "call the rmcp streamable http oauth echo tool".into(),
@@ -1044,7 +1059,7 @@ async fn streamable_http_with_oauth_round_trip_impl() -> anyhow::Result<()> {
         })
         .await?;
 
-    let begin_event = wait_for_event(&fixture.codex, |ev| {
+    let begin_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallBegin(_))
     })
     .await;
@@ -1055,7 +1070,7 @@ async fn streamable_http_with_oauth_round_trip_impl() -> anyhow::Result<()> {
     assert_eq!(begin.invocation.server, server_name);
     assert_eq!(begin.invocation.tool, "echo");
 
-    let end_event = wait_for_event(&fixture.codex, |ev| {
+    let end_event = wait_for_event(&fixture.thread, |ev| {
         matches!(ev, EventMsg::McpToolCallEnd(_))
     })
     .await;
@@ -1091,7 +1106,10 @@ async fn streamable_http_with_oauth_round_trip_impl() -> anyhow::Result<()> {
         .expect("env snapshot inserted");
     assert_eq!(env_value, expected_env_value);
 
-    wait_for_event(&fixture.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&fixture.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     server.verify().await;
 

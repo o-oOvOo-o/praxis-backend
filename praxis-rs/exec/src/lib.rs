@@ -109,8 +109,8 @@ use tracing_subscriber::prelude::*;
 use uuid::Uuid;
 
 use crate::cli::Command as ExecCommand;
-use crate::event_processor::CodexStatus;
 use crate::event_processor::EventProcessor;
+use crate::event_processor::PraxisStatus;
 
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
 enum InitialOperation {
@@ -185,6 +185,7 @@ async fn connect_remote_exec_app_gateway(
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
+        host_extensions: Vec::new(),
         channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
     })
     .await
@@ -210,7 +211,7 @@ async fn start_exec_app_gateway(
 
 fn exec_root_span() -> tracing::Span {
     info_span!(
-        "codex.exec",
+        "praxis.exec",
         otel.kind = "internal",
         thread.id = field::Empty,
         turn.id = field::Empty,
@@ -301,7 +302,7 @@ pub async fn run_main(
     let praxis_home = match find_praxis_home() {
         Ok(praxis_home) => praxis_home,
         Err(err) => {
-            eprintln!("Error finding codex home: {err}");
+            eprintln!("Error finding praxis home: {err}");
             std::process::exit(1);
         }
     };
@@ -492,6 +493,7 @@ pub async fn run_main(
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
+        host_extensions: Vec::new(),
         channel_capacity: DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY,
         control_listen: None,
         control_auth: NativeControlAuthSettings::default(),
@@ -846,8 +848,8 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     &task_id,
                 ) {
                     match event_processor.process_server_notification(notification) {
-                        CodexStatus::Running => {}
-                        CodexStatus::InitiateShutdown => {
+                        PraxisStatus::Running => {}
+                        PraxisStatus::InitiateShutdown => {
                             if let Err(err) = request_shutdown(
                                 &client,
                                 &mut request_ids,
@@ -1228,6 +1230,7 @@ async fn resolve_resume_thread_id(
                         source_kinds: Some(all_thread_source_kinds()),
                         archived: Some(false),
                         cwd: None,
+                        cwd_scope: None,
                         search_term: None,
                     },
                 },
@@ -1268,6 +1271,7 @@ async fn resolve_resume_thread_id(
                     source_kinds: Some(all_thread_source_kinds()),
                     archived: Some(false),
                     cwd: None,
+                    cwd_scope: None,
                     // Thread names are attached separately from rollout titles, so name
                     // resolution must scan the filtered list client-side instead of relying
                     // on the backend `search_term` filter.
@@ -1441,6 +1445,15 @@ async fn handle_server_request(
                     "dynamic tool calls are not supported in exec mode for thread `{}`",
                     params.thread_id
                 ),
+            )
+            .await
+        }
+        ServerRequest::Cunning3dBridgeCall { request_id, .. } => {
+            reject_server_request(
+                client,
+                request_id,
+                &method,
+                "Cunning3D bridge calls require an attached Cunning3D host".to_string(),
             )
             .await
         }
@@ -1898,7 +1911,7 @@ mod tests {
 
     #[tokio::test]
     async fn resume_lookup_model_providers_filters_only_last_lookup() {
-        let praxis_home = tempdir().expect("create temp codex home");
+        let praxis_home = tempdir().expect("create temp Praxis home");
         let cwd = tempdir().expect("create temp cwd");
         let mut config = ConfigBuilder::default()
             .praxis_home(praxis_home.path().to_path_buf())
@@ -2006,7 +2019,7 @@ mod tests {
 
     #[tokio::test]
     async fn thread_start_params_include_review_policy_when_review_policy_is_manual_only() {
-        let praxis_home = tempdir().expect("create temp codex home");
+        let praxis_home = tempdir().expect("create temp Praxis home");
         let cwd = tempdir().expect("create temp cwd");
         let config = ConfigBuilder::default()
             .praxis_home(praxis_home.path().to_path_buf())
@@ -2029,7 +2042,7 @@ mod tests {
 
     #[tokio::test]
     async fn thread_start_params_include_review_policy_when_auto_review_is_enabled() {
-        let praxis_home = tempdir().expect("create temp codex home");
+        let praxis_home = tempdir().expect("create temp Praxis home");
         let cwd = tempdir().expect("create temp cwd");
         let config = ConfigBuilder::default()
             .praxis_home(praxis_home.path().to_path_buf())
@@ -2090,6 +2103,8 @@ mod tests {
                 exclude_slash_tmp: false,
             },
             reasoning_effort: None,
+            history_log_id: 0,
+            history_entry_count: 0,
         };
 
         let event = session_configured_from_thread_start_response(&response)

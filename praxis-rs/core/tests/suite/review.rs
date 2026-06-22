@@ -4,7 +4,7 @@ use core_test_support::responses::ResponseMock;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::PraxisThread;
 use praxis_core::REVIEW_PROMPT;
@@ -908,7 +908,7 @@ where
     F: FnOnce(&mut Config) + Send + 'static,
 {
     let base_url = format!("{}/v1", server.uri());
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_home(praxis_home)
         .with_config(move |config| {
             config.model_provider.base_url = Some(base_url.clone());
@@ -918,7 +918,7 @@ where
         .build(server)
         .await
         .expect("create conversation")
-        .codex
+        .thread
 }
 
 /// Create a conversation resuming from a rollout file, configured to talk to the provided mock server.
@@ -933,7 +933,7 @@ where
     F: FnOnce(&mut Config) + Send + 'static,
 {
     let base_url = format!("{}/v1", server.uri());
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_home(praxis_home.clone())
         .with_config(move |config| {
             config.model_provider.base_url = Some(base_url.clone());
@@ -943,5 +943,5 @@ where
         .resume(server, praxis_home, resume_path)
         .await
         .expect("resume conversation")
-        .codex
+        .thread
 }

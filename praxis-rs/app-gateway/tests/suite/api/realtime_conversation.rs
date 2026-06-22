@@ -80,7 +80,7 @@ async fn realtime_conversation_streams_notifications() -> Result<()> {
                 "item": {
                     "id": "item_2",
                     "type": "function_call",
-                    "name": "codex",
+                    "name": "praxis",
                     "call_id": "handoff_1",
                     "arguments": "{\"input_transcript\":\"delegate now\"}"
                 }

@@ -68,6 +68,7 @@ use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::StatusLinePreviewData;
 use crate::bottom_pane::StatusLineSetupView;
 use crate::bottom_pane::TerminalTitleItem;
+use crate::bottom_pane::TerminalTitlePreviewData;
 use crate::bottom_pane::TerminalTitleSetupView;
 use crate::mention_codec::LinkedMention;
 use crate::mention_codec::encode_history_mentions;
@@ -97,7 +98,6 @@ use praxis_app_core::thread_commands::ExternalThreadCommandIntent;
 use praxis_app_core::thread_commands::ExternalThreadCommandSource;
 use praxis_app_core::thread_commands::parse_external_thread_command;
 use praxis_app_gateway_protocol::AppSummary;
-use praxis_app_gateway_protocol::CodexErrorInfo as AppGatewayCodexErrorInfo;
 use praxis_app_gateway_protocol::CollabAgentState as AppGatewayCollabAgentState;
 use praxis_app_gateway_protocol::CollabAgentTool;
 use praxis_app_gateway_protocol::CollabAgentToolCallStatus;
@@ -107,9 +107,7 @@ use praxis_app_gateway_protocol::ItemCompletedNotification;
 use praxis_app_gateway_protocol::ItemStartedNotification;
 use praxis_app_gateway_protocol::McpServerStartupState;
 use praxis_app_gateway_protocol::McpServerStatusUpdatedNotification;
-use praxis_app_gateway_protocol::ResumedHistoryLabel;
-use praxis_app_gateway_protocol::ResumedHistoryLane;
-use praxis_app_gateway_protocol::ResumedThreadHistoryAction;
+use praxis_app_gateway_protocol::PraxisErrorInfo as AppGatewayPraxisErrorInfo;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::ThreadControlState;
@@ -118,11 +116,12 @@ use praxis_app_gateway_protocol::ThreadGoal;
 use praxis_app_gateway_protocol::ThreadGoalClearedNotification;
 use praxis_app_gateway_protocol::ThreadGoalStatus as AppGatewayThreadGoalStatus;
 use praxis_app_gateway_protocol::ThreadItem;
+use praxis_app_gateway_protocol::ThreadModelChangedNotification;
 use praxis_app_gateway_protocol::Turn;
 use praxis_app_gateway_protocol::TurnCompletedNotification;
+use praxis_app_gateway_protocol::TurnError;
 use praxis_app_gateway_protocol::TurnPlanStepStatus;
 use praxis_app_gateway_protocol::TurnStatus;
-use praxis_app_gateway_protocol::classify_resumed_thread_item;
 use praxis_chatgpt::connectors;
 use praxis_config::types::ApprovalsReviewer;
 use praxis_config::types::Notifications;
@@ -182,8 +181,6 @@ use praxis_protocol::protocol::AgentStatus;
 use praxis_protocol::protocol::ApplyPatchApprovalRequestEvent;
 #[cfg(test)]
 use praxis_protocol::protocol::BackgroundEventEvent;
-#[cfg(test)]
-use praxis_protocol::protocol::CodexErrorInfo as CoreCodexErrorInfo;
 use praxis_protocol::protocol::CollabAgentRef;
 #[cfg(test)]
 use praxis_protocol::protocol::CollabAgentSpawnBeginEvent;
@@ -218,8 +215,11 @@ use praxis_protocol::protocol::McpStartupStatus;
 use praxis_protocol::protocol::McpStartupUpdateEvent;
 use praxis_protocol::protocol::McpToolCallBeginEvent;
 use praxis_protocol::protocol::McpToolCallEndEvent;
+use praxis_protocol::protocol::OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID;
 use praxis_protocol::protocol::Op;
 use praxis_protocol::protocol::PatchApplyBeginEvent;
+#[cfg(test)]
+use praxis_protocol::protocol::PraxisErrorInfo as CorePraxisErrorInfo;
 use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_protocol::protocol::ReviewRequest;
 use praxis_protocol::protocol::ReviewTarget;
@@ -244,6 +244,7 @@ use praxis_protocol::protocol::ViewImageToolCallEvent;
 use praxis_protocol::protocol::WarningEvent;
 use praxis_protocol::protocol::WebSearchBeginEvent;
 use praxis_protocol::protocol::WebSearchEndEvent;
+use praxis_protocol::protocol::is_openai_hosted_primary_rate_limit;
 use praxis_protocol::request_permissions::RequestPermissionsEvent;
 use praxis_protocol::request_user_input::RequestUserInputEvent;
 use praxis_protocol::user_input::TextElement;
@@ -296,7 +297,6 @@ const SELFWORK_PLAN_PREVIEW_WIDTH: usize = 88;
 const STATUS_ACTIVITY_TEXT_MAX_GRAPHEMES: usize = 48;
 const REASONING_SUMMARY_STATUS_PREVIEW_MAX_LINES: usize = 4;
 const REASONING_FULL_STATUS_PREVIEW_MAX_LINES: usize = 8;
-const RESUME_REPLAY_PREVIEW_MAX_GRAPHEMES: usize = 180;
 const IN_APP_TOAST_DURATION: Duration = Duration::from_secs(4);
 const IN_APP_TOAST_PRIORITY_DURATION: Duration = Duration::from_secs(6);
 const ACTIVE_CELL_ANIMATION_FRAME_DELAY_FOCUSED: Duration = Duration::from_millis(60);
@@ -414,8 +414,6 @@ use crate::transcript_search::TranscriptSearchOverlayState;
 use crate::transcript_search::TranscriptSearchState;
 use crate::transcript_search::TranscriptSearchStatus;
 use crate::tui::FrameRequester;
-use crate::turn_runtime::ActivityTrail;
-use crate::turn_runtime::RuntimeTextCapitalization;
 use crate::turn_runtime::TurnRuntimeState;
 use crate::workspace::LaunchStripDropdown;
 use crate::workspace::LaunchStripDropdownItem;
@@ -449,6 +447,8 @@ use self::plugins::PluginsCacheState;
 mod realtime;
 use self::realtime::RealtimeConversationUiState;
 use self::realtime::RenderedUserMessageEvent;
+mod resume_replay;
+use self::resume_replay::ResumeReplayProjector;
 mod status_surfaces;
 mod surface_layout;
 use self::status_surfaces::CachedProjectRootName;
@@ -699,11 +699,11 @@ enum RateLimitErrorKind {
 }
 
 #[cfg(test)]
-fn core_rate_limit_error_kind(info: &CoreCodexErrorInfo) -> Option<RateLimitErrorKind> {
+fn core_rate_limit_error_kind(info: &CorePraxisErrorInfo) -> Option<RateLimitErrorKind> {
     match info {
-        CoreCodexErrorInfo::ServerOverloaded => Some(RateLimitErrorKind::ServerOverloaded),
-        CoreCodexErrorInfo::UsageLimitExceeded => Some(RateLimitErrorKind::UsageLimit),
-        CoreCodexErrorInfo::ResponseTooManyFailedAttempts {
+        CorePraxisErrorInfo::ServerOverloaded => Some(RateLimitErrorKind::ServerOverloaded),
+        CorePraxisErrorInfo::UsageLimitExceeded => Some(RateLimitErrorKind::UsageLimit),
+        CorePraxisErrorInfo::ResponseTooManyFailedAttempts {
             http_status_code: Some(429),
         } => Some(RateLimitErrorKind::Generic),
         _ => None,
@@ -711,12 +711,12 @@ fn core_rate_limit_error_kind(info: &CoreCodexErrorInfo) -> Option<RateLimitErro
 }
 
 fn app_gateway_rate_limit_error_kind(
-    info: &AppGatewayCodexErrorInfo,
+    info: &AppGatewayPraxisErrorInfo,
 ) -> Option<RateLimitErrorKind> {
     match info {
-        AppGatewayCodexErrorInfo::ServerOverloaded => Some(RateLimitErrorKind::ServerOverloaded),
-        AppGatewayCodexErrorInfo::UsageLimitExceeded => Some(RateLimitErrorKind::UsageLimit),
-        AppGatewayCodexErrorInfo::ResponseTooManyFailedAttempts {
+        AppGatewayPraxisErrorInfo::ServerOverloaded => Some(RateLimitErrorKind::ServerOverloaded),
+        AppGatewayPraxisErrorInfo::UsageLimitExceeded => Some(RateLimitErrorKind::UsageLimit),
+        AppGatewayPraxisErrorInfo::ResponseTooManyFailedAttempts {
             http_status_code: Some(429),
         } => Some(RateLimitErrorKind::Generic),
         _ => None,
@@ -947,10 +947,8 @@ pub(crate) struct ChatWidget {
     // details here so transient stream interruptions can restore the footer
     // exactly as it was shown.
     current_status: StatusIndicatorState,
-    /// CC-style runtime snapshot for active task / override / tip selection.
+    /// Runtime snapshot for active task, status overrides, activity, and footer copy.
     turn_status_snapshot: TurnRuntimeState,
-    /// Short summaries of recent work for the currently running turn.
-    status_activity_trail: ActivityTrail,
     // Guardian review keeps its own pending set so it can derive a single
     // footer summary from one or more in-flight review events.
     pending_guardian_review_status: PendingGuardianReviewStatus,
@@ -1511,7 +1509,7 @@ impl ThreadItemRenderSource {
     }
 }
 
-fn thread_session_state_to_legacy_event(
+fn session_state_to_configured_event(
     session: ThreadSessionState,
 ) -> praxis_protocol::protocol::SessionConfiguredEvent {
     praxis_protocol::protocol::SessionConfiguredEvent {
@@ -1700,7 +1698,7 @@ impl ChatWidget {
         let is_interruptible = self.agent_turn_running || self.mcp_startup_status.is_some();
         let is_running = is_interruptible;
         if was_running != is_running {
-            self.clear_status_activity_trail();
+            self.clear_status_activity();
         }
         self.bottom_pane.set_task_running(is_running);
         if is_running {
@@ -1711,16 +1709,9 @@ impl ChatWidget {
         self.refresh_terminal_title();
     }
 
-    fn clear_status_activity_trail(&mut self) {
-        if self.status_activity_trail.is_empty() {
-            self.bottom_pane.set_status_activity_message(None);
-            self.sync_work_panel_live_status();
-            return;
-        }
-        self.status_activity_trail.clear();
+    fn clear_status_activity(&mut self) {
         self.turn_status_snapshot.clear_activity();
-        self.bottom_pane.set_status_activity_message(None);
-        self.sync_work_panel_live_status();
+        self.sync_status_activity_message();
     }
 
     fn push_status_activity(&mut self, summary: impl Into<String>) {
@@ -1731,18 +1722,15 @@ impl ChatWidget {
         }
 
         let normalized = truncate_text(normalized, STATUS_ACTIVITY_TEXT_MAX_GRAPHEMES);
-        let previous_summary = self.status_activity_trail.summary();
-        self.status_activity_trail.push(normalized.clone());
-        if self.status_activity_trail.summary() == previous_summary {
+        if !self.turn_status_snapshot.push_activity(normalized) {
             return;
         }
-        self.turn_status_snapshot.push_activity(normalized);
         self.sync_status_activity_message();
     }
 
     fn sync_status_activity_message(&mut self) {
         self.bottom_pane
-            .set_status_activity_message(self.status_activity_trail.summary());
+            .set_status_activity_message(self.turn_status_snapshot.activity_summary());
         self.sync_work_panel_live_status();
     }
 
@@ -1751,7 +1739,7 @@ impl ChatWidget {
             self.work_panel.set_live_status(
                 self.current_status.header.clone(),
                 self.current_status.details.clone(),
-                self.status_activity_trail.summary(),
+                self.turn_status_snapshot.activity_summary(),
             );
         } else {
             self.work_panel.clear_live_status();
@@ -1930,19 +1918,13 @@ impl ChatWidget {
         self.turn_status_snapshot.set_base_status(
             self.current_status.header.clone(),
             self.current_status.details.clone(),
-            RuntimeTextCapitalization::CapitalizeFirst,
             self.current_status.details_max_lines,
         );
         let snapshot = self.turn_status_snapshot.status_snapshot();
         self.bottom_pane.update_status(
             snapshot.header,
             snapshot.details,
-            match snapshot.details_capitalization {
-                RuntimeTextCapitalization::CapitalizeFirst => {
-                    StatusDetailsCapitalization::CapitalizeFirst
-                }
-                RuntimeTextCapitalization::Preserve => StatusDetailsCapitalization::Preserve,
-            },
+            StatusDetailsCapitalization::CapitalizeFirst,
             snapshot.details_max_lines,
         );
         self.bottom_pane
@@ -1950,13 +1932,7 @@ impl ChatWidget {
         self.bottom_pane
             .set_status_activity_message(snapshot.activity_message);
         self.bottom_pane
-            .set_status_footer_message((!snapshot.extra_lines.is_empty()).then(|| {
-                snapshot
-                    .extra_lines
-                    .into_iter()
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }));
+            .set_status_footer_message(snapshot.footer_message);
         self.sync_work_panel_live_status();
         self.refresh_status_surfaces();
     }
@@ -2129,6 +2105,10 @@ impl ChatWidget {
         self.last_copyable_output = None;
         self.pending_turn_copyable_output = None;
         let forked_from_id = event.forked_from_id;
+        let forked_from_name = event
+            .thread_name
+            .clone()
+            .filter(|name| !name.trim().is_empty());
         let model_for_header = event.model.clone();
         self.session_header.set_model(&model_for_header);
         self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
@@ -2181,7 +2161,7 @@ impl ChatWidget {
             }
         }
         if let Some(forked_from_id) = forked_from_id {
-            self.emit_forked_thread_event(forked_from_id);
+            self.emit_forked_thread_event(forked_from_id, forked_from_name);
         }
         if !self.suppress_session_configured_redraw {
             self.request_redraw();
@@ -2206,55 +2186,35 @@ impl ChatWidget {
         }
         self.selfwork_plan_path = session.selfwork_plan_path.clone();
         self.sync_work_panel_selfwork();
-        self.on_session_configured(thread_session_state_to_legacy_event(session));
+        self.on_session_configured(session_state_to_configured_event(session));
     }
 
     pub(crate) fn maybe_resume_selfwork_if_idle(&mut self) {
         self.maybe_start_selfwork_turn_now();
     }
 
-    fn emit_forked_thread_event(&self, forked_from_id: ThreadId) {
+    fn emit_forked_thread_event(&self, forked_from_id: ThreadId, forked_from_name: Option<String>) {
         let app_event_tx = self.app_event_tx.clone();
-        let praxis_home = self.config.praxis_home.clone();
-        tokio::spawn(async move {
-            let forked_from_id_text = forked_from_id.to_string();
-            let send_name_and_id = |name: String| {
-                let line: Line<'static> = vec![
-                    "• ".dim(),
-                    "Thread forked from ".into(),
-                    name.cyan(),
-                    " (".into(),
-                    forked_from_id_text.clone().cyan(),
-                    ")".into(),
-                ]
-                .into();
-                app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                    PlainHistoryCell::new(vec![line]),
-                )));
-            };
-            let send_id_only = || {
-                let line: Line<'static> = vec![
-                    "• ".dim(),
-                    "Thread forked from ".into(),
-                    forked_from_id_text.clone().cyan(),
-                ]
-                .into();
-                app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
-                    PlainHistoryCell::new(vec![line]),
-                )));
-            };
-
-            let state_db = praxis_rollout::state_db::open_if_present(&praxis_home, "").await;
-            match praxis_rollout::ThreadNameResolver::new(state_db.as_deref())
-                .resolve_name(forked_from_id)
-                .await
-            {
-                Some(name) if !name.trim().is_empty() => {
-                    send_name_and_id(name);
-                }
-                _ => send_id_only(),
-            }
-        });
+        let forked_from_id_text = forked_from_id.to_string();
+        let line = match forked_from_name {
+            Some(name) => vec![
+                "• ".dim(),
+                "Thread forked from ".into(),
+                name.cyan(),
+                " (".into(),
+                forked_from_id_text.cyan(),
+                ")".into(),
+            ],
+            None => vec![
+                "• ".dim(),
+                "Thread forked from ".into(),
+                forked_from_id_text.cyan(),
+            ],
+        }
+        .into();
+        app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+            PlainHistoryCell::new(vec![line]),
+        )));
     }
 
     fn on_thread_name_updated(&mut self, event: praxis_protocol::protocol::ThreadNameUpdatedEvent) {
@@ -2438,7 +2398,7 @@ impl ChatWidget {
 
     fn thinking_persona_for_reasoning_kind(&self, kind: ReasoningBlockKind) -> ThinkingPersona {
         match kind {
-            ReasoningBlockKind::Summary => ThinkingPersona::CodexSummary,
+            ReasoningBlockKind::Summary => ThinkingPersona::PraxisSummary,
             ReasoningBlockKind::Full if self.is_deepseek_current_model() => {
                 ThinkingPersona::DeepSeekFull
             }
@@ -2890,20 +2850,20 @@ impl ChatWidget {
     }
 
     #[cfg(test)]
-    fn handle_steer_rejected_error(&mut self, praxis_error_info: &CoreCodexErrorInfo) -> bool {
+    fn handle_steer_rejected_error(&mut self, praxis_error_info: &CorePraxisErrorInfo) -> bool {
         matches!(
             praxis_error_info,
-            CoreCodexErrorInfo::ActiveTurnNotSteerable { .. }
+            CorePraxisErrorInfo::ActiveTurnNotSteerable { .. }
         ) && self.enqueue_rejected_steer()
     }
 
     fn handle_app_gateway_steer_rejected_error(
         &mut self,
-        praxis_error_info: &AppGatewayCodexErrorInfo,
+        praxis_error_info: &AppGatewayPraxisErrorInfo,
     ) -> bool {
         matches!(
             praxis_error_info,
-            AppGatewayCodexErrorInfo::ActiveTurnNotSteerable { .. }
+            AppGatewayPraxisErrorInfo::ActiveTurnNotSteerable { .. }
         ) && self.enqueue_rejected_steer()
     }
 
@@ -3143,7 +3103,7 @@ impl ChatWidget {
             let limit_id = snapshot
                 .limit_id
                 .clone()
-                .unwrap_or_else(|| "codex".to_string());
+                .unwrap_or_else(|| OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string());
             let limit_label = snapshot
                 .limit_name
                 .clone()
@@ -3162,7 +3122,7 @@ impl ChatWidget {
 
             self.plan_type = snapshot.plan_type.or(self.plan_type);
 
-            let is_praxis_limit = limit_id.eq_ignore_ascii_case("codex");
+            let is_praxis_limit = is_openai_hosted_primary_rate_limit(&limit_id);
             let warnings = if is_praxis_limit {
                 self.rate_limit_warnings.take_warnings(
                     snapshot
@@ -3283,7 +3243,7 @@ impl ChatWidget {
     fn handle_non_retry_error(
         &mut self,
         message: String,
-        praxis_error_info: Option<AppGatewayCodexErrorInfo>,
+        praxis_error_info: Option<AppGatewayPraxisErrorInfo>,
     ) {
         if praxis_error_info
             .as_ref()
@@ -3941,11 +3901,11 @@ impl ChatWidget {
                 GuardianAssessmentAction::McpToolCall {
                     server, tool_name, ..
                 } => history_cell::new_guardian_denied_action_request(format!(
-                    "codex to call MCP tool {server}.{tool_name}"
+                    "Praxis to call MCP tool {server}.{tool_name}"
                 )),
                 GuardianAssessmentAction::NetworkAccess { target, .. } => {
                     history_cell::new_guardian_denied_action_request(format!(
-                        "codex to access {target}"
+                        "Praxis to access {target}"
                     ))
                 }
                 GuardianAssessmentAction::Command { .. } => unreachable!(),
@@ -5319,7 +5279,6 @@ impl ChatWidget {
             reasoning_block_kind: None,
             current_status: StatusIndicatorState::turn_running(),
             turn_status_snapshot: TurnRuntimeState::default(),
-            status_activity_trail: ActivityTrail::default(),
             pending_guardian_review_status: PendingGuardianReviewStatus::default(),
             terminal_title_status_kind: TerminalTitleStatusKind::TurnRunning,
             retry_status_header: None,
@@ -6422,7 +6381,7 @@ impl ChatWidget {
             }
             SlashCommand::Rename => {
                 self.session_telemetry
-                    .counter("codex.thread.rename", /*inc*/ 1, &[]);
+                    .counter("praxis.thread.rename", /*inc*/ 1, &[]);
                 self.show_rename_prompt();
             }
             SlashCommand::Namegen => {
@@ -6571,7 +6530,7 @@ impl ChatWidget {
                     }
 
                     self.session_telemetry.counter(
-                        "codex.windows_sandbox.setup_elevated_sandbox_command",
+                        "praxis.windows_sandbox.setup_elevated_sandbox_command",
                         /*inc*/ 1,
                         &[],
                     );
@@ -6863,7 +6822,7 @@ impl ChatWidget {
             }
             SlashCommand::Rename if !trimmed.is_empty() => {
                 self.session_telemetry
-                    .counter("codex.thread.rename", /*inc*/ 1, &[]);
+                    .counter("praxis.thread.rename", /*inc*/ 1, &[]);
                 let Some((prepared_args, _prepared_elements)) = self
                     .bottom_pane
                     .prepare_inline_args_submission(/*record_history*/ false)
@@ -7515,7 +7474,11 @@ impl ChatWidget {
     /// avoid triggering side effects. Event ids are passed as `None` to
     /// distinguish replayed events from live ones.
     pub(crate) fn replay_thread_turns(&mut self, turns: Vec<Turn>, replay_kind: ReplayKind) {
-        let mut hidden_resume_tool_events = 0usize;
+        if matches!(replay_kind, ReplayKind::ResumeInitialMessages) {
+            self.replay_initial_thread_turns_compact(turns);
+            return;
+        }
+
         for turn in turns {
             let Turn {
                 id: turn_id,
@@ -7530,36 +7493,58 @@ impl ChatWidget {
                 self.on_task_started();
             }
             for item in items {
-                hidden_resume_tool_events = hidden_resume_tool_events.saturating_add(usize::from(
-                    self.replay_thread_item(item, turn_id.clone(), replay_kind),
-                ));
+                self.replay_thread_item(item, turn_id.clone(), replay_kind);
             }
-            if matches!(
-                status,
-                TurnStatus::Completed | TurnStatus::Interrupted | TurnStatus::Failed
-            ) {
-                self.handle_turn_completed_notification(
-                    TurnCompletedNotification {
-                        thread_id: self.thread_id.map(|id| id.to_string()).unwrap_or_default(),
-                        turn: Turn {
-                            id: turn_id,
-                            items: Vec::new(),
-                            status,
-                            error,
-                        },
-                    },
-                    Some(replay_kind),
-                );
-            }
+            self.handle_replayed_turn_status(turn_id, status, error, replay_kind);
         }
-        if matches!(replay_kind, ReplayKind::ResumeInitialMessages) && hidden_resume_tool_events > 0
-        {
-            self.add_resume_replay_line(
-                ChatLane::Assistant,
-                "Resume",
-                format!("{hidden_resume_tool_events} tool events hidden from resumed history"),
+    }
+
+    fn replay_initial_thread_turns_compact(&mut self, turns: Vec<Turn>) {
+        let mut projector = ResumeReplayProjector::default();
+        for turn in turns {
+            let Turn {
+                id: turn_id,
+                items,
+                status,
+                error,
+            } = turn;
+            projector.project_items(items, |cell| self.add_to_history(cell));
+            self.handle_replayed_turn_status(
+                turn_id,
+                status,
+                error,
+                ReplayKind::ResumeInitialMessages,
             );
         }
+        projector.finish(|cell| self.add_to_history(cell));
+    }
+
+    fn handle_replayed_turn_status(
+        &mut self,
+        turn_id: String,
+        status: TurnStatus,
+        error: Option<TurnError>,
+        replay_kind: ReplayKind,
+    ) {
+        if !matches!(
+            status,
+            TurnStatus::Completed | TurnStatus::Interrupted | TurnStatus::Failed
+        ) {
+            return;
+        }
+
+        self.handle_turn_completed_notification(
+            TurnCompletedNotification {
+                thread_id: self.thread_id.map(|id| id.to_string()).unwrap_or_default(),
+                turn: Turn {
+                    id: turn_id,
+                    items: Vec::new(),
+                    status,
+                    error,
+                },
+            },
+            Some(replay_kind),
+        );
     }
 
     pub(crate) fn replay_thread_item(
@@ -7567,7 +7552,7 @@ impl ChatWidget {
         item: ThreadItem,
         turn_id: String,
         replay_kind: ReplayKind,
-    ) -> bool {
+    ) {
         self.handle_thread_item(item, turn_id, ThreadItemRenderSource::Replay(replay_kind))
     }
 
@@ -7576,11 +7561,12 @@ impl ChatWidget {
         item: ThreadItem,
         turn_id: String,
         render_source: ThreadItemRenderSource,
-    ) -> bool {
+    ) {
         let from_replay = render_source.is_replay();
         let replay_kind = render_source.replay_kind();
         if matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
-            return self.replay_initial_thread_item_compact(item);
+            ResumeReplayProjector::project_single(item, |cell| self.add_to_history(cell));
+            return;
         }
         match item {
             ThreadItem::UserMessage { id, content } => {
@@ -7890,65 +7876,6 @@ impl ChatWidget {
         if matches!(replay_kind, Some(ReplayKind::ThreadSnapshot)) && turn_id.is_empty() {
             self.request_redraw();
         }
-        false
-    }
-
-    fn replay_initial_thread_item_compact(&mut self, item: ThreadItem) -> bool {
-        match classify_resumed_thread_item(item) {
-            ResumedThreadHistoryAction::Show {
-                lane,
-                label,
-                preview,
-            } => {
-                self.add_resume_replay_line(
-                    Self::resumed_history_lane_to_chat_lane(lane),
-                    Self::resumed_history_label_text(label),
-                    preview,
-                );
-                false
-            }
-            ResumedThreadHistoryAction::FoldToolEvent => true,
-            ResumedThreadHistoryAction::Drop => false,
-        }
-    }
-
-    fn resumed_history_lane_to_chat_lane(lane: ResumedHistoryLane) -> ChatLane {
-        match lane {
-            ResumedHistoryLane::User => ChatLane::User,
-            ResumedHistoryLane::Assistant => ChatLane::Assistant,
-        }
-    }
-
-    fn resumed_history_label_text(label: ResumedHistoryLabel) -> &'static str {
-        match label {
-            ResumedHistoryLabel::You => "You",
-            ResumedHistoryLabel::Assistant => "Assistant",
-            ResumedHistoryLabel::AssistantNote => "Assistant note",
-            ResumedHistoryLabel::Plan => "Plan",
-            ResumedHistoryLabel::Reasoning => "Reasoning",
-            ResumedHistoryLabel::Review => "Review",
-            ResumedHistoryLabel::ReviewExited => "Review exited",
-            ResumedHistoryLabel::Context => "Context",
-            ResumedHistoryLabel::Hook => "Hook",
-        }
-    }
-
-    fn add_resume_replay_line(
-        &mut self,
-        lane: ChatLane,
-        label: impl Into<String>,
-        preview: impl AsRef<str>,
-    ) {
-        self.add_to_history(history_cell::ResumeReplayHistoryCell::new(
-            lane,
-            label.into(),
-            Self::compact_resume_preview(preview.as_ref()),
-        ));
-    }
-
-    fn compact_resume_preview(text: &str) -> String {
-        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        truncate_text(&text, RESUME_REPLAY_PREVIEW_MAX_GRAPHEMES)
     }
 
     pub(crate) fn handle_server_request(
@@ -7980,6 +7907,7 @@ impl ChatWidget {
                 self.on_request_user_input(request_user_input_from_params(params));
             }
             ServerRequest::DynamicToolCall { .. }
+            | ServerRequest::Cunning3dBridgeCall { .. }
             | ServerRequest::ChatgptAuthTokensRefresh { .. } => {
                 if replay_kind.is_none() {
                     self.add_error_message(TUI_STUB_MESSAGE.to_string());
@@ -8041,6 +7969,9 @@ impl ChatWidget {
                         );
                     }
                 }
+            }
+            ServerNotification::ThreadModelChanged(notification) => {
+                self.handle_thread_model_changed_notification(notification);
             }
             ServerNotification::TurnStarted(notification) => {
                 self.last_non_retry_error = None;
@@ -8251,6 +8182,62 @@ impl ChatWidget {
 
     pub(crate) fn handle_skills_list_response(&mut self, response: ListSkillsResponseEvent) {
         self.on_list_skills(response);
+    }
+
+    fn handle_thread_model_changed_notification(
+        &mut self,
+        notification: ThreadModelChangedNotification,
+    ) {
+        if self
+            .thread_id()
+            .is_some_and(|thread_id| thread_id.to_string() != notification.thread_id.as_str())
+        {
+            return;
+        }
+
+        let previous_model = self.current_model().to_string();
+        let previous_effort = self.effective_reasoning_effort();
+        let model = notification.model;
+        let provider_id = notification.model_provider;
+        let effort = notification.reasoning_effort;
+
+        self.config.model_provider_id = provider_id.clone();
+        self.config.model = Some(model.clone());
+        if let Some(provider) = self.config.model_providers.get(&provider_id).cloned() {
+            self.config.model_provider = provider;
+        }
+        self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
+            Some(model.clone()),
+            Some(effort),
+            /*developer_instructions*/ None,
+        );
+        if self.collaboration_modes_enabled()
+            && let Some(mask) = self.active_collaboration_mask.as_mut()
+        {
+            mask.model = Some(model.clone());
+            mask.reasoning_effort = Some(effort);
+        }
+
+        self.refresh_model_dependent_surfaces();
+        if previous_model != model || previous_effort != effort {
+            let mut message = format!("Model changed to {model}");
+            if !model.starts_with("praxis-auto-") {
+                let reasoning_label = match effort {
+                    Some(ReasoningEffortConfig::Minimal) => "minimal",
+                    Some(ReasoningEffortConfig::Low) => "low",
+                    Some(ReasoningEffortConfig::Medium) => "medium",
+                    Some(ReasoningEffortConfig::High) => "high",
+                    Some(ReasoningEffortConfig::XHigh) => "xhigh",
+                    None | Some(ReasoningEffortConfig::None) => "default",
+                };
+                message.push(' ');
+                message.push_str(reasoning_label);
+            }
+            message.push('.');
+            self.add_model_change_message(message);
+        } else {
+            self.request_redraw();
+        }
     }
 
     pub(crate) fn handle_thread_rolled_back(&mut self) {
@@ -8494,7 +8481,7 @@ impl ChatWidget {
             ) {
                 continue;
             }
-            // `id: None` indicates a synthetic/fake id coming from replay.
+            // `id: None` indicates a synthetic replay id.
             self.dispatch_event_msg(
                 /*id*/ None,
                 msg,
@@ -8521,7 +8508,7 @@ impl ChatWidget {
     /// Dispatch a protocol `EventMsg` to the appropriate handler.
     ///
     /// `id` is `Some` for live events and `None` for replayed events from
-    /// `replay_initial_messages()`. Callers should treat `None` as a "fake" id
+    /// `replay_initial_messages()`. Callers should treat `None` as a synthetic id
     /// that must not be used to correlate follow-up actions.
     #[cfg(test)]
     fn dispatch_event_msg(
@@ -9182,8 +9169,13 @@ impl ChatWidget {
     fn open_terminal_title_setup(&mut self) {
         let configured_terminal_title_items = self.configured_terminal_title_items();
         self.terminal_title_setup_original_items = Some(self.tui_config.terminal_title.clone());
+        let now = Instant::now();
         let view = TerminalTitleSetupView::new(
             Some(configured_terminal_title_items.as_slice()),
+            TerminalTitlePreviewData::from_iter(TerminalTitleItem::iter().filter_map(|item| {
+                self.terminal_title_value_for_item(item, now)
+                    .map(|value| (item, value))
+            })),
             self.app_event_tx.clone(),
         );
         self.bottom_pane.show_view(Box::new(view));
@@ -9511,7 +9503,7 @@ impl ChatWidget {
         let codex_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
             tx.send(AppEvent::InsertHistoryCell(Box::new(
                 history_cell::new_info_event(
-                    "Praxis inherits existing Codex/OpenAI login when it is available."
+                    "Praxis uses your ChatGPT/OpenAI login when it is available."
                         .to_string(),
                     Some(
                         "If no provider works at startup, Praxis opens the full ChatGPT sign-in flow."
@@ -9549,9 +9541,9 @@ impl ChatWidget {
             footer_hint: Some(standard_popup_hint_line()),
             items: vec![
                 SelectionItem {
-                    name: "ChatGPT / Codex account".to_string(),
+                    name: "ChatGPT / OpenAI account".to_string(),
                     description: Some(
-                        "Inherited automatically from Codex when present.".to_string(),
+                        "Uses inherited ChatGPT/OpenAI credentials when present.".to_string(),
                     ),
                     actions: codex_actions,
                     dismiss_on_select: true,
@@ -9622,7 +9614,7 @@ impl ChatWidget {
                 "Praxis does not provide Anthropic account integration. The company publicly objects to model distillation while benefiting from the same industry-wide extraction dynamics it condemns.",
             ),
             Line::from(
-                "We will not spend the Praxis login surface normalizing that posture. Use ChatGPT/Codex, DeepSeek, or a common OpenAI-compatible endpoint instead.",
+                "We will not spend the Praxis login surface normalizing that posture. Use ChatGPT/OpenAI, DeepSeek, or a common OpenAI-compatible endpoint instead.",
             )
             .dim(),
         ]);
@@ -9651,7 +9643,7 @@ impl ChatWidget {
                 || target.eq_ignore_ascii_case("openai") =>
             {
                 self.add_info_message(
-                    "Praxis inherits existing Codex/OpenAI login when available.".to_string(),
+                    "Praxis uses your ChatGPT/OpenAI login when available.".to_string(),
                     Some(
                         "Use /login deepseek or /login common to configure API providers."
                             .to_string(),
@@ -11120,7 +11112,7 @@ impl ChatWidget {
             header.push(*Box::new(
                 Paragraph::new(vec![
                     line!["Agent mode on Windows uses an experimental sandbox to limit network and filesystem access.".bold()],
-                    line!["Learn more: https://developers.openai.com/codex/windows"],
+                    line!["Learn more: https://github.com/o-oOvOo-o/praxis-backend/blob/main/docs/sandbox.md"],
                 ])
                 .wrap(Wrap { trim: false }),
             ));
@@ -11161,7 +11153,7 @@ impl ChatWidget {
         }
 
         self.session_telemetry.counter(
-            "codex.windows_sandbox.elevated_prompt_shown",
+            "praxis.windows_sandbox.elevated_prompt_shown",
             /*inc*/ 1,
             &[],
         );
@@ -11169,7 +11161,7 @@ impl ChatWidget {
         let mut header = ColumnRenderable::new();
         header.push(*Box::new(
             Paragraph::new(vec![
-                line!["Set up the Praxis agent sandbox to protect your files and control network access. Learn more <https://developers.openai.com/codex/windows>"],
+                line!["Set up the Praxis agent sandbox to protect your files and control network access. Learn more <https://github.com/o-oOvOo-o/praxis-backend/blob/main/docs/sandbox.md>"],
             ])
             .wrap(Wrap { trim: false }),
         ));
@@ -11184,7 +11176,7 @@ impl ChatWidget {
                 description: None,
                 actions: vec![Box::new(move |tx| {
                     accept_otel.counter(
-                        "codex.windows_sandbox.elevated_prompt_accept",
+                        "praxis.windows_sandbox.elevated_prompt_accept",
                         /*inc*/ 1,
                         &[],
                     );
@@ -11200,7 +11192,7 @@ impl ChatWidget {
                 description: None,
                 actions: vec![Box::new(move |tx| {
                     legacy_otel.counter(
-                        "codex.windows_sandbox.elevated_prompt_use_legacy",
+                        "praxis.windows_sandbox.elevated_prompt_use_legacy",
                         /*inc*/ 1,
                         &[],
                     );
@@ -11216,7 +11208,7 @@ impl ChatWidget {
                 description: None,
                 actions: vec![Box::new(move |tx| {
                     quit_otel.counter(
-                        "codex.windows_sandbox.elevated_prompt_quit",
+                        "praxis.windows_sandbox.elevated_prompt_quit",
                         /*inc*/ 1,
                         &[],
                     );
@@ -11252,7 +11244,7 @@ impl ChatWidget {
             "You can still use Praxis in a non-admin sandbox. It carries greater risk if prompt injected."
         ]);
         lines.push(line![
-            "Learn more <https://developers.openai.com/codex/windows>"
+            "Learn more <https://github.com/o-oOvOo-o/praxis-backend/blob/main/docs/sandbox.md>"
         ]);
 
         let mut header = ColumnRenderable::new();
@@ -11270,7 +11262,7 @@ impl ChatWidget {
                     let preset = elevated_preset;
                     move |tx| {
                         otel.counter(
-                            "codex.windows_sandbox.fallback_retry_elevated",
+                            "praxis.windows_sandbox.fallback_retry_elevated",
                             /*inc*/ 1,
                             &[],
                         );
@@ -11290,7 +11282,7 @@ impl ChatWidget {
                     let preset = legacy_preset;
                     move |tx| {
                         otel.counter(
-                            "codex.windows_sandbox.fallback_use_legacy",
+                            "praxis.windows_sandbox.fallback_use_legacy",
                             /*inc*/ 1,
                             &[],
                         );
@@ -11307,7 +11299,7 @@ impl ChatWidget {
                 description: None,
                 actions: vec![Box::new(move |tx| {
                     quit_otel.counter(
-                        "codex.windows_sandbox.fallback_prompt_quit",
+                        "praxis.windows_sandbox.fallback_prompt_quit",
                         /*inc*/ 1,
                         &[],
                     );
@@ -12526,7 +12518,7 @@ impl ChatWidget {
     pub(crate) fn clear_esc_backtrack_hint(&mut self) {
         self.bottom_pane.clear_esc_backtrack_hint();
     }
-    /// Forward a command directly to codex.
+    /// Forward a command directly to the application command pipeline.
     pub(crate) fn submit_op<T>(&mut self, op: T) -> bool
     where
         T: Into<AppCommand>,

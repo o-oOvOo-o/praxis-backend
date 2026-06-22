@@ -1,6 +1,6 @@
 #![cfg(target_os = "macos")]
 
-use crate::spawn::CODEX_SANDBOX_ENV_VAR;
+use crate::spawn::PRAXIS_SANDBOX_ENV_VAR;
 use crate::spawn::SpawnChildRequest;
 use crate::spawn::StdioPolicy;
 use crate::spawn::spawn_child_async;
@@ -33,7 +33,7 @@ pub async fn spawn_command_under_seatbelt(
         network,
     );
     let arg0 = None;
-    env.insert(CODEX_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
+    env.insert(PRAXIS_SANDBOX_ENV_VAR.to_string(), "seatbelt".to_string());
     spawn_child_async(SpawnChildRequest {
         program: PathBuf::from(MACOS_PATH_TO_SEATBELT_EXECUTABLE),
         args,

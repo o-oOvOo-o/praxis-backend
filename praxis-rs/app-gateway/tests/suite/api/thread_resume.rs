@@ -77,7 +77,7 @@ use super::analytics::thread_initialized_event;
 use super::analytics::wait_for_analytics_payload;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
-const CODEX_5_2_INSTRUCTIONS_TEMPLATE_DEFAULT: &str = "You are Praxis, a coding agent based on GPT-5. You and the user share the same workspace and collaborate to achieve the user's goals.";
+const PRAXIS_5_2_INSTRUCTIONS_TEMPLATE_DEFAULT: &str = "You are Praxis, a coding agent based on GPT-5. You and the user share the same workspace and collaborate to achieve the user's goals.";
 
 async fn wait_for_responses_request_count(
     server: &wiremock::MockServer,
@@ -1862,7 +1862,7 @@ async fn thread_resume_accepts_personality_override() -> Result<()> {
     );
     let instructions_text = request.instructions_text();
     assert!(
-        instructions_text.contains(CODEX_5_2_INSTRUCTIONS_TEMPLATE_DEFAULT),
+        instructions_text.contains(PRAXIS_5_2_INSTRUCTIONS_TEMPLATE_DEFAULT),
         "expected default base instructions from history, got {instructions_text:?}"
     );
 

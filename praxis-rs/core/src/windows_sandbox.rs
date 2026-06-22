@@ -102,9 +102,9 @@ pub fn elevated_setup_failure_metric_name(err: &anyhow::Error) -> &'static str {
             praxis_windows_sandbox::SetupErrorCode::OrchestratorHelperLaunchCanceled
         )
     }) {
-        "codex.windows_sandbox.elevated_setup_canceled"
+        "praxis.windows_sandbox.elevated_setup_canceled"
     } else {
-        "codex.windows_sandbox.elevated_setup_failure"
+        "praxis.windows_sandbox.elevated_setup_failure"
     }
 }
 
@@ -310,7 +310,7 @@ fn emit_windows_sandbox_setup_success_metrics(
     };
     let mode_tag = windows_sandbox_setup_mode_tag(mode);
     let _ = metrics.record_duration(
-        "codex.windows_sandbox.setup_duration_ms",
+        "praxis.windows_sandbox.setup_duration_ms",
         duration,
         &[
             ("result", "success"),
@@ -319,7 +319,7 @@ fn emit_windows_sandbox_setup_success_metrics(
         ],
     );
     let _ = metrics.counter(
-        "codex.windows_sandbox.setup_success",
+        "praxis.windows_sandbox.setup_success",
         /*inc*/ 1,
         &[("originator", originator_tag), ("mode", mode_tag)],
     );
@@ -336,7 +336,7 @@ fn emit_windows_sandbox_setup_failure_metrics(
     };
     let mode_tag = windows_sandbox_setup_mode_tag(mode);
     let _ = metrics.record_duration(
-        "codex.windows_sandbox.setup_duration_ms",
+        "praxis.windows_sandbox.setup_duration_ms",
         duration,
         &[
             ("result", "failure"),
@@ -345,7 +345,7 @@ fn emit_windows_sandbox_setup_failure_metrics(
         ],
     );
     let _ = metrics.counter(
-        "codex.windows_sandbox.setup_failure",
+        "praxis.windows_sandbox.setup_failure",
         /*inc*/ 1,
         &[("originator", originator_tag), ("mode", mode_tag)],
     );
@@ -374,7 +374,7 @@ fn emit_windows_sandbox_setup_failure_metrics(
         }
     } else {
         let _ = metrics.counter(
-            "codex.windows_sandbox.legacy_setup_preflight_failed",
+            "praxis.windows_sandbox.legacy_setup_preflight_failed",
             /*inc*/ 1,
             &[("originator", originator_tag)],
         );

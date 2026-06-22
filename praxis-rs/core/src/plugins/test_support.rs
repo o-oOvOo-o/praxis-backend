@@ -3,16 +3,18 @@ use crate::config::ConfigBuilder;
 use std::fs;
 use std::path::Path;
 
-use super::OPENAI_CURATED_MARKETPLACE_NAME;
+use super::curated::OPENAI_CURATED_MARKETPLACE_NAME;
+use super::curated::curated_plugins_sha_path;
+use super::marketplace::marketplace_manifest_path;
 
-pub(crate) const TEST_CURATED_PLUGIN_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
+pub(super) const TEST_CURATED_PLUGIN_SHA: &str = "0123456789abcdef0123456789abcdef01234567";
 
-pub(crate) fn write_file(path: &Path, contents: &str) {
+pub(super) fn write_file(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().expect("file should have a parent")).unwrap();
     fs::write(path, contents).unwrap();
 }
 
-pub(crate) fn write_curated_plugin(root: &Path, plugin_name: &str) {
+fn write_curated_plugin(root: &Path, plugin_name: &str) {
     let plugin_root = root.join("plugins").join(plugin_name);
     write_file(
         &plugin_root.join(".praxis-plugin/plugin.json"),
@@ -50,7 +52,7 @@ pub(crate) fn write_curated_plugin(root: &Path, plugin_name: &str) {
     );
 }
 
-pub(crate) fn write_openai_curated_marketplace(root: &Path, plugin_names: &[&str]) {
+pub(super) fn write_curated_marketplace(root: &Path, plugin_names: &[&str]) {
     let plugins = plugin_names
         .iter()
         .map(|plugin_name| {
@@ -67,7 +69,7 @@ pub(crate) fn write_openai_curated_marketplace(root: &Path, plugin_names: &[&str
         .collect::<Vec<_>>()
         .join(",\n");
     write_file(
-        &root.join(".agents/plugins/marketplace.json"),
+        &marketplace_manifest_path(root),
         &format!(
             r#"{{
   "name": "{OPENAI_CURATED_MARKETPLACE_NAME}",
@@ -86,8 +88,12 @@ pub(crate) fn write_curated_plugin_sha(praxis_home: &Path) {
     write_curated_plugin_sha_with(praxis_home, TEST_CURATED_PLUGIN_SHA);
 }
 
-pub(crate) fn write_curated_plugin_sha_with(praxis_home: &Path, sha: &str) {
-    write_file(&praxis_home.join(".tmp/plugins.sha"), &format!("{sha}\n"));
+pub(super) fn write_curated_plugin_sha_with(praxis_home: &Path, sha: &str) {
+    write_file(&curated_plugins_sha_path(praxis_home), &format!("{sha}\n"));
+}
+
+pub(crate) fn write_openai_curated_marketplace(root: &Path, plugin_names: &[&str]) {
+    write_curated_marketplace(root, plugin_names);
 }
 
 pub(crate) fn write_plugins_feature_config(praxis_home: &Path) {

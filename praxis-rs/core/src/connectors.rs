@@ -36,9 +36,9 @@ use praxis_config::types::AppsConfigToml;
 use praxis_config::types::ToolSuggestDiscoverableType;
 use praxis_features::Feature;
 use praxis_login::AuthManager;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::default_client::create_client;
-use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_mcp::mcp::PRAXIS_APPS_MCP_SERVER_NAME;
 use praxis_mcp::mcp::ToolPluginProvenance;
 use praxis_mcp::mcp::auth::compute_auth_statuses;
 use praxis_mcp::mcp::with_praxis_apps_mcp;
@@ -118,7 +118,7 @@ pub(crate) async fn list_accessible_and_enabled_connectors_from_manager(
 
 pub(crate) async fn list_tool_suggest_discoverable_tools_with_auth(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
     accessible_connectors: &[AppInfo],
 ) -> anyhow::Result<Vec<DiscoverableTool>> {
     let directory_connectors =
@@ -153,7 +153,7 @@ pub async fn list_cached_accessible_connectors_from_mcp_tools(
 
 pub(crate) fn refresh_accessible_connectors_cache_from_mcp_tools(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
     mcp_tools: &HashMap<String, ToolInfo>,
 ) {
     if !config.features.enabled(Feature::Apps) {
@@ -247,7 +247,7 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_options_and_status(
             Ok(tools) => Some(tools),
             Err(err) => {
                 warn!(
-                    "failed to force-refresh tools for MCP server '{CODEX_APPS_MCP_SERVER_NAME}', using cached/startup tools: {err:#}"
+                    "failed to force-refresh tools for MCP server '{PRAXIS_APPS_MCP_SERVER_NAME}', using cached/startup tools: {err:#}"
                 );
                 None
             }
@@ -265,9 +265,9 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_options_and_status(
     let mut should_reload_tools = false;
     let praxis_apps_ready = if refreshed_tools_succeeded {
         true
-    } else if let Some(cfg) = mcp_servers.get(CODEX_APPS_MCP_SERVER_NAME) {
+    } else if let Some(cfg) = mcp_servers.get(PRAXIS_APPS_MCP_SERVER_NAME) {
         let immediate_ready = mcp_connection_manager
-            .wait_for_server_ready(CODEX_APPS_MCP_SERVER_NAME, Duration::ZERO)
+            .wait_for_server_ready(PRAXIS_APPS_MCP_SERVER_NAME, Duration::ZERO)
             .await;
         if immediate_ready {
             true
@@ -276,7 +276,7 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_options_and_status(
                 .startup_timeout_sec
                 .unwrap_or(CONNECTORS_READY_TIMEOUT_ON_EMPTY_TOOLS);
             let ready = mcp_connection_manager
-                .wait_for_server_ready(CODEX_APPS_MCP_SERVER_NAME, timeout)
+                .wait_for_server_ready(PRAXIS_APPS_MCP_SERVER_NAME, timeout)
                 .await;
             should_reload_tools = ready;
             ready
@@ -308,7 +308,7 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_options_and_status(
 
 fn accessible_connectors_cache_key(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
 ) -> AccessibleConnectorsCacheKey {
     let token_data: Option<TokenData> = auth.and_then(|auth| auth.get_token_data().ok());
     let account_id = token_data
@@ -407,7 +407,7 @@ fn tool_suggest_connector_ids(config: &Config) -> HashSet<String> {
 
 async fn list_directory_connectors_for_tool_suggest_with_auth(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
 ) -> anyhow::Result<Vec<AppInfo>> {
     if !config.features.enabled(Feature::Apps) {
         return Ok(Vec::new());
@@ -529,7 +529,7 @@ pub(crate) fn accessible_connectors_from_mcp_tools(
     // ToolInfo already carries plugin provenance, so app-level plugin sources
     // can be derived here instead of requiring a separate enrichment pass.
     let tools = mcp_tools.values().filter_map(|tool| {
-        if tool.server_name != CODEX_APPS_MCP_SERVER_NAME {
+        if tool.server_name != PRAXIS_APPS_MCP_SERVER_NAME {
             return None;
         }
         let connector_id = tool.connector_id.as_deref()?;
@@ -699,7 +699,7 @@ pub(crate) fn app_tool_policy(
 }
 
 pub(crate) fn praxis_app_tool_is_enabled(config: &Config, tool_info: &ToolInfo) -> bool {
-    if tool_info.server_name != CODEX_APPS_MCP_SERVER_NAME {
+    if tool_info.server_name != PRAXIS_APPS_MCP_SERVER_NAME {
         return true;
     }
 
@@ -720,6 +720,7 @@ pub fn filter_disallowed_connectors(connectors: Vec<AppInfo>) -> Vec<AppInfo> {
         .collect()
 }
 
+#[cfg(test)]
 fn filter_disallowed_connectors_for_originator(
     connectors: Vec<AppInfo>,
     originator_value: &str,

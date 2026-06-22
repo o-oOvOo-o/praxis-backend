@@ -8,8 +8,8 @@ use praxis_features::Feature;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
 
-use crate::test_codex::TestCodex;
-use crate::test_codex::test_codex;
+use crate::test_praxis::TestPraxis;
+use crate::test_praxis::test_praxis;
 
 #[derive(Clone)]
 pub struct ZshForkRuntime {
@@ -79,11 +79,11 @@ pub async fn build_zsh_fork_test<F>(
     approval_policy: AskForApproval,
     sandbox_policy: SandboxPolicy,
     pre_build_hook: F,
-) -> Result<TestCodex>
+) -> Result<TestPraxis>
 where
     F: FnOnce(&Path) + Send + 'static,
 {
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(pre_build_hook)
         .with_config(move |config| {
             runtime.apply_to_config(config, approval_policy, sandbox_policy);

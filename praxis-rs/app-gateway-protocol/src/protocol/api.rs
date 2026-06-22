@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use crate::RequestId;
 use crate::protocol::common::AuthMode;
+use crate::protocol::common::HostExtensionInfo;
 use praxis_experimental_api_macros::ExperimentalApi;
 use praxis_protocol::account::PlanType;
 #[cfg(test)]
@@ -48,7 +49,6 @@ use praxis_protocol::plan_tool::PlanItemArg as CorePlanItemArg;
 use praxis_protocol::plan_tool::StepStatus as CorePlanStepStatus;
 use praxis_protocol::protocol::AgentStatus as CoreAgentStatus;
 use praxis_protocol::protocol::AskForApproval as CoreAskForApproval;
-use praxis_protocol::protocol::CodexErrorInfo as CoreCodexErrorInfo;
 use praxis_protocol::protocol::CreditsSnapshot as CoreCreditsSnapshot;
 use praxis_protocol::protocol::ExecCommandSource as CoreExecCommandSource;
 use praxis_protocol::protocol::ExecCommandStatus as CoreExecCommandStatus;
@@ -65,6 +65,7 @@ use praxis_protocol::protocol::HookScope as CoreHookScope;
 use praxis_protocol::protocol::ModelRerouteReason as CoreModelRerouteReason;
 use praxis_protocol::protocol::NonSteerableTurnKind as CoreNonSteerableTurnKind;
 use praxis_protocol::protocol::PatchApplyStatus as CorePatchApplyStatus;
+use praxis_protocol::protocol::PraxisErrorInfo as CorePraxisErrorInfo;
 use praxis_protocol::protocol::RateLimitSnapshot as CoreRateLimitSnapshot;
 use praxis_protocol::protocol::RateLimitWindow as CoreRateLimitWindow;
 use praxis_protocol::protocol::ReadOnlyAccess as CoreReadOnlyAccess;
@@ -154,6 +155,8 @@ pub struct InitializeParams {
     pub client_info: ClientInfo,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<InitializeCapabilities>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_extensions: Vec<HostExtensionInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema, TS)]
@@ -180,6 +183,96 @@ pub struct InitializeResponse {
     pub praxis_home: AbsolutePathBuf,
     pub platform_family: String,
     pub platform_os: String,
+}
+
+pub const CUNNING3D_BRIDGE_SCHEMA_V1: &str = "cunning3d.bridge.v1";
+pub const CUNNING3D_BRIDGE_EXTENSION_ID: &str = CUNNING3D_BRIDGE_SCHEMA_V1;
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum Cunning3dBridgeCommandKind {
+    GraphSnapshot,
+    CreateNode,
+    ConnectNodes,
+    SetParameter,
+    CookGraph,
+    InspectGeometry,
+    InspectHeightfield,
+    CaptureViewport,
+    GetSelection,
+    RunDiagnostic,
+    OpenNodePanel,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Cunning3dBridgeCallParams {
+    pub schema: String,
+    pub command: Cunning3dBridgeCommandKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
+    #[serde(default)]
+    pub payload: JsonValue,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum Cunning3dBridgeStatus {
+    Ok,
+    Failed,
+    Unsupported,
+    Unavailable,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum Cunning3dBridgeDiagnosticSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Cunning3dBridgeDiagnostic {
+    pub severity: Cunning3dBridgeDiagnosticSeverity,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<JsonValue>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Cunning3dBridgeArtifactHandle {
+    pub id: String,
+    pub media_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byte_length: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct Cunning3dBridgeCallResponse {
+    pub schema: String,
+    pub status: Cunning3dBridgeStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub output: JsonValue,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<Cunning3dBridgeDiagnostic>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<Cunning3dBridgeArtifactHandle>,
 }
 
 // Macro to declare a camelCased API enum mirroring a core enum which
@@ -219,13 +312,13 @@ pub enum NonSteerableTurnKind {
     Compact,
 }
 
-/// This translation layer make sure that we expose codex error code in camel case.
+/// This translation layer exposes Praxis error codes in camel case.
 ///
 /// When an upstream HTTP status is available (for example, from the Responses API or a provider),
-/// it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant.
+/// it is forwarded in `httpStatusCode` on the relevant `praxisErrorInfo` variant.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub enum CodexErrorInfo {
+pub enum PraxisErrorInfo {
     ContextWindowExceeded,
     UsageLimitExceeded,
     ServerOverloaded,
@@ -267,35 +360,38 @@ pub enum CodexErrorInfo {
     Other,
 }
 
-impl From<CoreCodexErrorInfo> for CodexErrorInfo {
-    fn from(value: CoreCodexErrorInfo) -> Self {
+// Compatibility alias for clients that still import the old protocol name.
+pub type CodexErrorInfo = PraxisErrorInfo;
+
+impl From<CorePraxisErrorInfo> for PraxisErrorInfo {
+    fn from(value: CorePraxisErrorInfo) -> Self {
         match value {
-            CoreCodexErrorInfo::ContextWindowExceeded => CodexErrorInfo::ContextWindowExceeded,
-            CoreCodexErrorInfo::UsageLimitExceeded => CodexErrorInfo::UsageLimitExceeded,
-            CoreCodexErrorInfo::ServerOverloaded => CodexErrorInfo::ServerOverloaded,
-            CoreCodexErrorInfo::HttpConnectionFailed { http_status_code } => {
-                CodexErrorInfo::HttpConnectionFailed { http_status_code }
+            CorePraxisErrorInfo::ContextWindowExceeded => PraxisErrorInfo::ContextWindowExceeded,
+            CorePraxisErrorInfo::UsageLimitExceeded => PraxisErrorInfo::UsageLimitExceeded,
+            CorePraxisErrorInfo::ServerOverloaded => PraxisErrorInfo::ServerOverloaded,
+            CorePraxisErrorInfo::HttpConnectionFailed { http_status_code } => {
+                PraxisErrorInfo::HttpConnectionFailed { http_status_code }
             }
-            CoreCodexErrorInfo::ResponseStreamConnectionFailed { http_status_code } => {
-                CodexErrorInfo::ResponseStreamConnectionFailed { http_status_code }
+            CorePraxisErrorInfo::ResponseStreamConnectionFailed { http_status_code } => {
+                PraxisErrorInfo::ResponseStreamConnectionFailed { http_status_code }
             }
-            CoreCodexErrorInfo::InternalServerError => CodexErrorInfo::InternalServerError,
-            CoreCodexErrorInfo::Unauthorized => CodexErrorInfo::Unauthorized,
-            CoreCodexErrorInfo::BadRequest => CodexErrorInfo::BadRequest,
-            CoreCodexErrorInfo::ThreadRollbackFailed => CodexErrorInfo::ThreadRollbackFailed,
-            CoreCodexErrorInfo::SandboxError => CodexErrorInfo::SandboxError,
-            CoreCodexErrorInfo::ResponseStreamDisconnected { http_status_code } => {
-                CodexErrorInfo::ResponseStreamDisconnected { http_status_code }
+            CorePraxisErrorInfo::InternalServerError => PraxisErrorInfo::InternalServerError,
+            CorePraxisErrorInfo::Unauthorized => PraxisErrorInfo::Unauthorized,
+            CorePraxisErrorInfo::BadRequest => PraxisErrorInfo::BadRequest,
+            CorePraxisErrorInfo::ThreadRollbackFailed => PraxisErrorInfo::ThreadRollbackFailed,
+            CorePraxisErrorInfo::SandboxError => PraxisErrorInfo::SandboxError,
+            CorePraxisErrorInfo::ResponseStreamDisconnected { http_status_code } => {
+                PraxisErrorInfo::ResponseStreamDisconnected { http_status_code }
             }
-            CoreCodexErrorInfo::ResponseTooManyFailedAttempts { http_status_code } => {
-                CodexErrorInfo::ResponseTooManyFailedAttempts { http_status_code }
+            CorePraxisErrorInfo::ResponseTooManyFailedAttempts { http_status_code } => {
+                PraxisErrorInfo::ResponseTooManyFailedAttempts { http_status_code }
             }
-            CoreCodexErrorInfo::ActiveTurnNotSteerable { turn_kind } => {
-                CodexErrorInfo::ActiveTurnNotSteerable {
+            CorePraxisErrorInfo::ActiveTurnNotSteerable { turn_kind } => {
+                PraxisErrorInfo::ActiveTurnNotSteerable {
                     turn_kind: turn_kind.into(),
                 }
             }
-            CoreCodexErrorInfo::Other => CodexErrorInfo::Other,
+            CorePraxisErrorInfo::Other => PraxisErrorInfo::Other,
         }
     }
 }
@@ -1596,7 +1692,7 @@ pub struct ChatgptAuthTokensRefreshResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAccountRateLimitsResponse {
-    /// Multi-bucket view keyed by metered `limit_id` (for example, `codex`).
+    /// Multi-bucket view keyed by metered `limit_id`.
     pub rate_limits: HashMap<String, RateLimitSnapshot>,
 }
 
@@ -2250,6 +2346,8 @@ pub struct ThreadStartResponse {
     pub approvals_reviewer: ApprovalsReviewer,
     pub sandbox: SandboxPolicy,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub history_log_id: u64,
+    pub history_entry_count: u64,
 }
 
 #[derive(
@@ -2268,7 +2366,7 @@ pub struct ThreadStartResponse {
 pub struct ThreadResumeParams {
     pub thread_id: String,
 
-    /// [UNSTABLE] FOR CODEX CLOUD - DO NOT USE.
+    /// [UNSTABLE] For managed cloud callers only; do not use from ordinary clients.
     /// If specified, the thread will be resumed with the provided history
     /// instead of loaded from disk.
     #[experimental("thread/resume.history")]
@@ -2334,6 +2432,8 @@ pub struct ThreadResumeResponse {
     pub approvals_reviewer: ApprovalsReviewer,
     pub sandbox: SandboxPolicy,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub history_log_id: u64,
+    pub history_entry_count: u64,
 }
 
 #[derive(
@@ -2409,6 +2509,8 @@ pub struct ThreadForkResponse {
     pub approvals_reviewer: ApprovalsReviewer,
     pub sandbox: SandboxPolicy,
     pub reasoning_effort: Option<ReasoningEffort>,
+    pub history_log_id: u64,
+    pub history_entry_count: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -2518,6 +2620,55 @@ pub struct ThreadRegenerateNameResponse {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadModelSetParams {
+    pub thread_id: String,
+    pub model_provider: String,
+    pub model: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "super::serde_helpers::serialize_double_option",
+        deserialize_with = "super::serde_helpers::deserialize_double_option"
+    )]
+    #[ts(optional = nullable)]
+    pub reasoning_effort: Option<Option<ReasoningEffort>>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadModelSetResponse {
+    pub thread: Thread,
+    pub previous_model_provider: String,
+    pub previous_model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub previous_reasoning_effort: Option<ReasoningEffort>,
+    pub model_provider: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadModelChangedNotification {
+    pub thread_id: String,
+    pub thread: Thread,
+    pub previous_model_provider: String,
+    pub previous_model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub previous_reasoning_effort: Option<ReasoningEffort>,
+    pub model_provider: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadMetadataUpdateParams {
     pub thread_id: String,
     /// Patch the stored Git metadata for this thread.
@@ -2611,6 +2762,29 @@ pub struct ThreadShellCommandResponse {}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryAppendParams {
+    pub thread_id: String,
+    pub text: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryAppendResponse {}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryEntryGetParams {
+    pub thread_id: String,
+    pub offset: usize,
+    pub log_id: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryEntryGetResponse {}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadBackgroundTerminalsCleanParams {
     pub thread_id: String,
 }
@@ -2669,6 +2843,10 @@ pub struct ThreadListParams {
     /// matches this path or is under it are returned.
     #[ts(optional = nullable)]
     pub cwd: Option<String>,
+    /// Optional project scope filter. The gateway resolves this path to its trusted
+    /// project root, then returns threads whose cwd is inside that project.
+    #[ts(optional = nullable)]
+    pub cwd_scope: Option<String>,
     /// Optional indexed search over thread title, summary, cwd, metadata, and thread name.
     #[ts(optional = nullable)]
     pub search_term: Option<String>,
@@ -2709,6 +2887,44 @@ pub struct ThreadListResponse {
     /// Opaque cursor to pass to the next call to continue after the last item.
     /// if None, there are no more items to return.
     pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type")]
+pub enum ThreadLookupSelector {
+    #[serde(rename_all = "camelCase")]
+    #[ts(rename_all = "camelCase")]
+    IdOrName {
+        value: String,
+    },
+    Latest,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadLookupParams {
+    pub selector: ThreadLookupSelector,
+    /// When true, include turns and their items from rollout history.
+    #[serde(default)]
+    pub include_turns: bool,
+    /// Optional source filter; when set, only sessions from these source kinds
+    /// are considered. When omitted or empty, defaults to interactive sources.
+    #[ts(optional = nullable)]
+    pub source_kinds: Option<Vec<ThreadSourceKind>>,
+    /// Optional project scope for latest lookup. The gateway resolves both this
+    /// path and candidate thread cwds to their trusted project root before matching.
+    #[ts(optional = nullable)]
+    pub cwd_scope: Option<String>,
+    /// Optional archived filter; if false or null, only non-archived threads are considered.
+    #[ts(optional = nullable)]
+    pub archived: Option<bool>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadLookupResponse {
+    pub thread: Option<Thread>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema, TS)]
@@ -3339,6 +3555,35 @@ pub struct ThreadController {
     pub rank: Option<u8>,
 }
 
+impl ThreadController {
+    pub fn validate_control_access(&self, target_rank: Option<u8>) -> Result<(), String> {
+        match self.kind {
+            ThreadControllerKind::External => Ok(()),
+            ThreadControllerKind::Thread => {
+                let Some(rank) = self.rank else {
+                    return Err(
+                        "agent group thread controllers must include rank 0 or rank 1".to_string(),
+                    );
+                };
+                if rank > 1 {
+                    return Err(
+                        "only agent group rank 0 and rank 1 threads can control other threads"
+                            .to_string(),
+                    );
+                }
+                if let Some(target_rank) = target_rank
+                    && rank >= target_rank
+                {
+                    return Err(format!(
+                        "agent group rank {rank} cannot control rank {target_rank}; same-rank and higher-rank control is forbidden"
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadControlState {
@@ -3627,7 +3872,7 @@ impl From<CoreMemoryCitationEntry> for MemoryCitationEntry {
 #[error("{message}")]
 pub struct TurnError {
     pub message: String,
-    pub praxis_error_info: Option<CodexErrorInfo>,
+    pub praxis_error_info: Option<PraxisErrorInfo>,
     #[serde(default)]
     pub additional_details: Option<String>,
 }
@@ -3719,6 +3964,48 @@ pub struct ThreadRealtimeAppendAudioParams {
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadRealtimeAppendAudioResponse {}
+
+/// EXPERIMENTAL - raw audio input for standalone transcription.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioTranscribeAudio {
+    pub data: String,
+    pub media_type: String,
+}
+
+/// EXPERIMENTAL - transcription submit behavior requested by backend config.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum AudioTranscriptionSubmitMode {
+    #[default]
+    InsertIntoComposer,
+    AutoSubmit,
+}
+
+/// EXPERIMENTAL - transcribe audio without starting a realtime turn.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioTranscribeParams {
+    #[ts(optional = nullable)]
+    pub provider_id: Option<String>,
+    #[ts(optional = nullable)]
+    pub model: Option<String>,
+    pub audio: AudioTranscribeAudio,
+    #[ts(optional = nullable)]
+    pub language: Option<String>,
+}
+
+/// EXPERIMENTAL - response for standalone audio transcription.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioTranscribeResponse {
+    pub text: String,
+    pub provider_id: String,
+    #[ts(optional = nullable)]
+    pub model: Option<String>,
+    pub submit_mode: AudioTranscriptionSubmitMode,
+}
 
 /// EXPERIMENTAL - append text input to thread realtime.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
@@ -7414,7 +7701,7 @@ mod tests {
 
     #[test]
     fn praxis_error_info_serializes_http_status_code_in_camel_case() {
-        let value = CodexErrorInfo::ResponseTooManyFailedAttempts {
+        let value = PraxisErrorInfo::ResponseTooManyFailedAttempts {
             http_status_code: Some(401),
         };
 
@@ -7430,7 +7717,7 @@ mod tests {
 
     #[test]
     fn praxis_error_info_serializes_active_turn_not_steerable_turn_kind_in_camel_case() {
-        let value = CodexErrorInfo::ActiveTurnNotSteerable {
+        let value = PraxisErrorInfo::ActiveTurnNotSteerable {
             turn_kind: NonSteerableTurnKind::Review,
         };
 

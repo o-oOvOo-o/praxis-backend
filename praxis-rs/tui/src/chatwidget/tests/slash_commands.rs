@@ -676,7 +676,7 @@ async fn compact_queues_user_messages_snapshot() {
         id: "steer-rejected".into(),
         msg: EventMsg::Error(ErrorEvent {
             message: "cannot steer a compact turn".to_string(),
-            praxis_error_info: Some(CodexErrorInfo::ActiveTurnNotSteerable {
+            praxis_error_info: Some(PraxisErrorInfo::ActiveTurnNotSteerable {
                 turn_kind: NonSteerableTurnKind::Compact,
             }),
         }),

@@ -91,7 +91,7 @@ trust_level = "trusted"
         .arg("seed session for resume")
         .env("CODEX_HOME", praxis_home.path())
         .env("OPENAI_API_KEY", "dummy")
-        .env("CODEX_RS_SSE_FIXTURE", fixture_path)
+        .env("PRAXIS_RS_SSE_FIXTURE", fixture_path)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .output()
         .context("failed to execute praxis exec")?;

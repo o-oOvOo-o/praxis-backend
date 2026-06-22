@@ -109,7 +109,7 @@ const APP_GATEWAY_GRACEFUL_SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_mil
 const DEFAULT_ANALYTICS_ENABLED: bool = true;
 const OTEL_SERVICE_NAME: &str = "praxis-app-gateway-test-client";
 const TRACE_DISABLED_MESSAGE: &str =
-    "Not enabled - enable tracing in $CODEX_HOME/config.toml to get a trace URL!";
+    "Not enabled - enable tracing in $PRAXIS_HOME/config.toml to get a trace URL!";
 
 /// Minimal launcher that initializes the Praxis app-gateway and logs the handshake.
 #[derive(Parser)]
@@ -188,7 +188,7 @@ enum CliCommand {
         #[arg(long, default_value_t = 300)]
         hold_seconds: u64,
     },
-    /// Release a Codex harness control lock on a thread.
+    /// Release a Praxis harness control lock on a thread.
     ControlRelease {
         /// Existing thread id to unlock.
         thread_id: String,
@@ -1044,13 +1044,13 @@ async fn control_message_api(
             })?;
             println!("< thread/start response: {thread_response:?}");
 
-            let controller = codex_harness_controller();
+            let controller = praxis_harness_controller();
             let control_response = client.thread_control_acquire(ThreadControlAcquireParams {
                 thread_id: thread_response.thread.id.clone(),
                 controller: controller.clone(),
                 target_rank: Some(2),
                 reason: Some(
-                    "Codex is controlling this DeepSeek thread for Praxis Center observation"
+                    "Praxis R0 is controlling this DeepSeek thread for Center observation"
                         .to_string(),
                 ),
             })?;
@@ -1104,7 +1104,7 @@ async fn control_release(
 
         let response = client.thread_control_release(ThreadControlReleaseParams {
             thread_id,
-            controller: Some(codex_harness_controller()),
+            controller: Some(praxis_harness_controller()),
         })?;
         println!("< thread/control/release response: {response:?}");
 
@@ -1161,11 +1161,11 @@ async fn send_follow_up_api(
     .await
 }
 
-fn codex_harness_controller() -> ThreadController {
+fn praxis_harness_controller() -> ThreadController {
     ThreadController {
         kind: ThreadControllerKind::External,
-        id: "codex-harness".to_string(),
-        label: Some("Codex harness".to_string()),
+        id: "praxis-harness".to_string(),
+        label: Some("Praxis harness".to_string()),
         rank: Some(0),
     }
 }
@@ -1266,6 +1266,7 @@ async fn thread_list(endpoint: &Endpoint, config_overrides: &[String], limit: u3
             source_kinds: None,
             archived: None,
             cwd: None,
+            cwd_scope: None,
             search_term: None,
         })?;
         println!("< thread/list response: {response:?}");
@@ -1699,6 +1700,7 @@ impl PraxisClient {
                             .collect(),
                     ),
                 }),
+                host_extensions: Vec::new(),
             },
         };
 

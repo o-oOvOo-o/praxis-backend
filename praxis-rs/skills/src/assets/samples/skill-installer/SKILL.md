@@ -1,6 +1,6 @@
 ---
 name: skill-installer
-description: Install Codex skills into $CODEX_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos).
+description: Install Praxis skills into $PRAXIS_HOME/skills from a curated list or a GitHub repo path. Use when a user asks to list installable skills, install a curated skill, or install a skill from another repo (including private repos).
 metadata:
   short-description: Install curated skills from openai/skills or other repos
 ---
@@ -27,7 +27,7 @@ Skills from {repo}:
 Which ones would you like installed?
 """
 
-After installing a skill, tell the user: "Restart Codex to pick up new skills."
+After installing a skill, tell the user: "Restart Praxis to pick up new skills."
 
 ## Scripts
 
@@ -55,4 +55,4 @@ All of these scripts use network, so when running in the sandbox, request escala
 - Private GitHub repos can be accessed via existing git credentials or optional `GITHUB_TOKEN`/`GH_TOKEN` for download.
 - Git fallback tries HTTPS first, then SSH.
 - The skills at https://github.com/openai/skills/tree/main/skills/.system are preinstalled, so no need to help users install those. If they ask, just explain this. If they insist, you can download and overwrite.
-- Installed annotations come from `$CODEX_HOME/skills`.
+- Installed annotations come from `$PRAXIS_HOME/skills`, with legacy `$CODEX_HOME/skills` considered only by compatibility tooling.

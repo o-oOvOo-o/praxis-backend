@@ -88,6 +88,7 @@ async fn list_threads_with_sort(
             source_kinds,
             archived,
             cwd: None,
+            cwd_scope: None,
             search_term: None,
         })
         .await?;
@@ -502,6 +503,7 @@ async fn thread_list_respects_cwd_filter() -> Result<()> {
             source_kinds: None,
             archived: None,
             cwd: Some(target_cwd.to_string_lossy().into_owned()),
+            cwd_scope: None,
             search_term: None,
         })
         .await?;
@@ -583,6 +585,7 @@ sqlite = true
             source_kinds: None,
             archived: None,
             cwd: None,
+            cwd_scope: None,
             search_term: Some("needle".to_string()),
         })
         .await?;
@@ -1457,6 +1460,7 @@ async fn thread_list_invalid_cursor_returns_error() -> Result<()> {
             source_kinds: None,
             archived: None,
             cwd: None,
+            cwd_scope: None,
             search_term: None,
         })
         .await?;

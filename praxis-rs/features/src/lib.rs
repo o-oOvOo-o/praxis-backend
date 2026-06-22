@@ -4,7 +4,7 @@
 //! effective feature set from config-like inputs.
 
 use praxis_login::AuthManager;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_otel::SessionTelemetry;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::EventMsg;
@@ -90,7 +90,7 @@ pub enum Feature {
     /// Allow exec tools to request additional permissions while staying sandboxed.
     ExecPermissionApprovals,
     /// Enable Claude-style lifecycle hooks loaded from hooks.json files.
-    CodexHooks,
+    PraxisHooks,
     /// Expose the built-in request_permissions tool.
     RequestPermissionsTool,
     /// Allow the model to request web searches that fetch live content.
@@ -104,7 +104,7 @@ pub enum Feature {
     /// Experimental shell snapshotting.
     ShellSnapshot,
     /// Enable git commit attribution guidance via model instructions.
-    CodexGitCommit,
+    PraxisGitCommit,
     /// Enable runtime metrics snapshots via a manual reader.
     RuntimeMetrics,
     /// Enable thread lifecycle analytics emitted via the app-gateway analytics pipeline.
@@ -257,8 +257,8 @@ impl Features {
         self.apps_enabled_for_auth(auth.as_ref())
     }
 
-    pub fn apps_enabled_for_auth(&self, auth: Option<&CodexAuth>) -> bool {
-        self.enabled(Feature::Apps) && auth.is_some_and(CodexAuth::is_chatgpt_auth)
+    pub fn apps_enabled_for_auth(&self, auth: Option<&OpenAiAccountAuth>) -> bool {
+        self.enabled(Feature::Apps) && auth.is_some_and(OpenAiAccountAuth::is_chatgpt_auth)
     }
 
     pub fn use_legacy_landlock(&self) -> bool {
@@ -311,7 +311,7 @@ impl Features {
             }
             if self.enabled(feature.id) != feature.default_enabled {
                 otel.counter(
-                    "codex.feature.state",
+                    "praxis.feature.state",
                     /*inc*/ 1,
                     &[
                         ("feature", feature.key),
@@ -430,7 +430,7 @@ fn legacy_usage_notice(alias: &str, feature: Feature) -> (String, Option<String>
                 None
             } else {
                 Some(format!(
-                    "Enable it with `--enable {canonical}` or `[features].{canonical}` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details."
+                    "Enable it with `--enable {canonical}` or `[features].{canonical}` in config.toml."
                 ))
             };
             (summary, details)
@@ -538,7 +538,7 @@ pub const FEATURES: &[FeatureSpec] = &[
     },
     // Experimental program. Rendered in the `/experimental` menu for users.
     FeatureSpec {
-        id: Feature::CodexGitCommit,
+        id: Feature::PraxisGitCommit,
         key: "praxis_git_commit",
         stage: Stage::UnderDevelopment,
         default_enabled: false,
@@ -586,7 +586,7 @@ pub const FEATURES: &[FeatureSpec] = &[
         default_enabled: false,
     },
     FeatureSpec {
-        id: Feature::CodexHooks,
+        id: Feature::PraxisHooks,
         key: "praxis_hooks",
         stage: Stage::UnderDevelopment,
         default_enabled: false,

@@ -6,9 +6,10 @@ use praxis_protocol::models::ResponseItem;
 
 use crate::connectors;
 use crate::plugins::PluginCapabilitySummary;
-use crate::plugins::render_explicit_plugin_instructions;
-use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_mcp::mcp::PRAXIS_APPS_MCP_SERVER_NAME;
 use praxis_mcp::mcp_connection_manager::ToolInfo;
+
+use super::render::render_explicit_plugin_instructions;
 
 pub(crate) fn build_plugin_injections(
     mentioned_plugins: &[PluginCapabilitySummary],
@@ -27,11 +28,11 @@ pub(crate) fn build_plugin_injections(
             let available_mcp_servers = mcp_tools
                 .values()
                 .filter(|tool| {
-                    tool.server_name != CODEX_APPS_MCP_SERVER_NAME
-                        && tool
-                            .plugin_display_names
-                            .iter()
-                            .any(|plugin_name| plugin_name == &plugin.display_name)
+                    tool.server_name != PRAXIS_APPS_MCP_SERVER_NAME
+                        && includes_plugin_display_name(
+                            &tool.plugin_display_names,
+                            &plugin.display_name,
+                        )
                 })
                 .map(|tool| tool.server_name.clone())
                 .collect::<BTreeSet<String>>()
@@ -41,10 +42,10 @@ pub(crate) fn build_plugin_injections(
                 .iter()
                 .filter(|connector| {
                     connector.is_enabled
-                        && connector
-                            .plugin_display_names
-                            .iter()
-                            .any(|plugin_name| plugin_name == &plugin.display_name)
+                        && includes_plugin_display_name(
+                            &connector.plugin_display_names,
+                            &plugin.display_name,
+                        )
                 })
                 .map(connectors::connector_display_label)
                 .collect::<BTreeSet<String>>()
@@ -55,4 +56,13 @@ pub(crate) fn build_plugin_injections(
                 .map(ResponseItem::from)
         })
         .collect()
+}
+
+fn includes_plugin_display_name(
+    plugin_display_names: &[String],
+    plugin_display_name: &str,
+) -> bool {
+    plugin_display_names
+        .iter()
+        .any(|display_name| display_name == plugin_display_name)
 }

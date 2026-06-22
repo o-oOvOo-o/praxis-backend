@@ -34,14 +34,10 @@ impl PraxisMessageProcessor {
         };
 
         if let Some(thread_id) = params.thread_id.as_deref() {
-            let (_, thread) = match self.load_thread(thread_id).await {
-                Ok(result) => result,
-                Err(error) => {
-                    self.outgoing.send_error(request_id, error).await;
-                    return;
-                }
+            let Some((_, thread)) = self.ensure_thread_for_request(thread_id, &request_id).await
+            else {
+                return;
             };
-
             let _ = config
                 .features
                 .set_enabled(Feature::Apps, thread.enabled(Feature::Apps));
@@ -60,10 +56,9 @@ impl PraxisMessageProcessor {
             return;
         }
 
-        let request = request_id.clone();
         let outgoing = Arc::clone(&self.outgoing);
         tokio::spawn(async move {
-            Self::apps_list_task(outgoing, request, params, config).await;
+            Self::apps_list_task(outgoing, request_id, params, config).await;
         });
     }
 

@@ -188,6 +188,7 @@ impl ToolHandler for ListDirHandler {
     }
 }
 
+#[cfg(test)]
 async fn list_dir_slice(
     path: &Path,
     offset: usize,

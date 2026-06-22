@@ -1,4 +1,4 @@
-use super::emit_turn_network_proxy_metric;
+use super::metrics::emit_turn_network_proxy_metric;
 use opentelemetry::KeyValue;
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use opentelemetry_sdk::metrics::data::AggregatedMetrics;

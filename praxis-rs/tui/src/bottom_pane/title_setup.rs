@@ -7,6 +7,8 @@
 //! - Reorder items
 //! - Preview the rendered title
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -58,32 +60,13 @@ impl TerminalTitleItem {
             TerminalTitleItem::Spinner => {
                 "Animated task spinner (omitted while idle or when animations are off)"
             }
-            TerminalTitleItem::Status => {
-                "Compact session status text (Ready, Turn running, Reasoning)"
-            }
+            TerminalTitleItem::Status => "Compact runtime status text",
             TerminalTitleItem::Thread => "Current thread title (omitted until available)",
             TerminalTitleItem::GitBranch => "Current Git branch (omitted when unavailable)",
             TerminalTitleItem::Model => "Current model name",
             TerminalTitleItem::TaskProgress => {
                 "Latest task progress from update_plan (omitted until available)"
             }
-        }
-    }
-
-    /// Example text used when previewing the title picker.
-    ///
-    /// These are illustrative sample values, not live data from the current
-    /// session.
-    pub(crate) fn preview_example(self) -> &'static str {
-        match self {
-            TerminalTitleItem::AppName => "praxis",
-            TerminalTitleItem::Project => "my-project",
-            TerminalTitleItem::Spinner => "⠋",
-            TerminalTitleItem::Status => "Turn running",
-            TerminalTitleItem::Thread => "Investigate flaky test",
-            TerminalTitleItem::GitBranch => "feat/awesome-feature",
-            TerminalTitleItem::Model => "gpt-5.2-codex",
-            TerminalTitleItem::TaskProgress => "Tasks 2/5",
         }
     }
 
@@ -101,6 +84,47 @@ impl TerminalTitleItem {
                 " "
             }
             Some(_) => " · ",
+        }
+    }
+}
+
+/// Runtime values used to preview the current terminal-title selection.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TerminalTitlePreviewData {
+    values: HashMap<TerminalTitleItem, String>,
+}
+
+impl TerminalTitlePreviewData {
+    pub(crate) fn from_iter<I>(values: I) -> Self
+    where
+        I: IntoIterator<Item = (TerminalTitleItem, String)>,
+    {
+        Self {
+            values: values.into_iter().collect(),
+        }
+    }
+
+    fn line_for_items(&self, items: &[MultiSelectItem]) -> Option<Line<'static>> {
+        let items = parse_terminal_title_items(
+            items
+                .iter()
+                .filter(|item| item.enabled)
+                .map(|item| item.id.as_str()),
+        )?;
+        let mut preview = String::new();
+        let mut previous = None;
+        for item in items.iter().copied() {
+            let Some(value) = self.values.get(&item) else {
+                continue;
+            };
+            preview.push_str(item.separator_from_previous(previous));
+            preview.push_str(value);
+            previous = Some(item);
+        }
+        if preview.is_empty() {
+            None
+        } else {
+            Some(Line::from(preview))
         }
     }
 }
@@ -130,7 +154,11 @@ impl TerminalTitleSetupView {
     /// main TUI still warns about them when rendering the actual title, but the
     /// picker itself only exposes the selectable items it can meaningfully
     /// preview and persist.
-    pub(crate) fn new(title_items: Option<&[String]>, app_event_tx: AppEventSender) -> Self {
+    pub(crate) fn new(
+        title_items: Option<&[String]>,
+        preview_data: TerminalTitlePreviewData,
+        app_event_tx: AppEventSender,
+    ) -> Self {
         let selected_items = title_items
             .into_iter()
             .flatten()
@@ -163,26 +191,7 @@ impl TerminalTitleSetupView {
             ])
             .items(items)
             .enable_ordering()
-            .on_preview(|items| {
-                let items = parse_terminal_title_items(
-                    items
-                        .iter()
-                        .filter(|item| item.enabled)
-                        .map(|item| item.id.as_str()),
-                )?;
-                let mut preview = String::new();
-                let mut previous = None;
-                for item in items.iter().copied() {
-                    preview.push_str(item.separator_from_previous(previous));
-                    preview.push_str(item.preview_example());
-                    previous = Some(item);
-                }
-                if preview.is_empty() {
-                    None
-                } else {
-                    Some(Line::from(preview))
-                }
-            })
+            .on_preview(move |items| preview_data.line_for_items(items))
             .on_change(|items, app_event| {
                 let Some(items) = parse_terminal_title_items(
                     items
@@ -282,7 +291,19 @@ mod tests {
             "status".to_string(),
             "thread".to_string(),
         ];
-        let view = TerminalTitleSetupView::new(Some(&selected), tx);
+        let view = TerminalTitleSetupView::new(
+            Some(&selected),
+            TerminalTitlePreviewData::from_iter([
+                (TerminalTitleItem::Project, "my-project".to_string()),
+                (TerminalTitleItem::Spinner, "⠋".to_string()),
+                (TerminalTitleItem::Status, "Turn running".to_string()),
+                (
+                    TerminalTitleItem::Thread,
+                    "Investigate flaky test".to_string(),
+                ),
+            ]),
+            tx,
+        );
         assert_snapshot!(
             "terminal_title_setup_basic",
             render_lines(&view, /*width*/ 84)

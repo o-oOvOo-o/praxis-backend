@@ -10,7 +10,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 const AUDIT_TARGET: &str = "praxis_otel.network_proxy";
-const POLICY_DECISION_EVENT_NAME: &str = "codex.network_proxy.policy_decision";
+const POLICY_DECISION_EVENT_NAME: &str = "praxis.network_proxy.policy_decision";
 const POLICY_SCOPE_DOMAIN: &str = "domain";
 const POLICY_SCOPE_NON_DOMAIN: &str = "non_domain";
 const POLICY_DECISION_ALLOW: &str = "allow";
@@ -552,8 +552,8 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     const LEGACY_DOMAIN_POLICY_DECISION_EVENT_NAME: &str =
-        "codex.network_proxy.domain_policy_decision";
-    const LEGACY_BLOCK_DECISION_EVENT_NAME: &str = "codex.network_proxy.block_decision";
+        "praxis.network_proxy.domain_policy_decision";
+    const LEGACY_BLOCK_DECISION_EVENT_NAME: &str = "praxis.network_proxy.block_decision";
 
     #[derive(Clone)]
     struct StaticReloader {

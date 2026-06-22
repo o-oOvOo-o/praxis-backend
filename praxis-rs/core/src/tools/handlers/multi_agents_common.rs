@@ -216,17 +216,6 @@ pub(crate) fn build_agent_spawn_config(turn: &TurnContext) -> Result<Config, Fun
     build_agent_shared_config(turn)
 }
 
-pub(crate) fn build_agent_resume_config(
-    turn: &TurnContext,
-    child_depth: i32,
-) -> Result<Config, FunctionCallError> {
-    let mut config = build_agent_shared_config(turn)?;
-    apply_spawn_agent_overrides(&mut config, child_depth);
-    // For resume, keep base instructions sourced from rollout/session metadata.
-    config.base_instructions = None;
-    Ok(config)
-}
-
 fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallError> {
     let base_config = turn.config.clone();
     let mut config = (*base_config).clone();
@@ -250,10 +239,11 @@ pub(crate) fn apply_spawn_agent_runtime_overrides(
     config: &mut Config,
     turn: &TurnContext,
 ) -> Result<(), FunctionCallError> {
+    let permissions = turn.effective_permissions();
     config
         .permissions
         .approval_policy
-        .set(turn.approval_policy.value())
+        .set(permissions.approval_policy.value())
         .map_err(|err| {
             FunctionCallError::RespondToModel(format!("approval_policy is invalid: {err}"))
         })?;
@@ -263,12 +253,12 @@ pub(crate) fn apply_spawn_agent_runtime_overrides(
     config
         .permissions
         .sandbox_policy
-        .set(turn.sandbox_policy.get().clone())
+        .set(permissions.sandbox_policy.get().clone())
         .map_err(|err| {
             FunctionCallError::RespondToModel(format!("sandbox_policy is invalid: {err}"))
         })?;
-    config.permissions.file_system_sandbox_policy = turn.file_system_sandbox_policy.clone();
-    config.permissions.network_sandbox_policy = turn.network_sandbox_policy;
+    config.permissions.file_system_sandbox_policy = permissions.file_system_sandbox_policy;
+    config.permissions.network_sandbox_policy = permissions.network_sandbox_policy;
     Ok(())
 }
 

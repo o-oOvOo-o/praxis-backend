@@ -220,17 +220,18 @@ impl ToolRegistry {
         let otel = invocation.turn.session_telemetry.clone();
         let payload_for_response = invocation.payload.clone();
         let log_payload = payload_for_response.log_payload();
+        let permissions = invocation.turn.effective_permissions();
         let metric_tags = [
             (
                 "sandbox",
                 sandbox_tag(
-                    &invocation.turn.sandbox_policy,
-                    invocation.turn.windows_sandbox_level,
+                    &permissions.sandbox_policy,
+                    permissions.windows_sandbox_level,
                 ),
             ),
             (
                 "sandbox_policy",
-                sandbox_policy_tag(&invocation.turn.sandbox_policy),
+                sandbox_policy_tag(&permissions.sandbox_policy),
             ),
         ];
         let (mcp_server, mcp_server_origin) = match &invocation.payload {
@@ -589,6 +590,7 @@ async fn dispatch_after_tool_use_hook(
     let session = invocation.session.as_ref();
     let turn = invocation.turn.as_ref();
     let tool_input = HookToolInput::from(&invocation.payload);
+    let permissions = turn.effective_permissions();
     let hook_outcomes = session
         .hooks()
         .dispatch(HookPayload {
@@ -607,9 +609,12 @@ async fn dispatch_after_tool_use_hook(
                     success: dispatch.success,
                     duration_ms: u64::try_from(dispatch.duration.as_millis()).unwrap_or(u64::MAX),
                     mutating: dispatch.mutating,
-                    sandbox: sandbox_tag(&turn.sandbox_policy, turn.windows_sandbox_level)
-                        .to_string(),
-                    sandbox_policy: sandbox_policy_tag(&turn.sandbox_policy).to_string(),
+                    sandbox: sandbox_tag(
+                        &permissions.sandbox_policy,
+                        permissions.windows_sandbox_level,
+                    )
+                    .to_string(),
+                    sandbox_policy: sandbox_policy_tag(&permissions.sandbox_policy).to_string(),
                     output_preview: dispatch.output_preview.clone(),
                 },
             },

@@ -11,8 +11,8 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use praxis_features::Feature;
@@ -78,10 +78,10 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
 
     let server = start_mock_server().await;
 
-    let builder = test_codex();
+    let builder = test_praxis();
     #[allow(clippy::expect_used)]
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..
@@ -205,9 +205,9 @@ where
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex();
-    let TestCodex {
-        codex,
+    let mut builder = test_praxis();
+    let TestPraxis {
+        thread: codex,
         cwd,
         session_configured,
         ..

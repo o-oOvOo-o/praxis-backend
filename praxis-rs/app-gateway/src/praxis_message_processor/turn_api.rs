@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use praxis_app_gateway_protocol::ApprovalsReviewer;
 use praxis_app_gateway_protocol::AskForApproval;
-use praxis_app_gateway_protocol::CodexErrorInfo as AppGatewayCodexErrorInfo;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
+use praxis_app_gateway_protocol::PraxisErrorInfo as AppGatewayErrorInfo;
 use praxis_app_gateway_protocol::ReviewDelivery as ApiReviewDelivery;
 use praxis_app_gateway_protocol::ReviewStartParams;
 use praxis_app_gateway_protocol::ReviewStartResponse;
@@ -48,9 +48,8 @@ use praxis_protocol::user_input::UserInput as CoreInputItem;
 
 use super::EnsureConversationListenerResult;
 use super::PraxisMessageProcessor;
-use super::hydrate_rollout_summary_with_state_db;
-use super::read_summary_from_rollout;
-use super::summary_to_thread;
+use super::find_thread_rollout_path_or_no_rollout;
+use super::load_thread_summary_for_rollout;
 use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 use crate::error_code::INTERNAL_ERROR_CODE;
 use crate::error_code::INVALID_PARAMS_ERROR_CODE;
@@ -172,12 +171,11 @@ impl PraxisMessageProcessor {
             self.outgoing.send_error(request_id, error).await;
             return;
         }
-        let (_, thread) = match self.load_thread(&params.thread_id).await {
-            Ok(v) => v,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((_, thread)) = self
+            .ensure_thread_for_request(&params.thread_id, &request_id)
+            .await
+        else {
+            return;
         };
         if let Err(error) =
             Self::set_app_gateway_client_name(thread.as_ref(), app_gateway_client_name).await
@@ -295,12 +293,11 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: TurnSteerParams,
     ) {
-        let (_, thread) = match self.load_thread(&params.thread_id).await {
-            Ok(v) => v,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((_, thread)) = self
+            .ensure_thread_for_request(&params.thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         if params.expected_turn_id.is_empty() {
@@ -356,11 +353,9 @@ impl PraxisMessageProcessor {
                         };
                         let error = TurnError {
                             message: message.clone(),
-                            praxis_error_info: Some(
-                                AppGatewayCodexErrorInfo::ActiveTurnNotSteerable {
-                                    turn_kind: turn_kind.into(),
-                                },
-                            ),
+                            praxis_error_info: Some(AppGatewayErrorInfo::ActiveTurnNotSteerable {
+                                turn_kind: turn_kind.into(),
+                            }),
                             additional_details: None,
                         };
                         let data = match serde_json::to_value(error) {
@@ -396,13 +391,9 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         thread_id: &str,
     ) -> Option<(ThreadId, Arc<PraxisThread>)> {
-        let (thread_id, thread) = match self.load_thread(thread_id).await {
-            Ok(v) => v,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return None;
-            }
-        };
+        let (thread_id, thread) = self
+            .ensure_thread_for_request(thread_id, &request_id)
+            .await?;
 
         match self
             .ensure_conversation_listener(
@@ -658,20 +649,7 @@ impl PraxisMessageProcessor {
         let rollout_path = if let Some(path) = parent_thread.rollout_path() {
             path
         } else {
-            let directory = praxis_rollout::ThreadDirectory::open(&self.config).await;
-            directory
-                .find_rollout_path(parent_thread_id, None)
-                .await
-                .map_err(|err| JSONRPCErrorError {
-                    code: INTERNAL_ERROR_CODE,
-                    message: format!("failed to locate thread id {parent_thread_id}: {err}"),
-                    data: None,
-                })?
-                .ok_or_else(|| JSONRPCErrorError {
-                    code: INVALID_REQUEST_ERROR_CODE,
-                    message: format!("no rollout found for thread id {parent_thread_id}"),
-                    data: None,
-                })?
+            find_thread_rollout_path_or_no_rollout(&self.config, parent_thread_id).await?
         };
 
         let mut config = self.config.as_ref().clone();
@@ -714,15 +692,20 @@ impl PraxisMessageProcessor {
 
         let fallback_provider = self.config.model_provider_id.as_str();
         if let Some(rollout_path) = review_thread.rollout_path() {
-            match read_summary_from_rollout(rollout_path.as_path(), fallback_provider).await {
-                Ok(summary) => {
-                    let mut thread = summary_to_thread(
-                        hydrate_rollout_summary_with_state_db(&self.config, summary).await,
-                    );
+            match load_thread_summary_for_rollout(
+                &self.config,
+                thread_id,
+                rollout_path.as_path(),
+                fallback_provider,
+                None,
+            )
+            .await
+            {
+                Ok(mut thread) => {
                     self.thread_watch_manager
                         .upsert_thread_silently(thread.clone())
                         .await;
-                    self.apply_thread_runtime_state(
+                    self.project_thread_runtime_state(
                         &mut thread,
                         /*has_live_in_progress_turn*/ false,
                     )
@@ -778,12 +761,11 @@ impl PraxisMessageProcessor {
             target,
             delivery,
         } = params;
-        let (parent_thread_id, parent_thread) = match self.load_thread(&thread_id).await {
-            Ok(v) => v,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some((parent_thread_id, parent_thread)) = self
+            .ensure_thread_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
 
         let (review_request, display_text) = match Self::review_request_from_target(target) {
@@ -833,25 +815,22 @@ impl PraxisMessageProcessor {
         params: TurnInterruptParams,
     ) {
         let TurnInterruptParams { thread_id, turn_id } = params;
+        let Some((thread_uuid, thread)) = self
+            .ensure_thread_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
+        };
+
         self.outgoing
             .record_request_turn_id(&request_id, &turn_id)
             .await;
-
-        let (thread_uuid, thread) = match self.load_thread(&thread_id).await {
-            Ok(v) => v,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
-        };
-
-        let request = request_id.clone();
 
         // Record the pending interrupt so we can reply when TurnAborted arrives.
         {
             let thread_state = self.thread_state_manager.thread_state(thread_uuid).await;
             let mut thread_state = thread_state.lock().await;
-            thread_state.pending_interrupts.push(request);
+            thread_state.pending_interrupts.push(request_id.clone());
         }
 
         // Submit the interrupt; we'll respond upon TurnAborted.

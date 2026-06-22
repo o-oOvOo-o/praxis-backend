@@ -21,7 +21,7 @@ use crate::models_manager::manager::ModelsManager;
 use crate::thread_manager;
 use crate::unified_exec;
 use praxis_login::AuthManager;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 
 static TEST_MODEL_PRESETS: Lazy<Vec<ModelPreset>> = Lazy::new(|| {
     let mut presets = crate::models_manager::model_presets::bundled_model_presets();
@@ -37,23 +37,26 @@ pub fn set_deterministic_process_ids(enabled: bool) {
     unified_exec::set_deterministic_process_ids_for_tests(enabled);
 }
 
-pub fn auth_manager_from_auth(auth: CodexAuth) -> Arc<AuthManager> {
+pub fn auth_manager_from_auth(auth: OpenAiAccountAuth) -> Arc<AuthManager> {
     AuthManager::from_auth_for_testing(auth)
 }
 
-pub fn auth_manager_from_auth_with_home(auth: CodexAuth, praxis_home: PathBuf) -> Arc<AuthManager> {
+pub fn auth_manager_from_auth_with_home(
+    auth: OpenAiAccountAuth,
+    praxis_home: PathBuf,
+) -> Arc<AuthManager> {
     AuthManager::from_auth_for_testing_with_home(auth, praxis_home)
 }
 
 pub fn thread_manager_with_models_provider(
-    auth: CodexAuth,
+    auth: OpenAiAccountAuth,
     provider: ModelProviderInfo,
 ) -> ThreadManager {
     ThreadManager::with_models_provider_for_tests(auth, provider)
 }
 
 pub fn thread_manager_with_models_provider_and_home(
-    auth: CodexAuth,
+    auth: OpenAiAccountAuth,
     provider: ModelProviderInfo,
     praxis_home: PathBuf,
     environment_manager: Arc<EnvironmentManager>,

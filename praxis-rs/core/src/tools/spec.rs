@@ -5,7 +5,7 @@ use crate::tools::handlers::multi_agents_common::DEFAULT_WAIT_TIMEOUT_MS;
 use crate::tools::handlers::multi_agents_common::MAX_WAIT_TIMEOUT_MS;
 use crate::tools::handlers::multi_agents_common::MIN_WAIT_TIMEOUT_MS;
 use crate::tools::registry::ToolRegistryBuilder;
-use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_mcp::mcp::PRAXIS_APPS_MCP_SERVER_NAME;
 use praxis_mcp::mcp_connection_manager::ToolInfo;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_tools::DiscoverableTool;
@@ -97,7 +97,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
                 min_timeout_ms: MIN_WAIT_TIMEOUT_MS,
                 max_timeout_ms: MAX_WAIT_TIMEOUT_MS,
             },
-            praxis_apps_mcp_server_name: CODEX_APPS_MCP_SERVER_NAME,
+            praxis_apps_mcp_server_name: PRAXIS_APPS_MCP_SERVER_NAME,
         },
     );
     let shell_handler = Arc::new(ShellHandler);

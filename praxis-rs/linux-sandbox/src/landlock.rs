@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use praxis_core::error::CodexErr;
+use praxis_core::error::PraxisErr;
 use praxis_core::error::Result;
 use praxis_core::error::SandboxErr;
 use praxis_protocol::protocol::NetworkSandboxPolicy;
@@ -69,7 +69,7 @@ pub(crate) fn apply_sandbox_policy_to_current_thread(
 
     if apply_landlock_fs && !sandbox_policy.has_full_disk_write_access() {
         if !sandbox_policy.has_full_disk_read_access() {
-            return Err(CodexErr::UnsupportedOperation(
+            return Err(PraxisErr::UnsupportedOperation(
                 "Restricted read-only access is not supported by the legacy Linux Landlock filesystem backend."
                     .to_string(),
             ));
@@ -129,7 +129,7 @@ fn set_no_new_privs() -> Result<()> {
 /// `/dev/null` and the provided list of `writable_roots`.
 ///
 /// # Errors
-/// Returns [`CodexErr::Sandbox`] variants when the ruleset fails to apply.
+/// Returns [`PraxisErr::Sandbox`] variants when the ruleset fails to apply.
 ///
 /// Note: this is currently unused because filesystem sandboxing is performed
 /// via bubblewrap. It is kept for reference and potential fallback use.
@@ -155,7 +155,7 @@ fn install_filesystem_landlock_rules_on_current_thread(
     let status = ruleset.restrict_self()?;
 
     if status.ruleset == landlock::RulesetStatus::NotEnforced {
-        return Err(CodexErr::Sandbox(SandboxErr::LandlockRestrict));
+        return Err(PraxisErr::Sandbox(SandboxErr::LandlockRestrict));
     }
 
     Ok(())

@@ -43,7 +43,7 @@ use praxis_windows_sandbox::sandbox_secrets_dir;
 use praxis_windows_sandbox::string_from_sid_bytes;
 use praxis_windows_sandbox::to_wide;
 
-pub const SANDBOX_USERS_GROUP: &str = "CodexSandboxUsers";
+pub const SANDBOX_USERS_GROUP: &str = "PraxisSandboxUsers";
 const SANDBOX_USERS_GROUP_COMMENT: &str = "Praxis sandbox internal group (managed)";
 const SID_ADMINISTRATORS: &str = "S-1-5-32-544";
 const SID_USERS: &str = "S-1-5-32-545";

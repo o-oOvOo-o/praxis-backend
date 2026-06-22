@@ -13,12 +13,13 @@ const SYSTEM_SKILLS_DIR: Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/sr
 
 const SYSTEM_SKILLS_DIR_NAME: &str = ".system";
 const SKILLS_DIR_NAME: &str = "skills";
-const SYSTEM_SKILLS_MARKER_FILENAME: &str = ".codex-system-skills.marker";
+const SYSTEM_SKILLS_MARKER_FILENAME: &str = ".praxis-system-skills.marker";
+const LEGACY_SYSTEM_SKILLS_MARKER_FILENAME: &str = ".codex-system-skills.marker";
 const SYSTEM_SKILLS_MARKER_SALT: &str = "v1";
 
 /// Returns the on-disk cache location for embedded system skills.
 ///
-/// This is typically located at `CODEX_HOME/skills/.system`.
+/// This is typically located at `PRAXIS_HOME/skills/.system`.
 pub fn system_cache_root_dir(praxis_home: &Path) -> PathBuf {
     AbsolutePathBuf::try_from(praxis_home)
         .and_then(|praxis_home| system_cache_root_dir_abs(&praxis_home))
@@ -36,7 +37,7 @@ fn system_cache_root_dir_abs(praxis_home: &AbsolutePathBuf) -> std::io::Result<A
         .join(SYSTEM_SKILLS_DIR_NAME)
 }
 
-/// Installs embedded system skills into `CODEX_HOME/skills/.system`.
+/// Installs embedded system skills into `PRAXIS_HOME/skills/.system`.
 ///
 /// Clears any existing system skills directory first and then writes the embedded
 /// skills directory into place.
@@ -46,7 +47,7 @@ fn system_cache_root_dir_abs(praxis_home: &AbsolutePathBuf) -> std::io::Result<A
 /// install is skipped.
 pub fn install_system_skills(praxis_home: &Path) -> Result<(), SystemSkillsError> {
     let praxis_home = AbsolutePathBuf::try_from(praxis_home)
-        .map_err(|source| SystemSkillsError::io("normalize codex home dir", source))?;
+        .map_err(|source| SystemSkillsError::io("normalize praxis home dir", source))?;
     let skills_root_dir = praxis_home
         .join(SKILLS_DIR_NAME)
         .map_err(|source| SystemSkillsError::io("resolve skills root dir", source))?;
@@ -59,11 +60,20 @@ pub fn install_system_skills(praxis_home: &Path) -> Result<(), SystemSkillsError
     let marker_path = dest_system
         .join(SYSTEM_SKILLS_MARKER_FILENAME)
         .map_err(|source| SystemSkillsError::io("resolve system skills marker path", source))?;
+    let legacy_marker_path = dest_system
+        .join(LEGACY_SYSTEM_SKILLS_MARKER_FILENAME)
+        .map_err(|source| {
+            SystemSkillsError::io("resolve legacy system skills marker path", source)
+        })?;
     let expected_fingerprint = embedded_system_skills_fingerprint();
-    if dest_system.as_path().is_dir()
-        && read_marker(&marker_path).is_ok_and(|marker| marker == expected_fingerprint)
-    {
-        return Ok(());
+    if dest_system.as_path().is_dir() {
+        if marker_matches(&marker_path, &expected_fingerprint) {
+            return Ok(());
+        }
+        if marker_matches(&legacy_marker_path, &expected_fingerprint) {
+            write_marker(&marker_path, &expected_fingerprint)?;
+            return Ok(());
+        }
     }
 
     if dest_system.as_path().exists() {
@@ -72,9 +82,17 @@ pub fn install_system_skills(praxis_home: &Path) -> Result<(), SystemSkillsError
     }
 
     write_embedded_dir(&SYSTEM_SKILLS_DIR, &dest_system)?;
-    fs::write(marker_path.as_path(), format!("{expected_fingerprint}\n"))
-        .map_err(|source| SystemSkillsError::io("write system skills marker", source))?;
+    write_marker(&marker_path, &expected_fingerprint)?;
     Ok(())
+}
+
+fn marker_matches(path: &AbsolutePathBuf, expected_fingerprint: &str) -> bool {
+    read_marker(path).is_ok_and(|marker| marker == expected_fingerprint)
+}
+
+fn write_marker(path: &AbsolutePathBuf, fingerprint: &str) -> Result<(), SystemSkillsError> {
+    fs::write(path.as_path(), format!("{fingerprint}\n"))
+        .map_err(|source| SystemSkillsError::io("write system skills marker", source))
 }
 
 fn read_marker(path: &AbsolutePathBuf) -> Result<String, SystemSkillsError> {

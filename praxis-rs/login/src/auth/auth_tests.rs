@@ -80,7 +80,7 @@ fn login_with_api_key_overwrites_existing_auth_json() {
 #[test]
 fn missing_auth_json_returns_none() {
     let dir = tempdir().unwrap();
-    let auth = CodexAuth::from_auth_storage(dir.path(), AuthCredentialsStoreMode::File)
+    let auth = OpenAiAccountAuth::from_auth_storage(dir.path(), AuthCredentialsStoreMode::File)
         .expect("call should succeed");
     assert_eq!(auth, None);
 }
@@ -236,7 +236,7 @@ fn refresh_failure_is_scoped_to_the_matching_auth_snapshot() {
         .expect("tokens should exist");
     updated_tokens.access_token = "new-access-token".to_string();
     updated_tokens.refresh_token = "new-refresh-token".to_string();
-    let updated_auth = CodexAuth::from_auth_dot_json(
+    let updated_auth = OpenAiAccountAuth::from_auth_dot_json(
         praxis_home.path(),
         updated_auth_dot_json,
         AuthCredentialsStoreMode::File,

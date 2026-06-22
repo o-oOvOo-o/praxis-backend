@@ -1,3 +1,4 @@
+use super::thread_store_api::ThreadStore;
 use super::*;
 
 impl PraxisMessageProcessor {
@@ -12,14 +13,13 @@ impl PraxisMessageProcessor {
             target_rank,
             reason,
         } = params;
-        let thread_uuid = match self.parse_thread_id(&thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some(thread_uuid) = self
+            .ensure_thread_id_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
-        if let Err(message) = validate_thread_control_access(&controller, target_rank) {
+        if let Err(message) = controller.validate_control_access(target_rank) {
             self.send_invalid_request_error(request_id, message).await;
             return;
         }
@@ -47,17 +47,17 @@ impl PraxisMessageProcessor {
             thread_id,
             controller,
         } = params;
-        let thread_uuid = match self.parse_thread_id(&thread_id) {
-            Ok(id) => id,
-            Err(error) => {
-                self.outgoing.send_error(request_id, error).await;
-                return;
-            }
+        let Some(thread_uuid) = self
+            .ensure_thread_id_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
         };
         let current = self
             .thread_watch_manager
-            .loaded_control_state_for_thread(&thread_id)
-            .await;
+            .loaded_runtime_state_for_thread(&thread_id)
+            .await
+            .control_state;
         if let (Some(expected), Some(current)) = (controller.as_ref(), current.as_ref())
             && &current.controller != expected
         {
@@ -83,65 +83,13 @@ impl PraxisMessageProcessor {
             .await;
     }
 
-    pub(crate) async fn apply_thread_runtime_state(
-        &self,
-        thread: &mut Thread,
-        has_live_in_progress_turn: bool,
-    ) {
-        let loaded_status = self
-            .thread_watch_manager
-            .loaded_status_for_thread(&thread.id)
-            .await;
-        let control_state = self
-            .thread_watch_manager
-            .loaded_control_state_for_thread(&thread.id)
-            .await;
-        thread.status = resolve_thread_status(
-            loaded_status,
-            has_live_in_progress_turn,
-            control_state.as_ref(),
-        );
-        thread.control_state = control_state;
-    }
-
     async fn thread_known(&self, thread_id: ThreadId) -> bool {
         if self.thread_manager.get_thread(thread_id).await.is_ok() {
             return true;
         }
-        let directory = praxis_rollout::ThreadDirectory::open(&self.config).await;
-        directory
+        ThreadStore::new(&self.config)
             .thread_exists(thread_id, None)
             .await
             .unwrap_or(false)
-    }
-}
-
-fn validate_thread_control_access(
-    controller: &ThreadController,
-    target_rank: Option<u8>,
-) -> std::result::Result<(), String> {
-    match controller.kind {
-        ThreadControllerKind::External => Ok(()),
-        ThreadControllerKind::Thread => {
-            let Some(rank) = controller.rank else {
-                return Err(
-                    "agent group thread controllers must include rank 0 or rank 1".to_string(),
-                );
-            };
-            if rank > 1 {
-                return Err(
-                    "only agent group rank 0 and rank 1 threads can control other threads"
-                        .to_string(),
-                );
-            }
-            if let Some(target_rank) = target_rank
-                && rank >= target_rank
-            {
-                return Err(format!(
-                    "agent group rank {rank} cannot control rank {target_rank}; same-rank and higher-rank control is forbidden"
-                ));
-            }
-            Ok(())
-        }
     }
 }

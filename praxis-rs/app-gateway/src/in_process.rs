@@ -113,6 +113,7 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
             | ServerNotification::ThreadControlChanged(_)
             | ServerNotification::ThreadGoalUpdated(_)
             | ServerNotification::ThreadGoalCleared(_)
+            | ServerNotification::ThreadModelChanged(_)
             | ServerNotification::AgentMessageDelta(_)
             | ServerNotification::PlanDelta(_)
             | ServerNotification::ReasoningSummaryTextDelta(_)
@@ -398,9 +399,8 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
     let transport_shutdown_token = CancellationToken::new();
     let mut transport_accept_handles = Vec::new();
     let control_listen = args.control_listen;
-    let external_transport = control_listen.map(|bind_address| AppGatewayTransport::WebSocket {
-        bind_address,
-    });
+    let external_transport =
+        control_listen.map(|bind_address| AppGatewayTransport::WebSocket { bind_address });
     if let Some(bind_address) = control_listen {
         let accept_handle = start_websocket_acceptor(
             bind_address,
@@ -652,7 +652,15 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                                                     connection_id,
                                                 )
                                                 .await;
-                                            processor.connection_initialized(connection_id).await;
+                                            processor
+                                                .connection_initialized(
+                                                    connection_id,
+                                                    connection_state
+                                                        .session
+                                                        .host_extensions
+                                                        .clone(),
+                                                )
+                                                .await;
                                             connection_state
                                                 .outbound_initialized
                                                 .store(true, Ordering::Release);
@@ -1034,6 +1042,7 @@ mod tests {
                     version: "0.0.0".to_string(),
                 },
                 capabilities: None,
+                host_extensions: Vec::new(),
             },
             channel_capacity,
             control_listen: None,

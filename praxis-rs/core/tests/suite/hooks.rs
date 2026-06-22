@@ -15,7 +15,7 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_features::Feature;
 use praxis_protocol::items::parse_hook_prompt_fragment;
@@ -485,7 +485,7 @@ async fn stop_hook_can_block_multiple_times_in_same_turn() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) = write_stop_hook(
                 home,
@@ -497,7 +497,7 @@ async fn stop_hook_can_block_multiple_times_in_same_turn() -> Result<()> {
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -557,7 +557,7 @@ async fn stop_hook_can_block_multiple_times_in_same_turn() -> Result<()> {
         vec![false, true, true],
     );
 
-    let rollout_path = test.codex.rollout_path().expect("rollout path");
+    let rollout_path = test.thread.rollout_path().expect("rollout path");
     let rollout_text = fs::read_to_string(&rollout_path)?;
     let hook_prompt_texts = rollout_hook_prompt_texts(&rollout_text)?;
     assert!(
@@ -587,7 +587,7 @@ async fn session_start_hook_sees_materialized_transcript_path() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) = write_session_start_hook_recording_transcript(home) {
                 panic!("failed to write session start hook test fixture: {error}");
@@ -596,7 +596,7 @@ async fn session_start_hook_sees_materialized_transcript_path() -> Result<()> {
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -639,7 +639,7 @@ async fn resumed_thread_keeps_stop_continuation_prompt_in_history() -> Result<()
     )
     .await;
 
-    let mut initial_builder = test_codex()
+    let mut initial_builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) = write_stop_hook(home, &[FIRST_CONTINUATION_PROMPT]) {
                 panic!("failed to write stop hook test fixture: {error}");
@@ -648,7 +648,7 @@ async fn resumed_thread_keeps_stop_continuation_prompt_in_history() -> Result<()
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let initial = initial_builder.build(&server).await?;
@@ -673,10 +673,10 @@ async fn resumed_thread_keeps_stop_continuation_prompt_in_history() -> Result<()
     )
     .await;
 
-    let mut resume_builder = test_codex().with_config(|config| {
+    let mut resume_builder = test_praxis().with_config(|config| {
         config
             .features
-            .enable(Feature::CodexHooks)
+            .enable(Feature::PraxisHooks)
             .expect("test config should allow feature update");
     });
     let resumed = resume_builder.resume(&server, home, rollout_path).await?;
@@ -715,7 +715,7 @@ async fn multiple_blocking_stop_hooks_persist_multiple_hook_prompt_fragments() -
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) = write_parallel_stop_hooks(
                 home,
@@ -727,7 +727,7 @@ async fn multiple_blocking_stop_hooks_persist_multiple_hook_prompt_fragments() -
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -745,7 +745,7 @@ async fn multiple_blocking_stop_hooks_persist_multiple_hook_prompt_fragments() -
         "second request should receive one user hook prompt message with both fragments",
     );
 
-    let rollout_path = test.codex.rollout_path().expect("rollout path");
+    let rollout_path = test.thread.rollout_path().expect("rollout path");
     let rollout_text = fs::read_to_string(&rollout_path)?;
     assert_eq!(
         rollout_hook_prompt_texts(&rollout_text)?,
@@ -774,7 +774,7 @@ async fn blocked_user_prompt_submit_persists_additional_context_for_next_turn() 
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_user_prompt_submit_hook(home, "blocked first prompt", BLOCKED_PROMPT_CONTEXT)
@@ -785,7 +785,7 @@ async fn blocked_user_prompt_submit_persists_additional_context_for_next_turn() 
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -880,7 +880,7 @@ async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Resu
     let (server, _completions) =
         start_streaming_sse_server(vec![first_chunks, second_chunks]).await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.1")
         .with_pre_build_hook(|home| {
             if let Err(error) =
@@ -892,12 +892,12 @@ async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Resu
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build_with_streaming_server(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "initial prompt".to_string(),
@@ -907,13 +907,13 @@ async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Resu
         })
         .await?;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::AgentMessageContentDelta(_))
     })
     .await;
 
     for text in ["accepted queued prompt", "blocked queued prompt"] {
-        test.codex
+        test.thread
             .submit(Op::UserInput {
                 items: vec![UserInput::Text {
                     text: text.to_string(),
@@ -1033,7 +1033,7 @@ async fn pre_tool_use_blocks_shell_command_before_execution() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_pre_tool_use_hook(home, Some("^Bash$"), "json_deny", "blocked by pre hook")
@@ -1044,7 +1044,7 @@ async fn pre_tool_use_blocks_shell_command_before_execution() -> Result<()> {
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -1138,7 +1138,7 @@ async fn pre_tool_use_blocks_local_shell_before_execution() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_pre_tool_use_hook(home, Some("^Bash$"), "json_deny", "blocked local shell")
@@ -1149,7 +1149,7 @@ async fn pre_tool_use_blocks_local_shell_before_execution() -> Result<()> {
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -1229,7 +1229,7 @@ async fn pre_tool_use_blocks_exec_command_before_execution() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_pre_tool_use_hook(home, Some("^Bash$"), "exit_2", "blocked exec command")
@@ -1241,7 +1241,7 @@ async fn pre_tool_use_blocks_exec_command_before_execution() -> Result<()> {
             config.use_experimental_unified_exec_tool = true;
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
             config
                 .features
@@ -1319,7 +1319,7 @@ async fn pre_tool_use_does_not_fire_for_non_shell_tools() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_pre_tool_use_hook(home, /*matcher*/ None, "json_deny", "should not fire")
@@ -1330,7 +1330,7 @@ async fn pre_tool_use_does_not_fire_for_non_shell_tools() -> Result<()> {
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -1388,7 +1388,7 @@ async fn post_tool_use_records_additional_context_for_shell_command() -> Result<
     .await;
 
     let post_context = "Remember the bash post-tool note.";
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_post_tool_use_hook(home, Some("^Bash$"), "context", post_context)
@@ -1399,7 +1399,7 @@ async fn post_tool_use_records_additional_context_for_shell_command() -> Result<
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -1485,7 +1485,7 @@ async fn post_tool_use_block_decision_replaces_shell_command_output_with_reason(
     .await;
 
     let reason = "bash output looked sketchy";
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_post_tool_use_hook(home, Some("^Bash$"), "decision_block", reason)
@@ -1496,7 +1496,7 @@ async fn post_tool_use_block_decision_replaces_shell_command_output_with_reason(
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -1554,7 +1554,7 @@ async fn post_tool_use_continue_false_replaces_shell_command_output_with_stop_re
     .await;
 
     let stop_reason = "Execution halted by post-tool hook";
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_post_tool_use_hook(home, Some("^Bash$"), "continue_false", stop_reason)
@@ -1565,7 +1565,7 @@ async fn post_tool_use_continue_false_replaces_shell_command_output_with_stop_re
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -1625,7 +1625,7 @@ async fn post_tool_use_records_additional_context_for_local_shell() -> Result<()
     .await;
 
     let post_context = "Remember the local shell post-tool note.";
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_post_tool_use_hook(home, Some("^Bash$"), "context", post_context)
@@ -1636,7 +1636,7 @@ async fn post_tool_use_records_additional_context_for_local_shell() -> Result<()
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
@@ -1696,7 +1696,7 @@ async fn post_tool_use_exit_two_replaces_one_shot_exec_command_output_with_feedb
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) =
                 write_post_tool_use_hook(home, Some("^Bash$"), "exit_2", "blocked by post hook")
@@ -1708,7 +1708,7 @@ async fn post_tool_use_exit_two_replaces_one_shot_exec_command_output_with_feedb
             config.use_experimental_unified_exec_tool = true;
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
             config
                 .features
@@ -1774,7 +1774,7 @@ async fn post_tool_use_does_not_fire_for_non_shell_tools() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_pre_build_hook(|home| {
             if let Err(error) = write_post_tool_use_hook(
                 home,
@@ -1788,7 +1788,7 @@ async fn post_tool_use_does_not_fire_for_non_shell_tools() -> Result<()> {
         .with_config(|config| {
             config
                 .features
-                .enable(Feature::CodexHooks)
+                .enable(Feature::PraxisHooks)
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;

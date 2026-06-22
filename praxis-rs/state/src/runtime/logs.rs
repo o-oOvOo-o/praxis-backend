@@ -601,7 +601,7 @@ mod tests {
         let praxis_home = unique_temp_dir();
         tokio::fs::create_dir_all(&praxis_home)
             .await
-            .expect("create codex home");
+            .expect("create Praxis home");
         let logs_path = logs_db_path(praxis_home.as_path());
         let old_logs_migrator = Migrator {
             migrations: Cow::Owned(vec![LOGS_MIGRATOR.migrations[0].clone()]),
@@ -697,7 +697,7 @@ mod tests {
         let praxis_home = unique_temp_dir();
         tokio::fs::create_dir_all(&praxis_home)
             .await
-            .expect("create codex home");
+            .expect("create Praxis home");
         let legacy_logs_path = praxis_home.join("logs_1.sqlite");
         let pool = SqlitePool::connect_with(
             SqliteConnectOptions::new()

@@ -10,9 +10,9 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_windows;
-use core_test_support::test_codex::TestCodexBuilder;
-use core_test_support::test_codex::TestCodexHarness;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxisBuilder;
+use core_test_support::test_praxis::TestPraxisHarness;
+use core_test_support::test_praxis::test_praxis;
 use serde_json::json;
 use test_case::test_case;
 
@@ -59,16 +59,16 @@ fn shell_responses(call_id: &str, command: &str, login: Option<bool>) -> Vec<Str
 }
 
 async fn shell_command_harness_with(
-    configure: impl FnOnce(TestCodexBuilder) -> TestCodexBuilder,
-) -> Result<TestCodexHarness> {
-    let builder = configure(test_codex()).with_config(|config| {
+    configure: impl FnOnce(TestPraxisBuilder) -> TestPraxisBuilder,
+) -> Result<TestPraxisHarness> {
+    let builder = configure(test_praxis()).with_config(|config| {
         config.include_apply_patch_tool = true;
     });
-    TestCodexHarness::with_builder(builder).await
+    TestPraxisHarness::with_builder(builder).await
 }
 
 async fn mount_shell_responses(
-    harness: &TestCodexHarness,
+    harness: &TestPraxisHarness,
     call_id: &str,
     command: &str,
     login: Option<bool>,
@@ -77,7 +77,7 @@ async fn mount_shell_responses(
 }
 
 async fn mount_shell_responses_with_timeout(
-    harness: &TestCodexHarness,
+    harness: &TestPraxisHarness,
     call_id: &str,
     command: &str,
     login: Option<bool>,

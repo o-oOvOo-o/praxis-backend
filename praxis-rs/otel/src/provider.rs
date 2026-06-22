@@ -3,6 +3,12 @@ use crate::config::OtelHttpProtocol;
 use crate::config::OtelSettings;
 use crate::metrics::MetricsClient;
 use crate::metrics::MetricsConfig;
+#[cfg(test)]
+use crate::targets::OTEL_LOG_ONLY_TARGET;
+#[cfg(test)]
+use crate::targets::OTEL_TARGET_PREFIX;
+#[cfg(test)]
+use crate::targets::OTEL_TRACE_SAFE_TARGET;
 use crate::targets::is_log_export_target;
 use crate::targets::is_trace_safe_target;
 use gethostname::gethostname;
@@ -437,18 +443,22 @@ mod tests {
 
     #[test]
     fn log_export_target_excludes_trace_safe_events() {
-        assert!(is_log_export_target("praxis_otel.log_only"));
-        assert!(is_log_export_target("praxis_otel.network_proxy"));
-        assert!(!is_log_export_target("praxis_otel.trace_safe"));
-        assert!(!is_log_export_target("praxis_otel.trace_safe.debug"));
+        let network_proxy_target = format!("{OTEL_TARGET_PREFIX}.network_proxy");
+        let trace_safe_debug_target = format!("{OTEL_TRACE_SAFE_TARGET}.debug");
+        assert!(is_log_export_target(OTEL_LOG_ONLY_TARGET));
+        assert!(is_log_export_target(network_proxy_target.as_str()));
+        assert!(!is_log_export_target(OTEL_TRACE_SAFE_TARGET));
+        assert!(!is_log_export_target(trace_safe_debug_target.as_str()));
     }
 
     #[test]
     fn trace_export_target_only_includes_trace_safe_prefix() {
-        assert!(is_trace_safe_target("praxis_otel.trace_safe"));
-        assert!(is_trace_safe_target("praxis_otel.trace_safe.summary"));
-        assert!(!is_trace_safe_target("praxis_otel.log_only"));
-        assert!(!is_trace_safe_target("praxis_otel.network_proxy"));
+        let trace_safe_summary_target = format!("{OTEL_TRACE_SAFE_TARGET}.summary");
+        let network_proxy_target = format!("{OTEL_TARGET_PREFIX}.network_proxy");
+        assert!(is_trace_safe_target(OTEL_TRACE_SAFE_TARGET));
+        assert!(is_trace_safe_target(trace_safe_summary_target.as_str()));
+        assert!(!is_trace_safe_target(OTEL_LOG_ONLY_TARGET));
+        assert!(!is_trace_safe_target(network_proxy_target.as_str()));
     }
 
     fn test_otel_settings() -> OtelSettings {

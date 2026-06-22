@@ -16,15 +16,15 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_sandbox;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use praxis_core::ModelProviderInfo;
 use praxis_core::built_in_model_providers;
 use praxis_core::models_manager::manager::ModelsManager;
 use praxis_core::models_manager::manager::RefreshStrategy;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::config_types::ReasoningSummary;
 use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::ModelInfo;
@@ -92,7 +92,7 @@ async fn remote_models_get_model_info_uses_longest_matching_prefix() -> Result<(
     let praxis_home = TempDir::new()?;
     let config = load_default_config_for_test(&praxis_home).await;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
     let provider = ModelProviderInfo {
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
@@ -154,10 +154,13 @@ async fn remote_models_long_model_slug_is_sent_with_high_reasoning() -> Result<(
     )
     .await;
 
-    let TestCodex {
-        codex, cwd, config, ..
-    } = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let TestPraxis {
+        thread: codex,
+        cwd,
+        config,
+        ..
+    } = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some(requested_model.to_string());
         })
@@ -216,9 +219,12 @@ async fn namespaced_model_slug_uses_catalog_metadata_without_fallback_warning() 
     )
     .await;
 
-    let TestCodex {
-        codex, cwd, config, ..
-    } = test_codex()
+    let TestPraxis {
+        thread: codex,
+        cwd,
+        config,
+        ..
+    } = test_praxis()
         .with_model(requested_model)
         .build(&server)
         .await?;
@@ -321,13 +327,13 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some("gpt-5.1".to_string());
         });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         config,
         thread_manager,
@@ -446,8 +452,8 @@ async fn remote_models_truncation_policy_without_override_preserves_remote() -> 
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some("gpt-5.1".to_string());
         });
@@ -490,8 +496,8 @@ async fn remote_models_truncation_policy_with_tool_output_override() -> Result<(
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some("gpt-5.1".to_string());
             config.tool_output_token_limit = Some(50);
@@ -575,13 +581,13 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(|config| {
             config.model = Some("gpt-5.1".to_string());
         });
-    let TestCodex {
-        codex,
+    let TestPraxis {
+        thread: codex,
         cwd,
         config,
         thread_manager,
@@ -656,7 +662,7 @@ async fn remote_models_do_not_append_removed_builtin_presets() -> Result<()> {
 
     let praxis_home = TempDir::new()?;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
     let provider = ModelProviderInfo {
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
@@ -717,7 +723,7 @@ async fn remote_models_merge_adds_new_high_priority_first() -> Result<()> {
 
     let praxis_home = TempDir::new()?;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
     let provider = ModelProviderInfo {
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
@@ -764,7 +770,7 @@ async fn remote_models_merge_replaces_overlapping_model() -> Result<()> {
 
     let praxis_home = TempDir::new()?;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
     let provider = ModelProviderInfo {
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
@@ -808,7 +814,7 @@ async fn remote_models_merge_preserves_bundled_models_on_empty_response() -> Res
 
     let praxis_home = TempDir::new()?;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
     let provider = ModelProviderInfo {
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
@@ -850,7 +856,7 @@ async fn remote_models_request_times_out_after_5s() -> Result<()> {
 
     let praxis_home = TempDir::new()?;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
     let provider = ModelProviderInfo {
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()
@@ -920,7 +926,7 @@ async fn remote_models_hide_picker_only_models() -> Result<()> {
 
     let praxis_home = TempDir::new()?;
 
-    let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
+    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
     let provider = ModelProviderInfo {
         base_url: Some(format!("{}/v1", server.uri())),
         ..built_in_model_providers(/* openai_base_url */ /*openai_base_url*/ None)["openai"].clone()

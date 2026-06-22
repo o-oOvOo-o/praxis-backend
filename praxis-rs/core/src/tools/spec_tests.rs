@@ -8,7 +8,7 @@ use crate::tools::registry::tool_handler_key;
 use crate::tools::router::ToolRouterParams;
 use praxis_features::Feature;
 use praxis_features::Features;
-use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_mcp::mcp::PRAXIS_APPS_MCP_SERVER_NAME;
 use praxis_protocol::apps::AppInfo;
 use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
@@ -757,7 +757,7 @@ fn search_tool_description_falls_back_to_connector_name_without_description() {
         Some(HashMap::from([(
             "mcp__praxis_apps__calendar_create_event".to_string(),
             ToolInfo {
-                server_name: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+                server_name: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
                 tool_name: "_create_event".to_string(),
                 tool_namespace: "mcp__praxis_apps__calendar".to_string(),
                 tool: mcp_tool(
@@ -807,7 +807,7 @@ fn search_tool_registers_namespaced_app_tool_aliases() {
             (
                 "mcp__praxis_apps__calendar_create_event".to_string(),
                 ToolInfo {
-                    server_name: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+                    server_name: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
                     tool_name: "_create_event".to_string(),
                     tool_namespace: "mcp__praxis_apps__calendar".to_string(),
                     tool: mcp_tool(
@@ -824,7 +824,7 @@ fn search_tool_registers_namespaced_app_tool_aliases() {
             (
                 "mcp__praxis_apps__calendar_list_events".to_string(),
                 ToolInfo {
-                    server_name: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+                    server_name: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
                     tool_name: "_list_events".to_string(),
                     tool_namespace: "mcp__praxis_apps__calendar".to_string(),
                     tool: mcp_tool(

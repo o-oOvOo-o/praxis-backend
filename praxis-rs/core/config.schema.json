@@ -9,6 +9,13 @@
     "AgentRoleToml": {
       "additionalProperties": false,
       "properties": {
+        "base_name_candidates": {
+          "description": "Candidate base names for agents spawned with this role.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "config_file": {
           "allOf": [
             {
@@ -20,13 +27,6 @@
         "description": {
           "description": "Human-facing role documentation used in spawn tool guidance. Required unless supplied by the referenced agent role file.",
           "type": "string"
-        },
-        "nickname_candidates": {
-          "description": "Candidate nicknames for agents spawned with this role.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
         }
       },
       "type": "object"
@@ -57,38 +57,12 @@
       },
       "type": "object"
     },
-    "AltScreenMode": {
-      "description": "Controls whether the TUI uses the terminal's alternate screen buffer.\n\n**Background:** The alternate screen buffer provides a cleaner fullscreen experience without polluting the terminal's scrollback history. However, it conflicts with terminal multiplexers like Zellij that strictly follow the xterm specification, which defines that alternate screen buffers should not have scrollback.\n\n**Zellij's behavior:** Zellij intentionally disables scrollback in alternate screen mode (see https://github.com/zellij-org/zellij/pull/1032) to comply with the xterm spec. This is by design and not configurable in Zellij—there is no option to enable scrollback in alternate screen mode.\n\n**Solution:** This setting provides a pragmatic workaround: - `auto` (default): Automatically detect the terminal multiplexer. If running in Zellij, disable alternate screen to preserve scrollback. Enable it everywhere else. - `always`: Always use alternate screen mode (original behavior before this fix). - `never`: Never use alternate screen mode. Runs in inline mode, preserving scrollback in all multiplexers.\n\nThe CLI flag `--no-alt-screen` can override this setting at runtime.",
-      "oneOf": [
-        {
-          "description": "Auto-detect: disable alternate screen in Zellij, enable elsewhere.",
-          "enum": [
-            "auto"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Always use alternate screen (original behavior).",
-          "enum": [
-            "always"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Never use alternate screen (inline mode only).",
-          "enum": [
-            "never"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "AnalyticsConfigToml": {
       "additionalProperties": false,
       "description": "Analytics settings loaded from config.toml. Fields are optional so we can apply defaults.",
       "properties": {
         "enabled": {
-          "description": "When `false`, disables analytics across Codex product surfaces in this profile.",
+          "description": "When `false`, disables analytics across Praxis product surfaces in this profile.",
           "type": "boolean"
         }
       },
@@ -116,7 +90,7 @@
         },
         "enabled": {
           "default": true,
-          "description": "When `false`, Codex does not surface this app.",
+          "description": "When `false`, Praxis does not surface this app.",
           "type": "boolean"
         },
         "open_world_enabled": {
@@ -214,7 +188,7 @@
       "type": "object"
     },
     "AskForApproval": {
-      "description": "Determines the conditions under which the user is consulted to approve running the command proposed by Codex.",
+      "description": "Determines the conditions under which the user is consulted to approve running the command proposed by Praxis.",
       "oneOf": [
         {
           "description": "Under this policy, only \"known safe\" commands—as determined by `is_safe_command()`—that **only read files** are auto‑approved. Everything else will ask the user to approve.",
@@ -260,7 +234,7 @@
       ]
     },
     "AuthCredentialsStoreMode": {
-      "description": "Determine where Codex should store CLI auth credentials.",
+      "description": "Determine where Praxis should store CLI auth credentials.",
       "oneOf": [
         {
           "description": "Persist credentials in PRAXIS_HOME/auth.json.",
@@ -347,28 +321,13 @@
             "code_mode_only": {
               "type": "boolean"
             },
-            "praxis_git_commit": {
-              "type": "boolean"
-            },
-            "praxis_hooks": {
-              "type": "boolean"
-            },
             "collab": {
-              "type": "boolean"
-            },
-            "collaboration_modes": {
               "type": "boolean"
             },
             "connectors": {
               "type": "boolean"
             },
             "default_mode_request_user_input": {
-              "type": "boolean"
-            },
-            "elevated_windows_sandbox": {
-              "type": "boolean"
-            },
-            "enable_experimental_windows_sandbox": {
               "type": "boolean"
             },
             "enable_fanout": {
@@ -384,9 +343,6 @@
               "type": "boolean"
             },
             "experimental_use_unified_exec_tool": {
-              "type": "boolean"
-            },
-            "experimental_windows_sandbox": {
               "type": "boolean"
             },
             "fast_mode": {
@@ -407,12 +363,6 @@
             "include_apply_patch_tool": {
               "type": "boolean"
             },
-            "js_repl": {
-              "type": "boolean"
-            },
-            "js_repl_tools_only": {
-              "type": "boolean"
-            },
             "memories": {
               "type": "boolean"
             },
@@ -428,13 +378,16 @@
             "plugins": {
               "type": "boolean"
             },
+            "praxis_git_commit": {
+              "type": "boolean"
+            },
+            "praxis_hooks": {
+              "type": "boolean"
+            },
             "prevent_idle_sleep": {
               "type": "boolean"
             },
             "realtime_conversation": {
-              "type": "boolean"
-            },
-            "remote_models": {
               "type": "boolean"
             },
             "request_permissions": {
@@ -443,19 +396,7 @@
             "request_permissions_tool": {
               "type": "boolean"
             },
-            "request_rule": {
-              "type": "boolean"
-            },
-            "responses_websockets": {
-              "type": "boolean"
-            },
-            "responses_websockets_v2": {
-              "type": "boolean"
-            },
             "runtime_metrics": {
-              "type": "boolean"
-            },
-            "search_tool": {
               "type": "boolean"
             },
             "shell_snapshot": {
@@ -473,12 +414,6 @@
             "skill_mcp_dependency_install": {
               "type": "boolean"
             },
-            "sqlite": {
-              "type": "boolean"
-            },
-            "steer": {
-              "type": "boolean"
-            },
             "tool_call_mcp_elicitation": {
               "type": "boolean"
             },
@@ -488,9 +423,6 @@
             "tool_suggest": {
               "type": "boolean"
             },
-            "tui_app_gateway": {
-              "type": "boolean"
-            },
             "undo": {
               "type": "boolean"
             },
@@ -498,9 +430,6 @@
               "type": "boolean"
             },
             "use_legacy_landlock": {
-              "type": "boolean"
-            },
-            "use_linux_sandbox_bwrap": {
               "type": "boolean"
             },
             "web_search": {
@@ -517,16 +446,6 @@
         },
         "include_apply_patch_tool": {
           "type": "boolean"
-        },
-        "js_repl_node_module_dirs": {
-          "description": "Ordered list of directories to search for Node modules in `js_repl`.",
-          "items": {
-            "$ref": "#/definitions/AbsolutePathBuf"
-          },
-          "type": "array"
-        },
-        "js_repl_node_path": {
-          "$ref": "#/definitions/AbsolutePathBuf"
         },
         "model": {
           "type": "string"
@@ -607,7 +526,7 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
-          "description": "When `false`, disables the feedback flow across Codex product surfaces.",
+          "description": "When `false`, disables the feedback flow across Praxis product surfaces.",
           "type": "boolean"
         }
       },
@@ -808,14 +727,6 @@
       },
       "type": "object"
     },
-    "ModelAvailabilityNuxConfig": {
-      "additionalProperties": {
-        "format": "uint32",
-        "minimum": 0.0,
-        "type": "integer"
-      },
-      "type": "object"
-    },
     "ModelProviderAuthInfo": {
       "additionalProperties": false,
       "description": "Configuration for obtaining a provider bearer token from a command.",
@@ -860,6 +771,57 @@
       ],
       "type": "object"
     },
+    "ModelProviderCompatInfo": {
+      "additionalProperties": false,
+      "description": "Provider-specific compatibility shims for non-standard implementations that share a broader wire API family.",
+      "properties": {
+        "max_tokens_field": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelProviderMaxTokensField"
+            }
+          ],
+          "description": "Which field name the provider expects for output token limits."
+        },
+        "reasoning_effort_map": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelProviderReasoningEffortMap"
+            }
+          ],
+          "description": "Optional mapping from Praxis effort labels to provider-specific values."
+        },
+        "requires_assistant_after_tool_result": {
+          "description": "Whether an assistant bridge message is required before a user message immediately following tool results.",
+          "type": "boolean"
+        },
+        "requires_tool_result_name": {
+          "description": "Whether tool-result messages must include the tool name.",
+          "type": "boolean"
+        },
+        "supports_developer_role": {
+          "description": "Whether developer-role messages can be sent distinctly instead of being folded into a system prompt.",
+          "type": "boolean"
+        },
+        "supports_parallel_tool_calls": {
+          "description": "Whether the provider accepts the `parallel_tool_calls` request field.",
+          "type": "boolean"
+        },
+        "supports_reasoning_effort": {
+          "description": "Whether the provider accepts explicit reasoning effort controls.",
+          "type": "boolean"
+        },
+        "thinking_format": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelProviderThinkingFormat"
+            }
+          ],
+          "description": "Optional provider-specific reasoning/thinking payload style."
+        }
+      },
+      "type": "object"
+    },
     "ModelProviderInfo": {
       "additionalProperties": false,
       "description": "Serializable representation of a provider definition.",
@@ -875,6 +837,14 @@
         "base_url": {
           "description": "Base URL for the provider's OpenAI-compatible API.",
           "type": "string"
+        },
+        "compat": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelProviderCompatInfo"
+            }
+          ],
+          "description": "Optional compatibility shims for provider-specific quirks inside the selected wire API family."
         },
         "env_http_headers": {
           "additionalProperties": {
@@ -962,6 +932,46 @@
       ],
       "type": "object"
     },
+    "ModelProviderMaxTokensField": {
+      "enum": [
+        "max_completion_tokens",
+        "max_tokens"
+      ],
+      "type": "string"
+    },
+    "ModelProviderReasoningEffortMap": {
+      "additionalProperties": false,
+      "properties": {
+        "high": {
+          "type": "string"
+        },
+        "low": {
+          "type": "string"
+        },
+        "medium": {
+          "type": "string"
+        },
+        "minimal": {
+          "type": "string"
+        },
+        "xhigh": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ModelProviderThinkingFormat": {
+      "enum": [
+        "openai",
+        "openrouter",
+        "deepseek",
+        "gemini",
+        "zai",
+        "qwen",
+        "qwen_chat_template"
+      ],
+      "type": "string"
+    },
     "NetworkDomainPermissionToml": {
       "enum": [
         "allow",
@@ -1032,7 +1042,7 @@
       "type": "object"
     },
     "Notice": {
-      "description": "Settings for notices we display to users via the tui and app-gateway clients (primarily the Codex IDE extension). NOTE: these are different from notifications - notices are warnings, NUX screens, acknowledgements, etc.",
+      "description": "Settings for notices we display to users via the tui and app-gateway clients (primarily the Praxis IDE extension). NOTE: these are different from notifications - notices are warnings, NUX screens, acknowledgements, etc.",
       "properties": {
         "hide_full_access_warning": {
           "description": "Tracks whether the user has acknowledged the full access warning prompt.",
@@ -1065,32 +1075,11 @@
       },
       "type": "object"
     },
-    "NotificationMethod": {
-      "enum": [
-        "auto",
-        "osc9",
-        "bel"
-      ],
-      "type": "string"
-    },
-    "Notifications": {
-      "anyOf": [
-        {
-          "type": "boolean"
-        },
-        {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      ]
-    },
     "OAuthCredentialsStoreMode": {
-      "description": "Determine where Codex should store and read MCP credentials.",
+      "description": "Determine where Praxis should store and read MCP credentials.",
       "oneOf": [
         {
-          "description": "`Keyring` when available; otherwise, `File`. Credentials stored in the keyring will only be readable by Codex unless the user explicitly grants access via OS-level keyring access.",
+          "description": "`Keyring` when available; otherwise, `File`. Credentials stored in the keyring will only be readable by Praxis unless the user explicitly grants access via OS-level keyring access.",
           "enum": [
             "auto"
           ],
@@ -1300,6 +1289,91 @@
       "properties": {
         "enabled": {
           "default": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "PluginMarketplaceConfig": {
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "$ref": "#/definitions/AbsolutePathBuf"
+            },
+            "provider": {
+              "enum": [
+                "local"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "provider"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "default": null,
+              "type": "string"
+            },
+            "provider": {
+              "enum": [
+                "git"
+              ],
+              "type": "string"
+            },
+            "reference": {
+              "default": null,
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider",
+            "repo"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "provider": {
+              "enum": [
+                "http"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider",
+            "url"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "display_name": {
+          "default": null,
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "sync_on_startup": {
+          "default": false,
           "type": "boolean"
         }
       },
@@ -1705,85 +1779,6 @@
       ],
       "type": "string"
     },
-    "Tui": {
-      "additionalProperties": false,
-      "description": "Collection of settings that are specific to the TUI.",
-      "properties": {
-        "alternate_screen": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/AltScreenMode"
-            }
-          ],
-          "default": "auto",
-          "description": "Controls whether the TUI uses the terminal's alternate screen buffer.\n\n- `auto` (default): Disable alternate screen in Zellij, enable elsewhere. - `always`: Always use alternate screen (original behavior). - `never`: Never use alternate screen (inline mode only, preserves scrollback).\n\nUsing alternate screen provides a cleaner fullscreen experience but prevents scrollback in terminal multiplexers like Zellij that follow the xterm spec."
-        },
-        "animations": {
-          "default": true,
-          "description": "Enable animations (welcome screen, shimmer effects, spinners). Defaults to `true`.",
-          "type": "boolean"
-        },
-        "model_availability_nux": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ModelAvailabilityNuxConfig"
-            }
-          ],
-          "default": {},
-          "description": "Startup tooltip availability NUX state persisted by the TUI."
-        },
-        "notification_method": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/NotificationMethod"
-            }
-          ],
-          "default": "auto",
-          "description": "Notification method to use for unfocused terminal notifications. Defaults to `auto`."
-        },
-        "notifications": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Notifications"
-            }
-          ],
-          "default": true,
-          "description": "Enable desktop notifications from the TUI when the terminal is unfocused. Defaults to `true`."
-        },
-        "show_tooltips": {
-          "default": true,
-          "description": "Show startup tooltips in the TUI welcome screen. Defaults to `true`.",
-          "type": "boolean"
-        },
-        "status_line": {
-          "default": null,
-          "description": "Ordered list of status line item identifiers.\n\nWhen set, the TUI renders the selected items as the status line. When unset, the TUI defaults to: `model-with-reasoning`, `context-remaining`, and `current-dir`.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "surface_theme": {
-          "default": null,
-          "description": "Praxis TUI surface theme (`auto`, `dark`, `classic`, or `deepseek`).\n\nThis controls application chrome only. Syntax highlighting remains controlled by `theme` and `/theme`.",
-          "type": "string"
-        },
-        "terminal_title": {
-          "default": null,
-          "description": "Ordered list of terminal title item identifiers.\n\nWhen set, the TUI renders the selected items into the terminal window/tab title. When unset, the TUI defaults to: `spinner` and `project`.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "theme": {
-          "default": null,
-          "description": "Syntax highlighting theme name (kebab-case).\n\nWhen set, overrides automatic light/dark theme detection. Use `/theme` in the TUI or see `$PRAXIS_HOME/themes` for custom themes.",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "UriBasedFileOpener": {
       "oneOf": [
         {
@@ -1894,6 +1889,20 @@
             "responses"
           ],
           "type": "string"
+        },
+        {
+          "description": "Anthropic/Claude-style messages API.",
+          "enum": [
+            "claude"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Generic OpenAI-compatible chat/completions-style API.",
+          "enum": [
+            "openai_compat"
+          ],
+          "type": "string"
         }
       ]
     }
@@ -1918,7 +1927,7 @@
           "$ref": "#/definitions/AnalyticsConfigToml"
         }
       ],
-      "description": "When `false`, disables analytics across Codex product surfaces in this machine. Defaults to `true`."
+      "description": "When `false`, disables analytics across Praxis product surfaces in this machine. Defaults to `true`."
     },
     "approval_policy": {
       "allOf": [
@@ -1965,7 +1974,7 @@
       "type": "string"
     },
     "check_for_update_on_startup": {
-      "description": "When `true`, checks for Codex updates on startup and surfaces update prompts. Set to `false` only if your Codex updates are centrally managed. Defaults to `true`.",
+      "description": "When `true`, checks for Praxis updates on startup and surfaces update prompts. Set to `false` only if your Praxis updates are centrally managed. Defaults to `true`.",
       "type": "boolean"
     },
     "cli_auth_credentials_store": {
@@ -1975,7 +1984,7 @@
         }
       ],
       "default": null,
-      "description": "Preferred backend for storing CLI auth credentials. file (default): Use a file in the Codex home directory. keyring: Use an OS-specific keyring service. auto: Use the keyring if available, otherwise use a file."
+      "description": "Preferred backend for storing CLI auth credentials. file (default): Use a file in the Praxis home directory. keyring: Use an OS-specific keyring service. auto: Use the keyring if available, otherwise use a file."
     },
     "commit_attribution": {
       "description": "Optional commit attribution text for commit message co-author trailers.\n\nSet to an empty string to disable automatic commit attribution.",
@@ -2047,28 +2056,13 @@
         "code_mode_only": {
           "type": "boolean"
         },
-        "praxis_git_commit": {
-          "type": "boolean"
-        },
-        "praxis_hooks": {
-          "type": "boolean"
-        },
         "collab": {
-          "type": "boolean"
-        },
-        "collaboration_modes": {
           "type": "boolean"
         },
         "connectors": {
           "type": "boolean"
         },
         "default_mode_request_user_input": {
-          "type": "boolean"
-        },
-        "elevated_windows_sandbox": {
-          "type": "boolean"
-        },
-        "enable_experimental_windows_sandbox": {
           "type": "boolean"
         },
         "enable_fanout": {
@@ -2084,9 +2078,6 @@
           "type": "boolean"
         },
         "experimental_use_unified_exec_tool": {
-          "type": "boolean"
-        },
-        "experimental_windows_sandbox": {
           "type": "boolean"
         },
         "fast_mode": {
@@ -2107,12 +2098,6 @@
         "include_apply_patch_tool": {
           "type": "boolean"
         },
-        "js_repl": {
-          "type": "boolean"
-        },
-        "js_repl_tools_only": {
-          "type": "boolean"
-        },
         "memories": {
           "type": "boolean"
         },
@@ -2128,13 +2113,16 @@
         "plugins": {
           "type": "boolean"
         },
+        "praxis_git_commit": {
+          "type": "boolean"
+        },
+        "praxis_hooks": {
+          "type": "boolean"
+        },
         "prevent_idle_sleep": {
           "type": "boolean"
         },
         "realtime_conversation": {
-          "type": "boolean"
-        },
-        "remote_models": {
           "type": "boolean"
         },
         "request_permissions": {
@@ -2143,19 +2131,7 @@
         "request_permissions_tool": {
           "type": "boolean"
         },
-        "request_rule": {
-          "type": "boolean"
-        },
-        "responses_websockets": {
-          "type": "boolean"
-        },
-        "responses_websockets_v2": {
-          "type": "boolean"
-        },
         "runtime_metrics": {
-          "type": "boolean"
-        },
-        "search_tool": {
           "type": "boolean"
         },
         "shell_snapshot": {
@@ -2173,12 +2149,6 @@
         "skill_mcp_dependency_install": {
           "type": "boolean"
         },
-        "sqlite": {
-          "type": "boolean"
-        },
-        "steer": {
-          "type": "boolean"
-        },
         "tool_call_mcp_elicitation": {
           "type": "boolean"
         },
@@ -2188,9 +2158,6 @@
         "tool_suggest": {
           "type": "boolean"
         },
-        "tui_app_gateway": {
-          "type": "boolean"
-        },
         "undo": {
           "type": "boolean"
         },
@@ -2198,9 +2165,6 @@
           "type": "boolean"
         },
         "use_legacy_landlock": {
-          "type": "boolean"
-        },
-        "use_linux_sandbox_bwrap": {
           "type": "boolean"
         },
         "web_search": {
@@ -2221,7 +2185,7 @@
           "$ref": "#/definitions/FeedbackConfigToml"
         }
       ],
-      "description": "When `false`, disables feedback collection across Codex product surfaces. Defaults to `true`."
+      "description": "When `false`, disables feedback collection across Praxis product surfaces. Defaults to `true`."
     },
     "file_opener": {
       "allOf": [
@@ -2271,31 +2235,16 @@
       "description": "System instructions.",
       "type": "string"
     },
-    "js_repl_node_module_dirs": {
-      "description": "Ordered list of directories to search for Node modules in `js_repl`.",
-      "items": {
-        "$ref": "#/definitions/AbsolutePathBuf"
-      },
-      "type": "array"
-    },
-    "js_repl_node_path": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/AbsolutePathBuf"
-        }
-      ],
-      "description": "Optional absolute path to the Node runtime used by `js_repl`."
-    },
     "log_dir": {
       "allOf": [
         {
           "$ref": "#/definitions/AbsolutePathBuf"
         }
       ],
-      "description": "Directory where Praxis writes log files, for example `praxis-tui.log`. Defaults to `$PRAXIS_HOME/log`."
+      "description": "Directory where Praxis writes client/runtime log files. Defaults to `$PRAXIS_HOME/log`."
     },
     "mcp_oauth_callback_port": {
-      "description": "Optional fixed port for the local HTTP callback server used during MCP OAuth login. When unset, Codex will bind to an ephemeral port chosen by the OS.",
+      "description": "Optional fixed port for the local HTTP callback server used during MCP OAuth login. When unset, Praxis will bind to an ephemeral port chosen by the OS.",
       "format": "uint16",
       "minimum": 0.0,
       "type": "integer"
@@ -2311,14 +2260,14 @@
         }
       ],
       "default": null,
-      "description": "Preferred backend for storing MCP OAuth credentials. keyring: Use an OS-specific keyring service. https://github.com/openai/codex/blob/main/praxis-rs/rmcp-client/src/oauth.rs#L2 file: Use a file in the Codex home directory. auto (default): Use the OS-specific keyring service if available, otherwise use a file."
+      "description": "Preferred backend for storing MCP OAuth credentials. keyring: Use an OS-specific keyring service. file: Use a file in the Praxis home directory. auto (default): Use the OS-specific keyring service if available, otherwise use a file."
     },
     "mcp_servers": {
       "additionalProperties": {
         "$ref": "#/definitions/RawMcpServerConfig"
       },
       "default": {},
-      "description": "Definition for MCP servers that Codex can reach out to for tool calls.",
+      "description": "Definition for MCP servers that Praxis can reach out to for tool calls.",
       "type": "object"
     },
     "memories": {
@@ -2357,7 +2306,7 @@
           "$ref": "#/definitions/AbsolutePathBuf"
         }
       ],
-      "description": "Optional path to a file containing model instructions that will override the built-in instructions for the selected model. Users are STRONGLY DISCOURAGED from using this field, as deviating from the instructions sanctioned by Codex will likely degrade model performance."
+      "description": "Optional path to a file containing model instructions that will override the built-in instructions for the selected model. Users are STRONGLY DISCOURAGED from using this field, as deviating from the instructions sanctioned by Praxis will likely degrade model performance."
     },
     "model_provider": {
       "description": "Provider to use from the model_providers map.",
@@ -2440,6 +2389,14 @@
     },
     "plan_mode_reasoning_effort": {
       "$ref": "#/definitions/ReasoningEffort"
+    },
+    "plugin_marketplaces": {
+      "additionalProperties": {
+        "$ref": "#/definitions/PluginMarketplaceConfig"
+      },
+      "default": {},
+      "description": "Plugin marketplace providers keyed by stable marketplace name.",
+      "type": "object"
     },
     "plugins": {
       "additionalProperties": {
@@ -2558,7 +2515,7 @@
           "$ref": "#/definitions/AbsolutePathBuf"
         }
       ],
-      "description": "Directory where Praxis stores the SQLite state DB. Defaults to `$PRAXIS_SQLITE_HOME` when set. Otherwise uses `$PRAXIS_HOME` / the resolved Praxis home. Praxis does not honor CODEX_SQLITE_HOME for state isolation."
+      "description": "Directory where Praxis stores the SQLite state DB. Defaults to `$PRAXIS_SQLITE_HOME` when set. Otherwise uses `$PRAXIS_HOME`."
     },
     "suppress_unstable_features_warning": {
       "description": "Suppress warnings about unstable (under development) features.",
@@ -2585,14 +2542,6 @@
         }
       ],
       "description": "Nested tools section for feature toggles"
-    },
-    "tui": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/Tui"
-        }
-      ],
-      "description": "Collection of settings that are specific to the TUI."
     },
     "web_search": {
       "allOf": [

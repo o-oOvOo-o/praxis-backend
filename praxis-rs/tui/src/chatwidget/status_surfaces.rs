@@ -481,7 +481,7 @@ impl ChatWidget {
             StatusLineItem::FiveHourLimit => {
                 let window = self
                     .rate_limit_snapshots_by_limit_id
-                    .get("codex")
+                    .get(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
                     .and_then(|s| s.primary.as_ref());
                 let label = window
                     .and_then(|window| window.window_minutes)
@@ -492,7 +492,7 @@ impl ChatWidget {
             StatusLineItem::WeeklyLimit => {
                 let window = self
                     .rate_limit_snapshots_by_limit_id
-                    .get("codex")
+                    .get(OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID)
                     .and_then(|s| s.secondary.as_ref());
                 let label = window
                     .and_then(|window| window.window_minutes)
@@ -500,7 +500,7 @@ impl ChatWidget {
                     .unwrap_or_else(|| "weekly".to_string());
                 self.status_line_limit_display(window, &label)
             }
-            StatusLineItem::CodexVersion => Some(PRAXIS_CLI_VERSION.to_string()),
+            StatusLineItem::PraxisVersion => Some(PRAXIS_CLI_VERSION.to_string()),
             StatusLineItem::ContextWindowSize => self
                 .status_line_context_window_size()
                 .map(|cws| format!("{} window", format_tokens_compact(cws))),
@@ -528,13 +528,13 @@ impl ChatWidget {
     ///
     /// Returning `None` means "omit this segment for now" so callers can keep
     /// the configured order while hiding values that are not yet available.
-    fn terminal_title_value_for_item(
+    pub(super) fn terminal_title_value_for_item(
         &mut self,
         item: TerminalTitleItem,
         now: Instant,
     ) -> Option<String> {
         match item {
-            TerminalTitleItem::AppName => Some("codex".to_string()),
+            TerminalTitleItem::AppName => Some("praxis".to_string()),
             TerminalTitleItem::Project => self.terminal_title_project_name(),
             TerminalTitleItem::Spinner => self.terminal_title_spinner_text_at(now),
             TerminalTitleItem::Status => Some(self.terminal_title_status_text()),

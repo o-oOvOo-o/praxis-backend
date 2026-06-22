@@ -93,7 +93,7 @@ pub struct NetworkProxyBuilder {
     state: Option<Arc<NetworkProxyState>>,
     http_addr: Option<SocketAddr>,
     socks_addr: Option<SocketAddr>,
-    managed_by_codex: bool,
+    managed_by_praxis: bool,
     policy_decider: Option<Arc<dyn NetworkPolicyDecider>>,
     blocked_request_observer: Option<Arc<dyn BlockedRequestObserver>>,
 }
@@ -104,7 +104,7 @@ impl Default for NetworkProxyBuilder {
             state: None,
             http_addr: None,
             socks_addr: None,
-            managed_by_codex: true,
+            managed_by_praxis: true,
             policy_decider: None,
             blocked_request_observer: None,
         }
@@ -127,8 +127,8 @@ impl NetworkProxyBuilder {
         self
     }
 
-    pub fn managed_by_codex(mut self, managed_by_codex: bool) -> Self {
-        self.managed_by_codex = managed_by_codex;
+    pub fn managed_by_praxis(mut self, managed_by_praxis: bool) -> Self {
+        self.managed_by_praxis = managed_by_praxis;
         self
     }
 
@@ -172,7 +172,7 @@ impl NetworkProxyBuilder {
             .await;
         let current_cfg = state.current_cfg().await?;
         let (requested_http_addr, requested_socks_addr, reserved_listeners) = if self
-            .managed_by_codex
+            .managed_by_praxis
         {
             let runtime = config::resolve_runtime(&current_cfg)?;
             #[cfg(target_os = "windows")]
@@ -348,7 +348,7 @@ pub const PROXY_URL_ENV_KEYS: &[&str] = &[
 ];
 
 pub const ALL_PROXY_ENV_KEYS: &[&str] = &["ALL_PROXY", "all_proxy"];
-pub const ALLOW_LOCAL_BINDING_ENV_KEY: &str = "CODEX_NETWORK_ALLOW_LOCAL_BINDING";
+pub const ALLOW_LOCAL_BINDING_ENV_KEY: &str = "PRAXIS_NETWORK_ALLOW_LOCAL_BINDING";
 
 const FTP_PROXY_ENV_KEYS: &[&str] = &["FTP_PROXY", "ftp_proxy"];
 const WEBSOCKET_PROXY_ENV_KEYS: &[&str] = &["WS_PROXY", "WSS_PROXY", "ws_proxy", "wss_proxy"];
@@ -705,7 +705,7 @@ mod tests {
         let state = Arc::new(network_proxy_state_for_policy(settings));
         let proxy = NetworkProxy::builder()
             .state(state)
-            .managed_by_codex(/*managed_by_codex*/ false)
+            .managed_by_praxis(/*managed_by_praxis*/ false)
             .build()
             .await
             .unwrap();

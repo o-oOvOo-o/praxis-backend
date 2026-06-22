@@ -7,20 +7,20 @@ use core_test_support::responses::start_websocket_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::streaming_sse::StreamingSseChunk;
 use core_test_support::streaming_sse::start_streaming_sse_server;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
-use praxis_login::CodexAuth;
 use praxis_login::OPENAI_API_KEY_ENV_VAR;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::ThreadId;
-use praxis_protocol::protocol::CodexErrorInfo;
 use praxis_protocol::protocol::ConversationAudioParams;
 use praxis_protocol::protocol::ConversationStartParams;
 use praxis_protocol::protocol::ConversationTextParams;
 use praxis_protocol::protocol::ErrorEvent;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::Op;
+use praxis_protocol::protocol::PraxisErrorInfo;
 use praxis_protocol::protocol::RealtimeAudioFrame;
 use praxis_protocol::protocol::RealtimeConversationRealtimeEvent;
 use praxis_protocol::protocol::RealtimeConversationVersion;
@@ -40,7 +40,7 @@ const STARTUP_CONTEXT_HEADER: &str = "Startup context from Praxis.";
 const MEMORY_PROMPT_PHRASE: &str =
     "You have access to a memory folder with guidance from prior runs.";
 const REALTIME_CONVERSATION_TEST_SUBPROCESS_ENV_VAR: &str =
-    "CODEX_REALTIME_CONVERSATION_TEST_SUBPROCESS";
+    "PRAXIS_REALTIME_CONVERSATION_TEST_SUBPROCESS";
 fn websocket_request_text(
     request: &core_test_support::responses::WebSocketRequest,
 ) -> Option<String> {
@@ -112,12 +112,12 @@ fn run_realtime_conversation_test_in_subprocess(
     Ok(())
 }
 async fn seed_recent_thread(
-    test: &TestCodex,
+    test: &TestPraxis,
     title: &str,
     first_user_message: &str,
     slug: &str,
 ) -> Result<()> {
-    let db = test.codex.state_db().context("state db enabled")?;
+    let db = test.thread.state_db().context("state db enabled")?;
     let thread_id = ThreadId::new();
     let updated_at = Utc::now();
     let mut metadata_builder = praxis_state::ThreadMetadataBuilder::new(
@@ -170,7 +170,7 @@ async fn conversation_start_audio_text_close_round_trip() -> Result<()> {
     ])
     .await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_with_websocket_server(&server).await?;
     assert!(
         server
@@ -178,14 +178,14 @@ async fn conversation_start_audio_text_close_round_trip() -> Result<()> {
             .await
     );
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let started = wait_for_event_match(&test.codex, |msg| match msg {
+    let started = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationStarted(started) => Some(Ok(started.clone())),
         EventMsg::Error(err) => Some(Err(err.clone())),
         _ => None,
@@ -195,7 +195,7 @@ async fn conversation_start_audio_text_close_round_trip() -> Result<()> {
     assert!(started.session_id.is_some());
     assert_eq!(started.version, RealtimeConversationVersion::V1);
 
-    let session_updated = wait_for_event_match(&test.codex, |msg| match msg {
+    let session_updated = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) => Some(session_id.clone()),
@@ -204,7 +204,7 @@ async fn conversation_start_audio_text_close_round_trip() -> Result<()> {
     .await;
     assert_eq!(session_updated, "sess_1");
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationAudio(ConversationAudioParams {
             frame: RealtimeAudioFrame {
                 data: "AQID".to_string(),
@@ -215,13 +215,13 @@ async fn conversation_start_audio_text_close_round_trip() -> Result<()> {
             },
         }))
         .await?;
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationText(ConversationTextParams {
             text: "hello".to_string(),
         }))
         .await?;
 
-    let audio_out = wait_for_event_match(&test.codex, |msg| match msg {
+    let audio_out = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::AudioOut(frame),
         }) => Some(frame.clone()),
@@ -277,8 +277,8 @@ async fn conversation_start_audio_text_close_round_trip() -> Result<()> {
         ]
     );
 
-    test.codex.submit(Op::RealtimeConversationClose).await?;
-    let closed = wait_for_event_match(&test.codex, |msg| match msg {
+    test.thread.submit(Op::RealtimeConversationClose).await?;
+    let closed = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationClosed(closed) => Some(closed.clone()),
         _ => None,
     })
@@ -312,7 +312,8 @@ async fn conversation_start_uses_openai_env_key_fallback_with_chatgpt_auth() -> 
     ])
     .await;
 
-    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let mut builder =
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing());
     let test = builder.build_with_websocket_server(&server).await?;
     assert!(
         server
@@ -320,14 +321,14 @@ async fn conversation_start_uses_openai_env_key_fallback_with_chatgpt_auth() -> 
             .await
     );
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let started = wait_for_event_match(&test.codex, |msg| match msg {
+    let started = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationStarted(started) => Some(Ok(started.clone())),
         EventMsg::Error(err) => Some(Err(err.clone())),
         _ => None,
@@ -336,7 +337,7 @@ async fn conversation_start_uses_openai_env_key_fallback_with_chatgpt_auth() -> 
     .unwrap_or_else(|err: ErrorEvent| panic!("conversation start failed: {err:?}"));
     assert!(started.session_id.is_some());
 
-    let session_updated = wait_for_event_match(&test.codex, |msg| match msg {
+    let session_updated = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) => Some(session_id.clone()),
@@ -350,8 +351,8 @@ async fn conversation_start_uses_openai_env_key_fallback_with_chatgpt_auth() -> 
         Some("Bearer env-realtime-key")
     );
 
-    test.codex.submit(Op::RealtimeConversationClose).await?;
-    let _closed = wait_for_event_match(&test.codex, |msg| match msg {
+    test.thread.submit(Op::RealtimeConversationClose).await?;
+    let _closed = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationClosed(closed) => Some(closed.clone()),
         _ => None,
     })
@@ -371,7 +372,7 @@ async fn conversation_transport_close_emits_closed_event() -> Result<()> {
     })];
     let server = start_websocket_server(vec![vec![], vec![session_updated]]).await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_with_websocket_server(&server).await?;
     assert!(
         server
@@ -379,14 +380,14 @@ async fn conversation_transport_close_emits_closed_event() -> Result<()> {
             .await
     );
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let started = wait_for_event_match(&test.codex, |msg| match msg {
+    let started = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationStarted(started) => Some(Ok(started.clone())),
         EventMsg::Error(err) => Some(Err(err.clone())),
         _ => None,
@@ -395,7 +396,7 @@ async fn conversation_transport_close_emits_closed_event() -> Result<()> {
     .unwrap_or_else(|err: ErrorEvent| panic!("conversation start failed: {err:?}"));
     assert!(started.session_id.is_some());
 
-    let session_updated = wait_for_event_match(&test.codex, |msg| match msg {
+    let session_updated = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) => Some(session_id.clone()),
@@ -404,7 +405,7 @@ async fn conversation_transport_close_emits_closed_event() -> Result<()> {
     .await;
     assert_eq!(session_updated, "sess_1");
 
-    let closed = wait_for_event_match(&test.codex, |msg| match msg {
+    let closed = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationClosed(closed) => Some(closed.clone()),
         _ => None,
     })
@@ -420,10 +421,10 @@ async fn conversation_audio_before_start_emits_error() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_websocket_server(vec![]).await;
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_with_websocket_server(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationAudio(ConversationAudioParams {
             frame: RealtimeAudioFrame {
                 data: "AQID".to_string(),
@@ -435,12 +436,12 @@ async fn conversation_audio_before_start_emits_error() -> Result<()> {
         }))
         .await?;
 
-    let err = wait_for_event_match(&test.codex, |msg| match msg {
+    let err = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::Error(err) => Some(err.clone()),
         _ => None,
     })
     .await;
-    assert_eq!(err.praxis_error_info, Some(CodexErrorInfo::BadRequest));
+    assert_eq!(err.praxis_error_info, Some(PraxisErrorInfo::BadRequest));
     assert_eq!(err.message, "conversation is not running");
 
     server.shutdown().await;
@@ -459,17 +460,18 @@ async fn conversation_start_preflight_failure_emits_realtime_error_only() -> Res
     skip_if_no_network!(Ok(()));
 
     let server = start_websocket_server(vec![]).await;
-    let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let mut builder =
+        test_praxis().with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing());
     let test = builder.build_with_websocket_server(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let err = wait_for_event_match(&test.codex, |msg| match msg {
+    let err = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::Error(message),
         }) => Some(message.clone()),
@@ -479,7 +481,7 @@ async fn conversation_start_preflight_failure_emits_realtime_error_only() -> Res
     assert_eq!(err, "realtime conversation requires API key auth");
 
     let closed = timeout(Duration::from_millis(200), async {
-        wait_for_event_match(&test.codex, |msg| match msg {
+        wait_for_event_match(&test.thread, |msg| match msg {
             EventMsg::RealtimeConversationClosed(closed) => Some(closed.clone()),
             _ => None,
         })
@@ -497,19 +499,19 @@ async fn conversation_start_connect_failure_emits_realtime_error_only() -> Resul
     skip_if_no_network!(Ok(()));
 
     let server = start_websocket_server(vec![]).await;
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.experimental_realtime_ws_base_url = Some("http://127.0.0.1:1".to_string());
     });
     let test = builder.build_with_websocket_server(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let err = wait_for_event_match(&test.codex, |msg| match msg {
+    let err = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::Error(message),
         }) => Some(message.clone()),
@@ -519,7 +521,7 @@ async fn conversation_start_connect_failure_emits_realtime_error_only() -> Resul
     assert!(!err.is_empty());
 
     let closed = timeout(Duration::from_millis(200), async {
-        wait_for_event_match(&test.codex, |msg| match msg {
+        wait_for_event_match(&test.thread, |msg| match msg {
             EventMsg::RealtimeConversationClosed(closed) => Some(closed.clone()),
             _ => None,
         })
@@ -537,21 +539,21 @@ async fn conversation_text_before_start_emits_error() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_websocket_server(vec![]).await;
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_with_websocket_server(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationText(ConversationTextParams {
             text: "hello".to_string(),
         }))
         .await?;
 
-    let err = wait_for_event_match(&test.codex, |msg| match msg {
+    let err = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::Error(err) => Some(err.clone()),
         _ => None,
     })
     .await;
-    assert_eq!(err.praxis_error_info, Some(CodexErrorInfo::BadRequest));
+    assert_eq!(err.praxis_error_info, Some(PraxisErrorInfo::BadRequest));
     assert_eq!(err.message, "conversation is not running");
 
     server.shutdown().await;
@@ -582,7 +584,7 @@ async fn conversation_second_start_replaces_runtime() -> Result<()> {
         ],
     ])
     .await;
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build_with_websocket_server(&server).await?;
     assert!(
         server
@@ -590,13 +592,13 @@ async fn conversation_second_start_replaces_runtime() -> Result<()> {
             .await
     );
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "old".to_string(),
             session_id: Some("conv_old".to_string()),
         }))
         .await?;
-    wait_for_event_match(&test.codex, |msg| match msg {
+    wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) if session_id == "sess_old" => Some(Ok(())),
@@ -606,13 +608,13 @@ async fn conversation_second_start_replaces_runtime() -> Result<()> {
     .await
     .unwrap_or_else(|err: ErrorEvent| panic!("first conversation start failed: {err:?}"));
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "new".to_string(),
             session_id: Some("conv_new".to_string()),
         }))
         .await?;
-    wait_for_event_match(&test.codex, |msg| match msg {
+    wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) if session_id == "sess_new" => Some(Ok(())),
@@ -622,7 +624,7 @@ async fn conversation_second_start_replaces_runtime() -> Result<()> {
     .await
     .unwrap_or_else(|err: ErrorEvent| panic!("second conversation start failed: {err:?}"));
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationAudio(ConversationAudioParams {
             frame: RealtimeAudioFrame {
                 data: "AQID".to_string(),
@@ -633,7 +635,7 @@ async fn conversation_second_start_replaces_runtime() -> Result<()> {
             },
         }))
         .await?;
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::AudioOut(frame),
         }) if frame.data == "AQID" => Some(()),
@@ -679,7 +681,7 @@ async fn conversation_uses_experimental_realtime_ws_base_url_override() -> Resul
     })]]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -692,14 +694,14 @@ async fn conversation_uses_experimental_realtime_ws_base_url_override() -> Resul
             .await
     );
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let session_updated = wait_for_event_match(&test.codex, |msg| match msg {
+    let session_updated = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) => Some(session_id.clone()),
@@ -736,7 +738,7 @@ async fn conversation_uses_experimental_realtime_ws_backend_prompt_override() ->
     ])
     .await;
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         config.experimental_realtime_ws_backend_prompt = Some("prompt from config".to_string());
     });
     let test = builder.build_with_websocket_server(&server).await?;
@@ -746,14 +748,14 @@ async fn conversation_uses_experimental_realtime_ws_backend_prompt_override() ->
             .await
     );
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "prompt from op".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let session_updated = wait_for_event_match(&test.codex, |msg| match msg {
+    let session_updated = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) => Some(session_id.clone()),
@@ -783,7 +785,7 @@ async fn conversation_uses_experimental_realtime_ws_startup_context_override() -
     })]]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -808,7 +810,7 @@ async fn conversation_uses_experimental_realtime_ws_startup_context_override() -
             .await
     );
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "prompt from op".to_string(),
             session_id: None,
@@ -844,7 +846,7 @@ async fn conversation_disables_realtime_startup_context_with_empty_override() ->
     })]]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -868,7 +870,7 @@ async fn conversation_disables_realtime_startup_context_with_empty_override() ->
             .await
     );
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "prompt from op".to_string(),
             session_id: None,
@@ -904,7 +906,7 @@ async fn conversation_start_injects_startup_context_from_thread_history() -> Res
     })]]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -921,7 +923,7 @@ async fn conversation_start_injects_startup_context_from_thread_history() -> Res
     fs::create_dir_all(test.workspace_path("docs"))?;
     fs::write(test.workspace_path("README.md"), "workspace marker")?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
@@ -964,7 +966,7 @@ async fn conversation_startup_context_falls_back_to_workspace_map() -> Result<()
     })]]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -974,7 +976,7 @@ async fn conversation_startup_context_falls_back_to_workspace_map() -> Result<()
     fs::create_dir_all(test.workspace_path("praxis-rs/core"))?;
     fs::write(test.workspace_path("notes.txt"), "workspace marker")?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
@@ -1015,7 +1017,7 @@ async fn conversation_startup_context_is_truncated_and_sent_once_per_start() -> 
     .await;
 
     let oversized_summary = "recent work ".repeat(3_500);
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -1025,7 +1027,7 @@ async fn conversation_startup_context_is_truncated_and_sent_once_per_start() -> 
     seed_recent_thread(&test, &oversized_summary, "summary", "oversized").await?;
     fs::write(test.workspace_path("marker.txt"), "marker")?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
@@ -1043,7 +1045,7 @@ async fn conversation_startup_context_is_truncated_and_sent_once_per_start() -> 
     assert!(startup_context.contains(STARTUP_CONTEXT_HEADER));
     assert!(startup_context.len() <= 20_500);
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationText(ConversationTextParams {
             text: "hello".to_string(),
         }))
@@ -1101,7 +1103,7 @@ async fn conversation_mirrors_assistant_message_text_to_realtime_handoff() -> Re
     ]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -1109,14 +1111,14 @@ async fn conversation_mirrors_assistant_message_text_to_realtime_handoff() -> Re
     });
     let test = builder.build(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let session_updated = wait_for_event_match(&test.codex, |msg| match msg {
+    let session_updated = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) => Some(session_id.clone()),
@@ -1125,7 +1127,7 @@ async fn conversation_mirrors_assistant_message_text_to_realtime_handoff() -> Re
     .await;
     assert_eq!(session_updated, "sess_1");
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::HandoffRequested(handoff),
         }) if handoff.handoff_id == "handoff_1" => Some(()),
@@ -1133,7 +1135,7 @@ async fn conversation_mirrors_assistant_message_text_to_realtime_handoff() -> Re
     })
     .await;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -1227,7 +1229,7 @@ async fn conversation_handoff_persists_across_item_done_until_turn_complete() ->
     ]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -1235,14 +1237,14 @@ async fn conversation_handoff_persists_across_item_done_until_turn_complete() ->
     });
     let test = builder.build_with_streaming_server(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) if session_id == "sess_item_done" => Some(()),
@@ -1250,7 +1252,7 @@ async fn conversation_handoff_persists_across_item_done_until_turn_complete() ->
     })
     .await;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::HandoffRequested(handoff),
         }) if handoff.handoff_id == "handoff_item_done" => Some(()),
@@ -1274,7 +1276,7 @@ async fn conversation_handoff_persists_across_item_done_until_turn_complete() ->
         Some("\"Agent Final Message\":\n\nassistant message 1")
     );
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::ConversationItemDone { item_id },
         }) if item_id == "item_item_done" => Some(()),
@@ -1307,7 +1309,7 @@ async fn conversation_handoff_persists_across_item_done_until_turn_complete() ->
     completion
         .await
         .expect("delegated turn request did not complete");
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -1368,7 +1370,7 @@ async fn inbound_handoff_request_starts_turn() -> Result<()> {
     ]]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -1376,14 +1378,14 @@ async fn inbound_handoff_request_starts_turn() -> Result<()> {
     });
     let test = builder.build(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let session_updated = wait_for_event_match(&test.codex, |msg| match msg {
+    let session_updated = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) => Some(session_id.clone()),
@@ -1392,7 +1394,7 @@ async fn inbound_handoff_request_starts_turn() -> Result<()> {
     .await;
     assert_eq!(session_updated, "sess_inbound");
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::HandoffRequested(handoff),
         }) if handoff.handoff_id == "handoff_inbound"
@@ -1404,7 +1406,7 @@ async fn inbound_handoff_request_starts_turn() -> Result<()> {
     })
     .await;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -1462,7 +1464,7 @@ async fn inbound_handoff_request_uses_active_transcript() -> Result<()> {
     ]]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -1470,14 +1472,14 @@ async fn inbound_handoff_request_uses_active_transcript() -> Result<()> {
     });
     let test = builder.build(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) => Some(session_id.clone()),
@@ -1485,7 +1487,7 @@ async fn inbound_handoff_request_uses_active_transcript() -> Result<()> {
     })
     .await;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -1554,7 +1556,7 @@ async fn inbound_handoff_request_clears_active_transcript_after_each_handoff() -
     ]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -1562,14 +1564,14 @@ async fn inbound_handoff_request_clears_active_transcript_after_each_handoff() -
     });
     let test = builder.build(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) => Some(session_id.clone()),
@@ -1577,12 +1579,12 @@ async fn inbound_handoff_request_clears_active_transcript_after_each_handoff() -
     })
     .await;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationAudio(ConversationAudioParams {
             frame: RealtimeAudioFrame {
                 data: "AQID".to_string(),
@@ -1594,7 +1596,7 @@ async fn inbound_handoff_request_clears_active_transcript_after_each_handoff() -
         }))
         .await?;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -1653,7 +1655,7 @@ async fn inbound_conversation_item_does_not_start_turn_and_still_forwards_audio(
     ]]])
     .await;
 
-    let mut builder = test_codex().with_config({
+    let mut builder = test_praxis().with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -1661,14 +1663,14 @@ async fn inbound_conversation_item_does_not_start_turn_and_still_forwards_audio(
     });
     let test = builder.build(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) if session_id == "sess_ignore_item" => Some(()),
@@ -1678,7 +1680,7 @@ async fn inbound_conversation_item_does_not_start_turn_and_still_forwards_audio(
 
     let audio_out = tokio::time::timeout(
         Duration::from_millis(500),
-        wait_for_event_match(&test.codex, |msg| match msg {
+        wait_for_event_match(&test.thread, |msg| match msg {
             EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
                 payload: RealtimeEvent::AudioOut(frame),
             }) => Some(frame.clone()),
@@ -1691,7 +1693,7 @@ async fn inbound_conversation_item_does_not_start_turn_and_still_forwards_audio(
 
     let unexpected_turn_started = tokio::time::timeout(
         Duration::from_millis(200),
-        wait_for_event_match(&test.codex, |msg| match msg {
+        wait_for_event_match(&test.thread, |msg| match msg {
             EventMsg::TurnStarted(_) => Some(()),
             _ => None,
         }),
@@ -1765,7 +1767,7 @@ async fn delegated_turn_user_role_echo_does_not_redelegate_and_still_forwards_au
     ]])
     .await;
 
-    let mut builder = test_codex().with_model("gpt-5.1").with_config({
+    let mut builder = test_praxis().with_model("gpt-5.1").with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -1773,14 +1775,14 @@ async fn delegated_turn_user_role_echo_does_not_redelegate_and_still_forwards_au
     });
     let test = builder.build_with_streaming_server(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) if session_id == "sess_echo_guard" => Some(()),
@@ -1788,7 +1790,7 @@ async fn delegated_turn_user_role_echo_does_not_redelegate_and_still_forwards_au
     })
     .await;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::HandoffRequested(handoff),
         }) if handoff.input_transcript == "delegate now" => Some(()),
@@ -1825,7 +1827,7 @@ async fn delegated_turn_user_role_echo_does_not_redelegate_and_still_forwards_au
         Some("\"Agent Final Message\":\n\nassistant says hi")
     );
 
-    let audio_out = wait_for_event_match(&test.codex, |msg| match msg {
+    let audio_out = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::AudioOut(frame),
         }) => Some(frame.clone()),
@@ -1853,7 +1855,7 @@ async fn delegated_turn_user_role_echo_does_not_redelegate_and_still_forwards_au
         "[realtime test +{}ms] delegated completion resolved",
         start.elapsed().as_millis()
     );
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -1907,7 +1909,7 @@ async fn inbound_handoff_request_does_not_block_realtime_event_forwarding() -> R
     ]]])
     .await;
 
-    let mut builder = test_codex().with_model("gpt-5.1").with_config({
+    let mut builder = test_praxis().with_model("gpt-5.1").with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -1915,14 +1917,14 @@ async fn inbound_handoff_request_does_not_block_realtime_event_forwarding() -> R
     });
     let test = builder.build_with_streaming_server(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) if session_id == "sess_non_blocking" => Some(()),
@@ -1930,7 +1932,7 @@ async fn inbound_handoff_request_does_not_block_realtime_event_forwarding() -> R
     })
     .await;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::HandoffRequested(handoff),
         }) if handoff.input_transcript == "delegate now" => Some(()),
@@ -1940,7 +1942,7 @@ async fn inbound_handoff_request_does_not_block_realtime_event_forwarding() -> R
 
     let audio_out = tokio::time::timeout(
         Duration::from_millis(500),
-        wait_for_event_match(&test.codex, |msg| match msg {
+        wait_for_event_match(&test.thread, |msg| match msg {
             EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
                 payload: RealtimeEvent::AudioOut(frame),
             }) => Some(frame.clone()),
@@ -1959,7 +1961,7 @@ async fn inbound_handoff_request_does_not_block_realtime_event_forwarding() -> R
     completion
         .await
         .expect("delegated turn request did not complete");
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -2033,7 +2035,7 @@ async fn inbound_handoff_request_steers_active_turn() -> Result<()> {
     ]])
     .await;
 
-    let mut builder = test_codex().with_model("gpt-5.1").with_config({
+    let mut builder = test_praxis().with_model("gpt-5.1").with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -2041,13 +2043,13 @@ async fn inbound_handoff_request_steers_active_turn() -> Result<()> {
     });
     let test = builder.build_with_streaming_server(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) if session_id == "sess_steer" => Some(()),
@@ -2055,7 +2057,7 @@ async fn inbound_handoff_request_steers_active_turn() -> Result<()> {
     })
     .await;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "first prompt".to_string(),
@@ -2065,12 +2067,12 @@ async fn inbound_handoff_request_steers_active_turn() -> Result<()> {
         })
         .await?;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::AgentMessageContentDelta(_))
     })
     .await;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationAudio(ConversationAudioParams {
             frame: RealtimeAudioFrame {
                 data: "AQID".to_string(),
@@ -2082,7 +2084,7 @@ async fn inbound_handoff_request_steers_active_turn() -> Result<()> {
         }))
         .await?;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::HandoffRequested(handoff),
         }) if handoff.input_transcript == "steer via realtime" => Some(()),
@@ -2101,7 +2103,7 @@ async fn inbound_handoff_request_steers_active_turn() -> Result<()> {
     second_completion
         .await
         .expect("second request did not complete");
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -2174,7 +2176,7 @@ async fn inbound_handoff_request_starts_turn_and_does_not_block_realtime_audio()
     ]]])
     .await;
 
-    let mut builder = test_codex().with_model("gpt-5.1").with_config({
+    let mut builder = test_praxis().with_model("gpt-5.1").with_config({
         let realtime_base_url = realtime_server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
@@ -2182,14 +2184,14 @@ async fn inbound_handoff_request_starts_turn_and_does_not_block_realtime_audio()
     });
     let test = builder.build_with_streaming_server(&api_server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::RealtimeConversationStart(ConversationStartParams {
             prompt: "backend prompt".to_string(),
             session_id: None,
         }))
         .await?;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::SessionUpdated { session_id, .. },
         }) if session_id == "sess_handoff_request" => Some(()),
@@ -2197,7 +2199,7 @@ async fn inbound_handoff_request_starts_turn_and_does_not_block_realtime_audio()
     })
     .await;
 
-    let _ = wait_for_event_match(&test.codex, |msg| match msg {
+    let _ = wait_for_event_match(&test.thread, |msg| match msg {
         EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
             payload: RealtimeEvent::HandoffRequested(handoff),
         }) => (handoff.handoff_id == "handoff_audio" && handoff.input_transcript == delegated_text)
@@ -2208,7 +2210,7 @@ async fn inbound_handoff_request_starts_turn_and_does_not_block_realtime_audio()
 
     let audio_out = tokio::time::timeout(
         Duration::from_millis(500),
-        wait_for_event_match(&test.codex, |msg| match msg {
+        wait_for_event_match(&test.thread, |msg| match msg {
             EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
                 payload: RealtimeEvent::AudioOut(frame),
             }) => Some(frame.clone()),
@@ -2227,7 +2229,7 @@ async fn inbound_handoff_request_starts_turn_and_does_not_block_realtime_audio()
     completion
         .await
         .expect("delegated turn request did not complete");
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;

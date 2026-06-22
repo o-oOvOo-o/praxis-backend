@@ -1,5 +1,7 @@
 use praxis_protocol::protocol::Product;
 
+use crate::model_provider_info::WireApi;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum WireId {
     Responses,
@@ -17,9 +19,19 @@ impl WireId {
     }
 }
 
+impl From<WireApi> for WireId {
+    fn from(api: WireApi) -> Self {
+        match api {
+            WireApi::Responses => Self::Responses,
+            WireApi::Claude => Self::ClaudeMessages,
+            WireApi::OpenAiCompat => Self::OpenAiCompat,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum BehaviorProfileId {
-    CodexResponses,
+    OpenAiResponses,
     Common,
     DeepSeek,
     Gemini,
@@ -32,7 +44,7 @@ pub(crate) enum BehaviorProfileId {
 impl BehaviorProfileId {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::CodexResponses => "codex/responses",
+            Self::OpenAiResponses => "codex/responses",
             Self::Common => "common",
             Self::DeepSeek => "deepseek",
             Self::Gemini => "gemini",
@@ -63,6 +75,12 @@ impl ProductProfileId {
             Product::Praxis => Some(Self::Praxis),
             Product::Cunning3d => Some(Self::Cunning3d),
             Product::Chatgpt | Product::Atlas => None,
+        }
+    }
+
+    pub(crate) fn policy_reader_behavior_id(self) -> BehaviorProfileId {
+        match self {
+            Self::Praxis | Self::Cunning3d => BehaviorProfileId::Common,
         }
     }
 }

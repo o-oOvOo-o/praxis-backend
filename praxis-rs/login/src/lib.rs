@@ -20,7 +20,7 @@ pub use auth::AuthCredentialsStoreMode;
 pub use auth::AuthDotJson;
 pub use auth::AuthManager;
 pub use auth::CLIENT_ID;
-pub use auth::CodexAuth;
+pub use auth::OpenAiAccountAuth;
 pub use auth::ExternalAuth;
 pub use auth::ExternalAuthChatgptMetadata;
 pub use auth::ExternalAuthRefreshContext;
@@ -41,3 +41,8 @@ pub use auth::read_praxis_api_key_from_env;
 pub use auth::save_auth;
 pub use praxis_protocol::auth::AuthMode;
 pub use token_data::TokenData;
+
+pub mod compat {
+    #[allow(deprecated)]
+    pub use crate::auth::CodexAuth;
+}

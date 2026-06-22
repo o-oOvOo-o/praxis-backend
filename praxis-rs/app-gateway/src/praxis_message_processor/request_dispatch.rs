@@ -13,10 +13,8 @@ impl PraxisMessageProcessor {
         app_gateway_client_name: Option<String>,
         request_context: RequestContext,
     ) {
-        let to_connection_request_id = |request_id| ConnectionRequestId {
-            connection_id,
-            request_id,
-        };
+        let to_connection_request_id =
+            |request_id| ConnectionRequestId::new(connection_id, request_id);
 
         match request {
             ClientRequest::Initialize { .. } => {
@@ -66,6 +64,10 @@ impl PraxisMessageProcessor {
                 self.thread_regenerate_name(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::ThreadModelSet { request_id, params } => {
+                self.thread_model_set(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::ThreadMetadataUpdate { request_id, params } => {
                 self.thread_metadata_update(to_connection_request_id(request_id), params)
                     .await;
@@ -91,6 +93,10 @@ impl PraxisMessageProcessor {
             }
             ClientRequest::ThreadList { request_id, params } => {
                 self.thread_list(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadLookup { request_id, params } => {
+                self.thread_lookup(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::ThreadLoadedList { request_id, params } => {
@@ -127,6 +133,14 @@ impl PraxisMessageProcessor {
             }
             ClientRequest::ThreadShellCommand { request_id, params } => {
                 self.thread_shell_command(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadHistoryAppend { request_id, params } => {
+                self.thread_history_append(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadHistoryEntryGet { request_id, params } => {
+                self.thread_history_entry_get(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::SkillsList { request_id, params } => {
@@ -187,6 +201,10 @@ impl PraxisMessageProcessor {
             }
             ClientRequest::ThreadRealtimeAppendAudio { request_id, params } => {
                 self.thread_realtime_append_audio(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::AudioTranscribe { request_id, params } => {
+                self.audio_transcribe(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::ThreadRealtimeAppendText { request_id, params } => {
@@ -288,7 +306,7 @@ impl PraxisMessageProcessor {
             | ClientRequest::ConfigValueWrite { .. }
             | ClientRequest::ConfigBatchWrite { .. }
             | ClientRequest::ExperimentalFeatureEnablementSet { .. } => {
-                warn!("Config request reached PraxisMessageProcessor unexpectedly");
+                Self::warn_unexpected_forwarded_request("Config request");
             }
             ClientRequest::FsReadFile { .. }
             | ClientRequest::FsWriteFile { .. }
@@ -299,14 +317,14 @@ impl PraxisMessageProcessor {
             | ClientRequest::FsCopy { .. }
             | ClientRequest::FsWatch { .. }
             | ClientRequest::FsUnwatch { .. } => {
-                warn!("Filesystem request reached PraxisMessageProcessor unexpectedly");
+                Self::warn_unexpected_forwarded_request("Filesystem request");
             }
             ClientRequest::ConfigRequirementsRead { .. } => {
-                warn!("ConfigRequirementsRead request reached PraxisMessageProcessor unexpectedly");
+                Self::warn_unexpected_forwarded_request("ConfigRequirementsRead request");
             }
             ClientRequest::ExternalAgentConfigDetect { .. }
             | ClientRequest::ExternalAgentConfigImport { .. } => {
-                warn!("ExternalAgentConfig request reached PraxisMessageProcessor unexpectedly");
+                Self::warn_unexpected_forwarded_request("ExternalAgentConfig request");
             }
             ClientRequest::GetAccountRateLimits {
                 request_id,
@@ -320,5 +338,9 @@ impl PraxisMessageProcessor {
                     .await;
             }
         }
+    }
+
+    fn warn_unexpected_forwarded_request(category: &str) {
+        warn!("{category} reached PraxisMessageProcessor unexpectedly");
     }
 }

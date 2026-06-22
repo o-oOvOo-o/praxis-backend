@@ -21,8 +21,9 @@ use praxis_app_gateway_client::RemoteAppGatewayConnectArgs;
 use praxis_app_gateway_protocol::AuthMode as AppGatewayAuthMode;
 use praxis_app_gateway_protocol::ConfigWarningNotification;
 use praxis_app_gateway_protocol::Thread as AppGatewayThread;
-use praxis_app_gateway_protocol::ThreadListParams;
-use praxis_app_gateway_protocol::ThreadSortKey as AppGatewayThreadSortKey;
+use praxis_app_gateway_protocol::ThreadLookupParams;
+use praxis_app_gateway_protocol::ThreadLookupSelector;
+use praxis_app_gateway_protocol::ThreadSourceKind;
 use praxis_cloud_requirements::cloud_config_bundle_loader_for_storage;
 use praxis_core::LMSTUDIO_OSS_PROVIDER_ID;
 use praxis_core::ModelProviderInfo;
@@ -43,7 +44,6 @@ use praxis_core::config_loader::LoaderOverrides;
 use praxis_core::config_loader::format_config_error_with_source;
 use praxis_core::format_exec_policy_error_with_source;
 use praxis_core::path_utils;
-use praxis_core::read_session_meta_line;
 use praxis_core::windows_sandbox::WindowsSandboxLevelExt;
 use praxis_login::AuthConfig;
 use praxis_login::default_client::set_default_client_residency_requirement;
@@ -54,9 +54,6 @@ use praxis_protocol::config_types::SandboxMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
 use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::protocol::AskForApproval;
-use praxis_protocol::protocol::RolloutItem;
-use praxis_protocol::protocol::RolloutLine;
-use praxis_protocol::protocol::TurnContextItem;
 use praxis_rollout::state_db::get_state_db;
 use praxis_state::log_db;
 use praxis_terminal_detection::Multiplexer;
@@ -71,7 +68,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thread_pagination::interactive_thread_source_kinds;
-use thread_pagination::thread_list_params as app_gateway_thread_list_params;
 use tracing::error;
 use tracing::warn;
 
@@ -82,7 +78,6 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::prelude::*;
 use tui_config::TuiRuntimeConfig;
 use url::Url;
-use uuid::Uuid;
 
 mod additional_dirs;
 mod app;
@@ -377,9 +372,7 @@ pub fn normalize_remote_addr(addr: &str) -> color_eyre::Result<String> {
 
 pub fn parse_control_listen_addr(addr: &str) -> color_eyre::Result<SocketAddr> {
     let Some(socket_addr) = addr.strip_prefix("ws://") else {
-        color_eyre::eyre::bail!(
-            "invalid control listen address `{addr}`; expected `ws://IP:PORT`"
-        );
+        color_eyre::eyre::bail!("invalid control listen address `{addr}`; expected `ws://IP:PORT`");
     };
     socket_addr.parse::<SocketAddr>().map_err(|err| {
         color_eyre::eyre::eyre!(
@@ -410,6 +403,7 @@ async fn connect_remote_app_gateway(
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
+        host_extensions: Vec::new(),
         channel_capacity: TUI_APP_GATEWAY_CHANNEL_CAPACITY,
     })
     .await
@@ -419,16 +413,14 @@ async fn connect_remote_app_gateway(
 
 fn control_listener_bind_failed(err: &color_eyre::Report) -> bool {
     err.chain().any(|cause| {
-        cause
-            .downcast_ref::<std::io::Error>()
-            .is_some_and(|err| {
-                matches!(
-                    err.kind(),
-                    std::io::ErrorKind::AddrInUse
-                        | std::io::ErrorKind::AddrNotAvailable
-                        | std::io::ErrorKind::PermissionDenied
-                )
-            })
+        cause.downcast_ref::<std::io::Error>().is_some_and(|err| {
+            matches!(
+                err.kind(),
+                std::io::ErrorKind::AddrInUse
+                    | std::io::ErrorKind::AddrNotAvailable
+                    | std::io::ErrorKind::PermissionDenied
+            )
+        })
     })
 }
 
@@ -553,6 +545,7 @@ where
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         experimental_api: true,
         opt_out_notification_methods: Vec::new(),
+        host_extensions: Vec::new(),
         channel_capacity: TUI_APP_GATEWAY_CHANNEL_CAPACITY,
         control_listen,
         control_auth: NativeControlAuthSettings::default(),
@@ -578,6 +571,7 @@ fn session_target_from_app_gateway_thread(
             path: thread.path,
             thread_id,
             thread_name: thread.name,
+            cwd: Some(thread.cwd),
         }),
         Err(err) => {
             warn!(
@@ -590,70 +584,21 @@ fn session_target_from_app_gateway_thread(
     }
 }
 
-async fn lookup_session_target_by_name_with_app_gateway(
-    app_gateway: &mut AppGatewaySession,
-    name: &str,
-) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
-    let mut cursor = None;
-    loop {
-        let response = app_gateway
-            .thread_list(app_gateway_thread_list_params(
-                cursor.clone(),
-                AppGatewayThreadSortKey::UpdatedAt,
-                interactive_thread_source_kinds(/*include_non_interactive*/ false),
-                // Thread names are hydrated after `thread/list` resolves rollout metadata, so
-                // name-based resume must scan the filtered list client-side instead of relying on
-                // the backend search index.
-                None,
-            ))
-            .await?;
-        if let Some(thread) = response
-            .data
-            .into_iter()
-            .find(|thread| thread.name.as_deref() == Some(name))
-        {
-            return Ok(session_target_from_app_gateway_thread(thread));
-        }
-        if response.next_cursor.is_none() {
-            return Ok(None);
-        }
-        cursor = response.next_cursor;
-    }
-}
-
 async fn lookup_session_target_with_app_gateway(
     app_gateway: &mut AppGatewaySession,
     id_or_name: &str,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
-    if Uuid::parse_str(id_or_name).is_ok() {
-        let thread_id = match ThreadId::from_string(id_or_name) {
-            Ok(thread_id) => thread_id,
-            Err(err) => {
-                warn!(
-                    session = id_or_name,
-                    %err,
-                    "Failed to parse session id during TUI lookup"
-                );
-                return Ok(None);
-            }
-        };
-        return match app_gateway
-            .thread_read(thread_id, /*include_turns*/ false)
-            .await
-        {
-            Ok(thread) => Ok(session_target_from_app_gateway_thread(thread)),
-            Err(err) => {
-                warn!(
-                    session = id_or_name,
-                    %err,
-                    "thread/read failed during TUI session lookup"
-                );
-                Ok(None)
-            }
-        };
-    }
-
-    lookup_session_target_by_name_with_app_gateway(app_gateway, id_or_name).await
+    let params = session_lookup_params(
+        ThreadLookupSelector::IdOrName {
+            value: id_or_name.to_string(),
+        },
+        interactive_thread_source_kinds(/*include_non_interactive*/ false),
+        None,
+    );
+    app_gateway
+        .thread_lookup(params)
+        .await
+        .map(|thread| thread.and_then(session_target_from_app_gateway_thread))
 }
 
 async fn lookup_latest_session_target_with_app_gateway(
@@ -661,47 +606,29 @@ async fn lookup_latest_session_target_with_app_gateway(
     cwd_filter: Option<&Path>,
     include_non_interactive: bool,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
-    let project_filter = cwd_filter.map(project_scope_root);
-    let mut cursor = None;
-    loop {
-        let response = app_gateway
-            .thread_list(latest_session_lookup_params(
-                cursor.clone(),
-                include_non_interactive,
-            ))
-            .await?;
-        if let Some(thread) =
-            response
-                .data
-                .into_iter()
-                .find(|thread| match project_filter.as_deref() {
-                    Some(filter_root) => project_scope_root(thread.cwd.as_path()) == filter_root,
-                    None => true,
-                })
-        {
-            return Ok(session_target_from_app_gateway_thread(thread));
-        }
-        if response.next_cursor.is_none() {
-            return Ok(None);
-        }
-        cursor = response.next_cursor;
-    }
-}
-
-fn latest_session_lookup_params(
-    cursor: Option<String>,
-    include_non_interactive: bool,
-) -> ThreadListParams {
-    app_gateway_thread_list_params(
-        cursor,
-        AppGatewayThreadSortKey::UpdatedAt,
+    let params = session_lookup_params(
+        ThreadLookupSelector::Latest,
         interactive_thread_source_kinds(include_non_interactive),
-        None,
-    )
+        cwd_filter.map(|path| path.to_string_lossy().into_owned()),
+    );
+    app_gateway
+        .thread_lookup(params)
+        .await
+        .map(|thread| thread.and_then(session_target_from_app_gateway_thread))
 }
 
-fn project_scope_root(path: &Path) -> PathBuf {
-    praxis_git_utils::resolve_root_git_project_for_trust(path).unwrap_or_else(|| path.to_path_buf())
+fn session_lookup_params(
+    selector: ThreadLookupSelector,
+    source_kinds: Option<Vec<ThreadSourceKind>>,
+    cwd_scope: Option<String>,
+) -> ThreadLookupParams {
+    ThreadLookupParams {
+        selector,
+        include_turns: false,
+        source_kinds,
+        cwd_scope,
+        archived: Some(false),
+    }
 }
 
 fn session_lookup_command_hint(action: &str, source: SessionLookupSource) -> String {
@@ -876,7 +803,7 @@ pub async fn run_main(
     let praxis_home = match find_praxis_home() {
         Ok(praxis_home) => praxis_home.to_path_buf(),
         Err(err) => {
-            eprintln!("Error finding codex home: {err}");
+            eprintln!("Error finding praxis home: {err}");
             std::process::exit(1);
         }
     };
@@ -1050,7 +977,7 @@ pub async fn run_main(
     // Wrap file in non‑blocking writer.
     let (non_blocking, _guard) = non_blocking(log_file);
 
-    // use RUST_LOG env var, default to info for codex crates.
+    // Use RUST_LOG env var, default to info for Praxis crates.
     let env_filter = || {
         EnvFilter::try_from_default_env().unwrap_or_else(|_| {
             EnvFilter::new("praxis_core=info,praxis_tui=info,praxis_rmcp_client=info")
@@ -1582,10 +1509,8 @@ async fn run_ratatui_app(
             } else {
                 match resolve_cwd_for_resume_or_fork(
                     &mut tui,
-                    &config,
                     &current_cwd,
-                    target_session.thread_id,
-                    target_session.path.as_deref(),
+                    target_session.cwd.as_deref(),
                     action,
                     allow_prompt,
                 )
@@ -1721,86 +1646,6 @@ fn install_color_eyre() -> color_eyre::Result<()> {
     }
 }
 
-pub(crate) async fn resolve_session_thread_id(
-    path: &Path,
-    id_str_if_uuid: Option<&str>,
-) -> Option<ThreadId> {
-    match id_str_if_uuid {
-        Some(id_str) => ThreadId::from_string(id_str).ok(),
-        None => read_session_meta_line(path)
-            .await
-            .ok()
-            .map(|meta_line| meta_line.meta.id),
-    }
-}
-
-pub(crate) async fn read_session_cwd(
-    config: &Config,
-    thread_id: ThreadId,
-    path: Option<&Path>,
-) -> Option<PathBuf> {
-    if let Some(state_db_ctx) = get_state_db(config).await
-        && let Ok(Some(metadata)) = state_db_ctx.get_thread(thread_id).await
-    {
-        return Some(metadata.cwd);
-    }
-
-    // Prefer the latest TurnContext cwd so resume/fork reflects the most recent
-    // session directory (for the changed-cwd prompt) when DB data is unavailable.
-    // The alternative would be mutating the SessionMeta line when the session cwd
-    // changes, but the rollout is an append-only JSONL log and rewriting the head
-    // would be error-prone.
-    let path = path?;
-    if let Some(cwd) = read_latest_turn_context(path).await.map(|item| item.cwd) {
-        return Some(cwd);
-    }
-    match read_session_meta_line(path).await {
-        Ok(meta_line) => Some(meta_line.meta.cwd),
-        Err(err) => {
-            let rollout_path = path.display().to_string();
-            tracing::warn!(
-                %rollout_path,
-                %err,
-                "Failed to read session metadata from rollout"
-            );
-            None
-        }
-    }
-}
-
-pub(crate) async fn read_session_model(
-    config: &Config,
-    thread_id: ThreadId,
-    path: Option<&Path>,
-) -> Option<String> {
-    if let Some(state_db_ctx) = get_state_db(config).await
-        && let Ok(Some(metadata)) = state_db_ctx.get_thread(thread_id).await
-        && let Some(model) = metadata.model
-    {
-        return Some(model);
-    }
-
-    let path = path?;
-    read_latest_turn_context(path).await.map(|item| item.model)
-}
-
-async fn read_latest_turn_context(path: &Path) -> Option<TurnContextItem> {
-    let text = tokio::fs::read_to_string(path).await.ok()?;
-    for line in text.lines().rev() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Ok(rollout_line) = serde_json::from_str::<RolloutLine>(trimmed) else {
-            continue;
-        };
-        if let RolloutItem::TurnContext(item) = rollout_line.item {
-            return Some(item);
-        }
-    }
-    None
-}
-
 pub(crate) fn cwds_differ(current_cwd: &Path, session_cwd: &Path) -> bool {
     match (
         path_utils::normalize_for_path_comparison(current_cwd),
@@ -1818,16 +1663,15 @@ pub(crate) enum ResolveCwdOutcome {
 
 pub(crate) async fn resolve_cwd_for_resume_or_fork(
     tui: &mut Tui,
-    config: &Config,
     current_cwd: &Path,
-    thread_id: ThreadId,
-    path: Option<&Path>,
+    session_cwd: Option<&Path>,
     action: CwdPromptAction,
     allow_prompt: bool,
 ) -> color_eyre::Result<ResolveCwdOutcome> {
-    let Some(history_cwd) = read_session_cwd(config, thread_id, path).await else {
+    let Some(history_cwd) = session_cwd else {
         return Ok(ResolveCwdOutcome::Continue(None));
     };
+    let history_cwd = history_cwd.to_path_buf();
     if allow_prompt && cwds_differ(current_cwd, &history_cwd) {
         let selection_outcome =
             cwd_prompt::run_cwd_selection_prompt(tui, action, current_cwd, &history_cwd).await?;
@@ -2186,14 +2030,8 @@ mod tests {
     use praxis_core::config::ConfigBuilder;
     use praxis_core::config::ConfigOverrides;
     use praxis_core::config::ProjectConfig;
-    use praxis_features::Feature;
     use praxis_protocol::protocol::AskForApproval;
-    use praxis_protocol::protocol::RolloutItem;
-    use praxis_protocol::protocol::RolloutLine;
-    use praxis_protocol::protocol::SessionMeta;
-    use praxis_protocol::protocol::SessionMetaLine;
     use praxis_protocol::protocol::SessionSource;
-    use praxis_protocol::protocol::TurnContextItem;
     use serial_test::serial;
     use tempfile::TempDir;
 
@@ -2225,6 +2063,7 @@ mod tests {
             path: None,
             thread_id,
             thread_name: None,
+            cwd: None,
         };
 
         assert_eq!(target.display_label(), format!("thread {thread_id}"));
@@ -2311,38 +2150,33 @@ mod tests {
     #[tokio::test]
     async fn latest_session_lookup_params_are_provider_agnostic_for_embedded_sessions()
     -> std::io::Result<()> {
-        let params = latest_session_lookup_params(
-            /*cursor*/ None, /*include_non_interactive*/ false,
+        let params = session_lookup_params(
+            ThreadLookupSelector::Latest,
+            interactive_thread_source_kinds(/*include_non_interactive*/ false),
+            None,
         );
 
-        assert_eq!(params.model_providers, None);
-        assert_eq!(params.cwd, None);
+        assert_eq!(
+            params.source_kinds,
+            Some(vec![ThreadSourceKind::Cli, ThreadSourceKind::VsCode])
+        );
+        assert_eq!(params.cwd_scope, None);
+        assert_eq!(params.archived, Some(false));
         Ok(())
     }
 
     #[tokio::test]
     async fn latest_session_lookup_params_can_resume_non_interactive_when_requested()
     -> std::io::Result<()> {
-        let params = latest_session_lookup_params(
-            /*cursor*/ Some("cursor-1".to_string()),
-            /*include_non_interactive*/ true,
+        let params = session_lookup_params(
+            ThreadLookupSelector::Latest,
+            interactive_thread_source_kinds(/*include_non_interactive*/ true),
+            Some("project".to_string()),
         );
 
-        assert_eq!(params.cursor, Some("cursor-1".to_string()));
-        assert_eq!(params.model_providers, None);
-        assert_eq!(params.cwd, None);
         assert_eq!(params.source_kinds, None);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn read_session_cwd_returns_none_without_sqlite_or_rollout_path() -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
-
-        let cwd = read_session_cwd(&config, ThreadId::new(), /*path*/ None).await;
-
-        assert_eq!(cwd, None);
+        assert_eq!(params.cwd_scope, Some("project".to_string()));
+        assert_eq!(params.archived, Some(false));
         Ok(())
     }
 
@@ -2437,8 +2271,7 @@ mod tests {
                 start_test_embedded_app_gateway(config).await?,
             ));
         let target =
-            lookup_session_target_by_name_with_app_gateway(&mut app_gateway, "saved-session")
-                .await?;
+            lookup_session_target_with_app_gateway(&mut app_gateway, "saved-session").await?;
         let target = target.expect("name lookup should find the saved thread");
         assert_eq!(target.path, Some(rollout_path));
         assert_eq!(target.thread_id, thread_id);
@@ -2509,112 +2342,6 @@ mod tests {
             !should_show,
             "Trust prompt should not be shown for projects explicitly marked as untrusted"
         );
-        Ok(())
-    }
-
-    fn build_turn_context(config: &Config, cwd: PathBuf) -> TurnContextItem {
-        let model = config
-            .model
-            .clone()
-            .unwrap_or_else(|| "gpt-5.1".to_string());
-        TurnContextItem {
-            turn_id: None,
-            trace_id: None,
-            cwd,
-            current_date: None,
-            timezone: None,
-            approval_policy: config.permissions.approval_policy.value(),
-            sandbox_policy: config.permissions.sandbox_policy.get().clone(),
-            network: None,
-            model,
-            personality: None,
-            collaboration_mode: None,
-            realtime_active: Some(false),
-            effort: config.model_reasoning_effort,
-            summary: config
-                .model_reasoning_summary
-                .unwrap_or(praxis_protocol::config_types::ReasoningSummary::Auto),
-            user_instructions: None,
-            developer_instructions: None,
-            final_output_json_schema: None,
-            truncation_policy: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn read_session_cwd_prefers_latest_turn_context() -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
-        let first = temp_dir.path().join("first");
-        let second = temp_dir.path().join("second");
-        std::fs::create_dir_all(&first)?;
-        std::fs::create_dir_all(&second)?;
-
-        let rollout_path = temp_dir.path().join("rollout.jsonl");
-        let lines = vec![
-            RolloutLine {
-                timestamp: "t0".to_string(),
-                item: RolloutItem::TurnContext(build_turn_context(&config, first)),
-            },
-            RolloutLine {
-                timestamp: "t1".to_string(),
-                item: RolloutItem::TurnContext(build_turn_context(&config, second.clone())),
-            },
-        ];
-        let mut text = String::new();
-        for line in lines {
-            text.push_str(&serde_json::to_string(&line).expect("serialize rollout"));
-            text.push('\n');
-        }
-        std::fs::write(&rollout_path, text)?;
-
-        let cwd = read_session_cwd(&config, ThreadId::new(), Some(&rollout_path))
-            .await
-            .expect("expected cwd");
-        assert_eq!(cwd, second);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn should_prompt_when_meta_matches_current_but_latest_turn_differs() -> std::io::Result<()>
-    {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
-        let current = temp_dir.path().join("current");
-        let latest = temp_dir.path().join("latest");
-        std::fs::create_dir_all(&current)?;
-        std::fs::create_dir_all(&latest)?;
-
-        let rollout_path = temp_dir.path().join("rollout.jsonl");
-        let session_meta = SessionMeta {
-            cwd: current.clone(),
-            ..SessionMeta::default()
-        };
-        let lines = vec![
-            RolloutLine {
-                timestamp: "t0".to_string(),
-                item: RolloutItem::SessionMeta(SessionMetaLine {
-                    meta: session_meta,
-                    git: None,
-                }),
-            },
-            RolloutLine {
-                timestamp: "t1".to_string(),
-                item: RolloutItem::TurnContext(build_turn_context(&config, latest.clone())),
-            },
-        ];
-        let mut text = String::new();
-        for line in lines {
-            text.push_str(&serde_json::to_string(&line).expect("serialize rollout"));
-            text.push('\n');
-        }
-        std::fs::write(&rollout_path, text)?;
-
-        let session_cwd = read_session_cwd(&config, ThreadId::new(), Some(&rollout_path))
-            .await
-            .expect("expected cwd");
-        assert_eq!(session_cwd, latest);
-        assert!(cwds_differ(&current, &session_cwd));
         Ok(())
     }
 
@@ -2713,97 +2440,6 @@ trust_level = "untrusted"
             config.startup_warnings[0].contains("bogus-theme"),
             "warning should reference the final config's theme name"
         );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn read_session_cwd_falls_back_to_session_meta() -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let config = build_config(&temp_dir).await?;
-        let session_cwd = temp_dir.path().join("session");
-        std::fs::create_dir_all(&session_cwd)?;
-
-        let rollout_path = temp_dir.path().join("rollout.jsonl");
-        let session_meta = SessionMeta {
-            cwd: session_cwd.clone(),
-            ..SessionMeta::default()
-        };
-        let meta_line = RolloutLine {
-            timestamp: "t0".to_string(),
-            item: RolloutItem::SessionMeta(SessionMetaLine {
-                meta: session_meta,
-                git: None,
-            }),
-        };
-        let text = format!(
-            "{}\n",
-            serde_json::to_string(&meta_line).expect("serialize meta")
-        );
-        std::fs::write(&rollout_path, text)?;
-
-        let cwd = read_session_cwd(&config, ThreadId::new(), Some(&rollout_path))
-            .await
-            .expect("expected cwd");
-        assert_eq!(cwd, session_cwd);
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn read_session_cwd_prefers_sqlite_when_thread_id_present() -> std::io::Result<()> {
-        let temp_dir = TempDir::new()?;
-        let mut config = build_config(&temp_dir).await?;
-        config
-            .features
-            .enable(Feature::Sqlite)
-            .expect("test config should allow sqlite");
-
-        let thread_id = ThreadId::new();
-        let rollout_cwd = temp_dir.path().join("rollout-cwd");
-        let sqlite_cwd = temp_dir.path().join("sqlite-cwd");
-        std::fs::create_dir_all(&rollout_cwd)?;
-        std::fs::create_dir_all(&sqlite_cwd)?;
-
-        let rollout_path = temp_dir.path().join("rollout.jsonl");
-        let rollout_line = RolloutLine {
-            timestamp: "t0".to_string(),
-            item: RolloutItem::TurnContext(build_turn_context(&config, rollout_cwd)),
-        };
-        std::fs::write(
-            &rollout_path,
-            format!(
-                "{}\n",
-                serde_json::to_string(&rollout_line).expect("serialize rollout")
-            ),
-        )?;
-
-        let runtime = praxis_state::StateRuntime::init(
-            config.praxis_home.clone(),
-            config.model_provider_id.clone(),
-        )
-        .await
-        .map_err(std::io::Error::other)?;
-        runtime
-            .mark_backfill_complete(/*last_watermark*/ None)
-            .await
-            .map_err(std::io::Error::other)?;
-
-        let mut builder = praxis_state::ThreadMetadataBuilder::new(
-            thread_id,
-            rollout_path.clone(),
-            chrono::Utc::now(),
-            SessionSource::Cli,
-        );
-        builder.cwd = sqlite_cwd.clone();
-        let metadata = builder.build(config.model_provider_id.as_str());
-        runtime
-            .upsert_thread(&metadata)
-            .await
-            .map_err(std::io::Error::other)?;
-
-        let cwd = read_session_cwd(&config, thread_id, Some(&rollout_path))
-            .await
-            .expect("expected cwd");
-        assert_eq!(cwd, sqlite_cwd);
         Ok(())
     }
 }

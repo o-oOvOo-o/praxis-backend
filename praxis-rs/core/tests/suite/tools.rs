@@ -18,7 +18,7 @@ use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use praxis_core::sandboxing::SandboxPermissions;
 use praxis_features::Feature;
 use praxis_protocol::protocol::AskForApproval;
@@ -49,7 +49,7 @@ async fn custom_tool_unknown_returns_custom_output_error() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let test = builder.build(&server).await?;
 
     let call_id = "custom-unsupported";
@@ -96,7 +96,7 @@ async fn shell_escalated_permissions_rejected_then_ok() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5");
+    let mut builder = test_praxis().with_model("gpt-5");
     let test = builder.build(&server).await?;
 
     let command = ["/bin/echo", "shell ok"];
@@ -193,7 +193,7 @@ async fn sandbox_denied_shell_returns_original_output() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.1-codex");
+    let mut builder = test_praxis().with_model("gpt-5.1-codex");
     let fixture = builder.build(&server).await?;
 
     let call_id = "sandbox-denied-shell";
@@ -291,7 +291,7 @@ async fn collect_tools(use_unified_exec: bool) -> Result<Vec<String>> {
     ])];
     let mock = mount_sse_sequence(&server, responses).await;
 
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         if use_unified_exec {
             config
                 .features
@@ -349,7 +349,7 @@ async fn shell_timeout_includes_timeout_prefix_and_metadata() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5");
+    let mut builder = test_praxis().with_model("gpt-5");
     let test = builder.build(&server).await?;
 
     let call_id = "shell-timeout";
@@ -420,7 +420,7 @@ async fn shell_timeout_handles_background_grandchild_stdout() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.1").with_config(|config| {
+    let mut builder = test_praxis().with_model("gpt-5.1").with_config(|config| {
         config
             .permissions
             .sandbox_policy
@@ -517,7 +517,7 @@ async fn shell_spawn_failure_truncates_exec_error() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_config(|cfg| {
+    let mut builder = test_praxis().with_config(|cfg| {
         cfg.permissions
             .sandbox_policy
             .set(SandboxPolicy::DangerFullAccess)

@@ -1,38 +1,30 @@
 use super::super::plugin::ProfileMatchContext;
-use super::super::plugin::base_url;
-use super::super::plugin::contains_any_text;
+use super::super::plugin::ProfileProviderIdentityRule;
 
-pub(crate) const QWEN_PROVIDER_ID: &str = "qwen";
+pub(super) const QWEN_PROVIDER_ID: &str = "qwen";
+const QWEN_CONTEXT_NEEDLES: &[&str] = &["qwen", "dashscope"];
+const QWEN_PROVIDER_NAME_NEEDLES: &[&str] = &["qwen", "dashscope"];
+const QWEN_BASE_URL_NEEDLES: &[&str] = &["dashscope.aliyuncs.com"];
+const QWEN_PROVIDER_RULE: ProfileProviderIdentityRule = ProfileProviderIdentityRule::new(
+    &[],
+    &[QWEN_PROVIDER_ID, "dashscope"],
+    &[],
+    QWEN_PROVIDER_NAME_NEEDLES,
+    QWEN_BASE_URL_NEEDLES,
+);
 
-pub(crate) fn matches(ctx: &ProfileMatchContext<'_>) -> bool {
-    contains_any_text(
-        &[
-            ctx.model_info.slug.as_str(),
-            ctx.provider_id,
-            ctx.provider.name.as_str(),
-            base_url(ctx.provider),
-        ],
-        &["qwen", "dashscope"],
-    )
+pub(super) fn matches(ctx: &ProfileMatchContext<'_>) -> bool {
+    ctx.model_and_provider_identity_contains_any(QWEN_CONTEXT_NEEDLES)
 }
 
-pub(crate) fn is_first_party_provider(
+pub(super) fn is_first_party_provider(
     provider_id: &str,
     provider: &crate::ModelProviderInfo,
 ) -> bool {
-    let provider_name = provider.name.to_ascii_lowercase();
-    provider_id.eq_ignore_ascii_case(QWEN_PROVIDER_ID)
-        || provider_id.eq_ignore_ascii_case("dashscope")
-        || provider_name.contains("qwen")
-        || provider_name.contains("dashscope")
-        || provider.base_url.as_deref().is_some_and(|base_url| {
-            base_url
-                .to_ascii_lowercase()
-                .contains("dashscope.aliyuncs.com")
-        })
+    QWEN_PROVIDER_RULE.matches_provider(provider_id, provider)
 }
 
-pub(crate) fn is_first_party_model(model: &str) -> bool {
+pub(super) fn is_first_party_model(model: &str) -> bool {
     let model = model.trim().to_ascii_lowercase();
     if model.is_empty() || model.starts_with("qwen-image") {
         return false;

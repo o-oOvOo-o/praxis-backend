@@ -12,7 +12,7 @@ use praxis_config::types::AppToolConfig;
 use praxis_config::types::AppToolsConfig;
 use praxis_config::types::AppsDefaultConfig;
 use praxis_features::Feature;
-use praxis_mcp::mcp::CODEX_APPS_MCP_SERVER_NAME;
+use praxis_mcp::mcp::PRAXIS_APPS_MCP_SERVER_NAME;
 use praxis_mcp::mcp_connection_manager::ToolInfo;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
@@ -105,11 +105,11 @@ fn praxis_app_tool(
 ) -> ToolInfo {
     let tool_namespace = connector_name
         .map(sanitize_name)
-        .map(|connector_name| format!("mcp__{CODEX_APPS_MCP_SERVER_NAME}__{connector_name}"))
-        .unwrap_or_else(|| CODEX_APPS_MCP_SERVER_NAME.to_string());
+        .map(|connector_name| format!("mcp__{PRAXIS_APPS_MCP_SERVER_NAME}__{connector_name}"))
+        .unwrap_or_else(|| PRAXIS_APPS_MCP_SERVER_NAME.to_string());
 
     ToolInfo {
-        server_name: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+        server_name: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
         tool_name: tool_name.to_string(),
         tool_namespace,
         tool: test_tool_definition(tool_name),
@@ -311,7 +311,7 @@ fn accessible_connectors_from_mcp_tools_preserves_description() {
     let mcp_tools = HashMap::from([(
         "mcp__praxis_apps__calendar_create_event".to_string(),
         ToolInfo {
-            server_name: CODEX_APPS_MCP_SERVER_NAME.to_string(),
+            server_name: PRAXIS_APPS_MCP_SERVER_NAME.to_string(),
             tool_name: "calendar_create_event".to_string(),
             tool_namespace: "mcp__praxis_apps__calendar".to_string(),
             tool: Tool {

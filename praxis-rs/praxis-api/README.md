@@ -1,6 +1,6 @@
 # praxis-api
 
-Typed clients for Codex/OpenAI APIs built on top of the generic transport in `praxis-client`.
+Typed clients for Praxis and OpenAI hosted APIs built on top of the generic transport in `praxis-client`.
 
 - Hosts the request/response models and request builders for Responses and Compact APIs.
 - Owns provider configuration (base URLs, headers, query params), auth header injection, retry tuning, and stream idle settings.

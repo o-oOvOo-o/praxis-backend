@@ -1,12 +1,12 @@
 # praxis-otel
 
-`praxis-otel` is the OpenTelemetry integration crate for Codex. It provides:
+`praxis-otel` is the OpenTelemetry integration crate for Praxis. It provides:
 
 - Provider wiring for log/trace/metric exporters (`praxis_otel::OtelProvider`
   and `praxis_otel::provider`).
 - Session-scoped business event emission via `praxis_otel::SessionTelemetry`.
 - Low-level metrics APIs via `praxis_otel::metrics`.
-- Trace-context helpers via `praxis_otel::trace_context` and crate-root re-exports.
+- Trace-context helpers via crate-root re-exports.
 
 ## Tracing and logs
 
@@ -52,7 +52,7 @@ if let Some(provider) = OtelProvider::from(&settings)? {
 ## SessionTelemetry (events)
 
 `SessionTelemetry` adds consistent metadata to tracing events and helps record
-Codex-specific session events. Rich session/business events should go through
+Praxis session events. Rich session/business events should go through
 `SessionTelemetry`; subsystem-owned audit events can stay with the owning subsystem.
 
 ```rust
@@ -82,7 +82,7 @@ Modes:
 - In-memory: records via `opentelemetry_sdk::metrics::InMemoryMetricExporter` for tests/assertions; call `shutdown()` to flush.
 
 `praxis-otel` also provides `OtelExporter::Statsig`, a shorthand for exporting OTLP/HTTP JSON metrics
-to Statsig using Codex-internal defaults.
+to Statsig using Praxis-internal defaults.
 
 Statsig ingestion (OTLP/HTTP JSON) example:
 
@@ -104,8 +104,8 @@ let metrics = MetricsClient::new(MetricsConfig::otlp(
     },
 ))?;
 
-metrics.counter("codex.session_started", 1, &[("source", "tui")])?;
-metrics.histogram("codex.request_latency", 83, &[("route", "chat")])?;
+metrics.counter("praxis.session_started", 1, &[("source", "tui")])?;
+metrics.histogram("praxis.request_latency", 83, &[("route", "chat")])?;
 ```
 
 In-memory (tests):
@@ -118,7 +118,7 @@ let metrics = MetricsClient::new(MetricsConfig::in_memory(
     env!("CARGO_PKG_VERSION"),
     exporter.clone(),
 ))?;
-metrics.counter("codex.turns", 1, &[("model", "gpt-5.1")])?;
+metrics.counter("praxis.turns", 1, &[("model", "gpt-5.1")])?;
 metrics.shutdown()?; // flushes in-memory exporter
 ```
 

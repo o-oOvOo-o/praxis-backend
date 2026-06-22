@@ -9,6 +9,7 @@ use crate::tools::context::ToolPayload;
 use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::spec::build_specs_with_discoverable_tools;
+use praxis_loop::tool::ConcurrencyMode;
 use praxis_mcp::mcp_connection_manager::ToolInfo;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::models::LocalShellAction;
@@ -92,13 +93,6 @@ impl ToolRouter {
         }
     }
 
-    pub fn specs(&self) -> Vec<ToolSpec> {
-        self.specs
-            .iter()
-            .map(|config| config.spec.clone())
-            .collect()
-    }
-
     pub fn model_visible_specs(&self) -> Vec<ToolSpec> {
         self.model_visible_specs.clone()
     }
@@ -115,6 +109,14 @@ impl ToolRouter {
             .iter()
             .filter(|config| config.supports_parallel_tool_calls)
             .any(|config| config.name() == tool_name)
+    }
+
+    pub fn tool_concurrency_mode(&self, tool_name: &str) -> ConcurrencyMode {
+        if self.tool_supports_parallel(tool_name) {
+            ConcurrencyMode::Parallel
+        } else {
+            ConcurrencyMode::Exclusive
+        }
     }
 
     #[instrument(level = "trace", skip_all, err)]

@@ -8,7 +8,7 @@ use core_test_support::responses::ev_response_created;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_features::Feature;
 use praxis_protocol::config_types::CollaborationMode;
@@ -35,14 +35,14 @@ fn collaboration_mode_for_model(model: String) -> CollaborationMode {
 }
 
 async fn submit_user_turn(
-    test: &core_test_support::test_codex::TestCodex,
+    test: &core_test_support::test_praxis::TestPraxis,
     prompt: &str,
     approval_policy: AskForApproval,
     sandbox_policy: SandboxPolicy,
     collaboration_mode: Option<CollaborationMode>,
 ) -> Result<()> {
     let session_model = test.session_configured.model.clone();
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: prompt.into(),
@@ -81,7 +81,7 @@ async fn execpolicy_blocks_shell_invocation() -> Result<()> {
         return Ok(());
     }
 
-    let mut builder = test_codex().with_config(|config| {
+    let mut builder = test_praxis().with_config(|config| {
         let policy_path = config.praxis_home.join("rules").join("policy.rules");
         fs::create_dir_all(
             policy_path
@@ -123,7 +123,7 @@ async fn execpolicy_blocks_shell_invocation() -> Result<()> {
     .await;
 
     let session_model = test.session_configured.model.clone();
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "run shell command".into(),
@@ -143,14 +143,14 @@ async fn execpolicy_blocks_shell_invocation() -> Result<()> {
         })
         .await?;
 
-    let EventMsg::ExecCommandEnd(end) = wait_for_event(&test.codex, |event| {
+    let EventMsg::ExecCommandEnd(end) = wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::ExecCommandEnd(_))
     })
     .await
     else {
         unreachable!()
     };
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -168,7 +168,7 @@ async fn execpolicy_blocks_shell_invocation() -> Result<()> {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shell_command_empty_script_with_collaboration_mode_does_not_panic() -> Result<()> {
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5").with_config(|config| {
+    let mut builder = test_praxis().with_model("gpt-5").with_config(|config| {
         config
             .features
             .enable(Feature::CollaborationModes)
@@ -209,7 +209,7 @@ async fn shell_command_empty_script_with_collaboration_mode_does_not_panic() -> 
     )
     .await?;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -223,7 +223,7 @@ async fn shell_command_empty_script_with_collaboration_mode_does_not_panic() -> 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unified_exec_empty_script_with_collaboration_mode_does_not_panic() -> Result<()> {
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5").with_config(|config| {
+    let mut builder = test_praxis().with_model("gpt-5").with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
@@ -268,7 +268,7 @@ async fn unified_exec_empty_script_with_collaboration_mode_does_not_panic() -> R
     )
     .await?;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -282,7 +282,7 @@ async fn unified_exec_empty_script_with_collaboration_mode_does_not_panic() -> R
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn shell_command_whitespace_script_with_collaboration_mode_does_not_panic() -> Result<()> {
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5").with_config(|config| {
+    let mut builder = test_praxis().with_model("gpt-5").with_config(|config| {
         config
             .features
             .enable(Feature::CollaborationModes)
@@ -323,7 +323,7 @@ async fn shell_command_whitespace_script_with_collaboration_mode_does_not_panic(
     )
     .await?;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
@@ -337,7 +337,7 @@ async fn shell_command_whitespace_script_with_collaboration_mode_does_not_panic(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unified_exec_whitespace_script_with_collaboration_mode_does_not_panic() -> Result<()> {
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5").with_config(|config| {
+    let mut builder = test_praxis().with_model("gpt-5").with_config(|config| {
         config
             .features
             .enable(Feature::UnifiedExec)
@@ -382,7 +382,7 @@ async fn unified_exec_whitespace_script_with_collaboration_mode_does_not_panic()
     )
     .await?;
 
-    wait_for_event(&test.codex, |event| {
+    wait_for_event(&test.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;

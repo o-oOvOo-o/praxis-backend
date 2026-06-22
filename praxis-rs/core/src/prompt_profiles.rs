@@ -11,7 +11,7 @@ use praxis_protocol::openai_models::ModelInfo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PromptProfileId {
-    CodexResponses,
+    OpenAiResponses,
     CommonBase,
     DeepSeek,
     Gemini,
@@ -22,7 +22,7 @@ pub(crate) enum PromptProfileId {
 impl PromptProfileId {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::CodexResponses => "codex/responses",
+            Self::OpenAiResponses => "codex/responses",
             Self::CommonBase => "common/base",
             Self::DeepSeek => "deepseek/base",
             Self::Gemini => "gemini/base",
@@ -33,7 +33,7 @@ impl PromptProfileId {
 
     fn from_behavior_id(profile_id: BehaviorProfileId) -> Option<Self> {
         match profile_id {
-            BehaviorProfileId::CodexResponses => Some(Self::CodexResponses),
+            BehaviorProfileId::OpenAiResponses => Some(Self::OpenAiResponses),
             BehaviorProfileId::Common => Some(Self::CommonBase),
             BehaviorProfileId::DeepSeek => Some(Self::DeepSeek),
             BehaviorProfileId::Gemini => Some(Self::Gemini),
@@ -94,7 +94,7 @@ fn resolve_behavior_model_instructions(
     }
     let instructions = match PromptProfileId::from_behavior_id(profile.id) {
         Some(profile_id)
-            if profile_id == PromptProfileId::CodexResponses
+            if profile_id == PromptProfileId::OpenAiResponses
                 && !catalog_instructions.trim().is_empty() =>
         {
             catalog_instructions.to_string()
@@ -170,11 +170,7 @@ fn resolve_prompt_profile(
     provider_id: &str,
     provider: &ModelProviderInfo,
 ) -> Option<ProfileDescriptor> {
-    let ctx = ProfileMatchContext {
-        model_info,
-        provider_id,
-        provider,
-    };
+    let ctx = ProfileMatchContext::new(model_info, provider_id, provider);
     LlmProfileRegistry::builtin_static().resolve(&ctx)
 }
 
@@ -249,14 +245,14 @@ mod tests {
     }
 
     #[test]
-    fn openai_gpt_model_resolves_codex_responses_profile() {
+    fn openai_gpt_model_resolves_openai_responses_profile() {
         let (provider_id, provider) = provider(
             OPENAI_PROVIDER_ID,
             "https://api.openai.com/v1",
             WireApi::Responses,
         );
         let profile = infer_prompt_profile_id(&model("gpt-5.2-codex"), &provider_id, &provider);
-        assert_eq!(profile, Some(PromptProfileId::CodexResponses));
+        assert_eq!(profile, Some(PromptProfileId::OpenAiResponses));
     }
 
     #[test]
@@ -275,7 +271,11 @@ mod tests {
             None,
             &LlmRuntimeCatalog::default(),
         );
-        assert_eq!(instructions, crate::llm::profiles::common::prompts::BASE);
+        assert_eq!(
+            Some(instructions.as_str()),
+            resolve_prompt_profile(&model_info, &provider_id, &provider)
+                .and_then(|profile| profile.instructions)
+        );
     }
 
     #[test]
@@ -298,7 +298,8 @@ mod tests {
         assert!(instructions.starts_with("你是 Praxis"));
         assert!(instructions.contains("# DeepSeek Smarter Orchestration"));
         assert!(
-            instructions.contains("优先把实现层委派给 Praxis 暴露的 Codex/OpenAI worker subagent")
+            instructions
+                .contains("优先把实现层委派给 Praxis 暴露的 OpenAI-backed Praxis worker subagent")
         );
         assert!(instructions.contains("精确复制规则只适用于正向任务契约"));
         assert!(instructions.contains("不得把该字面量传给 worker、写入工具参数或放进最终答复"));

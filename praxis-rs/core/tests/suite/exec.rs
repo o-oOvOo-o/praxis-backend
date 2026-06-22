@@ -8,7 +8,7 @@ use praxis_core::exec::ExecParams;
 use praxis_core::exec::ExecToolCallOutput;
 use praxis_core::exec::process_exec_tool_call;
 use praxis_core::sandboxing::SandboxPermissions;
-use praxis_core::spawn::CODEX_SANDBOX_ENV_VAR;
+use praxis_core::spawn::PRAXIS_SANDBOX_ENV_VAR;
 use praxis_protocol::config_types::WindowsSandboxLevel;
 use praxis_protocol::permissions::FileSystemSandboxPolicy;
 use praxis_protocol::permissions::NetworkSandboxPolicy;
@@ -20,8 +20,8 @@ use tempfile::TempDir;
 use praxis_core::error::Result;
 
 fn skip_test() -> bool {
-    if std::env::var(CODEX_SANDBOX_ENV_VAR) == Ok("seatbelt".to_string()) {
-        eprintln!("{CODEX_SANDBOX_ENV_VAR} is set to 'seatbelt', skipping test.");
+    if std::env::var(PRAXIS_SANDBOX_ENV_VAR) == Ok("seatbelt".to_string()) {
+        eprintln!("{PRAXIS_SANDBOX_ENV_VAR} is set to 'seatbelt', skipping test.");
         return true;
     }
 

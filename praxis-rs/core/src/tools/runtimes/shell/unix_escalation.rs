@@ -188,13 +188,14 @@ pub(super) async fn try_run_zsh_fork(
         req.sandbox_permissions,
         req.additional_permissions_preapproved,
     );
+    let effective_approval_policy = ctx.turn.effective_approval_policy();
     let escalation_policy = CoreShellActionProvider {
         policy: Arc::clone(&exec_policy),
         session: Arc::clone(&ctx.session),
         turn: Arc::clone(&ctx.turn),
         call_id: ctx.call_id.clone(),
         tool_name: GuardianCommandSource::Shell,
-        approval_policy: ctx.turn.approval_policy.value(),
+        approval_policy: effective_approval_policy,
         sandbox_policy: command_executor.sandbox_policy.clone(),
         file_system_sandbox_policy: command_executor.file_system_sandbox_policy.clone(),
         network_sandbox_policy: command_executor.network_sandbox_policy,
@@ -261,13 +262,14 @@ pub(crate) async fn prepare_unified_exec_zsh_fork(
         use_legacy_landlock: ctx.turn.features.use_legacy_landlock(),
         agent_os_command_span: None,
     };
+    let effective_approval_policy = ctx.turn.effective_approval_policy();
     let escalation_policy = CoreShellActionProvider {
         policy: Arc::clone(&exec_policy),
         session: Arc::clone(&ctx.session),
         turn: Arc::clone(&ctx.turn),
         call_id: ctx.call_id.clone(),
         tool_name: GuardianCommandSource::UnifiedExec,
-        approval_policy: ctx.turn.approval_policy.value(),
+        approval_policy: effective_approval_policy,
         sandbox_policy: exec_request.sandbox_policy.clone(),
         file_system_sandbox_policy: exec_request.file_system_sandbox_policy.clone(),
         network_sandbox_policy: exec_request.network_sandbox_policy,
@@ -701,7 +703,7 @@ impl ShellCommandExecutor for CoreShellCommandExecutor {
         let mut exec_env = self.env.clone();
         // `env_overlay` comes from `EscalationSession::env()`, so merge only the
         // wrapper/socket variables into the base shell environment.
-        for var in ["CODEX_ESCALATE_SOCKET", "EXEC_WRAPPER"] {
+        for var in ["PRAXIS_ESCALATE_SOCKET", "EXEC_WRAPPER"] {
             if let Some(value) = env_overlay.get(var) {
                 exec_env.insert(var.to_string(), value.clone());
             }

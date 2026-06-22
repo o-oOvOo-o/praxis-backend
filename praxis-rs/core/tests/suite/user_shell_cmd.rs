@@ -10,7 +10,7 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use core_test_support::wait_for_event_with_timeout;
@@ -46,14 +46,14 @@ async fn user_shell_cmd_ls_and_cat_in_temp_dir() {
     // Pin cwd to the temp dir so ls/cat operate there.
     let server = start_mock_server().await;
     let cwd_path = cwd.path().to_path_buf();
-    let mut builder = test_codex().with_config(move |config| {
+    let mut builder = test_praxis().with_config(move |config| {
         config.cwd = cwd_path.abs();
     });
     let codex = builder
         .build(&server)
         .await
         .expect("create new conversation")
-        .codex;
+        .thread;
 
     // 1) shell command should list the file
     let list_cmd = "ls".to_string();
@@ -101,12 +101,12 @@ async fn user_shell_cmd_ls_and_cat_in_temp_dir() {
 async fn user_shell_cmd_can_be_interrupted() {
     // Set up isolated config and conversation.
     let server = start_mock_server().await;
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let fixture = builder
         .build(&server)
         .await
         .expect("create new conversation");
-    let codex = &fixture.codex;
+    let codex = &fixture.thread;
 
     // Start a long-running command and then interrupt it.
     let sleep_cmd = "sleep 5".to_string();
@@ -141,7 +141,7 @@ async fn user_shell_cmd_can_be_interrupted() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()> {
     let server = start_mock_server().await;
-    let mut builder = test_codex().with_model("gpt-5.1");
+    let mut builder = test_praxis().with_model("gpt-5.1");
     let fixture = builder.build(&server).await?;
 
     let call_id = "active-turn-shell-call";
@@ -168,7 +168,7 @@ async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()>
     let mock = responses::mount_sse_sequence(&server, vec![first, second]).await;
 
     fixture
-        .codex
+        .thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "run model shell command".to_string(),
@@ -188,7 +188,7 @@ async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()>
         })
         .await?;
 
-    let _ = wait_for_event_match(&fixture.codex, |ev| match ev {
+    let _ = wait_for_event_match(&fixture.thread, |ev| match ev {
         EventMsg::ExecCommandBegin(event) if event.source == ExecCommandSource::Agent => {
             Some(event.clone())
         }
@@ -201,7 +201,7 @@ async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()>
     #[cfg(not(windows))]
     let user_shell_command = "printf user-shell".to_string();
     fixture
-        .codex
+        .thread
         .submit(Op::RunUserShellCommand {
             command: user_shell_command,
         })
@@ -211,7 +211,7 @@ async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()>
     let mut saw_user_shell_end = false;
     let mut saw_turn_complete = false;
     for _ in 0..200 {
-        let event = timeout(Duration::from_secs(20), fixture.codex.next_event())
+        let event = timeout(Duration::from_secs(20), fixture.thread.next_event())
             .await
             .context("timed out waiting for event")?
             .context("event stream ended unexpectedly")?;
@@ -253,7 +253,7 @@ async fn user_shell_command_does_not_replace_active_turn() -> anyhow::Result<()>
 async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
     // Disable it to ease command matching.
-    let mut builder = core_test_support::test_codex::test_codex().with_config(move |config| {
+    let mut builder = core_test_support::test_praxis::test_praxis().with_config(move |config| {
         config
             .features
             .disable(Feature::ShellSnapshot)
@@ -262,17 +262,17 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
     let test = builder.build(&server).await?;
 
     #[cfg(windows)]
-    let command = r#"$val = $env:CODEX_SANDBOX; if ([string]::IsNullOrEmpty($val)) { $val = 'not-set' } ; [System.Console]::Write($val)"#.to_string();
+    let command = r#"$val = $env:PRAXIS_SANDBOX; if ([string]::IsNullOrEmpty($val)) { $val = 'not-set' } ; [System.Console]::Write($val)"#.to_string();
     #[cfg(not(windows))]
-    let command = r#"sh -c "printf '%s' \"${CODEX_SANDBOX:-not-set}\"""#.to_string();
+    let command = r#"sh -c "printf '%s' \"${PRAXIS_SANDBOX:-not-set}\"""#.to_string();
 
-    test.codex
+    test.thread
         .submit(Op::RunUserShellCommand {
             command: command.clone(),
         })
         .await?;
 
-    let begin_event = wait_for_event_match(&test.codex, |ev| match ev {
+    let begin_event = wait_for_event_match(&test.thread, |ev| match ev {
         EventMsg::ExecCommandBegin(event) => Some(event.clone()),
         _ => None,
     })
@@ -286,7 +286,7 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
         begin_event.command
     );
 
-    let delta_event = wait_for_event_match(&test.codex, |ev| match ev {
+    let delta_event = wait_for_event_match(&test.thread, |ev| match ev {
         EventMsg::ExecCommandOutputDelta(event) => Some(event.clone()),
         _ => None,
     })
@@ -296,7 +296,7 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
         String::from_utf8(delta_event.chunk.clone()).expect("user command chunk is valid utf-8");
     assert_eq!(chunk_text.trim(), "not-set");
 
-    let end_event = wait_for_event_match(&test.codex, |ev| match ev {
+    let end_event = wait_for_event_match(&test.thread, |ev| match ev {
         EventMsg::ExecCommandEnd(event) => Some(event.clone()),
         _ => None,
     })
@@ -304,7 +304,7 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
     assert_eq!(end_event.exit_code, 0);
     assert_eq!(end_event.stdout.trim(), "not-set");
 
-    let _ = wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    let _ = wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let responses = vec![responses::sse(vec![
         responses::ev_response_created("resp-1"),
@@ -335,22 +335,22 @@ async fn user_shell_command_history_is_persisted_and_shared_with_model() -> anyh
 #[tokio::test]
 async fn user_shell_command_does_not_set_network_sandbox_env_var() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
-    let mut builder = core_test_support::test_codex::test_codex().with_config(|config| {
+    let mut builder = core_test_support::test_praxis::test_praxis().with_config(|config| {
         config.permissions.network_sandbox_policy = NetworkSandboxPolicy::Restricted;
     });
     let test = builder.build(&server).await?;
 
     #[cfg(windows)]
-    let command = r#"$val = $env:CODEX_SANDBOX_NETWORK_DISABLED; if ([string]::IsNullOrEmpty($val)) { $val = 'not-set' } ; [System.Console]::Write($val)"#.to_string();
+    let command = r#"$val = $env:PRAXIS_SANDBOX_NETWORK_DISABLED; if ([string]::IsNullOrEmpty($val)) { $val = 'not-set' } ; [System.Console]::Write($val)"#.to_string();
     #[cfg(not(windows))]
     let command =
-        r#"sh -c "printf '%s' \"${CODEX_SANDBOX_NETWORK_DISABLED:-not-set}\"""#.to_string();
+        r#"sh -c "printf '%s' \"${PRAXIS_SANDBOX_NETWORK_DISABLED:-not-set}\"""#.to_string();
 
-    test.codex
+    test.thread
         .submit(Op::RunUserShellCommand { command })
         .await?;
 
-    let end_event = wait_for_event_match(&test.codex, |ev| match ev {
+    let end_event = wait_for_event_match(&test.thread, |ev| match ev {
         EventMsg::ExecCommandEnd(event) => Some(event.clone()),
         _ => None,
     })
@@ -365,7 +365,7 @@ async fn user_shell_command_does_not_set_network_sandbox_env_var() -> anyhow::Re
 #[cfg(not(target_os = "windows"))] // TODO: unignore on windows
 async fn user_shell_command_output_is_truncated_in_history() -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;
-    let builder = core_test_support::test_codex::test_codex();
+    let builder = core_test_support::test_praxis::test_praxis();
     let test = builder
         .with_config(|config| {
             config.tool_output_token_limit = Some(100);
@@ -378,20 +378,20 @@ async fn user_shell_command_output_is_truncated_in_history() -> anyhow::Result<(
     #[cfg(not(windows))]
     let command = "seq 1 400".to_string();
 
-    test.codex
+    test.thread
         .submit(Op::RunUserShellCommand {
             command: command.clone(),
         })
         .await?;
 
-    let end_event = wait_for_event_match(&test.codex, |ev| match ev {
+    let end_event = wait_for_event_match(&test.thread, |ev| match ev {
         EventMsg::ExecCommandEnd(event) => Some(event.clone()),
         _ => None,
     })
     .await;
     assert_eq!(end_event.exit_code, 0);
 
-    let _ = wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    let _ = wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let responses = vec![responses::sse(vec![
         responses::ev_response_created("resp-1"),
@@ -430,7 +430,7 @@ async fn user_shell_command_is_truncated_only_once() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let mut builder = test_codex()
+    let mut builder = test_praxis()
         .with_model("gpt-5.1-codex")
         .with_config(|config| {
             config.tool_output_token_limit = Some(100);

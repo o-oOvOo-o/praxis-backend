@@ -77,7 +77,7 @@ use praxis_app_gateway_protocol::TurnInterruptParams;
 use praxis_app_gateway_protocol::TurnStartParams;
 use praxis_app_gateway_protocol::TurnSteerParams;
 use praxis_app_gateway_protocol::WindowsSandboxSetupStartParams;
-use praxis_login::default_client::CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
+use praxis_login::default_client::PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR;
 use tokio::process::Command;
 
 pub struct McpProcess {
@@ -131,7 +131,7 @@ impl McpProcess {
         cmd.env("CODEX_HOME", praxis_home);
         cmd.env("PRAXIS_HOME", praxis_home);
         cmd.env("RUST_LOG", "info");
-        cmd.env_remove(CODEX_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
+        cmd.env_remove(PRAXIS_INTERNAL_ORIGINATOR_OVERRIDE_ENV_VAR);
         cmd.args(args);
 
         for (k, v) in env_overrides {
@@ -216,6 +216,7 @@ impl McpProcess {
         self.initialize_with_params(InitializeParams {
             client_info,
             capabilities,
+            host_extensions: Vec::new(),
         })
         .await
     }

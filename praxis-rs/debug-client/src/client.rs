@@ -105,6 +105,7 @@ impl AppGatewayClient {
                     experimental_api: true,
                     opt_out_notification_methods: None,
                 }),
+                host_extensions: Vec::new(),
             },
         };
 
@@ -182,6 +183,7 @@ impl AppGatewayClient {
                 source_kinds: None,
                 archived: None,
                 cwd: None,
+                cwd_scope: None,
                 search_term: None,
             },
         };

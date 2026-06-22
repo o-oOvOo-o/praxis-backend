@@ -69,7 +69,9 @@ impl LlmProfileRegistry {
         let model_policy = self.first_party_policy_for_model(model)?;
         if self
             .first_party_policy_for_provider(current_provider_id, current_provider)
-            .is_some_and(|current_policy| current_policy.owner_label == model_policy.owner_label)
+            .is_some_and(|current_policy| {
+                current_policy.owner_label() == model_policy.owner_label()
+            })
         {
             return None;
         }
@@ -79,7 +81,7 @@ impl LlmProfileRegistry {
             .map(|(provider_id, provider)| ModelProviderSwitch {
                 provider_id,
                 provider,
-                model_owner_label: model_policy.owner_label,
+                model_owner_label: model_policy.owner_label(),
             })
     }
 
@@ -111,7 +113,7 @@ impl LlmProfileRegistry {
         policy: ProfileProviderPolicy,
         model_providers: &HashMap<String, ModelProviderInfo>,
     ) -> Option<(String, ModelProviderInfo)> {
-        if let Some(provider_id) = policy.canonical_provider_id
+        if let Some(provider_id) = policy.canonical_provider_id()
             && let Some(provider) = model_providers.get(provider_id)
             && policy.matches_provider(provider_id, provider)
         {

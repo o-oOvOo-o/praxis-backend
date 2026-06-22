@@ -6,7 +6,7 @@ use core_test_support::wait_for_event;
 use praxis_config::CONFIG_TOML_FILE;
 use praxis_core::ThreadSpawnResult;
 use praxis_features::Feature;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::WarningEvent;
@@ -32,11 +32,11 @@ async fn emits_warning_when_unstable_features_enabled_via_config() {
     );
 
     let thread_manager = praxis_core::test_support::thread_manager_with_models_provider(
-        CodexAuth::from_api_key("test"),
+        OpenAiAccountAuth::from_api_key("test"),
         config.model_provider.clone(),
     );
     let auth_manager =
-        praxis_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("test"));
+        praxis_core::test_support::auth_manager_from_auth(OpenAiAccountAuth::from_api_key("test"));
 
     let ThreadSpawnResult {
         thread: conversation,
@@ -79,11 +79,11 @@ async fn suppresses_warning_when_configured() {
     );
 
     let thread_manager = praxis_core::test_support::thread_manager_with_models_provider(
-        CodexAuth::from_api_key("test"),
+        OpenAiAccountAuth::from_api_key("test"),
         config.model_provider.clone(),
     );
     let auth_manager =
-        praxis_core::test_support::auth_manager_from_auth(CodexAuth::from_api_key("test"));
+        praxis_core::test_support::auth_manager_from_auth(OpenAiAccountAuth::from_api_key("test"));
 
     let ThreadSpawnResult {
         thread: conversation,

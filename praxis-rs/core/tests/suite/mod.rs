@@ -3,13 +3,13 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use ctor::ctor;
-use praxis_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
+use praxis_apply_patch::PRAXIS_RUN_AS_APPLY_PATCH_ARG1;
 use praxis_arg0::Arg0PathEntryGuard;
 use praxis_arg0::arg0_dispatch;
-use praxis_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
+use praxis_sandboxing::landlock::PRAXIS_LINUX_SANDBOX_ARG0;
 use tempfile::TempDir;
 
-struct TestCodexAliasesGuard {
+struct TestPraxisAliasesGuard {
     _praxis_home: TempDir,
     _arg0: Arg0PathEntryGuard,
     _previous_praxis_home: Option<OsString>,
@@ -22,7 +22,7 @@ const CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
 // based on the arg0.
 // NOTE: this doesn't work on ARM
 #[ctor]
-pub static CODEX_ALIASES_TEMP_DIR: Option<TestCodexAliasesGuard> = {
+pub static CODEX_ALIASES_TEMP_DIR: Option<TestPraxisAliasesGuard> = {
     let mut args = std::env::args_os();
     let argv0 = args.next().unwrap_or_default();
     let exe_name = Path::new(&argv0)
@@ -32,7 +32,7 @@ pub static CODEX_ALIASES_TEMP_DIR: Option<TestCodexAliasesGuard> = {
     let argv1 = args.next().unwrap_or_default();
     // Helper re-execs inherit this ctor too, but they may run inside a sandbox
     // where creating another CODEX_HOME tempdir under /tmp is not allowed.
-    if exe_name == CODEX_LINUX_SANDBOX_ARG0 || argv1 == CODEX_CORE_APPLY_PATCH_ARG1 {
+    if exe_name == PRAXIS_LINUX_SANDBOX_ARG0 || argv1 == PRAXIS_RUN_AS_APPLY_PATCH_ARG1 {
         return None;
     }
 
@@ -63,7 +63,7 @@ pub static CODEX_ALIASES_TEMP_DIR: Option<TestCodexAliasesGuard> = {
         },
     }
 
-    Some(TestCodexAliasesGuard {
+    Some(TestPraxisAliasesGuard {
         _praxis_home: praxis_home,
         _arg0: arg0,
         _previous_praxis_home: previous_praxis_home,

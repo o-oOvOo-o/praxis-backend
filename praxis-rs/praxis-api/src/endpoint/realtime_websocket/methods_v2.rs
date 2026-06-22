@@ -27,8 +27,8 @@ use serde_json::json;
 
 const REALTIME_V2_OUTPUT_MODALITY_AUDIO: &str = "audio";
 const REALTIME_V2_TOOL_CHOICE: &str = "auto";
-const REALTIME_V2_CODEX_TOOL_NAME: &str = "codex";
-const REALTIME_V2_CODEX_TOOL_DESCRIPTION: &str = "Delegate a request to Praxis and return the final result to the user. Use this as the default action. If the user asks to do something next, later, after this, or once current work finishes, call this tool so the work is actually queued instead of merely promising to do it later.";
+const REALTIME_V2_PRAXIS_TOOL_NAME: &str = "praxis";
+const REALTIME_V2_PRAXIS_TOOL_DESCRIPTION: &str = "Delegate a request to Praxis and return the final result to the user. Use this as the default action. If the user asks to do something next, later, after this, or once current work finishes, call this tool so the work is actually queued instead of merely promising to do it later.";
 
 pub(super) fn conversation_item_create_message(text: String) -> RealtimeOutboundMessage {
     RealtimeOutboundMessage::ConversationItemCreate {
@@ -90,8 +90,8 @@ pub(super) fn session_update_session(
             },
             tools: Some(vec![SessionFunctionTool {
                 r#type: SessionToolType::Function,
-                name: REALTIME_V2_CODEX_TOOL_NAME.to_string(),
-                description: REALTIME_V2_CODEX_TOOL_DESCRIPTION.to_string(),
+                name: REALTIME_V2_PRAXIS_TOOL_NAME.to_string(),
+                description: REALTIME_V2_PRAXIS_TOOL_DESCRIPTION.to_string(),
                 parameters: json!({
                     "type": "object",
                     "properties": {

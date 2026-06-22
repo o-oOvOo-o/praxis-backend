@@ -1112,7 +1112,7 @@ fn spawn_agent_common_properties(agent_type_description: &str) -> BTreeMap<Strin
             "model_provider".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Optional model provider override for the new agent. Use provider ids such as `openai`, `deepseek`, `qwen`, `glm`, or `common`. `codex` and `responses` are accepted aliases for OpenAI/Codex workers. When omitted, the provider is inferred from a known first-party model when possible, otherwise inherited."
+                    "Optional model provider override for the new agent. Use provider ids such as `openai`, `deepseek`, `qwen`, `glm`, or `common`. `codex` and `responses` are accepted compatibility aliases for OpenAI-backed Praxis workers. When omitted, the provider is inferred from a known first-party model when possible, otherwise inherited."
                         .to_string(),
                 ),
             },
@@ -1121,7 +1121,7 @@ fn spawn_agent_common_properties(agent_type_description: &str) -> BTreeMap<Strin
             "model".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Optional model override for the new agent. Replaces the inherited model; known first-party model ids can also switch the provider automatically. For the strongest Codex coding worker, use `gpt-5.5`; natural aliases like `5.5`, `gpt5.5`, and `codex5.5` are accepted."
+                    "Optional model override for the new agent. Replaces the inherited model; known first-party model ids can also switch the provider automatically. For the strongest OpenAI-backed Praxis coding worker, use `gpt-5.5`; natural aliases like `5.5`, `gpt5.5`, and `codex5.5` are accepted."
                         .to_string(),
                 ),
             },
@@ -1151,7 +1151,7 @@ fn spawn_agent_tool_description(
 
 {available_models_description}
 ### Cross-provider coding workers
-- Picker-visible models above may only reflect the current provider. When a Codex/GPT worker is needed and the OpenAI provider is configured, you may still explicitly set `model_provider` to `openai`, `model` to `gpt-5.5`, and `reasoning_effort` to `xhigh`. Natural model aliases such as `5.5`, `gpt5.5`, `codex5.5`, and `gpt 5.5 xhigh` are accepted, but explicit fields are more reliable.
+- Picker-visible models above may only reflect the current provider. When an OpenAI-backed Praxis worker is needed and the OpenAI provider is configured, you may still explicitly set `model_provider` to `openai`, `model` to `gpt-5.5`, and `reasoning_effort` to `xhigh`. Natural model aliases such as `5.5`, `gpt5.5`, `codex5.5`, and `gpt 5.5 xhigh` are accepted, but explicit fields are more reliable.
 
 ### When to delegate vs. do the subtask yourself
 - First, quickly analyze the overall user task and form a succinct high-level plan. Identify which tasks are immediate blockers on the critical path, and which tasks are sidecar tasks that are needed but can run in parallel without blocking the next local step. As part of that plan, explicitly decide what immediate task you should do locally right now. Do this planning step before delegating to agents so you do not hand off the immediate blocking task to a submodel and then waste time waiting on it.

@@ -25,14 +25,8 @@ use crate::invocation::ExtractHeredocError;
 /// Detailed instructions for gpt-4.1 on how to use the `apply_patch` tool.
 pub const APPLY_PATCH_TOOL_INSTRUCTIONS: &str = include_str!("../apply_patch_tool_instructions.md");
 
-/// Special argv[1] flag used when the Praxis executable self-invokes to run the
-/// internal `apply_patch` path.
-///
-/// Although this constant lives in `praxis-apply-patch` (to avoid forcing
-/// `praxis-arg0` to depend on `praxis-core`), it is part of the "codex core"
-/// process-invocation contract between the apply-patch runtime and the arg0
-/// dispatcher.
-pub const CODEX_CORE_APPLY_PATCH_ARG1: &str = "--praxis-run-as-apply-patch";
+/// Special argv[1] flag used when the Praxis executable self-invokes `apply_patch`.
+pub const PRAXIS_RUN_AS_APPLY_PATCH_ARG1: &str = "--praxis-run-as-apply-patch";
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ApplyPatchError {

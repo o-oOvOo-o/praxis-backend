@@ -1687,7 +1687,7 @@ async fn server_overloaded_error_does_not_switch_models() {
         id: "err-1".to_string(),
         msg: EventMsg::Error(ErrorEvent {
             message: "server overloaded".to_string(),
-            praxis_error_info: Some(CodexErrorInfo::ServerOverloaded),
+            praxis_error_info: Some(PraxisErrorInfo::ServerOverloaded),
         }),
     });
 

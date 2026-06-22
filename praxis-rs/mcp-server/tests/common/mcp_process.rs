@@ -10,7 +10,7 @@ use tokio::process::ChildStdin;
 use tokio::process::ChildStdout;
 
 use anyhow::Context;
-use praxis_mcp_server::CodexToolCallParam;
+use praxis_mcp_server::PraxisToolCallParam;
 use praxis_terminal_detection::user_agent;
 
 use pretty_assertions::assert_eq;
@@ -201,11 +201,11 @@ impl McpProcess {
     /// correlating notifications.
     pub async fn send_praxis_tool_call(
         &mut self,
-        params: CodexToolCallParam,
+        params: PraxisToolCallParam,
     ) -> anyhow::Result<i64> {
         let praxis_tool_call_params = CallToolRequestParams {
             meta: None,
-            name: "codex".into(),
+            name: "praxis".into(),
             arguments: Some(match serde_json::to_value(params)? {
                 serde_json::Value::Object(map) => map,
                 _ => unreachable!("params serialize to object"),

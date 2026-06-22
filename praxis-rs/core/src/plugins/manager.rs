@@ -1,10 +1,15 @@
 use super::LoadedPlugin;
 use super::PluginLoadOutcome;
-use super::PluginManifestPaths;
-use super::curated_plugins_repo_path;
-use super::load_plugin_manifest;
+use super::curated::curated_plugins_marketplace_path;
+use super::curated::curated_plugins_repo_path;
+use super::curated::is_openai_curated_marketplace;
+use super::curated::openai_curated_marketplace_display_name;
+use super::curated::openai_curated_marketplace_interface;
+use super::curated::unique_curated_marketplace_plugins;
 use super::manifest::PluginManifestInterface;
 use super::manifest::PluginManifestLlm;
+use super::manifest::PluginManifestPaths;
+use super::manifest::load_plugin_manifest;
 use super::marketplace::MarketplaceError;
 use super::marketplace::MarketplaceInterface;
 use super::marketplace::MarketplaceListError;
@@ -14,19 +19,20 @@ use super::marketplace::MarketplacePluginSource;
 use super::marketplace::ResolvedMarketplacePlugin;
 use super::marketplace::list_marketplaces;
 use super::marketplace::load_marketplace;
+use super::marketplace::marketplace_manifest_path;
 use super::marketplace::resolve_marketplace_plugin;
-use super::read_curated_plugins_sha;
 use super::remote::RemotePluginFetchError;
 use super::remote::RemotePluginMutationError;
 use super::remote::enable_remote_plugin;
 use super::remote::fetch_remote_featured_plugin_ids;
 use super::remote::fetch_remote_plugin_status;
 use super::remote::uninstall_remote_plugin;
+use super::startup_sync::read_curated_plugins_sha;
 use super::startup_sync::start_startup_remote_plugin_sync_once;
+use super::startup_sync::sync_curated_plugins_repo;
 use super::store::PluginInstallResult as StorePluginInstallResult;
 use super::store::PluginStore;
 use super::store::PluginStoreError;
-use super::sync_openai_plugins_repo;
 use crate::SkillMetadata;
 use crate::config::CONFIG_TOML_FILE;
 use crate::config::Config;
@@ -48,7 +54,7 @@ use praxis_config::types::PluginConfig;
 use praxis_config::types::PluginMarketplaceProviderConfig;
 use praxis_features::Feature;
 use praxis_login::AuthManager;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_plugin::AppConnectorId;
 use praxis_plugin::PluginActivationDelta;
 use praxis_plugin::PluginCapabilityChanges;
@@ -93,8 +99,6 @@ const DEFAULT_APP_CONFIG_FILE: &str = ".app.json";
 const MARKETPLACE_PROVIDER_CACHE_DIR: &str = "plugins/marketplaces";
 const MARKETPLACE_PROVIDER_GIT_TIMEOUT: Duration = Duration::from_secs(45);
 const MARKETPLACE_PROVIDER_STALE_TEMP_DIR_MAX_AGE: Duration = Duration::from_secs(10 * 60);
-pub const OPENAI_CURATED_MARKETPLACE_NAME: &str = "openai-curated";
-pub const OPENAI_CURATED_MARKETPLACE_DISPLAY_NAME: &str = "OpenAI Curated";
 static CURATED_REPO_SYNC_STARTED: AtomicBool = AtomicBool::new(false);
 const FEATURED_PLUGIN_IDS_CACHE_TTL: std::time::Duration =
     std::time::Duration::from_secs(60 * 60 * 3);
@@ -116,7 +120,7 @@ struct CachedFeaturedPluginIds {
 
 fn featured_plugin_ids_cache_key(
     config: &Config,
-    auth: Option<&CodexAuth>,
+    auth: Option<&OpenAiAccountAuth>,
 ) -> FeaturedPluginIdsCacheKey {
     let token_data = auth.and_then(|auth| auth.get_token_data().ok());
     let account_id = token_data
@@ -524,7 +528,7 @@ impl PluginsManager {
     pub async fn featured_plugin_ids_for_config(
         &self,
         config: &Config,
-        auth: Option<&CodexAuth>,
+        auth: Option<&OpenAiAccountAuth>,
     ) -> Result<Vec<String>, RemotePluginFetchError> {
         if !config.features.enabled(Feature::Plugins) {
             return Ok(Vec::new());
@@ -555,7 +559,7 @@ impl PluginsManager {
     pub async fn install_plugin_with_remote_sync(
         &self,
         config: &Config,
-        auth: Option<&CodexAuth>,
+        auth: Option<&OpenAiAccountAuth>,
         request: PluginInstallRequest,
     ) -> Result<PluginInstallOutcome, PluginInstallError> {
         let resolved = resolve_marketplace_plugin(
@@ -578,18 +582,18 @@ impl PluginsManager {
         resolved: ResolvedMarketplacePlugin,
     ) -> Result<PluginInstallOutcome, PluginInstallError> {
         let auth_policy = resolved.auth_policy;
-        let plugin_version =
-            if resolved.plugin_id.marketplace_name == OPENAI_CURATED_MARKETPLACE_NAME {
-                Some(
-                    read_curated_plugins_sha(self.praxis_home.as_path()).ok_or_else(|| {
-                        PluginStoreError::Invalid(
-                            "local curated marketplace sha is not available".to_string(),
-                        )
-                    })?,
-                )
-            } else {
-                None
-            };
+        let plugin_version = if is_openai_curated_marketplace(&resolved.plugin_id.marketplace_name)
+        {
+            Some(
+                read_curated_plugins_sha(self.praxis_home.as_path()).ok_or_else(|| {
+                    PluginStoreError::Invalid(
+                        "local curated marketplace sha is not available".to_string(),
+                    )
+                })?,
+            )
+        } else {
+            None
+        };
         let store = self.store.clone();
         let result: StorePluginInstallResult = tokio::task::spawn_blocking(move || {
             if let Some(plugin_version) = plugin_version {
@@ -649,7 +653,7 @@ impl PluginsManager {
     pub async fn uninstall_plugin_with_remote_sync(
         &self,
         config: &Config,
-        auth: Option<&CodexAuth>,
+        auth: Option<&OpenAiAccountAuth>,
         plugin_id: String,
     ) -> Result<PluginActivationDelta<McpServerConfig>, PluginUninstallError> {
         let plugin_id = PluginId::parse(&plugin_id)?;
@@ -735,7 +739,7 @@ impl PluginsManager {
     pub async fn sync_plugins_from_remote(
         &self,
         config: &Config,
-        auth: Option<&CodexAuth>,
+        auth: Option<&OpenAiAccountAuth>,
         additive_only: bool,
     ) -> Result<RemotePluginSyncResult, PluginRemoteSyncError> {
         let _remote_sync_guard = self.remote_sync_lock.lock().await;
@@ -749,11 +753,9 @@ impl PluginsManager {
             .await
             .map_err(PluginRemoteSyncError::from)?;
         let configured_plugins = configured_plugins_from_stack(&config.config_layer_stack);
-        let curated_marketplace_root = curated_plugins_repo_path(self.praxis_home.as_path());
-        let curated_marketplace_path = AbsolutePathBuf::try_from(
-            curated_marketplace_root.join(".agents/plugins/marketplace.json"),
-        )
-        .map_err(|_| PluginRemoteSyncError::LocalMarketplaceNotFound)?;
+        let curated_marketplace_path =
+            AbsolutePathBuf::try_from(curated_plugins_marketplace_path(self.praxis_home.as_path()))
+                .map_err(|_| PluginRemoteSyncError::LocalMarketplaceNotFound)?;
         let curated_marketplace = match load_marketplace(&curated_marketplace_path) {
             Ok(marketplace) => marketplace,
             Err(MarketplaceError::MarketplaceNotFound { .. }) => {
@@ -769,6 +771,15 @@ impl PluginsManager {
                     "local curated marketplace sha is not available".to_string(),
                 )
             })?;
+        let curated_plugins = unique_curated_marketplace_plugins(
+            &marketplace_name,
+            curated_marketplace.plugins,
+            "remote sync",
+        );
+        let local_plugin_names = curated_plugins
+            .iter()
+            .map(|plugin| plugin.name.clone())
+            .collect::<HashSet<_>>();
         let mut local_plugins = Vec::<(
             String,
             PluginId,
@@ -777,23 +788,9 @@ impl PluginsManager {
             Option<String>,
             bool,
         )>::new();
-        let mut local_plugin_names = HashSet::new();
-        for plugin in curated_marketplace.plugins {
-            let plugin_name = plugin.name;
-            if !local_plugin_names.insert(plugin_name.clone()) {
-                warn!(
-                    plugin = plugin_name,
-                    marketplace = %marketplace_name,
-                    "ignoring duplicate local plugin entry during remote sync"
-                );
-                continue;
-            }
-
-            let plugin_id = PluginId::new(plugin_name.clone(), marketplace_name.clone())?;
+        for plugin in curated_plugins {
+            let plugin_id = PluginId::new(plugin.name.clone(), marketplace_name.clone())?;
             let plugin_key = plugin_id.as_key();
-            let source_path = match plugin.source {
-                MarketplacePluginSource::Local { path } => path,
-            };
             let current_enabled = configured_plugins
                 .get(&plugin_key)
                 .map(|plugin| plugin.enabled);
@@ -801,9 +798,9 @@ impl PluginsManager {
             let product_allowed =
                 self.restriction_product_matches(plugin.policy.products.as_deref());
             local_plugins.push((
-                plugin_name,
+                plugin.name,
                 plugin_id,
-                source_path,
+                plugin.source_path,
                 current_enabled,
                 installed_version,
                 product_allowed,
@@ -1054,13 +1051,8 @@ impl PluginsManager {
                 (!plugins.is_empty()).then_some(ConfiguredMarketplace {
                     name: marketplace.name,
                     path: marketplace.path,
-                    interface: if marketplace_name == OPENAI_CURATED_MARKETPLACE_NAME {
-                        Some(MarketplaceInterface {
-                            display_name: Some(OPENAI_CURATED_MARKETPLACE_DISPLAY_NAME.to_string()),
-                        })
-                    } else {
-                        marketplace.interface
-                    },
+                    interface: openai_curated_marketplace_interface(&marketplace_name)
+                        .or(marketplace.interface),
                     plugins,
                 })
             })
@@ -1143,11 +1135,9 @@ impl PluginsManager {
         mcp_server_names.dedup();
 
         Ok(PluginReadOutcome {
-            marketplace_name: if marketplace.name == OPENAI_CURATED_MARKETPLACE_NAME {
-                OPENAI_CURATED_MARKETPLACE_DISPLAY_NAME.to_string()
-            } else {
-                marketplace.name
-            },
+            marketplace_name: openai_curated_marketplace_display_name(&marketplace.name)
+                .map(str::to_string)
+                .unwrap_or(marketplace.name),
             marketplace_path: marketplace.path,
             plugin: PluginDetail {
                 id: plugin_key.clone(),
@@ -1207,7 +1197,7 @@ impl PluginsManager {
         if let Err(err) = std::thread::Builder::new()
             .name("plugins-curated-repo-sync".to_string())
             .spawn(
-                move || match sync_openai_plugins_repo(praxis_home.as_path()) {
+                move || match sync_curated_plugins_repo(praxis_home.as_path()) {
                     Ok(curated_plugin_version) => {
                         let configured_curated_plugin_ids =
                             configured_curated_plugin_ids_from_praxis_home(praxis_home.as_path());
@@ -1551,7 +1541,7 @@ fn ensure_marketplace_provider_manifest_exists(
     let root = relative_path
         .map(|path| repo_path.join(path))
         .unwrap_or_else(|| repo_path.to_path_buf());
-    let manifest = root.join(".agents/plugins/marketplace.json");
+    let manifest = marketplace_manifest_path(&root);
     if manifest.is_file() {
         return Ok(());
     }
@@ -1865,29 +1855,21 @@ fn refresh_curated_plugin_cache(
     configured_curated_plugin_ids: &[PluginId],
 ) -> Result<bool, String> {
     let store = PluginStore::new(praxis_home.to_path_buf());
-    let curated_marketplace_path = AbsolutePathBuf::try_from(
-        curated_plugins_repo_path(praxis_home).join(".agents/plugins/marketplace.json"),
-    )
-    .map_err(|_| "local curated marketplace is not available".to_string())?;
+    let curated_marketplace_path =
+        AbsolutePathBuf::try_from(curated_plugins_marketplace_path(praxis_home))
+            .map_err(|_| "local curated marketplace is not available".to_string())?;
     let curated_marketplace = load_marketplace(&curated_marketplace_path)
         .map_err(|err| format!("failed to load curated marketplace for cache refresh: {err}"))?;
+    let marketplace_name = curated_marketplace.name.clone();
 
-    let mut plugin_sources = HashMap::<String, AbsolutePathBuf>::new();
-    for plugin in curated_marketplace.plugins {
-        let plugin_name = plugin.name;
-        if plugin_sources.contains_key(&plugin_name) {
-            warn!(
-                plugin = plugin_name,
-                marketplace = OPENAI_CURATED_MARKETPLACE_NAME,
-                "ignoring duplicate curated plugin entry during cache refresh"
-            );
-            continue;
-        }
-        let source_path = match plugin.source {
-            MarketplacePluginSource::Local { path } => path,
-        };
-        plugin_sources.insert(plugin_name, source_path);
-    }
+    let plugin_sources = unique_curated_marketplace_plugins(
+        &marketplace_name,
+        curated_marketplace.plugins,
+        "cache refresh",
+    )
+    .into_iter()
+    .map(|plugin| (plugin.name, plugin.source_path))
+    .collect::<HashMap<_, _>>();
 
     let mut cache_refreshed = false;
     for plugin_id in configured_curated_plugin_ids {
@@ -1898,7 +1880,7 @@ fn refresh_curated_plugin_cache(
         let Some(source_path) = plugin_sources.get(&plugin_id.plugin_name).cloned() else {
             warn!(
                 plugin = plugin_id.plugin_name,
-                marketplace = OPENAI_CURATED_MARKETPLACE_NAME,
+                marketplace = %marketplace_name,
                 "configured curated plugin no longer exists in curated marketplace during cache refresh"
             );
             continue;
@@ -1949,7 +1931,7 @@ fn configured_curated_plugin_ids(
     let mut configured_curated_plugin_ids = configured_plugins
         .into_keys()
         .filter_map(|plugin_key| match PluginId::parse(&plugin_key) {
-            Ok(plugin_id) if plugin_id.marketplace_name == OPENAI_CURATED_MARKETPLACE_NAME => {
+            Ok(plugin_id) if is_openai_curated_marketplace(&plugin_id.marketplace_name) => {
                 Some(plugin_id)
             }
             Ok(_) => None,

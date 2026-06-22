@@ -123,7 +123,7 @@ fn exec_resume_last_appends_to_existing_file() -> anyhow::Result<()> {
     let prompt = format!("echo {marker}");
 
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -142,7 +142,7 @@ fn exec_resume_last_appends_to_existing_file() -> anyhow::Result<()> {
     let prompt2 = format!("echo {marker2}");
 
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -177,7 +177,7 @@ fn exec_resume_last_accepts_prompt_after_flag_in_json_mode() -> anyhow::Result<(
     let prompt = format!("echo {marker}");
 
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -196,7 +196,7 @@ fn exec_resume_last_accepts_prompt_after_flag_in_json_mode() -> anyhow::Result<(
     let prompt2 = format!("echo {marker2}");
 
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -231,7 +231,7 @@ fn exec_resume_last_respects_cwd_filter_and_all_flag() -> anyhow::Result<()> {
     let marker_a = format!("resume-cwd-a-{}", Uuid::new_v4());
     let prompt_a = format!("echo {marker_a}");
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -243,7 +243,7 @@ fn exec_resume_last_respects_cwd_filter_and_all_flag() -> anyhow::Result<()> {
     let marker_b = format!("resume-cwd-b-{}", Uuid::new_v4());
     let prompt_b = format!("echo {marker_b}");
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -267,7 +267,7 @@ fn exec_resume_last_respects_cwd_filter_and_all_flag() -> anyhow::Result<()> {
     let marker_b_touch = format!("resume-cwd-b-touch-{}", Uuid::new_v4());
     let prompt_b_touch = format!("echo {marker_b_touch}");
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -286,7 +286,7 @@ fn exec_resume_last_respects_cwd_filter_and_all_flag() -> anyhow::Result<()> {
     let marker_b2 = format!("resume-cwd-b-2-{}", Uuid::new_v4());
     let prompt_b2 = format!("echo {marker_b2}");
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -308,7 +308,7 @@ fn exec_resume_last_respects_cwd_filter_and_all_flag() -> anyhow::Result<()> {
     let marker_a2 = format!("resume-cwd-a-2-{}", Uuid::new_v4());
     let prompt_a2 = format!("echo {marker_a2}");
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -339,7 +339,7 @@ fn exec_resume_accepts_global_flags_after_subcommand() -> anyhow::Result<()> {
 
     // Seed a session.
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("echo seed-resume-session")
@@ -348,7 +348,7 @@ fn exec_resume_accepts_global_flags_after_subcommand() -> anyhow::Result<()> {
 
     // Resume while passing global flags after the subcommand to ensure clap accepts them.
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("resume")
         .arg("--last")
@@ -377,7 +377,7 @@ fn exec_resume_by_id_appends_to_existing_file() -> anyhow::Result<()> {
     let prompt = format!("echo {marker}");
 
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -400,7 +400,7 @@ fn exec_resume_by_id_appends_to_existing_file() -> anyhow::Result<()> {
     let prompt2 = format!("echo {marker2}");
 
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -433,7 +433,7 @@ fn exec_resume_preserves_cli_configuration_overrides() -> anyhow::Result<()> {
     let prompt = format!("echo {marker}");
 
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("--sandbox")
@@ -455,7 +455,7 @@ fn exec_resume_preserves_cli_configuration_overrides() -> anyhow::Result<()> {
 
     let output = test
         .cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("--sandbox")
@@ -509,7 +509,7 @@ fn exec_resume_accepts_images_after_subcommand() -> anyhow::Result<()> {
     let prompt = format!("echo {marker}");
 
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -533,7 +533,7 @@ fn exec_resume_accepts_images_after_subcommand() -> anyhow::Result<()> {
     let marker2 = format!("resume-image-2-{}", Uuid::new_v4());
     let prompt2 = format!("echo {marker2}");
     test.cmd()
-        .env("CODEX_RS_SSE_FIXTURE", &fixture)
+        .env("PRAXIS_RS_SSE_FIXTURE", &fixture)
         .env("OPENAI_BASE_URL", "http://unused.local")
         .arg("--skip-git-repo-check")
         .arg("-C")

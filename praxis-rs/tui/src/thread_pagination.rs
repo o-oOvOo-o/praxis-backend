@@ -72,6 +72,7 @@ pub(crate) fn thread_list_params(
         source_kinds,
         archived: Some(false),
         cwd: None,
+        cwd_scope: None,
         search_term,
     }
 }

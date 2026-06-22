@@ -5,7 +5,7 @@ use praxis_network_proxy::NetworkProxy;
 use praxis_protocol::permissions::FileSystemSandboxPolicy;
 use praxis_protocol::permissions::NetworkSandboxPolicy;
 use praxis_protocol::protocol::SandboxPolicy;
-use praxis_sandboxing::landlock::CODEX_LINUX_SANDBOX_ARG0;
+use praxis_sandboxing::landlock::PRAXIS_LINUX_SANDBOX_ARG0;
 use praxis_sandboxing::landlock::allow_network_for_proxy;
 use praxis_sandboxing::landlock::create_linux_sandbox_command_args_for_policies;
 use std::collections::HashMap;
@@ -55,13 +55,13 @@ where
     let arg0 = if praxis_linux_sandbox_exe
         .file_name()
         .and_then(|name| name.to_str())
-        == Some(CODEX_LINUX_SANDBOX_ARG0)
+        == Some(PRAXIS_LINUX_SANDBOX_ARG0)
     {
         // Old bubblewrap builds without `--argv0` need a real helper path whose
         // basename still dispatches to the Linux sandbox entrypoint.
         praxis_linux_sandbox_exe.to_string_lossy().into_owned()
     } else {
-        CODEX_LINUX_SANDBOX_ARG0.to_string()
+        PRAXIS_LINUX_SANDBOX_ARG0.to_string()
     };
     spawn_child_async(SpawnChildRequest {
         program: praxis_linux_sandbox_exe.to_path_buf(),

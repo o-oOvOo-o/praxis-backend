@@ -134,6 +134,6 @@ impl LaunchStripState {
     }
 }
 
-pub(crate) fn rect_contains_point(area: Rect, column: u16, row: u16) -> bool {
+fn rect_contains_point(area: Rect, column: u16, row: u16) -> bool {
     column >= area.x && column < area.right() && row >= area.y && row < area.bottom()
 }

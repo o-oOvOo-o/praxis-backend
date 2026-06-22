@@ -556,6 +556,7 @@ pub(super) async fn send_initialize_request(
             version: "0.1.0".to_string(),
         },
         capabilities: None,
+        host_extensions: Vec::new(),
     };
     send_request(
         stream,

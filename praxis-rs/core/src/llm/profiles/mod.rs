@@ -1,9 +1,9 @@
-pub(crate) mod claude;
-pub(crate) mod codex;
-pub(crate) mod common;
-pub(crate) mod deepseek;
-pub(crate) mod gemini;
-pub(crate) mod glm;
-pub(crate) mod openrouter;
+pub(super) mod claude;
+pub(super) mod common;
+pub(super) mod deepseek;
+pub(super) mod gemini;
+pub(super) mod glm;
+pub(super) mod openai_responses;
+pub(super) mod openrouter;
 pub(crate) mod plugin;
-pub(crate) mod qwen;
+pub(super) mod qwen;

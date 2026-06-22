@@ -18,6 +18,6 @@ praxis_rust_crate(
     test_data_extra = glob(["src/**/snapshots/**"]) + ["//praxis-rs/core:model_availability_nux_fixtures"],
     integration_compile_data_extra = ["src/test_backend.rs"],
     extra_binaries = [
-        "//praxis-rs/cli:codex",
+        "//praxis-rs/cli:praxis",
     ],
 )

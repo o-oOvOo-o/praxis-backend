@@ -2,8 +2,8 @@
 
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::TestPraxis;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::EventMsg;
@@ -68,7 +68,9 @@ async fn praxis_returns_json_result(model: String) -> anyhow::Result<()> {
     };
     responses::mount_sse_once_match(&server, match_json_text_param, sse1).await;
 
-    let TestCodex { codex, cwd, .. } = test_codex().build(&server).await?;
+    let TestPraxis {
+        thread: codex, cwd, ..
+    } = test_praxis().build(&server).await?;
 
     // 1) Normal user input – should hit server once.
     codex

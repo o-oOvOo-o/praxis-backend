@@ -2,7 +2,7 @@
 //!
 //! These helpers centralize small pieces of setup logic used across both legacy and
 //! elevated paths, including unified_exec sessions and capture flows. They cover
-//! codex home directory creation and git safe.directory injection so sandboxed
+//! Praxis home directory creation and git safe.directory injection so sandboxed
 //! users can run git inside a repo owned by the primary user.
 
 use anyhow::Result;
@@ -40,7 +40,7 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Ensure the sandbox codex home directory exists.
+/// Ensure the sandbox Praxis home directory exists.
 pub fn ensure_praxis_home_exists(p: &Path) -> Result<()> {
     std::fs::create_dir_all(p)?;
     Ok(())

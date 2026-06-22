@@ -22,7 +22,7 @@ Seatbelt also keeps the legacy default preferences read access
 
 ### Linux
 
-Expects the binary containing `praxis-core` to run the equivalent of `codex sandbox linux` (legacy alias: `codex debug landlock`) when `arg0` is `praxis-linux-sandbox`. See the `praxis-arg0` crate for details.
+Expects the binary containing `praxis-core` to run the Linux sandbox entrypoint when `arg0` is `praxis-linux-sandbox`. See the `praxis-arg0` crate for details.
 
 Legacy `SandboxPolicy` / `sandbox_mode` configs are still supported on Linux.
 They can continue to use the legacy Landlock path when the split filesystem
@@ -40,7 +40,7 @@ current working directory whenever it is available. If `bwrap` is present but
 too old to support `--argv0`, the helper keeps using system bubblewrap and
 switches to a no-`--argv0` compatibility path for the inner re-exec. If
 `bwrap` is missing, it falls back to the vendored bubblewrap path compiled into
-the binary and Codex surfaces a startup warning through its normal notification
+the binary and Praxis surfaces a startup warning through its normal notification
 path instead of printing directly from the sandbox helper.
 
 ### Windows

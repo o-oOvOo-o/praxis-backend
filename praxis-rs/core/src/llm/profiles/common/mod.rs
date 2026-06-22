@@ -1,15 +1,10 @@
-pub(crate) mod behavior;
-pub(crate) mod prompts;
-pub(crate) mod provider;
-pub(crate) mod tasks;
-pub(crate) mod tools;
+mod prompts;
+mod provider;
 
-use super::plugin::ProfileAutoTitlePolicyDescriptor;
 use super::plugin::ProfileDescriptor;
 use super::plugin::ProfileTaskPolicyDescriptor;
 use super::plugin::ProfileToolCapabilityDescriptor;
 use crate::llm::ids::BehaviorProfileId;
-use crate::llm::tasks::compact::CompactExecutionPolicy;
 use crate::llm::tasks::title::AutoTitleProfile;
 
 pub(crate) fn profile() -> ProfileDescriptor {
@@ -20,15 +15,18 @@ pub(crate) fn profile() -> ProfileDescriptor {
         prompt_layers: &[],
         matcher: provider::matches,
         provider_policy: None,
-        task_policy: ProfileTaskPolicyDescriptor {
-            auto_title: Some(ProfileAutoTitlePolicyDescriptor::current(
-                AutoTitleProfile::Common,
-            )),
-            compact_execution: Some(CompactExecutionPolicy::LocalPrompt),
-            compact_model: None,
-            auto_compact_token_limit_cap: None,
-        },
+        task_policy: ProfileTaskPolicyDescriptor::local_prompt_with_current_title(
+            AutoTitleProfile::Common,
+        ),
         tool_capabilities: ProfileToolCapabilityDescriptor::praxis_web_search(),
         priority: 100,
     }
+}
+
+pub(crate) fn is_generic_provider(provider_id: &str, provider: &crate::ModelProviderInfo) -> bool {
+    provider::is_generic_provider(provider_id, provider)
+}
+
+pub(crate) fn is_generic_model(model: &str) -> bool {
+    provider::is_generic_model(model)
 }

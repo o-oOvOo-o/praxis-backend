@@ -4,7 +4,7 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::Op;
@@ -17,7 +17,7 @@ async fn quota_exceeded_emits_single_error_event() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
 
     mount_sse_once(
         &server,
@@ -39,7 +39,7 @@ async fn quota_exceeded_emits_single_error_event() -> Result<()> {
 
     let test = builder.build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "quota?".into(),
@@ -53,7 +53,7 @@ async fn quota_exceeded_emits_single_error_event() -> Result<()> {
     let mut error_events = 0;
 
     loop {
-        let event = wait_for_event(&test.codex, |_| true).await;
+        let event = wait_for_event(&test.thread, |_| true).await;
 
         match event {
             EventMsg::Error(err) => {

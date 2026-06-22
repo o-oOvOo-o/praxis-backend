@@ -9,14 +9,14 @@ use crate::compact::content_items_to_text;
 use crate::event_mapping::is_contextual_user_message_content;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_login::default_client::build_reqwest_client;
 use praxis_protocol::models::MessagePhase;
 use praxis_protocol::models::ResponseItem;
 
 const ARC_MONITOR_TIMEOUT: Duration = Duration::from_secs(30);
-const CODEX_ARC_MONITOR_ENDPOINT_OVERRIDE: &str = "CODEX_ARC_MONITOR_ENDPOINT_OVERRIDE";
-const CODEX_ARC_MONITOR_TOKEN: &str = "CODEX_ARC_MONITOR_TOKEN";
+const PRAXIS_ARC_MONITOR_ENDPOINT_OVERRIDE: &str = "PRAXIS_ARC_MONITOR_ENDPOINT_OVERRIDE";
+const PRAXIS_ARC_MONITOR_TOKEN: &str = "PRAXIS_ARC_MONITOR_TOKEN";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ArcMonitorOutcome {
@@ -109,7 +109,7 @@ pub(crate) async fn monitor_action(
         },
         None => None,
     };
-    let token = if let Some(token) = read_non_empty_env_var(CODEX_ARC_MONITOR_TOKEN) {
+    let token = if let Some(token) = read_non_empty_env_var(PRAXIS_ARC_MONITOR_TOKEN) {
         token
     } else {
         let Some(auth) = auth.as_ref() else {
@@ -127,7 +127,7 @@ pub(crate) async fn monitor_action(
         }
     };
 
-    let url = read_non_empty_env_var(CODEX_ARC_MONITOR_ENDPOINT_OVERRIDE).unwrap_or_else(|| {
+    let url = read_non_empty_env_var(PRAXIS_ARC_MONITOR_ENDPOINT_OVERRIDE).unwrap_or_else(|| {
         format!(
             "{}/codex/safety/arc",
             turn_context.config.chatgpt_base_url.trim_end_matches('/')
@@ -148,7 +148,7 @@ pub(crate) async fn monitor_action(
         .timeout(ARC_MONITOR_TIMEOUT)
         .json(&body)
         .bearer_auth(token);
-    if let Some(account_id) = auth.as_ref().and_then(CodexAuth::get_account_id) {
+    if let Some(account_id) = auth.as_ref().and_then(OpenAiAccountAuth::get_account_id) {
         request = request.header("chatgpt-account-id", account_id);
     }
 

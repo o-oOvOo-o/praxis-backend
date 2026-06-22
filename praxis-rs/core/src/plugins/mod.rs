@@ -1,5 +1,6 @@
 use praxis_config::types::McpServerConfig;
 
+mod curated;
 mod discoverable;
 mod injection;
 mod manager;
@@ -30,12 +31,14 @@ pub use praxis_plugin::PluginTelemetryMetadata;
 pub type LoadedPlugin = praxis_plugin::LoadedPlugin<McpServerConfig>;
 pub type PluginLoadOutcome = praxis_plugin::PluginLoadOutcome<McpServerConfig>;
 
+pub use curated::OPENAI_CURATED_MARKETPLACE_NAME;
+#[cfg(test)]
+pub(crate) use curated::curated_plugins_repo_path;
 pub(crate) use discoverable::list_tool_suggest_discoverable_plugins;
 pub(crate) use injection::build_plugin_injections;
 pub use manager::ConfiguredMarketplace;
 pub use manager::ConfiguredMarketplaceListOutcome;
 pub use manager::ConfiguredMarketplacePlugin;
-pub use manager::OPENAI_CURATED_MARKETPLACE_NAME;
 pub use manager::PluginDetail;
 pub use manager::PluginInstallError;
 pub use manager::PluginInstallOutcome;
@@ -59,9 +62,7 @@ pub use manifest::PluginManifestLlm;
 pub use manifest::PluginManifestLlmProduct;
 pub use manifest::PluginManifestLlmProfile;
 pub use manifest::PluginManifestLlmPromptSlot;
-pub(crate) use manifest::PluginManifestPaths;
 pub use manifest::PluginManifestToolPolicy;
-pub(crate) use manifest::load_plugin_manifest;
 pub use marketplace::MarketplaceError;
 pub use marketplace::MarketplaceListError;
 pub use marketplace::MarketplacePluginAuthPolicy;
@@ -69,12 +70,7 @@ pub use marketplace::MarketplacePluginInstallPolicy;
 pub use marketplace::MarketplacePluginPolicy;
 pub use marketplace::MarketplacePluginSource;
 pub use remote::RemotePluginFetchError;
-pub use remote::fetch_remote_featured_plugin_ids;
-pub(crate) use render::render_explicit_plugin_instructions;
 pub(crate) use render::render_plugins_section;
-pub(crate) use startup_sync::curated_plugins_repo_path;
-pub(crate) use startup_sync::read_curated_plugins_sha;
-pub(crate) use startup_sync::sync_openai_plugins_repo;
 pub use toggles::collect_plugin_enabled_candidates;
 
 pub(crate) use mentions::build_connector_slug_counts;

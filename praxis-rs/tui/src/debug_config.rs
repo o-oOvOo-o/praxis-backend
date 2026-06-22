@@ -487,14 +487,14 @@ mod tests {
     #[test]
     fn debug_config_output_lists_all_layers_including_disabled() {
         let system_file = if cfg!(windows) {
-            absolute_path("C:\\etc\\codex\\config.toml")
+            absolute_path("C:\\etc\\praxis\\config.toml")
         } else {
             absolute_path("/etc/praxis/config.toml")
         };
         let project_folder = if cfg!(windows) {
-            absolute_path("C:\\repo\\.codex")
+            absolute_path("C:\\repo\\.praxis")
         } else {
-            absolute_path("/repo/.codex")
+            absolute_path("/repo/.praxis")
         };
 
         let layers = vec![
@@ -600,7 +600,7 @@ mod tests {
         };
 
         let user_file = if cfg!(windows) {
-            absolute_path("C:\\users\\alice\\.codex\\config.toml")
+            absolute_path("C:\\users\\alice\\.praxis\\config.toml")
         } else {
             absolute_path("/home/alice/.praxis/config.toml")
         };
@@ -648,7 +648,7 @@ mod tests {
                     unix_sockets: Some(NetworkUnixSocketPermissionsToml {
                         entries: BTreeMap::from([
                             (
-                                "/tmp/codex.sock".to_string(),
+                                "/tmp/praxis.sock".to_string(),
                                 NetworkUnixSocketPermissionToml::Allow,
                             ),
                             (
@@ -670,7 +670,7 @@ mod tests {
 
         let rendered = render_to_text(&render_debug_config_lines(&stack));
         assert!(rendered.contains(
-            "experimental_network: unix_sockets={/tmp/blocked.sock=none, /tmp/codex.sock=allow} (source: cloud requirements)"
+            "experimental_network: unix_sockets={/tmp/blocked.sock=none, /tmp/praxis.sock=allow} (source: cloud requirements)"
         ));
     }
 

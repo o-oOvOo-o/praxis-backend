@@ -45,18 +45,18 @@ enum PendingInputRecord {
     },
 }
 
-pub(crate) struct PendingInputSamplingOutcome {
+pub(crate) struct PendingInputRoundOutcome {
     accepted_any: bool,
     blocked: bool,
     requeued_remaining: bool,
 }
 
-impl PendingInputSamplingOutcome {
-    pub(crate) fn should_retry_without_sampling(&self) -> bool {
+impl PendingInputRoundOutcome {
+    pub(crate) fn should_retry_without_model_request(&self) -> bool {
         self.blocked && !self.accepted_any && self.requeued_remaining
     }
 
-    pub(crate) fn should_stop_without_sampling(&self) -> bool {
+    pub(crate) fn should_stop_without_model_request(&self) -> bool {
         self.blocked && !self.accepted_any && !self.requeued_remaining
     }
 }
@@ -284,11 +284,11 @@ pub(crate) async fn record_pending_inputs(
     }
 }
 
-pub(crate) async fn process_pending_input_for_sampling(
+pub(crate) async fn process_pending_input_for_model_round(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     pending_input: Vec<ResponseInputItem>,
-) -> PendingInputSamplingOutcome {
+) -> PendingInputRoundOutcome {
     let mut blocked = false;
     let mut requeued_remaining = false;
     let mut accepted_pending_input = Vec::new();
@@ -321,7 +321,7 @@ pub(crate) async fn process_pending_input_for_sampling(
     }
     record_additional_contexts(sess, turn_context, blocked_contexts).await;
 
-    PendingInputSamplingOutcome {
+    PendingInputRoundOutcome {
         accepted_any,
         blocked,
         requeued_remaining,
@@ -407,7 +407,7 @@ async fn emit_hook_completed_events(
 }
 
 fn hook_permission_mode(turn_context: &TurnContext) -> String {
-    match turn_context.approval_policy.value() {
+    match turn_context.effective_approval_policy() {
         AskForApproval::Never => "bypassPermissions",
         AskForApproval::UnlessTrusted
         | AskForApproval::OnFailure

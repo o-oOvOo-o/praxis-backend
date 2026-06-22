@@ -1,22 +1,24 @@
+use super::thread_runtime_api::project_thread_runtime_state_with_turn_cleanup_from_watch;
 use super::thread_store_api::ThreadHistorySource;
-use super::thread_store_api::hydrate_thread_turns;
+use super::thread_store_api::ThreadStore;
 use super::*;
-use praxis_app_gateway_protocol::ThreadControlState;
+use crate::bespoke_event_handling::apply_bespoke_event_handling;
+use praxis_app_gateway_protocol::TurnStatus;
 
 #[derive(Clone)]
-pub(crate) struct ListenerTaskContext {
-    pub(crate) thread_manager: Arc<ThreadManager>,
-    pub(crate) thread_state_manager: ThreadStateManager,
-    pub(crate) outgoing: Arc<OutgoingMessageSender>,
-    pub(crate) analytics_events_client: AnalyticsEventsClient,
-    pub(crate) general_analytics_enabled: bool,
-    pub(crate) thread_watch_manager: ThreadWatchManager,
-    pub(crate) fallback_model_provider: String,
-    pub(crate) praxis_home: PathBuf,
+pub(super) struct ListenerTaskContext {
+    pub(super) thread_manager: Arc<ThreadManager>,
+    pub(super) thread_state_manager: ThreadStateManager,
+    pub(super) outgoing: Arc<OutgoingMessageSender>,
+    pub(super) analytics_events_client: AnalyticsEventsClient,
+    pub(super) general_analytics_enabled: bool,
+    pub(super) thread_watch_manager: ThreadWatchManager,
+    pub(super) fallback_model_provider: String,
+    pub(super) praxis_home: PathBuf,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum EnsureConversationListenerResult {
+pub(super) enum EnsureConversationListenerResult {
     Attached,
     ConnectionClosed,
 }
@@ -305,7 +307,7 @@ async fn handle_pending_thread_resume_request(
     let request_id = pending.request_id;
     let connection_id = request_id.connection_id;
     let mut thread = pending.thread_summary;
-    if let Err(message) = hydrate_thread_turns(
+    if let Err(message) = ThreadStore::hydrate_turns(
         &mut thread,
         ThreadHistorySource::RolloutPath(pending.rollout_path.as_path()),
         active_turn.as_ref(),
@@ -325,25 +327,15 @@ async fn handle_pending_thread_resume_request(
         return;
     }
 
-    let thread_status = thread_watch_manager
-        .loaded_status_for_thread(&thread.id)
-        .await;
-
-    let control_state = thread_watch_manager
-        .loaded_control_state_for_thread(&thread.id)
-        .await;
-    set_thread_status_and_interrupt_stale_turns(
+    project_thread_runtime_state_with_turn_cleanup_from_watch(
+        thread_watch_manager,
         &mut thread,
-        thread_status,
         has_live_in_progress_turn,
-        control_state.as_ref(),
-    );
-    thread.control_state = control_state;
+    )
+    .await;
 
-    let state_db = praxis_rollout::state_db::open_if_present(praxis_home, "").await;
-    thread.name = praxis_rollout::ThreadNameResolver::new(state_db.as_deref())
-        .resolve_name(conversation_id)
-        .await;
+    thread.name = ThreadStore::resolve_thread_name_from_home(praxis_home, conversation_id).await;
+    let history_entry_count = u64::try_from(thread.turns.len()).unwrap_or(u64::MAX);
 
     let ThreadConfigSnapshot {
         model,
@@ -366,6 +358,8 @@ async fn handle_pending_thread_resume_request(
         approvals_reviewer: approvals_reviewer.into(),
         sandbox: sandbox_policy.into(),
         reasoning_effort,
+        history_log_id: 0,
+        history_entry_count,
     };
     outgoing.send_response(request_id, response).await;
     outgoing
@@ -399,21 +393,4 @@ async fn resolve_pending_server_request(
             },
         ))
         .await;
-}
-
-pub(super) fn set_thread_status_and_interrupt_stale_turns(
-    thread: &mut Thread,
-    loaded_status: ThreadStatus,
-    has_live_in_progress_turn: bool,
-    control_state: Option<&ThreadControlState>,
-) {
-    let status = resolve_thread_status(loaded_status, has_live_in_progress_turn, control_state);
-    if !matches!(status, ThreadStatus::Active { .. }) {
-        for turn in &mut thread.turns {
-            if matches!(turn.status, TurnStatus::InProgress) {
-                turn.status = TurnStatus::Interrupted;
-            }
-        }
-    }
-    thread.status = status;
 }

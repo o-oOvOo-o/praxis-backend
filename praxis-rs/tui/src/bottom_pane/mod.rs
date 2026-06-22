@@ -106,6 +106,7 @@ pub(crate) use status_line_setup::StatusLineItem;
 pub(crate) use status_line_setup::StatusLinePreviewData;
 pub(crate) use status_line_setup::StatusLineSetupView;
 pub(crate) use title_setup::TerminalTitleItem;
+pub(crate) use title_setup::TerminalTitlePreviewData;
 pub(crate) use title_setup::TerminalTitleSetupView;
 mod paste_burst;
 mod pending_input_preview;

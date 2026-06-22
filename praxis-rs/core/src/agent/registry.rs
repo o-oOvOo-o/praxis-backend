@@ -265,7 +265,7 @@ impl AgentRegistry {
                 active_agents.base_name_reset_count += 1;
                 if let Some(metrics) = praxis_otel::metrics::global() {
                     let _ = metrics.counter(
-                        "codex.multi_agent.base_name_pool_reset",
+                        "praxis.multi_agent.base_name_pool_reset",
                         /*inc*/ 1,
                         &[],
                     );

@@ -5,7 +5,7 @@ use praxis_core::config::Config;
 use praxis_protocol::protocol::SessionConfiguredEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodexStatus {
+pub enum PraxisStatus {
     Running,
     InitiateShutdown,
 }
@@ -20,10 +20,10 @@ pub(crate) trait EventProcessor {
     );
 
     /// Handle a single typed app-gateway notification emitted by the agent.
-    fn process_server_notification(&mut self, notification: ServerNotification) -> CodexStatus;
+    fn process_server_notification(&mut self, notification: ServerNotification) -> PraxisStatus;
 
     /// Handle a local exec warning that is not represented as an app-gateway notification.
-    fn process_warning(&mut self, message: String) -> CodexStatus;
+    fn process_warning(&mut self, message: String) -> PraxisStatus;
 
     fn print_final_output(&mut self) {}
 }

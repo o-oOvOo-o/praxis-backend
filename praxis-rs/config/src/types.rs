@@ -537,7 +537,7 @@ pub struct Notice {
     pub hide_rate_limit_model_nudge: Option<bool>,
     /// Tracks whether the user has seen the model migration prompt
     pub hide_gpt5_1_migration_prompt: Option<bool>,
-    /// Tracks whether the user has seen the gpt-5.1-codex-max migration prompt
+    /// Tracks whether the user has seen the legacy OpenAI model migration prompt.
     #[serde(rename = "hide_gpt-5.1-codex-max_migration_prompt")]
     pub hide_gpt_5_1_praxis_max_migration_prompt: Option<bool>,
     /// Tracks acknowledged model migrations as old->new model slug mappings.

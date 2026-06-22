@@ -8,11 +8,11 @@ use core_test_support::responses::mount_models_once;
 use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use praxis_core::models_manager::manager::ModelsManager;
 use praxis_core::models_manager::manager::RefreshStrategy;
 use praxis_features::Feature;
-use praxis_login::CodexAuth;
+use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::config_types::ReasoningSummary;
 use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::ModelInfo;
@@ -146,8 +146,8 @@ async fn spawn_agent_description_lists_visible_models_and_reasoning_efforts() ->
     )
     .await;
 
-    let mut builder = test_codex()
-        .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+    let mut builder = test_praxis()
+        .with_auth(OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing())
         .with_model("visible-model")
         .with_config(|config| {
             config

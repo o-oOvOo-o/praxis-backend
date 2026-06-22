@@ -5,7 +5,7 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
-use core_test_support::test_codex::test_codex;
+use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_protocol::config_types::CollaborationMode;
 use praxis_protocol::config_types::ModeKind;
@@ -75,9 +75,9 @@ async fn no_collaboration_instructions_by_default() -> Result<()> {
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -86,7 +86,7 @@ async fn no_collaboration_instructions_by_default() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req.single_request().input();
     assert_eq!(developer_message_count(&input), 1);
@@ -116,11 +116,11 @@ async fn user_input_includes_collaboration_instructions_after_override() -> Resu
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
 
     let collab_text = "collab instructions";
     let collaboration_mode = collab_mode_with_instructions(Some(collab_text));
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -137,7 +137,7 @@ async fn user_input_includes_collaboration_instructions_after_override() -> Resu
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -146,7 +146,7 @@ async fn user_input_includes_collaboration_instructions_after_override() -> Resu
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req.single_request().input();
     let dev_texts = developer_texts(&input);
@@ -167,11 +167,11 @@ async fn collaboration_instructions_added_on_user_turn() -> Result<()> {
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
     let collab_text = "turn instructions";
     let collaboration_mode = collab_mode_with_instructions(Some(collab_text));
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -194,7 +194,7 @@ async fn collaboration_instructions_added_on_user_turn() -> Result<()> {
             personality: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req.single_request().input();
     let dev_texts = developer_texts(&input);
@@ -215,11 +215,11 @@ async fn override_then_next_turn_uses_updated_collaboration_instructions() -> Re
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
     let collab_text = "override instructions";
     let collaboration_mode = collab_mode_with_instructions(Some(collab_text));
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -236,7 +236,7 @@ async fn override_then_next_turn_uses_updated_collaboration_instructions() -> Re
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -245,7 +245,7 @@ async fn override_then_next_turn_uses_updated_collaboration_instructions() -> Re
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req.single_request().input();
     let dev_texts = developer_texts(&input);
@@ -266,13 +266,13 @@ async fn user_turn_overrides_collaboration_instructions_after_override() -> Resu
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
     let base_text = "base instructions";
     let base_mode = collab_mode_with_instructions(Some(base_text));
     let turn_text = "turn override";
     let turn_mode = collab_mode_with_instructions(Some(turn_text));
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -289,7 +289,7 @@ async fn user_turn_overrides_collaboration_instructions_after_override() -> Resu
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserTurn {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -312,7 +312,7 @@ async fn user_turn_overrides_collaboration_instructions_after_override() -> Resu
             personality: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req.single_request().input();
     let dev_texts = developer_texts(&input);
@@ -340,11 +340,11 @@ async fn collaboration_mode_update_emits_new_instruction_message() -> Result<()>
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
     let first_text = "first instructions";
     let second_text = "second instructions";
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -361,7 +361,7 @@ async fn collaboration_mode_update_emits_new_instruction_message() -> Result<()>
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 1".into(),
@@ -370,9 +370,9 @@ async fn collaboration_mode_update_emits_new_instruction_message() -> Result<()>
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -389,7 +389,7 @@ async fn collaboration_mode_update_emits_new_instruction_message() -> Result<()>
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 2".into(),
@@ -398,7 +398,7 @@ async fn collaboration_mode_update_emits_new_instruction_message() -> Result<()>
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req2.single_request().input();
     let dev_texts = developer_texts(&input);
@@ -426,10 +426,10 @@ async fn collaboration_mode_update_noop_does_not_append() -> Result<()> {
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
     let collab_text = "same instructions";
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -446,7 +446,7 @@ async fn collaboration_mode_update_noop_does_not_append() -> Result<()> {
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 1".into(),
@@ -455,9 +455,9 @@ async fn collaboration_mode_update_noop_does_not_append() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -474,7 +474,7 @@ async fn collaboration_mode_update_noop_does_not_append() -> Result<()> {
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 2".into(),
@@ -483,7 +483,7 @@ async fn collaboration_mode_update_noop_does_not_append() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req2.single_request().input();
     let dev_texts = developer_texts(&input);
@@ -509,11 +509,11 @@ async fn collaboration_mode_update_emits_new_instruction_message_when_mode_chang
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
     let default_text = "default mode instructions";
     let plan_text = "plan mode instructions";
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -533,7 +533,7 @@ async fn collaboration_mode_update_emits_new_instruction_message_when_mode_chang
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 1".into(),
@@ -542,9 +542,9 @@ async fn collaboration_mode_update_emits_new_instruction_message_when_mode_chang
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -564,7 +564,7 @@ async fn collaboration_mode_update_emits_new_instruction_message_when_mode_chang
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 2".into(),
@@ -573,7 +573,7 @@ async fn collaboration_mode_update_emits_new_instruction_message_when_mode_chang
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req2.single_request().input();
     let dev_texts = developer_texts(&input);
@@ -601,10 +601,10 @@ async fn collaboration_mode_update_noop_does_not_append_when_mode_is_unchanged()
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
     let collab_text = "mode-stable instructions";
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -624,7 +624,7 @@ async fn collaboration_mode_update_noop_does_not_append_when_mode_is_unchanged()
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 1".into(),
@@ -633,9 +633,9 @@ async fn collaboration_mode_update_noop_does_not_append_when_mode_is_unchanged()
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -655,7 +655,7 @@ async fn collaboration_mode_update_noop_does_not_append_when_mode_is_unchanged()
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello 2".into(),
@@ -664,7 +664,7 @@ async fn collaboration_mode_update_noop_does_not_append_when_mode_is_unchanged()
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req2.single_request().input();
     let dev_texts = developer_texts(&input);
@@ -690,7 +690,7 @@ async fn resume_replays_collaboration_instructions() -> Result<()> {
     )
     .await;
 
-    let mut builder = test_codex();
+    let mut builder = test_praxis();
     let initial = builder.build(&server).await?;
     let rollout_path = initial
         .session_configured
@@ -701,7 +701,7 @@ async fn resume_replays_collaboration_instructions() -> Result<()> {
 
     let collab_text = "resume instructions";
     initial
-        .codex
+        .thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -719,7 +719,7 @@ async fn resume_replays_collaboration_instructions() -> Result<()> {
         .await?;
 
     initial
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -728,11 +728,14 @@ async fn resume_replays_collaboration_instructions() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&initial.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&initial.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     let resumed = builder.resume(&server, home, rollout_path).await?;
     resumed
-        .codex
+        .thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "after resume".into(),
@@ -741,7 +744,10 @@ async fn resume_replays_collaboration_instructions() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&resumed.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&resumed.thread, |ev| {
+        matches!(ev, EventMsg::TurnComplete(_))
+    })
+    .await;
 
     let input = req2.single_request().input();
     let dev_texts = developer_texts(&input);
@@ -762,10 +768,10 @@ async fn empty_collaboration_instructions_are_ignored() -> Result<()> {
     )
     .await;
 
-    let test = test_codex().build(&server).await?;
+    let test = test_praxis().build(&server).await?;
     let current_model = test.session_configured.model.clone();
 
-    test.codex
+    test.thread
         .submit(Op::OverrideTurnContext {
             cwd: None,
             approval_policy: None,
@@ -789,7 +795,7 @@ async fn empty_collaboration_instructions_are_ignored() -> Result<()> {
         })
         .await?;
 
-    test.codex
+    test.thread
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
                 text: "hello".into(),
@@ -798,7 +804,7 @@ async fn empty_collaboration_instructions_are_ignored() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&test.codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let input = req.single_request().input();
     assert_eq!(developer_message_count(&input), 1);

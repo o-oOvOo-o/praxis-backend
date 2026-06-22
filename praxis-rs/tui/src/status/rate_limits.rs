@@ -14,8 +14,10 @@ use chrono::Duration as ChronoDuration;
 use chrono::Local;
 use chrono::Utc;
 use praxis_protocol::protocol::CreditsSnapshot as CoreCreditsSnapshot;
+use praxis_protocol::protocol::OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID;
 use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_protocol::protocol::RateLimitWindow;
+use praxis_protocol::protocol::is_openai_hosted_primary_rate_limit;
 
 const STATUS_LIMIT_BAR_SEGMENTS: usize = 20;
 const STATUS_LIMIT_BAR_FILLED: &str = "█";
@@ -118,7 +120,11 @@ pub(crate) fn rate_limit_snapshot_display(
     snapshot: &RateLimitSnapshot,
     captured_at: DateTime<Local>,
 ) -> RateLimitSnapshotDisplay {
-    rate_limit_snapshot_display_for_limit(snapshot, "codex".to_string(), captured_at)
+    rate_limit_snapshot_display_for_limit(
+        snapshot,
+        OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string(),
+        captured_at,
+    )
 }
 
 pub(crate) fn rate_limit_snapshot_display_for_limit(
@@ -181,7 +187,7 @@ pub(crate) fn compose_rate_limit_data_many(
             > ChronoDuration::minutes(RATE_LIMIT_STALE_THRESHOLD_MINUTES);
 
         let limit_bucket_label = snapshot.limit_name.clone();
-        let show_limit_prefix = !limit_bucket_label.eq_ignore_ascii_case("codex");
+        let show_limit_prefix = !is_openai_hosted_primary_rate_limit(&limit_bucket_label);
         let primary_label = snapshot
             .primary
             .as_ref()
@@ -350,6 +356,7 @@ mod tests {
     use super::StatusRateLimitData;
     use super::compose_rate_limit_data_many;
     use chrono::Local;
+    use praxis_protocol::protocol::OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID;
     use pretty_assertions::assert_eq;
 
     fn window(used_percent: f64) -> RateLimitWindowDisplay {
@@ -363,8 +370,8 @@ mod tests {
     #[test]
     fn non_praxis_single_limit_renders_combined_row() {
         let now = Local::now();
-        let codex = RateLimitSnapshotDisplay {
-            limit_name: "codex".to_string(),
+        let primary_limit = RateLimitSnapshotDisplay {
+            limit_name: OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string(),
             captured_at: now,
             primary: Some(window(/*used_percent*/ 10.0)),
             secondary: None,
@@ -386,7 +393,7 @@ mod tests {
             }),
         };
 
-        let rows = match compose_rate_limit_data_many(&[codex, other], now) {
+        let rows = match compose_rate_limit_data_many(&[primary_limit, other], now) {
             StatusRateLimitData::Available(rows) => rows,
             other => panic!("unexpected status: {other:?}"),
         };

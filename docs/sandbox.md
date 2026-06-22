@@ -1,3 +1,6 @@
 ## Sandbox & approvals
 
-For information about Codex sandboxing and approvals, see [this documentation](https://developers.openai.com/codex/security).
+Praxis sandboxing and approvals are owned by the tools runtime.
+
+The active permission profile determines which filesystem and network actions
+can run without an approval prompt.
