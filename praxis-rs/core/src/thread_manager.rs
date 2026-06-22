@@ -39,6 +39,7 @@ mod inner;
 mod lifecycle;
 mod mcp_refresh;
 mod registry;
+mod services;
 mod shutdown;
 mod source_inheritance;
 

@@ -8,22 +8,19 @@ use praxis_protocol::protocol::SessionSource;
 use tokio::sync::broadcast;
 
 use crate::ModelProviderInfo;
-use crate::SkillsManager;
 use crate::agent_os::AgentOs;
 use crate::config::Config;
-use crate::mcp::McpManager;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::manager::ModelsManager;
-use crate::plugins::PluginsManager;
 
 use super::THREAD_CREATED_CHANNEL_CAPACITY;
 use super::ThreadManager;
 use super::ThreadManagerInner;
 use super::bootstrap::TempPraxisHomeGuard;
-use super::bootstrap::build_skills_watcher;
 use super::bootstrap::set_thread_manager_test_mode_for_tests;
 use super::bootstrap::should_use_test_thread_manager_behavior;
 use super::registry::ThreadRegistry;
+use super::services::ThreadManagerServices;
 
 impl ThreadManager {
     pub fn new(
@@ -34,19 +31,17 @@ impl ThreadManager {
         environment_manager: Arc<EnvironmentManager>,
     ) -> Self {
         let praxis_home = config.praxis_home.clone();
-        let restriction_product = session_source.restriction_product();
-        let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
-        let plugins_manager = Arc::new(PluginsManager::new_with_restriction_product(
-            praxis_home.clone(),
-            restriction_product,
-        ));
-        let mcp_manager = Arc::new(McpManager::new(Arc::clone(&plugins_manager)));
-        let skills_manager = Arc::new(SkillsManager::new_with_restriction_product(
+        let ThreadManagerServices {
+            skills_manager,
+            plugins_manager,
+            mcp_manager,
+            skills_watcher,
+        } = ThreadManagerServices::new(
             praxis_home.clone(),
             config.bundled_skills_enabled(),
-            restriction_product,
-        ));
-        let skills_watcher = build_skills_watcher(Arc::clone(&skills_manager));
+            session_source.restriction_product(),
+        );
+        let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
         Self {
             state: Arc::new(ThreadManagerInner {
                 threads: ThreadRegistry::default(),
@@ -107,18 +102,16 @@ impl ThreadManager {
         set_thread_manager_test_mode_for_tests(/*enabled*/ true);
         let auth_manager = AuthManager::from_auth_for_testing(auth);
         let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
-        let restriction_product = SessionSource::Exec.restriction_product();
-        let plugins_manager = Arc::new(PluginsManager::new_with_restriction_product(
-            praxis_home.clone(),
-            restriction_product,
-        ));
-        let mcp_manager = Arc::new(McpManager::new(Arc::clone(&plugins_manager)));
-        let skills_manager = Arc::new(SkillsManager::new_with_restriction_product(
+        let ThreadManagerServices {
+            skills_manager,
+            plugins_manager,
+            mcp_manager,
+            skills_watcher,
+        } = ThreadManagerServices::new(
             praxis_home.clone(),
             /*bundled_skills_enabled*/ true,
-            restriction_product,
-        ));
-        let skills_watcher = build_skills_watcher(Arc::clone(&skills_manager));
+            SessionSource::Exec.restriction_product(),
+        );
         Self {
             state: Arc::new(ThreadManagerInner {
                 threads: ThreadRegistry::default(),
