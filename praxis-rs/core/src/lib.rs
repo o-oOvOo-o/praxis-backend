@@ -1,5 +1,7 @@
 //! Root of the `praxis-core` library.
 
+// Session startup composes deep async service graphs across exec, MCP, and network proxy code.
+#![recursion_limit = "256"]
 // Prevent accidental direct writes to stdout/stderr in library code. All
 // user-visible output must go through the appropriate abstraction (e.g.,
 // the TUI or the tracing stack).

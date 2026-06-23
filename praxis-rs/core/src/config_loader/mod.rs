@@ -17,7 +17,7 @@ use praxis_protocol::config_types::TrustLevel;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use praxis_utils_absolute_path::AbsolutePathBufGuard;
-use praxis_utils_home_dir::upstream_codex_read_through_home;
+use praxis_utils_home_dir::external_codex_read_through_home;
 use serde::Deserialize;
 use std::io;
 use std::path::Path;
@@ -410,7 +410,7 @@ fn parse_cloud_requirements_fragment(
 }
 
 async fn resolve_user_config_toml_file(praxis_home: &Path) -> io::Result<AbsolutePathBuf> {
-    let shared_praxis_home = upstream_codex_read_through_home(praxis_home)?;
+    let shared_praxis_home = external_codex_read_through_home(praxis_home)?;
     resolve_user_config_toml_file_with_shared_home(praxis_home, shared_praxis_home.as_deref()).await
 }
 

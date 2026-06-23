@@ -5,9 +5,9 @@ In the praxis-rs folder where the rust code lives:
 - Crate names are prefixed with `praxis-`. For example, the `core` folder's crate is named `praxis-core`
 - When using format! and you can inline variables into {}, always do that.
 - Install any commands the repo relies on (for example `just`, `rg`, or `cargo-insta`) if they aren't already available before running instructions here.
-- Never add or modify any code related to `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` or `CODEX_SANDBOX_ENV_VAR`.
-  - You operate in a sandbox where `CODEX_SANDBOX_NETWORK_DISABLED=1` will be set whenever you use the `shell` tool. Any existing code that uses `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` was authored with this fact in mind. It is often used to early exit out of tests that the author knew you would not be able to run given your sandbox limitations.
-  - Similarly, when you spawn a process using Seatbelt (`/usr/bin/sandbox-exec`), `CODEX_SANDBOX=seatbelt` will be set on the child process. Integration tests that want to run Seatbelt themselves cannot be run under Seatbelt, so checks for `CODEX_SANDBOX=seatbelt` are also often used to early exit out of tests, as appropriate.
+- Treat `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` and `CODEX_SANDBOX_ENV_VAR` as legacy external-sandbox compatibility contracts. Do not change their semantics unless the sandbox contract is deliberately replaced.
+  - `CODEX_SANDBOX_NETWORK_DISABLED=1` may be set by an external restricted shell harness. Existing compatibility checks use it to skip tests that require network access.
+  - `CODEX_SANDBOX=seatbelt` may be set for Seatbelt (`/usr/bin/sandbox-exec`) child processes. Integration tests that invoke Seatbelt themselves can use this value to skip nested Seatbelt runs.
 - Always collapse if statements per https://rust-lang.github.io/rust-clippy/master/index.html#collapsible_if
 - Always inline format! args when possible per https://rust-lang.github.io/rust-clippy/master/index.html#uninlined_format_args
 - Use method references over closures when possible per https://rust-lang.github.io/rust-clippy/master/index.html#redundant_closure_for_method_calls
@@ -136,7 +136,7 @@ If you don’t have the tool:
 
 ### Integration tests (core)
 
-- Prefer the utilities in `core_test_support::responses` when writing end-to-end Codex tests.
+- Prefer the utilities in `core_test_support::responses` when writing end-to-end Praxis tests.
 
 - All `mount_sse*` helpers return a `ResponseMock`; hold onto it so you can assert against outbound `/responses` POST bodies.
 - Use `ResponseMock::single_request()` when a test should only issue one POST, or `ResponseMock::requests()` to inspect every captured `ResponsesRequest`.
@@ -154,7 +154,7 @@ If you don’t have the tool:
       responses::ev_completed("resp-1"),
   ])).await;
 
-  codex.submit(Op::UserTurn { ... }).await?;
+  praxis.submit(Op::UserTurn { ... }).await?;
 
   // Assert request body if needed.
   let request = mock.single_request();

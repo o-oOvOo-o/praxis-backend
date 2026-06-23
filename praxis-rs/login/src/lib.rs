@@ -20,13 +20,13 @@ pub use auth::AuthCredentialsStoreMode;
 pub use auth::AuthDotJson;
 pub use auth::AuthManager;
 pub use auth::CLIENT_ID;
-pub use auth::OpenAiAccountAuth;
 pub use auth::ExternalAuth;
 pub use auth::ExternalAuthChatgptMetadata;
 pub use auth::ExternalAuthRefreshContext;
 pub use auth::ExternalAuthRefreshReason;
 pub use auth::ExternalAuthTokens;
 pub use auth::OPENAI_API_KEY_ENV_VAR;
+pub use auth::OpenAiAccountAuth;
 pub use auth::PRAXIS_API_KEY_ENV_VAR;
 pub use auth::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
 pub use auth::RefreshTokenError;
@@ -41,8 +41,3 @@ pub use auth::read_praxis_api_key_from_env;
 pub use auth::save_auth;
 pub use praxis_protocol::auth::AuthMode;
 pub use token_data::TokenData;
-
-pub mod compat {
-    #[allow(deprecated)]
-    pub use crate::auth::CodexAuth;
-}

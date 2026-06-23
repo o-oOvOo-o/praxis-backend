@@ -666,7 +666,7 @@ async fn js_repl_exposes_praxis_path_helpers() -> Result<()> {
     let server = responses::start_mock_server().await;
     let mock = run_js_repl_turn(
         &server,
-        "check codex path helpers",
+        "check praxis path helpers",
         &[(
             "call-1",
             "console.log(`cwd:${typeof praxis.cwd}:${praxis.cwd.length > 0}`); console.log(`home:${praxis.homeDir === null || typeof praxis.homeDir === \"string\"}`);",

@@ -39,7 +39,7 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
 
-      - name: Build codex with Bazel
+      - name: Build Praxis with Bazel
         env:
           BUILDBUDDY_API_KEY: ${{ secrets.BUILDBUDDY_API_KEY }}
         shell: bash
@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           # Use the shared CI wrapper so fork PRs fall back cleanly when
           # BuildBuddy credentials are unavailable. This workflow needs the
-          # built `codex` binary on disk afterwards, so ask the wrapper to
+          # built Praxis binary on disk afterwards, so ask the wrapper to
           # override CI's default remote_download_minimal behavior.
           ./.github/scripts/run-bazel-ci.sh \
             --remote-download-toplevel \
@@ -56,7 +56,7 @@ jobs:
             --build_metadata=COMMIT_SHA=${GITHUB_SHA} \
             --build_metadata=TAG_job=sdk \
             -- \
-            //praxis-rs/cli:codex
+            //praxis-rs/cli:praxis
 
           # Resolve the exact output file using the same wrapper/config path as
           # the build instead of guessing which Bazel convenience symlink is
@@ -67,7 +67,7 @@ jobs:
               cquery \
               --output=files \
               -- \
-              //praxis-rs/cli:codex \
+              //praxis-rs/cli:praxis \
               | grep -E '^(/|bazel-out/)' \
               | tail -n 1
           )"
@@ -77,28 +77,28 @@ jobs:
             praxis_bazel_output_path="${GITHUB_WORKSPACE}/${cquery_output}"
           fi
           if [[ -z "${praxis_bazel_output_path}" ]]; then
-            echo "Bazel did not report an output path for //praxis-rs/cli:codex." >&2
+            echo "Bazel did not report an output path for //praxis-rs/cli:praxis." >&2
             exit 1
           fi
           if [[ ! -e "${praxis_bazel_output_path}" ]]; then
-            echo "Unable to locate the Bazel-built codex binary at ${praxis_bazel_output_path}." >&2
+            echo "Unable to locate the Bazel-built Praxis binary at ${praxis_bazel_output_path}." >&2
             exit 1
           fi
 
           # Stage the binary into the workspace and point the SDK tests at that
-          # stable path. The tests spawn `codex` directly many times, so using a
+          # stable path. The tests spawn Praxis directly many times, so using a
           # normal executable path is more reliable than invoking Bazel for each
           # test process.
           install_dir="${GITHUB_WORKSPACE}/.tmp/sdk-ci"
           mkdir -p "${install_dir}"
-          install -m 755 "${praxis_bazel_output_path}" "${install_dir}/codex"
-          echo "CODEX_EXEC_PATH=${install_dir}/codex" >> "$GITHUB_ENV"
+          install -m 755 "${praxis_bazel_output_path}" "${install_dir}/praxis"
+          echo "PRAXIS_EXEC_PATH=${install_dir}/praxis" >> "$GITHUB_ENV"
 
-      - name: Warm up Bazel-built codex
+      - name: Warm up Bazel-built Praxis
         shell: bash
         run: |
           set -euo pipefail
-          "${CODEX_EXEC_PATH}" --version
+          "${PRAXIS_EXEC_PATH}" --version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

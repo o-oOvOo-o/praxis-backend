@@ -1,6 +1,6 @@
 # What: let `rules_rust` repository_set entries specify an explicit exec-platform
 # constraint set.
-# Why: codex needs Windows nightly lint toolchains to run helper binaries on an
+# Why: Praxis needs Windows nightly lint toolchains to run helper binaries on an
 # MSVC exec platform while still targeting `windows-gnullvm` crates.
 
 diff --git a/rust/extensions.bzl b/rust/extensions.bzl

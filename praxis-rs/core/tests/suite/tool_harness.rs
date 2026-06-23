@@ -53,7 +53,7 @@ async fn shell_tool_executes_command_and_streams_output() -> anyhow::Result<()> 
 
     let mut builder = test_praxis().with_model("gpt-5");
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         session_configured,
         ..
@@ -96,7 +96,7 @@ async fn shell_tool_executes_command_and_streams_output() -> anyhow::Result<()> 
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let req = second_mock.single_request();
     let (output_text, _) = call_output(&req, call_id);
@@ -116,7 +116,7 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
 
     let mut builder = test_praxis();
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         session_configured,
         ..
@@ -168,7 +168,7 @@ async fn update_plan_tool_emits_plan_update_event() -> anyhow::Result<()> {
         .await?;
 
     let mut saw_plan_update = false;
-    wait_for_event(&codex, |event| match event {
+    wait_for_event(&praxis, |event| match event {
         EventMsg::PlanUpdate(update) => {
             saw_plan_update = true;
             assert_eq!(update.explanation.as_deref(), Some("Tool harness check"));
@@ -201,7 +201,7 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
 
     let mut builder = test_praxis();
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         session_configured,
         ..
@@ -249,7 +249,7 @@ async fn update_plan_tool_rejects_malformed_payload() -> anyhow::Result<()> {
         .await?;
 
     let mut saw_plan_update = false;
-    wait_for_event(&codex, |event| match event {
+    wait_for_event(&praxis, |event| match event {
         EventMsg::PlanUpdate(_) => {
             saw_plan_update = true;
             false
@@ -293,7 +293,7 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
             .expect("test config should allow feature update");
     });
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         session_configured,
         ..
@@ -346,7 +346,7 @@ async fn apply_patch_tool_executes_and_emits_patch_events() -> anyhow::Result<()
 
     let mut saw_patch_begin = false;
     let mut patch_end_success = None;
-    wait_for_event(&codex, |event| match event {
+    wait_for_event(&praxis, |event| match event {
         EventMsg::PatchApplyBegin(begin) => {
             saw_patch_begin = true;
             assert_eq!(begin.call_id, call_id);
@@ -402,7 +402,7 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
             .expect("test config should allow feature update");
     });
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         session_configured,
         ..
@@ -448,7 +448,7 @@ async fn apply_patch_reports_parse_diagnostics() -> anyhow::Result<()> {
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let req = second_mock.single_request();
     let (output_text, success_flag) = call_output(&req, call_id);

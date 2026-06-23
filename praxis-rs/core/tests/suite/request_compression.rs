@@ -36,7 +36,7 @@ async fn request_body_is_zstd_compressed_for_praxis_backend_when_enabled() -> an
                 .expect("test config should allow feature update");
             config.model_provider.base_url = Some(base_url);
         });
-    let codex = builder.build(&server).await?.thread;
+    let praxis = builder.build(&server).await?.thread;
 
     codex
         .submit(Op::UserInput {
@@ -49,7 +49,7 @@ async fn request_body_is_zstd_compressed_for_praxis_backend_when_enabled() -> an
         .await?;
 
     // Wait until the task completes so the request definitely hit the server.
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = request_log.single_request();
     assert_eq!(request.header("content-encoding").as_deref(), Some("zstd"));
@@ -83,7 +83,7 @@ async fn request_body_is_not_compressed_for_api_key_auth_even_when_enabled() -> 
             .expect("test config should allow feature update");
         config.model_provider.base_url = Some(base_url);
     });
-    let codex = builder.build(&server).await?.thread;
+    let praxis = builder.build(&server).await?.thread;
 
     codex
         .submit(Op::UserInput {
@@ -95,7 +95,7 @@ async fn request_body_is_not_compressed_for_api_key_auth_even_when_enabled() -> 
         })
         .await?;
 
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = request_log.single_request();
     assert!(

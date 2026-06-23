@@ -1,6 +1,6 @@
-use crate::agent_os::model::ActionIntent;
-use crate::agent_os::model::CapabilityProfile;
-use crate::agent_os::model::ResourceRequirement;
+use crate::agent_os::records::ActionIntent;
+use crate::agent_os::records::CapabilityProfile;
+use crate::agent_os::records::ResourceRequirement;
 
 impl CapabilityProfile {
     pub(in crate::agent_os) fn validate_tool_intent(

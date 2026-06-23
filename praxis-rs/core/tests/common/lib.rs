@@ -136,7 +136,7 @@ impl TempDirExt for TempDir {
 }
 
 pub fn test_tmp_path() -> AbsolutePathBuf {
-    test_absolute_path_with_windows("/tmp", Some(r"C:\Users\codex\AppData\Local\Temp"))
+    test_absolute_path_with_windows("/tmp", Some(r"C:\Users\praxis\AppData\Local\Temp"))
 }
 
 pub fn test_tmp_path_buf() -> PathBuf {

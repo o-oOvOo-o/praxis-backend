@@ -1,6 +1,6 @@
 # Security Policy
 
-Thank you for helping us keep Codex secure!
+Thank you for helping us keep Praxis secure!
 
 ## Reporting Security Issues
 

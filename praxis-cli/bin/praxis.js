@@ -13,12 +13,12 @@ const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 
 const PLATFORM_PACKAGE_BY_TARGET = {
-  "x86_64-unknown-linux-musl": "@openai/praxis-linux-x64",
-  "aarch64-unknown-linux-musl": "@openai/praxis-linux-arm64",
-  "x86_64-apple-darwin": "@openai/praxis-darwin-x64",
-  "aarch64-apple-darwin": "@openai/praxis-darwin-arm64",
-  "x86_64-pc-windows-msvc": "@openai/praxis-win32-x64",
-  "aarch64-pc-windows-msvc": "@openai/praxis-win32-arm64",
+  "x86_64-unknown-linux-musl": "@praxis/praxis-linux-x64",
+  "aarch64-unknown-linux-musl": "@praxis/praxis-linux-arm64",
+  "x86_64-apple-darwin": "@praxis/praxis-darwin-x64",
+  "aarch64-apple-darwin": "@praxis/praxis-darwin-arm64",
+  "x86_64-pc-windows-msvc": "@praxis/praxis-win32-x64",
+  "aarch64-pc-windows-msvc": "@praxis/praxis-win32-arm64",
 };
 
 const { platform, arch } = process;
@@ -75,28 +75,33 @@ if (!platformPackage) {
   throw new Error(`Unsupported target triple: ${targetTriple}`);
 }
 
-const nativeBinaryName = process.platform === "win32" ? "codex.exe" : "codex";
 const localVendorRoot = path.join(__dirname, "..", "vendor");
-const localBinaryPath = path.join(
-  localVendorRoot,
-  targetTriple,
-  "codex",
-  nativeBinaryName,
-);
+
+function nativeBinaryCandidates(vendorRoot) {
+  const praxisBinaryName = process.platform === "win32" ? "praxis.exe" : "praxis";
+  const targetRoot = path.join(vendorRoot, targetTriple);
+  return [path.join(targetRoot, "praxis", praxisBinaryName)];
+}
+
+function firstExistingPath(paths) {
+  return paths.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+const localBinaryPath = firstExistingPath(nativeBinaryCandidates(localVendorRoot));
 
 let vendorRoot;
 try {
   const packageJsonPath = require.resolve(`${platformPackage}/package.json`);
   vendorRoot = path.join(path.dirname(packageJsonPath), "vendor");
 } catch {
-  if (existsSync(localBinaryPath)) {
+  if (localBinaryPath) {
     vendorRoot = localVendorRoot;
   } else {
     const packageManager = detectPackageManager();
     const updateCommand =
       packageManager === "bun"
-        ? "bun install -g @openai/praxis@latest"
-        : "npm install -g @openai/praxis@latest";
+        ? "bun install -g @praxis/praxis@latest"
+        : "npm install -g @praxis/praxis@latest";
     throw new Error(
       `Missing optional dependency ${platformPackage}. Reinstall Praxis: ${updateCommand}`,
     );
@@ -107,15 +112,17 @@ if (!vendorRoot) {
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g @openai/praxis@latest"
-      : "npm install -g @openai/praxis@latest";
+      ? "bun install -g @praxis/praxis@latest"
+      : "npm install -g @praxis/praxis@latest";
   throw new Error(
     `Missing optional dependency ${platformPackage}. Reinstall Praxis: ${updateCommand}`,
   );
 }
 
 const archRoot = path.join(vendorRoot, targetTriple);
-const binaryPath = path.join(archRoot, "codex", nativeBinaryName);
+const binaryPath =
+  firstExistingPath(nativeBinaryCandidates(vendorRoot)) ??
+  nativeBinaryCandidates(vendorRoot)[0];
 
 // Use an asynchronous spawn instead of spawnSync so that Node is able to
 // respond to signals (e.g. Ctrl-C / SIGINT) while the native binary is
@@ -167,11 +174,9 @@ const updatedPath = getUpdatedPath(additionalDirs);
 
 const env = { ...process.env, PATH: updatedPath };
 
-// Praxis may read selected upstream Codex config/auth through explicit
-// read-through bridges, but it must never inherit Codex state variables into
-// its own native process.  This prevents shell-profile aliases or nested
-// sessions from forcing Praxis to attach to stale ~/.codex state databases or
-// leaking PRAXIS child commands back into upstream Codex threads.
+// Praxis may read selected external agent config/auth through explicit
+// read-through bridges, but it must never inherit external agent state into
+// its own native process.
 for (const key of [
   "CODEX_HOME",
   "CODEX_HOME_NAMESPACE",

@@ -1,37 +1,29 @@
 mod cancellation;
+mod input;
 mod required_wait;
 mod sandbox_state;
 mod server_scope;
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use async_channel::Sender;
-use praxis_config::types::McpServerConfig;
-use praxis_login::OpenAiAccountAuth;
-use praxis_mcp::mcp::auth::McpAuthStatusEntry;
 use praxis_mcp::mcp_connection_manager::McpConnectionManager;
 use praxis_mcp::mcp_connection_manager::praxis_apps_tools_cache_key;
-use praxis_protocol::protocol::Event;
 use tracing::Instrument;
 use tracing::info_span;
 
-use crate::config::Config;
-use crate::mcp::McpManager;
 use crate::praxis::INITIAL_SUBMIT_ID;
-use crate::praxis::Session;
-use crate::praxis::SessionConfiguration;
+pub(super) use input::McpStartupInput;
 
-pub(super) async fn start(
-    session: &Arc<Session>,
-    config: &Config,
-    session_configuration: &SessionConfiguration,
-    mcp_manager: &McpManager,
-    tx_event: Sender<Event>,
-    auth: Option<&OpenAiAccountAuth>,
-    mcp_servers: HashMap<String, McpServerConfig>,
-    auth_statuses: HashMap<String, McpAuthStatusEntry>,
-) -> anyhow::Result<()> {
+pub(super) async fn start(input: McpStartupInput<'_>) -> anyhow::Result<()> {
+    let McpStartupInput {
+        session,
+        config,
+        session_configuration,
+        mcp_manager,
+        tx_event,
+        auth,
+        mcp_servers,
+        auth_statuses,
+    } = input;
+
     let sandbox_state = sandbox_state::build(config, session_configuration);
     let server_scope = server_scope::McpStartupServerScope::from_servers(&mcp_servers);
     let tool_plugin_provenance = mcp_manager.tool_plugin_provenance(config);

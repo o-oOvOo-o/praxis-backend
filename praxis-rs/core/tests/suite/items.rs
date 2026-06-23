@@ -68,7 +68,7 @@ async fn user_message_item_is_emitted() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis().build(&server).await?;
+    let TestPraxis { thread: praxis, .. } = test_praxis().build(&server).await?;
 
     let first_response = sse(vec![ev_response_created("resp-1"), ev_completed("resp-1")]);
     mount_sse_once(&server, first_response).await;
@@ -89,7 +89,7 @@ async fn user_message_item_is_emitted() -> anyhow::Result<()> {
         })
         .await?;
 
-    let started_item = wait_for_event_match(&codex, |ev| match ev {
+    let started_item = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemStarted(ItemStartedEvent {
             item: TurnItem::UserMessage(item),
             ..
@@ -97,7 +97,7 @@ async fn user_message_item_is_emitted() -> anyhow::Result<()> {
         _ => None,
     })
     .await;
-    let completed_item = wait_for_event_match(&codex, |ev| match ev {
+    let completed_item = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemCompleted(ItemCompletedEvent {
             item: TurnItem::UserMessage(item),
             ..
@@ -110,7 +110,7 @@ async fn user_message_item_is_emitted() -> anyhow::Result<()> {
     assert_eq!(started_item.content, vec![expected_input.clone()]);
     assert_eq!(completed_item.content, vec![expected_input]);
 
-    let legacy_message = wait_for_event_match(&codex, |ev| match ev {
+    let legacy_message = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::UserMessage(event) => Some(event.clone()),
         _ => None,
     })
@@ -126,7 +126,7 @@ async fn assistant_message_item_is_emitted() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis().build(&server).await?;
+    let TestPraxis { thread: praxis, .. } = test_praxis().build(&server).await?;
 
     let first_response = sse(vec![
         ev_response_created("resp-1"),
@@ -145,7 +145,7 @@ async fn assistant_message_item_is_emitted() -> anyhow::Result<()> {
         })
         .await?;
 
-    let started = wait_for_event_match(&codex, |ev| match ev {
+    let started = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemStarted(ItemStartedEvent {
             item: TurnItem::AgentMessage(item),
             ..
@@ -153,7 +153,7 @@ async fn assistant_message_item_is_emitted() -> anyhow::Result<()> {
         _ => None,
     })
     .await;
-    let completed = wait_for_event_match(&codex, |ev| match ev {
+    let completed = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemCompleted(ItemCompletedEvent {
             item: TurnItem::AgentMessage(item),
             ..
@@ -179,7 +179,7 @@ async fn reasoning_item_is_emitted() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis().build(&server).await?;
+    let TestPraxis { thread: praxis, .. } = test_praxis().build(&server).await?;
 
     let reasoning_item = ev_reasoning_item(
         "reasoning-1",
@@ -204,7 +204,7 @@ async fn reasoning_item_is_emitted() -> anyhow::Result<()> {
         })
         .await?;
 
-    let started = wait_for_event_match(&codex, |ev| match ev {
+    let started = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemStarted(ItemStartedEvent {
             item: TurnItem::Reasoning(item),
             ..
@@ -212,7 +212,7 @@ async fn reasoning_item_is_emitted() -> anyhow::Result<()> {
         _ => None,
     })
     .await;
-    let completed = wait_for_event_match(&codex, |ev| match ev {
+    let completed = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemCompleted(ItemCompletedEvent {
             item: TurnItem::Reasoning(item),
             ..
@@ -240,7 +240,7 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis().build(&server).await?;
+    let TestPraxis { thread: praxis, .. } = test_praxis().build(&server).await?;
 
     let web_search_added = ev_web_search_call_added_partial("web-search-1", "in_progress");
     let web_search_done = ev_web_search_call_done("web-search-1", "completed", "weather seattle");
@@ -263,12 +263,12 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
         })
         .await?;
 
-    let begin = wait_for_event_match(&codex, |ev| match ev {
+    let begin = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::WebSearchBegin(event) => Some(event.clone()),
         _ => None,
     })
     .await;
-    let completed = wait_for_event_match(&codex, |ev| match ev {
+    let completed = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemCompleted(ItemCompletedEvent {
             item: TurnItem::WebSearch(item),
             ..
@@ -297,7 +297,7 @@ async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         config,
         session_configured,
         ..
@@ -327,12 +327,12 @@ async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
         })
         .await?;
 
-    let begin = wait_for_event_match(&codex, |ev| match ev {
+    let begin = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ImageGenerationBegin(event) => Some(event.clone()),
         _ => None,
     })
     .await;
-    let end = wait_for_event_match(&codex, |ev| match ev {
+    let end = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ImageGenerationEnd(event) => Some(event.clone()),
         _ => None,
     })
@@ -360,7 +360,7 @@ async fn image_generation_call_event_is_emitted_when_image_save_fails() -> anyho
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         config,
         session_configured,
         ..
@@ -389,12 +389,12 @@ async fn image_generation_call_event_is_emitted_when_image_save_fails() -> anyho
         })
         .await?;
 
-    let begin = wait_for_event_match(&codex, |ev| match ev {
+    let begin = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ImageGenerationBegin(event) => Some(event.clone()),
         _ => None,
     })
     .await;
-    let end = wait_for_event_match(&codex, |ev| match ev {
+    let end = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ImageGenerationEnd(event) => Some(event.clone()),
         _ => None,
     })
@@ -418,7 +418,7 @@ async fn agent_message_content_delta_has_item_metadata() -> anyhow::Result<()> {
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         session_configured,
         ..
     } = test_praxis().build(&server).await?;
@@ -442,7 +442,7 @@ async fn agent_message_content_delta_has_item_metadata() -> anyhow::Result<()> {
         })
         .await?;
 
-    let (started_turn_id, started_item) = wait_for_event_match(&codex, |ev| match ev {
+    let (started_turn_id, started_item) = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemStarted(ItemStartedEvent {
             turn_id,
             item: TurnItem::AgentMessage(item),
@@ -452,17 +452,17 @@ async fn agent_message_content_delta_has_item_metadata() -> anyhow::Result<()> {
     })
     .await;
 
-    let delta_event = wait_for_event_match(&codex, |ev| match ev {
+    let delta_event = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::AgentMessageContentDelta(event) => Some(event.clone()),
         _ => None,
     })
     .await;
-    let legacy_delta = wait_for_event_match(&codex, |ev| match ev {
+    let legacy_delta = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::AgentMessageDelta(event) => Some(event.clone()),
         _ => None,
     })
     .await;
-    let completed_item = wait_for_event_match(&codex, |ev| match ev {
+    let completed_item = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemCompleted(ItemCompletedEvent {
             item: TurnItem::AgentMessage(item),
             ..
@@ -489,7 +489,7 @@ async fn plan_mode_emits_plan_item_from_proposed_plan_block() -> anyhow::Result<
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         session_configured,
         ..
     } = test_praxis().build(&server).await?;
@@ -534,13 +534,13 @@ async fn plan_mode_emits_plan_item_from_proposed_plan_block() -> anyhow::Result<
         })
         .await?;
 
-    let plan_delta = wait_for_event_match(&codex, |ev| match ev {
+    let plan_delta = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::PlanDelta(event) => Some(event.clone()),
         _ => None,
     })
     .await;
 
-    let plan_completed = wait_for_event_match(&codex, |ev| match ev {
+    let plan_completed = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemCompleted(ItemCompletedEvent {
             item: TurnItem::Plan(item),
             ..
@@ -566,7 +566,7 @@ async fn plan_mode_strips_plan_from_agent_messages() -> anyhow::Result<()> {
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         session_configured,
         ..
     } = test_praxis().build(&server).await?;
@@ -617,7 +617,7 @@ async fn plan_mode_strips_plan_from_agent_messages() -> anyhow::Result<()> {
     let mut plan_item = None;
 
     while plan_delta.is_none() || agent_item.is_none() || plan_item.is_none() {
-        let ev = wait_for_event(&codex, |_| true).await;
+        let ev = wait_for_event(&praxis, |_| true).await;
         match ev {
             EventMsg::AgentMessageContentDelta(event) => {
                 agent_deltas.push(event.delta);
@@ -666,7 +666,7 @@ async fn plan_mode_streaming_citations_are_stripped_across_added_deltas_and_done
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         session_configured,
         ..
     } = test_praxis().build(&server).await?;
@@ -737,7 +737,7 @@ async fn plan_mode_streaming_citations_are_stripped_across_added_deltas_and_done
     let mut idx = 0usize;
 
     let turn_complete_idx = loop {
-        let ev = wait_for_event(&codex, |_| true).await;
+        let ev = wait_for_event(&praxis, |_| true).await;
         match ev {
             EventMsg::ItemStarted(ItemStartedEvent {
                 item: TurnItem::AgentMessage(item),
@@ -858,7 +858,7 @@ async fn plan_mode_streaming_proposed_plan_tag_split_across_added_and_delta_is_p
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         session_configured,
         ..
     } = test_praxis().build(&server).await?;
@@ -915,7 +915,7 @@ async fn plan_mode_streaming_proposed_plan_tag_split_across_added_and_delta_is_p
     let mut plan_deltas = Vec::new();
 
     loop {
-        let ev = wait_for_event(&codex, |_| true).await;
+        let ev = wait_for_event(&praxis, |_| true).await;
         match ev {
             EventMsg::ItemStarted(ItemStartedEvent {
                 item: TurnItem::AgentMessage(item),
@@ -977,7 +977,7 @@ async fn plan_mode_handles_missing_plan_close_tag() -> anyhow::Result<()> {
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         session_configured,
         ..
     } = test_praxis().build(&server).await?;
@@ -1026,7 +1026,7 @@ async fn plan_mode_handles_missing_plan_close_tag() -> anyhow::Result<()> {
     let mut agent_item = None;
 
     while plan_delta.is_none() || plan_item.is_none() || agent_item.is_none() {
-        let ev = wait_for_event(&codex, |_| true).await;
+        let ev = wait_for_event(&praxis, |_| true).await;
         match ev {
             EventMsg::PlanDelta(event) => {
                 plan_delta = Some(event.delta);
@@ -1068,7 +1068,7 @@ async fn reasoning_content_delta_has_item_metadata() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis().build(&server).await?;
+    let TestPraxis { thread: praxis, .. } = test_praxis().build(&server).await?;
 
     let stream = sse(vec![
         ev_response_created("resp-1"),
@@ -1089,7 +1089,7 @@ async fn reasoning_content_delta_has_item_metadata() -> anyhow::Result<()> {
         })
         .await?;
 
-    let reasoning_item = wait_for_event_match(&codex, |ev| match ev {
+    let reasoning_item = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemStarted(ItemStartedEvent {
             item: TurnItem::Reasoning(item),
             ..
@@ -1098,12 +1098,12 @@ async fn reasoning_content_delta_has_item_metadata() -> anyhow::Result<()> {
     })
     .await;
 
-    let delta_event = wait_for_event_match(&codex, |ev| match ev {
+    let delta_event = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ReasoningContentDelta(event) => Some(event.clone()),
         _ => None,
     })
     .await;
-    let legacy_delta = wait_for_event_match(&codex, |ev| match ev {
+    let legacy_delta = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::AgentReasoningDelta(event) => Some(event.clone()),
         _ => None,
     })
@@ -1122,7 +1122,7 @@ async fn reasoning_raw_content_delta_respects_flag() -> anyhow::Result<()> {
 
     let server = start_mock_server().await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis()
+    let TestPraxis { thread: praxis, .. } = test_praxis()
         .with_config(|config| {
             config.show_raw_agent_reasoning = true;
         })
@@ -1148,7 +1148,7 @@ async fn reasoning_raw_content_delta_respects_flag() -> anyhow::Result<()> {
         })
         .await?;
 
-    let reasoning_item = wait_for_event_match(&codex, |ev| match ev {
+    let reasoning_item = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ItemStarted(ItemStartedEvent {
             item: TurnItem::Reasoning(item),
             ..
@@ -1157,12 +1157,12 @@ async fn reasoning_raw_content_delta_respects_flag() -> anyhow::Result<()> {
     })
     .await;
 
-    let delta_event = wait_for_event_match(&codex, |ev| match ev {
+    let delta_event = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ReasoningRawContentDelta(event) => Some(event.clone()),
         _ => None,
     })
     .await;
-    let legacy_delta = wait_for_event_match(&codex, |ev| match ev {
+    let legacy_delta = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::AgentReasoningRawContentDelta(event) => Some(event.clone()),
         _ => None,
     })

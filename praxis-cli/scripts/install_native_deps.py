@@ -44,12 +44,10 @@ class BinaryComponent:
 WINDOWS_TARGETS = tuple(target for target in BINARY_TARGETS if "windows" in target)
 
 BINARY_COMPONENTS = {
-    # Compatibility: release artifacts are still named codex while the
-    # product/package entrypoint is Praxis.
     "praxis-cli": BinaryComponent(
-        artifact_prefix="codex",
-        dest_dir="codex",
-        binary_basename="codex",
+        artifact_prefix="praxis",
+        dest_dir="praxis",
+        binary_basename="praxis",
     ),
     "praxis-responses-api-proxy": BinaryComponent(
         artifact_prefix="praxis-responses-api-proxy",
@@ -58,13 +56,13 @@ BINARY_COMPONENTS = {
     ),
     "praxis-windows-sandbox-setup": BinaryComponent(
         artifact_prefix="praxis-windows-sandbox-setup",
-        dest_dir="codex",
+        dest_dir="praxis",
         binary_basename="praxis-windows-sandbox-setup",
         targets=WINDOWS_TARGETS,
     ),
     "praxis-command-runner": BinaryComponent(
         artifact_prefix="praxis-command-runner",
-        dest_dir="codex",
+        dest_dir="praxis",
         binary_basename="praxis-command-runner",
         targets=WINDOWS_TARGETS,
     ),

@@ -1,7 +1,7 @@
 use praxis_protocol::ThreadId;
 
-use crate::agent_os::model::ResourceRequirement;
-use crate::agent_os::model::RuntimeCommandRecord;
+use crate::agent_os::records::ResourceRequirement;
+use crate::agent_os::records::RuntimeCommandRecord;
 
 #[derive(Clone, Debug)]
 pub(crate) struct AgentTaskDispatchRequest {

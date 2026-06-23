@@ -10,7 +10,7 @@ jobs:
   gather-duplicates-all:
     name: Identify potential duplicates (all issues)
     # Prevent runs on forks (requires OpenAI API key, wastes Actions minutes)
-    if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'praxis-deduplicate'))
+    if: github.repository == 'o-oOvOo-o/praxis-backend' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'praxis-deduplicate'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Prepare Codex inputs
+      - name: Prepare Praxis inputs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -63,7 +63,7 @@ jobs:
         name: Find duplicates (pass 1, all issues)
         uses: openai/praxis-action@0b91f4a2703c23df3102c3f0967d3c6db34eedef # v1
         with:
-          openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
+          openai-api-key: ${{ secrets.PRAXIS_OPENAI_API_KEY }}
           allow-users: "*"
           prompt: |
             You are an assistant that triages new GitHub issues by identifying potential duplicates.
@@ -101,12 +101,12 @@ jobs:
       - id: normalize-all
         name: Normalize pass 1 output
         env:
-          CODEX_OUTPUT: ${{ steps.codex-all.outputs.final-message }}
+          PRAXIS_OUTPUT: ${{ steps.praxis-all.outputs.final-message }}
           CURRENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           set -eo pipefail
 
-          raw=${CODEX_OUTPUT//$'\r'/}
+          raw=${PRAXIS_OUTPUT//$'\r'/}
           parsed=false
           issues='[]'
           reason=''
@@ -157,7 +157,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Prepare Codex inputs
+      - name: Prepare Praxis inputs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -197,7 +197,7 @@ jobs:
         name: Find duplicates (pass 2, open issues)
         uses: openai/praxis-action@0b91f4a2703c23df3102c3f0967d3c6db34eedef # v1
         with:
-          openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
+          openai-api-key: ${{ secrets.PRAXIS_OPENAI_API_KEY }}
           allow-users: "*"
           prompt: |
             You are an assistant that triages new GitHub issues by identifying potential duplicates.
@@ -235,12 +235,12 @@ jobs:
       - id: normalize-open
         name: Normalize pass 2 output
         env:
-          CODEX_OUTPUT: ${{ steps.codex-open.outputs.final-message }}
+          PRAXIS_OUTPUT: ${{ steps.praxis-open.outputs.final-message }}
           CURRENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: |
           set -eo pipefail
 
-          raw=${CODEX_OUTPUT//$'\r'/}
+          raw=${PRAXIS_OUTPUT//$'\r'/}
           parsed=false
           issues='[]'
           reason=''
@@ -344,16 +344,16 @@ jobs:
       - name: Comment on issue
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          CODEX_OUTPUT: ${{ needs.select-final.outputs.praxis_output }}
+          PRAXIS_OUTPUT: ${{ needs.select-final.outputs.praxis_output }}
         with:
           github-token: ${{ github.token }}
           script: |
-            const raw = process.env.CODEX_OUTPUT ?? '';
+            const raw = process.env.PRAXIS_OUTPUT ?? '';
             let parsed;
             try {
               parsed = JSON.parse(raw);
             } catch (error) {
-              core.info(`Codex output was not valid JSON. Raw output: ${raw}`);
+              core.info(`Praxis output was not valid JSON. Raw output: ${raw}`);
               core.info(`Parse error: ${error.message}`);
               return;
             }
@@ -373,7 +373,7 @@ jobs:
             const filteredIssues = [...new Set(issues.map((value) => String(value)))].filter((value) => value !== currentIssueNumber).slice(0, 5);
 
             if (filteredIssues.length === 0) {
-              core.info('Codex reported no potential duplicates.');
+              core.info('Praxis reported no potential duplicates.');
               return;
             }
 
@@ -382,7 +382,7 @@ jobs:
               '',
               ...filteredIssues.map((value) => `- #${String(value)}`),
               '',
-              '*Powered by [Codex Action](https://github.com/openai/praxis-action)*'];
+              '*Powered by [Praxis Action](https://github.com/openai/praxis-action)*'];
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,

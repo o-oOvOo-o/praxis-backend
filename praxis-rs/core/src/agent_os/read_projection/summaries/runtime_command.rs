@@ -1,4 +1,4 @@
-use crate::agent_os::model::RuntimeCommandRecord;
+use crate::agent_os::records::RuntimeCommandRecord;
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]

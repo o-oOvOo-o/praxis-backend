@@ -1,4 +1,4 @@
-use crate::agent_os::model::ResourceLease;
+use crate::agent_os::records::ResourceLease;
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]

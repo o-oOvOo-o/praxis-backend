@@ -37,9 +37,9 @@ async fn emits_deprecation_notice_for_legacy_feature_flag() -> anyhow::Result<()
         config.use_experimental_unified_exec_tool = true;
     });
 
-    let TestPraxis { thread: codex, .. } = builder.build(&server).await?;
+    let TestPraxis { thread: praxis, .. } = builder.build(&server).await?;
 
-    let notice = wait_for_event_match(&codex, |event| match event {
+    let notice = wait_for_event_match(&praxis, |event| match event {
         EventMsg::DeprecationNotice(ev) => Some(ev.clone()),
         _ => None,
     })
@@ -85,9 +85,9 @@ async fn emits_deprecation_notice_for_experimental_instructions_file() -> anyhow
         config.config_layer_stack = config_layer_stack;
     });
 
-    let TestPraxis { thread: codex, .. } = builder.build(&server).await?;
+    let TestPraxis { thread: praxis, .. } = builder.build(&server).await?;
 
-    let notice = wait_for_event_match(&codex, |event| match event {
+    let notice = wait_for_event_match(&praxis, |event| match event {
         EventMsg::DeprecationNotice(ev)
             if ev.summary.contains("experimental_instructions_file") =>
         {
@@ -131,9 +131,9 @@ async fn emits_deprecation_notice_for_web_search_feature_flag_values() -> anyhow
                 .expect("test config should allow managed feature map updates");
         });
 
-        let TestPraxis { thread: codex, .. } = builder.build(&server).await?;
+        let TestPraxis { thread: praxis, .. } = builder.build(&server).await?;
 
-        let notice = wait_for_event_match(&codex, |event| match event {
+        let notice = wait_for_event_match(&praxis, |event| match event {
             EventMsg::DeprecationNotice(ev)
                 if ev.summary.contains("[features].web_search_request") =>
             {

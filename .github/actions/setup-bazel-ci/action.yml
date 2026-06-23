@@ -23,7 +23,6 @@ runs:
         node-version-file: praxis-rs/node-version.txt
 
     # Some integration tests rely on DotSlash being installed.
-    # See https://github.com/openai/codex/pull/7617.
     - name: Install DotSlash
       if: inputs.install-test-prereqs == 'true'
       uses: facebook/install-dotslash@v2

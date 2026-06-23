@@ -98,7 +98,7 @@ async fn seed_guardian_parent_history(session: &Arc<Session>, turn: &Arc<TurnCon
                     provider_metadata: None,
                     name: "gh_repo_view".to_string(),
                     namespace: None,
-                    arguments: "{\"repo\":\"openai/codex\"}".to_string(),
+                    arguments: "{\"repo\":\"cunning3d/praxis\"}".to_string(),
                     call_id: "call-1".to_string(),
                 },
                 ResponseItem::FunctionCallOutput {

@@ -28,7 +28,7 @@ When enabled, direct model tool calls are restricted to `js_repl` and `js_repl_r
 Runtime resolution order:
 
 1. `js_repl_node_path` in config/profile
-2. `CODEX_JS_REPL_NODE_PATH` legacy compatibility environment variable, when supported by the host runtime
+2. `PRAXIS_JS_REPL_NODE_PATH` environment variable, when supported by the host runtime
 3. `node` discovered on `PATH`
 
 You can configure an explicit runtime path:
@@ -46,11 +46,10 @@ search path. Local file imports are also supported for relative paths, absolute 
 Module resolution proceeds in the following order:
 
 1. `PRAXIS_JS_REPL_NODE_MODULE_DIRS` (PATH-delimited list)
-2. `CODEX_JS_REPL_NODE_MODULE_DIRS` legacy compatibility environment variable
-3. `js_repl_node_module_dirs` in config/profile (array of absolute paths)
-4. Thread working directory (cwd, always included as the last fallback)
+2. `js_repl_node_module_dirs` in config/profile (array of absolute paths)
+3. Thread working directory (cwd, always included as the last fallback)
 
-For `PRAXIS_JS_REPL_NODE_MODULE_DIRS`, `CODEX_JS_REPL_NODE_MODULE_DIRS`, and `js_repl_node_module_dirs`, module resolution is attempted in the order provided with earlier entries taking precedence.
+For `PRAXIS_JS_REPL_NODE_MODULE_DIRS` and `js_repl_node_module_dirs`, module resolution is attempted in the order provided with earlier entries taking precedence.
 
 Bare package imports always use this REPL-wide search path, even when they originate from an
 imported local file. They are not resolved relative to the imported file's location.
@@ -82,7 +81,6 @@ imported local file. They are not resolved relative to the imported file's locat
 - `praxis.emitImage(imageLike)`: explicitly adds one image to the outer `js_repl` function output each time you call it.
 - `praxis.tool(...)` and `praxis.emitImage(...)` keep stable helper identities across cells. Saved references and persisted objects can reuse them in later cells, but async callbacks that fire after a cell finishes still fail because no exec is active.
 - Imported local files run in the same VM context, so they can also access `praxis.*`, the captured `console`, and Node-like `import.meta` helpers.
-- `codex.*` remains available as a legacy compatibility alias for existing snippets and imported local files.
 - Each `praxis.tool(...)` call emits a bounded summary at `info` level from the `praxis_core::tools::js_repl` logger. At `trace` level, the same path also logs the exact raw response object or error string seen by JavaScript.
 - Nested `praxis.tool(...)` outputs stay inside JavaScript unless you emit them explicitly.
 - `praxis.emitImage(...)` accepts a data URL, a single `input_image` item, an object like `{ bytes, mimeType }`, or a raw tool response object that contains exactly one image and no text. Call it multiple times if you want to emit multiple images.
@@ -152,5 +150,5 @@ cp package/LICENSE.md /path/to/repo/third_party/meriyah/LICENSE
 2. Copy the new `dist/meriyah.umd.min.js` into `praxis-rs/core/src/tools/js_repl/meriyah.umd.min.js`.
 3. Copy the package license into `third_party/meriyah/LICENSE`.
 4. Update the version string in the header comment at the top of `meriyah.umd.min.js`.
-5. Update `NOTICE` if the upstream copyright notice changed.
+5. Update `NOTICE` if the vendored package copyright notice changed.
 6. Run the relevant `js_repl` tests.

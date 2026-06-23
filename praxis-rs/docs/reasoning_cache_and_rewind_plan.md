@@ -53,7 +53,7 @@ OpenAI Responses native path:
 - `prompt_tokens_details.cached_tokens`
 - `completion_tokens_details.reasoning_tokens`
 
-Praxis keeps this path working, but this document does not expand it. The upstream Responses implementation is already strong.
+Praxis keeps this path working, but this document does not expand it. The hosted Responses implementation is already strong.
 
 DeepSeek-style common API:
 

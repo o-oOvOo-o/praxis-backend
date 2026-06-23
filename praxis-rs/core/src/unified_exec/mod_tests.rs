@@ -244,7 +244,7 @@ async fn unified_exec_persists_across_requests() -> anyhow::Result<()> {
     write_stdin(
         &session,
         process_id,
-        "export PRAXIS_INTERACTIVE_SHELL_VAR=codex\n",
+        "export PRAXIS_INTERACTIVE_SHELL_VAR=praxis\n",
         /*yield_time_ms*/ 2_500,
     )
     .await?;
@@ -257,7 +257,7 @@ async fn unified_exec_persists_across_requests() -> anyhow::Result<()> {
     )
     .await?;
     assert!(
-        out_2.truncated_output().contains("codex"),
+        out_2.truncated_output().contains("praxis"),
         "expected environment variable output"
     );
 
@@ -279,7 +279,7 @@ async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
     write_stdin(
         &session,
         session_a,
-        "export PRAXIS_INTERACTIVE_SHELL_VAR=codex\n",
+        "export PRAXIS_INTERACTIVE_SHELL_VAR=praxis\n",
         /*yield_time_ms*/ 2_500,
     )
     .await?;
@@ -298,7 +298,7 @@ async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
         "short command should not report a process id if it exits quickly"
     );
     assert!(
-        !out_2.truncated_output().contains("codex"),
+        !out_2.truncated_output().contains("praxis"),
         "short command should run in a fresh shell"
     );
 
@@ -310,7 +310,7 @@ async fn multi_unified_exec_sessions() -> anyhow::Result<()> {
     )
     .await?;
     assert!(
-        out_3.truncated_output().contains("codex"),
+        out_3.truncated_output().contains("praxis"),
         "session should preserve state"
     );
 
@@ -410,14 +410,14 @@ async fn requests_with_large_timeout_are_capped() -> anyhow::Result<()> {
     let result = exec_command(
         &session,
         &turn,
-        "echo codex",
+        "echo praxis",
         /*yield_time_ms*/ 120_000,
         /*workdir*/ None,
     )
     .await?;
 
     assert!(result.process_id.is_some());
-    assert!(result.truncated_output().contains("codex"));
+    assert!(result.truncated_output().contains("praxis"));
 
     Ok(())
 }
@@ -429,7 +429,7 @@ async fn completed_commands_do_not_persist_sessions() -> anyhow::Result<()> {
     let result = exec_command(
         &session,
         &turn,
-        "echo codex",
+        "echo praxis",
         /*yield_time_ms*/ 2_500,
         /*workdir*/ None,
     )
@@ -439,7 +439,7 @@ async fn completed_commands_do_not_persist_sessions() -> anyhow::Result<()> {
         result.process_id.is_some(),
         "completed command should report a process id"
     );
-    assert!(result.truncated_output().contains("codex"));
+    assert!(result.truncated_output().contains("praxis"));
 
     assert!(
         session

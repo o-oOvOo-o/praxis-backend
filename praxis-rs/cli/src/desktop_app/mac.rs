@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn parses_mount_point_from_tab_separated_hdiutil_output() {
-        let output = "/dev/disk2s1\tApple_HFS\tCodex\t/Volumes/Praxis\n";
+        let output = "/dev/disk2s1\tApple_HFS\tPraxis\t/Volumes/Praxis\n";
         assert_eq!(
             parse_hdiutil_attach_mount_point(output).as_deref(),
             Some("/Volumes/Praxis")
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn parses_mount_point_with_spaces() {
-        let output = "/dev/disk2s1\tApple_HFS\tCodex Installer\t/Volumes/Praxis Installer\n";
+        let output = "/dev/disk2s1\tApple_HFS\tPraxis Installer\t/Volumes/Praxis Installer\n";
         assert_eq!(
             parse_hdiutil_attach_mount_point(output).as_deref(),
             Some("/Volumes/Praxis Installer")

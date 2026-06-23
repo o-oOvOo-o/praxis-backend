@@ -60,7 +60,7 @@ impl RequestUserInputOverlay {
     }
 
     /// Layout calculation when options are present.
-    fn layout_with_options(
+    pub(super) fn layout_with_options(
         &self,
         args: OptionsLayoutArgs,
         question_lines: &mut Vec<String>,
@@ -96,7 +96,7 @@ impl RequestUserInputOverlay {
 
     /// Normal layout for options case: allocate footer + progress first, and
     /// only allocate notes (and its label) when explicitly visible.
-    fn layout_with_options_normal(
+    pub(super) fn layout_with_options_normal(
         &self,
         args: OptionsNormalArgs,
         options: OptionsHeights,
@@ -200,7 +200,7 @@ impl RequestUserInputOverlay {
     /// Handles both tight layout (when space is constrained) and normal layout
     /// (when there's sufficient space for all elements).
     ///
-    fn layout_without_options(
+    pub(super) fn layout_without_options(
         &self,
         available_height: u16,
         question_height: u16,
@@ -222,7 +222,7 @@ impl RequestUserInputOverlay {
     }
 
     /// Tight layout for no-options case: truncate question to fit available space.
-    fn layout_without_options_tight(
+    pub(super) fn layout_without_options_tight(
         &self,
         available_height: u16,
         question_height: u16,
@@ -244,7 +244,7 @@ impl RequestUserInputOverlay {
     }
 
     /// Normal layout for no-options case: allocate space for notes, footer, and progress.
-    fn layout_without_options_normal(
+    pub(super) fn layout_without_options_normal(
         &self,
         available_height: u16,
         question_height: u16,
@@ -279,7 +279,7 @@ impl RequestUserInputOverlay {
     }
 
     /// Build the final layout areas from computed heights.
-    fn build_layout_areas(
+    pub(super) fn build_layout_areas(
         &self,
         area: Rect,
         heights: LayoutPlan,

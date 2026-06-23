@@ -15,8 +15,8 @@ MODULE_SPEC.loader.exec_module(gh_pr_watch)
 def sample_pr():
     return {
         "number": 123,
-        "url": "https://github.com/openai/codex/pull/123",
-        "repo": "openai/codex",
+        "url": "https://github.com/o-oOvOo-o/praxis-backend/pull/123",
+        "repo": "o-oOvOo-o/praxis-backend",
         "head_sha": "abc123",
         "head_branch": "feature",
         "state": "OPEN",

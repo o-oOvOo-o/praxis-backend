@@ -21,6 +21,7 @@ use praxis_app_gateway_protocol::PluginMarketplaceEntry;
 use praxis_app_gateway_protocol::PluginReadResponse;
 use praxis_app_gateway_protocol::PluginSummary;
 use praxis_app_gateway_protocol::PluginUninstallResponse;
+use praxis_core::plugins::PluginsManager;
 use praxis_features::Feature;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use ratatui::buffer::Buffer;
@@ -128,6 +129,34 @@ pub(super) enum PluginsCacheState {
 }
 
 impl ChatWidget {
+    pub(super) fn plugins_for_mentions(
+        &self,
+    ) -> Option<&[praxis_core::plugins::PluginCapabilitySummary]> {
+        if !self.config.features.enabled(Feature::Plugins) {
+            return None;
+        }
+
+        self.bottom_pane.plugins().map(Vec::as_slice)
+    }
+
+    pub(crate) fn refresh_plugin_mentions(&mut self) {
+        if !self.config.features.enabled(Feature::Plugins) {
+            self.bottom_pane.set_plugin_mentions(/*plugins*/ None);
+            return;
+        }
+
+        let plugins = PluginsManager::new(self.config.praxis_home.clone())
+            .plugins_for_config(&self.config)
+            .capability_summaries()
+            .to_vec();
+        self.bottom_pane.set_plugin_mentions(Some(plugins));
+    }
+
+    pub(crate) fn sync_plugin_mentions_config(&mut self, config: &praxis_core::config::Config) {
+        self.config.features = config.features.clone();
+        self.config.config_layer_stack = config.config_layer_stack.clone();
+    }
+
     pub(crate) fn add_plugins_output(&mut self) {
         if !self.config.features.enabled(Feature::Plugins) {
             self.add_info_message(

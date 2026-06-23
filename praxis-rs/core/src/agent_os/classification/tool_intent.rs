@@ -1,6 +1,6 @@
-use crate::agent_os::model::ActionIntent;
-use crate::agent_os::model::ActionIntentKind;
-use crate::agent_os::model::ResourceRequirement;
+use crate::agent_os::records::ActionIntent;
+use crate::agent_os::records::ActionIntentKind;
+use crate::agent_os::records::ResourceRequirement;
 
 pub(in crate::agent_os) fn classify_mutating_tool(tool_name: &str) -> ActionIntent {
     ActionIntent {

@@ -49,7 +49,7 @@ async fn user_shell_cmd_ls_and_cat_in_temp_dir() {
     let mut builder = test_praxis().with_config(move |config| {
         config.cwd = cwd_path.abs();
     });
-    let codex = builder
+    let praxis = builder
         .build(&server)
         .await
         .expect("create new conversation")
@@ -61,7 +61,7 @@ async fn user_shell_cmd_ls_and_cat_in_temp_dir() {
         .submit(Op::RunUserShellCommand { command: list_cmd })
         .await
         .unwrap();
-    let msg = wait_for_event(&codex, |ev| matches!(ev, EventMsg::ExecCommandEnd(_))).await;
+    let msg = wait_for_event(&praxis, |ev| matches!(ev, EventMsg::ExecCommandEnd(_))).await;
     let EventMsg::ExecCommandEnd(ExecCommandEndEvent {
         stdout, exit_code, ..
     }) = msg
@@ -80,7 +80,7 @@ async fn user_shell_cmd_ls_and_cat_in_temp_dir() {
         .submit(Op::RunUserShellCommand { command: cat_cmd })
         .await
         .unwrap();
-    let msg = wait_for_event(&codex, |ev| matches!(ev, EventMsg::ExecCommandEnd(_))).await;
+    let msg = wait_for_event(&praxis, |ev| matches!(ev, EventMsg::ExecCommandEnd(_))).await;
     let EventMsg::ExecCommandEnd(ExecCommandEndEvent {
         mut stdout,
         exit_code,
@@ -106,7 +106,7 @@ async fn user_shell_cmd_can_be_interrupted() {
         .build(&server)
         .await
         .expect("create new conversation");
-    let codex = &fixture.thread;
+    let praxis = &fixture.thread;
 
     // Start a long-running command and then interrupt it.
     let sleep_cmd = "sleep 5".to_string();
@@ -116,18 +116,18 @@ async fn user_shell_cmd_can_be_interrupted() {
         .unwrap();
 
     // Wait until it has started (ExecCommandBegin), then interrupt.
-    let _begin = wait_for_event_match(codex, |ev| match ev {
+    let _begin = wait_for_event_match(praxis, |ev| match ev {
         EventMsg::ExecCommandBegin(event) if event.source == ExecCommandSource::UserShell => {
             Some(event.clone())
         }
         _ => None,
     })
     .await;
-    codex.submit(Op::Interrupt).await.unwrap();
+    praxis.submit(Op::Interrupt).await.unwrap();
 
     // Expect a TurnAborted(Interrupted) notification.
     let msg = wait_for_event_with_timeout(
-        codex,
+        praxis,
         |ev| matches!(ev, EventMsg::TurnAborted(_)),
         Duration::from_secs(60),
     )

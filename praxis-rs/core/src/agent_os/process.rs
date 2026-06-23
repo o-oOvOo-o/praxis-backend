@@ -1,5 +1,7 @@
 use async_trait::async_trait;
 
+mod tracking;
+
 pub(crate) mod process_runtime_kind {
     pub(crate) const GENERIC: &str = "generic";
     pub(crate) const SHELL: &str = "shell";

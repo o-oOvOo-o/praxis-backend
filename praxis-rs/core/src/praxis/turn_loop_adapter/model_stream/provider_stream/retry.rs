@@ -8,7 +8,7 @@ use super::super::PraxisModelStreamInput;
 use super::super::error_bridge::finish_model_error;
 use super::super::stream_run_state::ModelStreamProgress;
 use super::retry_notice;
-use super::retry_transport;
+use super::transport_failover;
 
 pub(super) async fn wait_before_retry_or_error(
     input: &PraxisModelStreamInput,
@@ -21,8 +21,8 @@ pub(super) async fn wait_before_retry_or_error(
     }
 
     let max_retries = input.turn_context.provider.stream_max_retries();
-    if *retries >= max_retries && retry_transport::switch_to_fallback_transport(input).await {
-        retry_transport::warn_fallback_transport(input, &err).await;
+    if *retries >= max_retries && transport_failover::switch_to_http_transport(input).await {
+        transport_failover::warn_http_transport_failover(input, &err).await;
         *retries = 0;
         return Ok(());
     }

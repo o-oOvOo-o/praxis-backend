@@ -38,7 +38,7 @@ async fn forward_events_cancelled_while_send_blocked_shuts_down_delegate() {
     let (tx_sub, rx_sub) = bounded(SUBMISSION_CHANNEL_CAPACITY);
     let (_agent_status_tx, agent_status) = watch::channel(AgentStatus::PendingInit);
     let (session, ctx, _rx_evt) = crate::praxis::make_session_and_context_with_rx().await;
-    let codex = Arc::new(Praxis {
+    let praxis = Arc::new(Praxis {
         tx_sub,
         rx_event: rx_events,
         agent_status,
@@ -60,7 +60,7 @@ async fn forward_events_cancelled_while_send_blocked_shuts_down_delegate() {
 
     let cancel = CancellationToken::new();
     let forward = tokio::spawn(forward_events(
-        Arc::clone(&codex),
+        Arc::clone(&praxis),
         tx_out.clone(),
         session,
         ctx,
@@ -113,7 +113,7 @@ async fn forward_ops_preserves_submission_trace_context() {
     let (_tx_events, rx_events) = bounded(SUBMISSION_CHANNEL_CAPACITY);
     let (_agent_status_tx, agent_status) = watch::channel(AgentStatus::PendingInit);
     let (session, _ctx, _rx_evt) = crate::praxis::make_session_and_context_with_rx().await;
-    let codex = Arc::new(Praxis {
+    let praxis = Arc::new(Praxis {
         tx_sub,
         rx_event: rx_events,
         agent_status,
@@ -122,7 +122,7 @@ async fn forward_ops_preserves_submission_trace_context() {
     });
     let (tx_ops, rx_ops) = bounded(1);
     let cancel = CancellationToken::new();
-    let forward = tokio::spawn(forward_ops(Arc::clone(&codex), rx_ops, cancel));
+    let forward = tokio::spawn(forward_ops(Arc::clone(&praxis), rx_ops, cancel));
 
     let submission = Submission {
         id: "sub-1".to_string(),
@@ -160,7 +160,7 @@ async fn handle_request_permissions_uses_tool_call_id_for_round_trip() {
     let (tx_sub, rx_sub) = bounded(SUBMISSION_CHANNEL_CAPACITY);
     let (_tx_events, rx_events_child) = bounded(SUBMISSION_CHANNEL_CAPACITY);
     let (_agent_status_tx, agent_status) = watch::channel(AgentStatus::PendingInit);
-    let codex = Arc::new(Praxis {
+    let praxis = Arc::new(Praxis {
         tx_sub,
         rx_event: rx_events_child,
         agent_status,
@@ -182,13 +182,13 @@ async fn handle_request_permissions_uses_tool_call_id_for_round_trip() {
     let request_call_id = call_id.clone();
 
     let handle = tokio::spawn({
-        let codex = Arc::clone(&codex);
+        let praxis = Arc::clone(&praxis);
         let parent_session = Arc::clone(&parent_session);
         let parent_ctx = Arc::clone(&parent_ctx);
         let cancel_token = cancel_token.clone();
         async move {
             handle_request_permissions(
-                codex.as_ref(),
+                praxis.as_ref(),
                 &parent_session,
                 &parent_ctx,
                 RequestPermissionsEvent {
@@ -256,7 +256,7 @@ async fn handle_exec_approval_uses_call_id_for_guardian_review_and_approval_id_f
     let (tx_sub, rx_sub) = bounded(SUBMISSION_CHANNEL_CAPACITY);
     let (_tx_events, rx_events_child) = bounded(SUBMISSION_CHANNEL_CAPACITY);
     let (_agent_status_tx, agent_status) = watch::channel(AgentStatus::PendingInit);
-    let codex = Arc::new(Praxis {
+    let praxis = Arc::new(Praxis {
         tx_sub,
         rx_event: rx_events_child,
         agent_status,
@@ -266,13 +266,13 @@ async fn handle_exec_approval_uses_call_id_for_guardian_review_and_approval_id_f
 
     let cancel_token = CancellationToken::new();
     let handle = tokio::spawn({
-        let codex = Arc::clone(&codex);
+        let praxis = Arc::clone(&praxis);
         let parent_session = Arc::clone(&parent_session);
         let parent_ctx = Arc::clone(&parent_ctx);
         let cancel_token = cancel_token.clone();
         async move {
             handle_exec_approval(
-                codex.as_ref(),
+                praxis.as_ref(),
                 "child-turn-1".to_string(),
                 &parent_session,
                 &parent_ctx,

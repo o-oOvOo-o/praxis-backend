@@ -37,7 +37,7 @@ const PRAXIS_FEEDBACK_INTERNAL_URL: &str = "http://go/praxis-feedback-internal";
 /// must not change feedback upload behavior itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FeedbackAudience {
-    OpenAiEmployee,
+    Internal,
     External,
 }
 
@@ -315,14 +315,14 @@ pub(crate) fn feedback_success_cell(
     };
     let issue_url = issue_url_for_category(category, thread_id, feedback_audience);
     let mut lines = vec![Line::from(match issue_url.as_ref() {
-        Some(_) if feedback_audience == FeedbackAudience::OpenAiEmployee => {
+        Some(_) if feedback_audience == FeedbackAudience::Internal => {
             format!("{prefix} Please report this in #praxis-feedback:")
         }
         Some(_) => format!("{prefix} Please open an issue using the following URL:"),
         None => format!("{prefix} Thanks for the feedback!"),
     })];
     match issue_url {
-        Some(url) if feedback_audience == FeedbackAudience::OpenAiEmployee => {
+        Some(url) if feedback_audience == FeedbackAudience::Internal => {
             lines.extend([
                 "".into(),
                 Line::from(vec!["  ".into(), url.cyan().underlined()]),
@@ -369,7 +369,7 @@ fn issue_url_for_category(
         | FeedbackCategory::BadResult
         | FeedbackCategory::SafetyCheck
         | FeedbackCategory::Other => Some(match feedback_audience {
-            FeedbackAudience::OpenAiEmployee => slack_feedback_url(thread_id),
+            FeedbackAudience::Internal => slack_feedback_url(thread_id),
             FeedbackAudience::External => {
                 format!("{BASE_CLI_BUG_ISSUE_URL}&steps=Uploaded%20thread:%20{thread_id}")
             }
@@ -729,7 +729,7 @@ mod tests {
         let bug_url = issue_url_for_category(
             FeedbackCategory::Bug,
             "thread-1",
-            FeedbackAudience::OpenAiEmployee,
+            FeedbackAudience::Internal,
         );
         let expected_slack_url = "http://go/praxis-feedback-internal".to_string();
         assert_eq!(bug_url.as_deref(), Some(expected_slack_url.as_str()));
@@ -737,21 +737,21 @@ mod tests {
         let bad_result_url = issue_url_for_category(
             FeedbackCategory::BadResult,
             "thread-2",
-            FeedbackAudience::OpenAiEmployee,
+            FeedbackAudience::Internal,
         );
         assert!(bad_result_url.is_some());
 
         let other_url = issue_url_for_category(
             FeedbackCategory::Other,
             "thread-3",
-            FeedbackAudience::OpenAiEmployee,
+            FeedbackAudience::Internal,
         );
         assert!(other_url.is_some());
 
         let safety_check_url = issue_url_for_category(
             FeedbackCategory::SafetyCheck,
             "thread-4",
-            FeedbackAudience::OpenAiEmployee,
+            FeedbackAudience::Internal,
         );
         assert!(safety_check_url.is_some());
 
@@ -759,7 +759,7 @@ mod tests {
             issue_url_for_category(
                 FeedbackCategory::GoodResult,
                 "t",
-                FeedbackAudience::OpenAiEmployee
+                FeedbackAudience::Internal
             )
             .is_none()
         );
@@ -793,7 +793,7 @@ mod tests {
                 FeedbackCategory::Bug,
                 /*include_logs*/ true,
                 "thread-2",
-                FeedbackAudience::OpenAiEmployee,
+                FeedbackAudience::Internal,
             ),
             /*width*/ 120,
         );

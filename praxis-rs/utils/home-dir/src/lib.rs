@@ -2,20 +2,14 @@ use dirs::home_dir;
 use std::path::Path;
 use std::path::PathBuf;
 
+mod external_agent_state_env;
+
+pub use external_agent_state_env::is_external_agent_state_env_var;
+pub use external_agent_state_env::scrub_external_agent_state_env_for_current_process;
+
 const PRAXIS_HOME_ENV_VAR: &str = "PRAXIS_HOME";
 const PRAXIS_HOME_NAMESPACE_ENV_VAR: &str = "PRAXIS_HOME_NAMESPACE";
 const PRAXIS_HOME_DIRNAME: &str = ".praxis";
-const UPSTREAM_CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
-const UPSTREAM_CODEX_HOME_NAMESPACE_ENV_VAR: &str = "CODEX_HOME_NAMESPACE";
-const UPSTREAM_CODEX_SQLITE_HOME_ENV_VAR: &str = "CODEX_SQLITE_HOME";
-const UPSTREAM_CODEX_THREAD_ID_ENV_VAR: &str = "CODEX_THREAD_ID";
-const UPSTREAM_CODEX_STATE_ENV_VARS: &[&str] = &[
-    UPSTREAM_CODEX_HOME_ENV_VAR,
-    UPSTREAM_CODEX_HOME_NAMESPACE_ENV_VAR,
-    UPSTREAM_CODEX_SQLITE_HOME_ENV_VAR,
-    UPSTREAM_CODEX_THREAD_ID_ENV_VAR,
-];
-const UPSTREAM_CODEX_HOME_DIRNAME: &str = ".codex";
 const LEGACY_CODEP_HOME_DIRNAME: &str = ".codep";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -33,7 +27,7 @@ impl PraxisHomeNamespace {
     fn from_str(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "praxis" => Some(Self::Praxis),
-            // Codex is an upstream external source, not a Praxis namespace.
+            // Codex is an external source, not a Praxis namespace.
             "codex" => None,
             _ => None,
         }
@@ -74,13 +68,13 @@ pub fn default_praxis_home_for_namespace(
     default_home_with_dir_name(namespace.default_dir_name())
 }
 
-/// Returns the upstream Codex home used only by explicit read-through bridges.
+/// Returns the Codex home used only by explicit compatibility bridges.
 ///
 /// This is deliberately not represented as a `PraxisHomeNamespace`: Codex is
 /// an external data source, never a namespace where Praxis runtime state,
 /// thread indexes, goals, logs, or SQLite databases may be written.
-pub fn default_upstream_codex_home() -> std::io::Result<PathBuf> {
-    default_home_with_dir_name(UPSTREAM_CODEX_HOME_DIRNAME)
+pub fn default_external_codex_home() -> std::io::Result<PathBuf> {
+    default_home_with_dir_name(external_agent_state_env::codex_home_dirname())
 }
 
 /// Returns the legacy Codep home used only for explicit diagnostics/migration.
@@ -103,7 +97,7 @@ fn default_home_with_dir_name(dir_name: &str) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
-/// Returns the upstream Codex home that Praxis may use for bridged user-level
+/// Returns the Codex home that Praxis may use for bridged user-level
 /// state such as config/auth, or `None` when the current process should remain
 /// fully isolated.
 ///
@@ -113,31 +107,9 @@ fn default_home_with_dir_name(dir_name: &str) -> std::io::Result<PathBuf> {
 ///
 /// This keeps custom/test homes isolated while allowing the default Praxis UX
 /// to inherit Codex config/auth without sharing thread storage.
-pub fn upstream_codex_read_through_home(praxis_home: &Path) -> std::io::Result<Option<PathBuf>> {
+pub fn external_codex_read_through_home(praxis_home: &Path) -> std::io::Result<Option<PathBuf>> {
     let namespace = current_praxis_home_namespace();
-    upstream_codex_read_through_home_with_namespace_hint(namespace, praxis_home)
-}
-
-pub fn scrub_upstream_codex_state_env_for_current_process() {
-    // Safe because the binary entrypoint invokes this before the Tokio runtime
-    // and worker threads are created.  Keeping these variables in-process is a
-    // footgun: profile wrappers can point them at stale Codex/Codep homes and
-    // nested child commands can inherit them.
-    unsafe {
-        for &name in UPSTREAM_CODEX_STATE_ENV_VARS {
-            std::env::remove_var(name);
-        }
-    }
-}
-
-pub fn is_upstream_codex_state_env_var(name: &str) -> bool {
-    if cfg!(target_os = "windows") {
-        UPSTREAM_CODEX_STATE_ENV_VARS
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(name))
-    } else {
-        UPSTREAM_CODEX_STATE_ENV_VARS.contains(&name)
-    }
+    external_codex_read_through_home_with_namespace_hint(namespace, praxis_home)
 }
 
 pub fn set_process_praxis_home_namespace(namespace: PraxisHomeNamespace) {
@@ -202,7 +174,7 @@ fn find_praxis_home_from_env_and_namespace(
     }
 }
 
-fn upstream_codex_read_through_home_with_namespace_hint(
+fn external_codex_read_through_home_with_namespace_hint(
     namespace: PraxisHomeNamespace,
     praxis_home: &Path,
 ) -> std::io::Result<Option<PathBuf>> {
@@ -215,7 +187,7 @@ fn upstream_codex_read_through_home_with_namespace_hint(
         return Ok(None);
     }
 
-    default_upstream_codex_home().map(Some)
+    default_external_codex_home().map(Some)
 }
 
 #[derive(Clone, Debug)]
@@ -225,8 +197,8 @@ struct HomeEnvOverride {
 }
 
 fn active_home_env_override() -> Option<HomeEnvOverride> {
-    // Praxis must not honor CODEX_HOME.  CODEX_HOME belongs to the upstream
-    // Codex CLI and can point at an unrelated or stale state database when a
+    // Praxis must not honor CODEX_HOME. CODEX_HOME belongs to the external
+    // Codex state source and can point at an unrelated or stale database when a
     // user has shell-profile aliases such as codep/codex.  Praxis may read
     // selected Codex config/auth as an explicit read-through bridge, but its
     // own home/state must be controlled only by PRAXIS_HOME.
@@ -235,7 +207,7 @@ fn active_home_env_override() -> Option<HomeEnvOverride> {
 
 fn active_namespace_env_override() -> Option<HomeEnvOverride> {
     // Same isolation rule as PRAXIS_HOME: do not let CODEX_HOME_NAMESPACE move
-    // Praxis into the upstream Codex namespace.
+    // Praxis into the external Codex namespace.
     env_override(PRAXIS_HOME_NAMESPACE_ENV_VAR)
 }
 
@@ -273,11 +245,11 @@ fn find_praxis_home_with_namespace_hint(
 }
 
 #[cfg(test)]
-fn upstream_codex_read_through_home_for_test(
+fn external_codex_read_through_home_for_test(
     namespace: PraxisHomeNamespace,
     praxis_home: &Path,
 ) -> std::io::Result<Option<PathBuf>> {
-    upstream_codex_read_through_home_with_namespace_hint(namespace, praxis_home)
+    external_codex_read_through_home_with_namespace_hint(namespace, praxis_home)
 }
 
 #[cfg(test)]
@@ -287,11 +259,11 @@ mod tests {
     use super::PRAXIS_HOME_ENV_VAR;
     use super::PRAXIS_HOME_NAMESPACE_ENV_VAR;
     use super::PraxisHomeNamespace;
-    use super::UPSTREAM_CODEX_HOME_DIRNAME;
     use super::default_praxis_home_for_namespace;
+    use super::external_agent_state_env;
+    use super::external_codex_read_through_home_for_test;
     use super::find_praxis_home_with_namespace_hint;
-    use super::is_upstream_codex_state_env_var;
-    use super::upstream_codex_read_through_home_for_test;
+    use super::is_external_agent_state_env_var;
     use dirs::home_dir;
     use pretty_assertions::assert_eq;
     use std::fs;
@@ -389,21 +361,21 @@ mod tests {
     fn default_home_builder_uses_expected_suffixes() {
         let praxis_home =
             default_praxis_home_for_namespace(PraxisHomeNamespace::Praxis).expect("praxis home");
-        let upstream_codex_home =
-            super::default_upstream_codex_home().expect("upstream codex home");
+        let external_codex_home =
+            super::default_external_codex_home().expect("external codex home");
         let codep_home = super::default_legacy_codep_home().expect("legacy codep home");
         assert!(praxis_home.ends_with(PRAXIS_HOME_DIRNAME));
-        assert!(upstream_codex_home.ends_with(UPSTREAM_CODEX_HOME_DIRNAME));
+        assert!(external_codex_home.ends_with(external_agent_state_env::codex_home_dirname()));
         assert!(codep_home.ends_with(LEGACY_CODEP_HOME_DIRNAME));
     }
 
     #[test]
-    fn upstream_codex_state_env_vars_are_classified_explicitly() {
-        assert!(is_upstream_codex_state_env_var("CODEX_HOME"));
-        assert!(is_upstream_codex_state_env_var("CODEX_HOME_NAMESPACE"));
-        assert!(is_upstream_codex_state_env_var("CODEX_SQLITE_HOME"));
-        assert!(is_upstream_codex_state_env_var("CODEX_THREAD_ID"));
-        assert!(!is_upstream_codex_state_env_var("PRAXIS_HOME"));
+    fn external_agent_state_env_vars_are_classified_explicitly() {
+        assert!(is_external_agent_state_env_var("CODEX_HOME"));
+        assert!(is_external_agent_state_env_var("CODEX_HOME_NAMESPACE"));
+        assert!(is_external_agent_state_env_var("CODEX_SQLITE_HOME"));
+        assert!(is_external_agent_state_env_var("CODEX_THREAD_ID"));
+        assert!(!is_external_agent_state_env_var("PRAXIS_HOME"));
     }
 
     #[test]
@@ -429,22 +401,22 @@ mod tests {
     }
 
     #[test]
-    fn upstream_codex_read_through_home_uses_default_praxis_home_when_bridge_is_active() {
+    fn external_codex_read_through_home_uses_default_praxis_home_when_bridge_is_active() {
         let praxis_home =
             default_praxis_home_for_namespace(PraxisHomeNamespace::Praxis).expect("praxis home");
-        let shared = upstream_codex_read_through_home_for_test(
+        let shared = external_codex_read_through_home_for_test(
             PraxisHomeNamespace::Praxis,
             praxis_home.as_path(),
         )
         .expect("shared codex home");
-        let expected = super::default_upstream_codex_home().expect("codex home");
+        let expected = super::default_external_codex_home().expect("codex home");
         assert_eq!(shared, Some(expected));
     }
 
     #[test]
-    fn upstream_codex_read_through_home_is_disabled_for_non_default_home() {
+    fn external_codex_read_through_home_is_disabled_for_non_default_home() {
         let temp_home = TempDir::new().expect("temp home");
-        let shared = upstream_codex_read_through_home_for_test(
+        let shared = external_codex_read_through_home_for_test(
             PraxisHomeNamespace::Praxis,
             temp_home.path(),
         )

@@ -4,8 +4,8 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cargo_root="$repo_root/praxis-rs"
-listen_url="${PRAXIS_EXEC_SERVER_LISTEN_URL:-${CODEX_EXEC_SERVER_LISTEN_URL:-ws://127.0.0.1:0}}"
-start_timeout_seconds="${PRAXIS_EXEC_SERVER_START_TIMEOUT_SECONDS:-${CODEX_EXEC_SERVER_START_TIMEOUT_SECONDS:-120}}"
+listen_url="${PRAXIS_EXEC_SERVER_LISTEN_URL:-ws://127.0.0.1:0}"
+start_timeout_seconds="${PRAXIS_EXEC_SERVER_START_TIMEOUT_SECONDS:-120}"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/praxis-tui-with-exec-server.XXXXXX")"
 stdout_log="$tmp_dir/exec-server.stdout"
 stderr_log="$tmp_dir/exec-server.stderr"

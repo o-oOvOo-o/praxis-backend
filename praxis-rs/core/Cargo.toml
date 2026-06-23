@@ -67,7 +67,7 @@ praxis-secrets = { workspace = true }
 praxis-utils-string = { workspace = true }
 praxis-utils-stream-parser = { workspace = true }
 praxis-utils-template = { workspace = true }
-praxis-windows-sandbox = { package = "praxis-windows-sandbox", path = "../windows-sandbox-rs" }
+praxis-windows-sandbox = { package = "praxis-windows-sandbox", path = "../system_plugin/3rd/openai_sandbox/windows-sandbox-rs" }
 csv = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
@@ -120,6 +120,7 @@ toml_edit = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 url = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4", "v5"] }
+walkdir = { workspace = true }
 which = { workspace = true }
 zip = { workspace = true }
 

@@ -298,7 +298,7 @@ async fn snapshot_model_visible_layout_resume_with_personality_change() -> Resul
         config.model = Some("gpt-5.2".to_string());
     });
     let initial = initial_builder.build(&server).await?;
-    let codex = Arc::clone(&initial.thread);
+    let praxis = Arc::clone(&initial.thread);
     let home = initial.home.clone();
     let rollout_path = initial
         .session_configured
@@ -324,7 +324,7 @@ async fn snapshot_model_visible_layout_resume_with_personality_change() -> Resul
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     let initial_request = initial_mock.single_request();
 
     let resumed_mock = mount_sse_once(
@@ -397,7 +397,7 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
         config.model = Some("gpt-5.2".to_string());
     });
     let initial = initial_builder.build(&server).await?;
-    let codex = Arc::clone(&initial.thread);
+    let praxis = Arc::clone(&initial.thread);
     let home = initial.home.clone();
     let rollout_path = initial
         .session_configured
@@ -423,7 +423,7 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     let initial_request = initial_mock.single_request();
 
     let resumed_mock = mount_sse_once(

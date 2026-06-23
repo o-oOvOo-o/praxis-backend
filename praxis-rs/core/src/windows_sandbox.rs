@@ -146,7 +146,7 @@ pub fn run_elevated_setup(
 }
 
 #[cfg(target_os = "windows")]
-pub fn run_legacy_setup_preflight(
+pub fn run_non_admin_setup_preflight(
     policy: &SandboxPolicy,
     policy_cwd: &Path,
     command_cwd: &Path,
@@ -183,14 +183,14 @@ pub fn run_setup_refresh_with_extra_read_roots(
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn run_legacy_setup_preflight(
+pub fn run_non_admin_setup_preflight(
     _policy: &SandboxPolicy,
     _policy_cwd: &Path,
     _command_cwd: &Path,
     _env_map: &HashMap<String, String>,
     _praxis_home: &Path,
 ) -> anyhow::Result<()> {
-    anyhow::bail!("legacy Windows sandbox setup is only supported on Windows")
+    anyhow::bail!("non-admin Windows sandbox setup is only supported on Windows")
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -275,7 +275,7 @@ async fn run_windows_sandbox_setup_and_persist(
                 }
             }
             WindowsSandboxSetupMode::Unelevated => {
-                run_legacy_setup_preflight(
+                run_non_admin_setup_preflight(
                     &policy,
                     policy_cwd.as_path(),
                     command_cwd.as_path(),
@@ -294,7 +294,7 @@ async fn run_windows_sandbox_setup_and_persist(
     ConfigEditsBuilder::new(praxis_home.as_path())
         .with_profile(active_profile.as_deref())
         .set_windows_sandbox_mode(windows_sandbox_setup_mode_tag(mode))
-        .clear_legacy_windows_sandbox_keys()
+        .clear_previous_windows_sandbox_keys()
         .apply()
         .await
         .map_err(|err| anyhow::anyhow!("failed to persist windows sandbox mode: {err}"))
@@ -374,7 +374,7 @@ fn emit_windows_sandbox_setup_failure_metrics(
         }
     } else {
         let _ = metrics.counter(
-            "praxis.windows_sandbox.legacy_setup_preflight_failed",
+            "praxis.windows_sandbox.non_admin_setup_preflight_failed",
             /*inc*/ 1,
             &[("originator", originator_tag)],
         );

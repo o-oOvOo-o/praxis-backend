@@ -76,14 +76,13 @@ login flows and to Praxis external connections, including components that build
 reqwest clients or secure websocket clients through the
 shared `praxis-client` CA-loading path and remote MCP connections that use it.
 
-Set `CODEX_CA_CERTIFICATE` to the path of a PEM file containing one or more
-certificate blocks to use the legacy compatibility CA bundle override. If
-`CODEX_CA_CERTIFICATE` is unset, Praxis falls back to `SSL_CERT_FILE`. If
+Set `PRAXIS_CA_CERTIFICATE` to the path of a PEM file containing one or more
+certificate blocks to use the Praxis CA bundle override. If
+`PRAXIS_CA_CERTIFICATE` is unset, Praxis falls back to `SSL_CERT_FILE`. If
 neither variable is set, Praxis uses the system root certificates.
 
-`CODEX_CA_CERTIFICATE` takes precedence over `SSL_CERT_FILE`. Empty values are
-treated as unset. This variable is retained for compatibility until the CA
-loading path grows a Praxis-named alias.
+`PRAXIS_CA_CERTIFICATE` takes precedence over `SSL_CERT_FILE`. Empty values are
+treated as unset.
 
 The PEM file may contain multiple certificates. Praxis also tolerates OpenSSL
 `TRUSTED CERTIFICATE` labels and ignores well-formed `X509 CRL` sections in the

@@ -40,7 +40,7 @@ expression: "lines[start_idx..].join(\"\\n\")"
   └ Read Cargo.toml
 
 • I’m evaluating how binary size is influenced by various factors. There are
-  many binaries, such as codex and praxis-exec, which include dependencies by
+  many binaries, such as praxis and praxis-exec, which include dependencies by
   default, pulling in features like Tokio and hyper. For instance, reqwest
   includes default features like TLS through rustls. If default features remain
   enabled, it inflates the size with many additional components. I notice
@@ -118,7 +118,7 @@ expression: "lines[start_idx..].join(\"\\n\")"
 
   Main Causes
 
-  - Static linking style: Each bin (codex, praxis-tui, praxis-exec, praxis-mcp-
+  - Static linking style: Each bin (praxis, praxis-tui, praxis-exec, praxis-mcp-
   server, etc.) statically links its full dependency graph, so common code isn’t
   shared at runtime across executables.
   - Heavy deps (HTTP/TLS): reqwest brings in Hyper, HTTP/2, compressors,

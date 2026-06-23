@@ -71,19 +71,19 @@ trust_level = "trusted"
 
     let fixture_path =
         praxis_utils_cargo_bin::find_resource!("../core/tests/cli_responses_fixture.sse")?;
-    let codex = if let Ok(path) = praxis_utils_cargo_bin::cargo_bin("praxis") {
+    let praxis = if let Ok(path) = praxis_utils_cargo_bin::cargo_bin("praxis") {
         path
     } else {
-        let fallback = repo_root.join("praxis-rs/target/debug/codex");
+        let fallback = repo_root.join("praxis-rs/target/debug/praxis");
         if fallback.is_file() {
             fallback
         } else {
-            eprintln!("skipping integration test because codex binary is unavailable");
+            eprintln!("skipping integration test because praxis binary is unavailable");
             return Ok(());
         }
     };
 
-    let exec_output = std::process::Command::new(&codex)
+    let exec_output = std::process::Command::new(&praxis)
         .arg("exec")
         .arg("--skip-git-repo-check")
         .arg("-C")
@@ -119,7 +119,7 @@ trust_level = "trusted"
     ];
 
     let spawned = praxis_utils_pty::spawn_pty_process(
-        codex.to_string_lossy().as_ref(),
+        praxis.to_string_lossy().as_ref(),
         &args,
         &repo_root,
         &env,
@@ -175,7 +175,7 @@ trust_level = "trusted"
         Ok(Err(err)) => return Err(err.into()),
         Err(_) => {
             session.terminate();
-            anyhow::bail!("timed out waiting for codex resume to exit");
+            anyhow::bail!("timed out waiting for praxis resume to exit");
         }
     };
     let output_text = String::from_utf8_lossy(&output);
@@ -188,7 +188,7 @@ trust_level = "trusted"
     };
     anyhow::ensure!(
         exit_code == 0 || exit_code == 130 || (exit_code == 1 && interrupt_only_output),
-        "unexpected exit code from codex resume: {exit_code}; output: {output_text}",
+        "unexpected exit code from praxis resume: {exit_code}; output: {output_text}",
     );
 
     let config_contents = std::fs::read_to_string(praxis_home.path().join("config.toml"))?;

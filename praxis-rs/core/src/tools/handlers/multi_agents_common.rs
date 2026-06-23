@@ -432,7 +432,7 @@ fn spawn_agent_model_provider_candidates(requested_model_provider: &str) -> Vec<
         .collect::<String>()
         .to_ascii_lowercase();
     match normalized.as_str() {
-        "codex" | "responses" | "openairesponses" | "codexresponses" | "gpt" | "chatgpt" => {
+        "responses" | "openairesponses" | "openai" | "gpt" | "chatgpt" => {
             push_spawn_agent_model_candidate(&mut candidates, OPENAI_PROVIDER_ID.to_string());
             push_spawn_agent_model_candidate(&mut candidates, "OpenAI".to_string());
         }
@@ -566,10 +566,6 @@ fn normalize_spawn_agent_model_aliases(requested_model: &str) -> Vec<String> {
         .is_some_and(|first| first.is_ascii_digit())
     {
         format!("gpt-{lower}")
-    } else if let Some(rest) = lower.strip_prefix("codex-") {
-        normalize_codex_model_alias(rest).unwrap_or(lower.clone())
-    } else if let Some(rest) = lower.strip_prefix("codex") {
-        normalize_codex_model_alias(rest).unwrap_or(lower.clone())
     } else if let Some(rest) = lower.strip_prefix("gpt-") {
         format!("gpt-{rest}")
     } else if let Some(rest) = lower.strip_prefix("gpt") {
@@ -601,7 +597,7 @@ fn normalize_spawn_agent_model_aliases(requested_model: &str) -> Vec<String> {
     aliases
 }
 
-fn normalize_codex_model_alias(rest: &str) -> Option<String> {
+fn normalize_openai_model_alias(rest: &str) -> Option<String> {
     let rest = rest.trim_start_matches('-');
     if rest
         .chars()
@@ -660,7 +656,7 @@ mod tests {
     use crate::model_provider_info::WireApi;
 
     #[test]
-    fn spawn_agent_model_candidates_accept_natural_codex_aliases() {
+    fn spawn_agent_model_candidates_accept_openai_aliases() {
         let migrations = BTreeMap::new();
         assert_eq!(
             spawn_agent_model_candidates("5.5", &migrations),
@@ -668,9 +664,6 @@ mod tests {
         );
         assert!(
             spawn_agent_model_candidates("gpt5.5", &migrations).contains(&"gpt-5.5".to_string())
-        );
-        assert!(
-            spawn_agent_model_candidates("codex5.5", &migrations).contains(&"gpt-5.5".to_string())
         );
         assert!(
             spawn_agent_model_candidates("gpt 5.5 xhigh", &migrations)
@@ -681,19 +674,23 @@ mod tests {
             Some(ReasoningEffort::XHigh)
         );
         assert_eq!(
-            spawn_agent_embedded_reasoning_effort("codex5.5-high"),
+            spawn_agent_embedded_reasoning_effort("gpt5.5-high"),
             Some(ReasoningEffort::High)
         );
     }
 
     #[test]
-    fn spawn_agent_model_provider_candidates_accept_codex_aliases() {
+    fn spawn_agent_model_provider_candidates_accept_openai_aliases() {
         assert!(
-            spawn_agent_model_provider_candidates("codex")
+            spawn_agent_model_provider_candidates("openai/responses")
                 .contains(&OPENAI_PROVIDER_ID.to_string())
         );
         assert!(
-            spawn_agent_model_provider_candidates("codex/responses")
+            spawn_agent_model_provider_candidates("openai")
+                .contains(&OPENAI_PROVIDER_ID.to_string())
+        );
+        assert!(
+            spawn_agent_model_provider_candidates("responses")
                 .contains(&OPENAI_PROVIDER_ID.to_string())
         );
     }

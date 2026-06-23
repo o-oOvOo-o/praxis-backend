@@ -1,7 +1,7 @@
 use super::classification::classify_command;
 use super::classification::task_resource_allows;
-use super::model::ActionIntentKind;
-use super::model::ResourceRequirement;
+use super::records::ActionIntentKind;
+use super::records::ResourceRequirement;
 use crate::path_scope::scope_matches;
 use std::path::Path;
 

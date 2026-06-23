@@ -149,7 +149,7 @@ Qwen 路径要把工具调用做得机械、直接、可恢复：
 调用 `spawn_agent` 时：
 
 - `task_name` 只用于工具路由，必须是 lowercase ASCII，只使用小写字母、数字、`_`、`-` 或 `/`，不要写中文、大写 `ROUND8`、空格或标点。UI 名称用 `title`，例如 `task_name: plane_war_round9_patch`、`title: 遥测补丁落盘`。`title` 是职责短标题，不是 agent 姓名；不要把 `title` 写成 `墨子`、`荀子` 这类纯名字。
-- 需要 OpenAI-backed Praxis worker 时，优先显式传 `agent_type=worker`、`model_provider=openai`、`model=gpt-5.5`、`reasoning_effort=xhigh`。`5.5`、`gpt5.5`、`codex5.5`、`gpt 5.5 xhigh` 这些自然写法可以被 Praxis 解析，但正式工具调用里仍优先写规范字段。
+- 需要 OpenAI-backed Praxis worker 时，优先显式传 `agent_type=worker`、`model_provider=openai`、`model=gpt-5.5`、`reasoning_effort=xhigh`。`5.5`、`gpt5.5`、`gpt 5.5 xhigh` 这些自然写法可以被 Praxis 解析，但正式工具调用里仍优先写规范字段。
 - 给 worker 的 `message` 必须保留完整验收条件、允许/禁止路径、是否可写、是否可用工具、最终 marker。不要把用户或 harness 给你的验收句压缩成“按要求做”；压缩会丢证据。
 - 用户、外部 coordinator 或 harness 给出的精确字符串必须逐字复制到 worker `message` 中，尤其是 marker、文件路径、要追加到文件里的句子、命令片段、字段名和验收文本。不要把 `ROUND9 patched subagent telemetry marker through ...` 缩成 `ROUND9 patched`，也不要把长句改写成同义句；这会让外部验收失败。
 - 如果精确字符串较长，把它放进 worker `message` 的独立一行，使用引号包住也可以，但内容本身必须不增删、不改写、不翻译。

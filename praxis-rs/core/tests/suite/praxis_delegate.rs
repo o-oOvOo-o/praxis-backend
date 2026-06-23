@@ -67,7 +67,7 @@ async fn praxis_delegate_forwards_exec_approval_and_proceeds_on_approval() {
         config.permissions.sandbox_policy =
             Constrained::allow_any(SandboxPolicy::new_read_only_policy());
     });
-    let test = builder.build(&server).await.expect("build test codex");
+    let test = builder.build(&server).await.expect("build test praxis");
 
     // Kick off review (sub-agent starts internally).
     test.thread
@@ -151,7 +151,7 @@ async fn praxis_delegate_forwards_patch_approval_and_proceeds_on_decision() {
             Constrained::allow_any(SandboxPolicy::new_read_only_policy());
         config.include_apply_patch_tool = true;
     });
-    let test = builder.build(&server).await.expect("build test codex");
+    let test = builder.build(&server).await.expect("build test praxis");
 
     test.thread
         .submit(Op::Review {
@@ -209,7 +209,7 @@ async fn praxis_delegate_ignores_legacy_deltas() {
     mount_sse_sequence(&server, vec![sse_stream]).await;
 
     let mut builder = test_praxis();
-    let test = builder.build(&server).await.expect("build test codex");
+    let test = builder.build(&server).await.expect("build test praxis");
 
     // Kick off review (delegated).
     test.thread

@@ -3,6 +3,9 @@ mod input;
 
 use crate::state::SessionServices;
 
+pub(super) use input::ServiceManagerSet;
+pub(super) use input::ServiceRuntimeArtifacts;
+pub(super) use input::ServiceSessionSpec;
 pub(super) use input::ServicesBootstrapInput;
 
 pub(super) async fn build(input: ServicesBootstrapInput) -> anyhow::Result<SessionServices> {

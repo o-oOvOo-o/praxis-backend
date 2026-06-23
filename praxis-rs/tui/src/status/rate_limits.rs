@@ -88,7 +88,7 @@ impl RateLimitWindowDisplay {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RateLimitSnapshotDisplay {
-    /// Canonical limit identifier (for example: `codex` or `praxis_other`).
+    /// Canonical limit identifier (for example: `hosted_agent` or `praxis_other`).
     pub limit_name: String,
     /// Local timestamp representing when this display snapshot was captured.
     pub captured_at: DateTime<Local>,

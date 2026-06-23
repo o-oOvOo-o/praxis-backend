@@ -1,5 +1,5 @@
-use crate::agent_os::model::CommandIntentPlan;
-use crate::agent_os::model::ResourceRequirement;
+use crate::agent_os::records::CommandIntentPlan;
+use crate::agent_os::records::ResourceRequirement;
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]

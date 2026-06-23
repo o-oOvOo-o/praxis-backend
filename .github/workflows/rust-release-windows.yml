@@ -40,14 +40,14 @@ jobs:
           - runner: windows-x64
             target: x86_64-pc-windows-msvc
             bundle: primary
-            build_args: --bin codex --bin praxis-responses-api-proxy
+            build_args: --bin praxis --bin praxis-responses-api-proxy
             runs_on:
               group: praxis-runners
               labels: praxis-windows-x64
           - runner: windows-arm64
             target: aarch64-pc-windows-msvc
             bundle: primary
-            build_args: --bin codex --bin praxis-responses-api-proxy
+            build_args: --bin praxis --bin praxis-responses-api-proxy
             runs_on:
               group: praxis-runners
               labels: praxis-windows-arm64
@@ -104,7 +104,7 @@ jobs:
           output_dir="target/${{ matrix.target }}/release/staged-${{ matrix.bundle }}"
           mkdir -p "$output_dir"
           if [[ "${{ matrix.bundle }}" == "primary" ]]; then
-            cp target/${{ matrix.target }}/release/codex.exe "$output_dir/codex.exe"
+            cp target/${{ matrix.target }}/release/praxis.exe "$output_dir/praxis.exe"
             cp target/${{ matrix.target }}/release/praxis-responses-api-proxy.exe "$output_dir/praxis-responses-api-proxy.exe"
           else
             cp target/${{ matrix.target }}/release/praxis-windows-sandbox-setup.exe "$output_dir/praxis-windows-sandbox-setup.exe"
@@ -165,7 +165,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ls -lh target/${{ matrix.target }}/release/codex.exe
+          ls -lh target/${{ matrix.target }}/release/praxis.exe
           ls -lh target/${{ matrix.target }}/release/praxis-responses-api-proxy.exe
           ls -lh target/${{ matrix.target }}/release/praxis-windows-sandbox-setup.exe
           ls -lh target/${{ matrix.target }}/release/praxis-command-runner.exe
@@ -187,7 +187,7 @@ jobs:
           dest="dist/${{ matrix.target }}"
           mkdir -p "$dest"
 
-          cp target/${{ matrix.target }}/release/codex.exe "$dest/praxis-${{ matrix.target }}.exe"
+          cp target/${{ matrix.target }}/release/praxis.exe "$dest/praxis-${{ matrix.target }}.exe"
           cp target/${{ matrix.target }}/release/praxis-responses-api-proxy.exe "$dest/praxis-responses-api-proxy-${{ matrix.target }}.exe"
           cp target/${{ matrix.target }}/release/praxis-windows-sandbox-setup.exe "$dest/praxis-windows-sandbox-setup-${{ matrix.target }}.exe"
           cp target/${{ matrix.target }}/release/praxis-command-runner.exe "$dest/praxis-command-runner-${{ matrix.target }}.exe"
@@ -229,8 +229,8 @@ jobs:
             # Must run from inside the dest dir so 7z won't embed the
             # directory path inside the zip.
             if [[ "$base" == "praxis-${{ matrix.target }}.exe" ]]; then
-              # Bundle the sandbox helper binaries into the main codex zip so
-              # WinGet installs include the required helpers next to codex.exe.
+              # Bundle the sandbox helper binaries into the main Praxis zip so
+              # WinGet installs include the required helpers next to praxis.exe.
               # Fall back to the single-binary zip if the helpers are missing
               # to avoid breaking releases.
               bundle_dir="$(mktemp -d)"

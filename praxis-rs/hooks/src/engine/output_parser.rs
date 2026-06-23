@@ -86,7 +86,7 @@ pub(crate) fn parse_pre_tool_use(stdout: &str) -> Option<PreToolUseOutput> {
         if use_hook_specific_decision {
             hook_specific_output.and_then(unsupported_pre_tool_use_hook_specific_output)
         } else {
-            unsupported_pre_tool_use_legacy_decision(decision.as_ref(), reason.as_deref())
+            unsupported_pre_tool_use_flat_decision(decision.as_ref(), reason.as_deref())
         }
     });
     let block_reason = if invalid_reason.is_none() {
@@ -296,7 +296,7 @@ fn unsupported_pre_tool_use_hook_specific_output(
     }
 }
 
-fn unsupported_pre_tool_use_legacy_decision(
+fn unsupported_pre_tool_use_flat_decision(
     decision: Option<&PreToolUseDecisionWire>,
     reason: Option<&str>,
 ) -> Option<String> {

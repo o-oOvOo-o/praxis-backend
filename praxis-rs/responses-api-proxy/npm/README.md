@@ -1,6 +1,6 @@
-# @openai/praxis-responses-api-proxy
+# @praxis/praxis-responses-api-proxy
 
-<p align="center"><code>npm i -g @openai/praxis-responses-api-proxy</code> to install <code>praxis-responses-api-proxy</code></p>
+<p align="center"><code>npm i -g @praxis/praxis-responses-api-proxy</code> to install <code>praxis-responses-api-proxy</code></p>
 
 This package distributes the prebuilt Praxis Responses API proxy binary for macOS, Linux, and Windows.
 

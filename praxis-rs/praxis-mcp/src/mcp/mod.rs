@@ -177,7 +177,9 @@ fn praxis_apps_mcp_bearer_token(auth: Option<&OpenAiAccountAuth>) -> Option<Stri
     }
 }
 
-fn praxis_apps_mcp_http_headers(auth: Option<&OpenAiAccountAuth>) -> Option<HashMap<String, String>> {
+fn praxis_apps_mcp_http_headers(
+    auth: Option<&OpenAiAccountAuth>,
+) -> Option<HashMap<String, String>> {
     let mut headers = HashMap::new();
     if let Some(token) = praxis_apps_mcp_bearer_token(auth) {
         headers.insert("Authorization".to_string(), format!("Bearer {token}"));
@@ -218,7 +220,10 @@ pub(crate) fn praxis_apps_mcp_url(config: &McpConfig) -> String {
     praxis_apps_mcp_url_for_base_url(&config.chatgpt_base_url)
 }
 
-fn praxis_apps_mcp_server_config(config: &McpConfig, auth: Option<&OpenAiAccountAuth>) -> McpServerConfig {
+fn praxis_apps_mcp_server_config(
+    config: &McpConfig,
+    auth: Option<&OpenAiAccountAuth>,
+) -> McpServerConfig {
     let bearer_token_env_var = praxis_apps_mcp_bearer_token_env_var();
     let http_headers = if bearer_token_env_var.is_some() {
         None

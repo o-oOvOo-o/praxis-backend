@@ -5,7 +5,7 @@ Bazel consumer builds use:
 
 - upstream `denoland/rusty_v8` release archives on Windows
 - source-built V8 archives on Darwin, GNU Linux, and musl Linux
-- `openai/codex` release assets for published musl release pairs
+- Praxis release assets for published musl release pairs
 
 Cargo builds still use prebuilt `rusty_v8` archives by default. Only Bazel
 overrides `RUSTY_V8_ARCHIVE`/`RUSTY_V8_SRC_BINDING_PATH` in `MODULE.bazel` to
@@ -38,7 +38,7 @@ statically linked form:
 - `//third_party/v8:rusty_v8_release_pair_aarch64_unknown_linux_musl`
 
 Cargo musl builds use `RUSTY_V8_ARCHIVE` plus a downloaded
-`RUSTY_V8_SRC_BINDING_PATH` to point at those `openai/codex` release assets
+`RUSTY_V8_SRC_BINDING_PATH` to point at those Praxis release assets
 directly. We do not use `RUSTY_V8_MIRROR` for musl because the upstream `v8`
 crate hardcodes a `v<crate_version>` tag layout, while our musl artifacts are
 published under `rusty-v8-v<crate_version>`.

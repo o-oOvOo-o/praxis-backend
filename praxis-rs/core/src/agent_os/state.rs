@@ -1,4 +1,4 @@
-use super::model::*;
+use super::records::*;
 use praxis_protocol::ThreadId;
 use std::collections::HashMap;
 

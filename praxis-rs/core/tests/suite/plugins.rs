@@ -200,7 +200,7 @@ async fn capability_sections_render_in_developer_message_in_order() -> Result<()
     let praxis_home = Arc::new(TempDir::new()?);
     write_plugin_skill_plugin(praxis_home.as_ref());
     write_plugin_app_plugin(praxis_home.as_ref());
-    let codex = build_apps_enabled_plugin_test_praxis(
+    let praxis = build_apps_enabled_plugin_test_praxis(
         &server,
         Arc::clone(&praxis_home),
         apps_server.chatgpt_base_url,
@@ -217,7 +217,7 @@ async fn capability_sections_render_in_developer_message_in_order() -> Result<()
         })
         .await?;
 
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = resp_mock.single_request();
     let developer_messages = request.message_input_texts("developer");
@@ -278,7 +278,7 @@ async fn explicit_plugin_mentions_inject_plugin_guidance() -> Result<()> {
     write_plugin_mcp_plugin(praxis_home.as_ref(), &rmcp_test_server_bin);
     write_plugin_app_plugin(praxis_home.as_ref());
 
-    let codex =
+    let praxis =
         build_apps_enabled_plugin_test_praxis(&server, praxis_home, apps_server.chatgpt_base_url)
             .await?;
 
@@ -291,7 +291,7 @@ async fn explicit_plugin_mentions_inject_plugin_guidance() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request = mock.single_request();
     let developer_messages = request.message_input_texts("developer");
@@ -352,7 +352,7 @@ async fn explicit_plugin_mentions_track_plugin_used_analytics() -> Result<()> {
 
     let praxis_home = Arc::new(TempDir::new()?);
     write_plugin_skill_plugin(praxis_home.as_ref());
-    let codex = build_analytics_plugin_test_praxis(&server, praxis_home).await?;
+    let praxis = build_analytics_plugin_test_praxis(&server, praxis_home).await?;
 
     codex
         .submit(Op::UserInput {
@@ -363,7 +363,7 @@ async fn explicit_plugin_mentions_track_plugin_used_analytics() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let plugin_event = loop {
@@ -417,13 +417,13 @@ async fn plugin_mcp_tools_are_listed() -> Result<()> {
     let praxis_home = Arc::new(TempDir::new()?);
     let rmcp_test_server_bin = stdio_server_bin()?;
     write_plugin_mcp_plugin(praxis_home.as_ref(), &rmcp_test_server_bin);
-    let codex = build_plugin_test_praxis(&server, praxis_home).await?;
+    let praxis = build_plugin_test_praxis(&server, praxis_home).await?;
 
     let tools_ready_deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        codex.submit(Op::ListMcpTools).await?;
+        praxis.submit(Op::ListMcpTools).await?;
         let list_event = wait_for_event_with_timeout(
-            &codex,
+            &praxis,
             |ev| matches!(ev, EventMsg::McpListToolsResponse(_)),
             Duration::from_secs(10),
         )

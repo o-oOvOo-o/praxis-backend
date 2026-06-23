@@ -19,9 +19,7 @@ use time::format_description::FormatItem;
 use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use tokio::io::AsyncBufReadExt;
-use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
-use tokio::io::BufWriter;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
@@ -60,7 +58,14 @@ use praxis_protocol::protocol::SessionMetaLine;
 use praxis_protocol::protocol::SessionSource;
 use praxis_state::StateRuntime;
 use praxis_state::ThreadMetadataBuilder;
-use praxis_utils_path as path_utils;
+
+mod jsonl_writer;
+mod resume_selection;
+
+use jsonl_writer::JsonlWriter;
+use resume_selection::filter_fs_page_by_cwd;
+use resume_selection::select_resume_path;
+use resume_selection::select_resume_path_from_db_page;
 
 /// Records all [`ResponseItem`]s for a session and flushes them to disk after
 /// every update.
@@ -700,32 +705,6 @@ fn truncate_fs_page(
     page
 }
 
-async fn filter_fs_page_by_cwd(
-    mut page: ThreadsPage,
-    cwd: Option<&Path>,
-    default_provider: &str,
-) -> ThreadsPage {
-    let Some(cwd) = cwd else {
-        return page;
-    };
-
-    let mut filtered = Vec::with_capacity(page.items.len());
-    for item in page.items {
-        if resume_candidate_matches_cwd(
-            item.path.as_path(),
-            item.cwd.as_deref(),
-            cwd,
-            default_provider,
-        )
-        .await
-        {
-            filtered.push(item);
-        }
-    }
-    page.items = filtered;
-    page
-}
-
 struct LogFileInfo {
     /// Full path to the rollout file.
     path: PathBuf,
@@ -1061,57 +1040,6 @@ async fn sync_thread_state_after_write(
     .await;
 }
 
-struct JsonlWriter {
-    file: BufWriter<tokio::fs::File>,
-    needs_flush: bool,
-}
-
-#[derive(serde::Serialize)]
-struct RolloutLineRef<'a> {
-    timestamp: String,
-    #[serde(flatten)]
-    item: &'a RolloutItem,
-}
-
-impl JsonlWriter {
-    fn new(file: tokio::fs::File) -> Self {
-        Self {
-            file: BufWriter::new(file),
-            needs_flush: false,
-        }
-    }
-
-    async fn write_rollout_item(&mut self, rollout_item: &RolloutItem) -> std::io::Result<()> {
-        let timestamp_format: &[FormatItem] = format_description!(
-            "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
-        );
-        let timestamp = OffsetDateTime::now_utc()
-            .format(timestamp_format)
-            .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
-
-        let line = RolloutLineRef {
-            timestamp,
-            item: rollout_item,
-        };
-        self.write_line(&line).await
-    }
-    async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
-        let mut json = serde_json::to_string(item)?;
-        json.push('\n');
-        self.file.write_all(json.as_bytes()).await?;
-        self.needs_flush = true;
-        Ok(())
-    }
-
-    async fn flush(&mut self) -> std::io::Result<()> {
-        if self.needs_flush {
-            self.file.flush().await?;
-            self.needs_flush = false;
-        }
-        Ok(())
-    }
-}
-
 impl From<praxis_state::ThreadsPage> for ThreadsPage {
     fn from(db_page: praxis_state::ThreadsPage) -> Self {
         let items = db_page
@@ -1147,93 +1075,6 @@ impl From<praxis_state::ThreadsPage> for ThreadsPage {
             reached_scan_cap: false,
         }
     }
-}
-
-async fn select_resume_path(
-    page: &ThreadsPage,
-    filter_cwd: Option<&Path>,
-    default_provider: &str,
-) -> Option<PathBuf> {
-    match filter_cwd {
-        Some(cwd) => {
-            for item in &page.items {
-                if resume_candidate_matches_cwd(
-                    item.path.as_path(),
-                    item.cwd.as_deref(),
-                    cwd,
-                    default_provider,
-                )
-                .await
-                {
-                    return Some(item.path.clone());
-                }
-            }
-            None
-        }
-        None => page.items.first().map(|item| item.path.clone()),
-    }
-}
-
-async fn resume_candidate_matches_cwd(
-    rollout_path: &Path,
-    cached_cwd: Option<&Path>,
-    cwd: &Path,
-    default_provider: &str,
-) -> bool {
-    if cached_cwd.is_some_and(|session_cwd| cwd_matches(session_cwd, cwd)) {
-        return true;
-    }
-
-    if let Ok((items, _, _)) = RolloutRecorder::load_rollout_items(rollout_path).await
-        && let Some(latest_turn_context_cwd) = items.iter().rev().find_map(|item| match item {
-            RolloutItem::TurnContext(turn_context) => Some(turn_context.cwd.as_path()),
-            RolloutItem::SessionMeta(_)
-            | RolloutItem::ResponseItem(_)
-            | RolloutItem::Compacted(_)
-            | RolloutItem::EventMsg(_) => None,
-        })
-    {
-        return cwd_matches(latest_turn_context_cwd, cwd);
-    }
-
-    metadata::extract_metadata_from_rollout(rollout_path, default_provider)
-        .await
-        .is_ok_and(|outcome| cwd_matches(outcome.metadata.cwd.as_path(), cwd))
-}
-
-async fn select_resume_path_from_db_page(
-    page: &praxis_state::ThreadsPage,
-    filter_cwd: Option<&Path>,
-    default_provider: &str,
-) -> Option<PathBuf> {
-    match filter_cwd {
-        Some(cwd) => {
-            for item in &page.items {
-                if resume_candidate_matches_cwd(
-                    item.rollout_path.as_path(),
-                    Some(item.cwd.as_path()),
-                    cwd,
-                    default_provider,
-                )
-                .await
-                {
-                    return Some(item.rollout_path.clone());
-                }
-            }
-            None
-        }
-        None => page.items.first().map(|item| item.rollout_path.clone()),
-    }
-}
-
-fn cwd_matches(session_cwd: &Path, cwd: &Path) -> bool {
-    if let (Ok(ca), Ok(cb)) = (
-        path_utils::normalize_for_path_comparison(session_cwd),
-        path_utils::normalize_for_path_comparison(cwd),
-    ) {
-        return ca == cb || ca.starts_with(&cb);
-    }
-    session_cwd == cwd || session_cwd.starts_with(cwd)
 }
 
 #[cfg(test)]

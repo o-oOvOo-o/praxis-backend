@@ -63,7 +63,7 @@ async fn renews_cache_ttl_on_matching_models_etag() -> Result<()> {
     });
 
     let test = builder.build(&server).await?;
-    let codex = Arc::clone(&test.thread);
+    let praxis = Arc::clone(&test.thread);
     let config = test.config.clone();
 
     // Populate cache via initial refresh.
@@ -108,7 +108,7 @@ async fn renews_cache_ttl_on_matching_models_etag() -> Result<()> {
         })
         .await?;
 
-    let _ = wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    let _ = wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let refreshed_cache = read_cache(&cache_path).await?;
     assert!(

@@ -49,7 +49,7 @@ mv "${tmp_path}" "${payload_path}""#,
     let notify_file = notify_dir.path().join("notify.txt");
     let notify_script_str = notify_script.to_str().unwrap().to_string();
 
-    let TestPraxis { thread: codex, .. } = test_praxis()
+    let TestPraxis { thread: praxis, .. } = test_praxis()
         .with_config(move |cfg| cfg.notify = Some(vec![notify_script_str]))
         .build(&server)
         .await?;
@@ -64,7 +64,7 @@ mv "${tmp_path}" "${payload_path}""#,
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     // We fork the notify script, so we need to wait for it to write to the file.
     fs_wait::wait_for_path_exists(&notify_file, Duration::from_secs(5)).await?;

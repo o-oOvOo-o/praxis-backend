@@ -408,7 +408,7 @@ http_file(
     name = "rusty_v8_146_4_0_aarch64_unknown_linux_musl_archive",
     downloaded_file_path = "librusty_v8_release_aarch64-unknown-linux-musl.a.gz",
     urls = [
-        "https://github.com/openai/codex/releases/download/rusty-v8-v146.4.0/librusty_v8_release_aarch64-unknown-linux-musl.a.gz",
+        "https://github.com/o-oOvOo-o/praxis-backend/releases/download/rusty-v8-v146.4.0/librusty_v8_release_aarch64-unknown-linux-musl.a.gz",
     ],
 )
 
@@ -416,7 +416,7 @@ http_file(
     name = "rusty_v8_146_4_0_aarch64_unknown_linux_musl_binding",
     downloaded_file_path = "src_binding_release_aarch64-unknown-linux-musl.rs",
     urls = [
-        "https://github.com/openai/codex/releases/download/rusty-v8-v146.4.0/src_binding_release_aarch64-unknown-linux-musl.rs",
+        "https://github.com/o-oOvOo-o/praxis-backend/releases/download/rusty-v8-v146.4.0/src_binding_release_aarch64-unknown-linux-musl.rs",
     ],
 )
 
@@ -424,7 +424,7 @@ http_file(
     name = "rusty_v8_146_4_0_x86_64_unknown_linux_musl_archive",
     downloaded_file_path = "librusty_v8_release_x86_64-unknown-linux-musl.a.gz",
     urls = [
-        "https://github.com/openai/codex/releases/download/rusty-v8-v146.4.0/librusty_v8_release_x86_64-unknown-linux-musl.a.gz",
+        "https://github.com/o-oOvOo-o/praxis-backend/releases/download/rusty-v8-v146.4.0/librusty_v8_release_x86_64-unknown-linux-musl.a.gz",
     ],
 )
 
@@ -432,7 +432,7 @@ http_file(
     name = "rusty_v8_146_4_0_x86_64_unknown_linux_musl_binding",
     downloaded_file_path = "src_binding_release_x86_64-unknown-linux-musl.rs",
     urls = [
-        "https://github.com/openai/codex/releases/download/rusty-v8-v146.4.0/src_binding_release_x86_64-unknown-linux-musl.rs",
+        "https://github.com/o-oOvOo-o/praxis-backend/releases/download/rusty-v8-v146.4.0/src_binding_release_x86_64-unknown-linux-musl.rs",
     ],
 )
 

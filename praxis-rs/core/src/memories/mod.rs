@@ -19,7 +19,7 @@ use praxis_protocol::openai_models::ReasoningEffort;
 
 pub(crate) use control::clear_memory_root_contents;
 /// Starts the memory startup pipeline for eligible root sessions.
-/// This is the single entrypoint that `codex` uses to trigger memory startup.
+/// This is the single entrypoint that Praxis uses to trigger memory startup.
 ///
 /// This is the entry point to read and understand this module.
 pub(crate) use start::start_memories_startup_task;

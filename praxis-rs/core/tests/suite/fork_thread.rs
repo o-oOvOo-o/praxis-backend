@@ -40,7 +40,7 @@ async fn fork_thread_twice_drops_to_first_message() {
 
     let mut builder = test_praxis();
     let test = builder.build(&server).await.expect("create conversation");
-    let codex = test.thread.clone();
+    let praxis = test.thread.clone();
     let thread_manager = test.thread_manager.clone();
     let config_for_fork = test.config.clone();
 
@@ -56,11 +56,11 @@ async fn fork_thread_twice_drops_to_first_message() {
             })
             .await
             .unwrap();
-        let _ = wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+        let _ = wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
     }
 
     // Request history from the base conversation to obtain rollout path.
-    let base_path = codex.rollout_path().expect("rollout path");
+    let base_path = praxis.rollout_path().expect("rollout path");
 
     // GetHistory flushes before returning the path; no wait needed.
 

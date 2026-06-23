@@ -689,8 +689,8 @@ mod tests {
     use tempfile::TempDir;
 
     use super::BuildCustomCaTransportError;
-    use super::PRAXIS_CA_CERT_ENV;
     use super::EnvSource;
+    use super::PRAXIS_CA_CERT_ENV;
     use super::SSL_CERT_FILE_ENV;
     use super::maybe_build_rustls_client_config_with_env;
 
@@ -726,13 +726,13 @@ mod tests {
     #[test]
     fn ca_path_prefers_praxis_env() {
         let env = map_env(&[
-            (PRAXIS_CA_CERT_ENV, "/tmp/codex.pem"),
+            (PRAXIS_CA_CERT_ENV, "/tmp/praxis.pem"),
             (SSL_CERT_FILE_ENV, "/tmp/fallback.pem"),
         ]);
 
         assert_eq!(
             env.configured_ca_bundle().map(|bundle| bundle.path),
-            Some(PathBuf::from("/tmp/codex.pem"))
+            Some(PathBuf::from("/tmp/praxis.pem"))
         );
     }
 

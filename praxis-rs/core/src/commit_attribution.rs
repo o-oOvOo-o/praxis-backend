@@ -1,4 +1,4 @@
-const DEFAULT_ATTRIBUTION_VALUE: &str = "Praxis <noreply@openai.com>";
+const DEFAULT_ATTRIBUTION_VALUE: &str = "Praxis <noreply@praxis.dev>";
 
 fn build_commit_message_trailer(config_attribution: Option<&str>) -> Option<String> {
     let value = resolve_attribution_value(config_attribution)?;

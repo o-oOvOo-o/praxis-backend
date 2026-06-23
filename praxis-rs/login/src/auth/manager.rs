@@ -1,11 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
-use reqwest::StatusCode;
-use serde::Deserialize;
-use serde::Serialize;
 #[cfg(test)]
 use serial_test::serial;
-use std::env;
 use std::fmt::Debug;
 use std::path::Path;
 use std::path::PathBuf;
@@ -15,7 +11,6 @@ use std::sync::RwLock;
 use tokio::sync::Mutex as AsyncMutex;
 
 use praxis_protocol::auth::AuthMode as ApiAuthMode;
-use praxis_protocol::config_types::ForcedLoginMethod;
 use praxis_protocol::config_types::ModelProviderAuthInfo;
 
 use super::external_bearer::BearerTokenRefresher;
@@ -24,10 +19,7 @@ use crate::auth::error::RefreshTokenFailedReason;
 pub use crate::auth::storage::AuthCredentialsStoreMode;
 pub use crate::auth::storage::AuthDotJson;
 use crate::auth::storage::AuthStorageBackend;
-use crate::auth::storage::LoadedAuthOrigin;
 use crate::auth::storage::create_auth_storage;
-use crate::auth::storage::load_persistent_auth_with_origin;
-use crate::auth::util::try_parse_error_message;
 use crate::default_client::create_client;
 use crate::token_data::KnownPlan as InternalKnownPlan;
 use crate::token_data::PlanType as InternalPlanType;
@@ -36,8 +28,24 @@ use crate::token_data::parse_chatgpt_jwt_claims;
 use crate::token_data::parse_jwt_expiration;
 use praxis_client::PraxisHttpClient;
 use praxis_protocol::account::PlanType as AccountPlanType;
-use serde_json::Value;
 use thiserror::Error;
+
+mod recovery;
+mod refresh;
+mod source;
+
+use recovery::ReloadOutcome;
+pub use recovery::{UnauthorizedRecovery, UnauthorizedRecoveryStepResult};
+#[cfg(test)]
+use recovery::{UnauthorizedRecoveryMode, UnauthorizedRecoveryStep};
+pub use refresh::CLIENT_ID;
+use refresh::request_chatgpt_token_refresh;
+pub use source::{
+    AuthConfig, OPENAI_API_KEY_ENV_VAR, PRAXIS_API_KEY_ENV_VAR, enforce_login_restrictions,
+    load_auth_dot_json, login_with_api_key, login_with_chatgpt_auth_tokens, logout,
+    read_openai_api_key_from_env, read_praxis_api_key_from_env, save_auth,
+};
+use source::{load_auth, logout_all_stores, persist_tokens};
 
 /// Authentication mechanism used by the current user.
 #[derive(Debug, Clone)]
@@ -46,10 +54,6 @@ pub enum OpenAiAccountAuth {
     Chatgpt(ChatgptAuth),
     ChatgptAuthTokens(ChatgptAuthTokens),
 }
-
-// Compatibility alias for callers that still use the old login type name.
-#[deprecated(note = "use OpenAiAccountAuth")]
-pub type CodexAuth = OpenAiAccountAuth;
 
 #[derive(Debug, Clone)]
 pub struct ApiKeyAuth {
@@ -405,416 +409,6 @@ impl ChatgptAuth {
     }
 }
 
-pub const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
-pub const PRAXIS_API_KEY_ENV_VAR: &str = "PRAXIS_API_KEY";
-const LEGACY_CODEX_API_KEY_ENV_VAR: &str = "CODEX_API_KEY";
-
-pub fn read_openai_api_key_from_env() -> Option<String> {
-    env::var(OPENAI_API_KEY_ENV_VAR)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-pub fn read_praxis_api_key_from_env() -> Option<String> {
-    [PRAXIS_API_KEY_ENV_VAR, LEGACY_CODEX_API_KEY_ENV_VAR]
-        .into_iter()
-        .find_map(|name| {
-            env::var(name)
-                .ok()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-        })
-}
-
-/// Delete the auth.json file inside `praxis_home` if it exists. Returns `Ok(true)`
-/// if a file was removed, `Ok(false)` if no auth file was present.
-pub fn logout(
-    praxis_home: &Path,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<bool> {
-    let storage = create_auth_storage(praxis_home.to_path_buf(), auth_credentials_store_mode);
-    storage.delete()
-}
-
-/// Writes an `auth.json` that contains only the API key.
-pub fn login_with_api_key(
-    praxis_home: &Path,
-    api_key: &str,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<()> {
-    let auth_dot_json = AuthDotJson {
-        auth_mode: Some(ApiAuthMode::ApiKey),
-        openai_api_key: Some(api_key.to_string()),
-        tokens: None,
-        last_refresh: None,
-    };
-    save_auth(praxis_home, &auth_dot_json, auth_credentials_store_mode)
-}
-
-/// Writes an in-memory auth payload for externally managed ChatGPT tokens.
-pub fn login_with_chatgpt_auth_tokens(
-    praxis_home: &Path,
-    access_token: &str,
-    chatgpt_account_id: &str,
-    chatgpt_plan_type: Option<&str>,
-) -> std::io::Result<()> {
-    let auth_dot_json = AuthDotJson::from_external_access_token(
-        access_token,
-        chatgpt_account_id,
-        chatgpt_plan_type,
-    )?;
-    save_auth(
-        praxis_home,
-        &auth_dot_json,
-        AuthCredentialsStoreMode::Ephemeral,
-    )
-}
-
-/// Persist the provided auth payload using the specified backend.
-pub fn save_auth(
-    praxis_home: &Path,
-    auth: &AuthDotJson,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<()> {
-    let storage = create_auth_storage(praxis_home.to_path_buf(), auth_credentials_store_mode);
-    storage.save(auth)
-}
-
-/// Load CLI auth data using the configured credential store backend.
-/// Returns `None` when no credentials are stored. This function is
-/// provided only for tests. Production code should not directly load
-/// from the auth.json storage. It should use the AuthManager abstraction
-/// instead.
-pub fn load_auth_dot_json(
-    praxis_home: &Path,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<Option<AuthDotJson>> {
-    let storage = create_auth_storage(praxis_home.to_path_buf(), auth_credentials_store_mode);
-    storage.load()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuthConfig {
-    pub praxis_home: PathBuf,
-    pub auth_credentials_store_mode: AuthCredentialsStoreMode,
-    pub forced_login_method: Option<ForcedLoginMethod>,
-    pub forced_chatgpt_workspace_id: Option<String>,
-}
-
-pub fn enforce_login_restrictions(config: &AuthConfig) -> std::io::Result<()> {
-    let Some(auth) = load_auth(
-        &config.praxis_home,
-        /*enable_praxis_api_key_env*/ true,
-        config.auth_credentials_store_mode,
-    )?
-    else {
-        return Ok(());
-    };
-
-    if let Some(required_method) = config.forced_login_method {
-        let method_violation = match (required_method, auth.auth_mode()) {
-            (ForcedLoginMethod::Api, crate::AuthMode::ApiKey) => None,
-            (ForcedLoginMethod::Chatgpt, crate::AuthMode::Chatgpt)
-            | (ForcedLoginMethod::Chatgpt, crate::AuthMode::ChatgptAuthTokens) => None,
-            (ForcedLoginMethod::Api, crate::AuthMode::Chatgpt)
-            | (ForcedLoginMethod::Api, crate::AuthMode::ChatgptAuthTokens) => Some(
-                "API key login is required, but ChatGPT is currently being used. Logging out."
-                    .to_string(),
-            ),
-            (ForcedLoginMethod::Chatgpt, crate::AuthMode::ApiKey) => Some(
-                "ChatGPT login is required, but an API key is currently being used. Logging out."
-                    .to_string(),
-            ),
-        };
-
-        if let Some(message) = method_violation {
-            return logout_with_message(
-                &config.praxis_home,
-                message,
-                config.auth_credentials_store_mode,
-            );
-        }
-    }
-
-    if let Some(expected_account_id) = config.forced_chatgpt_workspace_id.as_deref() {
-        if !auth.is_chatgpt_auth() {
-            return Ok(());
-        }
-
-        let token_data = match auth.get_token_data() {
-            Ok(data) => data,
-            Err(err) => {
-                return logout_with_message(
-                    &config.praxis_home,
-                    format!(
-                        "Failed to load ChatGPT credentials while enforcing workspace restrictions: {err}. Logging out."
-                    ),
-                    config.auth_credentials_store_mode,
-                );
-            }
-        };
-
-        // workspace is the external identifier for account id.
-        let chatgpt_account_id = token_data.id_token.chatgpt_account_id.as_deref();
-        if chatgpt_account_id != Some(expected_account_id) {
-            let message = match chatgpt_account_id {
-                Some(actual) => format!(
-                    "Login is restricted to workspace {expected_account_id}, but current credentials belong to {actual}. Logging out."
-                ),
-                None => format!(
-                    "Login is restricted to workspace {expected_account_id}, but current credentials lack a workspace identifier. Logging out."
-                ),
-            };
-            return logout_with_message(
-                &config.praxis_home,
-                message,
-                config.auth_credentials_store_mode,
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn logout_with_message(
-    praxis_home: &Path,
-    message: String,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<()> {
-    // External auth tokens live in the ephemeral store, but persistent auth may still exist
-    // from earlier logins. Clear both so a forced logout truly removes all active auth.
-    let removal_result = logout_all_stores(praxis_home, auth_credentials_store_mode);
-    let error_message = match removal_result {
-        Ok(_) => message,
-        Err(err) => format!("{message}. Failed to remove auth.json: {err}"),
-    };
-    Err(std::io::Error::other(error_message))
-}
-
-fn logout_all_stores(
-    praxis_home: &Path,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<bool> {
-    if auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral {
-        return logout(praxis_home, AuthCredentialsStoreMode::Ephemeral);
-    }
-    let removed_ephemeral = logout(praxis_home, AuthCredentialsStoreMode::Ephemeral)?;
-    let removed_managed = logout(praxis_home, auth_credentials_store_mode)?;
-    Ok(removed_ephemeral || removed_managed)
-}
-
-fn load_auth(
-    praxis_home: &Path,
-    enable_praxis_api_key_env: bool,
-    auth_credentials_store_mode: AuthCredentialsStoreMode,
-) -> std::io::Result<Option<OpenAiAccountAuth>> {
-    let build_auth = |auth_dot_json: AuthDotJson, storage_mode| {
-        OpenAiAccountAuth::from_auth_dot_json(praxis_home, auth_dot_json, storage_mode)
-    };
-
-    // API key via env var takes precedence over any other auth method.
-    if enable_praxis_api_key_env && let Some(api_key) = read_praxis_api_key_from_env() {
-        return Ok(Some(OpenAiAccountAuth::from_api_key(api_key.as_str())));
-    }
-
-    // External ChatGPT auth tokens live in the in-memory (ephemeral) store. Always check this
-    // first so external auth takes precedence over any persisted credentials.
-    let ephemeral_storage = create_auth_storage(
-        praxis_home.to_path_buf(),
-        AuthCredentialsStoreMode::Ephemeral,
-    );
-    if let Some(auth_dot_json) = ephemeral_storage.load()? {
-        let auth = build_auth(auth_dot_json, AuthCredentialsStoreMode::Ephemeral)?;
-        return Ok(Some(auth));
-    }
-
-    // If the caller explicitly requested ephemeral auth, there is no persisted fallback.
-    if auth_credentials_store_mode == AuthCredentialsStoreMode::Ephemeral {
-        return Ok(None);
-    }
-
-    // Fall back to managed Praxis auth first, then inherit upstream Codex auth as externally
-    // managed tokens so Praxis never rotates Codex's single-use refresh token independently.
-    let loaded = match load_persistent_auth_with_origin(
-        praxis_home.to_path_buf(),
-        auth_credentials_store_mode,
-    )? {
-        Some(loaded) => loaded,
-        None => return Ok(None),
-    };
-
-    let auth_dot_json = match loaded.origin {
-        LoadedAuthOrigin::Praxis => loaded.auth,
-        LoadedAuthOrigin::InheritedCodex => inherited_codex_auth_as_external_tokens(loaded.auth),
-    };
-    let storage_mode = match loaded.origin {
-        LoadedAuthOrigin::Praxis => auth_credentials_store_mode,
-        LoadedAuthOrigin::InheritedCodex => AuthCredentialsStoreMode::Ephemeral,
-    };
-
-    let auth = build_auth(auth_dot_json, storage_mode)?;
-    Ok(Some(auth))
-}
-
-fn inherited_codex_auth_as_external_tokens(mut auth_dot_json: AuthDotJson) -> AuthDotJson {
-    if auth_dot_json.resolved_mode() == ApiAuthMode::Chatgpt {
-        auth_dot_json.auth_mode = Some(ApiAuthMode::ChatgptAuthTokens);
-        if let Some(tokens) = auth_dot_json.tokens.as_mut() {
-            tokens.refresh_token.clear();
-        }
-    }
-    auth_dot_json
-}
-
-// Persist refreshed tokens into auth storage and update last_refresh.
-fn persist_tokens(
-    storage: &Arc<dyn AuthStorageBackend>,
-    id_token: Option<String>,
-    access_token: Option<String>,
-    refresh_token: Option<String>,
-) -> std::io::Result<AuthDotJson> {
-    let mut auth_dot_json = storage
-        .load()?
-        .ok_or(std::io::Error::other("Token data is not available."))?;
-
-    let tokens = auth_dot_json.tokens.get_or_insert_with(TokenData::default);
-    if let Some(id_token) = id_token {
-        tokens.id_token = parse_chatgpt_jwt_claims(&id_token).map_err(std::io::Error::other)?;
-    }
-    if let Some(access_token) = access_token {
-        tokens.access_token = access_token;
-    }
-    if let Some(refresh_token) = refresh_token {
-        tokens.refresh_token = refresh_token;
-    }
-    auth_dot_json.last_refresh = Some(Utc::now());
-    storage.save(&auth_dot_json)?;
-    Ok(auth_dot_json)
-}
-
-// Requests refreshed ChatGPT OAuth tokens from the auth service using a refresh token.
-// The caller is responsible for persisting any returned tokens.
-async fn request_chatgpt_token_refresh(
-    refresh_token: String,
-    client: &PraxisHttpClient,
-) -> Result<RefreshResponse, RefreshTokenError> {
-    let refresh_request = RefreshRequest {
-        client_id: CLIENT_ID,
-        grant_type: "refresh_token",
-        refresh_token,
-    };
-
-    let endpoint = refresh_token_endpoint();
-
-    // Use shared client factory to include standard headers
-    let response = client
-        .post(endpoint.as_str())
-        .header("Content-Type", "application/json")
-        .json(&refresh_request)
-        .send()
-        .await
-        .map_err(|err| RefreshTokenError::Transient(std::io::Error::other(err)))?;
-
-    let status = response.status();
-    if status.is_success() {
-        let refresh_response = response
-            .json::<RefreshResponse>()
-            .await
-            .map_err(|err| RefreshTokenError::Transient(std::io::Error::other(err)))?;
-        Ok(refresh_response)
-    } else {
-        let body = response.text().await.unwrap_or_default();
-        tracing::error!("Failed to refresh token: {status}: {body}");
-        if status == StatusCode::UNAUTHORIZED {
-            let failed = classify_refresh_token_failure(&body);
-            Err(RefreshTokenError::Permanent(failed))
-        } else {
-            let message = try_parse_error_message(&body);
-            Err(RefreshTokenError::Transient(std::io::Error::other(
-                format!("Failed to refresh token: {status}: {message}"),
-            )))
-        }
-    }
-}
-
-fn classify_refresh_token_failure(body: &str) -> RefreshTokenFailedError {
-    let code = extract_refresh_token_error_code(body);
-
-    let normalized_code = code.as_deref().map(str::to_ascii_lowercase);
-    let reason = match normalized_code.as_deref() {
-        Some("refresh_token_expired") => RefreshTokenFailedReason::Expired,
-        Some("refresh_token_reused") => RefreshTokenFailedReason::Exhausted,
-        Some("refresh_token_invalidated") => RefreshTokenFailedReason::Revoked,
-        _ => RefreshTokenFailedReason::Other,
-    };
-
-    if reason == RefreshTokenFailedReason::Other {
-        tracing::warn!(
-            backend_code = normalized_code.as_deref(),
-            backend_body = body,
-            "Encountered unknown 401 response while refreshing token"
-        );
-    }
-
-    let message = match reason {
-        RefreshTokenFailedReason::Expired => REFRESH_TOKEN_EXPIRED_MESSAGE.to_string(),
-        RefreshTokenFailedReason::Exhausted => REFRESH_TOKEN_REUSED_MESSAGE.to_string(),
-        RefreshTokenFailedReason::Revoked => REFRESH_TOKEN_INVALIDATED_MESSAGE.to_string(),
-        RefreshTokenFailedReason::Other => REFRESH_TOKEN_UNKNOWN_MESSAGE.to_string(),
-    };
-
-    RefreshTokenFailedError::new(reason, message)
-}
-
-fn extract_refresh_token_error_code(body: &str) -> Option<String> {
-    if body.trim().is_empty() {
-        return None;
-    }
-
-    let Value::Object(map) = serde_json::from_str::<Value>(body).ok()? else {
-        return None;
-    };
-
-    if let Some(error_value) = map.get("error") {
-        match error_value {
-            Value::Object(obj) => {
-                if let Some(code) = obj.get("code").and_then(Value::as_str) {
-                    return Some(code.to_string());
-                }
-            }
-            Value::String(code) => {
-                return Some(code.to_string());
-            }
-            _ => {}
-        }
-    }
-
-    map.get("code").and_then(Value::as_str).map(str::to_string)
-}
-
-#[derive(Serialize)]
-struct RefreshRequest {
-    client_id: &'static str,
-    grant_type: &'static str,
-    refresh_token: String,
-}
-
-#[derive(Deserialize, Clone)]
-struct RefreshResponse {
-    id_token: Option<String>,
-    access_token: Option<String>,
-    refresh_token: Option<String>,
-}
-
-// Shared constant for token refresh (client id used for oauth token refresh flow)
-pub const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
-
-fn refresh_token_endpoint() -> String {
-    std::env::var(REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR)
-        .unwrap_or_else(|_| REFRESH_TOKEN_URL.to_string())
-}
-
 impl AuthDotJson {
     fn from_external_tokens(external: &ExternalAuthTokens) -> std::io::Result<Self> {
         let Some(chatgpt_metadata) = external.chatgpt_metadata() else {
@@ -914,214 +508,6 @@ impl Debug for CachedAuth {
     }
 }
 
-enum UnauthorizedRecoveryStep {
-    Reload,
-    RefreshToken,
-    ExternalRefresh,
-    Done,
-}
-
-enum ReloadOutcome {
-    /// Reload was performed and the cached auth changed
-    ReloadedChanged,
-    /// Reload was performed and the cached auth remained the same
-    ReloadedNoChange,
-    /// Reload was skipped (missing or mismatched account id)
-    Skipped,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum UnauthorizedRecoveryMode {
-    Managed,
-    External,
-}
-
-// UnauthorizedRecovery is a state machine that handles an attempt to refresh the authentication when requests
-// to API fail with 401 status code.
-// The client calls next() every time it encounters a 401 error, one time per retry.
-// For API key based authentication, we don't do anything and let the error bubble to the user.
-//
-// For ChatGPT based authentication, we:
-// 1. Attempt to reload the auth data from disk. We only reload if the account id matches the one the current process is running as.
-// 2. Attempt to refresh the token using OAuth token refresh flow.
-// If after both steps the server still responds with 401 we let the error bubble to the user.
-//
-// For external auth sources, UnauthorizedRecovery retries once.
-//
-// - External ChatGPT auth tokens (`chatgptAuthTokens`) are refreshed by asking
-//   the parent app for new tokens through the configured
-//   `ExternalAuth`, persisting them in the ephemeral auth store, and
-//   reloading the cached auth snapshot.
-// - External bearer auth sources for custom model providers rerun the provider
-//   auth command without touching disk.
-pub struct UnauthorizedRecovery {
-    manager: Arc<AuthManager>,
-    step: UnauthorizedRecoveryStep,
-    expected_account_id: Option<String>,
-    mode: UnauthorizedRecoveryMode,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct UnauthorizedRecoveryStepResult {
-    auth_state_changed: Option<bool>,
-}
-
-impl UnauthorizedRecoveryStepResult {
-    pub fn auth_state_changed(&self) -> Option<bool> {
-        self.auth_state_changed
-    }
-}
-
-impl UnauthorizedRecovery {
-    fn new(manager: Arc<AuthManager>) -> Self {
-        let cached_auth = manager.auth_cached();
-        let expected_account_id = cached_auth.as_ref().and_then(OpenAiAccountAuth::get_account_id);
-        let mode = if manager.has_external_api_key_auth()
-            || cached_auth
-                .as_ref()
-                .is_some_and(OpenAiAccountAuth::is_external_chatgpt_tokens)
-        {
-            UnauthorizedRecoveryMode::External
-        } else {
-            UnauthorizedRecoveryMode::Managed
-        };
-        let step = match mode {
-            UnauthorizedRecoveryMode::Managed => UnauthorizedRecoveryStep::Reload,
-            UnauthorizedRecoveryMode::External => UnauthorizedRecoveryStep::ExternalRefresh,
-        };
-        Self {
-            manager,
-            step,
-            expected_account_id,
-            mode,
-        }
-    }
-
-    pub fn has_next(&self) -> bool {
-        if self.manager.has_external_api_key_auth() {
-            return !matches!(self.step, UnauthorizedRecoveryStep::Done);
-        }
-
-        if !self
-            .manager
-            .auth_cached()
-            .as_ref()
-            .is_some_and(OpenAiAccountAuth::is_chatgpt_auth)
-        {
-            return false;
-        }
-
-        if self.mode == UnauthorizedRecoveryMode::External && !self.manager.has_external_auth() {
-            return false;
-        }
-
-        !matches!(self.step, UnauthorizedRecoveryStep::Done)
-    }
-
-    pub fn unavailable_reason(&self) -> &'static str {
-        if self.manager.has_external_api_key_auth() {
-            return if matches!(self.step, UnauthorizedRecoveryStep::Done) {
-                "recovery_exhausted"
-            } else {
-                "ready"
-            };
-        }
-
-        if !self
-            .manager
-            .auth_cached()
-            .as_ref()
-            .is_some_and(OpenAiAccountAuth::is_chatgpt_auth)
-        {
-            return "not_chatgpt_auth";
-        }
-
-        if self.mode == UnauthorizedRecoveryMode::External && !self.manager.has_external_auth() {
-            return "no_external_auth";
-        }
-
-        if matches!(self.step, UnauthorizedRecoveryStep::Done) {
-            return "recovery_exhausted";
-        }
-
-        "ready"
-    }
-
-    pub fn mode_name(&self) -> &'static str {
-        match self.mode {
-            UnauthorizedRecoveryMode::Managed => "managed",
-            UnauthorizedRecoveryMode::External => "external",
-        }
-    }
-
-    pub fn step_name(&self) -> &'static str {
-        match self.step {
-            UnauthorizedRecoveryStep::Reload => "reload",
-            UnauthorizedRecoveryStep::RefreshToken => "refresh_token",
-            UnauthorizedRecoveryStep::ExternalRefresh => "external_refresh",
-            UnauthorizedRecoveryStep::Done => "done",
-        }
-    }
-
-    pub async fn next(&mut self) -> Result<UnauthorizedRecoveryStepResult, RefreshTokenError> {
-        if !self.has_next() {
-            return Err(RefreshTokenError::Permanent(RefreshTokenFailedError::new(
-                RefreshTokenFailedReason::Other,
-                "No more recovery steps available.",
-            )));
-        }
-
-        match self.step {
-            UnauthorizedRecoveryStep::Reload => {
-                match self
-                    .manager
-                    .reload_if_account_id_matches(self.expected_account_id.as_deref())
-                {
-                    ReloadOutcome::ReloadedChanged => {
-                        self.step = UnauthorizedRecoveryStep::RefreshToken;
-                        return Ok(UnauthorizedRecoveryStepResult {
-                            auth_state_changed: Some(true),
-                        });
-                    }
-                    ReloadOutcome::ReloadedNoChange => {
-                        self.step = UnauthorizedRecoveryStep::RefreshToken;
-                        return Ok(UnauthorizedRecoveryStepResult {
-                            auth_state_changed: Some(false),
-                        });
-                    }
-                    ReloadOutcome::Skipped => {
-                        self.step = UnauthorizedRecoveryStep::Done;
-                        return Err(RefreshTokenError::Permanent(RefreshTokenFailedError::new(
-                            RefreshTokenFailedReason::Other,
-                            REFRESH_TOKEN_ACCOUNT_MISMATCH_MESSAGE.to_string(),
-                        )));
-                    }
-                }
-            }
-            UnauthorizedRecoveryStep::RefreshToken => {
-                self.manager.refresh_token_from_authority().await?;
-                self.step = UnauthorizedRecoveryStep::Done;
-                return Ok(UnauthorizedRecoveryStepResult {
-                    auth_state_changed: Some(true),
-                });
-            }
-            UnauthorizedRecoveryStep::ExternalRefresh => {
-                self.manager
-                    .refresh_external_auth(ExternalAuthRefreshReason::Unauthorized)
-                    .await?;
-                self.step = UnauthorizedRecoveryStep::Done;
-                return Ok(UnauthorizedRecoveryStepResult {
-                    auth_state_changed: Some(true),
-                });
-            }
-            UnauthorizedRecoveryStep::Done => {}
-        }
-        Ok(UnauthorizedRecoveryStepResult {
-            auth_state_changed: None,
-        })
-    }
-}
-
 /// Central manager providing a single source of truth for auth.json derived
 /// authentication data. It loads once (or on preference change) and then
 /// hands out cloned `OpenAiAccountAuth` values so the rest of the program has a
@@ -1209,7 +595,10 @@ impl AuthManager {
     }
 
     /// Create an AuthManager with a specific OpenAiAccountAuth and Praxis home, for testing only.
-    pub fn from_auth_for_testing_with_home(auth: OpenAiAccountAuth, praxis_home: PathBuf) -> Arc<Self> {
+    pub fn from_auth_for_testing_with_home(
+        auth: OpenAiAccountAuth,
+        praxis_home: PathBuf,
+    ) -> Arc<Self> {
         let cached = CachedAuth {
             auth: Some(auth),
             permanent_refresh_failure: None,
@@ -1247,7 +636,10 @@ impl AuthManager {
         self.inner.read().ok().and_then(|c| c.auth.clone())
     }
 
-    pub fn refresh_failure_for_auth(&self, auth: &OpenAiAccountAuth) -> Option<RefreshTokenFailedError> {
+    pub fn refresh_failure_for_auth(
+        &self,
+        auth: &OpenAiAccountAuth,
+    ) -> Option<RefreshTokenFailedError> {
         self.inner.read().ok().and_then(|cached| {
             cached
                 .permanent_refresh_failure
@@ -1293,7 +685,9 @@ impl AuthManager {
         };
 
         let new_auth = self.load_auth_from_storage();
-        let new_account_id = new_auth.as_ref().and_then(OpenAiAccountAuth::get_account_id);
+        let new_account_id = new_auth
+            .as_ref()
+            .and_then(OpenAiAccountAuth::get_account_id);
 
         if new_account_id.as_deref() != Some(expected_account_id) {
             let found_account_id = new_account_id.as_deref().unwrap_or("unknown");
@@ -1315,7 +709,10 @@ impl AuthManager {
         }
     }
 
-    fn auths_equal_for_refresh(a: Option<&OpenAiAccountAuth>, b: Option<&OpenAiAccountAuth>) -> bool {
+    fn auths_equal_for_refresh(
+        a: Option<&OpenAiAccountAuth>,
+        b: Option<&OpenAiAccountAuth>,
+    ) -> bool {
         match (a, b) {
             (None, None) => true,
             (Some(a), Some(b)) => match (a.api_auth_mode(), b.api_auth_mode()) {
@@ -1581,14 +978,18 @@ impl AuthManager {
         if self.has_external_api_key_auth() {
             return Some(ApiAuthMode::ApiKey);
         }
-        self.auth_cached().as_ref().map(OpenAiAccountAuth::api_auth_mode)
+        self.auth_cached()
+            .as_ref()
+            .map(OpenAiAccountAuth::api_auth_mode)
     }
 
     pub fn auth_mode(&self) -> Option<crate::AuthMode> {
         if self.has_external_api_key_auth() {
             return Some(crate::AuthMode::ApiKey);
         }
-        self.auth_cached().as_ref().map(OpenAiAccountAuth::auth_mode)
+        self.auth_cached()
+            .as_ref()
+            .map(OpenAiAccountAuth::auth_mode)
     }
 
     fn is_stale_for_proactive_refresh(auth: &OpenAiAccountAuth) -> bool {

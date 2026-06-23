@@ -132,9 +132,9 @@ runs:
           keychain_args+=(--keychain "${APPLE_CODESIGN_KEYCHAIN}")
         fi
 
-        entitlements_path="$GITHUB_ACTION_PATH/codex.entitlements.plist"
+        entitlements_path="$GITHUB_ACTION_PATH/praxis.entitlements.plist"
 
-        for binary in codex praxis-responses-api-proxy; do
+        for binary in praxis praxis-responses-api-proxy; do
           path="praxis-rs/target/${TARGET}/release/${binary}"
           codesign --force --options runtime --timestamp --entitlements "$entitlements_path" --sign "$APPLE_CODESIGN_IDENTITY" "${keychain_args[@]}" "$path"
         done
@@ -182,7 +182,7 @@ runs:
           notarize_submission "$binary" "$archive_path" "$notary_key_path"
         }
 
-        notarize_binary "codex"
+        notarize_binary "praxis"
         notarize_binary "praxis-responses-api-proxy"
 
     - name: Sign and notarize macOS dmg

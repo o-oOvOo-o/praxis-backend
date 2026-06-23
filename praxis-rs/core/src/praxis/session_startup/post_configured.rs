@@ -1,3 +1,7 @@
+mod background_tasks;
+mod initial_history;
+mod plugin_services;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -10,12 +14,8 @@ use praxis_protocol::protocol::InitialHistory;
 
 use crate::config::Config;
 use crate::mcp::McpManager;
-use crate::memories;
 use crate::praxis::Session;
 use crate::praxis::SessionConfiguration;
-
-use super::mcp_startup;
-use super::skills_watcher;
 
 pub(super) struct PostConfiguredInput<'a> {
     pub(super) session: Arc<Session>,
@@ -30,43 +30,32 @@ pub(super) struct PostConfiguredInput<'a> {
 }
 
 pub(super) async fn run(input: PostConfiguredInput<'_>) -> anyhow::Result<()> {
-    skills_watcher::start_listener(&input.session);
-    mcp_startup::start(
-        &input.session,
-        input.config.as_ref(),
-        input.session_configuration,
-        input.mcp_manager,
-        input.tx_event,
-        input.auth,
-        input.mcp_servers,
-        input.auth_statuses,
-    )
+    let PostConfiguredInput {
+        session,
+        config,
+        session_configuration,
+        mcp_manager,
+        tx_event,
+        auth,
+        mcp_servers,
+        auth_statuses,
+        initial_history,
+    } = input;
+
+    plugin_services::start(plugin_services::PluginServicesInput {
+        session: &session,
+        config: config.as_ref(),
+        session_configuration,
+        mcp_manager,
+        tx_event,
+        auth,
+        mcp_servers,
+        auth_statuses,
+    })
     .await?;
-    input
-        .session
-        .schedule_startup_prewarm(input.session_configuration.base_instructions.clone())
-        .await;
-    let session_start_source = match &input.initial_history {
-        InitialHistory::Resumed(_) => praxis_hooks::SessionStartSource::Resume,
-        InitialHistory::New | InitialHistory::Forked(_) => {
-            praxis_hooks::SessionStartSource::Startup
-        }
-    };
-
-    input
-        .session
-        .record_initial_history(input.initial_history)
-        .await;
-    {
-        let mut state = input.session.state.lock().await;
-        state.set_pending_session_start_source(Some(session_start_source));
-    }
-
-    memories::start_memories_startup_task(
-        &input.session,
-        Arc::clone(&input.config),
-        &input.session_configuration.session_source,
-    );
+    background_tasks::schedule_startup_prewarm(&session, session_configuration).await;
+    initial_history::record(&session, initial_history).await;
+    background_tasks::start_memory_bootstrap(&session, config, session_configuration);
 
     Ok(())
 }

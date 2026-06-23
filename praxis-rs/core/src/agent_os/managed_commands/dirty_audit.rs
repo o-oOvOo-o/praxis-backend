@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use crate::agent_os::model::CommandRecord;
-use crate::agent_os::model::TaskRecord;
-use crate::agent_os::model::ThreadRegistryEntry;
+use crate::agent_os::records::CommandRecord;
+use crate::agent_os::records::TaskRecord;
+use crate::agent_os::records::ThreadRegistryEntry;
 
 pub(in crate::agent_os) struct DirtyAuditOutcome {
     pub(in crate::agent_os) command: CommandRecord,

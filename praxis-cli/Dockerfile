@@ -42,9 +42,9 @@ ENV PATH=$PATH:/usr/local/share/npm-global/bin
 COPY dist/praxis.tgz praxis.tgz
 RUN npm install -g praxis.tgz \
   && npm cache clean --force \
-  && rm -rf /usr/local/share/npm-global/lib/node_modules/praxis-cli/node_modules/.cache \
-  && rm -rf /usr/local/share/npm-global/lib/node_modules/praxis-cli/tests \
-  && rm -rf /usr/local/share/npm-global/lib/node_modules/praxis-cli/docs
+  && rm -rf /usr/local/share/npm-global/lib/node_modules/@praxis/praxis/node_modules/.cache \
+  && rm -rf /usr/local/share/npm-global/lib/node_modules/@praxis/praxis/tests \
+  && rm -rf /usr/local/share/npm-global/lib/node_modules/@praxis/praxis/docs
 
 # Inside the container we consider the environment already sufficiently locked
 # down, therefore instruct Praxis CLI to allow running without sandboxing.

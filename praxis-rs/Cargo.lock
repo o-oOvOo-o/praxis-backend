@@ -7465,6 +7465,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "praxis-system-plugin-approval-control"
+version = "0.0.0"
+dependencies = [
+ "praxis-protocol",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "praxis-terminal-detection"
 version = "0.0.0"
 dependencies = [

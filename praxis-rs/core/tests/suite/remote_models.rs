@@ -155,7 +155,7 @@ async fn remote_models_long_model_slug_is_sent_with_high_reasoning() -> Result<(
     .await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         config,
         ..
@@ -187,7 +187,7 @@ async fn remote_models_long_model_slug_is_sent_with_high_reasoning() -> Result<(
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let request = response_mock.single_request();
     let body = request.body_json();
@@ -220,7 +220,7 @@ async fn namespaced_model_slug_uses_catalog_metadata_without_fallback_warning() 
     .await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         config,
         ..
@@ -255,7 +255,7 @@ async fn namespaced_model_slug_uses_catalog_metadata_without_fallback_warning() 
 
     let mut fallback_warning_count = 0;
     loop {
-        let event = wait_for_event(&codex, |_| true).await;
+        let event = wait_for_event(&praxis, |_| true).await;
         match event {
             EventMsg::Warning(warning)
                 if warning.message.contains("Defaulting to fallback metadata") =>
@@ -333,7 +333,7 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
             config.model = Some("gpt-5.1".to_string());
         });
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         config,
         thread_manager,
@@ -414,7 +414,7 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
         })
         .await?;
 
-    let begin_event = wait_for_event_match(&codex, |msg| match msg {
+    let begin_event = wait_for_event_match(&praxis, |msg| match msg {
         EventMsg::ExecCommandBegin(event) if event.call_id == call_id => Some(event.clone()),
         _ => None,
     })
@@ -422,7 +422,7 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
 
     assert_eq!(begin_event.source, ExecCommandSource::UnifiedExecStartup);
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     Ok(())
 }
@@ -587,7 +587,7 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
             config.model = Some("gpt-5.1".to_string());
         });
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         config,
         thread_manager,
@@ -634,7 +634,7 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let base_model_info = models_manager.get_model_info("gpt-5.1", &config).await;
     let body = response_mock.single_request().body_json();

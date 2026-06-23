@@ -1,5 +1,6 @@
 mod event_batch;
 mod options;
+mod service;
 mod snapshot;
 mod summaries;
 

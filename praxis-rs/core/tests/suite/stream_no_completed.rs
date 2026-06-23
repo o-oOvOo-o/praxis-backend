@@ -68,7 +68,7 @@ async fn retries_on_early_close() {
         supports_websockets: false,
     };
 
-    let TestPraxis { thread: codex, .. } = test_praxis()
+    let TestPraxis { thread: praxis, .. } = test_praxis()
         .with_config(move |config| {
             config.model_provider = model_provider;
         })
@@ -88,7 +88,7 @@ async fn retries_on_early_close() {
         .unwrap();
 
     // Wait until TurnComplete (should succeed after retry).
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let requests = server.requests().await;
     assert_eq!(

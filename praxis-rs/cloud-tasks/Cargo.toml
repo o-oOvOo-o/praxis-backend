@@ -18,7 +18,6 @@ chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 praxis-client = { workspace = true }
 praxis-cloud-tasks-client = { workspace = true }
-# TODO: praxis-cloud-tasks-mock-client should be in dev-dependencies.
 praxis-cloud-tasks-mock-client = { workspace = true }
 praxis-core = { workspace = true }
 praxis-git-utils = { workspace = true }

@@ -1,4 +1,4 @@
-use crate::agent_os::model::WorkerRequestRecord;
+use crate::agent_os::records::WorkerRequestRecord;
 use crate::util::truncate_to_char_boundary;
 use serde::Serialize;
 

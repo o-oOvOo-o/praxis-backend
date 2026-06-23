@@ -1,4 +1,4 @@
-use crate::agent_os::model::ActionIntentKind;
+use crate::agent_os::records::ActionIntentKind;
 
 pub(in crate::agent_os) fn requires_write(intent: ActionIntentKind) -> bool {
     matches!(

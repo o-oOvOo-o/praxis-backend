@@ -90,7 +90,7 @@ async fn injected_user_input_triggers_follow_up_request_with_deltas() {
     let (server, _completions) =
         start_streaming_sse_server(vec![first_chunks, second_chunks]).await;
 
-    let codex = test_praxis()
+    let praxis = test_praxis()
         .with_model("gpt-5.1")
         .build_with_streaming_server(&server)
         .await
@@ -108,7 +108,7 @@ async fn injected_user_input_triggers_follow_up_request_with_deltas() {
         .await
         .unwrap();
 
-    wait_for_event(&codex, |event| {
+    wait_for_event(&praxis, |event| {
         matches!(event, EventMsg::AgentMessageContentDelta(_))
     })
     .await;
@@ -126,7 +126,7 @@ async fn injected_user_input_triggers_follow_up_request_with_deltas() {
 
     let _ = gate_completed_tx.send(());
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let requests = server.requests().await;
     assert_eq!(requests.len(), 2);

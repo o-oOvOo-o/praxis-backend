@@ -18,7 +18,7 @@ use tempfile::tempdir;
 #[test]
 fn memory_root_uses_shared_global_path() {
     let dir = tempdir().expect("tempdir");
-    let praxis_home = dir.path().join("codex");
+    let praxis_home = dir.path().join("praxis");
     assert_eq!(memory_root(&praxis_home), praxis_home.join("memories"));
 }
 

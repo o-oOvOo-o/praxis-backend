@@ -1,17 +1,15 @@
 use std::sync::Arc;
-use std::sync::Weak;
 
 use crate::config::Config;
-use crate::praxis::Session;
 use crate::tools::network_approval::NetworkApprovalService;
-use crate::tools::network_approval::build_blocked_request_observer;
-use crate::tools::network_approval::build_network_policy_decider;
 use praxis_network_proxy::BlockedRequestObserver;
 use praxis_network_proxy::NetworkPolicyDecider;
-use tokio::sync::RwLock;
 
-pub(in crate::praxis::session_startup) type PolicyDeciderSession =
-    Option<Arc<RwLock<Weak<Session>>>>;
+mod components;
+mod session_binding;
+
+pub(in crate::praxis::session_startup) use session_binding::PolicyDeciderSession;
+pub(in crate::praxis::session_startup) use session_binding::bind_session;
 
 pub(super) struct NetworkApprovalBridge {
     pub(super) network_approval: Arc<NetworkApprovalService>,
@@ -22,10 +20,11 @@ pub(super) struct NetworkApprovalBridge {
 
 pub(super) fn build(config: &Config) -> NetworkApprovalBridge {
     let network_approval = Arc::new(NetworkApprovalService::default());
-    let policy_decider_session = policy_decider_session(config);
+    let policy_decider_session = session_binding::new_policy_decider_session(config);
     let blocked_request_observer =
-        blocked_request_observer(config, &network_approval, &policy_decider_session);
-    let network_policy_decider = network_policy_decider(&network_approval, &policy_decider_session);
+        components::blocked_request_observer(config, &network_approval, &policy_decider_session);
+    let network_policy_decider =
+        components::network_policy_decider(&network_approval, &policy_decider_session);
 
     NetworkApprovalBridge {
         network_approval,
@@ -33,56 +32,4 @@ pub(super) fn build(config: &Config) -> NetworkApprovalBridge {
         blocked_request_observer,
         network_policy_decider,
     }
-}
-
-pub(in crate::praxis::session_startup) async fn bind_session(
-    policy_decider_session: PolicyDeciderSession,
-    session: &Arc<Session>,
-) {
-    if let Some(policy_decider_session) = policy_decider_session {
-        let mut guard = policy_decider_session.write().await;
-        *guard = Arc::downgrade(session);
-    }
-}
-
-fn policy_decider_session(config: &Config) -> PolicyDeciderSession {
-    if !config.managed_network_requirements_enabled() {
-        return None;
-    }
-
-    config
-        .permissions
-        .network
-        .as_ref()
-        .map(|_| Arc::new(RwLock::new(Weak::<Session>::new())))
-}
-
-fn blocked_request_observer(
-    config: &Config,
-    network_approval: &Arc<NetworkApprovalService>,
-    policy_decider_session: &PolicyDeciderSession,
-) -> Option<Arc<dyn BlockedRequestObserver>> {
-    if policy_decider_session.is_none() || !config.managed_network_requirements_enabled() {
-        return None;
-    }
-
-    config
-        .permissions
-        .network
-        .as_ref()
-        .map(|_| build_blocked_request_observer(Arc::clone(network_approval)))
-}
-
-fn network_policy_decider(
-    network_approval: &Arc<NetworkApprovalService>,
-    policy_decider_session: &PolicyDeciderSession,
-) -> Option<Arc<dyn NetworkPolicyDecider>> {
-    policy_decider_session
-        .as_ref()
-        .map(|policy_decider_session| {
-            build_network_policy_decider(
-                Arc::clone(network_approval),
-                Arc::clone(policy_decider_session),
-            )
-        })
 }

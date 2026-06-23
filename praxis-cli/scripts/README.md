@@ -15,7 +15,7 @@ This downloads the native artifacts once, hydrates `vendor/` for each package, a
 tarballs to `dist/npm/`.
 
 When `--package praxis` is provided, the staging helper builds the lightweight
-`@openai/praxis` meta package plus all platform-native `@openai/praxis` variants
+`@praxis/praxis` meta package plus all platform-native `@praxis/praxis` variants
 that are later published under platform-specific dist-tags.
 
 If you need to invoke `build_npm_package.py` directly, run

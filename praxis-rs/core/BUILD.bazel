@@ -37,7 +37,7 @@ praxis_rust_crate(
         "CARGO_MANIFEST_DIR": "praxis-rs/core",
     },
     integration_compile_data_extra = [
-        "//praxis-rs/apply-patch:apply_patch_tool_instructions.md",
+        "//praxis-rs/tools/3rd/openai_apply_patch:apply_patch_tool_instructions.md",
         "models.json",
         "prompt.md",
     ],
@@ -58,7 +58,7 @@ praxis_rust_crate(
     ],
     test_tags = ["no-sandbox"],
     extra_binaries = [
-        "//praxis-rs/linux-sandbox:praxis-linux-sandbox",
+        "//praxis-rs/system_plugin/3rd/openai_sandbox/linux-sandbox:praxis-linux-sandbox",
         "//praxis-rs/rmcp-client:test_stdio_server",
         "//praxis-rs/rmcp-client:test_streamable_http_server",
         "//praxis-rs/cli:praxis",

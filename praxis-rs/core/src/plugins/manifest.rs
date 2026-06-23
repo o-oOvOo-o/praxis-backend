@@ -836,7 +836,7 @@ mod tests {
       {
         "id": "c3d-dev",
         "path": "./llm/tools/c3d-dev.toml",
-        "appliesTo": ["deepseek", "codex/responses"]
+        "appliesTo": ["deepseek", "openai/responses"]
       }
     ],
     "modelCatalogs": [
@@ -883,7 +883,7 @@ mod tests {
         assert_eq!(llm.tool_policies[0].id, "c3d-dev");
         assert_eq!(
             llm.tool_policies[0].applies_to,
-            vec!["deepseek".to_string(), "codex/responses".to_string()]
+            vec!["deepseek".to_string(), "openai/responses".to_string()]
         );
         assert_eq!(llm.model_catalogs[0].id, "aliyun-coder");
         assert_eq!(llm.model_catalogs[0].provider.as_deref(), Some("dashscope"));

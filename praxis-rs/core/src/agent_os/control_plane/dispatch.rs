@@ -3,9 +3,9 @@ use serde_json::json;
 use crate::agent_os::control_plane::AgentTaskDispatchRequest;
 use crate::agent_os::control_plane::AgentTaskDispatchResult;
 use crate::agent_os::instance::AgentOs;
-use crate::agent_os::model::ResourceRequirement;
-use crate::agent_os::model::RuntimeCommandType;
-use crate::agent_os::model::TaskCreateRequest;
+use crate::agent_os::records::ResourceRequirement;
+use crate::agent_os::records::RuntimeCommandType;
+use crate::agent_os::records::TaskCreateRequest;
 use crate::error::Result as PraxisResult;
 
 impl AgentOs {

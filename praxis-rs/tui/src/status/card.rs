@@ -623,14 +623,10 @@ impl HistoryCell for StatusHistoryCell {
         let value_width = formatter.value_width(available_inner_width);
 
         let note_first_line = Line::from(vec![
-            Span::from("Visit ").cyan(),
-            "https://chatgpt.com/codex/settings/usage"
-                .cyan()
-                .underlined(),
-            Span::from(" for up-to-date").cyan(),
+            Span::from("Usage and credit details are provider-managed.").cyan(),
         ]);
         let note_second_line = Line::from(vec![
-            Span::from("information on rate limits and credits").cyan(),
+            Span::from("Check your account dashboard for up-to-date limits.").cyan(),
         ]);
         let note_lines = adaptive_wrap_lines(
             [note_first_line, note_second_line],

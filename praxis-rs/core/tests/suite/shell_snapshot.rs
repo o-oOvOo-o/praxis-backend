@@ -150,7 +150,7 @@ async fn run_snapshot_command_with_options(
     mount_sse_sequence(harness.server(), responses).await;
 
     let test = harness.test();
-    let codex = test.thread.clone();
+    let praxis = test.thread.clone();
     let praxis_home = test.home.path().to_path_buf();
     let session_model = test.session_configured.model.clone();
     let cwd = test.cwd_path().to_path_buf();
@@ -175,7 +175,7 @@ async fn run_snapshot_command_with_options(
         })
         .await?;
 
-    let begin = wait_for_event_match(&codex, |ev| match ev {
+    let begin = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => Some(ev.clone()),
         _ => None,
     })
@@ -183,13 +183,13 @@ async fn run_snapshot_command_with_options(
     let snapshot_path = wait_for_snapshot(&praxis_home).await?;
     let snapshot_content = fs::read_to_string(&snapshot_path).await?;
 
-    let end = wait_for_event_match(&codex, |ev| match ev {
+    let end = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ExecCommandEnd(ev) if ev.call_id == call_id => Some(ev.clone()),
         _ => None,
     })
     .await;
 
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     Ok(SnapshotRun {
         begin,
@@ -241,7 +241,7 @@ async fn run_shell_command_snapshot_with_options(
     mount_sse_sequence(harness.server(), responses).await;
 
     let test = harness.test();
-    let codex = test.thread.clone();
+    let praxis = test.thread.clone();
     let praxis_home = test.home.path().to_path_buf();
     let session_model = test.session_configured.model.clone();
     let cwd = test.cwd_path().to_path_buf();
@@ -266,7 +266,7 @@ async fn run_shell_command_snapshot_with_options(
         })
         .await?;
 
-    let begin = wait_for_event_match(&codex, |ev| match ev {
+    let begin = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => Some(ev.clone()),
         _ => None,
     })
@@ -274,13 +274,13 @@ async fn run_shell_command_snapshot_with_options(
     let snapshot_path = wait_for_snapshot(&praxis_home).await?;
     let snapshot_content = fs::read_to_string(&snapshot_path).await?;
 
-    let end = wait_for_event_match(&codex, |ev| match ev {
+    let end = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ExecCommandEnd(ev) if ev.call_id == call_id => Some(ev.clone()),
         _ => None,
     })
     .await;
 
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     Ok(SnapshotRun {
         begin,
@@ -314,7 +314,7 @@ async fn run_tool_turn_on_harness(
     mount_sse_sequence(harness.server(), responses).await;
 
     let test = harness.test();
-    let codex = test.thread.clone();
+    let praxis = test.thread.clone();
     let session_model = test.session_configured.model.clone();
     let cwd = test.cwd_path().to_path_buf();
     codex
@@ -337,17 +337,17 @@ async fn run_tool_turn_on_harness(
         })
         .await?;
 
-    wait_for_event_match(&codex, |ev| match ev {
+    wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ExecCommandBegin(ev) if ev.call_id == call_id => Some(ev.clone()),
         _ => None,
     })
     .await;
-    let end = wait_for_event_match(&codex, |ev| match ev {
+    let end = wait_for_event_match(&praxis, |ev| match ev {
         EventMsg::ExecCommandEnd(ev) if ev.call_id == call_id => Some(ev.clone()),
         _ => None,
     })
     .await;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
     Ok(end)
 }
 
@@ -523,7 +523,7 @@ async fn shell_command_snapshot_still_intercepts_apply_patch() -> Result<()> {
     let harness = TestPraxisHarness::with_builder(builder).await?;
 
     let test = harness.test();
-    let codex = test.thread.clone();
+    let praxis = test.thread.clone();
     let cwd = test.cwd_path().to_path_buf();
     let praxis_home = test.home.path().to_path_buf();
     let target = cwd.join("snapshot-apply.txt");
@@ -531,7 +531,7 @@ async fn shell_command_snapshot_still_intercepts_apply_patch() -> Result<()> {
     let script = "apply_patch <<'EOF'\n*** Begin Patch\n*** Add File: snapshot-apply.txt\n+hello from snapshot\n*** End Patch\nEOF\n";
     let args = json!({
         "command": script,
-        // The intercepted apply_patch path self-invokes codex, which can take
+        // The intercepted apply_patch path self-invokes praxis, which can take
         // longer than a second in Bazel macOS test environments.
         "timeout_ms": 5_000,
     });
@@ -577,7 +577,7 @@ async fn shell_command_snapshot_still_intercepts_apply_patch() -> Result<()> {
 
     let mut saw_patch_begin = false;
     let mut patch_end = None;
-    wait_for_event(&codex, |ev| match ev {
+    wait_for_event(&praxis, |ev| match ev {
         EventMsg::PatchApplyBegin(begin) if begin.call_id == call_id => {
             saw_patch_begin = true;
             false
@@ -622,15 +622,15 @@ async fn shell_snapshot_deleted_after_shutdown_with_skills() -> Result<()> {
     let harness = TestPraxisHarness::with_builder(builder).await?;
     let home = harness.test().home.clone();
     let praxis_home = home.path().to_path_buf();
-    let codex = harness.test().thread.clone();
+    let praxis = harness.test().thread.clone();
 
     let snapshot_path = wait_for_snapshot(&praxis_home).await?;
     assert!(snapshot_path.exists());
 
-    codex.submit(Op::Shutdown {}).await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
+    praxis.submit(Op::Shutdown {}).await?;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
 
-    drop(codex);
+    drop(praxis);
     drop(harness);
     sleep(Duration::from_millis(150)).await;
 

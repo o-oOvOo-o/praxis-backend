@@ -1,20 +1,17 @@
 #!/usr/bin/env dotslash
 
-// This is the patched zsh fork corresponding to
-// `codex-rs/shell-escalation/patches/zsh-exec-wrapper.patch`.
+// This is the patched zsh fork corresponding to the shell escalation wrapper patch.
 // Fetching the prebuilt version via DotSlash makes it easier to write
 // integration tests that exercise the zsh fork behavior in app-gateway runtime tests.
 //
 // This checked-in fixture is still pinned to the latest released bundle that
-// contains this binary. New releases publish standalone `codex-zsh-*.tar.gz`
-// assets plus a generated `codex-zsh` DotSlash release asset, so this file can
-// be retargeted when a newer fork build needs to be exercised in tests.
+// contains this binary. Retarget this file once Praxis publishes its own zsh
+// DotSlash release asset.
 {
-  "name": "codex-zsh",
+  "name": "praxis-zsh",
   "platforms": {
-    // macOS 13 builds (and therefore x86_64) were dropped in
-    // https://github.com/openai/codex/pull/7295, so we only provide an
-    // Apple Silicon build for now.
+    // macOS 13 builds (and therefore x86_64) are not available in this pinned
+    // bundle, so only the Apple Silicon build is listed for now.
     "macos-aarch64": {
       "size": 53771483,
       "hash": "blake3",
@@ -23,13 +20,13 @@
       "path": "package/vendor/aarch64-apple-darwin/zsh/macos-15/zsh",
       "providers": [
         {
-          "url": "https://github.com/openai/codex/releases/download/rust-v0.104.0/codex-shell-tool-mcp-npm-0.104.0.tgz"
+          "url": "https://github.com/o-oOvOo-o/praxis-backend/releases/download/rust-v0.104.0/praxis-shell-tool-mcp-npm-0.104.0.tgz"
         },
         {
           "type": "github-release",
-          "repo": "openai/codex",
+          "repo": "o-oOvOo-o/praxis-backend",
           "tag": "rust-v0.104.0",
-          "name": "codex-shell-tool-mcp-npm-0.104.0.tgz"
+          "name": "praxis-shell-tool-mcp-npm-0.104.0.tgz"
         }
       ]
     },
@@ -41,13 +38,13 @@
       "path": "package/vendor/x86_64-unknown-linux-musl/zsh/ubuntu-24.04/zsh",
       "providers": [
         {
-          "url": "https://github.com/openai/codex/releases/download/rust-v0.104.0/codex-shell-tool-mcp-npm-0.104.0.tgz"
+          "url": "https://github.com/o-oOvOo-o/praxis-backend/releases/download/rust-v0.104.0/praxis-shell-tool-mcp-npm-0.104.0.tgz"
         },
         {
           "type": "github-release",
-          "repo": "openai/codex",
+          "repo": "o-oOvOo-o/praxis-backend",
           "tag": "rust-v0.104.0",
-          "name": "codex-shell-tool-mcp-npm-0.104.0.tgz"
+          "name": "praxis-shell-tool-mcp-npm-0.104.0.tgz"
         }
       ]
     },
@@ -59,13 +56,13 @@
       "path": "package/vendor/aarch64-unknown-linux-musl/zsh/ubuntu-24.04/zsh",
       "providers": [
         {
-          "url": "https://github.com/openai/codex/releases/download/rust-v0.104.0/codex-shell-tool-mcp-npm-0.104.0.tgz"
+          "url": "https://github.com/o-oOvOo-o/praxis-backend/releases/download/rust-v0.104.0/praxis-shell-tool-mcp-npm-0.104.0.tgz"
         },
         {
           "type": "github-release",
-          "repo": "openai/codex",
+          "repo": "o-oOvOo-o/praxis-backend",
           "tag": "rust-v0.104.0",
-          "name": "codex-shell-tool-mcp-npm-0.104.0.tgz"
+          "name": "praxis-shell-tool-mcp-npm-0.104.0.tgz"
         }
       ]
     },

@@ -15,9 +15,7 @@ const OPENAI_PROVIDER_RULE: ProfileProviderIdentityRule = ProfileProviderIdentit
 pub(super) fn matches(ctx: &ProfileMatchContext<'_>) -> bool {
     let model = ctx.model_info.slug.to_ascii_lowercase();
     ctx.wire_id_is(WireId::Responses)
-        && (ctx.provider_identity().id_eq(OPENAI_PROVIDER_ID)
-            || model.contains("codex")
-            || model.starts_with("gpt-"))
+        && (ctx.provider_identity().id_eq(OPENAI_PROVIDER_ID) || is_first_party_model(&model))
 }
 
 pub(super) fn is_first_party_provider(

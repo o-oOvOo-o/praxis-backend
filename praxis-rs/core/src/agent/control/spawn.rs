@@ -1,6 +1,10 @@
 use super::*;
 
+mod completion;
 mod fork;
+mod runtime_inheritance;
+mod source;
+mod thread_start;
 
 impl AgentControl {
     /// Spawn a new agent thread and submit the initial prompt.
@@ -42,81 +46,31 @@ impl AgentControl {
     ) -> PraxisResult<LiveAgent> {
         let state = self.upgrade()?;
         let mut reservation = self.state.reserve_spawn_slot(config.agent_max_threads)?;
-        let inherited_shell_snapshot = self
-            .inherited_shell_snapshot_for_source(&state, session_source.as_ref())
+        let inherited_runtime = self
+            .inherited_runtime_for_spawn(&state, session_source.as_ref(), &config)
             .await;
-        let inherited_exec_policy = self
-            .inherited_exec_policy_for_source(&state, session_source.as_ref(), &config)
-            .await;
-        let (session_source, mut agent_metadata) = match session_source {
-            Some(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-                parent_thread_id,
-                depth,
-                agent_path,
-                agent_base_name,
-                agent_title,
-                agent_display_name,
-                agent_role,
-            })) => {
-                let (session_source, agent_metadata) = self.prepare_thread_spawn(
-                    &mut reservation,
-                    &config,
-                    parent_thread_id,
-                    depth,
-                    agent_path,
-                    agent_role,
-                    agent_base_name,
-                    agent_title,
-                    agent_display_name,
-                    options.agent_title.as_deref(),
-                )?;
-                (Some(session_source), agent_metadata)
-            }
-            other => (other, AgentMetadata::default()),
-        };
-        let notification_source = session_source.clone();
-
-        let new_thread = match (session_source, options.fork_mode.as_ref()) {
-            (Some(session_source), Some(_)) => {
-                self.spawn_forked_thread(
-                    &state,
-                    config,
-                    session_source,
-                    &options,
-                    inherited_shell_snapshot,
-                    inherited_exec_policy,
-                )
-                .await?
-            }
-            (Some(session_source), None) => {
-                state
-                    .spawn_new_thread_with_source(
-                        config,
-                        self.clone(),
-                        session_source,
-                        /*persist_extended_history*/ false,
-                        /*metrics_service_name*/ None,
-                        inherited_shell_snapshot,
-                        inherited_exec_policy,
-                    )
-                    .await?
-            }
-            (None, _) => state.spawn_new_thread(config, self.clone()).await?,
-        };
+        let prepared =
+            self.prepare_spawn_source(&mut reservation, &config, session_source, &options)?;
+        let new_thread = self
+            .start_spawned_thread(
+                &state,
+                config,
+                prepared.session_source,
+                &options,
+                inherited_runtime,
+            )
+            .await?;
+        let mut agent_metadata = prepared.agent_metadata;
         agent_metadata.agent_id = Some(new_thread.thread_id);
         reservation.commit(agent_metadata.clone());
 
-        state.notify_thread_created(new_thread.thread_id);
-
-        self.persist_thread_spawn_edge_for_source(
-            new_thread.thread.as_ref(),
-            new_thread.thread_id,
-            notification_source.as_ref(),
+        self.complete_spawned_thread(
+            &state,
+            &new_thread,
+            prepared.notification_source.as_ref(),
+            initial_operation,
         )
-        .await;
-
-        self.submit_turn_operation(new_thread.thread_id, initial_operation)
-            .await?;
+        .await?;
 
         Ok(LiveAgent {
             thread_id: new_thread.thread_id,

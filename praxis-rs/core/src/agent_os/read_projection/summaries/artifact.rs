@@ -1,4 +1,4 @@
-use crate::agent_os::model::ArtifactRecord;
+use crate::agent_os::records::ArtifactRecord;
 use crate::util::truncate_to_char_boundary;
 use serde::Serialize;
 

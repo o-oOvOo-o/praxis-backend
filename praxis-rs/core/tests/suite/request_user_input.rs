@@ -81,7 +81,7 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
     let builder = test_praxis();
     #[allow(clippy::expect_used)]
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         session_configured,
         ..
@@ -156,7 +156,7 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
         })
         .await?;
 
-    let request = wait_for_event_match(&codex, |event| match event {
+    let request = wait_for_event_match(&praxis, |event| match event {
         EventMsg::RequestUserInput(request) => Some(request.clone()),
         _ => None,
     })
@@ -180,7 +180,7 @@ async fn request_user_input_round_trip_for_mode(mode: ModeKind) -> anyhow::Resul
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let req = second_mock.single_request();
     let output_text = call_output(&req, call_id);
@@ -207,7 +207,7 @@ where
 
     let mut builder = test_praxis();
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         session_configured,
         ..
@@ -267,7 +267,7 @@ where
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let req = second_mock.single_request();
     let (output, success) = call_output_content_and_success(&req, &call_id);

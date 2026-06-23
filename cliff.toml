@@ -4,7 +4,7 @@
 header = """
 # Changelog
 
-You can install any of these versions: `npm install -g @openai/praxis@<version>`
+You can install any of these versions: `npm install -g @praxis/praxis@<version>`
 """
 
 body = """

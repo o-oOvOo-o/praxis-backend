@@ -1,13 +1,14 @@
 use praxis_protocol::ThreadId;
-use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::SessionSource;
 use praxis_rollout::RolloutRecorderParams;
 use praxis_state::ThreadMetadataBuilder;
 
 use crate::praxis::SessionConfiguration;
-use crate::rollout::metadata;
 use crate::rollout::policy::EventPersistenceMode;
+
+mod recorder_params;
+mod state_metadata;
 
 pub(super) struct RolloutBootstrap {
     pub(super) conversation_id: ThreadId,
@@ -28,35 +29,17 @@ pub(super) fn build(
         EventPersistenceMode::Limited
     };
 
-    let (conversation_id, params) = match initial_history {
-        InitialHistory::New | InitialHistory::Forked(_) => {
-            let conversation_id = ThreadId::default();
-            (
-                conversation_id,
-                RolloutRecorderParams::new(
-                    conversation_id,
-                    forked_from_id,
-                    session_source,
-                    BaseInstructions {
-                        text: session_configuration.base_instructions.clone(),
-                    },
-                    session_configuration.dynamic_tools.clone(),
-                    persistence_mode,
-                ),
-            )
-        }
-        InitialHistory::Resumed(resumed_history) => (
-            resumed_history.conversation_id,
-            RolloutRecorderParams::resume(resumed_history.rollout_path.clone(), persistence_mode),
-        ),
-    };
-
-    let state_builder = match initial_history {
-        InitialHistory::Resumed(resumed) => {
-            metadata::builder_from_items(resumed.history.as_slice(), resumed.rollout_path.as_path())
-        }
-        InitialHistory::New | InitialHistory::Forked(_) => None,
-    };
+    let recorder_params::RecorderParamsBootstrap {
+        conversation_id,
+        params,
+    } = recorder_params::build(recorder_params::RecorderParamsInput {
+        initial_history,
+        session_configuration,
+        session_source,
+        forked_from_id,
+        persistence_mode,
+    });
+    let state_builder = state_metadata::builder_from_initial_history(initial_history);
 
     RolloutBootstrap {
         conversation_id,

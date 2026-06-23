@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage and optionally package the @openai/praxis npm module."""
+"""Stage and optionally package the @praxis/praxis npm module."""
 
 import argparse
 import json
@@ -14,48 +14,48 @@ PRAXIS_CLI_ROOT = SCRIPT_DIR.parent
 REPO_ROOT = PRAXIS_CLI_ROOT.parent
 RESPONSES_API_PROXY_NPM_ROOT = REPO_ROOT / "praxis-rs" / "responses-api-proxy" / "npm"
 PRAXIS_SDK_ROOT = REPO_ROOT / "sdk" / "typescript"
-PRAXIS_NPM_NAME = "@openai/praxis"
+PRAXIS_NPM_NAME = "@praxis/praxis"
 
 # `npm_name` is the local optional-dependency alias consumed by `bin/praxis.js`.
-# The underlying package published to npm is always `@openai/praxis`.
+# The underlying package published to npm is always `@praxis/praxis`.
 PRAXIS_PLATFORM_PACKAGES: dict[str, dict[str, str]] = {
     "praxis-linux-x64": {
-        "npm_name": "@openai/praxis-linux-x64",
+        "npm_name": "@praxis/praxis-linux-x64",
         "npm_tag": "linux-x64",
         "target_triple": "x86_64-unknown-linux-musl",
         "os": "linux",
         "cpu": "x64",
     },
     "praxis-linux-arm64": {
-        "npm_name": "@openai/praxis-linux-arm64",
+        "npm_name": "@praxis/praxis-linux-arm64",
         "npm_tag": "linux-arm64",
         "target_triple": "aarch64-unknown-linux-musl",
         "os": "linux",
         "cpu": "arm64",
     },
     "praxis-darwin-x64": {
-        "npm_name": "@openai/praxis-darwin-x64",
+        "npm_name": "@praxis/praxis-darwin-x64",
         "npm_tag": "darwin-x64",
         "target_triple": "x86_64-apple-darwin",
         "os": "darwin",
         "cpu": "x64",
     },
     "praxis-darwin-arm64": {
-        "npm_name": "@openai/praxis-darwin-arm64",
+        "npm_name": "@praxis/praxis-darwin-arm64",
         "npm_tag": "darwin-arm64",
         "target_triple": "aarch64-apple-darwin",
         "os": "darwin",
         "cpu": "arm64",
     },
     "praxis-win32-x64": {
-        "npm_name": "@openai/praxis-win32-x64",
+        "npm_name": "@praxis/praxis-win32-x64",
         "npm_tag": "win32-x64",
         "target_triple": "x86_64-pc-windows-msvc",
         "os": "win32",
         "cpu": "x64",
     },
     "praxis-win32-arm64": {
-        "npm_name": "@openai/praxis-win32-arm64",
+        "npm_name": "@praxis/praxis-win32-arm64",
         "npm_tag": "win32-arm64",
         "target_triple": "aarch64-pc-windows-msvc",
         "os": "win32",
@@ -87,18 +87,14 @@ PACKAGE_TARGET_FILTERS: dict[str, str] = {
 PACKAGE_CHOICES = tuple(PACKAGE_NATIVE_COMPONENTS)
 
 COMPONENT_DEST_DIR: dict[str, str] = {
-    # The native Rust artifact still ships under vendor/<target>/codex until
-    # the release pipeline is renamed.  External package logic should request
-    # the Praxis component name and let this compatibility mapping handle the
-    # artifact layout.
-    "praxis-cli": "codex",
+    # The release artifact filename may still use a legacy prefix, but staged
+    # packages should expose a Praxis vendor layout.
+    "praxis-cli": "praxis",
     "praxis-responses-api-proxy": "praxis-responses-api-proxy",
-    "praxis-windows-sandbox-setup": "codex",
-    "praxis-command-runner": "codex",
+    "praxis-windows-sandbox-setup": "praxis",
+    "praxis-command-runner": "praxis",
     "rg": "path",
 }
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build or stage the Praxis CLI npm package.")
     parser.add_argument(

@@ -13,9 +13,8 @@ use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
 
-/// While we may add an `apply-patch` subcommand to the `codex` CLI multitool
-/// at some point, we must ensure that the smaller `praxis-exec` CLI can still
-/// emulate the `apply_patch` CLI.
+/// If Praxis adds an `apply-patch` multitool subcommand, `praxis-exec` must
+/// still emulate the `apply_patch` CLI.
 #[test]
 fn test_standalone_exec_cli_can_use_apply_patch() -> anyhow::Result<()> {
     let tmp = tempdir()?;

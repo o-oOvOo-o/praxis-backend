@@ -9,7 +9,6 @@ pushd "$SCRIPT_DIR/.." >> /dev/null || {
   exit 1
 }
 pnpm install
-pnpm run build
 rm -rf ./dist/openai-praxis-*.tgz
 pnpm pack --pack-destination ./dist
 mv ./dist/openai-praxis-*.tgz ./dist/praxis.tgz

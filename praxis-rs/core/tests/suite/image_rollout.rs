@@ -88,7 +88,7 @@ async fn copy_paste_local_image_persists_rollout_request_shape() -> anyhow::Resu
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         session_configured,
         home: _home,
@@ -133,11 +133,11 @@ async fn copy_paste_local_image_persists_rollout_request_shape() -> anyhow::Resu
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    codex.submit(Op::Shutdown).await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::ShutdownComplete)).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    praxis.submit(Op::Shutdown).await?;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::ShutdownComplete)).await;
 
-    let rollout_path = codex.rollout_path().expect("rollout path");
+    let rollout_path = praxis.rollout_path().expect("rollout path");
     let rollout_text = read_rollout_text(&rollout_path).await?;
     let actual = find_user_message_with_image(&rollout_text)
         .expect("expected user message with input image in rollout");
@@ -174,7 +174,7 @@ async fn drag_drop_image_persists_rollout_request_shape() -> anyhow::Result<()> 
     let server = start_mock_server().await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         cwd,
         session_configured,
         home: _home,
@@ -217,11 +217,11 @@ async fn drag_drop_image_persists_rollout_request_shape() -> anyhow::Result<()> 
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
-    codex.submit(Op::Shutdown).await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::ShutdownComplete)).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    praxis.submit(Op::Shutdown).await?;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::ShutdownComplete)).await;
 
-    let rollout_path = codex.rollout_path().expect("rollout path");
+    let rollout_path = praxis.rollout_path().expect("rollout path");
     let rollout_text = read_rollout_text(&rollout_path).await?;
     let actual = find_user_message_with_image(&rollout_text)
         .expect("expected user message with input image in rollout");

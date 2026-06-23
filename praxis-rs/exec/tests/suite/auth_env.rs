@@ -23,7 +23,7 @@ async fn exec_uses_praxis_api_key_env_var() -> anyhow::Result<()> {
         .arg("--skip-git-repo-check")
         .arg("-C")
         .arg(&repo_root)
-        .arg("echo testing codex api key")
+        .arg("echo testing praxis api key")
         .assert()
         .success();
 

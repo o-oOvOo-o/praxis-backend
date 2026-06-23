@@ -70,6 +70,11 @@ pub(crate) trait BottomPaneView: Renderable {
         Some(request)
     }
 
+    /// Approve pending runtime permission requests that are obsolete under no-approval mode.
+    fn auto_approve_runtime_approval_requests(&mut self) -> bool {
+        false
+    }
+
     /// Try to handle request_user_input; return the original value if not
     /// consumed.
     fn try_consume_user_input_request(

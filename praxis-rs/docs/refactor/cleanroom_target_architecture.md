@@ -2,11 +2,11 @@
 
 Date: 2026-06-14
 
-This document records the target architecture for the Praxis cleanroom refactor. It is not a compatibility plan for making Praxis look different from Codex. It is the ownership model used to decide where every piece of Praxis code belongs, which code should be kept, which code should be absorbed from upstream, and which code should be replaced.
+This document records the target architecture for the Praxis cleanroom refactor. It defines the Praxis ownership model used to decide where every piece of code belongs, which code should be kept, which external designs are worth absorbing, and which code should be replaced.
 
 ## 1. Positioning
 
-Praxis is not a Codex skin and not just a CLI agent.
+Praxis is a general agent runtime, not a single-vendor CLI shell.
 
 Praxis is:
 
@@ -23,7 +23,7 @@ Core identity:
 | Name | Praxis role |
 |---|---|
 | Praxis | General agent runtime identity. |
-| Codex | Compatibility source, login source, thread import source, and upstream design reference. |
+| Codex | Compatibility source, login source, and external thread import source. |
 | OpenAI / GPT | Provider, auth, and model family. |
 | Claude | Provider, wire, and external migration source. |
 | Cursor | External session migration source. |
@@ -61,7 +61,7 @@ The three explicit loop concepts are:
 
 `AgentOs` and App Gateway are not loops. `Agent Task` is a task category and handler layer; `agent_task_loop` is the real middle loop.
 
-Pi Agent is useful as a reference for thin loop structure: the agent loop should read as control flow, not as a container for provider, storage, UI, and tool implementation details. Codex is useful as a reference for mature sandbox, exec, thread, and config implementation details. Praxis should absorb strong designs without inheriting upstream identity or accidental coupling.
+Pi Agent is useful as a reference for thin loop structure: the agent loop should read as control flow, not as a container for provider, storage, UI, and tool implementation details. Codex remains useful as an external reference for mature sandbox, exec, thread, and config implementation details. Praxis should absorb strong designs without inheriting external product identity or accidental coupling.
 
 ## 3. Architecture Diagram
 
@@ -481,8 +481,8 @@ Brand names:
 
 | Name | Allowed scope |
 |---|---|
-| Codex | Compatibility, auth, import source, behavior profile. |
-| OpenAI | Provider, auth, marketplace compatibility. |
+| Codex | Compatibility, auth, import source, external reference. |
+| OpenAI | Provider, auth, marketplace compatibility, OpenAI Responses behavior profile. |
 | Claude | Provider, wire, migration source. |
 | Cursor | Migration source. |
 | Cunning3D | Product profile, plugin, domain integration. |
@@ -533,7 +533,7 @@ Do not suggest a move just because a file is large. Move code when ownership, de
 | 16 | Config Bundle | Merge cloud config, requirements, profile, and diagnostics. |
 | 17 | Plugin / Product | Treat Cunning3D and marketplaces as plugin/product layers. |
 | 18 | Tool Runtime | Centralize tool registry, router, runtime, sandbox, and output policy. |
-| 19 | Sandbox / Exec | Absorb strong upstream ideas behind Praxis boundaries. |
+| 19 | Sandbox / Exec | Absorb strong external-reference ideas behind Praxis boundaries. |
 | 20 | Context / Memory Engine | Centralize context, memory, compaction, and history preview. |
 | 21 | External Migration | Keep Codex/Cursor/Claude import behind anti-corruption layers. |
 | 22 | Agent Identity / Role / Capability | Unify registry, role, resolver, status, mailbox, and capability language. |

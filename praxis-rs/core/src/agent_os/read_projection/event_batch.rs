@@ -1,5 +1,5 @@
 use super::options::AgentOsEventQuery;
-use crate::agent_os::model::EventLedgerEntry;
+use crate::agent_os::records::EventLedgerEntry;
 use crate::agent_os::state::AgentOsState;
 use serde::Serialize;
 

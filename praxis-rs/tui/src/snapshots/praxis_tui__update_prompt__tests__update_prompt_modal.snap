@@ -6,7 +6,7 @@ expression: terminal.backend()
 
   Release notes: https://github.com/o-oOvOo-o/praxis-backend/releases/latest
 
-› 1. Update now (runs `npm install -g @openai/praxis@latest`)
+› 1. Update now (runs `npm install -g @praxis/praxis@latest`)
   2. Skip
   3. Skip until next version
 

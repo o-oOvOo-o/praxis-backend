@@ -2,11 +2,8 @@ use std::sync::Arc;
 
 use praxis_protocol::protocol::SessionSource;
 use praxis_rollout::RolloutRecorderParams;
-use praxis_rollout::state_db;
 use praxis_state::ThreadMetadataBuilder;
-use tracing::Instrument;
 use tracing::error;
-use tracing::info_span;
 
 use crate::config::Config;
 use crate::mcp::McpManager;
@@ -15,6 +12,10 @@ use crate::rollout::RolloutRecorder;
 use praxis_rollout::state_db::StateDbHandle;
 
 use super::auth_mcp_bootstrap;
+
+mod auth_mcp_lane;
+mod history_lane;
+mod rollout_lane;
 
 pub(super) struct ParallelStartup {
     pub(super) rollout_recorder: Option<RolloutRecorder>,
@@ -32,50 +33,13 @@ pub(super) async fn run(
     rollout_params: RolloutRecorderParams,
     state_builder: Option<ThreadMetadataBuilder>,
 ) -> anyhow::Result<ParallelStartup> {
-    let rollout_fut = async {
-        if config.ephemeral {
-            Ok::<_, anyhow::Error>((None, None))
-        } else {
-            let state_db_ctx = state_db::init(&config).await;
-            let rollout_recorder = RolloutRecorder::new(
-                &config,
-                rollout_params,
-                state_db_ctx.clone(),
-                state_builder.clone(),
-            )
-            .await?;
-            Ok((Some(rollout_recorder), state_db_ctx))
-        }
-    }
-    .instrument(info_span!(
-        "session_init.rollout",
-        otel.name = "session_init.rollout",
-        session_init.ephemeral = config.ephemeral,
-    ));
-
+    let rollout_fut = rollout_lane::run(Arc::clone(&config), rollout_params, state_builder.clone());
     let is_subagent = matches!(
         session_configuration.session_source,
         SessionSource::SubAgent(_)
     );
-    let history_meta_fut = async {
-        if is_subagent {
-            (0, 0)
-        } else {
-            crate::message_history::history_metadata(&config).await
-        }
-    }
-    .instrument(info_span!(
-        "session_init.history_metadata",
-        otel.name = "session_init.history_metadata",
-        session_init.is_subagent = is_subagent,
-    ));
-
-    let config_for_mcp = Arc::clone(&config);
-    let auth_mcp_fut = auth_mcp_bootstrap::load(auth_manager, config_for_mcp, mcp_manager)
-        .instrument(info_span!(
-            "session_init.auth_mcp",
-            otel.name = "session_init.auth_mcp",
-        ));
+    let history_meta_fut = history_lane::load(Arc::clone(&config), is_subagent);
+    let auth_mcp_fut = auth_mcp_lane::load(auth_manager, Arc::clone(&config), mcp_manager);
 
     let (rollout_recorder_and_state_db, (history_log_id, history_entry_count), auth_mcp) =
         tokio::join!(rollout_fut, history_meta_fut, auth_mcp_fut);

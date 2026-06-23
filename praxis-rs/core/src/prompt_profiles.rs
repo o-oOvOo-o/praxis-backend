@@ -1,4 +1,5 @@
 use crate::llm::ids::BehaviorProfileId;
+use crate::llm::ids::OPENAI_RESPONSES_PROFILE_ID;
 use crate::llm::ids::ProductProfileId;
 use crate::llm::profiles::plugin::ProfileDescriptor;
 use crate::llm::profiles::plugin::ProfileMatchContext;
@@ -22,7 +23,7 @@ pub(crate) enum PromptProfileId {
 impl PromptProfileId {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::OpenAiResponses => "codex/responses",
+            Self::OpenAiResponses => OPENAI_RESPONSES_PROFILE_ID,
             Self::CommonBase => "common/base",
             Self::DeepSeek => "deepseek/base",
             Self::Gemini => "gemini/base",

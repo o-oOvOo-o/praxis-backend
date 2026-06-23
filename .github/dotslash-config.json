@@ -1,30 +1,30 @@
 {
   "outputs": {
-    "codex": {
+    "praxis": {
       "platforms": {
         "macos-aarch64": {
           "regex": "^praxis-aarch64-apple-darwin\\.zst$",
-          "path": "codex"
+          "path": "praxis"
         },
         "macos-x86_64": {
           "regex": "^praxis-x86_64-apple-darwin\\.zst$",
-          "path": "codex"
+          "path": "praxis"
         },
         "linux-x86_64": {
           "regex": "^praxis-x86_64-unknown-linux-musl\\.zst$",
-          "path": "codex"
+          "path": "praxis"
         },
         "linux-aarch64": {
           "regex": "^praxis-aarch64-unknown-linux-musl\\.zst$",
-          "path": "codex"
+          "path": "praxis"
         },
         "windows-x86_64": {
           "regex": "^praxis-x86_64-pc-windows-msvc\\.exe\\.zst$",
-          "path": "codex.exe"
+          "path": "praxis.exe"
         },
         "windows-aarch64": {
           "regex": "^praxis-aarch64-pc-windows-msvc\\.exe\\.zst$",
-          "path": "codex.exe"
+          "path": "praxis.exe"
         }
       }
     },

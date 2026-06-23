@@ -43,13 +43,13 @@ jobs:
         run: |
           set -euo pipefail
           # Use a rust-release version that includes all native binaries.
-          CODEX_VERSION=0.115.0
+          PRAXIS_VERSION=0.115.0
           OUTPUT_DIR="${RUNNER_TEMP}"
           python3 ./scripts/stage_npm_packages.py \
-            --release-version "$CODEX_VERSION" \
-            --package codex \
+            --release-version "$PRAXIS_VERSION" \
+            --package praxis \
             --output-dir "$OUTPUT_DIR"
-          PACK_OUTPUT="${OUTPUT_DIR}/praxis-npm-${CODEX_VERSION}.tgz"
+          PACK_OUTPUT="${OUTPUT_DIR}/praxis-npm-${PRAXIS_VERSION}.tgz"
           echo "pack_output=$PACK_OUTPUT" >> "$GITHUB_OUTPUT"
 
       - name: Upload staged npm package artifact
@@ -62,11 +62,6 @@ jobs:
         run: ./scripts/asciicheck.py README.md
       - name: Check root README ToC
         run: python3 scripts/readme_toc.py README.md
-
-      - name: Ensure praxis-cli/README.md contains only ASCII and certain Unicode code points
-        run: ./scripts/asciicheck.py praxis-cli/README.md
-      - name: Check praxis-cli/README ToC
-        run: python3 scripts/readme_toc.py praxis-cli/README.md
 
       - name: Prettier (run `pnpm run format:fix` to fix)
         run: pnpm run format

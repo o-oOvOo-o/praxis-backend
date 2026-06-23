@@ -32,7 +32,7 @@ pub async fn sync_external_agent_sessions_to_praxis_home(
     config: &Config,
 ) -> io::Result<ExternalSessionSyncStats> {
     match source {
-        ExternalAgentSource::Codex => super::codex::sync_sessions_to_store(),
+        ExternalAgentSource::Codex => super::codex::sync_sessions_to_store(config).await,
         ExternalAgentSource::Cursor => super::cursor::sync_sessions_to_store(config).await,
     }
 }

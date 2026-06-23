@@ -15,14 +15,14 @@ struct TestPraxisAliasesGuard {
     _previous_praxis_home: Option<OsString>,
 }
 
-const CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
+const LEGACY_CODEX_HOME_ENV_VAR: &str = "CODEX_HOME";
 
 // This code runs before any other tests are run.
-// It allows the test binary to behave like codex and dispatch to apply_patch and praxis-linux-sandbox
+// It allows the test binary to dispatch to apply_patch and praxis-linux-sandbox
 // based on the arg0.
 // NOTE: this doesn't work on ARM
 #[ctor]
-pub static CODEX_ALIASES_TEMP_DIR: Option<TestPraxisAliasesGuard> = {
+pub static PRAXIS_ARG0_ALIASES_TEMP_DIR: Option<TestPraxisAliasesGuard> = {
     let mut args = std::env::args_os();
     let argv0 = args.next().unwrap_or_default();
     let exe_name = Path::new(&argv0)
@@ -31,7 +31,7 @@ pub static CODEX_ALIASES_TEMP_DIR: Option<TestPraxisAliasesGuard> = {
         .unwrap_or("");
     let argv1 = args.next().unwrap_or_default();
     // Helper re-execs inherit this ctor too, but they may run inside a sandbox
-    // where creating another CODEX_HOME tempdir under /tmp is not allowed.
+    // where creating another legacy home tempdir under /tmp is not allowed.
     if exe_name == PRAXIS_LINUX_SANDBOX_ARG0 || argv1 == PRAXIS_RUN_AS_APPLY_PATCH_ARG1 {
         return None;
     }
@@ -41,25 +41,25 @@ pub static CODEX_ALIASES_TEMP_DIR: Option<TestPraxisAliasesGuard> = {
         .prefix("praxis-core-tests")
         .tempdir()
         .unwrap();
-    let previous_praxis_home = std::env::var_os(CODEX_HOME_ENV_VAR);
-    // arg0_dispatch() creates helper links under CODEX_HOME/tmp. Point it at a
+    let previous_praxis_home = std::env::var_os(LEGACY_CODEX_HOME_ENV_VAR);
+    // arg0_dispatch() creates helper links under the legacy home tmp dir. Point it at a
     // test-owned temp dir so startup never mutates the developer's real ~/.praxis.
     //
     // Safety: #[ctor] runs before tests start, so no test threads exist yet.
     unsafe {
-        std::env::set_var(CODEX_HOME_ENV_VAR, praxis_home.path());
+        std::env::set_var(LEGACY_CODEX_HOME_ENV_VAR, praxis_home.path());
     }
 
     #[allow(clippy::unwrap_used)]
     let arg0 = arg0_dispatch().unwrap();
     // Restore the process environment immediately so later tests observe the
-    // same CODEX_HOME state they started with.
+    // same legacy home state they started with.
     match previous_praxis_home.as_ref() {
         Some(value) => unsafe {
-            std::env::set_var(CODEX_HOME_ENV_VAR, value);
+            std::env::set_var(LEGACY_CODEX_HOME_ENV_VAR, value);
         },
         None => unsafe {
-            std::env::remove_var(CODEX_HOME_ENV_VAR);
+            std::env::remove_var(LEGACY_CODEX_HOME_ENV_VAR);
         },
     }
 

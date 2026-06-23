@@ -132,16 +132,16 @@ fn test_get_command_ignores_explicit_shell_in_zsh_fork_mode() -> anyhow::Result<
     let json = r#"{"cmd": "echo hello", "shell": "/bin/bash"}"#;
     let args: ExecCommandArgs = parse_arguments(json)?;
     let shell_zsh_path = AbsolutePathBuf::from_absolute_path(if cfg!(windows) {
-        r"C:\opt\codex\zsh"
+        r"C:\opt\praxis\zsh"
     } else {
-        "/opt/codex/zsh"
+        "/opt/praxis/zsh"
     })?;
     let shell_mode = UnifiedExecShellMode::ZshFork(ZshForkConfig {
         shell_zsh_path: shell_zsh_path.clone(),
         main_execve_wrapper_exe: AbsolutePathBuf::from_absolute_path(if cfg!(windows) {
-            r"C:\opt\codex\praxis-execve-wrapper"
+            r"C:\opt\praxis\praxis-execve-wrapper"
         } else {
-            "/opt/codex/praxis-execve-wrapper"
+            "/opt/praxis/praxis-execve-wrapper"
         })?,
     });
 

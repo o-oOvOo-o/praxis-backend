@@ -52,7 +52,7 @@ lease, mailbox, managed commands, artifacts, and multi-agent control.
 | `protocol/` | Core agent protocol and event types. |
 | `plugin/`, `plugins/`, `core-skills/`, `skills/` | Plugin manifests, marketplace support, built-in skills, and skill loading. |
 | `rollout/`, `state/` | Persistence foundations that are being pulled behind ThreadStore-style ownership. |
-| `sandboxing/`, `exec/`, `exec-server/`, `process-hardening/` | Command execution and sandbox infrastructure. |
+| `system_plugin/3rd/openai_sandbox/`, `exec/`, `exec-server/`, `process-hardening/` | Command execution and sandbox infrastructure. |
 | `otel/`, `analytics/`, `feedback/` | Observability, telemetry, diagnostics, and feedback boundaries. |
 
 ## Running Praxis
@@ -180,8 +180,8 @@ those names should stay at the edge:
 
 | Name | Praxis boundary |
 |---|---|
-| Codex | Login compatibility, thread import source, behavior profile, upstream design reference. |
-| OpenAI / GPT | Provider, auth, model family. |
+| Codex | Login compatibility and external thread import source. |
+| OpenAI / GPT | Provider, auth, model family, OpenAI Responses behavior profile. |
 | Claude | Provider, wire, external migration source. |
 | Cursor | External session migration source. |
 | Cunning3D | Product profile, plugin bundle, domain prompt/tool policy. |

@@ -112,7 +112,7 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
     .await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         config,
         thread_manager,
         ..
@@ -153,7 +153,7 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
         .submit(Op::UserInput {
@@ -164,7 +164,7 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let mut expected_tools_names = if cfg!(windows) {
         vec!["shell_command"]
@@ -225,7 +225,7 @@ async fn gpt_5_tools_without_apply_patch_append_apply_patch_instructions() -> an
     )
     .await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis()
+    let TestPraxis { thread: praxis, .. } = test_praxis()
         .with_config(|config| {
             config.user_instructions = Some("be consistent and helpful".to_string());
             config
@@ -251,7 +251,7 @@ async fn gpt_5_tools_without_apply_patch_append_apply_patch_instructions() -> an
         })
         .await?;
 
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
     codex
         .submit(Op::UserInput {
             items: vec![UserInput::Text {
@@ -262,7 +262,7 @@ async fn gpt_5_tools_without_apply_patch_append_apply_patch_instructions() -> an
         })
         .await?;
 
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let body0 = req1.single_request().body_json();
     let instructions0 = body0["instructions"]
@@ -304,7 +304,7 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
     .await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         config,
         ..
     } = test_praxis()
@@ -327,7 +327,7 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
         .submit(Op::UserInput {
@@ -338,7 +338,7 @@ async fn prefixes_context_and_instructions_once_and_consistently_across_requests
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let body1 = req1.single_request().body_json();
     let input1 = body1["input"].as_array().expect("input array");
@@ -398,7 +398,7 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() -> an
     )
     .await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis()
+    let TestPraxis { thread: praxis, .. } = test_praxis()
         .with_config(|config| {
             config.user_instructions = Some("be consistent and helpful".to_string());
             config
@@ -419,7 +419,7 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() -> an
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let writable = TempDir::new().unwrap();
     let new_policy = SandboxPolicy::WorkspaceWrite {
@@ -456,7 +456,7 @@ async fn overrides_turn_context_but_keeps_cached_prefix_and_key_constant() -> an
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request1 = req1.single_request();
     let request2 = req2.single_request();
@@ -502,7 +502,7 @@ async fn override_before_first_turn_emits_environment_context() -> anyhow::Resul
     )
     .await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis().build(&server).await?;
+    let TestPraxis { thread: praxis, .. } = test_praxis().build(&server).await?;
 
     let collaboration_mode = CollaborationMode {
         mode: ModeKind::Default,
@@ -540,7 +540,7 @@ async fn override_before_first_turn_emits_environment_context() -> anyhow::Resul
         })
         .await?;
 
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let body = req.single_request().body_json();
     assert_eq!(body["model"].as_str(), Some("gpt-5.1"));
@@ -669,7 +669,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() -> anyhow::Res
     )
     .await;
 
-    let TestPraxis { thread: codex, .. } = test_praxis()
+    let TestPraxis { thread: praxis, .. } = test_praxis()
         .with_config(|config| {
             config.user_instructions = Some("be consistent and helpful".to_string());
             config
@@ -690,7 +690,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() -> anyhow::Res
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     // Second turn using per-turn overrides via UserTurn
     let new_cwd = TempDir::new().unwrap();
@@ -721,7 +721,7 @@ async fn per_turn_overrides_keep_cached_prefix_and_key_constant() -> anyhow::Res
             personality: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request1 = req1.single_request();
     let request2 = req2.single_request();
@@ -793,7 +793,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
     .await;
 
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         config,
         session_configured,
         ..
@@ -834,7 +834,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
             personality: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
         .submit(Op::UserTurn {
@@ -855,7 +855,7 @@ async fn send_user_turn_with_no_changes_does_not_send_environment_context() -> a
             personality: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request1 = req1.single_request();
     let request2 = req2.single_request();
@@ -919,7 +919,7 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
     )
     .await;
     let TestPraxis {
-        thread: codex,
+        thread: praxis,
         config,
         session_configured,
         ..
@@ -960,7 +960,7 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
             personality: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
         .submit(Op::UserTurn {
@@ -981,7 +981,7 @@ async fn send_user_turn_with_changes_sends_environment_context() -> anyhow::Resu
             personality: None,
         })
         .await?;
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     let request1 = req1.single_request();
     let request2 = req2.single_request();

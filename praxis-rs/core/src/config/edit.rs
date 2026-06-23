@@ -1006,7 +1006,7 @@ impl ConfigEditsBuilder {
         self
     }
 
-    pub fn clear_legacy_windows_sandbox_keys(mut self) -> Self {
+    pub fn clear_previous_windows_sandbox_keys(mut self) -> Self {
         for key in [
             "experimental_windows_sandbox",
             "elevated_windows_sandbox",

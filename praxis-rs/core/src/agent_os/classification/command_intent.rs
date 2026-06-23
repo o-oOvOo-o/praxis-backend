@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use crate::agent_os::model::ActionIntent;
-use crate::agent_os::model::ActionIntentKind;
-use crate::agent_os::model::ResourceRequirement;
+use crate::agent_os::records::ActionIntent;
+use crate::agent_os::records::ActionIntentKind;
+use crate::agent_os::records::ResourceRequirement;
 use crate::agent_os::paths::repo_scope_for_cwd;
 
 use super::command_matchers::*;

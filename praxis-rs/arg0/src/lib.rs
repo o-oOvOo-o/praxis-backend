@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use praxis_apply_patch::PRAXIS_RUN_AS_APPLY_PATCH_ARG1;
 use praxis_sandboxing::landlock::PRAXIS_LINUX_SANDBOX_ARG0;
 use praxis_utils_home_dir::find_praxis_home;
-use praxis_utils_home_dir::scrub_upstream_codex_state_env_for_current_process;
+use praxis_utils_home_dir::scrub_external_agent_state_env_for_current_process;
 use praxis_utils_home_dir::set_process_praxis_home_namespace_if_unset_for_current_process;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
@@ -54,7 +54,7 @@ impl Arg0PathEntryGuard {
 }
 
 pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
-    scrub_upstream_codex_state_env_for_current_process();
+    scrub_external_agent_state_env_for_current_process();
     set_process_praxis_home_namespace_if_unset_for_current_process();
 
     // Determine if we were invoked via the special alias.

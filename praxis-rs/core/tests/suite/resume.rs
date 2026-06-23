@@ -64,7 +64,7 @@ async fn resume_includes_initial_messages_from_rollout_events() -> Result<()> {
     let server = start_mock_server().await;
     let mut builder = test_praxis();
     let initial = builder.build(&server).await?;
-    let codex = Arc::clone(&initial.thread);
+    let praxis = Arc::clone(&initial.thread);
     let home = initial.home.clone();
     let rollout_path = initial
         .session_configured
@@ -94,7 +94,7 @@ async fn resume_includes_initial_messages_from_rollout_events() -> Result<()> {
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let resumed = resume_until_initial_messages(
         &mut builder,
@@ -153,7 +153,7 @@ async fn resume_includes_initial_messages_from_reasoning_events() -> Result<()> 
         config.show_raw_agent_reasoning = true;
     });
     let initial = builder.build(&server).await?;
-    let codex = Arc::clone(&initial.thread);
+    let praxis = Arc::clone(&initial.thread);
     let home = initial.home.clone();
     let rollout_path = initial
         .session_configured
@@ -179,7 +179,7 @@ async fn resume_includes_initial_messages_from_reasoning_events() -> Result<()> 
         })
         .await?;
 
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let resumed = resume_until_initial_messages(
         &mut builder,
@@ -243,7 +243,7 @@ async fn resume_switches_models_preserves_base_instructions() -> Result<()> {
         config.model = Some("gpt-5.2".to_string());
     });
     let initial = builder.build(&server).await?;
-    let codex = Arc::clone(&initial.thread);
+    let praxis = Arc::clone(&initial.thread);
     let home = initial.home.clone();
     let rollout_path = initial
         .session_configured
@@ -267,7 +267,7 @@ async fn resume_switches_models_preserves_base_instructions() -> Result<()> {
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
     let initial_body = initial_mock.single_request().body_json();
     let initial_instructions = initial_body
@@ -366,7 +366,7 @@ async fn resume_model_switch_is_not_duplicated_after_pre_turn_override() -> Resu
         config.model = Some("gpt-5.2".to_string());
     });
     let initial = builder.build(&server).await?;
-    let codex = Arc::clone(&initial.thread);
+    let praxis = Arc::clone(&initial.thread);
     let home = initial.home.clone();
     let rollout_path = initial
         .session_configured
@@ -392,7 +392,7 @@ async fn resume_model_switch_is_not_duplicated_after_pre_turn_override() -> Resu
             final_output_json_schema: None,
         })
         .await?;
-    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+    wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     let _ = initial_mock.single_request();
 
     let resumed_mock = mount_sse_once(

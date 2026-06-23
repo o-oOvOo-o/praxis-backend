@@ -60,7 +60,7 @@ The framework has three explicit agent loop concepts:
 
 | Name | Decision | Reason |
 |---|---:|---|
-| `Op` | Keep | Short and accurate operation submitted into a session. Matches upstream Codex and remains useful. |
+| `Op` | Keep | Short and accurate operation submitted into a session. The term remains useful for Praxis session operations. |
 | `Submission` | Keep | Accurate envelope for an `Op` plus submission metadata. |
 | `Session` | Keep | Long-lived per-thread aggregate root. |
 | `PraxisThread` | Keep | Public thread handle. |
@@ -78,7 +78,7 @@ The framework has three explicit agent loop concepts:
 | `ModelRuntimeRegistry` | Keep | Provider/profile/model capability registry. |
 | `context_manager/*` | Keep | Context construction and history compaction. |
 | `guardian/*` | Keep | Approval and safety review. |
-| `sandboxing/*` and `exec_policy.rs` | Keep | Sandbox and execution policy. |
+| `system_plugin/3rd/openai_sandbox/*` and `exec_policy.rs` | Keep | Sandbox and execution policy. |
 | `unified_exec/*` | Keep | Process execution and output collection. |
 | `mcp.rs` and `praxis/mcp_runtime.rs` | Keep | MCP lifecycle. |
 | `hook_runtime.rs` | Keep | Hook execution. |

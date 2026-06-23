@@ -24,7 +24,7 @@ use once_cell::sync::Lazy;
 use praxis_keyring_store::DefaultKeyringStore;
 use praxis_keyring_store::KeyringStore;
 use praxis_protocol::auth::AuthMode;
-use praxis_utils_home_dir::upstream_codex_read_through_home;
+use praxis_utils_home_dir::external_codex_read_through_home;
 
 /// Determine where Praxis should store CLI auth credentials.
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -367,7 +367,7 @@ pub(super) fn load_persistent_auth_with_origin(
 }
 
 fn load_inherited_codex_auth(praxis_home: &Path) -> std::io::Result<Option<AuthDotJson>> {
-    let Some(shared_home) = upstream_codex_read_through_home(praxis_home)? else {
+    let Some(shared_home) = external_codex_read_through_home(praxis_home)? else {
         return Ok(None);
     };
     FileAuthStorage::new(shared_home).load()

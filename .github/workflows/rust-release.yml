@@ -219,8 +219,9 @@ jobs:
           set -euo pipefail
           version="$(python3 "${GITHUB_WORKSPACE}/.github/scripts/rusty_v8_bazel.py" resolved-v8-crate-version)"
           release_tag="rusty-v8-v${version}"
-          base_url="https://github.com/openai/codex/releases/download/${release_tag}"
-          archive="https://github.com/openai/codex/releases/download/rusty-v8-v${version}/librusty_v8_release_${TARGET}.a.gz"
+          release_base_url="${PRAXIS_RUSTY_V8_RELEASE_BASE_URL:-https://github.com/o-oOvOo-o/praxis-backend/releases/download}"
+          base_url="${release_base_url%/}/${release_tag}"
+          archive="${base_url}/librusty_v8_release_${TARGET}.a.gz"
           binding_dir="${RUNNER_TEMP}/rusty_v8"
           binding_path="${binding_dir}/src_binding_release_${TARGET}.rs"
           mkdir -p "${binding_dir}"
@@ -232,7 +233,7 @@ jobs:
         shell: bash
         run: |
           echo "CARGO_PROFILE_RELEASE_LTO: ${CARGO_PROFILE_RELEASE_LTO}"
-          cargo build --target ${{ matrix.target }} --release --timings --bin codex --bin praxis-responses-api-proxy
+          cargo build --target ${{ matrix.target }} --release --timings --bin praxis --bin praxis-responses-api-proxy
 
       - name: Upload Cargo timings
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
@@ -270,13 +271,13 @@ jobs:
           target="${{ matrix.target }}"
           release_dir="target/${target}/release"
           dmg_root="${RUNNER_TEMP}/praxis-dmg-root"
-          volname="Codex (${target})"
+          volname="Praxis (${target})"
           dmg_path="${release_dir}/praxis-${target}.dmg"
 
           # The previous "MacOS code signing (binaries)" step signs + notarizes the
           # built artifacts in `${release_dir}`. This step packages *those same*
           # signed binaries into a dmg.
-          praxis_binary_path="${release_dir}/codex"
+          praxis_binary_path="${release_dir}/praxis"
           proxy_binary_path="${release_dir}/praxis-responses-api-proxy"
 
           rm -rf "$dmg_root"
@@ -291,7 +292,7 @@ jobs:
             exit 1
           fi
 
-          ditto "$praxis_binary_path" "${dmg_root}/codex"
+          ditto "$praxis_binary_path" "${dmg_root}/praxis"
           ditto "$proxy_binary_path" "${dmg_root}/praxis-responses-api-proxy"
 
           rm -f "$dmg_path"
@@ -326,11 +327,11 @@ jobs:
           dest="dist/${{ matrix.target }}"
           mkdir -p "$dest"
 
-          cp target/${{ matrix.target }}/release/codex "$dest/praxis-${{ matrix.target }}"
+          cp target/${{ matrix.target }}/release/praxis "$dest/praxis-${{ matrix.target }}"
           cp target/${{ matrix.target }}/release/praxis-responses-api-proxy "$dest/praxis-responses-api-proxy-${{ matrix.target }}"
 
           if [[ "${{ matrix.target }}" == *linux* ]]; then
-            cp target/${{ matrix.target }}/release/codex.sigstore "$dest/praxis-${{ matrix.target }}.sigstore"
+            cp target/${{ matrix.target }}/release/praxis.sigstore "$dest/praxis-${{ matrix.target }}.sigstore"
             cp target/${{ matrix.target }}/release/praxis-responses-api-proxy.sigstore "$dest/praxis-responses-api-proxy-${{ matrix.target }}.sigstore"
           fi
 
@@ -513,7 +514,7 @@ jobs:
         run: |
           ./scripts/stage_npm_packages.py \
             --release-version "$RELEASE_VERSION" \
-            --package codex \
+            --package praxis \
             --package praxis-responses-api-proxy \
             --package praxis-sdk
 
@@ -695,7 +696,7 @@ jobs:
       - name: Publish to WinGet
         uses: vedantmgoyal9/winget-releaser@7bd472be23763def6e16bd06cc8b1cdfab0e2fd5
         with:
-          identifier: OpenAI.Codex
+          identifier: io.praxis.cli
           version: ${{ needs.release.outputs.version }}
           release-tag: ${{ needs.release.outputs.tag }}
           fork-user: openai-oss-forks

@@ -21,7 +21,7 @@ async fn override_turn_context_does_not_persist_when_config_exists() {
             config.model = Some("gpt-4o".to_string());
         });
     let test = builder.build(&server).await.expect("create conversation");
-    let codex = test.thread.clone();
+    let praxis = test.thread.clone();
     let config_path = test.home.path().join(CONFIG_TOML);
 
     codex
@@ -42,8 +42,8 @@ async fn override_turn_context_does_not_persist_when_config_exists() {
         .await
         .expect("submit override");
 
-    codex.submit(Op::Shutdown).await.expect("request shutdown");
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
+    praxis.submit(Op::Shutdown).await.expect("request shutdown");
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
 
     let contents = tokio::fs::read_to_string(&config_path)
         .await
@@ -56,7 +56,7 @@ async fn override_turn_context_does_not_create_config_file() {
     let server = start_mock_server().await;
     let mut builder = test_praxis();
     let test = builder.build(&server).await.expect("create conversation");
-    let codex = test.thread.clone();
+    let praxis = test.thread.clone();
     let config_path = test.home.path().join(CONFIG_TOML);
     assert!(
         !config_path.exists(),
@@ -81,8 +81,8 @@ async fn override_turn_context_does_not_create_config_file() {
         .await
         .expect("submit override");
 
-    codex.submit(Op::Shutdown).await.expect("request shutdown");
-    wait_for_event(&codex, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
+    praxis.submit(Op::Shutdown).await.expect("request shutdown");
+    wait_for_event(&praxis, |ev| matches!(ev, EventMsg::ShutdownComplete)).await;
 
     assert!(
         !config_path.exists(),

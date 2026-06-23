@@ -337,7 +337,6 @@ impl MessageProcessor {
 
         match name.as_ref() {
             "praxis" => self.handle_tool_call_praxis(id, arguments).await,
-            "codex" => self.handle_tool_call_praxis(id, arguments).await,
             "praxis-reply" => {
                 self.handle_tool_call_praxis_session_reply(id, arguments)
                     .await

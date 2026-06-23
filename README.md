@@ -1,4 +1,4 @@
-<p align="center"><code>npm i -g @openai/praxis</code></p>
+<p align="center"><code>npm i -g @praxis/praxis</code></p>
 <p align="center"><strong>Praxis CLI</strong> is a local agent runtime for coding workflows.</p>
 
 ---
@@ -11,7 +11,7 @@ Install globally with your preferred package manager:
 
 ```shell
 # Install using npm
-npm install -g @openai/praxis
+npm install -g @praxis/praxis
 ```
 
 Then run `praxis` to get started.
@@ -36,7 +36,7 @@ Each archive contains a single entry with the platform baked into the name (for 
 
 Run `praxis` and select **Sign in with ChatGPT**, or configure an API key.
 
-Praxis keeps its runtime state under the Praxis home directory. Read-through support for selected upstream Codex config/auth state is handled as an explicit compatibility path, not as Praxis runtime identity.
+Praxis keeps its runtime state under the Praxis home directory. Read-through support for selected Codex-compatible config/auth state is handled as an explicit compatibility path, not as Praxis runtime identity.
 
 ## Docs
 

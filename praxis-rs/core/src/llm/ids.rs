@@ -2,6 +2,11 @@ use praxis_protocol::protocol::Product;
 
 use crate::model_provider_info::WireApi;
 
+pub(crate) const OPENAI_RESPONSES_PROFILE_ID: &str = "openai/responses";
+pub(crate) const OPENAI_RESPONSES_BASE_PROFILE_ID: &str = "openai/responses/base";
+pub(crate) const LEGACY_CODEX_RESPONSES_PROFILE_ID: &str = "codex/responses";
+pub(crate) const LEGACY_CODEX_RESPONSES_BASE_PROFILE_ID: &str = "codex/responses/base";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum WireId {
     Responses,
@@ -44,7 +49,7 @@ pub(crate) enum BehaviorProfileId {
 impl BehaviorProfileId {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::OpenAiResponses => "codex/responses",
+            Self::OpenAiResponses => OPENAI_RESPONSES_PROFILE_ID,
             Self::Common => "common",
             Self::DeepSeek => "deepseek",
             Self::Gemini => "gemini",

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::agent_os::model::ScopedPaths;
+use crate::agent_os::records::ScopedPaths;
 use crate::path_scope::normalize_path_for_scope;
 use crate::path_scope::scope_matches;
 

@@ -6,6 +6,7 @@ use reqwest::header::HeaderMap;
 
 use praxis_core::config::Config;
 use praxis_login::AuthManager;
+use praxis_utils_cli::CliConfigOverrides;
 
 pub fn set_user_agent_suffix(suffix: &str) {
     if let Ok(mut guard) = praxis_login::default_client::USER_AGENT_SUFFIX.lock() {
@@ -59,10 +60,14 @@ pub fn extract_chatgpt_account_id(token: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-pub async fn load_auth_manager() -> Option<AuthManager> {
-    // TODO: pass in cli overrides once cloud tasks properly support them.
-    let config = Config::load_with_cli_overrides(Vec::new()).await.ok()?;
-    Some(AuthManager::new(
+pub async fn load_auth_manager(
+    config_overrides: &CliConfigOverrides,
+) -> anyhow::Result<AuthManager> {
+    let overrides = config_overrides
+        .parse_overrides()
+        .map_err(|error| anyhow::anyhow!("invalid cloud task configuration override: {error}"))?;
+    let config = Config::load_with_cli_overrides(overrides).await?;
+    Ok(AuthManager::new(
         config.praxis_home,
         /*enable_praxis_api_key_env*/ false,
         config.cli_auth_credentials_store_mode,
@@ -71,7 +76,9 @@ pub async fn load_auth_manager() -> Option<AuthManager> {
 
 /// Build headers for ChatGPT-backed requests: `User-Agent`, optional `Authorization`,
 /// and optional `ChatGPT-Account-Id`.
-pub async fn build_chatgpt_headers() -> HeaderMap {
+pub async fn build_chatgpt_headers(
+    config_overrides: &CliConfigOverrides,
+) -> anyhow::Result<HeaderMap> {
     use reqwest::header::AUTHORIZATION;
     use reqwest::header::HeaderName;
     use reqwest::header::HeaderValue;
@@ -84,8 +91,8 @@ pub async fn build_chatgpt_headers() -> HeaderMap {
         USER_AGENT,
         HeaderValue::from_str(&ua).unwrap_or(HeaderValue::from_static("praxis-cli")),
     );
-    if let Some(am) = load_auth_manager().await
-        && let Some(auth) = am.auth().await
+    let auth_manager = load_auth_manager(config_overrides).await?;
+    if let Some(auth) = auth_manager.auth().await
         && let Ok(tok) = auth.get_token()
         && !tok.is_empty()
     {
@@ -102,7 +109,7 @@ pub async fn build_chatgpt_headers() -> HeaderMap {
             headers.insert(name, hv);
         }
     }
-    headers
+    Ok(headers)
 }
 
 /// Construct a browser-friendly task URL for the given backend base URL.

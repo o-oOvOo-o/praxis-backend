@@ -111,7 +111,7 @@ switch ($architecture) {
 }
 
 if ([string]::IsNullOrWhiteSpace($env:PRAXIS_INSTALL_DIR)) {
-    $installDir = Join-Path $env:LOCALAPPDATA "Programs\OpenAI\Praxis\bin"
+    $installDir = Join-Path $env:LOCALAPPDATA "Programs\Praxis\bin"
 } else {
     $installDir = $env:PRAXIS_INSTALL_DIR
 }
@@ -144,16 +144,26 @@ try {
 
     $vendorRoot = Join-Path $extractDir "package/vendor/$target"
     Write-Step "Installing to $installDir"
-    $copyMap = @{
-        "codex/codex.exe" = "praxis.exe"
-        "codex/praxis-command-runner.exe" = "praxis-command-runner.exe"
-        "codex/praxis-windows-sandbox-setup.exe" = "praxis-windows-sandbox-setup.exe"
-        "path/rg.exe" = "rg.exe"
-    }
+    $copyEntries = @(
+        @{ Sources = @("praxis/praxis.exe"); Destination = "praxis.exe" },
+        @{ Sources = @("praxis/praxis-command-runner.exe"); Destination = "praxis-command-runner.exe" },
+        @{ Sources = @("praxis/praxis-windows-sandbox-setup.exe"); Destination = "praxis-windows-sandbox-setup.exe" },
+        @{ Sources = @("path/rg.exe"); Destination = "rg.exe" }
+    )
 
-    foreach ($relativeSource in $copyMap.Keys) {
-        $sourcePath = Join-Path $vendorRoot $relativeSource
-        $destinationPath = Join-Path $installDir $copyMap[$relativeSource]
+    foreach ($entry in $copyEntries) {
+        $sourcePath = $null
+        foreach ($relativeSource in $entry.Sources) {
+            $candidatePath = Join-Path $vendorRoot $relativeSource
+            if (Test-Path $candidatePath) {
+                $sourcePath = $candidatePath
+                break
+            }
+        }
+        if (-not $sourcePath) {
+            throw "Installer payload missing for $($entry.Destination)."
+        }
+        $destinationPath = Join-Path $installDir $entry.Destination
         Move-Item -Force $sourcePath $destinationPath
     }
 } finally {

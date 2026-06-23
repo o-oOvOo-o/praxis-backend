@@ -175,22 +175,22 @@ fn shell_zsh_fork_prefers_shell_command_over_unified_exec() {
             .with_unified_exec_shell_mode_for_session(
                 ToolUserShellType::Zsh,
                 Some(&PathBuf::from(if cfg!(windows) {
-                    r"C:\opt\codex\zsh"
+                    r"C:\opt\praxis\zsh"
                 } else {
-                    "/opt/codex/zsh"
+                    "/opt/praxis/zsh"
                 })),
                 Some(&PathBuf::from(if cfg!(windows) {
-                    r"C:\opt\codex\praxis-execve-wrapper"
+                    r"C:\opt\praxis\praxis-execve-wrapper"
                 } else {
-                    "/opt/codex/praxis-execve-wrapper"
+                    "/opt/praxis/praxis-execve-wrapper"
                 })),
             )
             .unified_exec_shell_mode,
         if cfg!(unix) {
             UnifiedExecShellMode::ZshFork(ZshForkConfig {
-                shell_zsh_path: AbsolutePathBuf::from_absolute_path("/opt/codex/zsh").unwrap(),
+                shell_zsh_path: AbsolutePathBuf::from_absolute_path("/opt/praxis/zsh").unwrap(),
                 main_execve_wrapper_exe: AbsolutePathBuf::from_absolute_path(
-                    "/opt/codex/praxis-execve-wrapper",
+                    "/opt/praxis/praxis-execve-wrapper",
                 )
                 .unwrap(),
             })

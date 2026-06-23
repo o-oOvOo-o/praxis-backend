@@ -1,3 +1,4 @@
+use crate::llm::ids::OPENAI_RESPONSES_PROFILE_ID;
 use crate::llm::profiles::plugin::ProfileAutoTitleModel;
 use crate::llm::profiles::plugin::ProfileMatchContext;
 use crate::llm::registry::LlmProfileRegistry;
@@ -18,7 +19,7 @@ pub(crate) enum AutoTitleProfile {
 impl AutoTitleProfile {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::OpenAiResponses => "codex/responses",
+            Self::OpenAiResponses => OPENAI_RESPONSES_PROFILE_ID,
             Self::Common => "common/current",
             Self::DeepSeekFlash => "deepseek/flash",
             Self::ProviderDefault => "provider/current",

@@ -217,7 +217,12 @@ tar -xzf "$archive_path" -C "$tmp_dir"
 
 step "Installing to $INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
-cp "$tmp_dir/package/vendor/$vendor_target/codex/codex" "$INSTALL_DIR/praxis"
+praxis_binary="$tmp_dir/package/vendor/$vendor_target/praxis/praxis"
+if [ ! -x "$praxis_binary" ]; then
+  echo "Praxis binary payload not found in the downloaded package." >&2
+  exit 1
+fi
+cp "$praxis_binary" "$INSTALL_DIR/praxis"
 cp "$tmp_dir/package/vendor/$vendor_target/path/rg" "$INSTALL_DIR/rg"
 chmod 0755 "$INSTALL_DIR/praxis"
 chmod 0755 "$INSTALL_DIR/rg"

@@ -1,5 +1,5 @@
-use crate::agent_os::model::ActionIntentKind;
-use crate::agent_os::model::ArtifactType;
+use crate::agent_os::records::ActionIntentKind;
+use crate::agent_os::records::ArtifactType;
 use crate::agent_os::process::process_runtime_kind;
 
 pub(in crate::agent_os) fn runtime_kind_for_intent(intent: ActionIntentKind) -> &'static str {

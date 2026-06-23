@@ -5,22 +5,21 @@ use praxis_exec_server::EnvironmentManager;
 use praxis_login::AuthManager;
 use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::protocol::SessionSource;
-use tokio::sync::broadcast;
 
 use crate::ModelProviderInfo;
-use crate::agent_os::AgentOs;
 use crate::config::Config;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::manager::ModelsManager;
 
-use super::THREAD_CREATED_CHANNEL_CAPACITY;
 use super::ThreadManager;
-use super::ThreadManagerInner;
 use super::bootstrap::TempPraxisHomeGuard;
 use super::bootstrap::set_thread_manager_test_mode_for_tests;
-use super::bootstrap::should_use_test_thread_manager_behavior;
-use super::registry::ThreadRegistry;
 use super::services::ThreadManagerServices;
+
+mod inner_assembly;
+
+use inner_assembly::ThreadManagerInnerAssembly;
+use inner_assembly::assemble_thread_manager_inner;
 
 impl ThreadManager {
     pub fn new(
@@ -41,29 +40,25 @@ impl ThreadManager {
             config.bundled_skills_enabled(),
             session_source.restriction_product(),
         );
-        let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
         Self {
-            state: Arc::new(ThreadManagerInner {
-                threads: ThreadRegistry::default(),
-                thread_created_tx,
+            state: Arc::new(assemble_thread_manager_inner(ThreadManagerInnerAssembly {
+                auth_manager: Arc::clone(&auth_manager),
                 models_manager: Arc::new(ModelsManager::new_with_provider(
                     praxis_home,
-                    auth_manager.clone(),
+                    auth_manager,
                     config.model_catalog.clone(),
                     collaboration_modes_config,
                     config.model_provider.clone(),
                 )),
                 environment_manager,
-                skills_manager,
-                plugins_manager,
-                mcp_manager,
-                skills_watcher,
-                agent_os: AgentOs::new(),
-                auth_manager,
+                services: ThreadManagerServices {
+                    skills_manager,
+                    plugins_manager,
+                    mcp_manager,
+                    skills_watcher,
+                },
                 session_source,
-                ops_log: should_use_test_thread_manager_behavior()
-                    .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
-            }),
+            })),
             _test_praxis_home_guard: None,
         }
     }
@@ -101,7 +96,6 @@ impl ThreadManager {
     ) -> Self {
         set_thread_manager_test_mode_for_tests(/*enabled*/ true);
         let auth_manager = AuthManager::from_auth_for_testing(auth);
-        let (thread_created_tx, _) = broadcast::channel(THREAD_CREATED_CHANNEL_CAPACITY);
         let ThreadManagerServices {
             skills_manager,
             plugins_manager,
@@ -113,25 +107,22 @@ impl ThreadManager {
             SessionSource::Exec.restriction_product(),
         );
         Self {
-            state: Arc::new(ThreadManagerInner {
-                threads: ThreadRegistry::default(),
-                thread_created_tx,
+            state: Arc::new(assemble_thread_manager_inner(ThreadManagerInnerAssembly {
+                auth_manager: Arc::clone(&auth_manager),
                 models_manager: Arc::new(ModelsManager::with_provider_for_tests(
                     praxis_home,
-                    auth_manager.clone(),
+                    auth_manager,
                     provider,
                 )),
                 environment_manager,
-                skills_manager,
-                plugins_manager,
-                mcp_manager,
-                skills_watcher,
-                agent_os: AgentOs::new(),
-                auth_manager,
+                services: ThreadManagerServices {
+                    skills_manager,
+                    plugins_manager,
+                    mcp_manager,
+                    skills_watcher,
+                },
                 session_source: SessionSource::Exec,
-                ops_log: should_use_test_thread_manager_behavior()
-                    .then(|| Arc::new(std::sync::Mutex::new(Vec::new()))),
-            }),
+            })),
             _test_praxis_home_guard: None,
         }
     }

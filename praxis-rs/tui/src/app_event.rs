@@ -73,7 +73,7 @@ impl RealtimeAudioDeviceKind {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) enum WindowsSandboxEnableMode {
     Elevated,
-    Legacy,
+    NonAdmin,
 }
 
 #[derive(Debug, Clone)]
@@ -473,9 +473,9 @@ pub(crate) enum AppEvent {
         preset: ApprovalPreset,
     },
 
-    /// Open the Windows sandbox fallback prompt after declining or failing elevation.
+    /// Open the Windows sandbox recovery prompt after elevated setup fails.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    OpenWindowsSandboxFallbackPrompt {
+    OpenWindowsSandboxRecoveryPrompt {
         preset: ApprovalPreset,
     },
 
@@ -485,9 +485,9 @@ pub(crate) enum AppEvent {
         preset: ApprovalPreset,
     },
 
-    /// Begin the non-elevated Windows sandbox setup flow.
+    /// Begin the non-admin Windows sandbox setup flow.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    BeginWindowsSandboxLegacySetup {
+    BeginWindowsSandboxNonAdminSetup {
         preset: ApprovalPreset,
     },
 

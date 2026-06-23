@@ -1,4 +1,5 @@
 //! Prototype MCP server.
+#![recursion_limit = "256"]
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 use std::io::ErrorKind;
@@ -43,13 +44,6 @@ pub use crate::patch_approval::PatchApprovalElicitRequestParams;
 pub use crate::patch_approval::PatchApprovalResponse;
 pub use crate::praxis_tool_config::PraxisToolCallParam;
 pub use crate::praxis_tool_config::PraxisToolCallReplyParam;
-
-pub mod compat {
-    #[allow(deprecated)]
-    pub use crate::praxis_tool_config::CodexToolCallParam;
-    #[allow(deprecated)]
-    pub use crate::praxis_tool_config::CodexToolCallReplyParam;
-}
 
 /// Size of the bounded channels used to communicate between tasks. The value
 /// is a balance between throughput and memory usage – 128 messages should be

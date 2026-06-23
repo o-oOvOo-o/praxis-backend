@@ -1,6 +1,6 @@
 mod engine;
 pub mod events;
-mod legacy_notify;
+mod notify;
 mod registry;
 mod schema;
 mod types;
@@ -16,8 +16,8 @@ pub use events::stop::StopOutcome;
 pub use events::stop::StopRequest;
 pub use events::user_prompt_submit::UserPromptSubmitOutcome;
 pub use events::user_prompt_submit::UserPromptSubmitRequest;
-pub use legacy_notify::legacy_notify_json;
-pub use legacy_notify::notify_hook;
+pub use notify::notify_hook;
+pub use notify::notify_payload_json;
 pub use registry::Hooks;
 pub use registry::HooksConfig;
 pub use registry::command_from_argv;

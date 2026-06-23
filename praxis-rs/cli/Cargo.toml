@@ -62,7 +62,7 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-praxis_windows_sandbox = { package = "praxis-windows-sandbox", path = "../windows-sandbox-rs" }
+praxis_windows_sandbox = { package = "praxis-windows-sandbox", path = "../system_plugin/3rd/openai_sandbox/windows-sandbox-rs" }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }

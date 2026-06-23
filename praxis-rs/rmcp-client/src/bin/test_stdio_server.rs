@@ -34,7 +34,7 @@ struct TestToolServer {
     resource_templates: Arc<Vec<ResourceTemplate>>,
 }
 
-const MEMO_URI: &str = "memo://codex/example-note";
+const MEMO_URI: &str = "memo://praxis/example-note";
 const MEMO_CONTENT: &str = "This is a sample MCP resource served by the rmcp test server.";
 const SMALL_PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
 
@@ -121,7 +121,7 @@ impl TestToolServer {
     /// Manual testing approach (Praxis TUI):
     /// - Build this binary: `cargo build -p praxis-rmcp-client --bin test_stdio_server`
     /// - Register it:
-    ///   - `codex mcp add mcpimg -- /abs/path/to/test_stdio_server`
+    ///   - `praxis mcp add mcpimg -- /abs/path/to/test_stdio_server`
     /// - Then in Praxis TUI, ask it to call:
     ///   - `mcpimg.image_scenario({"scenario":"image_only"})`
     ///   - `mcpimg.image_scenario({"scenario":"text_then_image","caption":"Here is the image:"})`
@@ -186,11 +186,11 @@ impl TestToolServer {
 
     fn memo_template() -> ResourceTemplate {
         let raw = RawResourceTemplate {
-            uri_template: "memo://codex/{slug}".to_string(),
+            uri_template: "memo://praxis/{slug}".to_string(),
             name: "praxis-memo".to_string(),
             title: Some("Praxis Memo".to_string()),
             description: Some(
-                "Template for memo://codex/{slug} resources used in tests.".to_string(),
+                "Template for memo://praxis/{slug} resources used in tests.".to_string(),
             ),
             mime_type: Some("text/plain".to_string()),
             icons: None,

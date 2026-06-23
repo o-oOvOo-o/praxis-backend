@@ -1,6 +1,6 @@
 ---
 name: babysit-pr
-description: Babysit a GitHub pull request after creation by continuously polling review comments, CI checks/workflow runs, and mergeability state until the PR is merged/closed or user help is required. Diagnose failures, retry likely flaky failures up to 3 times, auto-fix/push branch-related issues when appropriate, and keep watching open PRs so fresh review feedback is surfaced promptly. Use when the user asks Codex to monitor a PR, watch CI, handle review comments, or keep an eye on failures and feedback on an open PR.
+description: Babysit a GitHub pull request after creation by continuously polling review comments, CI checks/workflow runs, and mergeability state until the PR is merged/closed or user help is required. Diagnose failures, retry likely flaky failures up to 3 times, auto-fix/push branch-related issues when appropriate, and keep watching open PRs so fresh review feedback is surfaced promptly. Use when the user asks Praxis to monitor a PR, watch CI, handle review comments, or keep an eye on failures and feedback on an open PR.
 ---
 
 # PR Babysitter
@@ -44,25 +44,25 @@ Accept any of the following:
 ### One-shot snapshot
 
 ```bash
-python3 .codex/skills/babysit-pr/scripts/gh_pr_watch.py --pr auto --once
+python3 .praxis/skills/babysit-pr/scripts/gh_pr_watch.py --pr auto --once
 ```
 
 ### Continuous watch (JSONL)
 
 ```bash
-python3 .codex/skills/babysit-pr/scripts/gh_pr_watch.py --pr auto --watch
+python3 .praxis/skills/babysit-pr/scripts/gh_pr_watch.py --pr auto --watch
 ```
 
 ### Trigger flaky retry cycle (only when watcher indicates)
 
 ```bash
-python3 .codex/skills/babysit-pr/scripts/gh_pr_watch.py --pr auto --retry-failed-now
+python3 .praxis/skills/babysit-pr/scripts/gh_pr_watch.py --pr auto --retry-failed-now
 ```
 
 ### Explicit PR target
 
 ```bash
-python3 .codex/skills/babysit-pr/scripts/gh_pr_watch.py --pr <number-or-url> --once
+python3 .praxis/skills/babysit-pr/scripts/gh_pr_watch.py --pr <number-or-url> --once
 ```
 
 ## CI Failure Classification
@@ -77,7 +77,7 @@ Prefer treating failures as flaky/unrelated when logs show transient infra/exter
 
 If classification is ambiguous, perform one manual diagnosis attempt before choosing rerun.
 
-Read `.codex/skills/babysit-pr/references/heuristics.md` for a concise checklist.
+Read `.praxis/skills/babysit-pr/references/heuristics.md` for a concise checklist.
 
 ## Review Comment Handling
 The watcher surfaces review items from:
@@ -86,14 +86,14 @@ The watcher surfaces review items from:
 - Inline review comments
 - Review submissions (COMMENT / APPROVED / CHANGES_REQUESTED)
 
-It intentionally surfaces Codex reviewer bot feedback (for example comments/reviews from `chatgpt-codex-connector[bot]`) in addition to human reviewer feedback. Most unrelated bot noise should still be ignored.
-For safety, the watcher only auto-surfaces trusted human review authors (for example repo OWNER/MEMBER/COLLABORATOR, plus the authenticated operator) and approved review bots such as Codex.
+It intentionally surfaces Praxis reviewer bot feedback, including legacy Codex reviewer bots such as `chatgpt-codex-connector[bot]`, in addition to human reviewer feedback. Most unrelated bot noise should still be ignored.
+For safety, the watcher only auto-surfaces trusted human review authors (for example repo OWNER/MEMBER/COLLABORATOR, plus the authenticated operator) and approved review bots such as Praxis.
 On a fresh watcher state file, existing pending review feedback may be surfaced immediately (not only comments that arrive after monitoring starts). This is intentional so already-open review comments are not missed.
 
 When you agree with a comment and it is actionable:
 
 1. Patch code locally.
-2. Commit with `codex: address PR review feedback (#<n>)`.
+2. Commit with `praxis: address PR review feedback (#<n>)`.
 3. Push to the PR head branch.
 4. After the push succeeds, mark the associated GitHub review thread/comment as resolved.
 5. Resume watching on the new SHA immediately (do not stop after reporting the push).
@@ -115,11 +115,11 @@ If a code review comment/thread is already marked as resolved in GitHub, treat i
 
 Commit message defaults:
 
-- `codex: fix CI failure on PR #<n>`
-- `codex: address PR review feedback (#<n>)`
+- `praxis: fix CI failure on PR #<n>`
+- `praxis: address PR review feedback (#<n>)`
 
 ## Monitoring Loop Pattern
-Use this loop in a live Codex session:
+Use this loop in a live Praxis session:
 
 1. Run `--once`.
 2. Read `actions`.
@@ -153,7 +153,7 @@ Keep review polling aggressive and continue monitoring even after CI turns green
 Stop only when one of the following is true:
 
 - PR merged or closed (stop as soon as a poll/snapshot confirms this).
-- User intervention is required and Codex cannot safely proceed alone.
+- User intervention is required and Praxis cannot safely proceed alone.
 
 Keep polling when:
 
@@ -183,5 +183,5 @@ Provide concise progress updates while monitoring and a final summary that inclu
 
 ## References
 
-- Heuristics and decision tree: `.codex/skills/babysit-pr/references/heuristics.md`
-- GitHub CLI/API details used by the watcher: `.codex/skills/babysit-pr/references/github-api-notes.md`
+- Heuristics and decision tree: `.praxis/skills/babysit-pr/references/heuristics.md`
+- GitHub CLI/API details used by the watcher: `.praxis/skills/babysit-pr/references/github-api-notes.md`

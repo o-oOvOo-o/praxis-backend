@@ -1,0 +1,732 @@
+use super::*;
+
+#[tokio::test]
+async fn refresh_mcp_servers_is_deferred_until_next_turn() {
+    let (session, turn_context) = make_session_and_context().await;
+    let old_token = session.mcp_startup_cancellation_token().await;
+    assert!(!old_token.is_cancelled());
+
+    let mcp_oauth_credentials_store_mode =
+        serde_json::to_value(OAuthCredentialsStoreMode::Auto).expect("serialize store mode");
+    let refresh_config = McpServerRefreshConfig {
+        mcp_servers: json!({}),
+        mcp_oauth_credentials_store_mode,
+    };
+    {
+        let mut guard = session.pending_mcp_server_refresh_config.lock().await;
+        *guard = Some(refresh_config);
+    }
+
+    assert!(!old_token.is_cancelled());
+    assert!(
+        session
+            .pending_mcp_server_refresh_config
+            .lock()
+            .await
+            .is_some()
+    );
+
+    session
+        .refresh_mcp_servers_if_requested(&turn_context)
+        .await;
+
+    assert!(old_token.is_cancelled());
+    assert!(
+        session
+            .pending_mcp_server_refresh_config
+            .lock()
+            .await
+            .is_none()
+    );
+    let new_token = session.mcp_startup_cancellation_token().await;
+    assert!(!new_token.is_cancelled());
+}
+
+#[tokio::test]
+async fn record_model_warning_appends_user_message() {
+    let (mut session, turn_context) = make_session_and_context().await;
+    let features = Features::with_defaults().into();
+    session.features = features;
+
+    session
+        .record_model_warning("too many unified exec processes", &turn_context)
+        .await;
+
+    let history = session.clone_history().await;
+    let history_items = history.raw_items();
+    let last = history_items.last().expect("warning recorded");
+
+    match last {
+        ResponseItem::Message { role, content, .. } => {
+            assert_eq!(role, "user");
+            assert_eq!(
+                content,
+                &vec![ContentItem::InputText {
+                    text: "Warning: too many unified exec processes".to_string(),
+                }]
+            );
+        }
+        other => panic!("expected user message, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn spawn_task_does_not_update_previous_turn_settings_for_non_agent_turn_loop_tasks() {
+    let (sess, tc, _rx) = make_session_and_context_with_rx().await;
+    sess.set_previous_turn_settings(/*previous_turn_settings*/ None)
+        .await;
+    let input = vec![UserInput::Text {
+        text: "hello".to_string(),
+        text_elements: Vec::new(),
+    }];
+
+    sess.spawn_task(
+        Arc::clone(&tc),
+        input,
+        NeverEndingTask {
+            kind: AgentTaskKind::Regular,
+            listen_to_cancellation_token: true,
+        },
+    )
+    .await;
+
+    sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    assert_eq!(sess.previous_turn_settings().await, None);
+}
+
+#[tokio::test]
+async fn build_settings_update_items_emits_environment_item_for_network_changes() {
+    let (session, previous_context) = make_session_and_context().await;
+    let previous_context = Arc::new(previous_context);
+    let mut current_context = previous_context
+        .with_model(
+            previous_context.model_info.slug.clone(),
+            &session.services.models_manager,
+        )
+        .await;
+
+    let mut config = (*current_context.config).clone();
+    let mut requirements = config.config_layer_stack.requirements().clone();
+    requirements.network = Some(Sourced::new(
+        NetworkConstraints {
+            domains: Some(NetworkDomainPermissionsToml {
+                entries: std::collections::BTreeMap::from([
+                    (
+                        "api.example.com".to_string(),
+                        NetworkDomainPermissionToml::Allow,
+                    ),
+                    (
+                        "blocked.example.com".to_string(),
+                        NetworkDomainPermissionToml::Deny,
+                    ),
+                ]),
+            }),
+            ..Default::default()
+        },
+        RequirementSource::CloudRequirements,
+    ));
+    let layers = config
+        .config_layer_stack
+        .get_layers(
+            ConfigLayerStackOrdering::LowestPrecedenceFirst,
+            /*include_disabled*/ true,
+        )
+        .into_iter()
+        .cloned()
+        .collect();
+    config.config_layer_stack = ConfigLayerStack::new(
+        layers,
+        requirements,
+        config.config_layer_stack.requirements_toml().clone(),
+    )
+    .expect("rebuild config layer stack with network requirements");
+    current_context.config = Arc::new(config);
+
+    let reference_context_item = previous_context.to_turn_context_item();
+    let update_items = session
+        .build_settings_update_items(Some(&reference_context_item), &current_context)
+        .await;
+
+    let environment_update = update_items
+        .iter()
+        .find_map(|item| match item {
+            ResponseItem::Message { role, content, .. } if role == "user" => {
+                let [ContentItem::InputText { text }] = content.as_slice() else {
+                    return None;
+                };
+                text.contains("<environment_context>").then_some(text)
+            }
+            _ => None,
+        })
+        .expect("environment update item should be emitted");
+    assert!(environment_update.contains("<network enabled=\"true\">"));
+    assert!(environment_update.contains("<allowed>api.example.com</allowed>"));
+    assert!(environment_update.contains("<denied>blocked.example.com</denied>"));
+}
+
+#[tokio::test]
+async fn build_settings_update_items_emits_environment_item_for_time_changes() {
+    let (session, previous_context) = make_session_and_context().await;
+    let previous_context = Arc::new(previous_context);
+    let mut current_context = previous_context
+        .with_model(
+            previous_context.model_info.slug.clone(),
+            &session.services.models_manager,
+        )
+        .await;
+    current_context.current_date = Some("2026-02-27".to_string());
+    current_context.timezone = Some("Europe/Berlin".to_string());
+
+    let reference_context_item = previous_context.to_turn_context_item();
+    let update_items = session
+        .build_settings_update_items(Some(&reference_context_item), &current_context)
+        .await;
+
+    let environment_update = update_items
+        .iter()
+        .find_map(|item| match item {
+            ResponseItem::Message { role, content, .. } if role == "user" => {
+                let [ContentItem::InputText { text }] = content.as_slice() else {
+                    return None;
+                };
+                text.contains("<environment_context>").then_some(text)
+            }
+            _ => None,
+        })
+        .expect("environment update item should be emitted");
+    assert!(environment_update.contains("<current_date>2026-02-27</current_date>"));
+    assert!(environment_update.contains("<timezone>Europe/Berlin</timezone>"));
+}
+
+#[tokio::test]
+async fn build_settings_update_items_emits_realtime_start_when_session_becomes_live() {
+    let (session, previous_context) = make_session_and_context().await;
+    let previous_context = Arc::new(previous_context);
+    let mut current_context = previous_context
+        .with_model(
+            previous_context.model_info.slug.clone(),
+            &session.services.models_manager,
+        )
+        .await;
+    current_context.realtime_active = true;
+
+    let update_items = session
+        .build_settings_update_items(
+            Some(&previous_context.to_turn_context_item()),
+            &current_context,
+        )
+        .await;
+
+    let developer_texts = developer_input_texts(&update_items);
+    assert!(
+        developer_texts
+            .iter()
+            .any(|text| text.contains("<realtime_conversation>")),
+        "expected a realtime start update, got {developer_texts:?}"
+    );
+}
+
+#[tokio::test]
+async fn build_settings_update_items_emits_realtime_end_when_session_stops_being_live() {
+    let (session, mut previous_context) = make_session_and_context().await;
+    previous_context.realtime_active = true;
+    let mut current_context = previous_context
+        .with_model(
+            previous_context.model_info.slug.clone(),
+            &session.services.models_manager,
+        )
+        .await;
+    current_context.realtime_active = false;
+
+    let update_items = session
+        .build_settings_update_items(
+            Some(&previous_context.to_turn_context_item()),
+            &current_context,
+        )
+        .await;
+
+    let developer_texts = developer_input_texts(&update_items);
+    assert!(
+        developer_texts
+            .iter()
+            .any(|text| text.contains("Reason: inactive")),
+        "expected a realtime end update, got {developer_texts:?}"
+    );
+}
+
+#[tokio::test]
+async fn build_settings_update_items_uses_previous_turn_settings_for_realtime_end() {
+    let (session, previous_context) = make_session_and_context().await;
+    let mut previous_context_item = previous_context.to_turn_context_item();
+    previous_context_item.realtime_active = None;
+    let previous_turn_settings = PreviousTurnSettings {
+        model: previous_context.model_info.slug.clone(),
+        realtime_active: Some(true),
+    };
+    let mut current_context = previous_context
+        .with_model(
+            previous_context.model_info.slug.clone(),
+            &session.services.models_manager,
+        )
+        .await;
+    current_context.realtime_active = false;
+
+    session
+        .set_previous_turn_settings(Some(previous_turn_settings))
+        .await;
+    let update_items = session
+        .build_settings_update_items(Some(&previous_context_item), &current_context)
+        .await;
+
+    let developer_texts = developer_input_texts(&update_items);
+    assert!(
+        developer_texts
+            .iter()
+            .any(|text| text.contains("Reason: inactive")),
+        "expected a realtime end update from previous turn settings, got {developer_texts:?}"
+    );
+}
+
+#[tokio::test]
+async fn build_initial_context_uses_previous_realtime_state() {
+    let (session, mut turn_context) = make_session_and_context().await;
+    turn_context.realtime_active = true;
+
+    let initial_context = session.build_initial_context(&turn_context).await;
+    let developer_texts = developer_input_texts(&initial_context);
+    assert!(
+        developer_texts
+            .iter()
+            .any(|text| text.contains("<realtime_conversation>")),
+        "expected initial context to describe active realtime state, got {developer_texts:?}"
+    );
+
+    let previous_context_item = turn_context.to_turn_context_item();
+    {
+        let mut state = session.state.lock().await;
+        state.set_reference_context_item(Some(previous_context_item));
+    }
+    let resumed_context = session.build_initial_context(&turn_context).await;
+    let resumed_developer_texts = developer_input_texts(&resumed_context);
+    assert!(
+        !resumed_developer_texts
+            .iter()
+            .any(|text| text.contains("<realtime_conversation>")),
+        "did not expect a duplicate realtime update, got {resumed_developer_texts:?}"
+    );
+}
+
+#[tokio::test]
+async fn build_initial_context_omits_default_image_save_location_with_image_history() {
+    let (session, turn_context) = make_session_and_context().await;
+    session
+        .replace_history(
+            vec![ResponseItem::ImageGenerationCall {
+                id: "ig-test".to_string(),
+                status: "completed".to_string(),
+                revised_prompt: Some("a tiny blue square".to_string()),
+                result: "Zm9v".to_string(),
+            }],
+            /*reference_context_item*/ None,
+        )
+        .await;
+
+    let initial_context = session.build_initial_context(&turn_context).await;
+    let developer_texts = developer_input_texts(&initial_context);
+    assert!(
+        !developer_texts
+            .iter()
+            .any(|text| text.contains("Generated images are saved to")),
+        "expected initial context to omit image save instructions even with image history, got {developer_texts:?}"
+    );
+}
+
+#[tokio::test]
+async fn build_initial_context_omits_default_image_save_location_without_image_history() {
+    let (session, turn_context) = make_session_and_context().await;
+
+    let initial_context = session.build_initial_context(&turn_context).await;
+    let developer_texts = developer_input_texts(&initial_context);
+
+    assert!(
+        !developer_texts
+            .iter()
+            .any(|text| text.contains("Generated images are saved to")),
+        "expected initial context to omit image save instructions without image history, got {developer_texts:?}"
+    );
+}
+
+#[tokio::test]
+async fn handle_completed_output_item_records_image_save_history_message() {
+    let (session, turn_context) = make_session_and_context().await;
+    let session = Arc::new(session);
+    let turn_context = Arc::new(turn_context);
+    let call_id = "ig_history_records_message";
+    let expected_saved_path = crate::turn_image_output::image_generation_artifact_path(
+        turn_context.config.praxis_home.as_path(),
+        &session.conversation_id.to_string(),
+        call_id,
+    );
+    let _ = std::fs::remove_file(&expected_saved_path);
+    let item = ResponseItem::ImageGenerationCall {
+        id: call_id.to_string(),
+        status: "completed".to_string(),
+        revised_prompt: Some("a tiny blue square".to_string()),
+        result: "Zm9v".to_string(),
+    };
+
+    let mut ctx = CompletedOutputCtx {
+        sess: Arc::clone(&session),
+        turn_context: Arc::clone(&turn_context),
+        tool_runtime: test_tool_runtime(Arc::clone(&session), Arc::clone(&turn_context)),
+        cancellation_token: CancellationToken::new(),
+    };
+    handle_completed_output_item(&mut ctx, item.clone(), /*previously_active_item*/ None)
+        .await
+        .expect("image generation item should succeed");
+
+    let history = session.clone_history().await;
+    let image_output_path = crate::turn_image_output::image_generation_artifact_path(
+        turn_context.config.praxis_home.as_path(),
+        &session.conversation_id.to_string(),
+        "<image_id>",
+    );
+    let image_output_dir = image_output_path
+        .parent()
+        .expect("generated image path should have a parent");
+    let save_message: ResponseItem = DeveloperInstructions::new(format!(
+        "Generated images are saved to {} as {} by default.",
+        image_output_dir.display(),
+        image_output_path.display(),
+    ))
+    .into();
+    let copy_message: ResponseItem = DeveloperInstructions::new(
+        "If you need to use a generated image at another path, copy it and leave the original in place unless the user explicitly asks you to delete it."
+            .to_string(),
+    )
+    .into();
+    assert_eq!(history.raw_items(), &[save_message, copy_message, item]);
+    assert_eq!(
+        std::fs::read(&expected_saved_path).expect("saved file"),
+        b"foo"
+    );
+    let _ = std::fs::remove_file(&expected_saved_path);
+}
+
+#[tokio::test]
+async fn handle_completed_output_item_skips_image_save_message_when_save_fails() {
+    let (session, turn_context) = make_session_and_context().await;
+    let session = Arc::new(session);
+    let turn_context = Arc::new(turn_context);
+    let call_id = "ig_history_no_message";
+    let expected_saved_path = crate::turn_image_output::image_generation_artifact_path(
+        turn_context.config.praxis_home.as_path(),
+        &session.conversation_id.to_string(),
+        call_id,
+    );
+    let _ = std::fs::remove_file(&expected_saved_path);
+    let item = ResponseItem::ImageGenerationCall {
+        id: call_id.to_string(),
+        status: "completed".to_string(),
+        revised_prompt: Some("broken payload".to_string()),
+        result: "_-8".to_string(),
+    };
+
+    let mut ctx = CompletedOutputCtx {
+        sess: Arc::clone(&session),
+        turn_context: Arc::clone(&turn_context),
+        tool_runtime: test_tool_runtime(Arc::clone(&session), Arc::clone(&turn_context)),
+        cancellation_token: CancellationToken::new(),
+    };
+    handle_completed_output_item(&mut ctx, item.clone(), /*previously_active_item*/ None)
+        .await
+        .expect("image generation item should still complete");
+
+    let history = session.clone_history().await;
+    assert_eq!(history.raw_items(), &[item]);
+    assert!(!expected_saved_path.exists());
+}
+
+#[tokio::test]
+async fn build_initial_context_uses_previous_turn_settings_for_realtime_end() {
+    let (session, turn_context) = make_session_and_context().await;
+    let previous_turn_settings = PreviousTurnSettings {
+        model: turn_context.model_info.slug.clone(),
+        realtime_active: Some(true),
+    };
+
+    session
+        .set_previous_turn_settings(Some(previous_turn_settings))
+        .await;
+    let initial_context = session.build_initial_context(&turn_context).await;
+    let developer_texts = developer_input_texts(&initial_context);
+    assert!(
+        developer_texts
+            .iter()
+            .any(|text| text.contains("Reason: inactive")),
+        "expected initial context to describe an ended realtime session, got {developer_texts:?}"
+    );
+}
+
+#[tokio::test]
+async fn build_initial_context_restates_realtime_start_when_reference_context_is_missing() {
+    let (session, mut turn_context) = make_session_and_context().await;
+    turn_context.realtime_active = true;
+    let previous_turn_settings = PreviousTurnSettings {
+        model: turn_context.model_info.slug.clone(),
+        realtime_active: Some(true),
+    };
+
+    session
+        .set_previous_turn_settings(Some(previous_turn_settings))
+        .await;
+    let initial_context = session.build_initial_context(&turn_context).await;
+    let developer_texts = developer_input_texts(&initial_context);
+    assert!(
+        developer_texts
+            .iter()
+            .any(|text| text.contains("<realtime_conversation>")),
+        "expected initial context to restate active realtime when the reference context is missing, got {developer_texts:?}"
+    );
+}
+
+#[tokio::test]
+async fn record_context_updates_and_set_reference_context_item_injects_full_context_when_baseline_missing()
+ {
+    let (session, turn_context) = make_session_and_context().await;
+    session
+        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .await;
+    let history = session.clone_history().await;
+    let initial_context = session.build_initial_context(&turn_context).await;
+    assert_eq!(history.raw_items().to_vec(), initial_context);
+
+    let current_context = session.reference_context_item().await;
+    assert_eq!(
+        serde_json::to_value(current_context).expect("serialize current context item"),
+        serde_json::to_value(Some(turn_context.to_turn_context_item()))
+            .expect("serialize expected context item")
+    );
+}
+
+#[tokio::test]
+async fn record_context_updates_and_set_reference_context_item_reinjects_full_context_after_clear()
+{
+    let (session, turn_context) = make_session_and_context().await;
+    let compacted_summary = ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText {
+            text: format!("{}\nsummary", crate::compact::SUMMARY_PREFIX),
+        }],
+        end_turn: None,
+        phase: None,
+    };
+    session
+        .record_into_history(std::slice::from_ref(&compacted_summary), &turn_context)
+        .await;
+    session
+        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .await;
+    {
+        let mut state = session.state.lock().await;
+        state.set_reference_context_item(/*item*/ None);
+    }
+    session
+        .replace_history(
+            vec![compacted_summary.clone()],
+            /*reference_context_item*/ None,
+        )
+        .await;
+
+    session
+        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .await;
+
+    let history = session.clone_history().await;
+    let mut expected_history = vec![compacted_summary];
+    expected_history.extend(session.build_initial_context(&turn_context).await);
+    assert_eq!(history.raw_items().to_vec(), expected_history);
+}
+
+#[tokio::test]
+async fn record_context_updates_and_set_reference_context_item_persists_baseline_without_emitting_diffs()
+ {
+    let (session, previous_context) = make_session_and_context().await;
+    let next_model = if previous_context.model_info.slug == "gpt-5.1" {
+        "gpt-5"
+    } else {
+        "gpt-5.1"
+    };
+    let turn_context = previous_context
+        .with_model(next_model.to_string(), &session.services.models_manager)
+        .await;
+    let previous_context_item = previous_context.to_turn_context_item();
+    {
+        let mut state = session.state.lock().await;
+        state.set_reference_context_item(Some(previous_context_item.clone()));
+    }
+    let config = session.get_config().await;
+    let recorder = RolloutRecorder::new(
+        config.as_ref(),
+        RolloutRecorderParams::new(
+            ThreadId::default(),
+            /*forked_from_id*/ None,
+            SessionSource::Exec,
+            BaseInstructions::default(),
+            Vec::new(),
+            EventPersistenceMode::Limited,
+        ),
+        /*state_db_ctx*/ None,
+        /*state_builder*/ None,
+    )
+    .await
+    .expect("create rollout recorder");
+    let rollout_path = recorder.rollout_path().to_path_buf();
+    {
+        let mut rollout = session.services.rollout.lock().await;
+        *rollout = Some(recorder);
+    }
+
+    let update_items = session
+        .build_settings_update_items(Some(&previous_context_item), &turn_context)
+        .await;
+    assert_eq!(update_items, Vec::new());
+
+    session
+        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .await;
+
+    assert_eq!(
+        session.clone_history().await.raw_items().to_vec(),
+        Vec::new()
+    );
+    assert_eq!(
+        serde_json::to_value(session.reference_context_item().await)
+            .expect("serialize current context item"),
+        serde_json::to_value(Some(turn_context.to_turn_context_item()))
+            .expect("serialize expected context item")
+    );
+    session.ensure_rollout_materialized().await;
+    session.flush_rollout().await;
+
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    let persisted_turn_context = resumed.history.iter().find_map(|item| match item {
+        RolloutItem::TurnContext(ctx) => Some(ctx.clone()),
+        _ => None,
+    });
+    assert_eq!(
+        serde_json::to_value(persisted_turn_context)
+            .expect("serialize persisted turn context item"),
+        serde_json::to_value(Some(turn_context.to_turn_context_item()))
+            .expect("serialize expected turn context item")
+    );
+}
+
+#[tokio::test]
+async fn build_initial_context_prepends_model_switch_message() {
+    let (session, turn_context) = make_session_and_context().await;
+    let previous_turn_settings = PreviousTurnSettings {
+        model: "previous-regular-model".to_string(),
+        realtime_active: None,
+    };
+
+    session
+        .set_previous_turn_settings(Some(previous_turn_settings))
+        .await;
+    let initial_context = session.build_initial_context(&turn_context).await;
+
+    let ResponseItem::Message { role, content, .. } = &initial_context[0] else {
+        panic!("expected developer message");
+    };
+    assert_eq!(role, "developer");
+    let [ContentItem::InputText { text }, ..] = content.as_slice() else {
+        panic!("expected developer text");
+    };
+    assert!(text.contains("<model_switch>"));
+}
+
+#[tokio::test]
+async fn record_context_updates_and_set_reference_context_item_persists_full_reinjection_to_rollout()
+ {
+    let (session, previous_context) = make_session_and_context().await;
+    let next_model = if previous_context.model_info.slug == "gpt-5.1" {
+        "gpt-5"
+    } else {
+        "gpt-5.1"
+    };
+    let turn_context = previous_context
+        .with_model(next_model.to_string(), &session.services.models_manager)
+        .await;
+    let config = session.get_config().await;
+    let recorder = RolloutRecorder::new(
+        config.as_ref(),
+        RolloutRecorderParams::new(
+            ThreadId::default(),
+            /*forked_from_id*/ None,
+            SessionSource::Exec,
+            BaseInstructions::default(),
+            Vec::new(),
+            EventPersistenceMode::Limited,
+        ),
+        /*state_db_ctx*/ None,
+        /*state_builder*/ None,
+    )
+    .await
+    .expect("create rollout recorder");
+    let rollout_path = recorder.rollout_path().to_path_buf();
+    {
+        let mut rollout = session.services.rollout.lock().await;
+        *rollout = Some(recorder);
+    }
+
+    session
+        .persist_rollout_items(&[RolloutItem::EventMsg(EventMsg::UserMessage(
+            UserMessageEvent {
+                message: "seed rollout".to_string(),
+                images: None,
+                local_images: Vec::new(),
+                text_elements: Vec::new(),
+            },
+        ))])
+        .await;
+    {
+        let mut state = session.state.lock().await;
+        state.set_reference_context_item(/*item*/ None);
+    }
+
+    session
+        .set_previous_turn_settings(Some(PreviousTurnSettings {
+            model: previous_context.model_info.slug.clone(),
+            realtime_active: Some(previous_context.realtime_active),
+        }))
+        .await;
+    session
+        .record_context_updates_and_set_reference_context_item(&turn_context)
+        .await;
+    session.ensure_rollout_materialized().await;
+    session.flush_rollout().await;
+
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    let persisted_turn_context = resumed.history.iter().find_map(|item| match item {
+        RolloutItem::TurnContext(ctx) => Some(ctx.clone()),
+        _ => None,
+    });
+
+    assert_eq!(
+        serde_json::to_value(persisted_turn_context)
+            .expect("serialize persisted turn context item"),
+        serde_json::to_value(Some(turn_context.to_turn_context_item()))
+            .expect("serialize expected turn context item")
+    );
+}

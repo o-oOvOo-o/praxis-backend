@@ -1,10 +1,10 @@
 use crate::agent_os::classification::requires_compile;
 use crate::agent_os::classification::requires_cpu_heavy;
 use crate::agent_os::classification::requires_write;
-use crate::agent_os::model::ActionIntent;
-use crate::agent_os::model::ActionIntentKind;
-use crate::agent_os::model::CapabilityProfile;
-use crate::agent_os::model::ResourceRequirement;
+use crate::agent_os::records::ActionIntent;
+use crate::agent_os::records::ActionIntentKind;
+use crate::agent_os::records::CapabilityProfile;
+use crate::agent_os::records::ResourceRequirement;
 
 impl CapabilityProfile {
     pub(in crate::agent_os) fn capability_names_for_action(

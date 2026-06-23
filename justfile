@@ -10,10 +10,6 @@ alias p := praxis
 praxis *args:
     cargo run --bin praxis -- "$@"
 
-# Legacy alias for local workflows that still type `just codex`.
-codex *args:
-    cargo run --bin praxis -- "$@"
-
 # `praxis exec`
 exec *args:
     cargo run --bin praxis -- exec "$@"
@@ -60,12 +56,7 @@ test:
 # to ensure that Bazel runs the command in the current working directory.
 [no-cd]
 bazel-praxis *args:
-    bazel run //praxis-rs/cli:codex --run_under="cd $PWD &&" -- "$@"
-
-# Legacy alias while the Bazel binary target is still named `codex`.
-[no-cd]
-bazel-codex *args:
-    bazel run //praxis-rs/cli:codex --run_under="cd $PWD &&" -- "$@"
+    bazel run //praxis-rs/cli:praxis --run_under="cd $PWD &&" -- "$@"
 
 [no-cd]
 bazel-lock-update:

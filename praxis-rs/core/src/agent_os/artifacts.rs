@@ -1,3 +1,7 @@
+use super::*;
+
+mod blobs;
+
 use crate::exec::ExecStreamSpool;
 use serde_json::json;
 use std::path::PathBuf;

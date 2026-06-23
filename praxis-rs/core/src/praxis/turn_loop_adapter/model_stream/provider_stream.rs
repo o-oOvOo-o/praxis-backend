@@ -16,7 +16,7 @@ mod driver;
 mod opening;
 mod retry;
 mod retry_notice;
-mod retry_transport;
+mod transport_failover;
 mod retrying;
 
 pub(super) fn open_event_stream(

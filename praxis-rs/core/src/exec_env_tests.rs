@@ -218,8 +218,8 @@ fn test_inherit_none() {
 fn populate_env_strips_inherited_codex_state_env_vars() {
     let vars = make_vars(&[
         ("PATH", "/usr/bin"),
-        ("CODEX_HOME", "/tmp/codex"),
-        ("CODEX_SQLITE_HOME", "/tmp/codex-db"),
+        ("CODEX_HOME", "/tmp/legacy-home"),
+        ("CODEX_SQLITE_HOME", "/tmp/legacy-db"),
         ("CODEX_HOME_NAMESPACE", "codex"),
         ("CODEX_THREAD_ID", "old-thread"),
     ]);

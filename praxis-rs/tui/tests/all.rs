@@ -3,6 +3,6 @@
 mod test_backend;
 
 #[allow(unused_imports)]
-use praxis_cli as _; // Keep dev-dep for cargo-shear; tests spawn the codex binary.
+use praxis_cli as _; // Keep dev-dep for cargo-shear; tests spawn the praxis binary.
 
 mod suite;

@@ -2,7 +2,7 @@
 
 Praxis owns the product identity, runtime model, App Gateway, TUI, plugin system,
 and local state. Codex names may only remain when they describe an external
-source, a legacy wire contract, a model slug, or a backward-compatibility alias.
+source, a legacy wire contract, or a model slug.
 
 ## Classification
 
@@ -10,7 +10,7 @@ source, a legacy wire contract, a model slug, or a backward-compatibility alias.
 
 - Public install and run instructions should say Praxis.
 - README, contribution, CLA, open-source-fund, install, config, sandbox, skills,
-  exec, and TUI docs should not point users at the upstream Codex product.
+  exec, and TUI docs should not point users at the external Codex product.
 - Packaging metadata should describe Praxis as the shipped program.
 - Internal JS REPL helper docs should teach `praxis.*` first.
 
@@ -18,22 +18,20 @@ source, a legacy wire contract, a model slug, or a backward-compatibility alias.
 
 Keep these behind an explicit Codex compatibility boundary:
 
-- Legacy local state read-through from upstream Codex homes.
+- Legacy local state read-through from external Codex homes.
 - Legacy authentication/config import paths.
 - Legacy environment variables such as `CODEX_*`, with Praxis aliases added
   before any deprecation.
-- Legacy JS REPL global `codex.*`, implemented as an alias to `praxis.*`.
 - Legacy slash commands or import flows that explicitly resume or migrate
-  upstream Codex sessions.
-- Legacy packaging, binary, or Bazel target aliases needed by existing scripts.
+  external Codex sessions.
 - Wire protocol fields whose public contract is already named Codex.
 
 ### External facts
 
-Do not rename these unless the upstream artifact changes:
+Do not rename these unless the external artifact changes:
 
 - Model identifiers that include `codex`, for example `gpt-*-codex`.
-- Upstream artifact URLs, checksums, and third-party release locations.
+- External artifact URLs, checksums, and third-party release locations.
 - Imported external session source names when the source is literally Codex.
 
 ## Target Module Boundary
@@ -48,10 +46,8 @@ Suggested ownership:
 - `compat::codex::env`: maps `CODEX_*` variables to Praxis runtime settings.
 - `compat::codex::wire`: owns old wire names, payload aliases, and API path
   aliases that must remain stable.
-- `compat::codex::js_repl`: exposes `codex.*` as a thin alias over `praxis.*`.
-- `compat::codex::packaging`: keeps legacy CLI/npm/Bazel target aliases.
 - `external_agent_migration::sessions::codex`: stays as the importer for
-  actual upstream Codex session data.
+  actual external Codex session data.
 
 Everything outside this boundary should use Praxis, provider-neutral, or
 domain-neutral names.
@@ -62,13 +58,13 @@ The broad scan currently finds thousands of Codex matches because historical
 rollout fixtures, tests, model slugs, and external-source samples repeat the
 string many times. The actionable hotspots are narrower:
 
-- `praxis_login::OpenAiAccountAuth` is the internal auth name. `CodexAuth`
-  should remain only as a compatibility alias where older callers still import
-  it.
+- `praxis_login::OpenAiAccountAuth` is the only internal OpenAI account auth
+  name. Old login aliases are removed; compatibility belongs in explicit
+  import/config readers, not generic Rust exports.
 - `praxis_utils_home_dir::*codex*` and `config_loader`: should own legacy home
   read-through behind `compat::codex::home`.
 - `/backend-api/codex/*`, `/codex/safety/arc`, and usage settings URLs: wire
-  names for upstream services, owned by `compat::codex::wire`.
+  names for hosted compatibility services, owned by `compat::codex::wire`.
 - `CODEX_*` environment variables: map through `compat::codex::env` and add
   `PRAXIS_*` aliases before removing legacy names.
 - `llm::profiles::openai_responses` is the internal profile module. The
@@ -76,8 +72,7 @@ string many times. The actionable hotspots are narrower:
   not the internal module name.
 - `external_agent_migration::sessions::codex`: keep as the importer for real
   Codex session archives.
-- `justfile` and Bazel `//praxis-rs/cli:codex`: keep as build aliases until a
-  `praxis` target exists and is exercised by CI/scripts.
+- Build and release scripts should use the `praxis` binary and package names.
 
 ## Current Retained Codex Surfaces
 
@@ -89,10 +84,10 @@ Retain these unless a replacement protocol or migration has already shipped:
 - Rate-limit and telemetry wire buckets whose canonical id is `codex`.
 - `CODEX_*` environment variables used as legacy read-through inputs, with
   Praxis aliases preferred internally.
-- `.codex` filesystem paths when they mean upstream Codex home, project config
+- `.codex` filesystem paths when they mean external Codex home, project config
   compatibility, external session import, or sandbox protected subdirectories.
 - `/codex` slash command and `SessionLookupSource::Codex`, because the source is
-  literally upstream Codex sessions.
+  literally external Codex sessions.
 - `external_agent_migration::sessions::codex`, because it is the
   anti-corruption layer for real Codex rollout/session formats.
 - MCP or app-gateway wire aliases such as `codex/event` and
@@ -100,18 +95,32 @@ Retain these unless a replacement protocol or migration has already shipped:
 
 ## Recently Cleaned Identity Residue
 
-- Issue template product wording now points at Praxis CLI and `@openai/praxis`.
+- Issue template product wording now points at Praxis CLI and `@praxis/praxis`.
 - Test support module names use `test_praxis` / `TestPraxis`.
 - `TestPraxis` exposes its live thread handle as `thread`, not `codex`.
 - The exec policy example extension moved from `.codexpolicy` to
   `.praxispolicy`.
 - The local Responses WebSocket helper script now documents `praxis --profile`
   and the `test_praxis` flow.
+- App Gateway docs now document `praxisHome` and `praxisErrorInfo`, matching the
+  current protocol schema instead of legacy field names.
+- Startup and shell environment code now call neutral external-agent state
+  scrubbing APIs; raw `CODEX_*` constants live in the home-dir compatibility
+  boundary.
+- Guardian approval prompts and fixture repositories use Praxis wording and
+  Praxis example repositories.
+- npm native packaging uses only the Praxis layout (`vendor/<target>/praxis`).
+- Release, code-sign, DotSlash, and installer paths now target the `praxis`
+  binary instead of stale `codex` build outputs.
+- TUI snapshots now use Praxis product wording, and the unused old `oss-story`
+  recording was removed instead of carrying stale `codex_event` logs.
+- MCP tool calls accept the `praxis` tool name only; the hidden `codex` tool
+  alias was removed.
 
 ## Brooks-Style Design Rules
 
 - Conceptual integrity: a core type should not be named Codex unless its domain
-  is specifically upstream Codex compatibility.
+  is specifically external Codex compatibility.
 - Separation of concerns: compatibility translates at the edges; product logic
   consumes Praxis or neutral abstractions.
 - Information hiding: callers should not know whether a config value came from
@@ -119,15 +128,15 @@ Retain these unless a replacement protocol or migration has already shipped:
 - Change locality: removing a legacy Codex alias should touch the compatibility
   module and tests, not App Gateway, TUI, core session logic, and packaging at
   once.
-- Build stability: introduce Praxis aliases before deleting Codex aliases from
-  scripts, CI, and Bazel targets.
+- Build stability: scripts, CI, package metadata, and Bazel targets must use
+  Praxis identity unless a public wire contract requires a legacy name.
 
 ## Migration Plan
 
 1. Public identity cleanup: remove user-facing Codex product branding from docs,
    package metadata, and primary commands.
-2. Add additive Praxis aliases for environment variables, JS globals, binary
-   targets, and config names while preserving Codex aliases.
+2. Add additive Praxis aliases for environment variables, JS globals, and config
+   names while preserving only externally observable compatibility aliases.
 3. Move direct Codex constants into `compat::codex::*` modules with tests around
    fallback order and alias behavior.
 4. Update internal callers to consume Praxis or neutral abstractions.

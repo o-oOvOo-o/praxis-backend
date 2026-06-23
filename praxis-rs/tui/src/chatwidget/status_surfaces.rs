@@ -4,7 +4,17 @@
 //! behavior easier to review without paging through the rest of `chatwidget.rs`.
 
 use super::*;
+use crate::bottom_pane::StatusLineItem;
+use crate::bottom_pane::StatusLinePreviewData;
+use crate::bottom_pane::StatusLineSetupView;
+use crate::bottom_pane::TerminalTitleItem;
+use crate::bottom_pane::TerminalTitlePreviewData;
+use crate::bottom_pane::TerminalTitleSetupView;
+use crate::status::RateLimitSnapshotDisplay;
+use crate::status::RateLimitWindowDisplay;
 use crate::status_runtime::GENERIC_STATUS_HEADER;
+use praxis_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
+use praxis_protocol::protocol::TokenUsage;
 
 /// Items shown in the terminal title when the user has not configured a
 /// custom selection.
@@ -69,6 +79,123 @@ pub(super) struct CachedProjectRootName {
 }
 
 impl ChatWidget {
+    pub(super) fn open_status_line_setup(&mut self) {
+        let configured_status_line_items = self.configured_status_line_items();
+        let view = StatusLineSetupView::new(
+            Some(configured_status_line_items.as_slice()),
+            StatusLinePreviewData::from_iter(StatusLineItem::iter().filter_map(|item| {
+                self.status_line_value_for_item(&item)
+                    .map(|value| (item, value))
+            })),
+            self.app_event_tx.clone(),
+        );
+        self.bottom_pane.show_view(Box::new(view));
+    }
+
+    pub(super) fn open_terminal_title_setup(&mut self) {
+        let configured_terminal_title_items = self.configured_terminal_title_items();
+        self.terminal_title_setup_original_items = Some(self.tui_config.terminal_title.clone());
+        let now = Instant::now();
+        let view = TerminalTitleSetupView::new(
+            Some(configured_terminal_title_items.as_slice()),
+            TerminalTitlePreviewData::from_iter(TerminalTitleItem::iter().filter_map(|item| {
+                self.terminal_title_value_for_item(item, now)
+                    .map(|value| (item, value))
+            })),
+            self.app_event_tx.clone(),
+        );
+        self.bottom_pane.show_view(Box::new(view));
+    }
+
+    pub(super) fn open_theme_picker(&mut self) {
+        let praxis_home = praxis_core::config::find_praxis_home().ok();
+        let terminal_width = self
+            .last_rendered_width
+            .get()
+            .and_then(|width| u16::try_from(width).ok());
+        let params = crate::theme_picker::build_theme_picker_params(
+            self.tui_config.theme.as_deref(),
+            praxis_home.as_deref(),
+            terminal_width,
+        );
+        self.bottom_pane.show_selection_view(params);
+    }
+
+    pub(super) fn open_surface_theme_picker(&mut self) {
+        let params = crate::surface_theme_picker::build_surface_theme_picker_params(
+            self.tui_config.surface_theme.as_deref(),
+            self.current_model_provider_id(),
+            self.model_display_name(),
+        );
+        self.bottom_pane.show_selection_view(params);
+    }
+
+    pub(crate) fn add_status_output(
+        &mut self,
+        refreshing_rate_limits: bool,
+        request_id: Option<u64>,
+    ) {
+        let default_usage = TokenUsage::default();
+        let token_info = self.token_info.as_ref();
+        let total_usage = token_info
+            .map(|ti| &ti.total_token_usage)
+            .unwrap_or(&default_usage);
+        let collaboration_mode = self.collaboration_mode_label();
+        let reasoning_effort_override = Some(self.effective_reasoning_effort());
+        let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
+            .rate_limit_snapshots_by_limit_id
+            .values()
+            .cloned()
+            .collect();
+        let (cell, handle) = crate::status::new_status_output_with_rate_limits_handle(
+            &self.config,
+            self.status_account_display.as_ref(),
+            token_info,
+            total_usage,
+            &self.thread_id,
+            self.thread_name.clone(),
+            self.forked_from,
+            rate_limit_snapshots.as_slice(),
+            self.plan_type,
+            Local::now(),
+            self.model_display_name(),
+            collaboration_mode,
+            reasoning_effort_override,
+            refreshing_rate_limits,
+        );
+        if let Some(request_id) = request_id {
+            self.refreshing_status_outputs.push((request_id, handle));
+        }
+        self.add_to_history(cell);
+    }
+
+    pub(crate) fn finish_status_rate_limit_refresh(&mut self, request_id: u64) {
+        if self.refreshing_status_outputs.is_empty() {
+            return;
+        }
+
+        let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
+            .rate_limit_snapshots_by_limit_id
+            .values()
+            .cloned()
+            .collect();
+        let now = Local::now();
+        let mut remaining = Vec::with_capacity(self.refreshing_status_outputs.len());
+        let mut updated_any = false;
+        for (pending_request_id, handle) in self.refreshing_status_outputs.drain(..) {
+            if pending_request_id == request_id {
+                updated_any = true;
+                handle.finish_rate_limit_refresh(rate_limit_snapshots.as_slice(), now);
+            } else {
+                remaining.push((pending_request_id, handle));
+            }
+        }
+        self.refreshing_status_outputs = remaining;
+        if updated_any {
+            self.request_redraw();
+        }
+    }
+
     fn status_surface_selections(&self) -> StatusSurfaceSelections {
         let (status_line_items, invalid_status_line_items) = self.status_line_items_with_invalids();
         let (terminal_title_items, invalid_terminal_title_items) =

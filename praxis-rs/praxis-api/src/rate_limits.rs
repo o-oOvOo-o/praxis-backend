@@ -153,9 +153,7 @@ pub fn parse_rate_limit_event(payload: &str) -> Option<RateLimitSnapshot> {
         .or(event.limit_name)
         .map(normalize_limit_id);
     Some(RateLimitSnapshot {
-        limit_id: Some(
-            limit_id.unwrap_or_else(|| OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string()),
-        ),
+        limit_id: Some(limit_id.unwrap_or_else(|| OPENAI_HOSTED_PRIMARY_RATE_LIMIT_ID.to_string())),
         limit_name: None,
         primary,
         secondary,

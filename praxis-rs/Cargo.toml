@@ -12,7 +12,8 @@ members = [
     "app-gateway",
     "app-gateway-test-client",
     "debug-client",
-    "apply-patch",
+    "tools/3rd/openai_apply_patch",
+    "system_plugin/approval_control",
     "arg0",
     "feedback",
     "features",
@@ -36,10 +37,10 @@ members = [
     "secrets",
     "exec",
     "exec-server",
-    "execpolicy",
+    "system_plugin/3rd/openai_sandbox/execpolicy",
     "keyring-store",
     "file-search",
-    "linux-sandbox",
+    "system_plugin/3rd/openai_sandbox/linux-sandbox",
     "lmstudio",
     "login",
     "loop",
@@ -53,7 +54,7 @@ members = [
     "rollout",
     "rmcp-client",
     "responses-api-proxy",
-    "sandboxing",
+    "system_plugin/3rd/openai_sandbox/sandboxing",
     "stdio-to-uds",
     "otel",
     "tui",
@@ -114,7 +115,8 @@ praxis-app-gateway-protocol = { path = "app-gateway-protocol" }
 praxis-app-gateway-service = { path = "app-gateway-service" }
 praxis-app-gateway = { path = "app-gateway" }
 praxis-app-gateway-test-client = { path = "app-gateway-test-client" }
-praxis-apply-patch = { path = "apply-patch" }
+praxis-apply-patch = { path = "tools/3rd/openai_apply_patch" }
+praxis-system-plugin-approval-control = { path = "system_plugin/approval_control" }
 praxis-arg0 = { path = "arg0" }
 praxis-async-utils = { path = "async-utils" }
 praxis-backend-client = { path = "backend-client" }
@@ -131,7 +133,7 @@ praxis-core = { path = "core" }
 praxis-core-skills = { path = "core-skills" }
 praxis-exec = { path = "exec" }
 praxis-exec-server = { path = "exec-server" }
-praxis-execpolicy = { path = "execpolicy" }
+praxis-execpolicy = { path = "system_plugin/3rd/openai_sandbox/execpolicy" }
 praxis-experimental-api-macros = { path = "praxis-experimental-api-macros" }
 praxis-features = { path = "features" }
 praxis-feedback = { path = "feedback" }
@@ -141,7 +143,7 @@ praxis-hooks = { path = "hooks" }
 praxis-host-sdk = { path = "host-sdk" }
 praxis-instructions = { path = "instructions" }
 praxis-keyring-store = { path = "keyring-store" }
-praxis-linux-sandbox = { path = "linux-sandbox" }
+praxis-linux-sandbox = { path = "system_plugin/3rd/openai_sandbox/linux-sandbox" }
 praxis-lmstudio = { path = "lmstudio" }
 praxis-login = { path = "login" }
 praxis-loop = { path = "loop" }
@@ -157,7 +159,7 @@ praxis-protocol = { path = "protocol" }
 praxis-responses-api-proxy = { path = "responses-api-proxy" }
 praxis-rmcp-client = { path = "rmcp-client" }
 praxis-rollout = { path = "rollout" }
-praxis-sandboxing = { path = "sandboxing" }
+praxis-sandboxing = { path = "system_plugin/3rd/openai_sandbox/sandboxing" }
 praxis-secrets = { path = "secrets" }
 praxis-shell-command = { path = "shell-command" }
 praxis-shell-escalation = { path = "shell-escalation" }
@@ -190,7 +192,7 @@ praxis-utils-stream-parser = { path = "utils/stream-parser" }
 praxis-utils-string = { path = "utils/string" }
 praxis-utils-template = { path = "utils/template" }
 praxis-v8-poc = { path = "v8-poc" }
-praxis-windows-sandbox = { path = "windows-sandbox-rs" }
+praxis-windows-sandbox = { path = "system_plugin/3rd/openai_sandbox/windows-sandbox-rs" }
 core_test_support = { path = "core/tests/common" }
 mcp_test_support = { path = "mcp-server/tests/common" }
 
@@ -424,7 +426,7 @@ split-debuginfo = "off"
 # remove everything to make the binary as small as possible.
 strip = "symbols"
 
-# See https://github.com/openai/codex/issues/1411 for details.
+# Keep codegen units low because several shipped binaries have tight package-size budgets.
 codegen-units = 1
 
 [profile.ci-test]

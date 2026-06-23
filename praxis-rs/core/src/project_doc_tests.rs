@@ -277,7 +277,7 @@ async fn concatenates_root_and_cwd_docs() {
 #[tokio::test]
 async fn project_root_markers_are_honored_for_agents_discovery() {
     let root = tempfile::tempdir().expect("tempdir");
-    fs::write(root.path().join(".codex-root"), "").unwrap();
+    fs::write(root.path().join(".praxis-root"), "").unwrap();
     fs::write(root.path().join("AGENTS.md"), "parent doc").unwrap();
 
     let nested = root.path().join("dir1");
@@ -288,7 +288,7 @@ async fn project_root_markers_are_honored_for_agents_discovery() {
         &root,
         /*limit*/ 4096,
         /*instructions*/ None,
-        &[".codex-root"],
+        &[".praxis-root"],
     )
     .await;
     cfg.cwd = nested.abs();

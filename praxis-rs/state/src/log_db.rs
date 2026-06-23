@@ -33,6 +33,8 @@ use tracing::span::Id;
 use tracing::span::Record;
 use tracing_subscriber::Layer;
 use tracing_subscriber::field::RecordFields;
+use tracing_subscriber::filter::LevelFilter;
+use tracing_subscriber::filter::Targets;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::fmt::FormattedFields;
 use tracing_subscriber::fmt::format::DefaultFields;
@@ -45,6 +47,9 @@ use crate::StateRuntime;
 const LOG_QUEUE_CAPACITY: usize = 512;
 const LOG_BATCH_SIZE: usize = 128;
 const LOG_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
+pub const SQLITE_LOG_LEVEL_ENV: &str = "PRAXIS_SQLITE_LOG_LEVEL";
+const DEFAULT_SQLITE_LOG_LEVEL: LevelFilter = LevelFilter::WARN;
+
 pub struct LogDbLayer {
     sender: mpsc::Sender<LogDbCommand>,
     process_uuid: String,
@@ -58,6 +63,27 @@ pub fn start(state_db: std::sync::Arc<StateRuntime>) -> LogDbLayer {
     LogDbLayer {
         sender,
         process_uuid,
+    }
+}
+
+pub fn default_filter() -> Option<Targets> {
+    sqlite_log_level_setting().map(|level| Targets::new().with_default(level))
+}
+
+fn sqlite_log_level_setting() -> Option<LevelFilter> {
+    let Ok(raw) = std::env::var(SQLITE_LOG_LEVEL_ENV) else {
+        return Some(DEFAULT_SQLITE_LOG_LEVEL);
+    };
+    let value = raw.trim().to_ascii_lowercase();
+    match value.as_str() {
+        "" => Some(DEFAULT_SQLITE_LOG_LEVEL),
+        "off" | "none" | "false" | "0" => None,
+        "error" => Some(LevelFilter::ERROR),
+        "warn" | "warning" => Some(LevelFilter::WARN),
+        "info" => Some(LevelFilter::INFO),
+        "debug" => Some(LevelFilter::DEBUG),
+        "trace" => Some(LevelFilter::TRACE),
+        _ => Some(DEFAULT_SQLITE_LOG_LEVEL),
     }
 }
 

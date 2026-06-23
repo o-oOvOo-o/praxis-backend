@@ -69,7 +69,9 @@ async fn praxis_returns_json_result(model: String) -> anyhow::Result<()> {
     responses::mount_sse_once_match(&server, match_json_text_param, sse1).await;
 
     let TestPraxis {
-        thread: codex, cwd, ..
+        thread: praxis,
+        cwd,
+        ..
     } = test_praxis().build(&server).await?;
 
     // 1) Normal user input – should hit server once.
@@ -93,7 +95,7 @@ async fn praxis_returns_json_result(model: String) -> anyhow::Result<()> {
         })
         .await?;
 
-    let message = wait_for_event(&codex, |ev| matches!(ev, EventMsg::AgentMessage(_))).await;
+    let message = wait_for_event(&praxis, |ev| matches!(ev, EventMsg::AgentMessage(_))).await;
     if let EventMsg::AgentMessage(message) = message {
         let json: serde_json::Value = serde_json::from_str(&message.message)?;
         assert_eq!(

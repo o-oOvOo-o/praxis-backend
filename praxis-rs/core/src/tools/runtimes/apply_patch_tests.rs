@@ -96,7 +96,7 @@ fn build_sandbox_command_prefers_configured_praxis_self_exe_for_apply_patch() {
         permissions_preapproved: false,
         timeout_ms: None,
     };
-    let praxis_self_exe = PathBuf::from("/tmp/codex");
+    let praxis_self_exe = PathBuf::from("/tmp/praxis");
 
     let command = ApplyPatchRuntime::build_sandbox_command(&request, Some(&praxis_self_exe))
         .expect("build sandbox command");

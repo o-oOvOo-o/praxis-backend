@@ -2,7 +2,7 @@ use praxis_config::types::EnvironmentVariablePattern;
 use praxis_config::types::ShellEnvironmentPolicy;
 use praxis_config::types::ShellEnvironmentPolicyInherit;
 use praxis_protocol::ThreadId;
-use praxis_utils_home_dir::is_upstream_codex_state_env_var;
+use praxis_utils_home_dir::is_external_agent_state_env_var;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -19,11 +19,9 @@ pub const PRAXIS_THREAD_ID_ENV_VAR: &str = "PRAXIS_THREAD_ID";
 /// `PRAXIS_THREAD_ID` is injected when a thread id is provided, even when
 /// `include_only` is set.
 ///
-/// Praxis also strips inherited Codex state variables by default.  Those
-/// variables belong to the upstream Codex CLI and must not leak through Praxis
-/// into nested shells or child Codex processes.  A command policy may still set
-/// them explicitly via `set` when a task intentionally needs to control an
-/// upstream Codex process.
+/// Praxis also strips inherited external agent state variables by default.
+/// A command policy may still set them explicitly via `set` when a task
+/// intentionally needs to control a compatibility process.
 pub fn create_env(
     policy: &ShellEnvironmentPolicy,
     thread_id: Option<ThreadId>,
@@ -82,12 +80,11 @@ where
         env_map.retain(|k, _| !matches_any(k, &policy.exclude));
     }
 
-    // Step 4 – Strip inherited upstream Codex state variables.  These are not
+    // Step 4 – Strip inherited external agent state variables.  These are not
     // secrets, so the KEY/SECRET/TOKEN default filter will not remove them, but
-    // they can make nested official Codex processes attach to the wrong thread
-    // or write into a stale state database.  Do this before user-provided
-    // overrides so an explicit command policy can still opt back in.
-    env_map.retain(|k, _| !is_upstream_codex_state_env_var(k));
+    // they can make nested external agent processes attach to the wrong thread
+    // or write into a stale state database.
+    env_map.retain(|k, _| !is_external_agent_state_env_var(k));
 
     // Step 5 – Apply user-provided overrides.
     for (key, val) in &policy.r#set {

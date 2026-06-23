@@ -10,8 +10,9 @@ set -e
 
 # Default the work directory to WORKSPACE_ROOT_DIR if not provided.
 WORK_DIR="${WORKSPACE_ROOT_DIR:-$(pwd)}"
-# Default allowed domains - can be overridden with OPENAI_ALLOWED_DOMAINS env var
-OPENAI_ALLOWED_DOMAINS="${OPENAI_ALLOWED_DOMAINS:-api.openai.com}"
+# Default allowed domains - can be overridden with PRAXIS_ALLOWED_DOMAINS.
+PRAXIS_ALLOWED_DOMAINS="${PRAXIS_ALLOWED_DOMAINS:-${OPENAI_ALLOWED_DOMAINS:-api.openai.com}}"
+PRAXIS_CONTAINER_IMAGE="${PRAXIS_CONTAINER_IMAGE:-praxis}"
 
 # Parse optional flag.
 if [ "$1" = "--work_dir" ]; then
@@ -47,9 +48,9 @@ if [ -z "$WORK_DIR" ]; then
   exit 1
 fi
 
-# Verify that OPENAI_ALLOWED_DOMAINS is not empty
-if [ -z "$OPENAI_ALLOWED_DOMAINS" ]; then
-  echo "Error: OPENAI_ALLOWED_DOMAINS is empty."
+# Verify that PRAXIS_ALLOWED_DOMAINS is not empty
+if [ -z "$PRAXIS_ALLOWED_DOMAINS" ]; then
+  echo "Error: PRAXIS_ALLOWED_DOMAINS is empty."
   exit 1
 fi
 
@@ -62,22 +63,22 @@ docker run --name "$CONTAINER_NAME" -d \
   --cap-add=NET_ADMIN \
   --cap-add=NET_RAW \
   -v "$WORK_DIR:/app$WORK_DIR" \
-  codex \
+  "$PRAXIS_CONTAINER_IMAGE" \
   sleep infinity
 
 # Write the allowed domains to a file in the container
-docker exec --user root "$CONTAINER_NAME" bash -c "mkdir -p /etc/codex"
-for domain in $OPENAI_ALLOWED_DOMAINS; do
+docker exec --user root "$CONTAINER_NAME" bash -c "mkdir -p /etc/praxis"
+for domain in $PRAXIS_ALLOWED_DOMAINS; do
   # Validate domain format to prevent injection
   if [[ ! "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
     echo "Error: Invalid domain format: $domain"
     exit 1
   fi
-  echo "$domain" | docker exec --user root -i "$CONTAINER_NAME" bash -c "cat >> /etc/codex/allowed_domains.txt"
+  echo "$domain" | docker exec --user root -i "$CONTAINER_NAME" bash -c "cat >> /etc/praxis/allowed_domains.txt"
 done
 
 # Set proper permissions on the domains file
-docker exec --user root "$CONTAINER_NAME" bash -c "chmod 444 /etc/codex/allowed_domains.txt && chown root:root /etc/codex/allowed_domains.txt"
+docker exec --user root "$CONTAINER_NAME" bash -c "chmod 444 /etc/praxis/allowed_domains.txt && chown root:root /etc/praxis/allowed_domains.txt"
 
 # Initialize the firewall inside the container as root user
 docker exec --user root "$CONTAINER_NAME" bash -c "/usr/local/bin/init_firewall.sh"
@@ -92,4 +93,5 @@ quoted_args=""
 for arg in "$@"; do
   quoted_args+=" $(printf '%q' "$arg")"
 done
-docker exec -it "$CONTAINER_NAME" bash -c "cd \"/app$WORK_DIR\" && codex --full-auto ${quoted_args}"
+PRAXIS_CONTAINER_CMD="praxis"
+docker exec -it "$CONTAINER_NAME" bash -c "cd \"/app$WORK_DIR\" && $PRAXIS_CONTAINER_CMD --full-auto ${quoted_args}"

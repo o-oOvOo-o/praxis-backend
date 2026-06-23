@@ -25,9 +25,7 @@ pub(super) async fn process(
                 }
                 prev_agent_message = Some(event);
             }
-            // Suppress ItemCompleted only for assistant messages: forwarding it
-            // would trigger legacy AgentMessage via as_legacy_events(), which this
-            // review flow intentionally hides in favor of structured output.
+            // Suppress assistant message items because review mode renders structured output.
             EventMsg::ItemCompleted(ItemCompletedEvent {
                 item: TurnItem::AgentMessage(_),
                 ..

@@ -144,7 +144,7 @@ pub struct InProcessStartArgs {
     pub config_warnings: Vec<ConfigWarningNotification>,
     /// Session source stamped into thread/session metadata.
     pub session_source: SessionSource,
-    /// Whether auth loading should honor the `CODEX_API_KEY` environment variable.
+    /// Whether auth loading should honor the legacy `CODEX_API_KEY` compatibility variable.
     pub enable_praxis_api_key_env: bool,
     /// Initialize params used for initial handshake.
     pub initialize: InitializeParams,

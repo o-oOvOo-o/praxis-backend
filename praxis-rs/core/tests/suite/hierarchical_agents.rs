@@ -32,7 +32,7 @@ async fn hierarchical_agents_appends_to_project_doc_in_user_instructions() {
         )
         .expect("write AGENTS.md");
     });
-    let test = builder.build(&server).await.expect("build test codex");
+    let test = builder.build(&server).await.expect("build test praxis");
 
     test.submit_turn("hello").await.expect("submit turn");
 
@@ -73,7 +73,7 @@ async fn hierarchical_agents_emits_when_no_project_doc() {
             .enable(Feature::ChildAgentsMd)
             .expect("test config should allow feature update");
     });
-    let test = builder.build(&server).await.expect("build test codex");
+    let test = builder.build(&server).await.expect("build test praxis");
 
     test.submit_turn("hello").await.expect("submit turn");
 

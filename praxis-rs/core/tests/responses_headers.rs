@@ -393,7 +393,7 @@ async fn responses_stream_includes_turn_metadata_header_for_git_workspace_e2e() 
     let test = test_praxis()
         .build(&server)
         .await
-        .expect("build test codex");
+        .expect("build test praxis");
     let cwd = test.cwd_path();
 
     let first_request = responses::mount_sse_once(&server, response_body.clone()).await;
@@ -452,7 +452,7 @@ async fn responses_stream_includes_turn_metadata_header_for_git_workspace_e2e() 
         "remote",
         "add",
         "origin",
-        "https://github.com/openai/codex.git",
+        "https://github.com/cunning3d/praxis.git",
     ]);
 
     let expected_head = String::from_utf8(run_git(&["rev-parse", "HEAD"]).stdout)
