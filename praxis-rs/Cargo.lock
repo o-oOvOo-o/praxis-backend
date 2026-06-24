@@ -6693,6 +6693,7 @@ dependencies = [
  "praxis-shell-command",
  "praxis-shell-escalation",
  "praxis-state",
+ "praxis-system-plugin-approval-control",
  "praxis-tools",
  "praxis-utils-absolute-path",
  "praxis-utils-cache",
@@ -6756,7 +6757,6 @@ dependencies = [
  "praxis-analytics",
  "praxis-config",
  "praxis-instructions",
- "praxis-login",
  "praxis-otel",
  "praxis-protocol",
  "praxis-skills",
@@ -6764,14 +6764,12 @@ dependencies = [
  "praxis-utils-plugins",
  "pretty_assertions",
  "serde",
- "serde_json",
  "serde_yaml",
  "shlex",
  "tempfile",
  "tokio",
  "toml 0.9.11+spec-1.1.0",
  "tracing",
- "zip",
 ]
 
 [[package]]

@@ -10,6 +10,7 @@ use url::Url;
 const REMOTE_PLUGIN_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 const REMOTE_FEATURED_PLUGIN_FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const REMOTE_PLUGIN_MUTATION_TIMEOUT: Duration = Duration::from_secs(30);
+const OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID: &str = "codex";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub(crate) struct RemotePluginStatusSummary {
@@ -172,7 +173,7 @@ pub(crate) async fn fetch_remote_featured_plugin_ids(
         .get(&url)
         .query(&[(
             "platform",
-            product.unwrap_or(Product::Praxis).to_app_platform(),
+            openai_curated_featured_platform(product.unwrap_or(Product::Praxis)),
         )])
         .timeout(REMOTE_FEATURED_PLUGIN_FETCH_TIMEOUT);
 
@@ -203,6 +204,14 @@ pub(crate) async fn fetch_remote_featured_plugin_ids(
         url: url.clone(),
         source,
     })
+}
+
+fn openai_curated_featured_platform(product: Product) -> &'static str {
+    match product {
+        // OpenAI curated plugins still expect the legacy hosted-agent platform id.
+        Product::Praxis => OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID,
+        other => other.to_app_platform(),
+    }
 }
 
 pub(crate) async fn enable_remote_plugin(

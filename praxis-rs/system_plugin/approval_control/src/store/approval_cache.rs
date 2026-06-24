@@ -43,4 +43,8 @@ impl ApprovalCache {
         self.records
             .retain(|_, record| !record.is_expired_at(now_millis));
     }
+
+    pub fn clear(&mut self) {
+        self.records.clear();
+    }
 }

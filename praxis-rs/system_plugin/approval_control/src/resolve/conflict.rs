@@ -18,7 +18,7 @@ pub fn detect_permission_conflicts(
     permissions: &ResolvedTurnPermissions,
 ) -> Vec<PermissionConflict> {
     let mut conflicts = Vec::new();
-    if matches!(permissions.sandbox_policy, SandboxPolicy::DangerFullAccess)
+    if matches!(&permissions.sandbox_policy, SandboxPolicy::DangerFullAccess)
         && permissions.approval_policy != AskForApproval::Never
     {
         conflicts.push(PermissionConflict::FullAccessStillPrompts);
@@ -30,14 +30,14 @@ pub fn detect_permission_conflicts(
             FileSystemSandboxKind::Restricted
         )
         && !matches!(
-            permissions.sandbox_policy,
+            &permissions.sandbox_policy,
             SandboxPolicy::DangerFullAccess | SandboxPolicy::ExternalSandbox { .. }
         )
     {
         conflicts.push(PermissionConflict::PromptlessRestrictedSandbox);
     }
 
-    if matches!(permissions.sandbox_policy, SandboxPolicy::DangerFullAccess)
+    if matches!(&permissions.sandbox_policy, SandboxPolicy::DangerFullAccess)
         && permissions.file_system_sandbox_policy.kind != FileSystemSandboxKind::Unrestricted
     {
         conflicts.push(PermissionConflict::SandboxProjectionDrift);

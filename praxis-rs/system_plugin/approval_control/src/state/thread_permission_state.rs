@@ -77,5 +77,27 @@ impl ThreadPermissionState {
             windows_sandbox_level: self.windows_sandbox_level,
             generation: self.generation,
         }
+        .normalized()
+    }
+
+    pub fn normalized(mut self) -> Self {
+        let resolved = self.resolved();
+        self.approval_policy = resolved.approval_policy;
+        self.approvals_reviewer = resolved.approvals_reviewer;
+        self.sandbox_policy = resolved.sandbox_policy;
+        self.file_system_sandbox_policy = resolved.file_system_sandbox_policy;
+        self.network_sandbox_policy = resolved.network_sandbox_policy;
+        self.windows_sandbox_level = resolved.windows_sandbox_level;
+        self.generation = resolved.generation;
+        self
+    }
+
+    pub fn same_effective_permissions(&self, other: &Self) -> bool {
+        self.approval_policy == other.approval_policy
+            && self.approvals_reviewer == other.approvals_reviewer
+            && self.sandbox_policy == other.sandbox_policy
+            && self.file_system_sandbox_policy == other.file_system_sandbox_policy
+            && self.network_sandbox_policy == other.network_sandbox_policy
+            && self.windows_sandbox_level == other.windows_sandbox_level
     }
 }

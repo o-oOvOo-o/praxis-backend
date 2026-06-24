@@ -101,9 +101,8 @@ pub use tools::{ToolInfo, filter_non_praxis_apps_mcp_tools_only};
 #[cfg(test)]
 use cache::read_cached_praxis_apps_tools;
 use cache::{
-    CachedPraxisAppsToolsLoad, MCP_TOOLS_CACHE_WRITE_DURATION_METRIC,
-    MCP_TOOLS_FETCH_UNCACHED_DURATION_METRIC, MCP_TOOLS_LIST_DURATION_METRIC,
-    PraxisAppsToolsCacheContext, load_cached_praxis_apps_tools,
+    CachedPraxisAppsToolsLoad, MCP_TOOLS_FETCH_UNCACHED_DURATION_METRIC,
+    MCP_TOOLS_LIST_DURATION_METRIC, PraxisAppsToolsCacheContext, load_cached_praxis_apps_tools,
     load_startup_cached_praxis_apps_tools_snapshot, write_cached_praxis_apps_tools_if_needed,
 };
 use client::{AsyncManagedClient, ManagedClient};

@@ -1,5 +1,7 @@
 use super::*;
 
+const OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID: &str = "codex";
+
 #[tokio::test]
 async fn plugin_list_force_remote_sync_returns_remote_sync_error_on_fail_open() -> Result<()> {
     let praxis_home = TempDir::new()?;
@@ -81,7 +83,10 @@ async fn plugin_list_force_remote_sync_reconciles_curated_plugin_state() -> Resu
         .await;
     Mock::given(method("GET"))
         .and(path("/backend-api/plugins/featured"))
-        .and(query_param("platform", "codex"))
+        .and(query_param(
+            "platform",
+            OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID,
+        ))
         .and(header("authorization", "Bearer chatgpt-token"))
         .and(header("chatgpt-account-id", "account-123"))
         .respond_with(
@@ -191,7 +196,10 @@ async fn app_gateway_startup_remote_plugin_sync_runs_once() -> Result<()> {
         .await;
     Mock::given(method("GET"))
         .and(path("/backend-api/plugins/featured"))
-        .and(query_param("platform", "codex"))
+        .and(query_param(
+            "platform",
+            OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID,
+        ))
         .and(header("authorization", "Bearer chatgpt-token"))
         .and(header("chatgpt-account-id", "account-123"))
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"["linear@openai-curated"]"#))
@@ -263,7 +271,10 @@ async fn plugin_list_fetches_featured_plugin_ids_without_chatgpt_auth() -> Resul
 
     Mock::given(method("GET"))
         .and(path("/backend-api/plugins/featured"))
-        .and(query_param("platform", "codex"))
+        .and(query_param(
+            "platform",
+            OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID,
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"["linear@openai-curated"]"#))
         .mount(&server)
         .await;
@@ -305,7 +316,10 @@ async fn plugin_list_uses_warmed_featured_plugin_ids_cache_on_first_request() ->
 
     Mock::given(method("GET"))
         .and(path("/backend-api/plugins/featured"))
-        .and(query_param("platform", "codex"))
+        .and(query_param(
+            "platform",
+            OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID,
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"["linear@openai-curated"]"#))
         .expect(1)
         .mount(&server)

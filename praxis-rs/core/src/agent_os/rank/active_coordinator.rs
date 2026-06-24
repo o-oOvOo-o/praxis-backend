@@ -5,10 +5,10 @@ use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
 
 use crate::agent_os::instance::AgentOs;
-use crate::agent_os::records::ActiveCoordinatorLease;
-use crate::agent_os::records::ThreadRegistryEntry;
 use crate::agent_os::policy::AgentOsPolicy;
 use crate::agent_os::policy::COORDINATOR_RANK;
+use crate::agent_os::records::ActiveCoordinatorLease;
+use crate::agent_os::records::ThreadRegistryEntry;
 use crate::agent_os::state::AgentOsState;
 
 impl AgentOs {

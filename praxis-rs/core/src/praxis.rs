@@ -57,6 +57,7 @@ pub(crate) use session_context_types::AutoTitleModelContext;
 pub(crate) use session_context_types::EffectivePermissions;
 pub(crate) use session_context_types::LiveEffectivePermissions;
 pub(crate) use session_context_types::TurnSkillsContext;
+pub(crate) use session_context_types::thread_permissions_from_session_configuration;
 pub(crate) use session_handle::Session;
 pub use steer_input_error::SteerInputError;
 pub(crate) use thread_lifecycle::PraxisSpawnArgs;

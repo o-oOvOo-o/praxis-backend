@@ -14,6 +14,7 @@ use tempfile::TempDir;
 
 const APPLY_PATCH_ARG0: &str = "apply_patch";
 const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
+const APPLY_PATCH_ARG0_ALIASES: &[&str] = &[APPLY_PATCH_ARG0, MISSPELLED_APPLY_PATCH_ARG0];
 #[cfg(unix)]
 const EXECVE_WRAPPER_ARG0: &str = "praxis-execve-wrapper";
 const LOCK_FILENAME: &str = ".lock";
@@ -93,7 +94,7 @@ pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
     if exe_name == PRAXIS_LINUX_SANDBOX_ARG0 {
         // Safety: [`run_main`] never returns.
         praxis_linux_sandbox::run_main();
-    } else if exe_name == APPLY_PATCH_ARG0 || exe_name == MISSPELLED_APPLY_PATCH_ARG0 {
+    } else if is_apply_patch_arg0(exe_name) {
         praxis_apply_patch::main();
     }
 
@@ -235,7 +236,18 @@ fn build_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
     Ok(builder.build()?)
 }
 
-const ILLEGAL_ENV_VAR_PREFIXES: &[&str] = &["PRAXIS_", "CODEX_"];
+const PROTECTED_DOTENV_ENV_PREFIXES: &[&str] = &["PRAXIS_", "CODEX_"];
+
+fn is_apply_patch_arg0(exe_name: &str) -> bool {
+    APPLY_PATCH_ARG0_ALIASES.contains(&exe_name)
+}
+
+fn is_protected_dotenv_key(key: &str) -> bool {
+    let key_upper = key.to_ascii_uppercase();
+    PROTECTED_DOTENV_ENV_PREFIXES
+        .iter()
+        .any(|prefix| key_upper.starts_with(prefix))
+}
 
 /// Load env vars from ~/.praxis/.env.
 ///
@@ -255,11 +267,7 @@ where
     I: IntoIterator<Item = Result<(String, String), dotenvy::Error>>,
 {
     for (key, value) in iter.into_iter().flatten() {
-        let key_upper = key.to_ascii_uppercase();
-        if !ILLEGAL_ENV_VAR_PREFIXES
-            .iter()
-            .any(|prefix| key_upper.starts_with(prefix))
-        {
+        if !is_protected_dotenv_key(&key) {
             // It is safe to call set_var() because our process is
             // single-threaded at this point in its execution.
             unsafe { std::env::set_var(&key, &value) };
@@ -457,6 +465,8 @@ mod tests {
     use super::Arg0DispatchPaths;
     use super::Arg0PathEntryGuard;
     use super::LOCK_FILENAME;
+    use super::is_apply_patch_arg0;
+    use super::is_protected_dotenv_key;
     use super::janitor_cleanup;
     use super::linux_sandbox_exe_path;
     use std::fs;
@@ -534,5 +544,22 @@ mod tests {
 
         assert!(!dir.exists());
         Ok(())
+    }
+
+    #[test]
+    fn apply_patch_arg0_accepts_canonical_and_legacy_typo_aliases() {
+        assert!(is_apply_patch_arg0("apply_patch"));
+        assert!(is_apply_patch_arg0("applypatch"));
+        assert!(!is_apply_patch_arg0("praxis"));
+    }
+
+    #[test]
+    fn dotenv_filter_blocks_praxis_and_legacy_codex_state_prefixes() {
+        assert!(is_protected_dotenv_key("PRAXIS_HOME"));
+        assert!(is_protected_dotenv_key("praxis_home"));
+        assert!(is_protected_dotenv_key("CODEX_HOME"));
+        assert!(is_protected_dotenv_key("codex_thread_id"));
+        assert!(!is_protected_dotenv_key("PATH"));
+        assert!(!is_protected_dotenv_key("PROJECT_CODEX_HOME"));
     }
 }

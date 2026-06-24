@@ -1,5 +1,7 @@
 use super::*;
 
+const OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID: &str = "codex";
+
 #[tokio::test]
 async fn featured_plugin_ids_for_config_uses_restriction_product_query_param() {
     let tmp = tempfile::tempdir().unwrap();
@@ -39,7 +41,7 @@ plugins = true
 }
 
 #[tokio::test]
-async fn featured_plugin_ids_for_config_defaults_query_param_to_codex() {
+async fn featured_plugin_ids_for_config_defaults_to_openai_curated_praxis_platform() {
     let tmp = tempfile::tempdir().unwrap();
     write_file(
         &tmp.path().join(CONFIG_TOML_FILE),
@@ -51,7 +53,10 @@ plugins = true
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/backend-api/plugins/featured"))
-        .and(query_param("platform", "codex"))
+        .and(query_param(
+            "platform",
+            OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID,
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_string(r#"["praxis-plugin"]"#))
         .mount(&server)
         .await;

@@ -30,6 +30,10 @@ use praxis_protocol::protocol::NetworkPolicyRuleAction;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_sandboxing::SandboxManager;
 use praxis_sandboxing::SandboxType;
+use praxis_system_plugin_approval_control::ApprovalDecision;
+use praxis_system_plugin_approval_control::tool_safety::ToolKind;
+use praxis_system_plugin_approval_control::tool_safety::ToolSafetyOrchestrator;
+use praxis_system_plugin_approval_control::tool_safety::ToolSafetyRequest;
 
 pub(crate) struct ToolOrchestrator {
     sandbox: SandboxManager,
@@ -127,19 +131,48 @@ impl ToolOrchestrator {
                 &permissions.file_system_sandbox_policy,
             )
         });
-        match requirement {
-            ExecApprovalRequirement::Skip { .. } => {
-                otel.tool_decision(otel_tn, otel_ci, &ReviewDecision::Approved, otel_cfg);
+        let safety = ToolSafetyOrchestrator;
+        let resolved_permissions = permissions.as_resolved_turn_permissions();
+        let safety_decision = match &requirement {
+            ExecApprovalRequirement::Skip { .. } => safety.decide(ToolSafetyRequest {
+                id: &tool_ctx.call_id,
+                thread_id: None,
+                turn_id: Some(&tool_ctx.turn.sub_id),
+                kind: ToolKind::Unknown,
+                permissions: &resolved_permissions,
+                approval_required: false,
+                reason: None,
+            }),
+            ExecApprovalRequirement::Forbidden { reason } => ApprovalDecision::deny(reason.clone()),
+            ExecApprovalRequirement::NeedsApproval { reason, .. } => {
+                safety.decide(ToolSafetyRequest {
+                    id: &tool_ctx.call_id,
+                    thread_id: None,
+                    turn_id: Some(&tool_ctx.turn.sub_id),
+                    kind: ToolKind::Unknown,
+                    permissions: &resolved_permissions,
+                    approval_required: true,
+                    reason: reason.as_deref(),
+                })
             }
-            ExecApprovalRequirement::Forbidden { reason } => {
+        };
+
+        match safety_decision {
+            ApprovalDecision::Run { .. } => {
+                otel.tool_decision(otel_tn, otel_ci, &ReviewDecision::Approved, otel_cfg);
+                if matches!(requirement, ExecApprovalRequirement::NeedsApproval { .. }) {
+                    already_approved = true;
+                }
+            }
+            ApprovalDecision::Deny { reason } => {
                 return Err(ToolError::Rejected(reason));
             }
-            ExecApprovalRequirement::NeedsApproval { reason, .. } => {
+            ApprovalDecision::AskUser { request } => {
                 let approval_ctx = ApprovalCtx {
                     session: &tool_ctx.session,
                     turn: &tool_ctx.turn,
                     call_id: &tool_ctx.call_id,
-                    retry_reason: reason,
+                    retry_reason: request.reason,
                     network_approval_context: None,
                 };
                 let decision = tool.start_approval_async(req, approval_ctx).await;

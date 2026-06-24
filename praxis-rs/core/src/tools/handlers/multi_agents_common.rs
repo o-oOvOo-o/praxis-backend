@@ -597,19 +597,6 @@ fn normalize_spawn_agent_model_aliases(requested_model: &str) -> Vec<String> {
     aliases
 }
 
-fn normalize_openai_model_alias(rest: &str) -> Option<String> {
-    let rest = rest.trim_start_matches('-');
-    if rest
-        .chars()
-        .next()
-        .is_some_and(|first| first.is_ascii_digit())
-    {
-        Some(format!("gpt-{rest}"))
-    } else {
-        None
-    }
-}
-
 fn strip_embedded_reasoning_suffix(model: &str) -> Option<String> {
     for suffix in ["-xhigh", "-x-high", "-high", "xhigh", "x-high"] {
         if let Some(base) = model.strip_suffix(suffix)

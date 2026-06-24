@@ -32,7 +32,6 @@ pub(super) async fn build(input: ServicesBootstrapInput) -> anyhow::Result<Sessi
         rollout: Mutex::new(runtime.rollout_recorder),
         user_shell: Arc::new(runtime.default_shell),
         shell_snapshot_tx: runtime.shell_snapshot_tx,
-        show_raw_agent_reasoning: config.show_raw_agent_reasoning,
         exec_policy: runtime.exec_policy,
         auth_manager: Arc::clone(&managers.auth_manager),
         session_telemetry: runtime.session_telemetry,

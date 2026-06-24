@@ -49,4 +49,8 @@ impl PendingApprovalStore {
         self.pending
             .retain(|_, request| request.thread_id.as_deref() != Some(thread_id));
     }
+
+    pub fn clear(&mut self) {
+        self.pending.clear();
+    }
 }

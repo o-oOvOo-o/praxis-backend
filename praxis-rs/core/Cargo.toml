@@ -45,6 +45,7 @@ praxis-execpolicy = { workspace = true }
 praxis-git-utils = { workspace = true }
 praxis-hooks = { workspace = true }
 praxis-instructions = { workspace = true }
+praxis-system-plugin-approval-control = { workspace = true }
 praxis-network-proxy = { workspace = true }
 praxis-otel = { workspace = true }
 praxis-plugin = { workspace = true }

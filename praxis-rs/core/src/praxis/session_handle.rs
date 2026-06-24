@@ -7,6 +7,7 @@ use praxis_protocol::ThreadId;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::McpServerRefreshConfig;
+use praxis_system_plugin_approval_control::PermissionController;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
 
@@ -21,15 +22,13 @@ use crate::state::ActiveTurn;
 use crate::state::SessionServices;
 use crate::state::SessionState;
 
-use super::EffectivePermissions;
-
 /// Long-lived state and service handle for one loaded agent thread.
 pub(crate) struct Session {
     pub(crate) conversation_id: ThreadId,
     pub(super) tx_event: Sender<Event>,
     pub(super) agent_status: watch::Sender<AgentStatus>,
     pub(super) out_of_band_elicitation_paused: watch::Sender<bool>,
-    pub(super) effective_permissions: watch::Sender<EffectivePermissions>,
+    pub(super) permission_controller: PermissionController,
     pub(super) state: Mutex<SessionState>,
     /// The set of enabled features should be invariant for the lifetime of the session.
     pub(super) features: ManagedFeatures,

@@ -36,7 +36,6 @@ pub use praxis_core_skills::injection::collect_explicit_skill_mentions;
 pub use praxis_core_skills::loader;
 pub use praxis_core_skills::manager;
 pub use praxis_core_skills::model;
-pub use praxis_core_skills::remote;
 pub use praxis_core_skills::render;
 pub use praxis_core_skills::render_skills_section;
 pub use praxis_core_skills::system;

@@ -45,8 +45,4 @@ impl Session {
             .await
             .clone()
     }
-
-    pub(in crate::praxis) fn show_raw_agent_reasoning(&self) -> bool {
-        self.services.show_raw_agent_reasoning
-    }
 }
