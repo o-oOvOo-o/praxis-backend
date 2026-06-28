@@ -60,6 +60,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 mod app_gateway_tracing;
 mod approval_response_bridge;
+mod automation_projection;
 mod bespoke_event_handling;
 mod client_response_decode;
 mod collab_agent_event_bridge;
@@ -764,13 +765,7 @@ pub async fn run_main_with_transport(
                                                 )
                                                 .await;
                                             processor
-                                                .connection_initialized(
-                                                    connection_id,
-                                                    connection_state
-                                                        .session
-                                                        .host_extensions
-                                                        .clone(),
-                                                )
+                                                .connection_initialized(connection_id)
                                                 .await;
                                             connection_state
                                                 .outbound_initialized

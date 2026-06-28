@@ -87,13 +87,13 @@ async fn inbound_handoff_request_steers_active_turn() -> Result<()> {
     .await;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "first prompt".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     wait_for_event(&test.thread, |event| {

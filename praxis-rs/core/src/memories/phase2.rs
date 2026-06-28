@@ -127,12 +127,13 @@ pub(super) async fn run(session: &Arc<Session>, config: Arc<Config>) {
     }
 
     // 5. Spawn the agent
-    let prompt = agent::get_prompt(config, &selection);
+    let initial_items = agent::get_prompt(config, &selection);
+    let initial_operation = agent_config.user_turn_op(initial_items, None);
     let source = SessionSource::SubAgent(SubAgentSource::MemoryConsolidation);
     let thread_id = match session
         .services
         .agent_control
-        .spawn_agent(agent_config, prompt.into(), Some(source))
+        .spawn_agent(agent_config, initial_operation, Some(source))
         .await
     {
         Ok(thread_id) => thread_id,

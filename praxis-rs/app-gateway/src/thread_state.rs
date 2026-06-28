@@ -1,7 +1,5 @@
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
-use praxis_app_gateway_protocol::GatewayCapabilityKind;
-use praxis_app_gateway_protocol::HostExtensionInfo;
 use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::ThreadHistoryBuilder;
 use praxis_app_gateway_protocol::Turn;
@@ -132,7 +130,6 @@ impl Default for ThreadEntry {
 #[derive(Default)]
 struct ThreadStateManagerInner {
     live_connections: HashSet<ConnectionId>,
-    host_extensions_by_connection: HashMap<ConnectionId, Vec<HostExtensionInfo>>,
     threads: HashMap<ThreadId, ThreadEntry>,
     thread_ids_by_connection: HashMap<ConnectionId, HashSet<ThreadId>>,
 }
@@ -148,20 +145,8 @@ impl ThreadStateManager {
     }
 
     pub(crate) async fn connection_initialized(&self, connection_id: ConnectionId) {
-        self.connection_initialized_with_host_extensions(connection_id, Vec::new())
-            .await;
-    }
-
-    pub(crate) async fn connection_initialized_with_host_extensions(
-        &self,
-        connection_id: ConnectionId,
-        host_extensions: Vec<HostExtensionInfo>,
-    ) {
         let mut state = self.state.lock().await;
         state.live_connections.insert(connection_id);
-        state
-            .host_extensions_by_connection
-            .insert(connection_id, host_extensions);
     }
 
     pub(crate) async fn subscribed_connection_ids(&self, thread_id: ThreadId) -> Vec<ConnectionId> {
@@ -171,78 +156,6 @@ impl ThreadStateManager {
             .get(&thread_id)
             .map(|thread_entry| thread_entry.connection_ids.iter().copied().collect())
             .unwrap_or_default()
-    }
-
-    pub(crate) async fn connection_host_extensions(
-        &self,
-        connection_id: ConnectionId,
-    ) -> Vec<HostExtensionInfo> {
-        self.state
-            .lock()
-            .await
-            .host_extensions_by_connection
-            .get(&connection_id)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    pub(crate) async fn subscribed_connection_ids_with_host_extension(
-        &self,
-        thread_id: ThreadId,
-        extension_id: &str,
-    ) -> Vec<ConnectionId> {
-        let state = self.state.lock().await;
-        let Some(thread_entry) = state.threads.get(&thread_id) else {
-            return Vec::new();
-        };
-
-        thread_entry
-            .connection_ids
-            .iter()
-            .copied()
-            .filter(|connection_id| {
-                state
-                    .host_extensions_by_connection
-                    .get(connection_id)
-                    .is_some_and(|extensions| {
-                        extensions
-                            .iter()
-                            .any(|extension| extension.id == extension_id)
-                    })
-            })
-            .collect()
-    }
-
-    pub(crate) async fn subscribed_connection_ids_with_host_capability(
-        &self,
-        thread_id: ThreadId,
-        extension_id: &str,
-        capability_kind: GatewayCapabilityKind,
-    ) -> Vec<ConnectionId> {
-        let state = self.state.lock().await;
-        let Some(thread_entry) = state.threads.get(&thread_id) else {
-            return Vec::new();
-        };
-
-        thread_entry
-            .connection_ids
-            .iter()
-            .copied()
-            .filter(|connection_id| {
-                state
-                    .host_extensions_by_connection
-                    .get(connection_id)
-                    .is_some_and(|extensions| {
-                        extensions.iter().any(|extension| {
-                            extension.id == extension_id
-                                && extension
-                                    .capabilities
-                                    .iter()
-                                    .any(|capability| capability.kind == capability_kind)
-                        })
-                    })
-            })
-            .collect()
     }
 
     pub(crate) async fn thread_state(&self, thread_id: ThreadId) -> Arc<Mutex<ThreadState>> {
@@ -398,7 +311,6 @@ impl ThreadStateManager {
         let thread_states = {
             let mut state = self.state.lock().await;
             state.live_connections.remove(&connection_id);
-            state.host_extensions_by_connection.remove(&connection_id);
             let thread_ids = state
                 .thread_ids_by_connection
                 .remove(&connection_id)

@@ -108,6 +108,7 @@ pub(super) fn parent_agent_path_from_child_path(
         .and_then(|parent| AgentPath::try_from(parent).ok())
 }
 
+#[cfg(test)]
 pub(super) fn thread_spawn_depth(session_source: &SessionSource) -> Option<i32> {
     match session_source {
         SessionSource::SubAgent(SubAgentSource::ThreadSpawn { depth, .. }) => Some(*depth),

@@ -419,21 +419,6 @@ fn windows_restricted_token_skips_external_sandbox_policies() {
 }
 
 #[test]
-fn windows_restricted_token_runs_for_legacy_restricted_policies() {
-    let policy = SandboxPolicy::new_read_only_policy();
-    let file_system_policy = FileSystemSandboxPolicy::from(&policy);
-
-    assert_eq!(
-        should_use_windows_restricted_token_sandbox(
-            SandboxType::WindowsRestrictedToken,
-            &policy,
-            &file_system_policy,
-        ),
-        true
-    );
-}
-
-#[test]
 fn windows_restricted_token_rejects_network_only_restrictions() {
     let policy = SandboxPolicy::ExternalSandbox {
         network_access: praxis_protocol::protocol::NetworkAccess::Restricted,
@@ -451,32 +436,13 @@ fn windows_restricted_token_rejects_network_only_restrictions() {
                 WindowsSandboxLevel::RestrictedToken,
             ),
             Some(
-                "windows sandbox backend cannot enforce file_system=Unrestricted, network=Restricted, legacy_policy=ExternalSandbox { network_access: Restricted }; refusing to run unsandboxed".to_string()
+                "windows sandbox backend cannot enforce file_system=Unrestricted, network=Restricted, protocol_policy=ExternalSandbox { network_access: Restricted }; refusing to run unsandboxed".to_string()
             )
         );
 }
 
 #[test]
-fn windows_restricted_token_allows_legacy_restricted_policies() {
-    let policy = SandboxPolicy::new_read_only_policy();
-    let file_system_policy = FileSystemSandboxPolicy::from(&policy);
-    let sandbox_policy_cwd = std::env::current_dir().expect("cwd");
-
-    assert_eq!(
-        unsupported_windows_restricted_token_sandbox_reason(
-            SandboxType::WindowsRestrictedToken,
-            &policy,
-            &file_system_policy,
-            NetworkSandboxPolicy::Restricted,
-            &sandbox_policy_cwd,
-            WindowsSandboxLevel::RestrictedToken,
-        ),
-        None
-    );
-}
-
-#[test]
-fn windows_restricted_token_allows_legacy_workspace_write_policies() {
+fn windows_restricted_token_allows_workspace_write_projection_policies() {
     let policy = SandboxPolicy::WorkspaceWrite {
         writable_roots: vec![],
         read_only_access: praxis_protocol::protocol::ReadOnlyAccess::FullAccess,

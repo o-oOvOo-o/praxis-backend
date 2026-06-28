@@ -2,8 +2,6 @@ use praxis_protocol::models::ResponseItem;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::RolloutItem;
 
-use crate::compact::build_compacted_history;
-use crate::compact::collect_user_messages;
 use crate::context_manager::ContextManager;
 use crate::praxis::TurnContext;
 
@@ -15,7 +13,6 @@ pub(super) fn materialize_history_from_replay(
     rollout_suffix: &[RolloutItem],
 ) -> MaterializedHistory {
     let mut history = ContextManager::new();
-    let mut saw_legacy_compaction_without_replacement = false;
     if let Some(base_replacement_history) = base_replacement_history {
         history.replace(base_replacement_history.to_vec());
     }
@@ -31,12 +28,6 @@ pub(super) fn materialize_history_from_replay(
             RolloutItem::Compacted(compacted) => {
                 if let Some(replacement_history) = &compacted.replacement_history {
                     history.replace(replacement_history.clone());
-                } else {
-                    saw_legacy_compaction_without_replacement = true;
-                    let user_messages = collect_user_messages(history.raw_items());
-                    let rebuilt =
-                        build_compacted_history(Vec::new(), &user_messages, &compacted.message);
-                    history.replace(rebuilt);
                 }
             }
             RolloutItem::EventMsg(EventMsg::ThreadRolledBack(rollback)) => {
@@ -50,6 +41,5 @@ pub(super) fn materialize_history_from_replay(
 
     MaterializedHistory {
         history: history.raw_items().to_vec(),
-        saw_legacy_compaction_without_replacement,
     }
 }

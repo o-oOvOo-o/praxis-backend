@@ -38,7 +38,7 @@ pub(crate) trait AgentOsProcessCleaner: Send + Sync {
 pub(super) fn process_registry_key(process_id: i32, runtime_owner_id: Option<&str>) -> String {
     match runtime_owner_id.filter(|owner| !owner.is_empty()) {
         Some(owner) => format!("{owner}:{process_id}"),
-        None => format!("legacy:{process_id}"),
+        None => format!("unscoped:{process_id}"),
     }
 }
 

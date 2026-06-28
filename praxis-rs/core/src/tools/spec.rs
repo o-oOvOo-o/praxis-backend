@@ -42,12 +42,13 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::CreateGoalHandler;
     use crate::tools::handlers::DynamicToolHandler;
     use crate::tools::handlers::GetGoalHandler;
-    use crate::tools::handlers::ListDirHandler;
+    use crate::tools::handlers::ListDirectoryHandler;
     use crate::tools::handlers::McpHandler;
     use crate::tools::handlers::McpResourceHandler;
     use crate::tools::handlers::PlanHandler;
     use crate::tools::handlers::RequestPermissionsHandler;
     use crate::tools::handlers::RequestUserInputHandler;
+    use crate::tools::handlers::ReverseEngineeringHandler;
     use crate::tools::handlers::ShellCommandHandler;
     use crate::tools::handlers::ShellHandler;
     use crate::tools::handlers::TestSyncHandler;
@@ -116,6 +117,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
     let request_user_input_handler = Arc::new(RequestUserInputHandler {
         default_mode_request_user_input: config.default_mode_request_user_input,
     });
+    let reverse_engineering_handler = Arc::new(ReverseEngineeringHandler);
     let mut tool_search_handler = None;
     let tool_suggest_handler = Arc::new(ToolSuggestHandler);
     let code_mode_handler = Arc::new(CodeModeExecuteHandler);
@@ -167,8 +169,8 @@ pub(crate) fn build_specs_with_discoverable_tools(
             ToolHandlerKind::ListAgents => {
                 builder.register_handler(handler.name, Arc::new(ListAgentsHandler));
             }
-            ToolHandlerKind::ListDir => {
-                builder.register_handler(handler.name, Arc::new(ListDirHandler));
+            ToolHandlerKind::ListDirectory => {
+                builder.register_handler(handler.name, Arc::new(ListDirectoryHandler));
             }
             ToolHandlerKind::Mcp => {
                 builder.register_handler(handler.name, mcp_handler.clone());
@@ -190,6 +192,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
             }
             ToolHandlerKind::RequestUserInput => {
                 builder.register_handler(handler.name, request_user_input_handler.clone());
+            }
+            ToolHandlerKind::ReverseEngineering => {
+                builder.register_handler(handler.name, reverse_engineering_handler.clone());
             }
             ToolHandlerKind::SendMessage => {
                 builder.register_handler(handler.name, Arc::new(SendMessageHandler));

@@ -5,6 +5,8 @@ use crate::praxis::Session;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
 use praxis_utils_output_truncation::TruncationPolicy;
+use praxis_utils_output_truncation::trim_and_truncate_end_chars_with_ellipsis;
+use praxis_utils_output_truncation::truncate_end_chars_with_ellipsis;
 use praxis_utils_output_truncation::truncate_text;
 
 const TITLE_PREVIEW_ENTRY_MAX_CHARS: usize = 480;
@@ -116,7 +118,7 @@ impl HistoryPreview {
             }
             entries.push(format!(
                 "{role_label}: {}",
-                truncate_chars(trimmed, TITLE_PREVIEW_ENTRY_MAX_CHARS)
+                truncate_end_chars_with_ellipsis(trimmed, TITLE_PREVIEW_ENTRY_MAX_CHARS)
             ));
         }
 
@@ -126,7 +128,7 @@ impl HistoryPreview {
 
         let keep_from = entries.len().saturating_sub(max_messages);
         let preview = entries[keep_from..].join("\n\n");
-        Some(truncate_chars(&preview, max_chars))
+        Some(truncate_end_chars_with_ellipsis(&preview, max_chars))
     }
 
     pub(crate) fn conversation_summary_preview(
@@ -174,7 +176,10 @@ impl HistoryPreview {
                 format!(
                     "{}: {}",
                     role_label(role),
-                    truncate_for_prompt(text, SUMMARY_RECENT_MESSAGE_MAX_CHARS)
+                    trim_and_truncate_end_chars_with_ellipsis(
+                        text,
+                        SUMMARY_RECENT_MESSAGE_MAX_CHARS,
+                    )
                 )
             })
             .collect::<Vec<_>>();
@@ -183,7 +188,10 @@ impl HistoryPreview {
         if !first_user.is_empty() {
             sections.push(format!(
                 "Original user goal: {}",
-                truncate_for_prompt(&first_user, SUMMARY_FIRST_USER_MAX_CHARS)
+                trim_and_truncate_end_chars_with_ellipsis(
+                    &first_user,
+                    SUMMARY_FIRST_USER_MAX_CHARS,
+                )
             ));
         }
         sections.push("Recent conversation:".to_string());
@@ -321,22 +329,4 @@ fn role_label(role: &str) -> &'static str {
         "user" => "User",
         _ => "Message",
     }
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-    let mut truncated: String = text.chars().take(max_chars.saturating_sub(3)).collect();
-    truncated.push_str("...");
-    truncated
-}
-
-fn truncate_for_prompt(text: &str, max_chars: usize) -> String {
-    let mut truncated = text.trim().to_string();
-    if truncated.chars().count() > max_chars {
-        truncated = truncated.chars().take(max_chars).collect::<String>();
-        truncated.push_str("...");
-    }
-    truncated
 }

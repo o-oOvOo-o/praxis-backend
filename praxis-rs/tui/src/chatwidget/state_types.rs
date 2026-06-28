@@ -139,6 +139,7 @@ pub(super) struct WorkspaceActiveTailCache {
     pub(super) key: ActiveCellRenderCacheKey,
     pub(super) lane: ChatLane,
     pub(super) lines: Vec<Line<'static>>,
+    pub(super) mouse_targets: Vec<history_cell::HistoryCellMouseTarget>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

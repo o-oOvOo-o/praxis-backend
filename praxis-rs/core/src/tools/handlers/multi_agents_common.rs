@@ -21,7 +21,6 @@ use praxis_protocol::openai_models::ReasoningEffortPreset;
 use praxis_protocol::openai_models::known_openai_compatible_model_info;
 use praxis_protocol::protocol::CollabAgentRef;
 use praxis_protocol::protocol::CollabAgentStatusEntry;
-use praxis_protocol::protocol::Op;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
 use praxis_protocol::user_input::UserInput;
@@ -174,7 +173,7 @@ pub(crate) fn thread_spawn_source(
 pub(crate) fn parse_collab_input(
     message: Option<String>,
     items: Option<Vec<UserInput>>,
-) -> Result<Op, FunctionCallError> {
+) -> Result<Vec<UserInput>, FunctionCallError> {
     match (message, items) {
         (Some(_), Some(_)) => Err(FunctionCallError::RespondToModel(
             "Provide either message or items, but not both".to_string(),
@@ -191,8 +190,7 @@ pub(crate) fn parse_collab_input(
             Ok(vec![UserInput::Text {
                 text: message,
                 text_elements: Vec::new(),
-            }]
-            .into())
+            }])
         }
         (None, Some(items)) => {
             if items.is_empty() {
@@ -200,7 +198,7 @@ pub(crate) fn parse_collab_input(
                     "Items can't be empty".to_string(),
                 ));
             }
-            Ok(items.into())
+            Ok(items)
         }
     }
 }

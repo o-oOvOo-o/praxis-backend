@@ -131,20 +131,7 @@ pub enum Op {
     /// Close the running realtime conversation stream.
     RealtimeConversationClose,
 
-    /// Legacy user input.
-    ///
-    /// Prefer [`Op::UserTurn`] so the caller provides full turn context
-    /// (cwd/approval/sandbox/model/etc.) for each turn.
-    UserInput {
-        /// User input items, see `InputItem`
-        items: Vec<UserInput>,
-        /// Optional JSON Schema used to constrain the final assistant message for this turn.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        final_output_json_schema: Option<Value>,
-    },
-
-    /// Similar to [`Op::UserInput`], but contains additional context required
-    /// for a turn of a [`crate::praxis_thread::PraxisThread`].
+    /// Start a user turn with the full context required by the agent session.
     UserTurn {
         /// User input items, see `InputItem`
         items: Vec<UserInput>,
@@ -217,8 +204,7 @@ pub enum Op {
     ///
     /// All fields are optional; when omitted, the existing value is preserved.
     /// This does not enqueue any input – it only updates defaults used for
-    /// turns that rely on persistent session-level context (for example,
-    /// [`Op::UserInput`]).
+    /// turns that rely on persistent session-level context.
     OverrideTurnContext {
         /// Updated `cwd` for sandbox/tool calls.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -421,15 +407,6 @@ pub enum Op {
     ListModels,
 }
 
-impl From<Vec<UserInput>> for Op {
-    fn from(value: Vec<UserInput>) -> Self {
-        Op::UserInput {
-            items: value,
-            final_output_json_schema: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct InterAgentCommunication {
     pub author: AgentPath,
@@ -494,7 +471,6 @@ impl Op {
             Self::RealtimeConversationAudio(_) => "realtime_conversation_audio",
             Self::RealtimeConversationText(_) => "realtime_conversation_text",
             Self::RealtimeConversationClose => "realtime_conversation_close",
-            Self::UserInput { .. } => "user_input",
             Self::UserTurn { .. } => "user_turn",
             Self::InterAgentCommunication { .. } => "inter_agent_communication",
             Self::OverrideTurnContext { .. } => "override_turn_context",

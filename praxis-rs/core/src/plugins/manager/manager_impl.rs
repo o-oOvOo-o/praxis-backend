@@ -4,7 +4,7 @@ use super::*;
 
 impl PluginsManager {
     pub fn new(praxis_home: PathBuf) -> Self {
-        Self::new_with_restriction_product(praxis_home, Some(Product::Praxis))
+        Self::new_with_restriction_product(praxis_home, Some(Product::praxis()))
     }
 
     pub fn new_with_restriction_product(
@@ -43,6 +43,7 @@ impl PluginsManager {
             Some([]) => false,
             Some(products) => self
                 .restriction_product
+                .as_ref()
                 .is_some_and(|product| product.matches_product_restriction(products)),
         }
     }
@@ -67,7 +68,7 @@ impl PluginsManager {
         let outcome = load_plugins_from_layer_stack(
             &config.config_layer_stack,
             &self.store,
-            self.restriction_product,
+            self.restriction_product.clone(),
         );
         log_plugin_load_errors(&outcome);
         let mut cache = match self.cached_enabled_outcome.write() {
@@ -100,8 +101,12 @@ impl PluginsManager {
         if !plugins_feature_enabled {
             return Vec::new();
         }
-        load_plugins_from_layer_stack(config_layer_stack, &self.store, self.restriction_product)
-            .effective_skill_roots()
+        load_plugins_from_layer_stack(
+            config_layer_stack,
+            &self.store,
+            self.restriction_product.clone(),
+        )
+        .effective_skill_roots()
     }
 
     fn cached_enabled_outcome(&self) -> Option<PluginLoadOutcome> {
@@ -173,7 +178,8 @@ impl PluginsManager {
             return Ok(featured_plugin_ids);
         }
         let featured_plugin_ids =
-            fetch_remote_featured_plugin_ids(config, auth, self.restriction_product).await?;
+            fetch_remote_featured_plugin_ids(config, auth, self.restriction_product.clone())
+                .await?;
         self.write_featured_plugin_ids_cache(cache_key, &featured_plugin_ids);
         Ok(featured_plugin_ids)
     }
@@ -185,7 +191,7 @@ impl PluginsManager {
         let resolved = resolve_marketplace_plugin(
             &request.marketplace_path,
             &request.plugin_name,
-            self.restriction_product,
+            self.restriction_product.clone(),
         )?;
         self.install_resolved_plugin(resolved).await
     }
@@ -199,7 +205,7 @@ impl PluginsManager {
         let resolved = resolve_marketplace_plugin(
             &request.marketplace_path,
             &request.plugin_name,
-            self.restriction_product,
+            self.restriction_product.clone(),
         )?;
         let plugin_id = resolved.plugin_id.as_key();
         // This only forwards the backend mutation before the local install flow. We rely on
@@ -752,7 +758,7 @@ impl PluginsManager {
         let resolved_skills = load_plugin_skills(
             source_path.as_path(),
             manifest_paths,
-            self.restriction_product,
+            self.restriction_product.clone(),
             &skill_config_rules,
         );
         let apps = load_plugin_apps(source_path.as_path());

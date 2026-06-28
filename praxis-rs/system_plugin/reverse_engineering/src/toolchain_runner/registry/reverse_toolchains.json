@@ -1,0 +1,435 @@
+{
+  "schema_version": 1,
+  "cache_subdir": "toolchains",
+  "archive_subdirs": [
+    "toolchains/vendor_archives",
+    "vendor_archives",
+    "archives"
+  ],
+  "tools": [
+    {
+      "id": "java-jdk",
+      "label": "Java JDK for Ghidra headless",
+      "category": "runtime",
+      "required": true,
+      "env_vars": [
+        "JAVA_HOME"
+      ],
+      "path_candidates": [
+        "C:\\Program Files\\Microsoft\\jdk-21.0.10.7-hotspot\\bin\\java.exe",
+        "C:\\Program Files\\Eclipse Adoptium\\jdk-*\\bin\\java.exe",
+        "C:\\Program Files\\Java\\jdk*\\bin\\java.exe"
+      ],
+      "which": [
+        "java"
+      ],
+      "version_args": [
+        "-version"
+      ],
+      "redistribution": "external_or_redistributable_runtime",
+      "license_policy": "external_install_or_redistributable_runtime",
+      "notes": "Required by Ghidra analyzeHeadless."
+    },
+    {
+      "id": "ghidra",
+      "label": "Ghidra headless decompiler",
+      "category": "native_decompiler",
+      "required": true,
+      "env_vars": [
+        "GHIDRA_INSTALL_DIR",
+        "GHIDRA_HOME"
+      ],
+      "path_candidates": [
+        "F:\\tools\\ghidra_12.0.4_PUBLIC\\support\\analyzeHeadless.bat",
+        "D:\\ghost1.0\\_external\\ghidra\\support\\analyzeHeadless.bat",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\toolchains\\ghidra\\support\\analyzeHeadless.bat",
+        "C:\\ghidra*\\support\\analyzeHeadless.bat"
+      ],
+      "cache_candidates": [
+        "ghidra/support/analyzeHeadless.bat"
+      ],
+      "which": [
+        "analyzeHeadless"
+      ],
+      "archive_names": [
+        "ghidra*.zip"
+      ],
+      "redistribution": "cache_or_external",
+      "license_policy": "oss_redistributable_check_release_terms",
+      "notes": "Used by tools/gaea/run_ghidra_export.ps1 and native PE reverse evidence."
+    },
+    {
+      "id": "ghidra-export-script",
+      "label": "C3D Ghidra ExportFunctionArtifacts.java",
+      "category": "repo_script",
+      "required": true,
+      "path_candidates": [
+        "D:\\ghost1.0\\tools\\gaea\\ghidra\\ExportFunctionArtifacts.java"
+      ],
+      "redistribution": "repo",
+      "license_policy": "project_owned",
+      "notes": "Exports meta, decompiled C, pcode, and asm for native targets."
+    },
+    {
+      "id": "dotnet-sdk",
+      "label": ".NET SDK for GaeaReverseHarness",
+      "category": "runtime",
+      "required": true,
+      "path_candidates": [
+        "C:\\Program Files\\dotnet\\dotnet.exe"
+      ],
+      "which": [
+        "dotnet"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "redistribution": "external_install",
+      "license_policy": "external_sdk"
+    },
+    {
+      "id": "ilspycmd",
+      "label": "ILSpy command-line C# decompiler",
+      "category": "managed_decompiler",
+      "required": true,
+      "path_candidates": [
+        "%USERPROFILE%\\.dotnet\\tools\\ilspycmd.exe"
+      ],
+      "which": [
+        "ilspycmd"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "sync_hint": "dotnet tool install --global ilspycmd",
+      "redistribution": "external_or_dotnet_tool",
+      "license_policy": "oss_dotnet_tool",
+      "notes": "Managed C# decompilation for Gaea and Unity-side evidence."
+    },
+    {
+      "id": "gaea-reverse-harness-project",
+      "label": "GaeaReverseHarness project",
+      "category": "repo_harness",
+      "required": true,
+      "path_candidates": [
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\GaeaReverseHarness.csproj"
+      ],
+      "redistribution": "repo",
+      "license_policy": "project_owned"
+    },
+    {
+      "id": "gaea-reverse-harness-exe",
+      "label": "GaeaReverseHarness built executable",
+      "category": "built_harness",
+      "required": false,
+      "path_candidates": [
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\bin\\Debug\\net8.0-windows\\GaeaReverseHarness.exe",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\bin\\Debug\\net8.0-windows\\win-x64\\GaeaReverseHarness.exe",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\bin\\Debug\\net9.0-windows\\GaeaReverseHarness.exe",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\bin\\Release\\net8.0-windows\\GaeaReverseHarness.exe"
+      ],
+      "sync_hint": "dotnet build D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\GaeaReverseHarness.csproj -c Debug",
+      "redistribution": "build_from_repo",
+      "license_policy": "project_owned",
+      "notes": "Direct harness execution avoids dotnet run build-output locks."
+    },
+    {
+      "id": "gaea-install",
+      "label": "Gaea desktop install or patched runtime",
+      "category": "target_runtime",
+      "required": true,
+      "env_vars": [
+        "GAEA_DIR",
+        "C3D_GAEA_DIR"
+      ],
+      "path_candidates": [
+        "D:\\ghost1.0\\_gaea_patched_qonly\\Gaea.Swarm.exe",
+        "D:\\ghost1.0\\_gaea_patched_headless\\Gaea.Swarm.exe",
+        "D:\\ghost1.0\\_gaea_patched_runtime\\Gaea.Swarm.exe",
+        "F:\\Gaea 2\\Gaea.Swarm.exe"
+      ],
+      "redistribution": "not_redistributable",
+      "license_policy": "local_user_install_only",
+      "notes": "Bridge oracle target only; never vendor proprietary Gaea binaries."
+    },
+    {
+      "id": "python",
+      "label": "Python scripts for reverse evidence checks",
+      "category": "runtime",
+      "required": true,
+      "path_candidates": [
+        "%LOCALAPPDATA%\\Programs\\Python\\Python310\\python.exe"
+      ],
+      "which": [
+        "python",
+        "py"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "redistribution": "external_install",
+      "license_policy": "external_runtime"
+    },
+    {
+      "id": "powershell",
+      "label": "PowerShell automation shell",
+      "category": "runtime",
+      "required": true,
+      "path_candidates": [
+        "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+      ],
+      "which": [
+        "pwsh",
+        "powershell"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "redistribution": "external_or_system",
+      "license_policy": "external_runtime"
+    },
+    {
+      "id": "manage-reverse-assets-script",
+      "label": "C3D managed reverse asset index script",
+      "category": "repo_script",
+      "required": true,
+      "path_candidates": [
+        "D:\\ghost1.0\\tools\\gaea\\manage_reverse_assets.py"
+      ],
+      "redistribution": "repo",
+      "license_policy": "project_owned"
+    },
+    {
+      "id": "audit-native-displacements-script",
+      "label": "C3D native displacement audit script",
+      "category": "repo_script",
+      "required": true,
+      "path_candidates": [
+        "D:\\ghost1.0\\tools\\gaea\\audit_native_displacements.py"
+      ],
+      "redistribution": "repo",
+      "license_policy": "project_owned"
+    },
+    {
+      "id": "dnspyex",
+      "label": "dnSpyEx managed debugger/decompiler",
+      "category": "managed_decompiler",
+      "required": false,
+      "env_vars": [
+        "DNSPYEX_PATH",
+        "DNSPY_PATH"
+      ],
+      "path_candidates": [
+        "D:\\ghost1.0\\_external\\dnSpyEx\\dnSpy.exe",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\toolchains\\dnspyex\\dnSpy.exe"
+      ],
+      "archive_names": [
+        "dnSpy*.zip",
+        "dnSpyEx*.zip"
+      ],
+      "redistribution": "cache_or_external",
+      "license_policy": "oss_release_check_terms"
+    },
+    {
+      "id": "dotpeek",
+      "label": "JetBrains dotPeek",
+      "category": "managed_decompiler",
+      "required": false,
+      "env_vars": [
+        "DOTPEEK_PATH"
+      ],
+      "path_candidates": [
+        "C:\\Program Files\\JetBrains\\dotPeek*\\dotPeek64.exe"
+      ],
+      "redistribution": "external_only",
+      "license_policy": "user_install_only"
+    },
+    {
+      "id": "x64dbg",
+      "label": "x64dbg native debugger",
+      "category": "native_debugger",
+      "required": false,
+      "env_vars": [
+        "X64DBG_PATH"
+      ],
+      "path_candidates": [
+        "D:\\ghost1.0\\_external\\x64dbg\\release\\x64\\x64dbg.exe",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\toolchains\\x64dbg\\release\\x64\\x64dbg.exe"
+      ],
+      "archive_names": [
+        "x64dbg*.zip"
+      ],
+      "redistribution": "cache_or_external",
+      "license_policy": "oss_release_check_terms"
+    },
+    {
+      "id": "radare2",
+      "label": "radare2 native analysis",
+      "category": "native_decompiler",
+      "required": false,
+      "path_candidates": [
+        "D:\\ghost1.0\\_external\\radare2\\bin\\r2.exe",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\toolchains\\radare2\\bin\\r2.exe"
+      ],
+      "which": [
+        "r2"
+      ],
+      "archive_names": [
+        "radare2*.zip"
+      ],
+      "redistribution": "cache_or_external",
+      "license_policy": "oss_release_check_terms"
+    },
+    {
+      "id": "cutter",
+      "label": "Cutter GUI over radare2",
+      "category": "native_decompiler",
+      "required": false,
+      "path_candidates": [
+        "D:\\ghost1.0\\_external\\Cutter\\Cutter.exe",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\toolchains\\Cutter\\Cutter.exe"
+      ],
+      "archive_names": [
+        "Cutter*.zip"
+      ],
+      "redistribution": "cache_or_external",
+      "license_policy": "oss_release_check_terms"
+    },
+    {
+      "id": "ida-free",
+      "label": "IDA Free",
+      "category": "native_decompiler",
+      "required": false,
+      "env_vars": [
+        "IDA_FREE_PATH",
+        "IDA_PATH"
+      ],
+      "path_candidates": [
+        "C:\\Program Files\\IDA Freeware*\\ida64.exe"
+      ],
+      "redistribution": "external_only",
+      "license_policy": "user_install_only"
+    },
+    {
+      "id": "dumpbin",
+      "label": "MSVC dumpbin",
+      "category": "binary_inspection",
+      "required": false,
+      "path_candidates": [
+        "C:\\Program Files\\Microsoft Visual Studio\\2022\\*\\VC\\Tools\\MSVC\\*\\bin\\Hostx64\\x64\\dumpbin.exe"
+      ],
+      "which": [
+        "dumpbin"
+      ],
+      "redistribution": "external_install",
+      "license_policy": "external_sdk"
+    },
+    {
+      "id": "ildasm",
+      "label": "Microsoft ILDasm",
+      "category": "managed_inspection",
+      "required": false,
+      "path_candidates": [
+        "C:\\Program Files (x86)\\Microsoft SDKs\\Windows\\*\\bin\\*\\ildasm.exe"
+      ],
+      "which": [
+        "ildasm"
+      ],
+      "redistribution": "external_install",
+      "license_policy": "external_sdk"
+    },
+    {
+      "id": "dxc",
+      "label": "DirectX Shader Compiler",
+      "category": "shader_reverse",
+      "required": false,
+      "path_candidates": [
+        "C:\\VulkanSDK\\*\\Bin\\dxc.exe"
+      ],
+      "which": [
+        "dxc"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "redistribution": "external_sdk",
+      "license_policy": "external_sdk"
+    },
+    {
+      "id": "spirv-cross",
+      "label": "SPIRV-Cross shader reflector",
+      "category": "shader_reverse",
+      "required": false,
+      "path_candidates": [
+        "C:\\VulkanSDK\\*\\Bin\\spirv-cross.exe"
+      ],
+      "which": [
+        "spirv-cross"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "redistribution": "external_sdk",
+      "license_policy": "external_sdk"
+    },
+    {
+      "id": "renderdoc",
+      "label": "RenderDoc capture inspection",
+      "category": "gpu_debugger",
+      "required": false,
+      "path_candidates": [
+        "C:\\Program Files\\RenderDoc\\renderdoccmd.exe"
+      ],
+      "which": [
+        "renderdoccmd"
+      ],
+      "version_args": [
+        "--version"
+      ],
+      "redistribution": "external_install",
+      "license_policy": "external_tool"
+    },
+    {
+      "id": "pix",
+      "label": "Microsoft PIX",
+      "category": "gpu_debugger",
+      "required": false,
+      "path_candidates": [
+        "C:\\Program Files\\Microsoft PIX\\*\\WinPixEventRuntime.dll"
+      ],
+      "redistribution": "external_only",
+      "license_policy": "user_install_only"
+    },
+    {
+      "id": "assetripper",
+      "label": "AssetRipper Unity asset/decompanion",
+      "category": "unity_reverse",
+      "required": false,
+      "path_candidates": [
+        "D:\\ghost1.0\\_external\\AssetRipper\\AssetRipper.exe",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\toolchains\\AssetRipper\\AssetRipper.exe"
+      ],
+      "archive_names": [
+        "AssetRipper*.zip"
+      ],
+      "redistribution": "cache_or_external",
+      "license_policy": "oss_release_check_terms"
+    },
+    {
+      "id": "unitypy",
+      "label": "UnityPy package for Unity asset probes",
+      "category": "unity_reverse",
+      "required": false,
+      "python_modules": [
+        "UnityPy"
+      ],
+      "which": [
+        "python"
+      ],
+      "sync_hint": "python -m pip install UnityPy",
+      "redistribution": "external_python_package",
+      "license_policy": "oss_python_package"
+    }
+  ]
+}

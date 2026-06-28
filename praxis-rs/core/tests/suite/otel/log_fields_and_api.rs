@@ -30,13 +30,13 @@ async fn responses_api_emits_api_request_event() {
     let TestPraxis { thread: praxis, .. } = test_praxis().build(&server).await.unwrap();
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
 
@@ -73,13 +73,13 @@ async fn process_sse_emits_tracing_for_output_item() {
     let TestPraxis { thread: praxis, .. } = test_praxis().build(&server).await.unwrap();
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
 

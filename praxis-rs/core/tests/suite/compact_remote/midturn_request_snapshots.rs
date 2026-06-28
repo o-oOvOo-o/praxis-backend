@@ -37,13 +37,13 @@ async fn snapshot_request_shape_remote_mid_turn_continuation_compaction() -> Res
     .await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -112,13 +112,13 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_summary_only_reinject
     .await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -195,13 +195,13 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_multi_summary_reinjec
     .await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -209,13 +209,13 @@ async fn snapshot_request_shape_remote_mid_turn_compaction_multi_summary_reinjec
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "USER_TWO".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -288,13 +288,13 @@ async fn snapshot_request_shape_remote_manual_compact_without_previous_user_mess
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 

@@ -1,8 +1,6 @@
 use crate::command_exec::CommandExecManager;
 use crate::config_api::apply_runtime_feature_enablement;
-use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 use crate::error_code::INTERNAL_ERROR_CODE;
-use crate::error_code::INVALID_PARAMS_ERROR_CODE;
 use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::fuzzy_file_search::FuzzyFileSearchSession;
 use crate::outgoing_message::ConnectionId;
@@ -31,10 +29,20 @@ use praxis_app_gateway_protocol::ThreadBackgroundTerminalsCleanResponse;
 use praxis_app_gateway_protocol::ThreadClosedNotification;
 use praxis_app_gateway_protocol::ThreadCompactStartParams;
 use praxis_app_gateway_protocol::ThreadCompactStartResponse;
-use praxis_app_gateway_protocol::ThreadControlAcquireParams;
-use praxis_app_gateway_protocol::ThreadControlAcquireResponse;
+use praxis_app_gateway_protocol::ThreadControlClaimParams;
+use praxis_app_gateway_protocol::ThreadControlClaimResponse;
+use praxis_app_gateway_protocol::ThreadControlQueueCancelParams;
+use praxis_app_gateway_protocol::ThreadControlQueueCancelResponse;
+use praxis_app_gateway_protocol::ThreadControlQueueFlushParams;
+use praxis_app_gateway_protocol::ThreadControlQueueFlushResponse;
+use praxis_app_gateway_protocol::ThreadControlQueueItem as ApiThreadControlQueueItem;
+use praxis_app_gateway_protocol::ThreadControlQueueParams;
+use praxis_app_gateway_protocol::ThreadControlQueueResponse;
+use praxis_app_gateway_protocol::ThreadControlQueueStatus as ApiThreadControlQueueStatus;
 use praxis_app_gateway_protocol::ThreadControlReleaseParams;
 use praxis_app_gateway_protocol::ThreadControlReleaseResponse;
+use praxis_app_gateway_protocol::ThreadControlSnapshotParams;
+use praxis_app_gateway_protocol::ThreadControlSnapshotResponse;
 use praxis_app_gateway_protocol::ThreadDecrementElicitationParams;
 use praxis_app_gateway_protocol::ThreadDecrementElicitationResponse;
 use praxis_app_gateway_protocol::ThreadDeleteParams;
@@ -52,6 +60,13 @@ use praxis_app_gateway_protocol::ThreadGoalStatus;
 use praxis_app_gateway_protocol::ThreadGoalUpdateParams;
 use praxis_app_gateway_protocol::ThreadGoalUpdateResponse;
 use praxis_app_gateway_protocol::ThreadGoalUpdatedNotification;
+use praxis_app_gateway_protocol::ThreadHeartbeatClearParams;
+use praxis_app_gateway_protocol::ThreadHeartbeatClearResponse;
+use praxis_app_gateway_protocol::ThreadHeartbeatGetParams;
+use praxis_app_gateway_protocol::ThreadHeartbeatGetResponse;
+use praxis_app_gateway_protocol::ThreadHeartbeatSetParams;
+use praxis_app_gateway_protocol::ThreadHeartbeatSetResponse;
+use praxis_app_gateway_protocol::ThreadHeartbeatUpdatedNotification;
 use praxis_app_gateway_protocol::ThreadHistoryAppendParams;
 use praxis_app_gateway_protocol::ThreadHistoryAppendResponse;
 use praxis_app_gateway_protocol::ThreadHistoryEntryGetParams;
@@ -89,11 +104,8 @@ use praxis_app_gateway_protocol::ThreadUnarchivedNotification;
 use praxis_app_gateway_protocol::ThreadUnsubscribeParams;
 use praxis_app_gateway_protocol::ThreadUnsubscribeResponse;
 use praxis_app_gateway_protocol::ThreadUnsubscribeStatus;
-use praxis_app_gateway_protocol::Turn;
-use praxis_app_gateway_protocol::UserInput as ApiUserInput;
 use praxis_arg0::Arg0DispatchPaths;
 use praxis_core::PraxisThread;
-use praxis_core::SessionMeta;
 use praxis_core::ThreadConfigSnapshot;
 use praxis_core::ThreadForkSnapshot;
 use praxis_core::ThreadManager;
@@ -103,7 +115,6 @@ use praxis_core::config::ConfigOverrides;
 use praxis_core::config_loader::CloudConfigBundleLoadError;
 use praxis_core::config_loader::CloudConfigBundleLoadErrorCode;
 use praxis_core::config_loader::CloudConfigBundleLoader;
-use praxis_core::config_loader::LoaderOverrides;
 use praxis_core::error::PraxisErr;
 use praxis_core::error::Result as PraxisResult;
 use praxis_core::plugins::MarketplaceError;
@@ -126,6 +137,9 @@ use praxis_protocol::protocol::W3cTraceContext;
 use praxis_rollout::state_db::get_state_db;
 use praxis_rollout::state_db::reconcile_rollout;
 use praxis_state::StateRuntime;
+use praxis_state::ThreadControlQueueCreateParams as StateThreadControlQueueCreateParams;
+use praxis_state::ThreadControlQueueItem as StateThreadControlQueueItem;
+use praxis_state::ThreadControlQueueStatus as StateThreadControlQueueStatus;
 use praxis_state::ThreadMetadata;
 use praxis_state::ThreadMetadataBuilder;
 use praxis_state::log_db::LogDbLayer;
@@ -160,6 +174,8 @@ use praxis_app_gateway_protocol::ServerRequest;
 mod account_api;
 mod apps_api;
 mod apps_list_helpers;
+mod automation_api;
+mod automation_scheduler;
 mod command_exec_api;
 mod config_derivation_api;
 mod feedback_api;
@@ -170,12 +186,12 @@ mod plugin_api;
 mod plugin_app_helpers;
 mod plugin_mcp_oauth;
 mod processor_runtime_api;
-mod product_bridge_api;
 mod request_dispatch;
 mod skills_api;
 mod thread_archive_api;
 mod thread_control_api;
 mod thread_goal_api;
+mod thread_heartbeat_api;
 mod thread_lifecycle_api;
 mod thread_listener_api;
 mod thread_metadata_api;
@@ -271,7 +287,7 @@ impl PraxisMessageProcessor {
             feedback,
             log_db,
         } = args;
-        Self {
+        let processor = Self {
             auth_manager,
             thread_manager,
             outgoing: outgoing.clone(),
@@ -291,7 +307,9 @@ impl PraxisMessageProcessor {
             background_tasks: TaskTracker::new(),
             feedback,
             log_db,
-        }
+        };
+        processor.start_automation_scheduler();
+        processor
     }
 }
 

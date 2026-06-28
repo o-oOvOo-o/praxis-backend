@@ -26,6 +26,65 @@ pub fn truncate_text(content: &str, policy: TruncationPolicy) -> String {
     }
 }
 
+pub fn truncate_end_chars_with_ellipsis(content: &str, max_chars: usize) -> String {
+    if content.chars().count() <= max_chars {
+        return content.to_string();
+    }
+
+    let mut truncated = content
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
+}
+
+pub fn trim_and_truncate_end_chars_with_ellipsis(content: &str, max_chars: usize) -> String {
+    let trimmed = content.trim();
+    if trimmed.chars().count() <= max_chars {
+        return trimmed.to_string();
+    }
+
+    let mut truncated = trimmed.chars().take(max_chars).collect::<String>();
+    truncated.push_str("...");
+    truncated
+}
+
+pub fn truncate_utf8_bytes_with_ellipsis(content: &str, max_bytes: usize) -> String {
+    if content.len() <= max_bytes {
+        return content.to_string();
+    }
+
+    let cut = utf8_prefix_boundary(content, max_bytes);
+    let mut truncated = content[..cut].to_string();
+    truncated.push_str("...");
+    truncated
+}
+
+pub fn truncate_utf8_bytes_with_omitted_marker(content: &str, max_bytes: usize) -> String {
+    if content.len() <= max_bytes {
+        return content.to_string();
+    }
+
+    let cut = utf8_prefix_boundary(content, max_bytes);
+    let omitted = content.len().saturating_sub(cut);
+    format!(
+        "{}\n\n[... {omitted} more bytes truncated]",
+        &content[..cut]
+    )
+}
+
+fn utf8_prefix_boundary(content: &str, max_bytes: usize) -> usize {
+    let mut end = 0usize;
+    for (index, _) in content.char_indices() {
+        if index > max_bytes {
+            break;
+        }
+        end = index;
+    }
+    end
+}
+
 pub fn formatted_truncate_text_content_items_with_policy(
     items: &[FunctionCallOutputContentItem],
     policy: TruncationPolicy,

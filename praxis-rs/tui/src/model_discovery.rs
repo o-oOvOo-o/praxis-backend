@@ -17,6 +17,8 @@ use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::openai_models::ReasoningEffortPreset;
 use praxis_protocol::openai_models::default_input_modalities;
 use praxis_protocol::openai_models::known_openai_compatible_model_info;
+use praxis_utils_home_dir::PraxisHomeNamespace;
+use praxis_utils_home_dir::default_praxis_home_for_namespace;
 use serde::de::DeserializeOwned;
 #[derive(Debug, Clone)]
 pub(crate) struct ModelCatalogSelectionMetadata {
@@ -528,11 +530,11 @@ fn discover_praxis_config_paths() -> Vec<PathBuf> {
         }
     }
 
-    let Some(home) = home_dir() else {
+    let Ok(home) = default_praxis_home_for_namespace(PraxisHomeNamespace::Praxis) else {
         return paths;
     };
 
-    for candidate in [home.join(".praxis").join("config.toml")] {
+    for candidate in [home.join("config.toml")] {
         if candidate.is_file() && seen.insert(normalize_path(&candidate)) {
             paths.push(candidate);
         }
@@ -545,12 +547,6 @@ fn parse_toml_file<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
     let contents =
         fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
     toml::from_str(&contents).map_err(|error| format!("parse {}: {error}", path.display()))
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
 }
 
 fn praxis_config_string(value: Option<&str>) -> Option<String> {

@@ -86,7 +86,6 @@ mod collaboration_instructions;
 mod compact;
 mod compact_remote;
 mod compact_resume_fork;
-mod deprecation_notice;
 mod exec;
 mod exec_policy;
 mod fork_thread;

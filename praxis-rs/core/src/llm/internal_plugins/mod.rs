@@ -15,8 +15,6 @@ use crate::llm::ids::WireId;
 use crate::llm::profiles::plugin::FirstPartyModelMatcher;
 use crate::llm::profiles::plugin::FirstPartyProviderMatcher;
 use crate::llm::profiles::plugin::ProfileDescriptor;
-#[cfg(test)]
-use crate::llm::wire::plugin::WireDescriptor;
 use crate::model_provider_info::ModelProviderInfo;
 
 #[cfg(test)]
@@ -58,6 +56,13 @@ struct LlmPluginDescriptor {
     label: &'static str,
 }
 
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WireDescriptor {
+    id: WireId,
+    name: &'static str,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LlmModelCatalogScope {
     Exclusive,
@@ -68,6 +73,7 @@ pub(crate) enum LlmModelCatalogScope {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct LlmModelCatalogDescriptor {
     pub(crate) id: &'static str,
+    #[cfg(test)]
     pub(crate) label: &'static str,
     pub(crate) scope: LlmModelCatalogScope,
     pub(crate) provider_matches: FirstPartyProviderMatcher,
@@ -307,13 +313,14 @@ impl LlmPluginRegistry {
 
 fn exclusive_model_catalog(
     id: &'static str,
-    label: &'static str,
+    _label: &'static str,
     provider_matches: FirstPartyProviderMatcher,
     model_matches: FirstPartyModelMatcher,
 ) -> LlmModelCatalogDescriptor {
     LlmModelCatalogDescriptor {
         id,
-        label,
+        #[cfg(test)]
+        label: _label,
         scope: LlmModelCatalogScope::Exclusive,
         provider_matches,
         model_matches,
@@ -322,13 +329,14 @@ fn exclusive_model_catalog(
 
 fn provider_model_catalog(
     id: &'static str,
-    label: &'static str,
+    _label: &'static str,
     provider_matches: FirstPartyProviderMatcher,
     model_matches: FirstPartyModelMatcher,
 ) -> LlmModelCatalogDescriptor {
     LlmModelCatalogDescriptor {
         id,
-        label,
+        #[cfg(test)]
+        label: _label,
         scope: LlmModelCatalogScope::ProviderExclusive,
         provider_matches,
         model_matches,
@@ -337,13 +345,14 @@ fn provider_model_catalog(
 
 fn generic_model_catalog(
     id: &'static str,
-    label: &'static str,
+    _label: &'static str,
     provider_matches: FirstPartyProviderMatcher,
     model_matches: FirstPartyModelMatcher,
 ) -> LlmModelCatalogDescriptor {
     LlmModelCatalogDescriptor {
         id,
-        label,
+        #[cfg(test)]
+        label: _label,
         scope: LlmModelCatalogScope::Generic,
         provider_matches,
         model_matches,
@@ -430,7 +439,7 @@ mod tests {
                 .any(|profile| profile.id == BehaviorProfileId::OpenRouter)
         );
         assert!(
-            !registry
+            registry
                 .profiles()
                 .iter()
                 .any(|profile| profile.id == BehaviorProfileId::Claude)
@@ -481,15 +490,17 @@ mod tests {
         assert!(extension_ids.contains("web_search/praxis"));
         assert!(extension_ids.contains("web_search/responses"));
         assert!(extension_ids.contains("common/openrouter"));
-        assert!(extension_ids.contains("common/claude_placeholder"));
-        assert!(extension_ids.contains("common/claude_placeholder/statement"));
+        assert!(extension_ids.contains("common/claude"));
+        assert!(extension_ids.contains("common/claude/prompts"));
+        assert!(extension_ids.contains("common/claude/tasks"));
+        assert!(extension_ids.contains("common/claude/tools"));
         assert!(extension_ids.contains("deepseek/smarter"));
         assert!(!extension_ids.contains("praxis/web_search"));
         assert!(!extension_ids.contains("praxis/web_search/obscura"));
         assert!(!extension_ids.contains("deepseek/web_search"));
         assert!(!extension_ids.contains("deepseek/web_search/local_function"));
         assert!(!extension_ids.contains("codex/web_search/responses_native"));
-        assert!(!extension_ids.contains("claude/prompts"));
+        assert!(!extension_ids.contains("common/claude_placeholder"));
     }
 
     #[test]

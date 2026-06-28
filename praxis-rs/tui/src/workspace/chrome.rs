@@ -11,7 +11,7 @@ pub(crate) enum WorkspaceChromeMenu {
 pub(crate) enum WorkspaceChromeAction {
     NewChat,
     OpenFolder,
-    HelpWebsite,
+    AboutPraxis,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -71,7 +71,7 @@ pub(crate) fn menu_actions(menu: WorkspaceChromeMenu) -> &'static [WorkspaceChro
             WorkspaceChromeAction::NewChat,
             WorkspaceChromeAction::OpenFolder,
         ],
-        WorkspaceChromeMenu::Help => &[WorkspaceChromeAction::HelpWebsite],
+        WorkspaceChromeMenu::Help => &[WorkspaceChromeAction::AboutPraxis],
     }
 }
 
@@ -80,12 +80,12 @@ pub(crate) fn action_label(action: WorkspaceChromeAction, language: UiLanguage) 
         UiLanguage::En => match action {
             WorkspaceChromeAction::NewChat => "New Chat",
             WorkspaceChromeAction::OpenFolder => "Open Folder...",
-            WorkspaceChromeAction::HelpWebsite => "Cunning3D Website",
+            WorkspaceChromeAction::AboutPraxis => "About Praxis",
         },
         UiLanguage::Cn => match action {
             WorkspaceChromeAction::NewChat => "新聊天",
             WorkspaceChromeAction::OpenFolder => "打开文件夹...",
-            WorkspaceChromeAction::HelpWebsite => "Cunning3D 官网",
+            WorkspaceChromeAction::AboutPraxis => "关于 Praxis",
         },
     }
 }
@@ -94,7 +94,7 @@ pub(crate) fn action_shortcut(action: WorkspaceChromeAction) -> &'static str {
     match action {
         WorkspaceChromeAction::NewChat => "Ctrl+N",
         WorkspaceChromeAction::OpenFolder => "Ctrl+O",
-        WorkspaceChromeAction::HelpWebsite => "",
+        WorkspaceChromeAction::AboutPraxis => "",
     }
 }
 

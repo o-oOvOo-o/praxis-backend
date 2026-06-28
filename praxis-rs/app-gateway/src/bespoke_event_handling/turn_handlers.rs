@@ -179,7 +179,7 @@ pub(super) async fn handle_turn_complete(
     event_turn_id: String,
     outgoing: &ThreadScopedOutgoingMessageSender,
     thread_state: &Arc<Mutex<ThreadState>>,
-) {
+) -> (TurnStatus, Option<TurnError>) {
     let turn_summary = find_and_remove_turn_summary(conversation_id, thread_state).await;
 
     let (status, error) = match turn_summary.last_error {
@@ -187,7 +187,15 @@ pub(super) async fn handle_turn_complete(
         None => (TurnStatus::Completed, None),
     };
 
-    emit_turn_completed_with_status(conversation_id, event_turn_id, status, error, outgoing).await;
+    emit_turn_completed_with_status(
+        conversation_id,
+        event_turn_id,
+        status.clone(),
+        error.clone(),
+        outgoing,
+    )
+    .await;
+    (status, error)
 }
 
 pub(super) async fn handle_turn_interrupted(
@@ -195,7 +203,7 @@ pub(super) async fn handle_turn_interrupted(
     event_turn_id: String,
     outgoing: &ThreadScopedOutgoingMessageSender,
     thread_state: &Arc<Mutex<ThreadState>>,
-) {
+) -> (TurnStatus, Option<TurnError>) {
     find_and_remove_turn_summary(conversation_id, thread_state).await;
 
     emit_turn_completed_with_status(
@@ -206,6 +214,51 @@ pub(super) async fn handle_turn_interrupted(
         outgoing,
     )
     .await;
+    (TurnStatus::Interrupted, None)
+}
+
+pub(super) async fn finish_automation_runs_for_turn(
+    state_db: Option<&Arc<StateRuntime>>,
+    conversation_id: &ThreadId,
+    turn_id: &str,
+    status: &TurnStatus,
+    error: Option<&TurnError>,
+    outgoing: &ThreadScopedOutgoingMessageSender,
+) {
+    let Some(state_db) = state_db else {
+        return;
+    };
+    let run_status = match status {
+        TurnStatus::Completed => AutomationRunStatus::Succeeded,
+        TurnStatus::Failed => AutomationRunStatus::Failed,
+        TurnStatus::Interrupted => AutomationRunStatus::Cancelled,
+        TurnStatus::InProgress => return,
+    };
+    let error_message = error.map(|error| error.message.as_str());
+    let thread_id = conversation_id.to_string();
+    let runs = match state_db
+        .finish_automation_runs_for_turn(thread_id.as_str(), turn_id, run_status, error_message)
+        .await
+    {
+        Ok(runs) => runs,
+        Err(err) => {
+            tracing::warn!(
+                thread_id = %conversation_id,
+                turn_id,
+                "failed to finish automation runs for turn: {err}"
+            );
+            return;
+        }
+    };
+    for run in runs {
+        outgoing
+            .send_server_notification(ServerNotification::AutomationRunUpdated(
+                AutomationRunUpdatedNotification {
+                    run: api_automation_run_from_state(run),
+                },
+            ))
+            .await;
+    }
 }
 
 pub(super) async fn handle_thread_rollback_failed(

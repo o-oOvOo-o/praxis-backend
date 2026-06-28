@@ -57,7 +57,6 @@ use praxis_core::config::OverriddenMetadata as CoreOverriddenMetadata;
 use praxis_core::config::ServiceProfile as CoreProfile;
 use praxis_core::config::Tools as CoreTools;
 use praxis_core::config::WriteStatus as CoreWriteStatus;
-use praxis_core::config_loader::CloudConfigBundle;
 use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::ConfigRequirementsToml;
 use praxis_core::config_loader::LoaderOverrides;
@@ -1012,7 +1011,7 @@ mod tests {
                 TomlValue::Boolean(true),
             )])
             .cloud_config_bundle(CloudConfigBundleLoader::new(async {
-                Ok(Some(CloudConfigBundle::from_legacy_requirements(
+                Ok(Some(CloudConfigBundle::from_single_requirements(
                     ConfigRequirementsToml {
                         feature_requirements: Some(
                             praxis_core::config_loader::FeatureRequirementsToml {

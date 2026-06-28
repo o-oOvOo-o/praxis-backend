@@ -864,7 +864,7 @@ pub(crate) fn resolve_windows_restricted_token_filesystem_overlay(
         file_system_sandbox_policy,
     ) {
         return Err(format!(
-            "windows sandbox backend cannot enforce file_system={:?}, network={network_sandbox_policy:?}, legacy_policy={sandbox_policy:?}; refusing to run unsandboxed",
+            "windows sandbox backend cannot enforce file_system={:?}, network={network_sandbox_policy:?}, protocol_policy={sandbox_policy:?}; refusing to run unsandboxed",
             file_system_sandbox_policy.kind,
         ));
     }

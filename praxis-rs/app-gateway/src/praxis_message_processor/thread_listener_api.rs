@@ -15,6 +15,7 @@ pub(super) struct ListenerTaskContext {
     pub(super) thread_watch_manager: ThreadWatchManager,
     pub(super) fallback_model_provider: String,
     pub(super) praxis_home: PathBuf,
+    pub(super) state_db: Option<Arc<StateRuntime>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,6 +41,7 @@ impl PraxisMessageProcessor {
                 thread_watch_manager: self.thread_watch_manager.clone(),
                 fallback_model_provider: self.config.model_provider_id.clone(),
                 praxis_home: self.config.praxis_home.clone(),
+                state_db: get_state_db(self.config.as_ref()).await,
             },
             conversation_id,
             connection_id,
@@ -125,6 +127,7 @@ impl PraxisMessageProcessor {
                 thread_watch_manager: self.thread_watch_manager.clone(),
                 fallback_model_provider: self.config.model_provider_id.clone(),
                 praxis_home: self.config.praxis_home.clone(),
+                state_db: get_state_db(self.config.as_ref()).await,
             },
             conversation_id,
             conversation,
@@ -156,6 +159,7 @@ impl PraxisMessageProcessor {
             thread_watch_manager,
             fallback_model_provider,
             praxis_home,
+            state_db,
         } = listener_task_context;
         let outgoing_for_task = Arc::clone(&outgoing);
         tokio::spawn(async move {
@@ -204,6 +208,7 @@ impl PraxisMessageProcessor {
                             thread_watch_manager.clone(),
                             fallback_model_provider.clone(),
                             praxis_home.as_path(),
+                            state_db.clone(),
                         )
                         .await;
                     }

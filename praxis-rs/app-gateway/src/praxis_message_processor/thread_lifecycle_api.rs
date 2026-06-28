@@ -19,16 +19,6 @@ fn project_scope_root(path: &Path) -> PathBuf {
     praxis_git_utils::resolve_root_git_project_for_trust(path).unwrap_or_else(|| path.to_path_buf())
 }
 
-fn sandbox_policy_from_resume_mode(mode: SandboxMode) -> praxis_protocol::protocol::SandboxPolicy {
-    match mode {
-        SandboxMode::ReadOnly => praxis_protocol::protocol::SandboxPolicy::new_read_only_policy(),
-        SandboxMode::WorkspaceWrite => {
-            praxis_protocol::protocol::SandboxPolicy::new_workspace_write_policy()
-        }
-        SandboxMode::DangerFullAccess => praxis_protocol::protocol::SandboxPolicy::DangerFullAccess,
-    }
-}
-
 impl PraxisMessageProcessor {
     pub(super) async fn thread_resume(
         &mut self,
@@ -286,7 +276,9 @@ impl PraxisMessageProcessor {
             approvals_reviewer: params
                 .approvals_reviewer
                 .map(praxis_app_gateway_protocol::ApprovalsReviewer::to_core),
-            sandbox_policy: params.sandbox.map(sandbox_policy_from_resume_mode),
+            sandbox_policy: params.sandbox.map(|mode| {
+                praxis_core::config::sandbox_projection::sandbox_policy_from_mode(mode.to_core())
+            }),
             windows_sandbox_level: None,
             model_provider: params.model_provider.clone(),
             model: params.model.clone(),

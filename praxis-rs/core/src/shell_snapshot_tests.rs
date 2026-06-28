@@ -98,28 +98,6 @@ fn strip_snapshot_preamble_requires_marker() {
     assert!(result.is_err());
 }
 
-#[test]
-fn snapshot_file_name_parser_supports_legacy_and_suffixed_names() {
-    let session_id = "019cf82b-6a62-7700-bbbd-46909794ef89";
-
-    assert_eq!(
-        snapshot_session_id_from_file_name(&format!("{session_id}.sh")),
-        Some(session_id)
-    );
-    assert_eq!(
-        snapshot_session_id_from_file_name(&format!("{session_id}.123.sh")),
-        Some(session_id)
-    );
-    assert_eq!(
-        snapshot_session_id_from_file_name(&format!("{session_id}.tmp-123")),
-        Some(session_id)
-    );
-    assert_eq!(
-        snapshot_session_id_from_file_name("not-a-snapshot.txt"),
-        None
-    );
-}
-
 #[cfg(unix)]
 #[test]
 fn bash_snapshot_filters_invalid_exports() -> Result<()> {

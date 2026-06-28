@@ -264,14 +264,14 @@ impl FileSystemSandboxPolicy {
         }
     }
 
-    /// Converts a legacy sandbox policy into an equivalent filesystem policy
+    /// Converts a protocol sandbox policy into an equivalent filesystem policy
     /// for the provided cwd.
     ///
-    /// Legacy `WorkspaceWrite` policies may list readable roots that live
-    /// under an already-writable root. Those paths were redundant in the
-    /// legacy model and should not become read-only carveouts when projected
-    /// into split filesystem policy.
-    pub fn from_legacy_sandbox_policy(sandbox_policy: &SandboxPolicy, cwd: &Path) -> Self {
+    /// Protocol `WorkspaceWrite` policies may list readable roots that live
+    /// under an already-writable root. Those paths were redundant in that
+    /// model and should not become read-only carveouts when projected into
+    /// split filesystem policy.
+    pub fn from_sandbox_policy(sandbox_policy: &SandboxPolicy, cwd: &Path) -> Self {
         let mut file_system_policy = Self::from(sandbox_policy);
         if let SandboxPolicy::WorkspaceWrite { writable_roots, .. } = sandbox_policy {
             let legacy_writable_roots = sandbox_policy.get_writable_roots_with_cwd(cwd);
@@ -429,12 +429,12 @@ impl FileSystemSandboxPolicy {
             return false;
         }
 
-        let Ok(legacy_policy) = self.to_legacy_sandbox_policy(network_policy, cwd) else {
+        let Ok(protocol_policy) = self.to_sandbox_policy(network_policy, cwd) else {
             return true;
         };
 
         self.semantic_signature(cwd)
-            != FileSystemSandboxPolicy::from_legacy_sandbox_policy(&legacy_policy, cwd)
+            != FileSystemSandboxPolicy::from_sandbox_policy(&protocol_policy, cwd)
                 .semantic_signature(cwd)
     }
 
@@ -588,7 +588,7 @@ impl FileSystemSandboxPolicy {
         )
     }
 
-    pub fn to_legacy_sandbox_policy(
+    pub fn to_sandbox_policy(
         &self,
         network_policy: NetworkSandboxPolicy,
         cwd: &Path,

@@ -70,7 +70,6 @@ use classification::runtime_kind_for_intent;
 use classification::summarize_output;
 use classification::validate_task_action_contract;
 use managed_commands::ManagedCommandOutputSource;
-use managed_commands::RuntimeCommandActivity;
 use paths::action_fingerprint;
 use policy::AgentOsPolicy;
 use policy::COORDINATOR_RANK;

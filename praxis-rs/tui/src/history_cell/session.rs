@@ -31,17 +31,38 @@ impl HistoryCell for SessionInfoCell {
 
 pub(crate) fn new_session_info(
     _config: &Config,
-    _tui_config: &TuiRuntimeConfig,
+    tui_config: &TuiRuntimeConfig,
     requested_model: &str,
     event: SessionConfiguredEvent,
     is_first_event: bool,
-    _tooltip_override: Option<String>,
-    _auth_plan: Option<PlanType>,
-    _show_fast_status: bool,
+    tooltip_override: Option<String>,
+    auth_plan: Option<PlanType>,
+    show_fast_status: bool,
 ) -> SessionInfoCell {
-    let SessionConfiguredEvent { model, .. } = event;
+    let SessionConfiguredEvent {
+        model,
+        cwd,
+        reasoning_effort,
+        ..
+    } = event;
 
     let mut parts: Vec<Box<dyn HistoryCell>> = Vec::new();
+    if is_first_event {
+        let mut header = SessionHeaderHistoryCell::new_with_style_internal(
+            model.clone(),
+            Style::default(),
+            reasoning_effort,
+            show_fast_status,
+            cwd,
+            PRAXIS_CLI_VERSION,
+            tui_config.animations,
+        );
+        header.billing_label = session_header_billing_label(auth_plan);
+        if tui_config.show_tooltips {
+            header.set_startup_notice(tooltip_override);
+        }
+        parts.push(Box::new(header));
+    }
     if !is_first_event && requested_model != model {
         let lines = vec![
             "model changed:".magenta().bold().into(),
@@ -52,6 +73,22 @@ pub(crate) fn new_session_info(
     }
 
     SessionInfoCell(CompositeHistoryCell { parts })
+}
+
+fn session_header_billing_label(auth_plan: Option<PlanType>) -> String {
+    match auth_plan {
+        Some(PlanType::Free) => "ChatGPT Free".to_string(),
+        Some(PlanType::Go) => "ChatGPT Go".to_string(),
+        Some(PlanType::Plus) => "ChatGPT Plus".to_string(),
+        Some(PlanType::Pro) => "ChatGPT Pro".to_string(),
+        Some(PlanType::Team) => "ChatGPT Team".to_string(),
+        Some(PlanType::SelfServeBusinessUsageBased) => "ChatGPT Business".to_string(),
+        Some(PlanType::Business) => "ChatGPT Business".to_string(),
+        Some(PlanType::EnterpriseCbpUsageBased) => "ChatGPT Enterprise".to_string(),
+        Some(PlanType::Enterprise) => "ChatGPT Enterprise".to_string(),
+        Some(PlanType::Edu) => "ChatGPT Edu".to_string(),
+        Some(PlanType::Unknown) | None => "API Usage Billing".to_string(),
+    }
 }
 
 pub(crate) fn new_user_prompt(
@@ -164,7 +201,6 @@ impl SessionHeaderHistoryCell {
         )
     }
 
-    #[cfg(test)]
     fn new_with_style_internal(
         model: String,
         model_style: Style,
@@ -191,7 +227,6 @@ impl SessionHeaderHistoryCell {
         }
     }
 
-    #[cfg(test)]
     fn set_startup_notice(&mut self, notice: Option<String>) {
         self.startup_notice = notice.and_then(|notice| {
             let trimmed = notice.trim();

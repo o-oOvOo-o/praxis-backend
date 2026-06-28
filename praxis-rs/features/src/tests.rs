@@ -4,7 +4,6 @@ use crate::FeatureOverrides;
 use crate::Features;
 use crate::FeaturesToml;
 use crate::Stage;
-use crate::feature_for_key;
 use crate::unstable_features_warning_event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::WarningEvent;
@@ -38,12 +37,6 @@ fn default_enabled_features_are_stable() {
             );
         }
     }
-}
-
-#[test]
-fn use_legacy_landlock_is_stable_and_disabled_by_default() {
-    assert_eq!(Feature::UseLegacyLandlock.stage(), Stage::Stable);
-    assert_eq!(Feature::UseLegacyLandlock.default_enabled(), false);
 }
 
 #[test]
@@ -130,12 +123,6 @@ fn image_detail_original_feature_is_under_development() {
 }
 
 #[test]
-fn collab_is_legacy_alias_for_multi_agent() {
-    assert_eq!(feature_for_key("multi_agent"), Some(Feature::Collab));
-    assert_eq!(feature_for_key("collab"), Some(Feature::Collab));
-}
-
-#[test]
 fn multi_agent_is_stable_and_enabled_by_default() {
     assert_eq!(Feature::Collab.stage(), Stage::Stable);
     assert_eq!(Feature::Collab.default_enabled(), true);
@@ -187,6 +174,7 @@ fn from_sources_applies_base_profile_and_overrides() {
 
     let mut profile_entries = BTreeMap::new();
     profile_entries.insert("code_mode_only".to_string(), true);
+    profile_entries.insert("apply_patch_freeform".to_string(), true);
     let profile_features = FeaturesToml {
         entries: profile_entries,
     };
@@ -198,7 +186,6 @@ fn from_sources_applies_base_profile_and_overrides() {
         },
         FeatureConfigSource {
             features: Some(&profile_features),
-            include_apply_patch_tool: Some(true),
             ..Default::default()
         },
         FeatureOverrides {

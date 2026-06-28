@@ -10,7 +10,7 @@ pub enum PermissionConflict {
     FullAccessStillPrompts,
     #[error("approval prompts disabled while sandbox can still deny execution")]
     PromptlessRestrictedSandbox,
-    #[error("legacy sandbox policy and filesystem policy disagree")]
+    #[error("protocol sandbox policy and filesystem policy disagree")]
     SandboxProjectionDrift,
 }
 

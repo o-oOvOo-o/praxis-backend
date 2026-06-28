@@ -300,8 +300,8 @@ fn resolve_sandbox_policies(
                     network_sandbox_policy,
                 });
             }
-            let derived_legacy_policy = file_system_sandbox_policy
-                .to_legacy_sandbox_policy(network_sandbox_policy, sandbox_policy_cwd)
+            let derived_protocol_policy = file_system_sandbox_policy
+                .to_sandbox_policy(network_sandbox_policy, sandbox_policy_cwd)
                 .map_err(|err| {
                     ResolveSandboxPoliciesError::SplitPoliciesRequireDirectRuntimeEnforcement(
                         err.to_string(),
@@ -309,12 +309,12 @@ fn resolve_sandbox_policies(
                 })?;
             if !legacy_sandbox_policies_match_semantics(
                 &sandbox_policy,
-                &derived_legacy_policy,
+                &derived_protocol_policy,
                 sandbox_policy_cwd,
             ) {
                 return Err(ResolveSandboxPoliciesError::MismatchedLegacyPolicy {
                     provided: sandbox_policy,
-                    derived: derived_legacy_policy,
+                    derived: derived_protocol_policy,
                 });
             }
             Ok(EffectiveSandboxPolicies {
@@ -324,7 +324,7 @@ fn resolve_sandbox_policies(
             })
         }
         (Some(sandbox_policy), None) => Ok(EffectiveSandboxPolicies {
-            file_system_sandbox_policy: FileSystemSandboxPolicy::from_legacy_sandbox_policy(
+            file_system_sandbox_policy: FileSystemSandboxPolicy::from_sandbox_policy(
                 &sandbox_policy,
                 sandbox_policy_cwd,
             ),
@@ -333,7 +333,7 @@ fn resolve_sandbox_policies(
         }),
         (None, Some((file_system_sandbox_policy, network_sandbox_policy))) => {
             let sandbox_policy = file_system_sandbox_policy
-                .to_legacy_sandbox_policy(network_sandbox_policy, sandbox_policy_cwd)
+                .to_sandbox_policy(network_sandbox_policy, sandbox_policy_cwd)
                 .map_err(|err| {
                     ResolveSandboxPoliciesError::FailedToDeriveLegacyPolicy(err.to_string())
                 })?;
@@ -354,8 +354,8 @@ fn legacy_sandbox_policies_match_semantics(
 ) -> bool {
     NetworkSandboxPolicy::from(provided) == NetworkSandboxPolicy::from(derived)
         && file_system_sandbox_policies_match_semantics(
-            &FileSystemSandboxPolicy::from_legacy_sandbox_policy(provided, sandbox_policy_cwd),
-            &FileSystemSandboxPolicy::from_legacy_sandbox_policy(derived, sandbox_policy_cwd),
+            &FileSystemSandboxPolicy::from_sandbox_policy(provided, sandbox_policy_cwd),
+            &FileSystemSandboxPolicy::from_sandbox_policy(derived, sandbox_policy_cwd),
             sandbox_policy_cwd,
         )
 }

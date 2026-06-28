@@ -41,13 +41,13 @@ async fn snapshot_request_shape_mid_turn_continuation_compaction() {
     let praxis = builder.build(&server).await.unwrap().thread;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: FUNCTION_CALL_LIMIT_MSG.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
 
@@ -237,13 +237,13 @@ async fn auto_compact_counts_encrypted_reasoning_before_last_user() {
         .enumerate()
     {
         codex
-            .submit(Op::UserInput {
-                items: vec![UserInput::Text {
+            .submit_user_turn(
+                vec![UserInput::Text {
                     text: user.into(),
                     text_elements: Vec::new(),
                 }],
-                final_output_json_schema: None,
-            })
+                None,
+            )
             .await
             .unwrap();
         wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -354,13 +354,13 @@ async fn auto_compact_runs_when_reasoning_header_clears_between_turns() {
 
     for user in [first_user, second_user, third_user] {
         codex
-            .submit(Op::UserInput {
-                items: vec![UserInput::Text {
+            .submit_user_turn(
+                vec![UserInput::Text {
                     text: user.into(),
                     text_elements: Vec::new(),
                 }],
-                final_output_json_schema: None,
-            })
+                None,
+            )
             .await
             .unwrap();
         wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -413,13 +413,13 @@ async fn snapshot_request_shape_pre_turn_compaction_including_incoming_user_mess
 
     for user in ["USER_ONE", "USER_TWO"] {
         codex
-            .submit(Op::UserInput {
-                items: vec![UserInput::Text {
+            .submit_user_turn(
+                vec![UserInput::Text {
                     text: user.to_string(),
                     text_elements: Vec::new(),
                 }],
-                final_output_json_schema: None,
-            })
+                None,
+            )
             .await
             .expect("submit user input");
         wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -444,8 +444,8 @@ async fn snapshot_request_shape_pre_turn_compaction_including_incoming_user_mess
     let image_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII="
         .to_string();
     codex
-        .submit(Op::UserInput {
-            items: vec![
+        .submit_user_turn(
+            vec![
                 UserInput::Image {
                     image_url: image_url.clone(),
                 },
@@ -454,8 +454,8 @@ async fn snapshot_request_shape_pre_turn_compaction_including_incoming_user_mess
                     text_elements: Vec::new(),
                 },
             ],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .expect("submit user input");
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -659,25 +659,25 @@ async fn snapshot_request_shape_pre_turn_compaction_context_window_exceeded() {
         .thread;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .expect("submit first user");
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "USER_TWO".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .expect("submit second user");
     let error_message = wait_for_event_match(&praxis, |event| match event {
@@ -741,13 +741,13 @@ async fn snapshot_request_shape_manual_compact_without_previous_user_messages() 
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "AFTER_MANUAL_EMPTY_COMPACT".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .expect("submit follow-up user input");
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;

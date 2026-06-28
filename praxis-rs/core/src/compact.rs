@@ -31,6 +31,7 @@ use praxis_protocol::user_input::UserInput;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::approx_token_count;
 use praxis_utils_output_truncation::truncate_text;
+use praxis_utils_output_truncation::truncate_utf8_bytes_with_omitted_marker;
 use serde_json::Value;
 use tracing::error;
 
@@ -824,14 +825,14 @@ fn serialize_compaction_conversation(
                 if let Some(text) = function_output_to_text(output) {
                     parts.push(format!(
                         "[Tool result]: {}",
-                        truncate_for_compaction(&text, tool_result_max_chars)
+                        truncate_utf8_bytes_with_omitted_marker(&text, tool_result_max_chars)
                     ));
                 }
             }
             ResponseItem::ToolSearchOutput { tools, .. } => {
                 parts.push(format!(
                     "[Tool search result]: {}",
-                    truncate_for_compaction(
+                    truncate_utf8_bytes_with_omitted_marker(
                         &json_to_compact_string(&Value::Array(tools.clone())),
                         tool_result_max_chars
                     )
@@ -894,21 +895,6 @@ fn function_output_to_text(
 
 fn json_to_compact_string(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "<unserializable>".to_string())
-}
-
-fn truncate_for_compaction(text: &str, max_chars: usize) -> String {
-    if text.len() <= max_chars {
-        return text.to_string();
-    }
-    let mut end = 0usize;
-    for (index, _) in text.char_indices() {
-        if index > max_chars {
-            break;
-        }
-        end = index;
-    }
-    let omitted = text.len().saturating_sub(end);
-    format!("{}\n\n[... {omitted} more bytes truncated]", &text[..end])
 }
 
 async fn drain_to_completed(

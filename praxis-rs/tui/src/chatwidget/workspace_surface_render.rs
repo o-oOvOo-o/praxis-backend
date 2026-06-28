@@ -40,6 +40,12 @@ use crate::toast_queue::ToastSeverity;
 use crate::ui_language::UiLanguage;
 use crate::workspace::LaunchStripState;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ChatMouseSelectionAreas {
+    pub(crate) transcript: Option<Rect>,
+    pub(crate) work_panel: Option<Rect>,
+}
+
 impl Renderable for ChatWidget {
     fn render(&self, area: Rect, buf: &mut Buffer) {
         let launch = LaunchStripState::default();
@@ -181,6 +187,43 @@ impl ChatWidget {
 
     pub(crate) fn workspace_cursor_pos_embedded(&self, area: Rect) -> Option<(u16, u16)> {
         self.workspace_cursor_pos_for_body(Self::surface_body_area(area))
+    }
+
+    pub(crate) fn standalone_mouse_selection_areas(
+        &self,
+        area: Rect,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+    ) -> ChatMouseSelectionAreas {
+        self.mouse_selection_areas_for_body(self.deepseek_body_area(area), transcript_cells)
+    }
+
+    pub(crate) fn embedded_mouse_selection_areas(
+        &self,
+        area: Rect,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+    ) -> ChatMouseSelectionAreas {
+        self.mouse_selection_areas_for_body(Self::surface_body_area(area), transcript_cells)
+    }
+
+    fn mouse_selection_areas_for_body(
+        &self,
+        body_area: Rect,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+    ) -> ChatMouseSelectionAreas {
+        let use_entry_layout = self.workspace_entry_state_visible(transcript_cells)
+            && !self.bottom_pane.has_active_view();
+        let layout = if use_entry_layout {
+            self.workspace_entry_layout_for_area(body_area)
+        } else {
+            self.workspace_layout_for_area(body_area)
+        };
+        ChatMouseSelectionAreas {
+            transcript: layout.active_content_area.filter(|area| !area.is_empty()),
+            work_panel: layout
+                .work_panel_area
+                .map(Self::work_panel_card_area)
+                .filter(|area| !area.is_empty()),
+        }
     }
 
     fn workspace_cursor_pos_for_body(&self, body_area: Rect) -> Option<(u16, u16)> {
@@ -755,13 +798,17 @@ impl ChatWidget {
         let Some(area) = layout.work_panel_area else {
             return;
         };
-        let card_area = if area.width > 1 && area.height > 1 {
+        let card_area = Self::work_panel_card_area(area);
+        self.work_panel
+            .render(card_area, buf, self.workspace_theme());
+    }
+
+    fn work_panel_card_area(area: Rect) -> Rect {
+        if area.width > 1 && area.height > 1 {
             Rect::new(area.x, area.y, area.width - 1, area.height - 1)
         } else {
             area
-        };
-        self.work_panel
-            .render(card_area, buf, self.workspace_theme());
+        }
     }
 
     fn render_bottom_pane(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {

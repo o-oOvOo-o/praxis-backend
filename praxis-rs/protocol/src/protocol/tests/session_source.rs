@@ -28,27 +28,27 @@ fn session_source_from_startup_arg_normalizes_custom_values() {
 fn session_source_restriction_product_defaults_non_subagent_sources_to_praxis() {
     assert_eq!(
         SessionSource::Cli.restriction_product(),
-        Some(Product::Praxis)
+        Some(Product::praxis())
     );
     assert_eq!(
         SessionSource::VSCode.restriction_product(),
-        Some(Product::Praxis)
+        Some(Product::praxis())
     );
     assert_eq!(
         SessionSource::Exec.restriction_product(),
-        Some(Product::Praxis)
+        Some(Product::praxis())
     );
     assert_eq!(
         SessionSource::AppGateway.restriction_product(),
-        Some(Product::Praxis)
+        Some(Product::praxis())
     );
     assert_eq!(
         SessionSource::Mcp.restriction_product(),
-        Some(Product::Praxis)
+        Some(Product::praxis())
     );
     assert_eq!(
         SessionSource::Unknown.restriction_product(),
-        Some(Product::Praxis)
+        Some(Product::praxis())
     );
 }
 
@@ -64,31 +64,31 @@ fn session_source_restriction_product_does_not_guess_subagent_products() {
 fn session_source_restriction_product_maps_custom_sources_to_products() {
     assert_eq!(
         SessionSource::Custom("chatgpt".to_string()).restriction_product(),
-        Some(Product::Chatgpt)
+        Some(Product::chatgpt())
     );
     assert_eq!(
         SessionSource::Custom("ATLAS".to_string()).restriction_product(),
-        Some(Product::Atlas)
+        Some(Product::atlas())
     );
     assert_eq!(
         SessionSource::Custom("cunning3d".to_string()).restriction_product(),
-        Some(Product::Cunning3d)
+        Some(Product::cunning3d())
     );
     assert_eq!(
         SessionSource::Custom("c3d".to_string()).restriction_product(),
-        Some(Product::Cunning3d)
+        Some(Product::cunning3d())
     );
     assert_eq!(
         SessionSource::Custom("praxis".to_string()).restriction_product(),
-        Some(Product::Praxis)
+        Some(Product::praxis())
     );
     assert_eq!(
         SessionSource::Custom("codex".to_string()).restriction_product(),
-        Some(Product::Praxis)
+        Some(Product::praxis())
     );
     assert_eq!(
         SessionSource::Custom("atlas-dev".to_string()).restriction_product(),
-        None
+        Some(Product::new("atlas-dev").unwrap())
     );
 }
 
@@ -96,20 +96,24 @@ fn session_source_restriction_product_maps_custom_sources_to_products() {
 fn session_source_matches_product_restriction() {
     assert!(
         SessionSource::Custom("chatgpt".to_string())
-            .matches_product_restriction(&[Product::Chatgpt])
+            .matches_product_restriction(&[Product::chatgpt()])
     );
     assert!(
         !SessionSource::Custom("chatgpt".to_string())
-            .matches_product_restriction(&[Product::Praxis])
+            .matches_product_restriction(&[Product::praxis()])
     );
-    assert!(SessionSource::VSCode.matches_product_restriction(&[Product::Praxis]));
+    assert!(SessionSource::VSCode.matches_product_restriction(&[Product::praxis()]));
     assert!(
         !SessionSource::Custom("atlas-dev".to_string())
-            .matches_product_restriction(&[Product::Atlas])
+            .matches_product_restriction(&[Product::atlas()])
     );
     assert!(
         SessionSource::Custom("cunning3d".to_string())
-            .matches_product_restriction(&[Product::Cunning3d])
+            .matches_product_restriction(&[Product::cunning3d()])
+    );
+    assert!(
+        SessionSource::Custom("atlas-dev".to_string())
+            .matches_product_restriction(&[Product::new("atlas-dev").unwrap()])
     );
     assert!(SessionSource::Custom("atlas-dev".to_string()).matches_product_restriction(&[]));
 }

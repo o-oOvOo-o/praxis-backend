@@ -2,7 +2,7 @@ pub(crate) mod agent_jobs;
 pub mod apply_patch;
 mod dynamic;
 mod goal;
-mod list_dir;
+mod list_directory;
 mod managed_execution;
 mod mcp;
 mod mcp_resource;
@@ -11,6 +11,7 @@ pub(crate) mod multi_agents_common;
 mod plan;
 mod request_permissions;
 mod request_user_input;
+mod reverse_engineering;
 mod shell;
 mod test_sync;
 mod tool_search;
@@ -23,7 +24,6 @@ use praxis_sandboxing::policy_transforms::intersect_permission_profiles;
 use praxis_sandboxing::policy_transforms::merge_permission_profiles;
 use praxis_sandboxing::policy_transforms::normalize_additional_permissions;
 use praxis_utils_absolute_path::AbsolutePathBufGuard;
-use serde::Deserialize;
 use serde_json::Value;
 use std::path::Path;
 use std::path::PathBuf;
@@ -31,6 +31,7 @@ use std::path::PathBuf;
 use crate::function_tool::FunctionCallError;
 use crate::praxis::Session;
 use crate::sandboxing::SandboxPermissions;
+pub(crate) use crate::tools::arguments::parse_arguments;
 pub(crate) use crate::tools::code_mode::CodeModeExecuteHandler;
 pub(crate) use crate::tools::code_mode::CodeModeWaitHandler;
 pub use apply_patch::ApplyPatchHandler;
@@ -38,7 +39,7 @@ pub use dynamic::DynamicToolHandler;
 pub use goal::CreateGoalHandler;
 pub use goal::GetGoalHandler;
 pub use goal::UpdateGoalHandler;
-pub use list_dir::ListDirHandler;
+pub use list_directory::ListDirectoryHandler;
 pub use mcp::McpHandler;
 pub use mcp_resource::McpResourceHandler;
 pub use plan::PlanHandler;
@@ -46,6 +47,7 @@ use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::AskForApproval;
 pub use request_permissions::RequestPermissionsHandler;
 pub use request_user_input::RequestUserInputHandler;
+pub use reverse_engineering::ReverseEngineeringHandler;
 pub use shell::ShellCommandHandler;
 pub use shell::ShellHandler;
 pub use test_sync::TestSyncHandler;
@@ -55,21 +57,12 @@ pub use unified_exec::UnifiedExecHandler;
 pub use view_image::ViewImageHandler;
 pub use web_search::WebSearchHandler;
 
-fn parse_arguments<T>(arguments: &str) -> Result<T, FunctionCallError>
-where
-    T: for<'de> Deserialize<'de>,
-{
-    serde_json::from_str(arguments).map_err(|err| {
-        FunctionCallError::RespondToModel(format!("failed to parse function arguments: {err}"))
-    })
-}
-
 fn parse_arguments_with_base_path<T>(
     arguments: &str,
     base_path: &Path,
 ) -> Result<T, FunctionCallError>
 where
-    T: for<'de> Deserialize<'de>,
+    T: for<'de> serde::Deserialize<'de>,
 {
     let _guard = AbsolutePathBufGuard::new(base_path);
     parse_arguments(arguments)

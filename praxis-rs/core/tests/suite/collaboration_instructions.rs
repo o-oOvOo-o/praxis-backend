@@ -78,13 +78,13 @@ async fn no_collaboration_instructions_by_default() -> Result<()> {
     let test = test_praxis().build(&server).await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -138,13 +138,13 @@ async fn user_input_includes_collaboration_instructions_after_override() -> Resu
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -237,13 +237,13 @@ async fn override_then_next_turn_uses_updated_collaboration_instructions() -> Re
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -362,13 +362,13 @@ async fn collaboration_mode_update_emits_new_instruction_message() -> Result<()>
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -390,13 +390,13 @@ async fn collaboration_mode_update_emits_new_instruction_message() -> Result<()>
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -447,13 +447,13 @@ async fn collaboration_mode_update_noop_does_not_append() -> Result<()> {
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -475,13 +475,13 @@ async fn collaboration_mode_update_noop_does_not_append() -> Result<()> {
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -534,13 +534,13 @@ async fn collaboration_mode_update_emits_new_instruction_message_when_mode_chang
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -565,13 +565,13 @@ async fn collaboration_mode_update_emits_new_instruction_message_when_mode_chang
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -625,13 +625,13 @@ async fn collaboration_mode_update_noop_does_not_append_when_mode_is_unchanged()
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -656,13 +656,13 @@ async fn collaboration_mode_update_noop_does_not_append_when_mode_is_unchanged()
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -720,13 +720,13 @@ async fn resume_replays_collaboration_instructions() -> Result<()> {
 
     initial
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -736,13 +736,13 @@ async fn resume_replays_collaboration_instructions() -> Result<()> {
     let resumed = builder.resume(&server, home, rollout_path).await?;
     resumed
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "after resume".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&resumed.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -796,13 +796,13 @@ async fn empty_collaboration_instructions_are_ignored() -> Result<()> {
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 

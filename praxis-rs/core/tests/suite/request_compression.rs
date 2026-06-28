@@ -39,13 +39,13 @@ async fn request_body_is_zstd_compressed_for_praxis_backend_when_enabled() -> an
     let praxis = builder.build(&server).await?.thread;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "compress me".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     // Wait until the task completes so the request definitely hit the server.
@@ -86,13 +86,13 @@ async fn request_body_is_not_compressed_for_api_key_auth_even_when_enabled() -> 
     let praxis = builder.build(&server).await?.thread;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "do not compress".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;

@@ -10,7 +10,7 @@ use crate::praxis::SessionSettingsUpdate;
 use crate::praxis::SteerInputError;
 
 impl Session {
-    pub(crate) async fn submit_user_input_or_turn(self: &Arc<Self>, sub_id: String, op: Op) {
+    pub(crate) async fn submit_user_turn(self: &Arc<Self>, sub_id: String, op: Op) {
         let (items, updates) = match op {
             Op::UserTurn {
                 cwd,
@@ -55,16 +55,6 @@ impl Session {
                     },
                 )
             }
-            Op::UserInput {
-                items,
-                final_output_json_schema,
-            } => (
-                items,
-                SessionSettingsUpdate {
-                    final_output_json_schema: Some(final_output_json_schema),
-                    ..Default::default()
-                },
-            ),
             _ => unreachable!(),
         };
 

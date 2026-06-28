@@ -80,13 +80,13 @@ async fn same_conversation_can_switch_from_gpt_to_deepseek_provider() -> Result<
     let test = builder.build(&server).await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "answer with gpt".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -108,13 +108,13 @@ async fn same_conversation_can_switch_from_gpt_to_deepseek_provider() -> Result<
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "answer with deepseek".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 

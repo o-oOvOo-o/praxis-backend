@@ -81,6 +81,7 @@ impl App {
         if !self.workspace.enabled {
             self.workspace.list_area = None;
             self.workspace.chat_area = Some(area);
+            self.workspace.work_panel_area = None;
             self.workspace.chrome_bar_area = None;
             self.workspace.chrome_bar_areas = WorkspaceChromeBarAreas::default();
             self.workspace.toolbar_new_area = None;
@@ -95,7 +96,20 @@ impl App {
                 self.workspace.chat_scroll_from_bottom(),
                 &self.workspace.launch,
             );
-            self.update_mouse_pane_snapshot(MousePane::Chat, area, buf);
+            let selection_areas = self
+                .chat_widget
+                .standalone_mouse_selection_areas(area, &self.transcript_cells);
+            self.workspace.work_panel_area = selection_areas.work_panel;
+            if let Some(transcript_area) = selection_areas.transcript {
+                self.update_mouse_pane_snapshot(MousePane::Chat, transcript_area, buf);
+            } else {
+                self.clear_mouse_pane_snapshot(MousePane::Chat);
+            }
+            if let Some(work_panel_area) = selection_areas.work_panel {
+                self.update_mouse_pane_snapshot(MousePane::WorkPanel, work_panel_area, buf);
+            } else {
+                self.clear_mouse_pane_snapshot(MousePane::WorkPanel);
+            }
             self.render_mouse_selection_overlay(buf);
             return area;
         }
@@ -128,6 +142,7 @@ impl App {
         } = workspace_pane_split(content_area);
         self.workspace.list_area = Some(list_area);
         self.workspace.chat_area = (!chat_area.is_empty()).then_some(chat_area);
+        self.workspace.work_panel_area = None;
         self.workspace
             .clamp_list_scroll(self.workspace_visible_row_capacity());
         let max_chat_scroll = if chat_area.is_empty() || !self.workspace.chat_pane_is_active() {
@@ -154,7 +169,10 @@ impl App {
         }
         self.render_workspace_list(list_area, buf, false);
         if !chat_area.is_empty() {
-            if !self.workspace.render_picker_pane(chat_area, buf) {
+            if self.workspace.render_picker_pane(chat_area, buf) {
+                self.clear_mouse_pane_snapshot(MousePane::WorkPanel);
+                self.update_mouse_pane_snapshot(MousePane::Chat, chat_area, buf);
+            } else {
                 self.chat_widget.render_workspace_chat_embedded(
                     chat_area,
                     buf,
@@ -162,10 +180,24 @@ impl App {
                     self.workspace.chat_scroll_from_bottom(),
                     &self.workspace.launch,
                 );
+                let selection_areas = self
+                    .chat_widget
+                    .embedded_mouse_selection_areas(chat_area, &self.transcript_cells);
+                self.workspace.work_panel_area = selection_areas.work_panel;
+                if let Some(transcript_area) = selection_areas.transcript {
+                    self.update_mouse_pane_snapshot(MousePane::Chat, transcript_area, buf);
+                } else {
+                    self.clear_mouse_pane_snapshot(MousePane::Chat);
+                }
+                if let Some(work_panel_area) = selection_areas.work_panel {
+                    self.update_mouse_pane_snapshot(MousePane::WorkPanel, work_panel_area, buf);
+                } else {
+                    self.clear_mouse_pane_snapshot(MousePane::WorkPanel);
+                }
             }
-            self.update_mouse_pane_snapshot(MousePane::Chat, chat_area, buf);
         } else {
-            self.mouse.chat_snapshot = None;
+            self.clear_mouse_pane_snapshot(MousePane::Chat);
+            self.clear_mouse_pane_snapshot(MousePane::WorkPanel);
         }
         self.update_mouse_pane_snapshot(MousePane::WorkspaceList, list_area, buf);
         self.render_workspace_chrome_overlay(window_inner_area, buf);

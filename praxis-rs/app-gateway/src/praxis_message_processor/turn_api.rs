@@ -171,8 +171,24 @@ impl PraxisMessageProcessor {
             self.outgoing.send_error(request_id, error).await;
             return;
         }
+        let TurnStartParams {
+            thread_id,
+            input,
+            cwd,
+            approval_policy,
+            approvals_reviewer,
+            sandbox_policy,
+            model_provider,
+            model,
+            service_tier,
+            effort,
+            summary,
+            personality,
+            output_schema,
+            collaboration_mode,
+        } = params;
         let Some((_, thread)) = self
-            .ensure_thread_for_request(&params.thread_id, &request_id)
+            .ensure_thread_for_request(&thread_id, &request_id)
             .await
         else {
             return;
@@ -187,66 +203,39 @@ impl PraxisMessageProcessor {
         let collaboration_modes_config = CollaborationModesConfig {
             default_mode_request_user_input: thread.enabled(Feature::DefaultModeRequestUserInput),
         };
-        let collaboration_mode = params.collaboration_mode.map(|mode| {
+        let collaboration_mode = collaboration_mode.map(|mode| {
             self.normalize_turn_start_collaboration_mode(mode, collaboration_modes_config)
         });
 
-        // Map API input items to core input items.
-        let mapped_items: Vec<CoreInputItem> = params
-            .input
-            .into_iter()
-            .map(ApiUserInput::into_core)
-            .collect();
-
-        let has_any_overrides = params.cwd.is_some()
-            || params.approval_policy.is_some()
-            || params.approvals_reviewer.is_some()
-            || params.sandbox_policy.is_some()
-            || params.model_provider.is_some()
-            || params.model.is_some()
-            || params.service_tier.is_some()
-            || params.effort.is_some()
-            || params.summary.is_some()
-            || collaboration_mode.is_some()
-            || params.personality.is_some();
-
-        // If any overrides are provided, update the session turn context first.
-        if has_any_overrides {
-            let _ = self
-                .submit_core_op(
-                    &request_id,
-                    thread.as_ref(),
-                    Op::OverrideTurnContext {
-                        cwd: params.cwd,
-                        approval_policy: params.approval_policy.map(AskForApproval::to_core),
-                        approvals_reviewer: params
-                            .approvals_reviewer
-                            .map(ApprovalsReviewer::to_core),
-                        sandbox_policy: params.sandbox_policy.map(|p| p.to_core()),
-                        windows_sandbox_level: None,
-                        model_provider: params.model_provider,
-                        model: params.model,
-                        effort: params.effort.map(Some),
-                        summary: params.summary,
-                        service_tier: params.service_tier,
-                        collaboration_mode,
-                        personality: params.personality,
-                    },
-                )
-                .await;
-        }
+        let mapped_items: Vec<CoreInputItem> =
+            input.into_iter().map(ApiUserInput::into_core).collect();
+        let snapshot = thread.config_snapshot().await;
+        let op = Op::UserTurn {
+            items: mapped_items,
+            cwd: cwd.unwrap_or(snapshot.cwd),
+            approval_policy: approval_policy
+                .map(AskForApproval::to_core)
+                .unwrap_or(snapshot.approval_policy),
+            approvals_reviewer: Some(
+                approvals_reviewer
+                    .map(ApprovalsReviewer::to_core)
+                    .unwrap_or(snapshot.approvals_reviewer),
+            ),
+            sandbox_policy: sandbox_policy
+                .map(|policy| policy.to_core())
+                .unwrap_or(snapshot.sandbox_policy),
+            model: model.unwrap_or(snapshot.model),
+            model_provider: Some(model_provider.unwrap_or(snapshot.model_provider_id)),
+            effort: effort.or(snapshot.reasoning_effort),
+            summary,
+            service_tier: service_tier.or(Some(snapshot.service_tier)),
+            final_output_json_schema: output_schema,
+            collaboration_mode,
+            personality: personality.or(snapshot.personality),
+        };
 
         // Start the turn by submitting the user input. Return its submission id as turn_id.
-        let turn_id = self
-            .submit_core_op(
-                &request_id,
-                thread.as_ref(),
-                Op::UserInput {
-                    items: mapped_items,
-                    final_output_json_schema: params.output_schema,
-                },
-            )
-            .await;
+        let turn_id = self.submit_core_op(&request_id, thread.as_ref(), op).await;
 
         match turn_id {
             Ok(turn_id) => {

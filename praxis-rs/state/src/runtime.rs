@@ -5,6 +5,12 @@ use crate::AgentJobItemCreateParams;
 use crate::AgentJobItemStatus;
 use crate::AgentJobProgress;
 use crate::AgentJobStatus;
+use crate::Automation;
+use crate::AutomationCreateParams;
+use crate::AutomationRun;
+use crate::AutomationRunCreateParams;
+use crate::AutomationRunStatus;
+use crate::AutomationUpdate;
 use crate::LOGS_DB_FILENAME;
 use crate::LOGS_DB_VERSION;
 use crate::LogEntry;
@@ -13,6 +19,9 @@ use crate::LogRow;
 use crate::STATE_DB_FILENAME;
 use crate::STATE_DB_VERSION;
 use crate::SortKey;
+use crate::ThreadControlQueueCreateParams;
+use crate::ThreadControlQueueItem;
+use crate::ThreadControlQueueStatus;
 use crate::ThreadMetadata;
 use crate::ThreadMetadataBuilder;
 use crate::ThreadsPage;
@@ -52,12 +61,15 @@ use tracing::warn;
 
 mod agent_jobs;
 mod agent_os;
+mod automations;
 mod backfill;
 mod goals;
+mod heartbeats;
 mod logs;
 mod memories;
 #[cfg(test)]
 mod test_support;
+mod thread_control_queue;
 mod threads;
 
 pub use goals::GoalAccountingMode;

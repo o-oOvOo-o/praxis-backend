@@ -1,3 +1,9 @@
+//! Converts analytics facts emitted by the runtime into track-event requests.
+//!
+//! The analytics client queues small, local facts as work happens. This reducer is
+//! the stateful enrichment layer: it remembers connection metadata, derives
+//! stable IDs, and shapes those facts into the wire payloads sent by `client.rs`.
+
 use crate::events::AppGatewayRpcTransport;
 use crate::events::PraxisAppGatewayClientMetadata;
 use crate::events::PraxisAppMentionedEventRequest;
@@ -35,6 +41,8 @@ use std::path::Path;
 
 #[derive(Default)]
 pub(crate) struct AnalyticsReducer {
+    /// App Gateway initialization is observed before thread creation, so keep the
+    /// per-connection metadata here until a later thread event needs it.
     connections: HashMap<u64, ConnectionState>,
 }
 
@@ -44,6 +52,9 @@ struct ConnectionState {
 }
 
 impl AnalyticsReducer {
+    /// Ingests one internal analytics fact and appends any resulting wire events
+    /// to `out`. Some facts only update reducer state and intentionally emit no
+    /// event on their own.
     pub(crate) async fn ingest(&mut self, input: AnalyticsFact, out: &mut Vec<TrackEventRequest>) {
         match input {
             AnalyticsFact::Initialize {
@@ -95,6 +106,8 @@ impl AnalyticsReducer {
         runtime: PraxisRuntimeMetadata,
         rpc_transport: AppGatewayRpcTransport,
     ) {
+        // Initialization supplies metadata used to contextualize later thread
+        // events, so this updates state rather than emitting immediately.
         self.connections.insert(
             connection_id,
             ConnectionState {
@@ -126,6 +139,9 @@ impl AnalyticsReducer {
                 SkillScope::System => "system",
                 SkillScope::Admin => "admin",
             };
+            // Repo metadata is best-effort: it improves event grouping for
+            // repo-scoped skills, but a missing or unreadable git remote should
+            // not prevent the invocation event from being emitted.
             let repo_root = get_git_repo_root(invocation.skill_path.as_path());
             let repo_url = if let Some(root) = repo_root.as_ref() {
                 collect_git_info(root)
@@ -213,6 +229,8 @@ impl AnalyticsReducer {
         out: &mut Vec<TrackEventRequest>,
     ) {
         let Some(connection_state) = self.connections.get(&connection_id) else {
+            // Without the initialize fact, the event would be missing required
+            // client/runtime context, so drop it instead of sending partial data.
             return;
         };
         out.push(TrackEventRequest::ThreadInitialized(
@@ -235,6 +253,11 @@ impl AnalyticsReducer {
     }
 }
 
+/// Builds a stable, opaque identifier for a local skill.
+///
+/// The raw path participates in the hash so repeated invocations of the same
+/// skill resolve to the same ID, but the event payload does not expose that path
+/// as the identifier itself.
 pub(crate) fn skill_id_for_local_skill(
     repo_url: Option<&str>,
     repo_root: Option<&Path>,

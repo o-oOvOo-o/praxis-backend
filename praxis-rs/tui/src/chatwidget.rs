@@ -292,8 +292,7 @@ const WORKSPACE_INPUT_STRIP_ROWS: u16 = 1;
 const MULTI_AGENT_ENABLE_TITLE: &str = "Enable subagents?";
 const MULTI_AGENT_ENABLE_YES: &str = "Enable subagents";
 const MULTI_AGENT_ENABLE_NO: &str = "Keep disabled";
-const MULTI_AGENT_ENABLE_NOTICE: &str =
-    "Subagents are enabled. Start a new session to use them.";
+const MULTI_AGENT_ENABLE_NOTICE: &str = "Subagents are enabled. Start a new session to use them.";
 
 /// Choose the keybinding used to edit the most-recently queued message.
 ///
@@ -349,10 +348,10 @@ use crate::bottom_pane::QUIT_SHORTCUT_TIMEOUT;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
-use crate::bottom_pane::custom_prompt_view::CustomPromptView;
-use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
+use crate::bottom_pane::custom_prompt_view::CustomPromptView;
+use crate::bottom_pane::popup_consts::standard_popup_hint_line;
 use crate::clipboard_paste::paste_image_to_temp_png;
 use crate::clipboard_text;
 use crate::collaboration_modes;

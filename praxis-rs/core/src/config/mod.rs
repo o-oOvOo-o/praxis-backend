@@ -37,8 +37,6 @@ use praxis_protocol::config_types::Personality;
 use praxis_protocol::config_types::ServiceTier;
 use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
-use praxis_protocol::permissions::FileSystemSandboxPolicy;
-use praxis_protocol::permissions::NetworkSandboxPolicy;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_utils_absolute_path::AbsolutePathBuf;
@@ -72,19 +70,18 @@ mod project_trust;
 mod requirements_enforcement;
 mod runtime_config;
 mod runtime_types;
+pub mod sandbox_projection;
 pub mod schema;
 pub mod service;
 pub mod service_types;
 mod web_search;
 use self::instructions::guardian_developer_instructions_from_requirements;
-pub(crate) use self::instructions::uses_deprecated_instructions_file;
 use self::permission_syntax::PermissionConfigSyntax;
 use self::permission_syntax::resolve_permission_config_syntax;
 use self::requirements_enforcement::apply_requirement_constrained_value;
 use self::requirements_enforcement::constrain_mcp_servers;
 pub use home_paths::current_praxis_home_namespace;
 pub use home_paths::default_external_codex_home;
-pub use home_paths::default_legacy_codep_home;
 pub use home_paths::default_praxis_home_for_namespace;
 pub use home_paths::find_praxis_home;
 pub use home_paths::log_dir;
@@ -117,6 +114,8 @@ pub use praxis_config::ConstraintResult;
 pub use praxis_network_proxy::NetworkProxyAuditMetadata;
 pub use praxis_sandboxing::system_bwrap_warning;
 pub use praxis_utils_home_dir::PraxisHomeNamespace;
+use praxis_protocol::protocol::Op;
+use praxis_protocol::user_input::UserInput;
 pub use project_trust::set_project_trust_level;
 pub(crate) use project_trust::set_project_trust_level_inner;
 pub use runtime_config::Config;
@@ -160,6 +159,7 @@ pub use service_types::SandboxSettings;
 pub use service_types::Tools;
 pub use service_types::UserSavedConfig;
 pub use service_types::WriteStatus;
+use serde_json::Value as JsonValue;
 use web_search::resolve_web_search_config;
 use web_search::resolve_web_search_mode;
 pub(crate) use web_search::resolve_web_search_mode_for_turn;
@@ -177,7 +177,6 @@ pub(crate) const DEFAULT_AGENT_MAX_DEPTH: i32 = 1;
 pub(crate) const DEFAULT_AGENT_JOB_MAX_RUNTIME_SECONDS: Option<u64> = None;
 
 pub const CONFIG_TOML_FILE: &str = "config.toml";
-const OPENAI_BASE_URL_ENV_VAR: &str = "OPENAI_BASE_URL";
 
 fn resolve_sqlite_home_env(resolved_cwd: &Path) -> Option<PathBuf> {
     let raw = std::env::var(praxis_state::SQLITE_HOME_ENV).ok()?;
@@ -205,6 +204,28 @@ pub(crate) fn test_config() -> Config {
 }
 
 impl Config {
+    pub fn user_turn_op(
+        &self,
+        items: Vec<UserInput>,
+        final_output_json_schema: Option<JsonValue>,
+    ) -> Op {
+        Op::UserTurn {
+            items,
+            cwd: self.cwd.to_path_buf(),
+            approval_policy: self.permissions.approval_policy.value(),
+            approvals_reviewer: Some(self.approvals_reviewer.clone()),
+            sandbox_policy: self.permissions.sandbox_policy.get().clone(),
+            model: self.model.clone().unwrap_or_else(|| "praxis-auto".to_string()),
+            model_provider: Some(self.model_provider_id.clone()),
+            effort: self.model_reasoning_effort.clone(),
+            summary: self.model_reasoning_summary.clone(),
+            service_tier: Some(self.service_tier.clone()),
+            final_output_json_schema,
+            collaboration_mode: None,
+            personality: self.personality.clone(),
+        }
+    }
+
     pub fn to_mcp_config(&self, plugins_manager: &crate::plugins::PluginsManager) -> McpConfig {
         let loaded_plugins = plugins_manager.plugins_for_config(self);
         let mut configured_mcp_servers = self.mcp_servers.get().clone();
@@ -379,17 +400,9 @@ impl Config {
         let configured_features = Features::from_sources(
             FeatureConfigSource {
                 features: cfg.features.as_ref(),
-                include_apply_patch_tool: None,
-                experimental_use_freeform_apply_patch: cfg.experimental_use_freeform_apply_patch,
-                experimental_use_unified_exec_tool: cfg.experimental_use_unified_exec_tool,
             },
             FeatureConfigSource {
                 features: config_profile.features.as_ref(),
-                include_apply_patch_tool: config_profile.include_apply_patch_tool,
-                experimental_use_freeform_apply_patch: config_profile
-                    .experimental_use_freeform_apply_patch,
-                experimental_use_unified_exec_tool: config_profile
-                    .experimental_use_unified_exec_tool,
             },
             feature_overrides,
         );
@@ -492,16 +505,22 @@ impl Config {
                     default_permissions,
                     &mut startup_warnings,
                 )?;
-            let mut sandbox_policy = file_system_sandbox_policy
-                .to_legacy_sandbox_policy(network_sandbox_policy, resolved_cwd.as_path())?;
+            let mut sandbox_policy = sandbox_projection::sandbox_policy_from_split(
+                &file_system_sandbox_policy,
+                network_sandbox_policy,
+                resolved_cwd.as_path(),
+            )?;
             if matches!(sandbox_policy, SandboxPolicy::WorkspaceWrite { .. }) {
                 file_system_sandbox_policy = file_system_sandbox_policy
                     .with_additional_writable_roots(
                         resolved_cwd.as_path(),
                         &additional_writable_roots,
                     );
-                sandbox_policy = file_system_sandbox_policy
-                    .to_legacy_sandbox_policy(network_sandbox_policy, resolved_cwd.as_path())?;
+                sandbox_policy = sandbox_projection::sandbox_policy_from_split(
+                    &file_system_sandbox_policy,
+                    network_sandbox_policy,
+                    resolved_cwd.as_path(),
+                )?;
             }
             (
                 configured_network_proxy_config,
@@ -525,11 +544,8 @@ impl Config {
                     }
                 }
             }
-            let file_system_sandbox_policy = FileSystemSandboxPolicy::from_legacy_sandbox_policy(
-                &sandbox_policy,
-                resolved_cwd.as_path(),
-            );
-            let network_sandbox_policy = NetworkSandboxPolicy::from(&sandbox_policy);
+            let (file_system_sandbox_policy, network_sandbox_policy) =
+                sandbox_projection::split_sandbox_policy(&sandbox_policy, resolved_cwd.as_path());
             (
                 configured_network_proxy_config,
                 sandbox_policy,
@@ -572,28 +588,9 @@ impl Config {
         let agent_roles =
             agent_roles::load_agent_roles(&cfg, &config_layer_stack, &mut startup_warnings)?;
 
-        let openai_base_url = cfg
-            .openai_base_url
-            .clone()
-            .filter(|value| !value.is_empty());
-        let openai_base_url_from_env = std::env::var(OPENAI_BASE_URL_ENV_VAR)
-            .ok()
-            .filter(|value| !value.is_empty());
-        if openai_base_url_from_env.is_some() {
-            if openai_base_url.is_some() {
-                tracing::warn!(
-                    env_var = OPENAI_BASE_URL_ENV_VAR,
-                    "deprecated env var is ignored because `openai_base_url` is set in config.toml"
-                );
-            } else {
-                startup_warnings.push(format!(
-                    "`{OPENAI_BASE_URL_ENV_VAR}` is deprecated. Set `openai_base_url` in config.toml instead."
-                ));
-            }
-        }
-        let effective_openai_base_url = openai_base_url.or(openai_base_url_from_env);
+        let openai_base_url = cfg.openai_base_url.clone().filter(|value| !value.is_empty());
 
-        let mut model_providers = built_in_model_providers(effective_openai_base_url);
+        let mut model_providers = built_in_model_providers(openai_base_url);
         // Merge user-defined providers into the built-in list.
         for (key, provider) in cfg.model_providers.into_iter() {
             model_providers.entry(key).or_insert(provider);
@@ -858,7 +855,7 @@ impl Config {
             if effective_sandbox_policy == original_sandbox_policy {
                 file_system_sandbox_policy
             } else {
-                FileSystemSandboxPolicy::from_legacy_sandbox_policy(
+                sandbox_projection::file_system_policy_from_sandbox_policy(
                     &effective_sandbox_policy,
                     resolved_cwd.as_path(),
                 )
@@ -869,7 +866,7 @@ impl Config {
             if effective_sandbox_policy == original_sandbox_policy {
                 network_sandbox_policy
             } else {
-                NetworkSandboxPolicy::from(&effective_sandbox_policy)
+                sandbox_projection::network_policy_from_sandbox_policy(&effective_sandbox_policy)
             };
         let config = Self {
             model,

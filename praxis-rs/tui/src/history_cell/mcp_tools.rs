@@ -1,4 +1,5 @@
 use super::*;
+use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 
 #[derive(Debug)]
 struct CompletedMcpToolCallWithImageOutput {
@@ -58,6 +59,14 @@ impl McpToolCallCell {
             Some(Err(_)) => Some(false),
             None => None,
         }
+    }
+
+    fn card_id(&self) -> TranscriptCardId {
+        TranscriptCardId::mcp(self.call_id.clone())
+    }
+
+    fn is_card_expanded(&self) -> bool {
+        is_transcript_card_expanded(&self.card_id())
     }
 
     pub(crate) fn mark_failed(&mut self) {
@@ -152,6 +161,7 @@ impl HistoryCell for McpToolCallCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
         let status = self.success();
+        let expanded = self.is_card_expanded();
         let bullet = match status {
             Some(true) => "•".green().bold(),
             Some(false) => "•".red().bold(),
@@ -164,9 +174,24 @@ impl HistoryCell for McpToolCallCell {
         };
 
         let invocation_line = line_to_static(&format_mcp_invocation(self.invocation.clone()));
-        let mut compact_spans = vec![bullet.clone(), " ".into(), header_text.bold(), " ".into()];
+        let marker = if expanded { "▾ " } else { "▸ " };
+        let mut compact_spans = vec![
+            marker.dim(),
+            bullet.clone(),
+            " ".into(),
+            header_text.bold(),
+            " ".into(),
+        ];
         let mut compact_header = Line::from(compact_spans.clone());
         let reserved = compact_header.width();
+
+        if !expanded {
+            compact_header.extend(invocation_line.spans.clone());
+            return vec![truncate_line_with_ellipsis_if_overflow(
+                compact_header,
+                usize::from(width.max(1)),
+            )];
+        }
 
         let inline_invocation =
             invocation_line.width() <= (width as usize).saturating_sub(reserved);
@@ -186,10 +211,9 @@ impl HistoryCell for McpToolCallCell {
             lines.extend(prefix_lines(body_lines, "  └ ".dim(), "    ".into()));
         }
 
-        let expanded = true;
         let detail_lines = self.detail_lines(width, expanded);
 
-        if !detail_lines.is_empty() {
+        if expanded && !detail_lines.is_empty() {
             let initial_prefix: Span<'static> = if inline_invocation {
                 "  └ ".dim()
             } else {
@@ -199,6 +223,16 @@ impl HistoryCell for McpToolCallCell {
         }
 
         lines
+    }
+
+    fn mouse_targets(&self, _width: u16) -> Vec<HistoryCellMouseTarget> {
+        vec![HistoryCellMouseTarget {
+            row_start: 0,
+            row_end: 0,
+            action: HistoryCellMouseAction::ToggleTranscriptCard {
+                card_id: self.card_id(),
+            },
+        }]
     }
 
     fn transcript_animation_tick(&self) -> Option<u64> {
@@ -264,23 +298,58 @@ impl WebSearchCell {
     pub(crate) fn complete(&mut self) {
         self.completed = true;
     }
+
+    fn card_id(&self) -> TranscriptCardId {
+        TranscriptCardId::web_search(self.call_id.clone())
+    }
+
+    fn is_card_expanded(&self) -> bool {
+        is_transcript_card_expanded(&self.card_id())
+    }
 }
 
 impl HistoryCell for WebSearchCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let expanded = self.is_card_expanded();
         let bullet = if self.completed {
             "•".dim()
         } else {
             spinner(Some(self.start_time), self.animations_enabled)
         };
+        let marker = if expanded { "▾ " } else { "▸ " };
         let header = web_search_header(self.completed);
+        if !expanded {
+            let line = Line::from(vec![
+                marker.dim(),
+                bullet,
+                " ".into(),
+                header.bold(),
+                " ".into(),
+                self.query.clone().into(),
+            ]);
+            return vec![truncate_line_with_ellipsis_if_overflow(
+                line,
+                usize::from(width.max(1)),
+            )];
+        }
         let detail = web_search_detail(self.action.as_ref(), &self.query);
         let text: Text<'static> = if detail.is_empty() {
             Line::from(vec![header.bold()]).into()
         } else {
             Line::from(vec![header.bold(), " ".into(), detail.into()]).into()
         };
-        PrefixedWrappedHistoryCell::new(text, vec![bullet, " ".into()], "  ").display_lines(width)
+        PrefixedWrappedHistoryCell::new(text, vec![marker.dim(), bullet, " ".into()], "  ")
+            .display_lines(width)
+    }
+
+    fn mouse_targets(&self, _width: u16) -> Vec<HistoryCellMouseTarget> {
+        vec![HistoryCellMouseTarget {
+            row_start: 0,
+            row_end: 0,
+            action: HistoryCellMouseAction::ToggleTranscriptCard {
+                card_id: self.card_id(),
+            },
+        }]
     }
 }
 

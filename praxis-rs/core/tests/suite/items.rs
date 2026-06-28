@@ -83,10 +83,7 @@ async fn user_message_item_is_emitted() -> anyhow::Result<()> {
     };
 
     codex
-        .submit(Op::UserInput {
-            items: vec![expected_input.clone()],
-            final_output_json_schema: None,
-        })
+        .submit_user_turn(vec![expected_input.clone()], None)
         .await?;
 
     let started_item = wait_for_event_match(&praxis, |ev| match ev {
@@ -136,13 +133,13 @@ async fn assistant_message_item_is_emitted() -> anyhow::Result<()> {
     mount_sse_once(&server, first_response).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "please summarize results".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     let started = wait_for_event_match(&praxis, |ev| match ev {
@@ -195,13 +192,13 @@ async fn reasoning_item_is_emitted() -> anyhow::Result<()> {
     mount_sse_once(&server, first_response).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "explain your reasoning".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     let started = wait_for_event_match(&praxis, |ev| match ev {
@@ -254,13 +251,13 @@ async fn web_search_item_is_emitted() -> anyhow::Result<()> {
     mount_sse_once(&server, first_response).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "find the weather".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     let begin = wait_for_event_match(&praxis, |ev| match ev {
@@ -318,13 +315,13 @@ async fn image_generation_call_event_is_emitted() -> anyhow::Result<()> {
     mount_sse_once(&server, first_response).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "generate a tiny blue square".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     let begin = wait_for_event_match(&praxis, |ev| match ev {
@@ -380,13 +377,13 @@ async fn image_generation_call_event_is_emitted_when_image_save_fails() -> anyho
     mount_sse_once(&server, first_response).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "generate an image".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     let begin = wait_for_event_match(&praxis, |ev| match ev {
@@ -433,13 +430,13 @@ async fn agent_message_content_delta_has_item_metadata() -> anyhow::Result<()> {
     mount_sse_once(&server, stream).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "please stream text".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     let (started_turn_id, started_item) = wait_for_event_match(&praxis, |ev| match ev {
@@ -1080,13 +1077,13 @@ async fn reasoning_content_delta_has_item_metadata() -> anyhow::Result<()> {
     mount_sse_once(&server, stream).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "reason through it".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     let reasoning_item = wait_for_event_match(&praxis, |ev| match ev {
@@ -1139,13 +1136,13 @@ async fn reasoning_raw_content_delta_respects_flag() -> anyhow::Result<()> {
     mount_sse_once(&server, stream).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "show raw reasoning".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     let reasoning_item = wait_for_event_match(&praxis, |ev| match ev {

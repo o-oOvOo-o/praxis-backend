@@ -19,6 +19,7 @@ const PROMPT_LAYERS: &[ProfilePromptLayerDescriptor] =
 pub(crate) fn profile() -> ProfileDescriptor {
     ProfileDescriptor {
         id: BehaviorProfileId::DeepSeek,
+        #[cfg(test)]
         label: "DeepSeek",
         instructions: Some(prompts::BASE),
         prompt_layers: PROMPT_LAYERS,

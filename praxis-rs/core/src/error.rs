@@ -18,6 +18,7 @@ use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_protocol::protocol::is_openai_hosted_primary_rate_limit;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::truncate_text;
+use praxis_utils_output_truncation::truncate_utf8_bytes_with_ellipsis;
 use reqwest::StatusCode;
 use serde_json;
 use std::io;
@@ -292,7 +293,7 @@ impl UnexpectedResponseError {
             return "Unknown error".to_string();
         }
 
-        truncate_with_ellipsis(trimmed_body, UNEXPECTED_RESPONSE_BODY_MAX_BYTES)
+        truncate_utf8_bytes_with_ellipsis(trimmed_body, UNEXPECTED_RESPONSE_BODY_MAX_BYTES)
     }
 
     fn extract_error_message(&self) -> Option<String> {
@@ -369,20 +370,6 @@ impl std::fmt::Display for UnexpectedResponseError {
 }
 
 impl std::error::Error for UnexpectedResponseError {}
-
-fn truncate_with_ellipsis(text: &str, max_bytes: usize) -> String {
-    if text.len() <= max_bytes {
-        return text.to_string();
-    }
-
-    let mut cut = max_bytes;
-    while !text.is_char_boundary(cut) {
-        cut = cut.saturating_sub(1);
-    }
-    let mut truncated = text[..cut].to_string();
-    truncated.push_str("...");
-    truncated
-}
 
 #[derive(Debug)]
 pub struct RetryLimitReachedError {

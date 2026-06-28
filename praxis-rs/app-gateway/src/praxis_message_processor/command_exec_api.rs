@@ -172,10 +172,11 @@ impl PraxisMessageProcessor {
         ) = match requested_policy {
             Some(policy) => match self.config.permissions.sandbox_policy.can_set(&policy) {
                 Ok(()) => {
-                    let file_system_sandbox_policy =
-                        praxis_protocol::permissions::FileSystemSandboxPolicy::from_legacy_sandbox_policy(&policy, &sandbox_cwd);
-                    let network_sandbox_policy =
-                        praxis_protocol::permissions::NetworkSandboxPolicy::from(&policy);
+                    let (file_system_sandbox_policy, network_sandbox_policy) =
+                        praxis_core::config::sandbox_projection::split_sandbox_policy(
+                            &policy,
+                            &sandbox_cwd,
+                        );
                     (policy, file_system_sandbox_policy, network_sandbox_policy)
                 }
                 Err(err) => {

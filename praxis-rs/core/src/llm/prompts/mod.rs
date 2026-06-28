@@ -1,11 +1,4 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PromptLayer {
-    Product,
-    Profile,
-    Common,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LlmPromptPurpose {
     ModelInstructions,
     AutoTitle,

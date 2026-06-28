@@ -6,6 +6,7 @@ use praxis_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
+use praxis_utils_output_truncation::truncate_end_chars_with_ellipsis;
 use tracing::debug;
 use tracing::warn;
 
@@ -96,20 +97,7 @@ fn sanitize_summary(raw: &str) -> String {
         .trim()
         .trim_matches('"')
         .to_string();
-    truncate_chars(compact, SUMMARY_CHAR_LIMIT)
-}
-
-fn truncate_chars(text: String, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        text
-    } else {
-        let mut truncated = text
-            .chars()
-            .take(max_chars.saturating_sub(3))
-            .collect::<String>();
-        truncated.push_str("...");
-        truncated
-    }
+    truncate_end_chars_with_ellipsis(&compact, SUMMARY_CHAR_LIMIT)
 }
 
 async fn summary_via_model_runtime(

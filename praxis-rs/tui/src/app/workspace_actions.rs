@@ -50,14 +50,21 @@ impl App {
                 });
                 Ok(None)
             }
-            WorkspaceChromeAction::HelpWebsite => {
+            WorkspaceChromeAction::AboutPraxis => {
                 self.workspace.clear_overlay();
                 let language = self.chat_widget.ui_language();
-                let message = match language {
-                    UiLanguage::En => "Cunning3D website is not configured yet.",
-                    UiLanguage::Cn => "Cunning3D 官网入口还没有配置。",
+                let (message, hint) = match language {
+                    UiLanguage::En => (
+                        "Praxis is the local interface for agent threads.",
+                        "Product integrations are loaded through profiles and plugins.",
+                    ),
+                    UiLanguage::Cn => (
+                        "Praxis 是本地 agent 线程界面。",
+                        "产品集成通过 profile 和插件加载。",
+                    ),
                 };
-                self.chat_widget.add_info_message(message.to_string(), None);
+                self.chat_widget
+                    .add_info_message(message.to_string(), Some(hint.to_string()));
                 Ok(None)
             }
         }

@@ -11,16 +11,6 @@ impl PraxisMessageProcessor {
             .await;
     }
 
-    pub(crate) async fn connection_initialized_with_host_extensions(
-        &self,
-        connection_id: ConnectionId,
-        host_extensions: Vec<praxis_app_gateway_protocol::HostExtensionInfo>,
-    ) {
-        self.thread_state_manager
-            .connection_initialized_with_host_extensions(connection_id, host_extensions)
-            .await;
-    }
-
     pub(crate) async fn connection_closed(&mut self, connection_id: ConnectionId) {
         self.command_exec_manager
             .connection_closed(connection_id)

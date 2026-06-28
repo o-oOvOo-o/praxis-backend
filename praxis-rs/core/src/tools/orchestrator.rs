@@ -31,7 +31,8 @@ use praxis_protocol::protocol::ReviewDecision;
 use praxis_sandboxing::SandboxManager;
 use praxis_sandboxing::SandboxType;
 use praxis_system_plugin_approval_control::ApprovalDecision;
-use praxis_system_plugin_approval_control::tool_safety::ToolKind;
+use praxis_system_plugin_approval_control::tool_safety::SandboxRetryPolicy;
+use praxis_system_plugin_approval_control::tool_safety::SandboxRetryRequest;
 use praxis_system_plugin_approval_control::tool_safety::ToolSafetyOrchestrator;
 use praxis_system_plugin_approval_control::tool_safety::ToolSafetyRequest;
 
@@ -112,7 +113,9 @@ impl ToolOrchestrator {
         T: ToolRuntime<Rq, Out>,
     {
         let permissions = turn_ctx.effective_permissions();
-        let approval_policy = permissions.approval_policy.value();
+        let resolved_permissions = permissions.as_resolved_turn_permissions().normalized();
+        let approval_policy = resolved_permissions.approval_policy;
+        let tool_kind = tool.tool_kind();
         let otel = turn_ctx.session_telemetry.clone();
         let otel_tn = &tool_ctx.tool_name;
         let otel_ci = &tool_ctx.call_id;
@@ -128,17 +131,16 @@ impl ToolOrchestrator {
         let requirement = tool.exec_approval_requirement(req).unwrap_or_else(|| {
             default_exec_approval_requirement(
                 approval_policy,
-                &permissions.file_system_sandbox_policy,
+                &resolved_permissions.file_system_sandbox_policy,
             )
         });
         let safety = ToolSafetyOrchestrator;
-        let resolved_permissions = permissions.as_resolved_turn_permissions();
         let safety_decision = match &requirement {
             ExecApprovalRequirement::Skip { .. } => safety.decide(ToolSafetyRequest {
                 id: &tool_ctx.call_id,
                 thread_id: None,
                 turn_id: Some(&tool_ctx.turn.sub_id),
-                kind: ToolKind::Unknown,
+                kind: tool_kind,
                 permissions: &resolved_permissions,
                 approval_required: false,
                 reason: None,
@@ -149,7 +151,7 @@ impl ToolOrchestrator {
                     id: &tool_ctx.call_id,
                     thread_id: None,
                     turn_id: Some(&tool_ctx.turn.sub_id),
-                    kind: ToolKind::Unknown,
+                    kind: tool_kind,
                     permissions: &resolved_permissions,
                     approval_required: true,
                     reason: reason.as_deref(),
@@ -176,35 +178,15 @@ impl ToolOrchestrator {
                     network_approval_context: None,
                 };
                 let decision = tool.start_approval_async(req, approval_ctx).await;
-                let otel_source = if routes_approval_to_guardian(turn_ctx) {
+                let routed_to_guardian = routes_approval_to_guardian(turn_ctx);
+                let otel_source = if routed_to_guardian {
                     otel_automated_reviewer.clone()
                 } else {
                     otel_user.clone()
                 };
 
                 otel.tool_decision(otel_tn, otel_ci, &decision, otel_source);
-
-                match decision {
-                    ReviewDecision::Denied | ReviewDecision::Abort => {
-                        let reason = if routes_approval_to_guardian(turn_ctx) {
-                            GUARDIAN_REJECTION_MESSAGE.to_string()
-                        } else {
-                            "rejected by user".to_string()
-                        };
-                        return Err(ToolError::Rejected(reason));
-                    }
-                    ReviewDecision::Approved
-                    | ReviewDecision::ApprovedExecpolicyAmendment { .. }
-                    | ReviewDecision::ApprovedForSession => {}
-                    ReviewDecision::NetworkPolicyAmendment {
-                        network_policy_amendment,
-                    } => match network_policy_amendment.action {
-                        NetworkPolicyRuleAction::Allow => {}
-                        NetworkPolicyRuleAction::Deny => {
-                            return Err(ToolError::Rejected("rejected by user".to_string()));
-                        }
-                    },
-                }
+                apply_review_decision(decision, routed_to_guardian)?;
                 already_approved = true;
             }
         }
@@ -219,10 +201,10 @@ impl ToolOrchestrator {
         let initial_sandbox = match tool.sandbox_mode_for_first_attempt(req) {
             SandboxOverride::BypassSandboxFirstAttempt => SandboxType::None,
             SandboxOverride::NoOverride => self.sandbox.select_initial(
-                &permissions.file_system_sandbox_policy,
-                permissions.network_sandbox_policy,
+                &resolved_permissions.file_system_sandbox_policy,
+                resolved_permissions.network_sandbox_policy,
                 tool.sandbox_preference(),
-                permissions.windows_sandbox_level,
+                resolved_permissions.windows_sandbox_level,
                 has_managed_network_requirements,
             ),
         };
@@ -231,15 +213,15 @@ impl ToolOrchestrator {
         let use_legacy_landlock = turn_ctx.features.use_legacy_landlock();
         let initial_attempt = SandboxAttempt {
             sandbox: initial_sandbox,
-            policy: &permissions.sandbox_policy,
-            file_system_policy: &permissions.file_system_sandbox_policy,
-            network_policy: permissions.network_sandbox_policy,
+            policy: &resolved_permissions.sandbox_policy,
+            file_system_policy: &resolved_permissions.file_system_sandbox_policy,
+            network_policy: resolved_permissions.network_sandbox_policy,
             enforce_managed_network: has_managed_network_requirements,
             manager: &self.sandbox,
             sandbox_cwd: &turn_ctx.cwd,
             praxis_linux_sandbox_exe: turn_ctx.praxis_linux_sandbox_exe.as_ref(),
             use_legacy_landlock,
-            windows_sandbox_level: permissions.windows_sandbox_level,
+            windows_sandbox_level: resolved_permissions.windows_sandbox_level,
             windows_sandbox_private_desktop: turn_ctx
                 .config
                 .permissions
@@ -286,28 +268,31 @@ impl ToolOrchestrator {
                     })));
                 }
                 let retry_permissions = turn_ctx.effective_permissions();
-                let retry_approval_policy = retry_permissions.approval_policy.value();
-                // Under `Never` or `OnRequest`, do not retry without sandbox;
-                // surface a concise sandbox denial that preserves the
-                // original output.
-                if !tool.wants_no_sandbox_approval(retry_approval_policy) {
-                    let allow_on_request_network_prompt = matches!(
-                        retry_approval_policy,
-                        praxis_protocol::protocol::AskForApproval::OnRequest
-                    ) && network_approval_context.is_some()
-                        && matches!(
-                            default_exec_approval_requirement(
-                                retry_approval_policy,
-                                &retry_permissions.file_system_sandbox_policy
-                            ),
-                            ExecApprovalRequirement::NeedsApproval { .. }
-                        );
-                    if !allow_on_request_network_prompt {
-                        return Err(ToolError::Praxis(PraxisErr::Sandbox(SandboxErr::Denied {
-                            output,
-                            network_policy_decision,
-                        })));
-                    }
+                let retry_resolved_permissions = retry_permissions
+                    .as_resolved_turn_permissions()
+                    .normalized();
+                let retry_approval_policy = retry_resolved_permissions.approval_policy;
+                let retry_policy = SandboxRetryPolicy::for_denied_sandbox(SandboxRetryRequest {
+                    kind: tool_kind,
+                    permissions: &retry_resolved_permissions,
+                    tool_allows_no_sandbox_approval: tool
+                        .wants_no_sandbox_approval(retry_approval_policy),
+                    tool_bypasses_retry_approval: tool
+                        .should_bypass_approval(retry_approval_policy, already_approved),
+                    network_retry_available: network_approval_context.is_some(),
+                    network_retry_requires_approval: matches!(
+                        default_exec_approval_requirement(
+                            retry_approval_policy,
+                            &retry_resolved_permissions.file_system_sandbox_policy
+                        ),
+                        ExecApprovalRequirement::NeedsApproval { .. }
+                    ),
+                });
+                if !retry_policy.allow_without_sandbox {
+                    return Err(ToolError::Praxis(PraxisErr::Sandbox(SandboxErr::Denied {
+                        output,
+                        network_policy_decision,
+                    })));
                 }
                 let retry_reason =
                     if let Some(network_approval_context) = network_approval_context.as_ref() {
@@ -319,11 +304,7 @@ impl ToolOrchestrator {
                         build_denial_reason_from_output(output.as_ref())
                     };
 
-                // Ask for approval before retrying with the escalated sandbox.
-                let bypass_retry_approval = tool
-                    .should_bypass_approval(retry_approval_policy, already_approved)
-                    && network_approval_context.is_none();
-                if !bypass_retry_approval {
+                if retry_policy.ask_before_retry {
                     let approval_ctx = ApprovalCtx {
                         session: &tool_ctx.session,
                         turn: &tool_ctx.turn,
@@ -333,47 +314,27 @@ impl ToolOrchestrator {
                     };
 
                     let decision = tool.start_approval_async(req, approval_ctx).await;
-                    let otel_source = if routes_approval_to_guardian(turn_ctx) {
+                    let routed_to_guardian = routes_approval_to_guardian(turn_ctx);
+                    let otel_source = if routed_to_guardian {
                         otel_automated_reviewer
                     } else {
                         otel_user
                     };
                     otel.tool_decision(otel_tn, otel_ci, &decision, otel_source);
-
-                    match decision {
-                        ReviewDecision::Denied | ReviewDecision::Abort => {
-                            let reason = if routes_approval_to_guardian(turn_ctx) {
-                                GUARDIAN_REJECTION_MESSAGE.to_string()
-                            } else {
-                                "rejected by user".to_string()
-                            };
-                            return Err(ToolError::Rejected(reason));
-                        }
-                        ReviewDecision::Approved
-                        | ReviewDecision::ApprovedExecpolicyAmendment { .. }
-                        | ReviewDecision::ApprovedForSession => {}
-                        ReviewDecision::NetworkPolicyAmendment {
-                            network_policy_amendment,
-                        } => match network_policy_amendment.action {
-                            NetworkPolicyRuleAction::Allow => {}
-                            NetworkPolicyRuleAction::Deny => {
-                                return Err(ToolError::Rejected("rejected by user".to_string()));
-                            }
-                        },
-                    }
+                    apply_review_decision(decision, routed_to_guardian)?;
                 }
 
                 let escalated_attempt = SandboxAttempt {
                     sandbox: SandboxType::None,
-                    policy: &retry_permissions.sandbox_policy,
-                    file_system_policy: &retry_permissions.file_system_sandbox_policy,
-                    network_policy: retry_permissions.network_sandbox_policy,
+                    policy: &retry_resolved_permissions.sandbox_policy,
+                    file_system_policy: &retry_resolved_permissions.file_system_sandbox_policy,
+                    network_policy: retry_resolved_permissions.network_sandbox_policy,
                     enforce_managed_network: has_managed_network_requirements,
                     manager: &self.sandbox,
                     sandbox_cwd: &turn_ctx.cwd,
                     praxis_linux_sandbox_exe: None,
                     use_legacy_landlock,
-                    windows_sandbox_level: retry_permissions.windows_sandbox_level,
+                    windows_sandbox_level: retry_resolved_permissions.windows_sandbox_level,
                     windows_sandbox_private_desktop: turn_ctx
                         .config
                         .permissions
@@ -405,4 +366,31 @@ fn build_denial_reason_from_output(_output: &ExecToolCallOutput) -> String {
     // Keep approval reason terse and stable for UX/tests, but accept the
     // output so we can evolve heuristics later without touching call sites.
     "command failed; retry without sandbox?".to_string()
+}
+
+fn apply_review_decision(
+    decision: ReviewDecision,
+    routed_to_guardian: bool,
+) -> Result<(), ToolError> {
+    match decision {
+        ReviewDecision::Denied | ReviewDecision::Abort => {
+            let reason = if routed_to_guardian {
+                GUARDIAN_REJECTION_MESSAGE.to_string()
+            } else {
+                "rejected by user".to_string()
+            };
+            Err(ToolError::Rejected(reason))
+        }
+        ReviewDecision::Approved
+        | ReviewDecision::ApprovedExecpolicyAmendment { .. }
+        | ReviewDecision::ApprovedForSession => Ok(()),
+        ReviewDecision::NetworkPolicyAmendment {
+            network_policy_amendment,
+        } => match network_policy_amendment.action {
+            NetworkPolicyRuleAction::Allow => Ok(()),
+            NetworkPolicyRuleAction::Deny => {
+                Err(ToolError::Rejected("rejected by user".to_string()))
+            }
+        },
+    }
 }

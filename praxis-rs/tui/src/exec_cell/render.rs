@@ -4,7 +4,12 @@ use super::model::CommandOutput;
 use super::model::ExecCall;
 use super::model::ExecCell;
 use crate::exec_command::strip_bash_lc_and_escape;
+use crate::history_cell;
 use crate::history_cell::HistoryCell;
+use crate::history_cell::HistoryCellMouseAction;
+use crate::history_cell::HistoryCellMouseTarget;
+use crate::history_presentation::TranscriptCardId;
+use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::render::highlight::highlight_bash_to_lines;
 use crate::render::line_utils::prefix_lines;
 use crate::render::line_utils::push_owned_lines;
@@ -197,11 +202,16 @@ pub(crate) fn spinner(start_time: Option<Instant>, animations_enabled: bool) -> 
 
 impl HistoryCell for ExecCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        if self.is_exploring_cell() {
-            self.exploring_display_lines(width)
+        if !self.is_card_expanded() {
+            return self.collapsed_card_lines(width);
+        }
+        let mut lines = if self.is_group_cell() || self.is_exploring_cell() {
+            self.group_display_lines(width)
         } else {
             self.command_display_lines(width)
-        }
+        };
+        Self::prepend_expanded_marker(&mut lines);
+        lines
     }
 
     fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -247,11 +257,179 @@ impl HistoryCell for ExecCell {
         }
         lines
     }
+
+    fn mouse_targets(&self, _width: u16) -> Vec<HistoryCellMouseTarget> {
+        vec![HistoryCellMouseTarget {
+            row_start: 0,
+            row_end: 0,
+            action: HistoryCellMouseAction::ToggleTranscriptCard {
+                card_id: self.card_id(),
+            },
+        }]
+    }
 }
 
 impl ExecCell {
-    fn exploring_display_lines(&self, width: u16) -> Vec<Line<'static>> {
+    fn card_id(&self) -> TranscriptCardId {
+        if let [call] = self.calls.as_slice() {
+            TranscriptCardId::exec(call.call_id.clone())
+        } else {
+            TranscriptCardId::exec_group(self.calls.iter().map(|call| call.call_id.as_str()))
+        }
+    }
+
+    fn is_card_expanded(&self) -> bool {
+        history_cell::is_transcript_card_expanded(&self.card_id())
+    }
+
+    fn prepend_expanded_marker(lines: &mut [Line<'static>]) {
+        if let Some(line) = lines.first_mut() {
+            line.spans.insert(0, "▾ ".dim());
+        }
+    }
+
+    fn collapsed_card_lines(&self, width: u16) -> Vec<Line<'static>> {
+        let line = if self.is_exploring_cell() {
+            self.collapsed_exploring_line()
+        } else if self.is_group_cell() {
+            self.collapsed_command_group_line()
+        } else {
+            self.collapsed_command_line()
+        };
+        vec![truncate_line_with_ellipsis_if_overflow(
+            line,
+            usize::from(width.max(1)),
+        )]
+    }
+
+    fn collapsed_exploring_line(&self) -> Line<'static> {
+        let icon = if self.is_active() {
+            spinner(self.active_start_time(), self.animations_enabled())
+        } else {
+            "•".dim()
+        };
+        let title = if self.is_active() {
+            "Exploring"
+        } else {
+            "Explored"
+        };
+        let call_count = self.calls.len();
+        let mut read_count = 0usize;
+        let mut list_count = 0usize;
+        let mut search_count = 0usize;
+        for call in &self.calls {
+            for parsed in &call.parsed {
+                match parsed {
+                    ParsedCommand::Read { .. } => read_count += 1,
+                    ParsedCommand::ListFiles { .. } => list_count += 1,
+                    ParsedCommand::Search { .. } => search_count += 1,
+                    ParsedCommand::Unknown { .. } => {}
+                }
+            }
+        }
+        let mut parts = Vec::new();
+        if read_count > 0 {
+            parts.push(format!("{read_count} read"));
+        }
+        if list_count > 0 {
+            parts.push(format!("{list_count} list"));
+        }
+        if search_count > 0 {
+            parts.push(format!("{search_count} search"));
+        }
+        let summary = if parts.is_empty() {
+            format!("{call_count} commands")
+        } else {
+            parts.join(", ")
+        };
+        Line::from(vec![
+            "▸ ".dim(),
+            icon,
+            " ".into(),
+            title.bold(),
+            " · ".dim(),
+            summary.dim(),
+        ])
+    }
+
+    fn collapsed_command_line(&self) -> Line<'static> {
+        let [call] = &self.calls.as_slice() else {
+            return self.collapsed_command_group_line();
+        };
+        let success = call.output.as_ref().map(|output| output.exit_code == 0);
+        let bullet = match success {
+            Some(true) => "•".green().bold(),
+            Some(false) => "•".red().bold(),
+            None => spinner(call.start_time, self.animations_enabled()),
+        };
+        let title = if call.is_unified_exec_interaction() {
+            "Interaction"
+        } else if self.is_active() {
+            "Running"
+        } else if call.is_user_shell_command() {
+            "You ran"
+        } else {
+            "Ran"
+        };
+        let command = if call.is_unified_exec_interaction() {
+            format_unified_exec_interaction(&call.command, call.interaction_input.as_deref())
+        } else {
+            strip_bash_lc_and_escape(&call.command)
+        };
+        let mut spans = vec![
+            "▸ ".dim(),
+            bullet,
+            " ".into(),
+            title.bold(),
+            " ".into(),
+            command.into(),
+        ];
+        if let Some(duration) = call.duration {
+            spans.push(" · ".dim());
+            spans.push(format_duration(duration).dim());
+        }
+        Line::from(spans)
+    }
+
+    fn collapsed_command_group_line(&self) -> Line<'static> {
+        let success = self.calls.iter().all(|call| {
+            call.output
+                .as_ref()
+                .map(|output| output.exit_code == 0)
+                .unwrap_or(false)
+        });
+        let active = self.is_active();
+        let bullet = if active {
+            spinner(self.active_start_time(), self.animations_enabled())
+        } else if success {
+            "•".green().bold()
+        } else {
+            "•".red().bold()
+        };
+        let title = if active { "Running" } else { "Ran" };
+        Line::from(vec![
+            "▸ ".dim(),
+            bullet,
+            " ".into(),
+            title.bold(),
+            " · ".dim(),
+            format!("{} commands", self.calls.len()).dim(),
+        ])
+    }
+
+    fn group_display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut out: Vec<Line<'static>> = Vec::new();
+        let title = if self.is_exploring_cell() {
+            if self.is_active() {
+                "Exploring"
+            } else {
+                "Explored"
+            }
+        } else if self.is_active() {
+            "Running commands"
+        } else {
+            "Ran commands"
+        };
         out.push(Line::from(vec![
             if self.is_active() {
                 spinner(self.active_start_time(), self.animations_enabled())
@@ -259,27 +437,27 @@ impl ExecCell {
                 "•".dim()
             },
             " ".into(),
-            if self.is_active() {
-                "Exploring".bold()
-            } else {
-                "Explored".bold()
-            },
+            title.bold(),
+            " · ".dim(),
+            format!("{} commands", self.calls.len()).dim(),
         ]));
 
         let mut calls = self.calls.clone();
         let mut out_indented = Vec::new();
         while !calls.is_empty() {
             let mut call = calls.remove(0);
-            if call
-                .parsed
-                .iter()
-                .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }))
+            if !call.parsed.is_empty()
+                && call
+                    .parsed
+                    .iter()
+                    .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }))
             {
                 while let Some(next) = calls.first() {
-                    if next
-                        .parsed
-                        .iter()
-                        .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }))
+                    if !next.parsed.is_empty()
+                        && next
+                            .parsed
+                            .iter()
+                            .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }))
                     {
                         call.parsed.extend(next.parsed.clone());
                         calls.remove(0);
@@ -289,12 +467,15 @@ impl ExecCell {
                 }
             }
 
-            let reads_only = call
-                .parsed
-                .iter()
-                .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }));
+            let reads_only = !call.parsed.is_empty()
+                && call
+                    .parsed
+                    .iter()
+                    .all(|parsed| matches!(parsed, ParsedCommand::Read { .. }));
 
-            let call_lines: Vec<(&str, Vec<Span<'static>>)> = if reads_only {
+            let call_lines: Vec<(&str, Vec<Span<'static>>)> = if call.parsed.is_empty() {
+                vec![("Run", vec![strip_bash_lc_and_escape(&call.command).into()])]
+            } else if reads_only {
                 let names = call
                     .parsed
                     .iter()

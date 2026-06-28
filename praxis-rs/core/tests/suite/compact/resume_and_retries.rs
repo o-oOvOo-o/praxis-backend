@@ -458,37 +458,37 @@ async fn auto_compact_persists_rollout_entries() {
     let session_configured = test.session_configured;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: FIRST_AUTO_MSG.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: SECOND_AUTO_MSG.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: POST_AUTO_USER_MSG.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -568,13 +568,13 @@ async fn manual_compact_retries_after_context_window_error() {
     let praxis = builder.build(&server).await.unwrap().thread;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "first turn".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -679,13 +679,13 @@ async fn manual_compact_non_context_failure_retries_then_emits_task_error() {
         .thread;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "first turn".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .expect("submit user input");
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;

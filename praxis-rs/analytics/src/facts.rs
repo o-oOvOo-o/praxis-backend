@@ -62,7 +62,6 @@ pub struct ThreadInitializedFact {
     pub created_at: u64,
 }
 
-#[allow(dead_code)]
 pub(crate) enum AnalyticsFact {
     Initialize {
         connection_id: u64,

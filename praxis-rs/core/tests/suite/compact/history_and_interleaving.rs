@@ -58,13 +58,13 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
     let praxis = builder.build(&server).await.unwrap().thread;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: first_user_message.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -73,13 +73,13 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: second_user_message.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -88,13 +88,13 @@ async fn manual_compact_twice_preserves_latest_user_messages() {
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: final_user_message.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -249,13 +249,13 @@ async fn auto_compact_allows_multiple_attempts_when_interleaved_with_other_turn_
     let mut auto_compact_lifecycle_events = Vec::new();
     for user in [MULTI_AUTO_MSG, follow_up_user, final_user] {
         codex
-            .submit(Op::UserInput {
-                items: vec![UserInput::Text {
+            .submit_user_turn(
+                vec![UserInput::Text {
                     text: user.into(),
                     text_elements: Vec::new(),
                 }],
-                final_output_json_schema: None,
-            })
+                None,
+            )
             .await
             .unwrap();
 

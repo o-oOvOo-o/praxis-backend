@@ -293,7 +293,10 @@ fn diff_color_level_for_terminal(
 /// Full-width background applied to the `RtLine` itself (not individual spans).
 /// Context lines intentionally leave the background unset so the terminal
 /// default shows through.
-pub(super) fn style_line_bg_for(kind: DiffLineType, diff_backgrounds: ResolvedDiffBackgrounds) -> Style {
+pub(super) fn style_line_bg_for(
+    kind: DiffLineType,
+    diff_backgrounds: ResolvedDiffBackgrounds,
+) -> Style {
     match kind {
         DiffLineType::Insert => diff_backgrounds
             .add
@@ -352,7 +355,11 @@ fn light_del_num_bg(color_level: RichDiffColorLevel) -> Color {
 /// Line-number gutter style.  On light backgrounds the gutter has an opaque
 /// tinted background so numbers contrast against the pastel line fill.  On
 /// dark backgrounds a simple `DIM` modifier is sufficient.
-pub(super) fn style_gutter_for(kind: DiffLineType, theme: DiffTheme, color_level: DiffColorLevel) -> Style {
+pub(super) fn style_gutter_for(
+    kind: DiffLineType,
+    theme: DiffTheme,
+    color_level: DiffColorLevel,
+) -> Style {
     match (
         theme,
         kind,

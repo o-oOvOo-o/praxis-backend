@@ -59,7 +59,7 @@ impl SkillsManager {
         Self::new_with_restriction_product(
             praxis_home,
             bundled_skills_enabled,
-            Some(Product::Praxis),
+            Some(Product::praxis()),
         )
     }
 
@@ -177,7 +177,7 @@ impl SkillsManager {
     ) -> SkillLoadOutcome {
         let outcome = crate::filter_skill_load_outcome_for_product(
             load_skills_from_roots(roots),
-            self.restriction_product,
+            self.restriction_product.clone(),
         );
         let disabled_paths = resolve_disabled_skill_paths(&outcome.skills, skill_config_rules);
         finalize_skill_outcome(outcome, disabled_paths)

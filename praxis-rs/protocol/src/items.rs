@@ -322,7 +322,6 @@ impl TurnItem {
             TurnItem::ContextCompaction(item) => item.id.clone(),
         }
     }
-
 }
 
 #[cfg(test)]

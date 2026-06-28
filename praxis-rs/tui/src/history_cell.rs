@@ -21,6 +21,7 @@ use crate::exec_cell::spinner;
 use crate::exec_command::relativize_to_home;
 use crate::exec_command::strip_bash_lc_and_escape;
 use crate::history_presentation::PatchCellId;
+use crate::history_presentation::TranscriptCardId;
 use crate::live_wrap::take_prefix_by_width;
 use crate::markdown::append_markdown;
 use crate::render::line_utils::line_to_static;
@@ -215,6 +216,9 @@ pub(crate) enum HistoryCellMouseAction {
         thread_id: ThreadId,
         thread_name: String,
     },
+    ToggleTranscriptCard {
+        card_id: TranscriptCardId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -246,6 +250,14 @@ pub(crate) fn toggle_tool_output_expanded() -> bool {
 
 pub(crate) fn toggle_visible_diff_cells(ids: &[PatchCellId]) -> bool {
     crate::history_presentation::toggle_diff_cells(ids)
+}
+
+pub(crate) fn is_transcript_card_expanded(id: &TranscriptCardId) -> bool {
+    crate::history_presentation::is_transcript_card_expanded(id)
+}
+
+pub(crate) fn toggle_transcript_card(id: TranscriptCardId) -> bool {
+    crate::history_presentation::toggle_transcript_card(id)
 }
 
 impl Renderable for Box<dyn HistoryCell> {

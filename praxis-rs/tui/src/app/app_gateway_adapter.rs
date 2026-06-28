@@ -240,7 +240,6 @@ fn server_request_thread_id(request: &ServerRequest) -> Option<ThreadId> {
         }
         ServerRequest::PermissionsRequestApproval { params, .. } => Some(params.thread_id.as_str()),
         ServerRequest::DynamicToolCall { params, .. } => Some(params.thread_id.as_str()),
-        ServerRequest::Cunning3dBridgeCall { .. } => None,
         ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
     }?;
     parse_app_gateway_thread_id(thread_id)
@@ -289,6 +288,12 @@ fn server_notification_thread_id(notification: &ServerNotification) -> Option<&s
         }
         ServerNotification::ThreadGoalCleared(notification) => {
             Some(notification.thread_id.as_str())
+        }
+        ServerNotification::ThreadHeartbeatUpdated(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::AutomationRunUpdated(notification) => {
+            notification.run.thread_id.as_deref()
         }
         ServerNotification::ThreadModelChanged(notification) => {
             Some(notification.thread_id.as_str())

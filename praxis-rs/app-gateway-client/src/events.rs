@@ -52,6 +52,7 @@ pub(crate) fn server_notification_requires_delivery(notification: &ServerNotific
             | ServerNotification::ItemCompleted(_)
             | ServerNotification::ThreadGoalUpdated(_)
             | ServerNotification::ThreadGoalCleared(_)
+            | ServerNotification::ThreadHeartbeatUpdated(_)
             | ServerNotification::ThreadModelChanged(_)
             | ServerNotification::AgentMessageDelta(_)
             | ServerNotification::PlanDelta(_)

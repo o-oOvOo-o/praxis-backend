@@ -19,7 +19,6 @@ use praxis_protocol::protocol::ApplyPatchApprovalRequestEvent;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::ExecApprovalRequestEvent;
-use praxis_protocol::protocol::Op;
 use praxis_protocol::protocol::Submission;
 use praxis_protocol::protocol::TurnCompleteEvent;
 use praxis_protocol::user_input::UserInput;
@@ -109,14 +108,14 @@ pub async fn run_praxis_tool_session(
         .insert(id.clone(), thread_id);
     let submission = Submission {
         id: sub_id.clone(),
-        op: Op::UserInput {
-            items: vec![UserInput::Text {
+        op: thread.config_snapshot().await.user_turn_op(
+            vec![UserInput::Text {
                 text: initial_prompt.clone(),
                 // MCP tool prompts are plain text with no UI element ranges.
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        },
+            None,
+        ),
         trace: None,
     };
 
@@ -155,17 +154,19 @@ pub async fn run_praxis_tool_session_reply(
         .lock()
         .await
         .insert(request_id.clone(), thread_id);
-    if let Err(e) = thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+    let submission = Submission {
+        id: request_id.to_string(),
+        op: thread.config_snapshot().await.user_turn_op(
+            vec![UserInput::Text {
                 text: prompt,
                 // MCP tool prompts are plain text with no UI element ranges.
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
-        .await
-    {
+            None,
+        ),
+        trace: None,
+    };
+    if let Err(e) = thread.submit_with_id(submission).await {
         tracing::error!("Failed to submit user input: {e}");
         let result = create_call_tool_result_with_thread_id(
             thread_id,

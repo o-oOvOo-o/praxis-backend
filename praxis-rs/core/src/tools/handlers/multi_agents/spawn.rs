@@ -1,7 +1,7 @@
 use super::*;
 use crate::agent::control::SpawnAgentForkMode;
 use crate::agent::control::SpawnAgentOptions;
-use crate::agent::control::render_input_preview;
+use crate::agent::control::render_user_input_preview;
 use crate::agent::next_thread_spawn_depth;
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::apply_role_to_config;
@@ -39,8 +39,8 @@ impl ToolHandler for Handler {
             .map(str::trim)
             .filter(|role| !role.is_empty());
 
-        let initial_operation = parse_collab_input(Some(args.message), /*items*/ None)?;
-        let prompt = render_input_preview(&initial_operation);
+        let initial_items = parse_collab_input(Some(args.message), /*items*/ None)?;
+        let prompt = render_user_input_preview(&initial_items);
 
         let session_source = turn.session_source.clone();
         let child_depth = next_thread_spawn_depth(&session_source);
@@ -76,6 +76,7 @@ impl ToolHandler for Handler {
             .map_err(FunctionCallError::RespondToModel)?;
         apply_spawn_agent_runtime_overrides(&mut config, turn.as_ref())?;
         apply_spawn_agent_overrides(&mut config, child_depth);
+        let initial_operation = config.user_turn_op(initial_items, None);
 
         let spawn_source = thread_spawn_source(
             session.conversation_id,

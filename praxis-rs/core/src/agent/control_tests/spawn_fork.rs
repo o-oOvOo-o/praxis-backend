@@ -17,16 +17,7 @@ async fn spawn_agent_creates_thread_and_sends_prompt() {
         .get_thread(thread_id)
         .await
         .expect("thread should be registered");
-    let expected = (
-        thread_id,
-        Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "spawned".to_string(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-        },
-    );
+    let expected = (thread_id, text_input("spawned"));
     let captured = harness
         .manager
         .captured_ops()
@@ -100,16 +91,7 @@ async fn spawn_agent_can_fork_parent_thread_history() {
         "parent seed context"
     ));
 
-    let expected = (
-        child_thread_id,
-        Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "child task".to_string(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-        },
-    );
+    let expected = (child_thread_id, text_input("child task"));
     let captured = harness
         .manager
         .captured_ops()

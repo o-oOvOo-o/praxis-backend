@@ -123,12 +123,68 @@ impl PraxisMessageProcessor {
                 self.thread_goal_clear(to_connection_request_id(request_id), params)
                     .await;
             }
-            ClientRequest::ThreadControlAcquire { request_id, params } => {
-                self.thread_control_acquire(to_connection_request_id(request_id), params)
+            ClientRequest::ThreadHeartbeatGet { request_id, params } => {
+                self.thread_heartbeat_get(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadHeartbeatSet { request_id, params } => {
+                self.thread_heartbeat_set(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadHeartbeatClear { request_id, params } => {
+                self.thread_heartbeat_clear(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::AutomationList { request_id, params } => {
+                self.automation_list(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::AutomationGet { request_id, params } => {
+                self.automation_get(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::AutomationCreate { request_id, params } => {
+                self.automation_create(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::AutomationUpdate { request_id, params } => {
+                self.automation_update(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::AutomationDelete { request_id, params } => {
+                self.automation_delete(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::AutomationHistory { request_id, params } => {
+                self.automation_history(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::AutomationRunNow { request_id, params } => {
+                self.automation_run_now(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadControlSnapshot { request_id, params } => {
+                self.thread_control_snapshot(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadControlClaim { request_id, params } => {
+                self.thread_control_claim(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::ThreadControlRelease { request_id, params } => {
                 self.thread_control_release(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadControlQueue { request_id, params } => {
+                self.thread_control_queue(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadControlQueueCancel { request_id, params } => {
+                self.thread_control_queue_cancel(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadControlQueueFlush { request_id, params } => {
+                self.thread_control_queue_flush(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::ThreadShellCommand { request_id, params } => {

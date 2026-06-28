@@ -208,13 +208,13 @@ async fn capability_sections_render_in_developer_message_in_order() -> Result<()
     .await?;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![praxis_protocol::user_input::UserInput::Text {
+        .submit_user_turn(
+            vec![praxis_protocol::user_input::UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -283,13 +283,13 @@ async fn explicit_plugin_mentions_inject_plugin_guidance() -> Result<()> {
             .await?;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![praxis_protocol::user_input::UserInput::Mention {
+        .submit_user_turn(
+            vec![praxis_protocol::user_input::UserInput::Mention {
                 name: "sample".into(),
                 path: format!("plugin://{SAMPLE_PLUGIN_CONFIG_NAME}"),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -355,13 +355,13 @@ async fn explicit_plugin_mentions_track_plugin_used_analytics() -> Result<()> {
     let praxis = build_analytics_plugin_test_praxis(&server, praxis_home).await?;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![praxis_protocol::user_input::UserInput::Mention {
+        .submit_user_turn(
+            vec![praxis_protocol::user_input::UserInput::Mention {
                 name: "sample".into(),
                 path: format!("plugin://{SAMPLE_PLUGIN_CONFIG_NAME}"),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 

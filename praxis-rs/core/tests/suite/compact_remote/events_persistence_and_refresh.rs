@@ -48,13 +48,13 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     .await;
 
     baseline_codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: first_user_message.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&baseline_codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
@@ -62,13 +62,13 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     .await;
 
     baseline_codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: second_user_message.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&baseline_codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
@@ -147,13 +147,13 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     .await;
 
     override_codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: first_user_message.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&override_codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
@@ -161,13 +161,13 @@ async fn remote_compact_trim_estimate_uses_session_base_instructions() -> Result
     .await;
 
     override_codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: second_user_message.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&override_codex, |event| {
         matches!(event, EventMsg::TurnComplete(_))
@@ -229,13 +229,13 @@ async fn remote_manual_compact_emits_context_compaction_items() -> Result<()> {
     .await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "manual remote compact".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
@@ -307,13 +307,13 @@ async fn remote_manual_compact_failure_emits_task_error_event() -> Result<()> {
     .await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "manual remote compact".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
 
@@ -389,13 +389,13 @@ async fn remote_compact_persists_replacement_history_in_rollout() -> Result<()> 
     .await;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "needs compaction".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -530,13 +530,13 @@ async fn remote_compact_and_resume_refresh_stale_developer_instructions() -> Res
 
     initial
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "start remote compact flow".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -551,13 +551,13 @@ async fn remote_compact_and_resume_refresh_stale_developer_instructions() -> Res
 
     initial
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "after compact in same session".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -576,13 +576,13 @@ async fn remote_compact_and_resume_refresh_stale_developer_instructions() -> Res
 
     resumed
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "after resume".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&resumed.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -674,13 +674,13 @@ async fn remote_compact_refreshes_stale_developer_instructions_without_resume() 
     .await;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "start remote compact flow".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -688,13 +688,13 @@ async fn remote_compact_refreshes_stale_developer_instructions_without_resume() 
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "after compact in same session".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 

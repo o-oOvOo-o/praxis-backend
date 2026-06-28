@@ -427,10 +427,7 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn dispatch_external_thread_command(
-        &mut self,
-        intent: ExternalThreadCommandIntent,
-    ) {
+    pub(super) fn dispatch_external_thread_command(&mut self, intent: ExternalThreadCommandIntent) {
         let action = match intent.action {
             ExternalThreadCommandAction::Resume => SessionPickerAction::Resume,
             ExternalThreadCommandAction::Fork => SessionPickerAction::Fork,

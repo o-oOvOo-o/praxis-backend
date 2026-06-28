@@ -126,18 +126,15 @@ impl RealtimeHandoffState {
     }
 }
 
-#[allow(dead_code)]
 struct ConversationState {
     audio_tx: Sender<RealtimeAudioFrame>,
     user_text_tx: Sender<String>,
-    writer: RealtimeWebsocketWriter,
     handoff: RealtimeHandoffState,
     input_task: JoinHandle<()>,
     fanout_task: Option<JoinHandle<()>>,
     realtime_active: Arc<AtomicBool>,
 }
 
-#[allow(dead_code)]
 impl RealtimeConversationManager {
     pub(crate) fn new() -> Self {
         Self {
@@ -208,7 +205,6 @@ impl RealtimeConversationManager {
         *guard = Some(ConversationState {
             audio_tx,
             user_text_tx,
-            writer,
             handoff,
             input_task: task,
             fanout_task: None,

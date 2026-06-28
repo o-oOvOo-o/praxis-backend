@@ -6,13 +6,17 @@ use ratatui::prelude::Color;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
-use ratatui::widgets::Widget;
 
 use crate::history_cell::ChatLane;
 use crate::history_cell::HistoryCell;
+use crate::history_cell::HistoryCellMouseAction;
+use crate::history_cell::HistoryCellMouseTarget;
 use crate::history_presentation::PatchCellId;
 use crate::line_truncation::line_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
+use crate::transcript::TranscriptBlock;
+use crate::transcript::TranscriptVisibleRow;
+use crate::transcript::render_visible_rows;
 use crate::workspace::theme as workspace_theme;
 
 const CHAT_TIMELINE_SIDE_PADDING: u16 = 2;
@@ -30,6 +34,7 @@ pub(crate) struct WorkspaceTranscriptTail {
     pub(crate) lane: ChatLane,
     pub(crate) lines: Vec<Line<'static>>,
     pub(crate) patch_cell_id: Option<PatchCellId>,
+    pub(crate) mouse_targets: Vec<HistoryCellMouseTarget>,
 }
 
 pub(crate) struct WorkspaceTranscriptRequest<'a> {
@@ -45,8 +50,47 @@ pub(crate) struct WorkspaceTranscriptRequest<'a> {
 #[derive(Clone, Debug)]
 pub(crate) struct WorkspaceTranscriptViewport {
     pub(crate) content_area: Rect,
-    pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) rows: Vec<WorkspaceTranscriptRow>,
     pub(crate) patch_cell_ids: Vec<PatchCellId>,
+    mouse_actions: Vec<Vec<HistoryCellMouseAction>>,
+}
+
+impl WorkspaceTranscriptViewport {
+    pub(crate) fn mouse_action_at(&self, column: u16, row: u16) -> Option<HistoryCellMouseAction> {
+        if self.content_area.is_empty()
+            || column < self.content_area.x
+            || column >= self.content_area.right()
+            || row < self.content_area.y
+            || row >= self.content_area.bottom()
+        {
+            return None;
+        }
+
+        let visible_height = usize::from(self.content_area.height);
+        let rendered_len = visible_height.min(self.rows.len());
+        let top_offset = visible_height.saturating_sub(rendered_len);
+        let row_offset = usize::from(row.saturating_sub(self.content_area.y));
+        if row_offset < top_offset {
+            return None;
+        }
+        let visible_index = row_offset.saturating_sub(top_offset);
+        if visible_index >= rendered_len {
+            return None;
+        }
+        let local_column = column.saturating_sub(self.content_area.x);
+        if let Some((start, end)) = self
+            .rows
+            .get(visible_index)
+            .and_then(|row| row.selectable_range)
+            && (local_column < start || local_column > end)
+        {
+            return None;
+        }
+        self.mouse_actions
+            .get(visible_index)
+            .and_then(|actions| actions.first())
+            .cloned()
+    }
 }
 
 #[derive(Default)]
@@ -71,19 +115,8 @@ struct WorkspaceTranscriptCommittedLayout {
     blocks: Vec<WorkspaceTranscriptBlock>,
 }
 
-#[derive(Clone, Debug)]
-struct WorkspaceTranscriptBlock {
-    lane: ChatLane,
-    lines: Vec<Line<'static>>,
-    patch_cell_ids: Vec<PatchCellId>,
-    row_start: usize,
-}
-
-#[derive(Clone, Debug)]
-struct WorkspaceTranscriptRow {
-    line: Line<'static>,
-    patch_cell_ids: Vec<PatchCellId>,
-}
+type WorkspaceTranscriptBlock = TranscriptBlock;
+pub(crate) type WorkspaceTranscriptRow = TranscriptVisibleRow;
 
 impl WorkspaceTranscriptCache {
     pub(crate) fn scroll_limit(&mut self, request: WorkspaceTranscriptRequest<'_>) -> usize {
@@ -110,8 +143,9 @@ impl WorkspaceTranscriptCache {
         if visible_rows == 0 || total_rows == 0 {
             return WorkspaceTranscriptViewport {
                 content_area,
-                lines: Vec::new(),
+                rows: Vec::new(),
                 patch_cell_ids: Vec::new(),
+                mouse_actions: Vec::new(),
             };
         }
 
@@ -128,10 +162,16 @@ impl WorkspaceTranscriptCache {
             }
         }
 
+        let mouse_actions = visible
+            .iter()
+            .map(|row| row.mouse_actions.clone())
+            .collect();
+
         WorkspaceTranscriptViewport {
             content_area,
-            lines: visible.into_iter().map(|row| row.line).collect(),
+            rows: visible,
             patch_cell_ids,
+            mouse_actions,
         }
     }
 
@@ -179,31 +219,7 @@ impl WorkspaceTranscriptCache {
 }
 
 pub(crate) fn render_viewport(viewport: &WorkspaceTranscriptViewport, buf: &mut Buffer) {
-    if viewport.lines.is_empty() {
-        return;
-    }
-
-    let visible_height = usize::from(viewport.content_area.height);
-    let rendered_len = visible_height.min(viewport.lines.len());
-    let top_offset = visible_height.saturating_sub(rendered_len);
-    for visible_index in 0..rendered_len {
-        let Some(source_line) = viewport.lines.get(visible_index) else {
-            break;
-        };
-        let y_offset = top_offset.saturating_add(visible_index);
-        source_line.clone().render(
-            Rect::new(
-                viewport.content_area.x,
-                viewport
-                    .content_area
-                    .y
-                    .saturating_add(u16::try_from(y_offset).unwrap_or(u16::MAX)),
-                viewport.content_area.width,
-                1,
-            ),
-            buf,
-        );
-    }
+    render_visible_rows(viewport.content_area, &viewport.rows, buf);
 }
 
 pub(crate) fn lane_width(width: u16, lane: ChatLane) -> u16 {
@@ -276,6 +292,8 @@ fn row_segments_for_request<'a>(
     if let Some(last_block) = committed_layout.blocks.last()
         && matches!(tail.lane, ChatLane::Assistant)
         && matches!(last_block.lane, ChatLane::Assistant)
+        && tail.mouse_targets.is_empty()
+        && last_block.mouse_actions.is_empty()
     {
         let mut segments = Vec::with_capacity(2);
         if last_block.row_start > 0 {
@@ -338,38 +356,55 @@ fn build_committed_layout(
     layout: &mut WorkspaceTranscriptCommittedLayout,
 ) {
     let width = request.content_area.width;
-    let mut content_blocks: Vec<(ChatLane, Vec<Line<'static>>, Vec<PatchCellId>)> = Vec::new();
+    let mut content_blocks: Vec<WorkspaceTranscriptContentBlock> = Vec::new();
 
     for cell in request.transcript_cells {
         let lane = cell.chat_lane();
         let lane_width = lane_width(width, lane);
         let lines = wrap_lines(cell.committed_display_lines(lane_width), lane_width);
+        let mouse_actions = header_mouse_actions(cell.mouse_targets(lane_width));
         push_chat_timeline_content_block(
             &mut content_blocks,
             lane,
             lines,
             cell.patch_cell_id(),
+            mouse_actions,
             !cell.is_stream_continuation(),
         );
     }
 
     layout.rows.clear();
     layout.blocks.clear();
-    for (index, (lane, lines, patch_cell_ids)) in content_blocks.into_iter().enumerate() {
+    for (index, block) in content_blocks.into_iter().enumerate() {
         if index > 0 {
             layout.rows.push(blank_row());
         }
         let row_start = layout.rows.len();
-        let rendered_rows =
-            rows_for_block(width, request.theme, lane, lines.clone(), &patch_cell_ids);
+        let rendered_rows = rows_for_block(
+            width,
+            request.theme,
+            block.lane,
+            block.lines.clone(),
+            &block.patch_cell_ids,
+            &block.mouse_actions,
+        );
         layout.rows.extend(rendered_rows);
-        layout.blocks.push(WorkspaceTranscriptBlock {
-            lane,
-            lines,
-            patch_cell_ids,
+        layout.blocks.push(WorkspaceTranscriptBlock::new(
+            block.lane,
+            block.lines,
+            block.patch_cell_ids,
+            block.mouse_actions,
             row_start,
-        });
+        ));
     }
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceTranscriptContentBlock {
+    lane: ChatLane,
+    lines: Vec<Line<'static>>,
+    patch_cell_ids: Vec<PatchCellId>,
+    mouse_actions: Vec<HistoryCellMouseAction>,
 }
 
 fn merged_tail_rows(
@@ -389,7 +424,14 @@ fn merged_tail_rows(
     {
         patch_cell_ids.push(id);
     }
-    rows_for_block(width, theme, block.lane, lines, &patch_cell_ids)
+    rows_for_block(
+        width,
+        theme,
+        block.lane,
+        lines,
+        &patch_cell_ids,
+        &block.mouse_actions,
+    )
 }
 
 fn active_tail_rows(
@@ -398,7 +440,15 @@ fn active_tail_rows(
     tail: &WorkspaceTranscriptTail,
 ) -> Vec<WorkspaceTranscriptRow> {
     let patch_cell_ids = tail.patch_cell_id.into_iter().collect::<Vec<_>>();
-    rows_for_block(width, theme, tail.lane, tail.lines.clone(), &patch_cell_ids)
+    let mouse_actions = header_mouse_actions(tail.mouse_targets.clone());
+    rows_for_block(
+        width,
+        theme,
+        tail.lane,
+        tail.lines.clone(),
+        &patch_cell_ids,
+        &mouse_actions,
+    )
 }
 
 fn rows_for_block(
@@ -407,28 +457,31 @@ fn rows_for_block(
     lane: ChatLane,
     lines: Vec<Line<'static>>,
     patch_cell_ids: &[PatchCellId],
+    mouse_actions: &[HistoryCellMouseAction],
 ) -> Vec<WorkspaceTranscriptRow> {
-    chat_timeline_lines_for_raw(width, lane, lines, theme)
-        .into_iter()
-        .map(|line| WorkspaceTranscriptRow {
-            line,
-            patch_cell_ids: patch_cell_ids.to_vec(),
-        })
-        .collect()
+    let mut rows: Vec<WorkspaceTranscriptRow> =
+        chat_timeline_lines_for_raw(width, lane, lines, theme)
+            .into_iter()
+            .map(|line| WorkspaceTranscriptRow::new(line, patch_cell_ids.to_vec(), Vec::new()))
+            .collect();
+    if !mouse_actions.is_empty() {
+        for row in rows.iter_mut().take(2) {
+            row.mouse_actions.extend(mouse_actions.iter().cloned());
+        }
+    }
+    rows
 }
 
 fn blank_row() -> WorkspaceTranscriptRow {
-    WorkspaceTranscriptRow {
-        line: Line::from(""),
-        patch_cell_ids: Vec::new(),
-    }
+    WorkspaceTranscriptRow::blank()
 }
 
 fn push_chat_timeline_content_block(
-    blocks: &mut Vec<(ChatLane, Vec<Line<'static>>, Vec<PatchCellId>)>,
+    blocks: &mut Vec<WorkspaceTranscriptContentBlock>,
     lane: ChatLane,
     mut lines: Vec<Line<'static>>,
     patch_cell_id: Option<PatchCellId>,
+    mouse_actions: Vec<HistoryCellMouseAction>,
     separate_from_previous: bool,
 ) {
     if lines.is_empty() {
@@ -436,22 +489,37 @@ fn push_chat_timeline_content_block(
     }
 
     if matches!(lane, ChatLane::Assistant)
-        && let Some((last_lane, last_lines, last_patch_cell_ids)) = blocks.last_mut()
-        && *last_lane == lane
+        && mouse_actions.is_empty()
+        && let Some(last) = blocks.last_mut()
+        && last.lane == lane
+        && last.mouse_actions.is_empty()
     {
-        if separate_from_previous && !last_lines.is_empty() {
-            last_lines.push(Line::from(""));
+        if separate_from_previous && !last.lines.is_empty() {
+            last.lines.push(Line::from(""));
         }
-        last_lines.append(&mut lines);
+        last.lines.append(&mut lines);
         if let Some(id) = patch_cell_id
-            && !last_patch_cell_ids.contains(&id)
+            && !last.patch_cell_ids.contains(&id)
         {
-            last_patch_cell_ids.push(id);
+            last.patch_cell_ids.push(id);
         }
     } else {
         let patch_cell_ids = patch_cell_id.into_iter().collect();
-        blocks.push((lane, lines, patch_cell_ids));
+        blocks.push(WorkspaceTranscriptContentBlock {
+            lane,
+            lines,
+            patch_cell_ids,
+            mouse_actions,
+        });
     }
+}
+
+fn header_mouse_actions(targets: Vec<HistoryCellMouseTarget>) -> Vec<HistoryCellMouseAction> {
+    targets
+        .into_iter()
+        .filter(|target| target.contains_row(0))
+        .map(|target| target.action)
+        .collect()
 }
 
 fn chat_timeline_lines_for_raw(

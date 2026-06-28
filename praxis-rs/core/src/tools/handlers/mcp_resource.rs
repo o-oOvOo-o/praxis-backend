@@ -14,12 +14,14 @@ use rmcp::model::Resource;
 use rmcp::model::ResourceTemplate;
 use serde::Deserialize;
 use serde::Serialize;
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::function_tool::FunctionCallError;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
+use crate::tools::arguments::parse_optional_value_arguments;
+use crate::tools::arguments::parse_value;
+use crate::tools::arguments::parse_value_with_default;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -203,7 +205,7 @@ impl ToolHandler for McpResourceHandler {
             }
         };
 
-        let arguments_value = parse_arguments(arguments.as_str())?;
+        let arguments_value = parse_optional_value_arguments(arguments.as_str())?;
 
         match tool_name.as_str() {
             "list_mcp_resources" => {
@@ -246,7 +248,7 @@ async fn handle_list_resources(
     call_id: String,
     arguments: Option<Value>,
 ) -> Result<FunctionToolOutput, FunctionCallError> {
-    let args: ListResourcesArgs = parse_args_with_default(arguments.clone())?;
+    let args: ListResourcesArgs = parse_value_with_default(arguments.clone())?;
     let ListResourcesArgs { server, cursor } = args;
     let server = normalize_optional_string(server);
     let cursor = normalize_optional_string(cursor);
@@ -310,7 +312,7 @@ async fn handle_list_resource_templates(
     call_id: String,
     arguments: Option<Value>,
 ) -> Result<FunctionToolOutput, FunctionCallError> {
-    let args: ListResourceTemplatesArgs = parse_args_with_default(arguments.clone())?;
+    let args: ListResourceTemplatesArgs = parse_value_with_default(arguments.clone())?;
     let ListResourceTemplatesArgs { server, cursor } = args;
     let server = normalize_optional_string(server);
     let cursor = normalize_optional_string(cursor);
@@ -376,7 +378,7 @@ async fn handle_read_resource(
     call_id: String,
     arguments: Option<Value>,
 ) -> Result<FunctionToolOutput, FunctionCallError> {
-    let args: ReadResourceArgs = parse_args(arguments.clone())?;
+    let args: ReadResourceArgs = parse_value(arguments.clone())?;
     let ReadResourceArgs { server, uri } = args;
     let server = normalize_required_string("server", server)?;
     let uri = normalize_required_string("uri", uri)?;
@@ -502,45 +504,6 @@ where
     })?;
 
     Ok(FunctionToolOutput::from_text(content, Some(true)))
-}
-
-fn parse_arguments(raw_args: &str) -> Result<Option<Value>, FunctionCallError> {
-    if raw_args.trim().is_empty() {
-        Ok(None)
-    } else {
-        let value: Value = serde_json::from_str(raw_args).map_err(|err| {
-            FunctionCallError::RespondToModel(format!("failed to parse function arguments: {err}"))
-        })?;
-        if value.is_null() {
-            Ok(None)
-        } else {
-            Ok(Some(value))
-        }
-    }
-}
-
-fn parse_args<T>(arguments: Option<Value>) -> Result<T, FunctionCallError>
-where
-    T: DeserializeOwned,
-{
-    match arguments {
-        Some(value) => serde_json::from_value(value).map_err(|err| {
-            FunctionCallError::RespondToModel(format!("failed to parse function arguments: {err}"))
-        }),
-        None => Err(FunctionCallError::RespondToModel(
-            "failed to parse function arguments: expected value".to_string(),
-        )),
-    }
-}
-
-fn parse_args_with_default<T>(arguments: Option<Value>) -> Result<T, FunctionCallError>
-where
-    T: DeserializeOwned + Default,
-{
-    match arguments {
-        Some(value) => parse_args(Some(value)),
-        None => Ok(T::default()),
-    }
 }
 
 #[cfg(test)]

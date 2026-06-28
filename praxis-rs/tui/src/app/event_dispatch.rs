@@ -533,7 +533,8 @@ impl App {
                         &[("result", "failure")],
                     );
                 }
-                self.chat_widget.open_windows_sandbox_recovery_prompt(preset);
+                self.chat_widget
+                    .open_windows_sandbox_recovery_prompt(preset);
             }
             AppEvent::BeginWindowsSandboxElevatedSetup { preset } => {
                 #[cfg(target_os = "windows")]
@@ -635,13 +636,15 @@ impl App {
 
                     self.chat_widget.show_windows_sandbox_setup_status();
                     tokio::task::spawn_blocking(move || {
-                        if let Err(err) = praxis_core::windows_sandbox::run_non_admin_setup_preflight(
-                            &policy,
-                            policy_cwd.as_path(),
-                            command_cwd.as_path(),
-                            &env_map,
-                            praxis_home.as_path(),
-                        ) {
+                        if let Err(err) =
+                            praxis_core::windows_sandbox::run_non_admin_setup_preflight(
+                                &policy,
+                                policy_cwd.as_path(),
+                                command_cwd.as_path(),
+                                &env_map,
+                                praxis_home.as_path(),
+                            )
+                        {
                             session_telemetry.counter(
                                 "praxis.windows_sandbox.non_admin_setup_preflight_failed",
                                 /*inc*/ 1,
@@ -1109,9 +1112,7 @@ impl App {
             | AppEvent::PersistRateLimitSwitchPromptHidden
             | AppEvent::PersistPlanModeReasoningEffort(_)
             | AppEvent::PersistModelMigrationPromptAcknowledged { .. }) => {
-                return self
-                    .handle_provider_policy_event(app_gateway, event)
-                    .await;
+                return self.handle_provider_policy_event(app_gateway, event).await;
             }
         }
         Ok(AppRunControl::Continue)

@@ -92,9 +92,6 @@ fn collect_layer_mtimes(stack: &ConfigLayerStack) -> Vec<LayerMtime> {
                     .join(CONFIG_TOML_FILE)
                     .ok()
                     .map(|p| p.as_path().to_path_buf()),
-                ConfigLayerSource::LegacyManagedConfigTomlFromFile { file } => {
-                    Some(file.as_path().to_path_buf())
-                }
                 _ => None,
             };
             path.map(LayerMtime::new)

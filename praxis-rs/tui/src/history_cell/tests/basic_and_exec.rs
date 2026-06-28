@@ -165,7 +165,7 @@ async fn session_info_availability_nux_tooltip_snapshot() {
 }
 
 #[tokio::test]
-async fn session_info_first_event_suppresses_tooltips_and_nux() {
+async fn session_info_first_event_renders_welcome_header() {
     let config = test_config().await;
     let tui_config = test_tui_config();
     let cell = new_session_info(
@@ -180,8 +180,52 @@ async fn session_info_first_event_suppresses_tooltips_and_nux() {
     );
 
     let rendered = render_transcript(&cell).join("\n");
+    assert!(rendered.contains("Welcome back!"));
+    assert!(rendered.contains("ChatGPT Free"));
+}
+
+#[tokio::test]
+async fn session_info_first_event_uses_tooltip_override_when_enabled() {
+    let config = test_config().await;
+    let tui_config = test_tui_config();
+    let cell = new_session_info(
+        &config,
+        &tui_config,
+        "gpt-5",
+        session_configured_event("gpt-5"),
+        /*is_first_event*/ true,
+        Some("Model just became available".to_string()),
+        Some(PlanType::Free),
+        /*show_fast_status*/ false,
+    );
+
+    let rendered = render_transcript(&cell).join("\n");
+    assert!(rendered.contains("What's new"));
+    assert!(rendered.contains("Model just became available"));
+}
+
+#[tokio::test]
+async fn session_info_first_event_hides_tooltip_override_when_disabled() {
+    let config = test_config().await;
+    let tui_config = TuiRuntimeConfig {
+        show_tooltips: false,
+        animations: false,
+        ..Default::default()
+    };
+    let cell = new_session_info(
+        &config,
+        &tui_config,
+        "gpt-5",
+        session_configured_event("gpt-5"),
+        /*is_first_event*/ true,
+        Some("Model just became available".to_string()),
+        Some(PlanType::Free),
+        /*show_fast_status*/ false,
+    );
+
+    let rendered = render_transcript(&cell).join("\n");
+    assert!(rendered.contains("Welcome back!"));
     assert!(!rendered.contains("Model just became available"));
-    assert!(rendered.trim().is_empty());
 }
 
 #[tokio::test]

@@ -1,0 +1,460 @@
+warning: function `executable_stem` is never used
+   --> utils\home-dir\src\lib.rs:287:4
+    |
+287 | fn executable_stem(value: &OsStr) -> String {
+    |    ^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `praxis-utils-home-dir` (lib) generated 1 warning
+warning: struct `ThreadHeartbeat` is never constructed
+  --> state\src\model\thread_goal.rs:71:12
+   |
+71 | pub struct ThreadHeartbeat {
+   |            ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `ThreadHeartbeatRow` is never constructed
+  --> state\src\model\thread_goal.rs:94:19
+   |
+94 | pub(crate) struct ThreadHeartbeatRow {
+   |                   ^^^^^^^^^^^^^^^^^^
+
+warning: associated function `try_from_row` is never used
+   --> state\src\model\thread_goal.rs:122:19
+    |
+121 | impl ThreadHeartbeatRow {
+    | ----------------------- associated function in this implementation
+122 |     pub(crate) fn try_from_row(row: &SqliteRow) -> Result<Self> {
+    |                   ^^^^^^^^^^^^
+
+warning: `praxis-state` (lib) generated 3 warnings
+warning: variable does not need to be mutable
+    --> core\src\agent_os.rs:2596:13
+     |
+2596 |         let mut file = tokio::fs::File::open(path.as_path()).await.map_err(|err| {
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `inject_user_message_without_turn` is never used
+   --> core\src\praxis_thread.rs:134:25
+    |
+ 55 | impl PraxisThread {
+    | ----------------- method in this implementation
+...
+134 |     pub(crate) async fn inject_user_message_without_turn(&self, message: String) {
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `pending_message_input_item` is never used
+   --> core\src\praxis_thread.rs:253:4
+    |
+253 | fn pending_message_input_item(message: &ResponseItem) -> PraxisResult<ResponseInputItem> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `resume_thread_from_rollout`, `resume_single_thread_from_rollout`, and `get_agent_metadata` are never used
+   --> core\src\agent\control.rs:330:25
+    |
+113 | impl AgentControl {
+    | ----------------- methods in this implementation
+...
+330 |     pub(crate) async fn resume_thread_from_rollout(
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+403 |     async fn resume_single_thread_from_rollout(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+649 |     pub(crate) fn get_agent_metadata(&self, agent_id: ThreadId) -> Option<AgentMetadata> {
+    |                   ^^^^^^^^^^^^^^^^^^
+
+warning: function `thread_spawn_depth` is never used
+    --> core\src\agent\control.rs:1300:4
+     |
+1300 | fn thread_spawn_depth(session_source: &SessionSource) -> Option<i32> {
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: method `live_agents` is never used
+   --> core\src\agent\registry.rs:155:19
+    |
+ 79 | impl AgentRegistry {
+    | ------------------ method in this implementation
+...
+155 |     pub(crate) fn live_agents(&self) -> Vec<AgentMetadata> {
+    |                   ^^^^^^^^^^^
+
+warning: variant `WorkerHeartbeat` is never constructed
+   --> core\src\agent_os.rs:726:5
+    |
+725 | enum RuntimeCommandActivity {
+    |      ---------------------- variant in this enum
+726 |     WorkerHeartbeat,
+    |     ^^^^^^^^^^^^^^^
+    |
+    = note: `RuntimeCommandActivity` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `checkpoint` is never used
+   --> core\src\agent_os.rs:897:25
+    |
+861 | impl ManagedCommandSpan {
+    | ----------------------- method in this implementation
+...
+897 |     pub(crate) async fn checkpoint(&self, raw_output: &[u8]) -> PraxisResult<Option<String>> {
+    |                         ^^^^^^^^^^
+
+warning: methods `heartbeat_thread` and `start_managed_command` are never used
+    --> core\src\agent_os.rs:1265:25
+     |
+ 922 | impl AgentOsRuntime {
+     | ------------------- methods in this implementation
+...
+1265 |     pub(crate) async fn heartbeat_thread(&self, thread_id: ThreadId) -> PraxisResult<()> {
+     |                         ^^^^^^^^^^^^^^^^
+...
+3169 |     pub(crate) async fn start_managed_command(
+     |                         ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `filter_disallowed_connectors_for_originator` is never used
+   --> core\src\connectors.rs:723:4
+    |
+723 | fn filter_disallowed_connectors_for_originator(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `remove_first_item` is never used
+   --> core\src\context_manager\history.rs:156:19
+    |
+ 59 | impl ContextManager {
+    | ------------------- method in this implementation
+...
+156 |     pub(crate) fn remove_first_item(&mut self) {
+    |                   ^^^^^^^^^^^^^^^^^
+
+warning: method `resume_thread_from_rollout_with_source` is never used
+   --> core\src\thread_manager.rs:831:25
+    |
+744 | impl ThreadManagerState {
+    | ----------------------- method in this implementation
+...
+831 |     pub(crate) async fn resume_thread_from_rollout_with_source(
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_csv` is never used
+    --> core\src\tools\handlers\agent_jobs.rs:1106:4
+     |
+1106 | fn parse_csv(content: &str) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
+     |    ^^^^^^^^^
+
+warning: function `list_dir_slice` is never used
+   --> core\src\tools\handlers\list_dir.rs:191:10
+    |
+191 | async fn list_dir_slice(
+    |          ^^^^^^^^^^^^^^
+
+warning: function `build_wait_agent_statuses` is never used
+  --> core\src\tools\handlers\multi_agents_common.rs:74:15
+   |
+74 | pub(crate) fn build_wait_agent_statuses(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_agent_resume_config` is never used
+   --> core\src\tools\handlers\multi_agents_common.rs:212:15
+    |
+212 | pub(crate) fn build_agent_resume_config(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `start_agent_os_command_span` is never used
+  --> core\src\tools\runtimes\agent_os_command.rs:21:21
+   |
+21 | pub(crate) async fn start_agent_os_command_span(
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `start_agent_os_command_span_with_runtime_kind` is never used
+  --> core\src\tools\runtimes\agent_os_command.rs:38:21
+   |
+38 | pub(crate) async fn start_agent_os_command_span_with_runtime_kind(
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `praxis-core` (lib) generated 18 warnings (run `cargo fix --lib -p praxis-core` to apply 1 suggestion)
+warning: function `ensure_referenced_definitions_present` is never used
+    --> app-gateway-protocol\src\export.rs:1027:4
+     |
+1027 | fn ensure_referenced_definitions_present(schema: &Value, label: &str) -> Result<()> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `collect_missing_definitions` is never used
+    --> app-gateway-protocol\src\export.rs:1045:4
+     |
+1045 | fn collect_missing_definitions(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `praxis-app-gateway-protocol` (lib) generated 2 warnings
+   Compiling praxis-app-gateway-runtime v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\app-gateway-runtime)
+warning: unused import: `praxis_protocol::dynamic_tools::DynamicToolResponse as CoreDynamicToolResponse`
+   --> app-gateway-runtime\src\bespoke_event_handling.rs:111:5
+    |
+111 | use praxis_protocol::dynamic_tools::DynamicToolResponse as CoreDynamicToolResponse;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `praxis_protocol::protocol::ReviewOutputEvent`
+   --> app-gateway-runtime\src\bespoke_event_handling.rs:126:5
+    |
+126 | use praxis_protocol::protocol::ReviewOutputEvent;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `tracing::warn`
+   --> app-gateway-runtime\src\bespoke_event_handling.rs:144:5
+    |
+144 | use tracing::warn;
+    |     ^^^^^^^^^^^^^
+
+warning: unused import: `crate::error_code::INPUT_TOO_LARGE_ERROR_CODE`
+ --> app-gateway-runtime\src\praxis_message_processor.rs:4:5
+  |
+4 | use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::error_code::INVALID_PARAMS_ERROR_CODE`
+ --> app-gateway-runtime\src\praxis_message_processor.rs:6:5
+  |
+6 | use crate::error_code::INVALID_PARAMS_ERROR_CODE;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `praxis_app_gateway_protocol::UserInput as ApiUserInput`
+  --> app-gateway-runtime\src\praxis_message_processor.rs:87:5
+   |
+87 | use praxis_app_gateway_protocol::UserInput as ApiUserInput;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `praxis_core::config_loader::LoaderOverrides`
+   --> app-gateway-runtime\src\praxis_message_processor.rs:104:5
+    |
+104 | use praxis_core::config_loader::LoaderOverrides;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `praxis_protocol::protocol::SubAgentSource`
+   --> app-gateway-runtime\src\praxis_message_processor.rs:129:5
+    |
+129 | use praxis_protocol::protocol::SubAgentSource;
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `praxis_features::Feature`
+  --> app-gateway-runtime\src\praxis_message_processor\plugin_api.rs:35:5
+   |
+35 | use praxis_features::Feature;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+   --> app-gateway-runtime\src\config_api.rs:197:13
+    |
+197 |         let mut response = self
+    |             ----^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `turn_aborted_event`
+    --> app-gateway-runtime\src\bespoke_event_handling.rs:1691:31
+     |
+1691 |         EventMsg::TurnAborted(turn_aborted_event) => {
+     |                               ^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_turn_aborted_event`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `config`
+    --> app-gateway-runtime\src\praxis_message_processor\thread_lifecycle_api.rs:1840:17
+     |
+1840 |             let config = Arc::clone(&self.config);
+     |                 ^^^^^^ help: if this is intentional, prefix it with an underscore: `_config`
+
+warning: `praxis-app-gateway-runtime` (lib) generated 12 warnings (run `cargo fix --lib -p praxis-app-gateway-runtime` to apply 12 suggestions)
+   Compiling praxis-app-gateway-core v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\app-gateway-core)
+   Compiling praxis-app-gateway-native v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\app-gateway-native)
+   Compiling praxis-ollama v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\ollama)
+   Compiling praxis-lmstudio v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\lmstudio)
+   Compiling praxis-utils-oss v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\utils\oss)
+   Compiling praxis-app-gateway-client v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\app-gateway-client)
+   Compiling praxis-cloud-tasks-client v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\cloud-tasks-client)
+   Compiling praxis-utils-sandbox-summary v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\utils\sandbox-summary)
+   Compiling praxis-utils-approval-presets v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\utils\approval-presets)
+   Compiling praxis-tui v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\tui)
+warning: unused import: `ratatui::style::Stylize`
+ --> tui\src\key_hint.rs:6:5
+  |
+6 | use ratatui::style::Stylize;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `ratatui::style::Stylize`
+  --> tui\src\markdown_render.rs:53:13
+   |
+53 |         use ratatui::style::Stylize;
+   |             ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `ratatui::style::Stylize`
+ --> tui\src\selection_list.rs:6:5
+  |
+6 | use ratatui::style::Stylize as _;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: fields `app_gateway_reconnect_pending` and `last_app_gateway_reconnect_attempt` are never read
+    --> tui\src\app.rs:1017:5
+     |
+ 973 | pub(crate) struct App {
+     |                   --- fields in this struct
+...
+1017 |     app_gateway_reconnect_pending: bool,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+1018 |     last_app_gateway_reconnect_attempt: Option<Instant>,
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: constant `APP_GATEWAY_RECONNECT_INTERVAL` is never used
+    --> tui\src\app.rs:1052:7
+     |
+1052 | const APP_GATEWAY_RECONNECT_INTERVAL: Duration = Duration::from_secs(2);
+     |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `mark_app_gateway_disconnected`, `should_retry_app_gateway_reconnect`, and `try_reconnect_app_gateway` are never used
+    --> tui\src\app.rs:4640:8
+     |
+1990 | impl App {
+     | -------- methods in this implementation
+...
+4640 |     fn mark_app_gateway_disconnected(&mut self, message: String) {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+4653 |     fn should_retry_app_gateway_reconnect(&self) -> bool {
+     |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+4660 |     async fn try_reconnect_app_gateway(&mut self, app_gateway: &mut AppGatewaySession) -> bool {
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `reconnect_remote` is never used
+   --> tui\src\app_gateway_session.rs:201:25
+    |
+189 | impl AppGatewaySession {
+    | ---------------------- method in this implementation
+...
+201 |     pub(crate) async fn reconnect_remote(
+    |                         ^^^^^^^^^^^^^^^^
+
+warning: variant `ResumeRecentThread` is never constructed
+   --> tui\src\history_cell.rs:214:5
+    |
+213 | pub(crate) enum HistoryCellMouseAction {
+    |                 ---------------------- variant in this enum
+214 |     ResumeRecentThread {
+    |     ^^^^^^^^^^^^^^^^^^
+    |
+    = note: `HistoryCellMouseAction` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `offset` is never used
+   --> tui\src\history_cell.rs:232:8
+    |
+227 | impl HistoryCellMouseTarget {
+    | --------------------------- method in this implementation
+...
+232 |     fn offset(mut self, row_offset: u16) -> Self {
+    |        ^^^^^^
+
+warning: constant `REASONING_TOGGLE_KEY_HINT` is never used
+   --> tui\src\history_cell.rs:239:18
+    |
+239 | pub(crate) const REASONING_TOGGLE_KEY_HINT: &str = "F6";
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `TOOL_OUTPUT_TOGGLE_KEY_HINT` is never used
+   --> tui\src\history_cell.rs:240:18
+    |
+240 | pub(crate) const TOOL_OUTPUT_TOGGLE_KEY_HINT: &str = "F7";
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `provider_name` is never read
+  --> tui\src\model_discovery.rs:46:5
+   |
+44 | struct DiscoveredModel {
+   |        --------------- field in this struct
+45 |     provider_id: String,
+46 |     provider_name: String,
+   |     ^^^^^^^^^^^^^
+   |
+   = note: `DiscoveredModel` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: variant `Preserve` is never constructed
+  --> tui\src\turn_runtime.rs:39:5
+   |
+36 | pub(crate) enum RuntimeTextCapitalization {
+   |                 ------------------------- variant in this enum
+...
+39 |     Preserve,
+   |     ^^^^^^^^
+   |
+   = note: `RuntimeTextCapitalization` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: associated function `new` is never used
+  --> tui\src\turn_runtime.rs:50:19
+   |
+49 | impl RuntimeTaskSnapshot {
+   | ------------------------ associated function in this implementation
+50 |     pub(crate) fn new(
+   |                   ^^^
+
+warning: methods `set_tip_message`, `set_summary_message`, `set_queue_preview_message`, `set_active_task`, `set_next_task`, and `clear_tasks` are never used
+   --> tui\src\turn_runtime.rs:197:19
+    |
+159 | impl TurnRuntimeState {
+    | --------------------- methods in this implementation
+...
+197 |     pub(crate) fn set_tip_message(&mut self, message: Option<String>) {
+    |                   ^^^^^^^^^^^^^^^
+...
+209 |     pub(crate) fn set_summary_message(&mut self, message: Option<String>) {
+    |                   ^^^^^^^^^^^^^^^^^^^
+...
+215 |     pub(crate) fn set_queue_preview_message(&mut self, message: Option<String>) {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+221 |     pub(crate) fn set_active_task(&mut self, task: Option<RuntimeTaskSnapshot>) {
+    |                   ^^^^^^^^^^^^^^^
+...
+225 |     pub(crate) fn set_next_task(&mut self, task: Option<RuntimeTaskSnapshot>) {
+    |                   ^^^^^^^^^^^^^
+...
+229 |     pub(crate) fn clear_tasks(&mut self) {
+    |                   ^^^^^^^^^^^
+
+warning: `praxis-tui` (lib) generated 15 warnings
+   Compiling praxis-cloud-tasks-mock-client v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\cloud-tasks-mock-client)
+   Compiling praxis-cloud-tasks v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\cloud-tasks)
+   Compiling praxis-exec v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\exec)
+   Compiling praxis-app-gateway-service v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\app-gateway-service)
+   Compiling praxis-mcp-server v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\mcp-server)
+warning: type alias `CodexToolCallApprovalPolicy` is never used
+   --> mcp-server\src\praxis_tool_config.rs:115:10
+    |
+115 | pub type CodexToolCallApprovalPolicy = PraxisToolCallApprovalPolicy;
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: type alias `CodexToolCallSandboxMode` is never used
+   --> mcp-server\src\praxis_tool_config.rs:117:10
+    |
+117 | pub type CodexToolCallSandboxMode = PraxisToolCallSandboxMode;
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `praxis-mcp-server` (lib) generated 2 warnings
+   Compiling praxis-app-gateway-test-client v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\app-gateway-test-client)
+   Compiling praxis-cli v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4m 04s

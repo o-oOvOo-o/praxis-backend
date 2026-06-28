@@ -61,13 +61,13 @@ async fn permissions_message_sent_once_on_start() -> Result<()> {
     let test = builder.build(&server).await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -102,13 +102,13 @@ async fn permissions_message_added_on_override_change() -> Result<()> {
     let test = builder.build(&server).await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -130,13 +130,13 @@ async fn permissions_message_added_on_override_change() -> Result<()> {
         .await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -177,24 +177,24 @@ async fn permissions_message_not_added_when_no_change() -> Result<()> {
     let test = builder.build(&server).await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -246,13 +246,13 @@ async fn resume_replays_permissions_messages() -> Result<()> {
 
     initial
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -279,13 +279,13 @@ async fn resume_replays_permissions_messages() -> Result<()> {
 
     initial
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -295,13 +295,13 @@ async fn resume_replays_permissions_messages() -> Result<()> {
     let resumed = builder.resume(&server, home, rollout_path).await?;
     resumed
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "after resume".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&resumed.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -357,13 +357,13 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
 
     initial
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 1".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -390,13 +390,13 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
 
     initial
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello 2".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -414,13 +414,13 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
     let resumed = builder.resume(&server, home, rollout_path.clone()).await?;
     resumed
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "after resume".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&resumed.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -451,13 +451,13 @@ async fn resume_and_fork_append_permissions_messages() -> Result<()> {
         .await?;
     forked
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "after fork".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&forked.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
@@ -505,13 +505,13 @@ async fn permissions_message_includes_writable_roots() -> Result<()> {
     let test = builder.build(&server).await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 

@@ -10,7 +10,6 @@ pub use external_agent_state_env::scrub_external_agent_state_env_for_current_pro
 const PRAXIS_HOME_ENV_VAR: &str = "PRAXIS_HOME";
 const PRAXIS_HOME_NAMESPACE_ENV_VAR: &str = "PRAXIS_HOME_NAMESPACE";
 const PRAXIS_HOME_DIRNAME: &str = ".praxis";
-const LEGACY_CODEP_HOME_DIRNAME: &str = ".codep";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PraxisHomeNamespace {
@@ -75,15 +74,6 @@ pub fn default_praxis_home_for_namespace(
 /// thread indexes, goals, logs, or SQLite databases may be written.
 pub fn default_external_codex_home() -> std::io::Result<PathBuf> {
     default_home_with_dir_name(external_agent_state_env::codex_home_dirname())
-}
-
-/// Returns the legacy Codep home used only for explicit diagnostics/migration.
-///
-/// Praxis must not auto-rename or auto-import this directory because old
-/// Codep profiles commonly contain Codex env wrappers, stale thread ids, and
-/// schema-incompatible SQLite state.
-pub fn default_legacy_codep_home() -> std::io::Result<PathBuf> {
-    default_home_with_dir_name(LEGACY_CODEP_HOME_DIRNAME)
 }
 
 fn default_home_with_dir_name(dir_name: &str) -> std::io::Result<PathBuf> {
@@ -199,7 +189,7 @@ struct HomeEnvOverride {
 fn active_home_env_override() -> Option<HomeEnvOverride> {
     // Praxis must not honor CODEX_HOME. CODEX_HOME belongs to the external
     // Codex state source and can point at an unrelated or stale database when a
-    // user has shell-profile aliases such as codep/codex.  Praxis may read
+    // user has shell-profile aliases for external agents. Praxis may read
     // selected Codex config/auth as an explicit read-through bridge, but its
     // own home/state must be controlled only by PRAXIS_HOME.
     env_override(PRAXIS_HOME_ENV_VAR)
@@ -254,7 +244,6 @@ fn external_codex_read_through_home_for_test(
 
 #[cfg(test)]
 mod tests {
-    use super::LEGACY_CODEP_HOME_DIRNAME;
     use super::PRAXIS_HOME_DIRNAME;
     use super::PRAXIS_HOME_ENV_VAR;
     use super::PRAXIS_HOME_NAMESPACE_ENV_VAR;
@@ -363,10 +352,8 @@ mod tests {
             default_praxis_home_for_namespace(PraxisHomeNamespace::Praxis).expect("praxis home");
         let external_codex_home =
             super::default_external_codex_home().expect("external codex home");
-        let codep_home = super::default_legacy_codep_home().expect("legacy codep home");
         assert!(praxis_home.ends_with(PRAXIS_HOME_DIRNAME));
         assert!(external_codex_home.ends_with(external_agent_state_env::codex_home_dirname()));
-        assert!(codep_home.ends_with(LEGACY_CODEP_HOME_DIRNAME));
     }
 
     #[test]
@@ -376,28 +363,6 @@ mod tests {
         assert!(is_external_agent_state_env_var("CODEX_SQLITE_HOME"));
         assert!(is_external_agent_state_env_var("CODEX_THREAD_ID"));
         assert!(!is_external_agent_state_env_var("PRAXIS_HOME"));
-    }
-
-    #[test]
-    fn legacy_codep_home_is_not_auto_renamed_to_praxis_home() {
-        let temp_home = TempDir::new().expect("temp home");
-        let previous_home = temp_home.path().join(LEGACY_CODEP_HOME_DIRNAME);
-        let default_home = temp_home.path().join(PRAXIS_HOME_DIRNAME);
-        fs::create_dir_all(previous_home.join("sessions")).expect("create previous home");
-        fs::write(previous_home.join("sessions").join("thread.jsonl"), "{}")
-            .expect("write previous asset");
-
-        let resolved = super::default_praxis_home_for_namespace(PraxisHomeNamespace::Praxis)
-            .expect("default praxis home");
-
-        assert!(resolved.ends_with(PRAXIS_HOME_DIRNAME));
-        assert!(
-            previous_home
-                .join("sessions")
-                .join("thread.jsonl")
-                .is_file()
-        );
-        assert!(!default_home.exists());
     }
 
     #[test]

@@ -1,0 +1,25 @@
+[package]
+name = "praxis-system-plugin-reverse-engineering"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "praxis_system_plugin_reverse_engineering"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "process", "sync"] }
+tracing = { workspace = true }
+praxis-utils-time = { workspace = true }
+which = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -15,6 +15,7 @@ pub(crate) enum WireId {
 }
 
 impl WireId {
+    #[cfg(test)]
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Responses => "responses",
@@ -61,31 +62,31 @@ impl BehaviorProfileId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ProductProfileId {
-    Praxis,
-    Cunning3d,
-}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ProductProfileId(String);
 
 impl ProductProfileId {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Praxis => "praxis",
-            Self::Cunning3d => "cunning3d",
-        }
+    pub(crate) fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cunning3d() -> Self {
+        Self::new(Product::CUNNING3D)
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
     }
 
     pub(crate) fn from_product(product: Product) -> Option<Self> {
-        match product {
-            Product::Praxis => Some(Self::Praxis),
-            Product::Cunning3d => Some(Self::Cunning3d),
-            Product::Chatgpt | Product::Atlas => None,
+        match product.as_str() {
+            Product::CHATGPT | Product::ATLAS => None,
+            product_id => Some(Self::new(product_id)),
         }
     }
 
-    pub(crate) fn policy_reader_behavior_id(self) -> BehaviorProfileId {
-        match self {
-            Self::Praxis | Self::Cunning3d => BehaviorProfileId::Common,
-        }
+    pub(crate) fn policy_reader_behavior_id(&self) -> BehaviorProfileId {
+        BehaviorProfileId::Common
     }
 }

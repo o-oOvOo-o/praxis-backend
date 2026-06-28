@@ -431,13 +431,7 @@ pub(super) trait PagerContent {
     fn len(&self) -> usize;
     fn desired_height(&self, idx: usize, width: u16) -> u16;
     fn render(&self, idx: usize, area: Rect, buf: &mut Buffer);
-    fn render_window(
-        &self,
-        idx: usize,
-        area: Rect,
-        buf: &mut Buffer,
-        scroll_offset: u16,
-    );
+    fn render_window(&self, idx: usize, area: Rect, buf: &mut Buffer, scroll_offset: u16);
 }
 
 struct StaticPagerContent {
@@ -468,13 +462,7 @@ impl PagerContent for StaticPagerContent {
         }
     }
 
-    fn render_window(
-        &self,
-        idx: usize,
-        area: Rect,
-        buf: &mut Buffer,
-        scroll_offset: u16,
-    ) {
+    fn render_window(&self, idx: usize, area: Rect, buf: &mut Buffer, scroll_offset: u16) {
         if let Some(renderable) = self.renderables.get(idx) {
             renderable.render_window(area, buf, scroll_offset);
         }

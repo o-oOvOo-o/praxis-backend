@@ -8,12 +8,9 @@ use crate::agent_os::records::RuntimeCommandRecord;
 use crate::agent_os::records::RuntimeCommandStatus;
 use crate::agent_os::records::RuntimeCommandType;
 
-use super::activity::RuntimeCommandActivity;
-
 impl RuntimeCommandRecord {
-    pub(in crate::agent_os) fn apply_activity(
+    pub(in crate::agent_os) fn apply_worker_started_command(
         &mut self,
-        activity: RuntimeCommandActivity,
         current_task_id: Option<&str>,
         now: DateTime<Utc>,
         ttl: Duration,
@@ -33,13 +30,12 @@ impl RuntimeCommandRecord {
             self.updated_at = now;
             changed = true;
         }
-        match (activity, self.status, self.command_type) {
-            (_, RuntimeCommandStatus::Pending, _) => {
+        match (self.status, self.command_type) {
+            (RuntimeCommandStatus::Pending, _) => {
                 self.status = RuntimeCommandStatus::Acked;
                 changed = true;
             }
             (
-                RuntimeCommandActivity::WorkerStartedCommand,
                 RuntimeCommandStatus::Acked,
                 RuntimeCommandType::AssignTask,
             ) if self.task_id.as_deref() == current_task_id => {

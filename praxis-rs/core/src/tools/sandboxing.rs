@@ -29,6 +29,7 @@ use praxis_sandboxing::SandboxTransformError;
 use praxis_sandboxing::SandboxTransformRequest;
 use praxis_sandboxing::SandboxType;
 use praxis_sandboxing::SandboxablePreference;
+use praxis_system_plugin_approval_control::tool_safety::SafetyToolKind;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -285,6 +286,10 @@ pub(crate) trait Approvable<Req> {
 }
 
 pub(crate) trait Sandboxable {
+    fn tool_kind(&self) -> SafetyToolKind {
+        SafetyToolKind::Unknown
+    }
+
     fn sandbox_preference(&self) -> SandboxablePreference;
     fn escalate_on_failure(&self) -> bool {
         true

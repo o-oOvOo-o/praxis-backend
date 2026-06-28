@@ -316,13 +316,13 @@ async fn snapshot_model_visible_layout_resume_with_personality_change() -> Resul
     )
     .await;
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "seed resume history".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     let initial_request = initial_mock.single_request();
@@ -415,13 +415,13 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
     )
     .await;
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "seed resume history".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;
     let initial_request = initial_mock.single_request();
@@ -461,13 +461,13 @@ async fn snapshot_model_visible_layout_resume_override_matches_rollout_model() -
         .await?;
     resumed
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "first resumed turn after model override".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&resumed.thread, |event| {
         matches!(event, EventMsg::TurnComplete(_))

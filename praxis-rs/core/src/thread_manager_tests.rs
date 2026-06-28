@@ -11,9 +11,7 @@ use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ReasoningItemReasoningSummary;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::openai_models::ModelsResponse;
-use praxis_protocol::protocol::AgentMessageEvent;
 use praxis_protocol::protocol::TurnStartedEvent;
-use praxis_protocol::protocol::UserMessageEvent;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
 use tempfile::tempdir;
@@ -137,25 +135,6 @@ fn out_of_range_truncation_drops_only_unfinished_suffix_mid_turn() {
         serde_json::to_value(truncated.get_rollout_items()).unwrap(),
         serde_json::to_value(items[..2].to_vec()).unwrap()
     );
-}
-
-#[test]
-fn fork_thread_accepts_legacy_usize_snapshot_argument() {
-    fn assert_legacy_snapshot_callsite(
-        manager: &ThreadManager,
-        config: Config,
-        path: std::path::PathBuf,
-    ) {
-        let _future = manager.fork_thread(
-            usize::MAX,
-            config,
-            path,
-            /*persist_extended_history*/ false,
-            /*parent_trace*/ None,
-        );
-    }
-
-    let _: fn(&ThreadManager, Config, std::path::PathBuf) = assert_legacy_snapshot_callsite;
 }
 
 #[test]
@@ -368,56 +347,8 @@ fn interrupted_snapshot_is_not_mid_turn() {
     );
 }
 
-#[test]
-fn completed_legacy_event_history_is_not_mid_turn() {
-    let completed_history = InitialHistory::Forked(vec![
-        RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
-            message: "hello".to_string(),
-            images: None,
-            text_elements: Vec::new(),
-            local_images: Vec::new(),
-        })),
-        RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
-            message: "done".to_string(),
-            phase: None,
-            memory_citation: None,
-        })),
-    ]);
-
-    assert_eq!(
-        snapshot_turn_state(&completed_history),
-        SnapshotTurnState {
-            ends_mid_turn: false,
-            active_turn_id: None,
-            active_turn_start_index: None,
-        },
-    );
-}
-
-#[test]
-fn mixed_response_and_legacy_user_event_history_is_mid_turn() {
-    let mixed_history = InitialHistory::Forked(vec![
-        RolloutItem::ResponseItem(user_msg("hello")),
-        RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
-            message: "hello".to_string(),
-            images: None,
-            text_elements: Vec::new(),
-            local_images: Vec::new(),
-        })),
-    ]);
-
-    assert_eq!(
-        snapshot_turn_state(&mixed_history),
-        SnapshotTurnState {
-            ends_mid_turn: true,
-            active_turn_id: None,
-            active_turn_start_index: None,
-        },
-    );
-}
-
 #[tokio::test]
-async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_for_legacy_history() {
+async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_when_missing() {
     let temp_dir = tempdir().expect("tempdir");
     let mut config = test_config();
     config.praxis_home = temp_dir.path().join("praxis-home");

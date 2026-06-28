@@ -123,10 +123,10 @@ trust_level = "trusted"
 }
 
 #[test]
-fn legacy_sandbox_mode_config_builds_split_policies_without_drift() -> std::io::Result<()> {
+fn sandbox_mode_config_builds_split_policies_without_drift() -> std::io::Result<()> {
     let praxis_home = TempDir::new()?;
     let cwd = TempDir::new()?;
-    let extra_root = test_absolute_path("/tmp/legacy-extra-root");
+    let extra_root = test_absolute_path("/tmp/projection-extra-root");
     let cases = vec![
         (
             "danger-full-access".to_string(),
@@ -170,19 +170,19 @@ exclude_slash_tmp = true
         let sandbox_policy = config.permissions.sandbox_policy.get();
         assert_eq!(
             config.permissions.file_system_sandbox_policy,
-            FileSystemSandboxPolicy::from_legacy_sandbox_policy(sandbox_policy, cwd.path()),
-            "case `{name}` should preserve filesystem semantics from legacy config"
+            FileSystemSandboxPolicy::from_sandbox_policy(sandbox_policy, cwd.path()),
+            "case `{name}` should preserve filesystem semantics from protocol sandbox projection"
         );
         assert_eq!(
             config.permissions.network_sandbox_policy,
             NetworkSandboxPolicy::from(sandbox_policy),
-            "case `{name}` should preserve network semantics from legacy config"
+            "case `{name}` should preserve network semantics from protocol sandbox projection"
         );
         assert_eq!(
             config
                 .permissions
                 .file_system_sandbox_policy
-                .to_legacy_sandbox_policy(config.permissions.network_sandbox_policy, cwd.path())
+                .to_sandbox_policy(config.permissions.network_sandbox_policy, cwd.path())
                 .unwrap_or_else(|err| panic!("case `{name}` should round-trip: {err}")),
             sandbox_policy.clone(),
             "case `{name}` should round-trip through split policies without drift"
@@ -213,7 +213,10 @@ fn filter_mcp_servers_by_allowlist_enforces_identity_rules() {
         (MATCHED_URL_SERVER.to_string(), http_mcp(GOOD_URL)),
         (DIFFERENT_NAME_SERVER.to_string(), stdio_mcp("same-cmd")),
     ]);
-    let source = RequirementSource::LegacyManagedConfigTomlFromMdm;
+    let source = RequirementSource::MdmManagedPreferences {
+        domain: "com.openai.praxis".to_string(),
+        key: "requirements".to_string(),
+    };
     let requirements = Sourced::new(
         BTreeMap::from([
             (
@@ -306,7 +309,10 @@ fn filter_mcp_servers_by_allowlist_blocks_all_when_empty() {
         ("server-b".to_string(), http_mcp("https://example.com/b")),
     ]);
 
-    let source = RequirementSource::LegacyManagedConfigTomlFromMdm;
+    let source = RequirementSource::MdmManagedPreferences {
+        domain: "com.openai.praxis".to_string(),
+        key: "requirements".to_string(),
+    };
     let requirements = Sourced::new(BTreeMap::new(), source.clone());
     filter_mcp_servers_by_requirements(&mut servers, Some(&requirements));
 
@@ -728,7 +734,7 @@ fn cli_override_takes_precedence_over_profile_sandbox_mode() -> std::io::Result<
 }
 
 #[test]
-fn feature_table_overrides_legacy_flags() -> std::io::Result<()> {
+fn feature_table_controls_apply_patch_freeform() -> std::io::Result<()> {
     let praxis_home = TempDir::new()?;
     let mut entries = BTreeMap::new();
     entries.insert("apply_patch_freeform".to_string(), false);
@@ -745,31 +751,6 @@ fn feature_table_overrides_legacy_flags() -> std::io::Result<()> {
 
     assert!(!config.features.enabled(Feature::ApplyPatchFreeform));
     assert!(!config.include_apply_patch_tool);
-
-    Ok(())
-}
-
-#[test]
-fn legacy_toggles_map_to_features() -> std::io::Result<()> {
-    let praxis_home = TempDir::new()?;
-    let cfg = ConfigToml {
-        experimental_use_unified_exec_tool: Some(true),
-        experimental_use_freeform_apply_patch: Some(true),
-        ..Default::default()
-    };
-
-    let config = Config::load_from_base_config_with_overrides(
-        cfg,
-        ConfigOverrides::default(),
-        praxis_home.path().to_path_buf(),
-    )?;
-
-    assert!(config.features.enabled(Feature::ApplyPatchFreeform));
-    assert!(config.features.enabled(Feature::UnifiedExec));
-
-    assert!(config.include_apply_patch_tool);
-
-    assert!(config.use_experimental_unified_exec_tool);
 
     Ok(())
 }

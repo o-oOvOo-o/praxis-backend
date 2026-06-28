@@ -7,11 +7,6 @@ use praxis_arg0::arg0_dispatch_or_else;
 use praxis_core::config_loader::LoaderOverrides;
 use praxis_protocol::protocol::SessionSource;
 use praxis_utils_cli::CliConfigOverrides;
-use std::path::PathBuf;
-
-// Debug-only test hook: lets integration tests point the server at a temporary
-// managed config file without writing to /etc.
-const MANAGED_CONFIG_PATH_ENV_VAR: &str = "PRAXIS_APP_GATEWAY_MANAGED_CONFIG_PATH";
 
 #[derive(Debug, Parser)]
 struct AppGatewayArgs {
@@ -40,11 +35,7 @@ struct AppGatewayArgs {
 fn main() -> anyhow::Result<()> {
     arg0_dispatch_or_else(|arg0_paths: Arg0DispatchPaths| async move {
         let args = AppGatewayArgs::parse();
-        let managed_config_path = managed_config_path_from_debug_env();
-        let loader_overrides = LoaderOverrides {
-            managed_config_path,
-            ..Default::default()
-        };
+        let loader_overrides = LoaderOverrides::default();
         let transport = args.listen;
         let session_source = args.session_source;
         let auth = args.auth.try_into_settings()?;
@@ -61,19 +52,4 @@ fn main() -> anyhow::Result<()> {
         .await?;
         Ok(())
     })
-}
-
-fn managed_config_path_from_debug_env() -> Option<PathBuf> {
-    #[cfg(debug_assertions)]
-    {
-        if let Ok(value) = std::env::var(MANAGED_CONFIG_PATH_ENV_VAR) {
-            return if value.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(value))
-            };
-        }
-    }
-
-    None
 }

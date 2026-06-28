@@ -145,38 +145,6 @@ fn praxis_apps_mcp_url_for_base_url_keeps_existing_paths() {
     );
 }
 
-#[test]
-fn praxis_apps_mcp_url_uses_legacy_praxis_apps_path() {
-    let config = test_mcp_config(PathBuf::from("/tmp"));
-
-    assert_eq!(
-        praxis_apps_mcp_url(&config),
-        "https://chatgpt.com/backend-api/wham/apps"
-    );
-}
-
-#[test]
-fn praxis_apps_server_config_uses_legacy_praxis_apps_path() {
-    let mut config = test_mcp_config(PathBuf::from("/tmp"));
-    let auth = OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing();
-
-    let mut servers = with_praxis_apps_mcp(HashMap::new(), /*auth*/ None, &config);
-    assert!(!servers.contains_key(PRAXIS_APPS_MCP_SERVER_NAME));
-
-    config.apps_enabled = true;
-
-    servers = with_praxis_apps_mcp(servers, Some(&auth), &config);
-    let server = servers
-        .get(PRAXIS_APPS_MCP_SERVER_NAME)
-        .expect("Praxis apps should be present when apps is enabled");
-    let url = match &server.transport {
-        McpServerTransportConfig::StreamableHttp { url, .. } => url,
-        _ => panic!("expected streamable http transport for Praxis apps"),
-    };
-
-    assert_eq!(url, "https://chatgpt.com/backend-api/wham/apps");
-}
-
 #[tokio::test]
 async fn effective_mcp_servers_preserve_user_servers_and_add_praxis_apps() {
     let praxis_home = tempfile::tempdir().expect("tempdir");

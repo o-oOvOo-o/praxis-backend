@@ -32,6 +32,7 @@ use praxis_protocol::protocol::FileChange;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_sandboxing::SandboxCommand;
 use praxis_sandboxing::SandboxablePreference;
+use praxis_system_plugin_approval_control::tool_safety::SafetyToolKind;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -128,6 +129,10 @@ pub(crate) fn apply_patch_agent_os_command(action: &ApplyPatchAction) -> Vec<Str
 }
 
 impl Sandboxable for ApplyPatchRuntime {
+    fn tool_kind(&self) -> SafetyToolKind {
+        SafetyToolKind::ApplyPatch
+    }
+
     fn sandbox_preference(&self) -> SandboxablePreference {
         SandboxablePreference::Auto
     }

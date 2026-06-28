@@ -24,9 +24,11 @@ use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::Submission;
 use praxis_protocol::protocol::ThreadGoal;
 use praxis_protocol::protocol::ThreadGoalStatus;
+use praxis_protocol::protocol::ThreadHeartbeat;
 use praxis_protocol::protocol::TokenUsage;
 use praxis_protocol::protocol::W3cTraceContext;
 use praxis_protocol::user_input::UserInput;
+use serde_json::Value as JsonValue;
 use std::path::PathBuf;
 use tokio::sync::Mutex;
 use tokio::sync::watch;
@@ -46,6 +48,30 @@ pub struct ThreadConfigSnapshot {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub personality: Option<Personality>,
     pub session_source: SessionSource,
+}
+
+impl ThreadConfigSnapshot {
+    pub fn user_turn_op(
+        &self,
+        items: Vec<UserInput>,
+        final_output_json_schema: Option<JsonValue>,
+    ) -> Op {
+        Op::UserTurn {
+            items,
+            cwd: self.cwd.clone(),
+            approval_policy: self.approval_policy,
+            approvals_reviewer: Some(self.approvals_reviewer.clone()),
+            sandbox_policy: self.sandbox_policy.clone(),
+            model: self.model.clone(),
+            model_provider: Some(self.model_provider_id.clone()),
+            effort: self.reasoning_effort.clone(),
+            summary: None,
+            service_tier: Some(self.service_tier.clone()),
+            final_output_json_schema,
+            collaboration_mode: None,
+            personality: self.personality.clone(),
+        }
+    }
 }
 
 pub struct PraxisThread {
@@ -73,6 +99,16 @@ impl PraxisThread {
 
     pub async fn submit(&self, op: Op) -> PraxisResult<String> {
         self.praxis.submit(op).await
+    }
+
+    pub async fn submit_user_turn(
+        &self,
+        input: Vec<UserInput>,
+        final_output_json_schema: Option<JsonValue>,
+    ) -> PraxisResult<String> {
+        let snapshot = self.config_snapshot().await;
+        self.submit(snapshot.user_turn_op(input, final_output_json_schema))
+            .await
     }
 
     pub async fn shutdown_and_wait(&self) -> PraxisResult<()> {
@@ -236,6 +272,26 @@ impl PraxisThread {
 
     pub async fn clear_thread_goal_from_user(&self) -> anyhow::Result<bool> {
         self.praxis.session.user_clear_thread_goal().await
+    }
+
+    pub async fn get_thread_heartbeat(&self) -> anyhow::Result<Option<ThreadHeartbeat>> {
+        self.praxis.session.get_thread_heartbeat().await
+    }
+
+    pub async fn set_thread_heartbeat_from_user(
+        &self,
+        enabled: bool,
+        interval_ms: Option<i64>,
+        controller: Option<String>,
+    ) -> anyhow::Result<Option<ThreadHeartbeat>> {
+        self.praxis
+            .session
+            .user_set_thread_heartbeat(enabled, interval_ms, controller)
+            .await
+    }
+
+    pub async fn clear_thread_heartbeat_from_user(&self) -> anyhow::Result<bool> {
+        self.praxis.session.user_clear_thread_heartbeat().await
     }
 
     pub async fn regenerate_thread_name(&self) -> anyhow::Result<String> {

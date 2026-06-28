@@ -29,7 +29,7 @@ impl SkillMetadata {
 
     pub fn matches_product_restriction_for_product(
         &self,
-        restriction_product: Option<Product>,
+        restriction_product: Option<&Product>,
     ) -> bool {
         match &self.policy {
             Some(policy) => {
@@ -119,14 +119,16 @@ pub fn filter_skill_load_outcome_for_product(
     mut outcome: SkillLoadOutcome,
     restriction_product: Option<Product>,
 ) -> SkillLoadOutcome {
-    outcome
-        .skills
-        .retain(|skill| skill.matches_product_restriction_for_product(restriction_product));
+    outcome.skills.retain(|skill| {
+        skill.matches_product_restriction_for_product(restriction_product.as_ref())
+    });
     outcome.implicit_skills_by_scripts_dir = Arc::new(
         outcome
             .implicit_skills_by_scripts_dir
             .iter()
-            .filter(|(_, skill)| skill.matches_product_restriction_for_product(restriction_product))
+            .filter(|(_, skill)| {
+                skill.matches_product_restriction_for_product(restriction_product.as_ref())
+            })
             .map(|(path, skill)| (path.clone(), skill.clone()))
             .collect(),
     );
@@ -134,7 +136,9 @@ pub fn filter_skill_load_outcome_for_product(
         outcome
             .implicit_skills_by_doc_path
             .iter()
-            .filter(|(_, skill)| skill.matches_product_restriction_for_product(restriction_product))
+            .filter(|(_, skill)| {
+                skill.matches_product_restriction_for_product(restriction_product.as_ref())
+            })
             .map(|(path, skill)| (path.clone(), skill.clone()))
             .collect(),
     );

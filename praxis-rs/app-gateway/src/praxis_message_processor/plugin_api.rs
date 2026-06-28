@@ -42,7 +42,6 @@ use praxis_core::plugins::PluginInstallRequest;
 use praxis_core::plugins::PluginReadRequest;
 use praxis_core::plugins::PluginSetEnabledError as CorePluginSetEnabledError;
 use praxis_core::plugins::PluginUninstallError as CorePluginUninstallError;
-use praxis_features::Feature;
 use tracing::info;
 use tracing::warn;
 
@@ -255,7 +254,10 @@ impl PraxisMessageProcessor {
             .iter()
             .filter(|skill| {
                 skill.matches_product_restriction_for_product(
-                    self.thread_manager.session_source().restriction_product(),
+                    self.thread_manager
+                        .session_source()
+                        .restriction_product()
+                        .as_ref(),
                 )
             })
             .cloned()

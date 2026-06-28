@@ -380,130 +380,6 @@ model_reasoning_effort = "high"
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn config_read_includes_system_layer_and_overrides() -> Result<()> {
-    let praxis_home = TempDir::new()?;
-    let user_dir = test_path_buf_with_windows("/user", Some(r"C:\Users\user"));
-    let system_dir = test_path_buf_with_windows("/system", Some(r"C:\System"));
-    write_config(
-        &praxis_home,
-        &format!(
-            r#"
-model = "gpt-user"
-approval_policy = "on-request"
-sandbox_mode = "workspace-write"
-
-[sandbox_workspace_write]
-writable_roots = [{}]
-network_access = true
-"#,
-            serde_json::json!(user_dir)
-        ),
-    )?;
-    let praxis_home_path = praxis_home.path().canonicalize()?;
-    let user_file = AbsolutePathBuf::try_from(praxis_home_path.join("config.toml"))?;
-
-    let managed_path = praxis_home.path().join("managed_config.toml");
-    let managed_file = AbsolutePathBuf::try_from(managed_path.clone())?;
-    std::fs::write(
-        &managed_path,
-        format!(
-            r#"
-model = "gpt-system"
-approval_policy = "never"
-
-[sandbox_workspace_write]
-writable_roots = [{}]
-"#,
-            serde_json::json!(system_dir.clone())
-        ),
-    )?;
-
-    let managed_path_str = managed_path.display().to_string();
-
-    let mut mcp = McpProcess::new_with_env(
-        praxis_home.path(),
-        &[(
-            "PRAXIS_APP_GATEWAY_MANAGED_CONFIG_PATH",
-            Some(&managed_path_str),
-        )],
-    )
-    .await?;
-    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
-
-    let request_id = mcp
-        .send_config_read_request(ConfigReadParams {
-            include_layers: true,
-            cwd: None,
-        })
-        .await?;
-    let resp: JSONRPCResponse = timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
-    )
-    .await??;
-    let ConfigReadResponse {
-        config,
-        origins,
-        layers,
-    } = to_response(resp)?;
-
-    assert_eq!(config.model.as_deref(), Some("gpt-system"));
-    assert_eq!(
-        origins.get("model").expect("origin").name,
-        ConfigLayerSource::LegacyManagedConfigTomlFromFile {
-            file: managed_file.clone(),
-        }
-    );
-
-    assert_eq!(config.approval_policy, Some(AskForApproval::Never));
-    assert_eq!(
-        origins.get("approval_policy").expect("origin").name,
-        ConfigLayerSource::LegacyManagedConfigTomlFromFile {
-            file: managed_file.clone(),
-        }
-    );
-
-    assert_eq!(config.sandbox_mode, Some(SandboxMode::WorkspaceWrite));
-    assert_eq!(
-        origins.get("sandbox_mode").expect("origin").name,
-        ConfigLayerSource::User {
-            file: user_file.clone(),
-        }
-    );
-
-    let sandbox = config
-        .sandbox_workspace_write
-        .as_ref()
-        .expect("sandbox workspace write");
-    assert_eq!(sandbox.writable_roots, vec![system_dir]);
-    assert_eq!(
-        origins
-            .get("sandbox_workspace_write.writable_roots.0")
-            .expect("origin")
-            .name,
-        ConfigLayerSource::LegacyManagedConfigTomlFromFile {
-            file: managed_file.clone(),
-        }
-    );
-
-    assert!(sandbox.network_access);
-    assert_eq!(
-        origins
-            .get("sandbox_workspace_write.network_access")
-            .expect("origin")
-            .name,
-        ConfigLayerSource::User {
-            file: user_file.clone(),
-        }
-    );
-
-    let layers = layers.expect("layers present");
-    assert_layers_managed_user_then_optional_system(&layers, managed_file, user_file)?;
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn config_value_write_replaces_value() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let praxis_home = temp_dir.path().canonicalize()?;
@@ -683,7 +559,7 @@ fn assert_layers_user_then_optional_system(
     let mut first_index = 0;
     if matches!(
         layers.first().map(|layer| &layer.name),
-        Some(ConfigLayerSource::LegacyManagedConfigTomlFromMdm)
+        Some(ConfigLayerSource::Mdm { .. })
     ) {
         first_index = 1;
     }
@@ -694,34 +570,6 @@ fn assert_layers_user_then_optional_system(
     );
     assert!(matches!(
         layers[first_index + 1].name,
-        ConfigLayerSource::System { .. }
-    ));
-    Ok(())
-}
-
-fn assert_layers_managed_user_then_optional_system(
-    layers: &[praxis_app_gateway_protocol::ConfigLayer],
-    managed_file: AbsolutePathBuf,
-    user_file: AbsolutePathBuf,
-) -> Result<()> {
-    let mut first_index = 0;
-    if matches!(
-        layers.first().map(|layer| &layer.name),
-        Some(ConfigLayerSource::LegacyManagedConfigTomlFromMdm)
-    ) {
-        first_index = 1;
-    }
-    assert_eq!(layers.len(), first_index + 3);
-    assert_eq!(
-        layers[first_index].name,
-        ConfigLayerSource::LegacyManagedConfigTomlFromFile { file: managed_file }
-    );
-    assert_eq!(
-        layers[first_index + 1].name,
-        ConfigLayerSource::User { file: user_file }
-    );
-    assert!(matches!(
-        layers[first_index + 2].name,
         ConfigLayerSource::System { .. }
     ));
     Ok(())

@@ -6,7 +6,6 @@ use praxis_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde::de::Error as _;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -22,8 +21,6 @@ pub enum RequirementSource {
     EnterpriseManaged { id: String, name: String },
     CloudRequirements,
     SystemRequirementsToml { file: AbsolutePathBuf },
-    LegacyManagedConfigTomlFromFile { file: AbsolutePathBuf },
-    LegacyManagedConfigTomlFromMdm,
 }
 
 impl fmt::Display for RequirementSource {
@@ -41,12 +38,6 @@ impl fmt::Display for RequirementSource {
             }
             RequirementSource::SystemRequirementsToml { file } => {
                 write!(f, "{}", file.as_path().display())
-            }
-            RequirementSource::LegacyManagedConfigTomlFromFile { file } => {
-                write!(f, "{}", file.as_path().display())
-            }
-            RequirementSource::LegacyManagedConfigTomlFromMdm => {
-                write!(f, "MDM managed_config.toml (legacy)")
             }
         }
     }
@@ -237,7 +228,7 @@ pub struct NetworkRequirementsToml {
     pub dangerously_allow_non_loopback_proxy: Option<bool>,
     pub dangerously_allow_all_unix_sockets: Option<bool>,
     pub domains: Option<NetworkDomainPermissionsToml>,
-    /// When true, only managed `allowed_domains` are respected while managed
+    /// When true, only managed domain allow entries are respected while managed
     /// network enforcement is active. User allowlist entries are ignored.
     pub managed_allowed_domains_only: Option<bool>,
     pub unix_sockets: Option<NetworkUnixSocketPermissionsToml>,
@@ -253,16 +244,10 @@ struct RawNetworkRequirementsToml {
     dangerously_allow_non_loopback_proxy: Option<bool>,
     dangerously_allow_all_unix_sockets: Option<bool>,
     domains: Option<NetworkDomainPermissionsToml>,
-    #[serde(default)]
-    allowed_domains: Option<Vec<String>>,
-    /// When true, only managed `allowed_domains` are respected while managed
+    /// When true, only managed domain allow entries are respected while managed
     /// network enforcement is active. User allowlist entries are ignored.
     managed_allowed_domains_only: Option<bool>,
-    #[serde(default)]
-    denied_domains: Option<Vec<String>>,
     unix_sockets: Option<NetworkUnixSocketPermissionsToml>,
-    #[serde(default)]
-    allow_unix_sockets: Option<Vec<String>>,
     allow_local_binding: Option<bool>,
 }
 
@@ -280,25 +265,10 @@ impl<'de> Deserialize<'de> for NetworkRequirementsToml {
             dangerously_allow_non_loopback_proxy,
             dangerously_allow_all_unix_sockets,
             domains,
-            allowed_domains,
             managed_allowed_domains_only,
-            denied_domains,
             unix_sockets,
-            allow_unix_sockets,
             allow_local_binding,
         } = raw;
-
-        if domains.is_some() && (allowed_domains.is_some() || denied_domains.is_some()) {
-            return Err(D::Error::custom(
-                "`experimental_network.domains` cannot be combined with legacy `allowed_domains` or `denied_domains`",
-            ));
-        }
-
-        if unix_sockets.is_some() && allow_unix_sockets.is_some() {
-            return Err(D::Error::custom(
-                "`experimental_network.unix_sockets` cannot be combined with legacy `allow_unix_sockets`",
-            ));
-        }
 
         Ok(Self {
             enabled,
@@ -307,46 +277,12 @@ impl<'de> Deserialize<'de> for NetworkRequirementsToml {
             allow_upstream_proxy,
             dangerously_allow_non_loopback_proxy,
             dangerously_allow_all_unix_sockets,
-            domains: domains
-                .or_else(|| legacy_domain_permissions_from_lists(allowed_domains, denied_domains)),
+            domains,
             managed_allowed_domains_only,
-            unix_sockets: unix_sockets
-                .or_else(|| legacy_unix_socket_permissions_from_list(allow_unix_sockets)),
+            unix_sockets,
             allow_local_binding,
         })
     }
-}
-
-/// Legacy list normalization is intentionally lossy: explicit empty legacy
-/// lists are treated as unset when converted to the canonical network
-/// permission shape.
-fn legacy_domain_permissions_from_lists(
-    allowed_domains: Option<Vec<String>>,
-    denied_domains: Option<Vec<String>>,
-) -> Option<NetworkDomainPermissionsToml> {
-    let mut entries = BTreeMap::new();
-
-    for pattern in allowed_domains.unwrap_or_default() {
-        entries.insert(pattern, NetworkDomainPermissionToml::Allow);
-    }
-
-    for pattern in denied_domains.unwrap_or_default() {
-        entries.insert(pattern, NetworkDomainPermissionToml::Deny);
-    }
-
-    (!entries.is_empty()).then_some(NetworkDomainPermissionsToml { entries })
-}
-
-fn legacy_unix_socket_permissions_from_list(
-    allow_unix_sockets: Option<Vec<String>>,
-) -> Option<NetworkUnixSocketPermissionsToml> {
-    let entries = allow_unix_sockets
-        .unwrap_or_default()
-        .into_iter()
-        .map(|path| (path, NetworkUnixSocketPermissionToml::Allow))
-        .collect::<BTreeMap<_, _>>();
-
-    (!entries.is_empty()).then_some(NetworkUnixSocketPermissionsToml { entries })
 }
 
 /// Normalized network constraints derived from requirements TOML.
@@ -359,7 +295,7 @@ pub struct NetworkConstraints {
     pub dangerously_allow_non_loopback_proxy: Option<bool>,
     pub dangerously_allow_all_unix_sockets: Option<bool>,
     pub domains: Option<NetworkDomainPermissionsToml>,
-    /// When true, only managed `allowed_domains` are respected while managed
+    /// When true, only managed domain allow entries are respected while managed
     /// network enforcement is active. User allowlist entries are ignored.
     pub managed_allowed_domains_only: Option<bool>,
     pub unix_sockets: Option<NetworkUnixSocketPermissionsToml>,

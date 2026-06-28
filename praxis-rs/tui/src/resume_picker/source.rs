@@ -8,6 +8,7 @@ pub(super) struct PageLoadRequest {
     pub(super) search_term: Option<String>,
     pub(super) filter_cwd: Option<PathBuf>,
     pub(super) sort_key: ThreadSortKey,
+    pub(super) archive_filter: ThreadArchiveFilter,
 }
 
 pub(super) type PageLoader = Arc<dyn Fn(PageLoadRequest) + Send + Sync>;
@@ -22,6 +23,48 @@ pub(super) struct PickerSourceConfig {
 pub(super) struct PickerSourceEntry {
     pub(super) source: SessionLookupSource,
     pub(super) config: PickerSourceConfig,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum PickerSourceView {
+    Source(SessionLookupSource),
+    Archived,
+}
+
+impl PickerSourceView {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Source(source) => source.display_name(),
+            Self::Archived => "Archived",
+        }
+    }
+
+    pub(super) fn source(self) -> SessionLookupSource {
+        match self {
+            Self::Source(source) => source,
+            Self::Archived => SessionLookupSource::Praxis,
+        }
+    }
+
+    pub(super) fn archive_filter(self) -> ThreadArchiveFilter {
+        match self {
+            Self::Archived => ThreadArchiveFilter::Archived,
+            Self::Source(_) => ThreadArchiveFilter::Active,
+        }
+    }
+
+    pub(super) fn from_state(
+        source: SessionLookupSource,
+        archive_filter: ThreadArchiveFilter,
+    ) -> Self {
+        if source == SessionLookupSource::Praxis
+            && matches!(archive_filter, ThreadArchiveFilter::Archived)
+        {
+            Self::Archived
+        } else {
+            Self::Source(source)
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -57,26 +100,22 @@ impl SourceSwitcher {
             .map(|entry| &entry.config)
     }
 
-    pub(super) fn sources(&self) -> impl Iterator<Item = SessionLookupSource> + '_ {
-        self.sources.iter().map(|entry| entry.source)
-    }
-
-    pub(super) fn source_index(&self, source: SessionLookupSource) -> Option<usize> {
-        self.sources.iter().position(|entry| entry.source == source)
-    }
-
-    pub(super) fn previous_source(&self, source: SessionLookupSource) -> Option<SessionLookupSource> {
-        let index = self.source_index(source)?;
-        if index == 0 {
-            None
-        } else {
-            self.sources.get(index - 1).map(|entry| entry.source)
+    pub(super) fn views(&self) -> Vec<PickerSourceView> {
+        let mut views = Vec::new();
+        for source in [
+            SessionLookupSource::Praxis,
+            SessionLookupSource::Codex,
+            SessionLookupSource::Cursor,
+        ] {
+            if self.config(source).is_none() {
+                continue;
+            }
+            views.push(PickerSourceView::Source(source));
+            if source == SessionLookupSource::Praxis {
+                views.push(PickerSourceView::Archived);
+            }
         }
-    }
-
-    pub(super) fn next_source(&self, source: SessionLookupSource) -> Option<SessionLookupSource> {
-        let index = self.source_index(source)?;
-        self.sources.get(index + 1).map(|entry| entry.source)
+        views
     }
 }
 
@@ -121,6 +160,7 @@ pub(super) fn spawn_app_gateway_page_loader(
                 include_non_interactive,
                 request.search_term,
                 request.filter_cwd,
+                request.archive_filter,
             )
             .await;
             let _ = bg_tx.send(BackgroundEvent::PageLoaded {

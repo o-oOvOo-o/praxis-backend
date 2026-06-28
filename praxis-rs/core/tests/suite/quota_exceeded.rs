@@ -40,13 +40,13 @@ async fn quota_exceeded_emits_single_error_event() -> Result<()> {
     let test = builder.build(&server).await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "quota?".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
 

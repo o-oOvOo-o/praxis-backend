@@ -28,11 +28,3 @@ pub enum ThreadForkSnapshot {
     /// unchanged.
     Interrupted,
 }
-
-/// Preserve legacy `fork_thread(usize, ...)` callsites by mapping them to the
-/// existing truncate-before-nth-user-message snapshot mode.
-impl From<usize> for ThreadForkSnapshot {
-    fn from(value: usize) -> Self {
-        Self::TruncateBeforeNthUserMessage(value)
-    }
-}

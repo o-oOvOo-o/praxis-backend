@@ -309,12 +309,23 @@ fn op_kind_distinguishes_turn_ops() {
         "override_turn_context"
     );
     assert_eq!(
-        Op::UserInput {
+        Op::UserTurn {
             items: vec![],
+            cwd: std::path::PathBuf::new(),
+            approval_policy: AskForApproval::Never,
+            approvals_reviewer: None,
+            sandbox_policy: SandboxPolicy::DangerFullAccess,
+            model: "gpt-5".to_string(),
+            model_provider: None,
+            effort: None,
+            summary: None,
+            service_tier: None,
             final_output_json_schema: None,
+            collaboration_mode: None,
+            personality: None,
         }
         .kind(),
-        "user_input"
+        "user_turn"
     );
 }
 
@@ -323,8 +334,7 @@ async fn user_turn_updates_approvals_reviewer() {
     let (session, turn_context, _rx) = make_session_and_context_with_rx().await;
     let config = session.get_config().await;
 
-    handlers::user_input_or_turn(
-        &session,
+    session.submit_user_turn(
         "sub-1".to_string(),
         Op::UserTurn {
             items: vec![UserInput::Text {

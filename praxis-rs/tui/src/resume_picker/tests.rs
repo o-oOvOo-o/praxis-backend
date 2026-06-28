@@ -75,6 +75,7 @@ fn remote_thread_list_params_omit_model_providers() {
         /*include_non_interactive*/ false,
         /*search_term*/ None,
         /*filter_cwd*/ None,
+        ThreadArchiveFilter::Active,
     );
 
     assert_eq!(params.cursor, Some(String::from("cursor-1")));
@@ -93,6 +94,7 @@ fn remote_thread_list_params_can_include_non_interactive_sources() {
         /*include_non_interactive*/ true,
         /*search_term*/ None,
         /*filter_cwd*/ None,
+        ThreadArchiveFilter::Active,
     );
 
     assert_eq!(params.cursor, Some(String::from("cursor-1")));
@@ -108,6 +110,7 @@ fn remote_thread_list_params_forwards_search_term() {
         /*include_non_interactive*/ false,
         Some(String::from("legacy codex")),
         /*filter_cwd*/ None,
+        ThreadArchiveFilter::Active,
     );
 
     assert_eq!(params.search_term.as_deref(), Some("legacy codex"));
@@ -122,6 +125,7 @@ fn thread_list_params_send_project_scope_without_cwd_filter() {
         /*include_non_interactive*/ false,
         /*search_term*/ None,
         Some(cwd.clone()),
+        ThreadArchiveFilter::Active,
     );
 
     assert_eq!(params.cwd, None);

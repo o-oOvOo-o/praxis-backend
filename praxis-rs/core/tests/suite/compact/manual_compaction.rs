@@ -40,13 +40,13 @@ async fn summarize_context_three_requests_and_instructions() {
 
     // 1) Normal user input – should hit server once.
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello world".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -62,13 +62,13 @@ async fn summarize_context_three_requests_and_instructions() {
 
     // 3) Next user input – third hit; history should include only the summary.
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: THIRD_USER_MSG.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -238,13 +238,13 @@ async fn manual_compact_uses_custom_prompt() {
         .thread;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "USER_ONE".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .expect("submit first user turn");
     wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -382,13 +382,13 @@ async fn manual_compact_emits_context_compaction_items() {
     let praxis = builder.build(&server).await.unwrap().thread;
 
     codex
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "manual compact".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .unwrap();
     wait_for_event(&praxis, |event| matches!(event, EventMsg::TurnComplete(_))).await;

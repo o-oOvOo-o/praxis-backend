@@ -140,15 +140,6 @@ pub(super) async fn handle_server_request(
             )
             .await
         }
-        ServerRequest::Cunning3dBridgeCall { request_id, .. } => {
-            reject_server_request(
-                client,
-                request_id,
-                &method,
-                "Cunning3D bridge calls require an attached Cunning3D host".to_string(),
-            )
-            .await
-        }
         ServerRequest::ChatgptAuthTokensRefresh { request_id, .. } => {
             reject_server_request(
                 client,

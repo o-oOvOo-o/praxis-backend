@@ -2,9 +2,9 @@ use praxis_config::types::ApprovalsReviewer;
 #[cfg(target_os = "windows")]
 use praxis_core::windows_sandbox::WindowsSandboxLevelExt;
 #[cfg(target_os = "windows")]
-use praxis_protocol::protocol::SandboxPolicy;
-#[cfg(target_os = "windows")]
 use praxis_protocol::config_types::WindowsSandboxLevel;
+#[cfg(target_os = "windows")]
+use praxis_protocol::protocol::SandboxPolicy;
 use praxis_utils_approval_presets::ApprovalPreset;
 #[cfg(target_os = "windows")]
 use praxis_utils_approval_presets::builtin_approval_presets;

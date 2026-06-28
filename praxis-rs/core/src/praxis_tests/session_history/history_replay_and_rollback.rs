@@ -216,8 +216,13 @@ async fn recompute_token_usage_uses_session_base_instructions() {
     let expected_tokens = history
         .estimate_token_count_with_base_instructions(&session_base_instructions)
         .expect("estimate with session base instructions");
+    let model_base_instructions = BaseInstructions {
+        text: turn_context
+            .model_info
+            .get_model_instructions(turn_context.personality.or(turn_context.config.personality)),
+    };
     let model_estimated_tokens = history
-        .estimate_token_count(&turn_context)
+        .estimate_token_count_with_base_instructions(&model_base_instructions)
         .expect("estimate with model instructions");
     assert_ne!(expected_tokens, model_estimated_tokens);
 
@@ -298,13 +303,13 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
 
     initial
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "fork seed".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&initial.thread, |ev| {
         matches!(ev, EventMsg::TurnComplete(_))
@@ -357,13 +362,13 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
 
     forked
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "after fork".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
     wait_for_event(&forked.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 

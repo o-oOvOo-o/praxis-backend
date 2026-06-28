@@ -7,6 +7,8 @@ use crate::tool_plugins::builtin_tool_plugins;
 #[cfg(test)]
 use crate::CommandToolOptions;
 #[cfg(test)]
+use crate::LIST_DIRECTORY_TOOL_NAME;
+#[cfg(test)]
 use crate::REQUEST_USER_INPUT_TOOL_NAME;
 #[cfg(test)]
 use crate::SpawnAgentToolOptions;
@@ -14,6 +16,8 @@ use crate::SpawnAgentToolOptions;
 use crate::TOOL_SEARCH_TOOL_NAME;
 #[cfg(test)]
 use crate::TOOL_SUGGEST_TOOL_NAME;
+#[cfg(test)]
+use crate::ToolHandlerKind;
 #[cfg(test)]
 use crate::ToolSpec;
 #[cfg(test)]
@@ -32,6 +36,8 @@ use crate::create_exec_command_tool;
 use crate::create_get_goal_tool;
 #[cfg(test)]
 use crate::create_list_agents_tool;
+#[cfg(test)]
+use crate::create_list_directory_tool;
 #[cfg(test)]
 use crate::create_poll_runtime_commands_tool;
 #[cfg(test)]

@@ -235,17 +235,17 @@ impl PraxisClient {
         self.send_request(request, request_id, "turn/start")
     }
 
-    pub(super) fn thread_control_acquire(
+    pub(super) fn thread_control_claim(
         &mut self,
-        params: ThreadControlAcquireParams,
-    ) -> Result<ThreadControlAcquireResponse> {
+        params: ThreadControlClaimParams,
+    ) -> Result<ThreadControlClaimResponse> {
         let request_id = self.request_id();
-        let request = ClientRequest::ThreadControlAcquire {
+        let request = ClientRequest::ThreadControlClaim {
             request_id: request_id.clone(),
             params,
         };
 
-        self.send_request(request, request_id, "thread/control/acquire")
+        self.send_request(request, request_id, "thread/control/claim")
     }
 
     pub(super) fn thread_control_release(

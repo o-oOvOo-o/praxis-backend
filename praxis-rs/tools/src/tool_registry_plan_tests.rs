@@ -42,6 +42,7 @@ mod app_search;
 mod baseline;
 mod code_mode_exec;
 mod collab_agents;
+mod file_navigation;
 mod image_generation;
 mod mcp_resources;
 mod mcp_tools;

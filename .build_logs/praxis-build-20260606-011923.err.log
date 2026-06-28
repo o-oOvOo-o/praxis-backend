@@ -1,0 +1,197 @@
+warning: function `executable_stem` is never used
+   --> utils\home-dir\src\lib.rs:287:4
+    |
+287 | fn executable_stem(value: &OsStr) -> String {
+    |    ^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `praxis-utils-home-dir` (lib) generated 1 warning
+warning: struct `ThreadHeartbeat` is never constructed
+  --> state\src\model\thread_goal.rs:71:12
+   |
+71 | pub struct ThreadHeartbeat {
+   |            ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `ThreadHeartbeatRow` is never constructed
+  --> state\src\model\thread_goal.rs:94:19
+   |
+94 | pub(crate) struct ThreadHeartbeatRow {
+   |                   ^^^^^^^^^^^^^^^^^^
+
+warning: associated function `try_from_row` is never used
+   --> state\src\model\thread_goal.rs:122:19
+    |
+121 | impl ThreadHeartbeatRow {
+    | ----------------------- associated function in this implementation
+122 |     pub(crate) fn try_from_row(row: &SqliteRow) -> Result<Self> {
+    |                   ^^^^^^^^^^^^
+
+warning: `praxis-state` (lib) generated 3 warnings
+   Compiling praxis-tools v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\tools)
+warning: function `ensure_referenced_definitions_present` is never used
+    --> app-gateway-protocol\src\export.rs:1027:4
+     |
+1027 | fn ensure_referenced_definitions_present(schema: &Value, label: &str) -> Result<()> {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `collect_missing_definitions` is never used
+    --> app-gateway-protocol\src\export.rs:1045:4
+     |
+1045 | fn collect_missing_definitions(
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `praxis-app-gateway-protocol` (lib) generated 2 warnings
+   Compiling praxis-core v0.0.0 (D:\ghost1.0\_push\praxis-backend\praxis-rs\core)
+warning: variable does not need to be mutable
+    --> core\src\agent_os.rs:2596:13
+     |
+2596 |         let mut file = tokio::fs::File::open(path.as_path()).await.map_err(|err| {
+     |             ----^^^^
+     |             |
+     |             help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `inject_user_message_without_turn` is never used
+   --> core\src\praxis_thread.rs:134:25
+    |
+ 55 | impl PraxisThread {
+    | ----------------- method in this implementation
+...
+134 |     pub(crate) async fn inject_user_message_without_turn(&self, message: String) {
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `pending_message_input_item` is never used
+   --> core\src\praxis_thread.rs:253:4
+    |
+253 | fn pending_message_input_item(message: &ResponseItem) -> PraxisResult<ResponseInputItem> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: methods `resume_thread_from_rollout`, `resume_single_thread_from_rollout`, and `get_agent_metadata` are never used
+   --> core\src\agent\control.rs:330:25
+    |
+113 | impl AgentControl {
+    | ----------------- methods in this implementation
+...
+330 |     pub(crate) async fn resume_thread_from_rollout(
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+403 |     async fn resume_single_thread_from_rollout(
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+649 |     pub(crate) fn get_agent_metadata(&self, agent_id: ThreadId) -> Option<AgentMetadata> {
+    |                   ^^^^^^^^^^^^^^^^^^
+
+warning: function `thread_spawn_depth` is never used
+    --> core\src\agent\control.rs:1300:4
+     |
+1300 | fn thread_spawn_depth(session_source: &SessionSource) -> Option<i32> {
+     |    ^^^^^^^^^^^^^^^^^^
+
+warning: method `live_agents` is never used
+   --> core\src\agent\registry.rs:155:19
+    |
+ 79 | impl AgentRegistry {
+    | ------------------ method in this implementation
+...
+155 |     pub(crate) fn live_agents(&self) -> Vec<AgentMetadata> {
+    |                   ^^^^^^^^^^^
+
+warning: variant `WorkerHeartbeat` is never constructed
+   --> core\src\agent_os.rs:726:5
+    |
+725 | enum RuntimeCommandActivity {
+    |      ---------------------- variant in this enum
+726 |     WorkerHeartbeat,
+    |     ^^^^^^^^^^^^^^^
+    |
+    = note: `RuntimeCommandActivity` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: method `checkpoint` is never used
+   --> core\src\agent_os.rs:897:25
+    |
+861 | impl ManagedCommandSpan {
+    | ----------------------- method in this implementation
+...
+897 |     pub(crate) async fn checkpoint(&self, raw_output: &[u8]) -> PraxisResult<Option<String>> {
+    |                         ^^^^^^^^^^
+
+warning: methods `heartbeat_thread` and `start_managed_command` are never used
+    --> core\src\agent_os.rs:1265:25
+     |
+ 922 | impl AgentOsRuntime {
+     | ------------------- methods in this implementation
+...
+1265 |     pub(crate) async fn heartbeat_thread(&self, thread_id: ThreadId) -> PraxisResult<()> {
+     |                         ^^^^^^^^^^^^^^^^
+...
+3169 |     pub(crate) async fn start_managed_command(
+     |                         ^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `filter_disallowed_connectors_for_originator` is never used
+   --> core\src\connectors.rs:723:4
+    |
+723 | fn filter_disallowed_connectors_for_originator(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `remove_first_item` is never used
+   --> core\src\context_manager\history.rs:156:19
+    |
+ 59 | impl ContextManager {
+    | ------------------- method in this implementation
+...
+156 |     pub(crate) fn remove_first_item(&mut self) {
+    |                   ^^^^^^^^^^^^^^^^^
+
+warning: method `resume_thread_from_rollout_with_source` is never used
+   --> core\src\thread_manager.rs:831:25
+    |
+744 | impl ThreadManagerState {
+    | ----------------------- method in this implementation
+...
+831 |     pub(crate) async fn resume_thread_from_rollout_with_source(
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_csv` is never used
+    --> core\src\tools\handlers\agent_jobs.rs:1106:4
+     |
+1106 | fn parse_csv(content: &str) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
+     |    ^^^^^^^^^
+
+warning: function `list_dir_slice` is never used
+   --> core\src\tools\handlers\list_dir.rs:191:10
+    |
+191 | async fn list_dir_slice(
+    |          ^^^^^^^^^^^^^^
+
+warning: function `build_wait_agent_statuses` is never used
+  --> core\src\tools\handlers\multi_agents_common.rs:74:15
+   |
+74 | pub(crate) fn build_wait_agent_statuses(
+   |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `build_agent_resume_config` is never used
+   --> core\src\tools\handlers\multi_agents_common.rs:212:15
+    |
+212 | pub(crate) fn build_agent_resume_config(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `start_agent_os_command_span` is never used
+  --> core\src\tools\runtimes\agent_os_command.rs:21:21
+   |
+21 | pub(crate) async fn start_agent_os_command_span(
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `start_agent_os_command_span_with_runtime_kind` is never used
+  --> core\src\tools\runtimes\agent_os_command.rs:38:21
+   |
+38 | pub(crate) async fn start_agent_os_command_span_with_runtime_kind(
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+

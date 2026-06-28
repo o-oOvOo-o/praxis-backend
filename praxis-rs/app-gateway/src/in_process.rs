@@ -113,6 +113,8 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
             | ServerNotification::ThreadControlChanged(_)
             | ServerNotification::ThreadGoalUpdated(_)
             | ServerNotification::ThreadGoalCleared(_)
+            | ServerNotification::ThreadHeartbeatUpdated(_)
+            | ServerNotification::AutomationRunUpdated(_)
             | ServerNotification::ThreadModelChanged(_)
             | ServerNotification::AgentMessageDelta(_)
             | ServerNotification::PlanDelta(_)
@@ -653,13 +655,7 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                                                 )
                                                 .await;
                                             processor
-                                                .connection_initialized(
-                                                    connection_id,
-                                                    connection_state
-                                                        .session
-                                                        .host_extensions
-                                                        .clone(),
-                                                )
+                                                .connection_initialized(connection_id)
                                                 .await;
                                             connection_state
                                                 .outbound_initialized

@@ -33,13 +33,13 @@ async fn responses_websocket_invalid_request_error_with_status_is_forwarded() {
 
     let submission_id = test
         .thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "hello".into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .expect("submission should succeed while emitting invalid request events");
 

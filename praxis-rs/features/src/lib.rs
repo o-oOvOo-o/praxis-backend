@@ -16,10 +16,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use toml::Table;
 
-mod legacy;
-use legacy::LegacyFeatureToggles;
-pub use legacy::legacy_feature_keys;
-
 /// High-level lifecycle stage for a feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
@@ -35,7 +31,7 @@ pub enum Stage {
     Stable,
     /// Deprecated feature that should not be used anymore.
     Deprecated,
-    /// The feature flag is useless but kept for backward compatibility reason.
+    /// Feature no longer has runtime effect and is hidden from active telemetry.
     Removed,
 }
 
@@ -75,6 +71,8 @@ pub enum Feature {
     GhostCommit,
     /// Enable the default shell tool.
     ShellTool,
+    /// Enable structured read-only workspace navigation tools.
+    FileNavigation,
 
     // Experimental
     /// Enable a minimal JavaScript mode backed by Node's built-in vm runtime.
@@ -131,6 +129,8 @@ pub enum Feature {
     Plugins,
     /// Allow the model to invoke the built-in image generation tool.
     ImageGeneration,
+    /// Allow the model to invoke built-in authorized reverse-engineering tools.
+    ReverseEngineering,
     /// Allow prompting and installing missing MCP dependencies.
     SkillMcpDependencyInstall,
     /// Prompt for missing skill env var dependencies.
@@ -174,19 +174,10 @@ impl Feature {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct LegacyFeatureUsage {
-    pub alias: String,
-    pub feature: Feature,
-    pub summary: String,
-    pub details: Option<String>,
-}
-
 /// Holds the effective set of enabled features.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Features {
     enabled: BTreeSet<Feature>,
-    legacy_usages: BTreeSet<LegacyFeatureUsage>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -198,25 +189,19 @@ pub struct FeatureOverrides {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FeatureConfigSource<'a> {
     pub features: Option<&'a FeaturesToml>,
-    pub include_apply_patch_tool: Option<bool>,
-    pub experimental_use_freeform_apply_patch: Option<bool>,
-    pub experimental_use_unified_exec_tool: Option<bool>,
 }
 
 impl FeatureOverrides {
     fn apply(self, features: &mut Features) {
-        LegacyFeatureToggles {
-            include_apply_patch_tool: self.include_apply_patch_tool,
-            ..Default::default()
+        if let Some(enabled) = self.include_apply_patch_tool {
+            features.set_enabled(Feature::ApplyPatchFreeform, enabled);
         }
-        .apply(features);
         if let Some(enabled) = self.web_search_request {
             if enabled {
                 features.enable(Feature::WebSearchRequest);
             } else {
                 features.disable(Feature::WebSearchRequest);
             }
-            features.record_legacy_usage("web_search_request", Feature::WebSearchRequest);
         }
     }
 }
@@ -230,10 +215,7 @@ impl Features {
                 set.insert(spec.id);
             }
         }
-        Self {
-            enabled: set,
-            legacy_usages: BTreeSet::new(),
-        }
+        Self { enabled: set }
     }
 
     pub fn enabled(&self, f: Feature) -> bool {
@@ -283,27 +265,6 @@ impl Features {
         }
     }
 
-    pub fn record_legacy_usage_force(&mut self, alias: &str, feature: Feature) {
-        let (summary, details) = legacy_usage_notice(alias, feature);
-        self.legacy_usages.insert(LegacyFeatureUsage {
-            alias: alias.to_string(),
-            feature,
-            summary,
-            details,
-        });
-    }
-
-    pub fn record_legacy_usage(&mut self, alias: &str, feature: Feature) {
-        if alias == feature.key() {
-            return;
-        }
-        self.record_legacy_usage_force(alias, feature);
-    }
-
-    pub fn legacy_feature_usages(&self) -> impl Iterator<Item = &LegacyFeatureUsage> + '_ {
-        self.legacy_usages.iter()
-    }
-
     pub fn emit_metrics(&self, otel: &SessionTelemetry) {
         for feature in FEATURES {
             if matches!(feature.stage, Stage::Removed) {
@@ -325,29 +286,8 @@ impl Features {
     /// Apply a table of key -> bool toggles (e.g. from TOML).
     pub fn apply_map(&mut self, m: &BTreeMap<String, bool>) {
         for (k, v) in m {
-            match k.as_str() {
-                "web_search_request" => {
-                    self.record_legacy_usage_force(
-                        "features.web_search_request",
-                        Feature::WebSearchRequest,
-                    );
-                }
-                "web_search_cached" => {
-                    self.record_legacy_usage_force(
-                        "features.web_search_cached",
-                        Feature::WebSearchCached,
-                    );
-                }
-                "tui_app_gateway" => {
-                    continue;
-                }
-                _ => {}
-            }
             match feature_for_key(k) {
                 Some(feat) => {
-                    if k != feat.key() {
-                        self.record_legacy_usage(k.as_str(), feat);
-                    }
                     if *v {
                         self.enable(feat);
                     } else {
@@ -369,13 +309,6 @@ impl Features {
         let mut features = Features::with_defaults();
 
         for source in [base, profile] {
-            LegacyFeatureToggles {
-                include_apply_patch_tool: source.include_apply_patch_tool,
-                experimental_use_freeform_apply_patch: source.experimental_use_freeform_apply_patch,
-                experimental_use_unified_exec_tool: source.experimental_use_unified_exec_tool,
-            }
-            .apply(&mut features);
-
             if let Some(feature_entries) = source.features {
                 features.apply_map(&feature_entries.entries);
             }
@@ -401,47 +334,6 @@ impl Features {
     }
 }
 
-fn legacy_usage_notice(alias: &str, feature: Feature) -> (String, Option<String>) {
-    let canonical = feature.key();
-    match feature {
-        Feature::WebSearchRequest | Feature::WebSearchCached => {
-            let label = match alias {
-                "web_search" => "[features].web_search",
-                "features.web_search_request" | "web_search_request" => {
-                    "[features].web_search_request"
-                }
-                "features.web_search_cached" | "web_search_cached" => {
-                    "[features].web_search_cached"
-                }
-                _ => alias,
-            };
-            let summary =
-                format!("`{label}` is deprecated because web search is enabled by default.");
-            (summary, Some(web_search_details().to_string()))
-        }
-        _ => {
-            let label = if alias.contains('.') || alias.starts_with('[') {
-                alias.to_string()
-            } else {
-                format!("[features].{alias}")
-            };
-            let summary = format!("`{label}` is deprecated. Use `[features].{canonical}` instead.");
-            let details = if alias == canonical {
-                None
-            } else {
-                Some(format!(
-                    "Enable it with `--enable {canonical}` or `[features].{canonical}` in config.toml."
-                ))
-            };
-            (summary, details)
-        }
-    }
-}
-
-fn web_search_details() -> &'static str {
-    "Set `web_search` to `\"live\"`, `\"cached\"`, or `\"disabled\"` at the top level (or under a profile) in config.toml if you want to override it."
-}
-
 /// Keys accepted in `[features]` tables.
 pub fn feature_for_key(key: &str) -> Option<Feature> {
     for spec in FEATURES {
@@ -449,7 +341,7 @@ pub fn feature_for_key(key: &str) -> Option<Feature> {
             return Some(spec.id);
         }
     }
-    legacy::feature_for_key(key)
+    None
 }
 
 pub fn canonical_feature_for_key(key: &str) -> Option<Feature> {
@@ -491,6 +383,12 @@ pub const FEATURES: &[FeatureSpec] = &[
     FeatureSpec {
         id: Feature::ShellTool,
         key: "shell_tool",
+        stage: Stage::Stable,
+        default_enabled: true,
+    },
+    FeatureSpec {
+        id: Feature::FileNavigation,
+        key: "file_navigation",
         stage: Stage::Stable,
         default_enabled: true,
     },
@@ -649,6 +547,16 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::ImageGeneration,
         key: "image_generation",
         stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::ReverseEngineering,
+        key: "reverse_engineering",
+        stage: Stage::Experimental {
+            name: "Reverse Engineering",
+            menu_description: "Authorized reverse-engineering tools for local targets. Requires per-target user authorization and returns codec-filtered evidence only.",
+            announcement: "",
+        },
         default_enabled: false,
     },
     FeatureSpec {

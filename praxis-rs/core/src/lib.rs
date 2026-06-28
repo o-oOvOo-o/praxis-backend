@@ -50,6 +50,7 @@ mod flags;
 #[cfg(test)]
 mod git_info_tests;
 mod goals;
+mod heartbeats;
 mod guardian;
 mod history_preview;
 mod hook_runtime;

@@ -50,6 +50,7 @@ impl PraxisMessageProcessor {
             thread_watch_manager: self.thread_watch_manager.clone(),
             fallback_model_provider: self.config.model_provider_id.clone(),
             praxis_home: self.config.praxis_home.clone(),
+            state_db: get_state_db(self.config.as_ref()).await,
         };
         let request_trace = request_context.request_trace();
         let runtime_feature_enablement = self.current_runtime_feature_enablement();

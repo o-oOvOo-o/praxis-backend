@@ -34,7 +34,7 @@ pub(super) struct PendingAppGatewayRequests {
     file_change_approvals: HashMap<String, AppGatewayRequestId>,
     permissions_approvals: HashMap<String, AppGatewayRequestId>,
     user_inputs: HashMap<String, AppGatewayRequestId>,
-    mcp_requests: HashMap<McpLegacyRequestKey, AppGatewayRequestId>,
+    mcp_requests: HashMap<McpRequestKey, AppGatewayRequestId>,
 }
 
 impl PendingAppGatewayRequests {
@@ -76,7 +76,7 @@ impl PendingAppGatewayRequests {
             }
             ServerRequest::McpServerElicitationRequest { request_id, params } => {
                 self.mcp_requests.insert(
-                    McpLegacyRequestKey {
+                    McpRequestKey {
                         server_name: params.server_name.clone(),
                         request_id: app_gateway_request_id_to_mcp_request_id(request_id),
                     },
@@ -88,13 +88,6 @@ impl PendingAppGatewayRequests {
                 Some(UnsupportedAppGatewayRequest {
                     request_id: request_id.clone(),
                     message: "Dynamic tool calls are not available in TUI yet.".to_string(),
-                })
-            }
-            ServerRequest::Cunning3dBridgeCall { request_id, .. } => {
-                Some(UnsupportedAppGatewayRequest {
-                    request_id: request_id.clone(),
-                    message: "Cunning3D bridge calls require an attached Cunning3D host."
-                        .to_string(),
                 })
             }
             ServerRequest::ChatgptAuthTokensRefresh { .. } => None,
@@ -190,7 +183,7 @@ impl PendingAppGatewayRequests {
                 meta,
             } => self
                 .mcp_requests
-                .remove(&McpLegacyRequestKey {
+                .remove(&McpRequestKey {
                     server_name: server_name.to_string(),
                     request_id: request_id.clone(),
                 })
@@ -235,7 +228,7 @@ impl PendingAppGatewayRequests {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct McpLegacyRequestKey {
+struct McpRequestKey {
     server_name: String,
     request_id: McpRequestId,
 }

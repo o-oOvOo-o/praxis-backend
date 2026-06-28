@@ -9,6 +9,42 @@ use std::sync::atomic::Ordering;
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) struct PatchCellId(u64);
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub(crate) struct TranscriptCardId(String);
+
+impl TranscriptCardId {
+    pub(crate) fn exec(call_id: impl Into<String>) -> Self {
+        Self::new("exec", call_id)
+    }
+
+    pub(crate) fn exec_group<I, S>(call_ids: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut key = String::new();
+        for call_id in call_ids {
+            if !key.is_empty() {
+                key.push('+');
+            }
+            key.push_str(call_id.as_ref());
+        }
+        Self::new("exec", key)
+    }
+
+    pub(crate) fn mcp(call_id: impl Into<String>) -> Self {
+        Self::new("mcp", call_id)
+    }
+
+    pub(crate) fn web_search(call_id: impl Into<String>) -> Self {
+        Self::new("web", call_id)
+    }
+
+    fn new(kind: &str, key: impl Into<String>) -> Self {
+        Self(format!("{kind}:{}", key.into()))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub(crate) enum FoldCategory {
     Reasoning,
@@ -25,6 +61,7 @@ struct HistoryPresentationDefaults {
 struct RegistryState {
     defaults: HistoryPresentationDefaults,
     expanded_diff_cells: HashSet<PatchCellId>,
+    expanded_transcript_cards: HashSet<TranscriptCardId>,
 }
 
 static REGISTRY: OnceLock<Mutex<RegistryState>> = OnceLock::new();
@@ -104,6 +141,28 @@ pub(crate) fn toggle_diff_cells(ids: &[PatchCellId]) -> bool {
     }
     bump_revision();
     true
+}
+
+pub(crate) fn is_transcript_card_expanded(id: &TranscriptCardId) -> bool {
+    let guard = registry()
+        .lock()
+        .expect("history presentation mutex poisoned");
+    guard.expanded_transcript_cards.contains(id)
+}
+
+pub(crate) fn toggle_transcript_card(id: TranscriptCardId) -> bool {
+    let mut guard = registry()
+        .lock()
+        .expect("history presentation mutex poisoned");
+    let expanded = if guard.expanded_transcript_cards.contains(&id) {
+        guard.expanded_transcript_cards.remove(&id);
+        false
+    } else {
+        guard.expanded_transcript_cards.insert(id);
+        true
+    };
+    bump_revision();
+    expanded
 }
 
 pub(crate) fn history_presentation_revision() -> u64 {

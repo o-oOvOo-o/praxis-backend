@@ -1,4 +1,5 @@
 use super::*;
+use crate::protocol::common::HostExtensionInfo;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

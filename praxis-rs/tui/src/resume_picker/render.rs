@@ -61,15 +61,11 @@ fn picker_header_line(state: &PickerState) -> Line<'static> {
         spans.push("  ".into());
         spans.push("Source:".dim());
         spans.push(" ".into());
-        if let Some(switcher) = state.source_switcher.as_ref() {
-            for (index, source) in switcher.sources().enumerate() {
-                if index > 0 {
-                    spans.push(" ".into());
-                }
-                spans.push(source_tab_span(source, state.active_source));
+        for (index, view) in state.source_views().into_iter().enumerate() {
+            if index > 0 {
+                spans.push(" ".into());
             }
-        } else {
-            spans.push(source_tab_span(state.active_source, state.active_source));
+            spans.push(source_tab_span(view, state.active_source_view()));
         }
     }
 
@@ -100,7 +96,7 @@ fn picker_hint_line(state: &PickerState) -> Line<'static> {
         " to quit ".dim(),
     ];
 
-    if state.has_source_switcher() {
+    if state.shows_source_section() {
         spans.push("    ".dim());
         spans.push(key_hint::plain(KeyCode::Left).into());
         spans.push("/".dim());
@@ -119,20 +115,13 @@ fn picker_hint_line(state: &PickerState) -> Line<'static> {
     spans.into()
 }
 
-fn source_tab_span(
-    source: SessionLookupSource,
-    active_source: SessionLookupSource,
-) -> Span<'static> {
-    let label = source_display_name(source);
-    if source == active_source {
+fn source_tab_span(view: PickerSourceView, active_view: PickerSourceView) -> Span<'static> {
+    let label = view.label();
+    if view == active_view {
         format!("[{label}]").bold().cyan()
     } else {
         label.dim()
     }
-}
-
-fn source_display_name(source: SessionLookupSource) -> &'static str {
-    source.display_name()
 }
 
 fn search_line(state: &PickerState) -> Line<'_> {
@@ -338,10 +327,7 @@ fn render_empty_state_line(state: &PickerState) -> Line<'static> {
 
     if state.all_rows.is_empty() && state.pagination.num_scanned_files == 0 {
         let message = if state.shows_source_section() {
-            format!(
-                "No {} sessions yet",
-                source_display_name(state.active_source)
-            )
+            format!("No {} sessions yet", state.active_source_view().label())
         } else {
             String::from("No sessions yet")
         };

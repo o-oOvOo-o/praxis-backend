@@ -80,18 +80,6 @@ fn restricted_read_implicitly_allows_helper_executables() -> std::io::Result<()>
 }
 
 #[test]
-fn network_toml_ignores_legacy_network_list_keys() {
-    let parsed = toml::from_str::<NetworkToml>(
-        r#"
-allowed_domains = ["openai.com"]
-"#,
-    )
-    .expect("legacy network list keys should be ignored");
-
-    assert_eq!(parsed, NetworkToml::default());
-}
-
-#[test]
 fn network_permission_containers_project_allowed_and_denied_entries() {
     let domains = NetworkDomainPermissionsToml {
         entries: BTreeMap::from([

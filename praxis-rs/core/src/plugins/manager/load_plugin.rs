@@ -53,7 +53,7 @@ pub(crate) fn load_plugins_from_layer_stack(
             configured_name.clone(),
             &plugin,
             store,
-            restriction_product,
+            restriction_product.clone(),
             &skill_config_rules,
         );
         for name in loaded_plugin.mcp_servers.keys() {
@@ -340,7 +340,7 @@ pub(super) fn load_plugin_skills(
     let skills = outcome
         .skills
         .into_iter()
-        .filter(|skill| skill.matches_product_restriction_for_product(restriction_product))
+        .filter(|skill| skill.matches_product_restriction_for_product(restriction_product.as_ref()))
         .collect::<Vec<_>>();
     let disabled_skill_paths = resolve_disabled_skill_paths(&skills, skill_config_rules);
 

@@ -1,21 +1,31 @@
 use crate::llm::internal_plugins::LlmPluginRegistryBuilder;
+use crate::llm::profiles::claude;
 use crate::llm::profiles::openrouter;
 
 pub(super) fn register_common_branches(registry: &mut LlmPluginRegistryBuilder) {
-    let profile = openrouter::profile();
+    let openrouter_profile = openrouter::profile();
+    let claude_profile = claude::profile();
     #[cfg(test)]
     {
         register_common_branch(
             registry,
             "openrouter",
             "OpenRouter common branch prompt layer",
-            profile,
+            openrouter_profile,
         );
-        register_claude_placeholder(registry);
+        register_common_branch(
+            registry,
+            "claude",
+            "Claude common branch prompt layer",
+            claude_profile,
+        );
     }
 
     #[cfg(not(test))]
-    registry.add_profile(profile);
+    {
+        registry.add_profile(openrouter_profile);
+        registry.add_profile(claude_profile);
+    }
 }
 
 #[cfg(test)]
@@ -42,21 +52,10 @@ fn register_common_branch(
 }
 
 #[cfg(test)]
-fn register_claude_placeholder(registry: &mut LlmPluginRegistryBuilder) {
-    registry.add_provider_extension(
-        "common/claude_placeholder",
-        "Claude placeholder: Anthropic statement",
-    );
-    registry.add_prompt_layer_extension(
-        "common/claude_placeholder/statement",
-        "Praxis does not provide a Claude adapter",
-    );
-}
-
-#[cfg(test)]
 fn common_branch_id(namespace: &'static str) -> &'static str {
     match namespace {
         "openrouter" => "common/openrouter",
+        "claude" => "common/claude",
         _ => namespace,
     }
 }
@@ -65,6 +64,7 @@ fn common_branch_id(namespace: &'static str) -> &'static str {
 fn common_branch_prompt_layer_id(namespace: &'static str) -> &'static str {
     match namespace {
         "openrouter" => "common/openrouter/prompts",
+        "claude" => "common/claude/prompts",
         _ => namespace,
     }
 }
@@ -73,6 +73,7 @@ fn common_branch_prompt_layer_id(namespace: &'static str) -> &'static str {
 fn common_branch_task_policy_id(namespace: &'static str) -> &'static str {
     match namespace {
         "openrouter" => "common/openrouter/tasks",
+        "claude" => "common/claude/tasks",
         _ => namespace,
     }
 }
@@ -81,6 +82,7 @@ fn common_branch_task_policy_id(namespace: &'static str) -> &'static str {
 fn common_branch_tool_policy_id(namespace: &'static str) -> &'static str {
     match namespace {
         "openrouter" => "common/openrouter/tools",
+        "claude" => "common/claude/tools",
         _ => namespace,
     }
 }

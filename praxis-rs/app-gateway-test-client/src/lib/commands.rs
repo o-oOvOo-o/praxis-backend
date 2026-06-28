@@ -388,7 +388,7 @@ pub(super) async fn control_message_api(
             println!("< thread/start response: {thread_response:?}");
 
             let controller = praxis_harness_controller();
-            let control_response = client.thread_control_acquire(ThreadControlAcquireParams {
+            let control_response = client.thread_control_claim(ThreadControlClaimParams {
                 thread_id: thread_response.thread.id.clone(),
                 controller: controller.clone(),
                 target_rank: Some(2),
@@ -397,7 +397,7 @@ pub(super) async fn control_message_api(
                         .to_string(),
                 ),
             })?;
-            println!("< thread/control/acquire response: {control_response:?}");
+            println!("< thread/control/claim response: {control_response:?}");
 
             let turn_response = client.turn_start(TurnStartParams {
                 thread_id: thread_response.thread.id.clone(),

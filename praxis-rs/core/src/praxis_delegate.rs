@@ -155,6 +155,7 @@ pub(crate) async fn run_praxis_thread_one_shot(
     final_output_json_schema: Option<Value>,
     initial_history: Option<InitialHistory>,
 ) -> Result<Praxis, PraxisErr> {
+    let initial_op = config.user_turn_op(input, final_output_json_schema);
     // Use a child token so we can stop the delegate after completion without
     // requiring the caller to cancel the parent token.
     let child_cancel = cancel_token.child_token();
@@ -171,11 +172,7 @@ pub(crate) async fn run_praxis_thread_one_shot(
     .await?;
 
     // Send the initial input to kick off the one-shot turn.
-    io.submit(Op::UserInput {
-        items: input,
-        final_output_json_schema,
-    })
-    .await?;
+    io.submit(initial_op).await?;
 
     // Bridge events so we can observe completion and shut down automatically.
     let (tx_bridge, rx_bridge) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);

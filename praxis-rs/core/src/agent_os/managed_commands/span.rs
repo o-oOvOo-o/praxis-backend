@@ -54,12 +54,6 @@ impl ManagedCommandSpan {
             .await
     }
 
-    pub(crate) async fn checkpoint(&self, raw_output: &[u8]) -> PraxisResult<Option<String>> {
-        self.agent_os
-            .checkpoint_managed_command(self.command_id.as_str(), raw_output)
-            .await
-    }
-
     pub(crate) async fn record_dirty_files(&self, dirty_files: Vec<PathBuf>) -> PraxisResult<()> {
         self.agent_os
             .record_command_dirty_files(self.command_id.as_str(), dirty_files)

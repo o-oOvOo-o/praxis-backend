@@ -39,10 +39,12 @@ pub(super) struct MouseInteractionState {
     pub(super) down: Option<MouseDownState>,
     pub(super) drag: Option<MouseDragSelection>,
     pub(super) selection: Option<MouseDragSelection>,
+    pub(super) focused_pane: Option<MousePane>,
     pub(super) hover_workspace_thread_index: Option<usize>,
     pub(super) hover_workspace_target: Option<WorkspaceMouseTarget>,
     pub(super) workspace_list_snapshot: Option<PaneTextSnapshot>,
     pub(super) chat_snapshot: Option<PaneTextSnapshot>,
+    pub(super) work_panel_snapshot: Option<PaneTextSnapshot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +52,7 @@ pub(super) enum MousePane {
     WorkspaceChrome,
     WorkspaceList,
     Chat,
+    WorkPanel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,16 +119,51 @@ pub(super) struct MouseDownState {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct MouseDragSelection {
     pub(super) pane: MousePane,
+    pub(super) mode: MouseSelectionMode,
     pub(super) start_column: u16,
     pub(super) start_row: u16,
     pub(super) end_column: u16,
     pub(super) end_row: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MouseSelectionMode {
+    Range,
+    FullPane,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct PaneTextSnapshot {
     pub(super) area: Rect,
     pub(super) lines: Vec<String>,
+    pub(super) row_ranges: Vec<Option<PaneTextRowRange>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PaneTextRowRange {
+    pub(super) start: u16,
+    pub(super) end: u16,
+}
+
+impl MouseInteractionState {
+    fn snapshot_for_pane(&self, pane: MousePane) -> Option<&PaneTextSnapshot> {
+        match pane {
+            MousePane::WorkspaceChrome => None,
+            MousePane::WorkspaceList => self.workspace_list_snapshot.as_ref(),
+            MousePane::Chat => self.chat_snapshot.as_ref(),
+            MousePane::WorkPanel => self.work_panel_snapshot.as_ref(),
+        }
+    }
+
+    fn snapshot_area_for_pane(&self, pane: MousePane) -> Option<Rect> {
+        self.snapshot_for_pane(pane).map(|snapshot| snapshot.area)
+    }
+
+    fn snapshot_has_selectable_cell(&self, pane: MousePane, column: u16, row: u16) -> bool {
+        self.snapshot_for_pane(pane)
+            .and_then(|snapshot| snapshot.row_range_at(row))
+            .is_some_and(|range| column >= range.start && column <= range.end)
+    }
 }
 
 pub(super) fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
@@ -136,20 +174,61 @@ pub(super) fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
         && row < area.bottom()
 }
 
-pub(super) fn capture_pane_text(buf: &ratatui::buffer::Buffer, area: Rect) -> Vec<String> {
+impl PaneTextSnapshot {
+    fn empty(area: Rect) -> Self {
+        Self {
+            area,
+            lines: Vec::new(),
+            row_ranges: Vec::new(),
+        }
+    }
+
+    fn row_range_at(&self, row: u16) -> Option<PaneTextRowRange> {
+        if row < self.area.y || row >= self.area.bottom() {
+            return None;
+        }
+        self.row_ranges
+            .get(usize::from(row.saturating_sub(self.area.y)))
+            .copied()
+            .flatten()
+    }
+}
+
+fn symbol_has_visible_text(symbol: &str) -> bool {
+    symbol.chars().any(|ch| !ch.is_whitespace())
+}
+
+pub(super) fn capture_pane_text(buf: &ratatui::buffer::Buffer, area: Rect) -> PaneTextSnapshot {
     if area.is_empty() {
-        return Vec::new();
+        return PaneTextSnapshot::empty(area);
     }
 
     let mut lines = Vec::with_capacity(area.height as usize);
+    let mut row_ranges = Vec::with_capacity(area.height as usize);
     for y in area.y..area.bottom() {
         let mut line = String::new();
+        let mut first_visible = None;
+        let mut last_visible = None;
         for x in area.x..area.right() {
-            line.push_str(buf[(x, y)].symbol());
+            let symbol = buf[(x, y)].symbol();
+            if symbol_has_visible_text(symbol) {
+                first_visible.get_or_insert(x);
+                last_visible = Some(x);
+            }
+            line.push_str(symbol);
         }
         lines.push(line.trim_end().to_string());
+        row_ranges.push(
+            first_visible
+                .zip(last_visible)
+                .map(|(start, end)| PaneTextRowRange { start, end }),
+        );
     }
-    lines
+    PaneTextSnapshot {
+        area,
+        lines,
+        row_ranges,
+    }
 }
 
 fn ordered_selection_points(
@@ -174,20 +253,33 @@ fn ordered_selection_points(
     }
 }
 
-pub(super) fn selected_cells(area: Rect, selection: MouseDragSelection) -> Vec<(u16, u16)> {
-    let Some(((start_x, start_y), (end_x, end_y))) = ordered_selection_points(area, selection)
+pub(super) fn selected_snapshot_cells(
+    snapshot: &PaneTextSnapshot,
+    selection: MouseDragSelection,
+) -> Vec<(u16, u16)> {
+    let Some(((start_x, start_y), (end_x, end_y))) =
+        ordered_selection_points(snapshot.area, selection)
     else {
         return Vec::new();
     };
 
     let mut cells = Vec::new();
     for y in start_y..=end_y {
-        let row_start = if y == start_y { start_x } else { area.x };
+        let Some(range) = snapshot.row_range_at(y) else {
+            continue;
+        };
+        let row_start = if y == start_y {
+            start_x
+        } else {
+            snapshot.area.x
+        };
         let row_end = if y == end_y {
             end_x
         } else {
-            area.right().saturating_sub(1)
+            snapshot.area.right().saturating_sub(1)
         };
+        let row_start = row_start.max(range.start);
+        let row_end = row_end.min(range.end);
         if row_start > row_end {
             continue;
         }
@@ -215,20 +307,34 @@ pub(super) fn extract_pane_selection(
 
     let start_row = usize::from(start_y.saturating_sub(snapshot.area.y));
     let end_row = usize::from(end_y.saturating_sub(snapshot.area.y));
-    let start_col = usize::from(start_x.saturating_sub(snapshot.area.x));
-    let end_col = usize::from(end_x.saturating_sub(snapshot.area.x));
-    let last_col = usize::from(snapshot.area.width.saturating_sub(1));
 
     let mut selected = Vec::new();
     for row in start_row..=end_row {
         let Some(line) = snapshot.lines.get(row) else {
             continue;
         };
-        let row_start = if row == start_row { start_col } else { 0 };
-        let row_end = if row == end_row { end_col } else { last_col };
+        let absolute_y = snapshot.area.y.saturating_add(row as u16);
+        let Some(range) = snapshot.row_range_at(absolute_y) else {
+            selected.push(String::new());
+            continue;
+        };
+        let row_start = if row == start_row {
+            start_x
+        } else {
+            snapshot.area.x
+        }
+        .max(range.start);
+        let row_end = if row == end_row {
+            end_x
+        } else {
+            snapshot.area.right().saturating_sub(1)
+        }
+        .min(range.end);
         if row_start > row_end {
             continue;
         }
+        let row_start = usize::from(row_start.saturating_sub(snapshot.area.x));
+        let row_end = usize::from(row_end.saturating_sub(snapshot.area.x));
         selected.push(
             extract_line_range(line, row_start, row_end)
                 .trim_end()
@@ -342,10 +448,11 @@ impl App {
             matches!(pane, MousePane::WorkspaceChrome | MousePane::WorkspaceList)
                 .then(|| self.workspace_mouse_target_at(column, row))
                 .flatten();
-        if pane == MousePane::Chat {
+        if matches!(pane, MousePane::Chat | MousePane::WorkPanel) {
             self.workspace.clear_search_focus();
             self.workspace.clear_overlay();
         }
+        self.mouse.focused_pane = Some(pane);
         self.mouse.down = Some(MouseDownState {
             pane,
             column,
@@ -361,7 +468,8 @@ impl App {
 
     fn handle_mouse_right_down(&mut self, column: u16, row: u16) {
         self.mouse.selection = None;
-        if self.mouse_pane_at(column, row) == Some(MousePane::Chat) {
+        self.mouse.focused_pane = self.mouse_pane_at(column, row);
+        if self.mouse.focused_pane == Some(MousePane::Chat) {
             self.workspace.clear_overlay();
             self.workspace.clear_search_focus();
             self.paste_clipboard_into_chat();
@@ -412,11 +520,18 @@ impl App {
         if current_pane != down.pane {
             return;
         }
+        if !self
+            .mouse
+            .snapshot_has_selectable_cell(down.pane, down.column, down.row)
+        {
+            return;
+        }
         if down.column == column && down.row == row {
             return;
         }
         self.mouse.drag = Some(MouseDragSelection {
             pane: down.pane,
+            mode: MouseSelectionMode::Range,
             start_column: down.column,
             start_row: down.row,
             end_column: column,
@@ -439,6 +554,7 @@ impl App {
             selection.end_column = column;
             selection.end_row = row;
             self.mouse.selection = Some(selection);
+            self.mouse.focused_pane = Some(selection.pane);
             return Ok(None);
         }
 
@@ -463,6 +579,21 @@ impl App {
                         .handle_workspace_main_pane_effect(tui, app_gateway, effect)
                         .await;
                 }
+                let transcript_area = self
+                    .workspace
+                    .chat_area
+                    .unwrap_or(tui.terminal.viewport_area);
+                if let Some(action) = self.chat_widget.workspace_transcript_mouse_action(
+                    transcript_area,
+                    &self.transcript_cells,
+                    self.workspace.chat_scroll_from_bottom(),
+                    column,
+                    row,
+                ) {
+                    return self
+                        .handle_history_cell_mouse_action(tui, app_gateway, action)
+                        .await;
+                }
             }
             if down.pane == MousePane::Chat
                 && self.mouse_pane_at(column, row) == Some(MousePane::Chat)
@@ -476,12 +607,25 @@ impl App {
             return Ok(None);
         }
 
-        let Some(action) =
-            self.chat_widget
-                .active_cell_mouse_action(tui.terminal.viewport_area, column, row)
+        let Some(action) = (down.pane == MousePane::Chat)
+            .then(|| {
+                self.chat_widget
+                    .active_cell_mouse_action(tui.terminal.viewport_area, column, row)
+            })
+            .flatten()
         else {
             return Ok(None);
         };
+        self.handle_history_cell_mouse_action(tui, app_gateway, action)
+            .await
+    }
+
+    async fn handle_history_cell_mouse_action(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        action: history_cell::HistoryCellMouseAction,
+    ) -> Result<Option<AppRunControl>> {
         match action {
             history_cell::HistoryCellMouseAction::ResumeRecentThread {
                 thread_id,
@@ -498,6 +642,10 @@ impl App {
                     },
                 )
                 .await
+            }
+            history_cell::HistoryCellMouseAction::ToggleTranscriptCard { card_id } => {
+                history_cell::toggle_transcript_card(card_id);
+                Ok(None)
             }
         }
     }
@@ -736,10 +884,23 @@ impl App {
         if !self.workspace.enabled {
             if self
                 .workspace
+                .work_panel_area
+                .is_some_and(|area| rect_contains(area, column, row))
+            {
+                self.mouse.focused_pane = Some(MousePane::WorkPanel);
+                return false;
+            }
+            if self
+                .workspace
                 .chat_area
                 .is_some_and(|area| rect_contains(area, column, row))
             {
-                return self.workspace.scroll_chat(delta_rows);
+                let scrolled = self.workspace.scroll_chat(delta_rows);
+                if scrolled {
+                    self.clear_mouse_selection_for_pane(MousePane::Chat);
+                }
+                self.mouse.focused_pane = Some(MousePane::Chat);
+                return scrolled;
             }
             return false;
         }
@@ -752,6 +913,10 @@ impl App {
             let previous_hover_thread = self.mouse.hover_workspace_thread_index;
             let previous_hover_target = self.mouse.hover_workspace_target;
             let scrolled = self.workspace.scroll_list(delta_rows, visible_rows);
+            if scrolled {
+                self.clear_mouse_selection_for_pane(MousePane::WorkspaceList);
+            }
+            self.mouse.focused_pane = Some(MousePane::WorkspaceList);
             self.mouse.hover_workspace_thread_index = self.workspace_thread_index_at(column, row);
             self.mouse.hover_workspace_target = self.workspace_mouse_target_at(column, row);
             return scrolled
@@ -760,15 +925,64 @@ impl App {
         }
         if self
             .workspace
+            .work_panel_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            self.mouse.focused_pane = Some(MousePane::WorkPanel);
+            return false;
+        }
+        if self
+            .workspace
             .chat_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
             if let Some(scrolled) = self.workspace.handle_main_pane_scroll(delta_rows) {
+                if scrolled {
+                    self.clear_mouse_selection_for_pane(MousePane::Chat);
+                }
+                self.mouse.focused_pane = Some(MousePane::Chat);
                 return scrolled;
             }
-            return self.workspace.scroll_chat(delta_rows);
+            let scrolled = self.workspace.scroll_chat(delta_rows);
+            if scrolled {
+                self.clear_mouse_selection_for_pane(MousePane::Chat);
+            }
+            self.mouse.focused_pane = Some(MousePane::Chat);
+            return scrolled;
         }
         false
+    }
+
+    fn clear_mouse_selection_for_pane(&mut self, pane: MousePane) {
+        if self
+            .mouse
+            .drag
+            .is_some_and(|selection| selection.pane == pane)
+        {
+            self.mouse.drag = None;
+        }
+        if self.mouse.selection.is_some_and(|selection| {
+            selection.pane == pane && selection.mode != MouseSelectionMode::FullPane
+        }) {
+            self.mouse.selection = None;
+        }
+    }
+
+    fn clear_any_mouse_selection_for_pane(&mut self, pane: MousePane) {
+        if self
+            .mouse
+            .drag
+            .is_some_and(|selection| selection.pane == pane)
+        {
+            self.mouse.drag = None;
+        }
+        if self
+            .mouse
+            .selection
+            .is_some_and(|selection| selection.pane == pane)
+        {
+            self.mouse.selection = None;
+        }
     }
 
     pub(super) fn mouse_pane_at(&self, column: u16, row: u16) -> Option<MousePane> {
@@ -791,6 +1005,13 @@ impl App {
             .is_some_and(|area| rect_contains(area, column, row))
         {
             return Some(MousePane::WorkspaceList);
+        }
+        if self
+            .workspace
+            .work_panel_area
+            .is_some_and(|area| rect_contains(area, column, row))
+        {
+            return Some(MousePane::WorkPanel);
         }
         if self
             .workspace
@@ -955,23 +1176,53 @@ impl App {
 
     pub(super) fn handle_mouse_selection_copy_shortcut(&mut self, key_event: KeyEvent) -> bool {
         if key_event.kind != KeyEventKind::Press
-            || !matches!(key_event.code, KeyCode::Char('c') | KeyCode::Char('C'))
             || !key_event.modifiers.contains(KeyModifiers::CONTROL)
         {
             return false;
         }
-        let Some(selection) = self.mouse.selection.or(self.mouse.drag) else {
+        match key_event.code {
+            KeyCode::Char('a') | KeyCode::Char('A') => self.select_all_mouse_focused_pane(),
+            KeyCode::Char('c') | KeyCode::Char('C') => {
+                let Some(selection) = self.mouse.selection.or(self.mouse.drag) else {
+                    return false;
+                };
+                self.copy_mouse_selection_to_clipboard(selection)
+            }
+            _ => false,
+        }
+    }
+
+    fn select_all_mouse_focused_pane(&mut self) -> bool {
+        let Some(pane) = self
+            .mouse
+            .selection
+            .or(self.mouse.drag)
+            .map(|selection| selection.pane)
+            .or(self.mouse.focused_pane)
+        else {
             return false;
         };
-        self.copy_mouse_selection_to_clipboard(selection)
+        let Some(area) = self.mouse.snapshot_area_for_pane(pane) else {
+            return false;
+        };
+        if area.is_empty() {
+            return false;
+        }
+        self.mouse.drag = None;
+        self.mouse.selection = Some(MouseDragSelection {
+            pane,
+            mode: MouseSelectionMode::FullPane,
+            start_column: area.x,
+            start_row: area.y,
+            end_column: area.right().saturating_sub(1),
+            end_row: area.bottom().saturating_sub(1),
+        });
+        self.mouse.focused_pane = Some(pane);
+        true
     }
 
     fn copy_mouse_selection_to_clipboard(&mut self, selection: MouseDragSelection) -> bool {
-        let snapshot = match selection.pane {
-            MousePane::WorkspaceChrome => None,
-            MousePane::WorkspaceList => self.mouse.workspace_list_snapshot.as_ref(),
-            MousePane::Chat => self.mouse.chat_snapshot.as_ref(),
-        };
+        let snapshot = self.mouse.snapshot_for_pane(selection.pane);
         let Some(snapshot) = snapshot else {
             return false;
         };
@@ -1008,14 +1259,45 @@ impl App {
         area: Rect,
         buf: &ratatui::buffer::Buffer,
     ) {
-        let snapshot = PaneTextSnapshot {
-            area,
-            lines: capture_pane_text(buf, area),
-        };
+        let snapshot = capture_pane_text(buf, area);
+        let snapshot_area = snapshot.area;
         match pane {
             MousePane::WorkspaceChrome => {}
             MousePane::WorkspaceList => self.mouse.workspace_list_snapshot = Some(snapshot),
             MousePane::Chat => self.mouse.chat_snapshot = Some(snapshot),
+            MousePane::WorkPanel => self.mouse.work_panel_snapshot = Some(snapshot),
+        }
+        self.refresh_full_pane_mouse_selection(pane, snapshot_area);
+    }
+
+    fn refresh_full_pane_mouse_selection(&mut self, pane: MousePane, area: Rect) {
+        if area.is_empty() {
+            return;
+        }
+        if self.mouse.selection.is_some_and(|selection| {
+            selection.pane == pane && selection.mode == MouseSelectionMode::FullPane
+        }) {
+            self.mouse.selection = Some(MouseDragSelection {
+                pane,
+                mode: MouseSelectionMode::FullPane,
+                start_column: area.x,
+                start_row: area.y,
+                end_column: area.right().saturating_sub(1),
+                end_row: area.bottom().saturating_sub(1),
+            });
+        }
+    }
+
+    pub(super) fn clear_mouse_pane_snapshot(&mut self, pane: MousePane) {
+        match pane {
+            MousePane::WorkspaceChrome => {}
+            MousePane::WorkspaceList => self.mouse.workspace_list_snapshot = None,
+            MousePane::Chat => self.mouse.chat_snapshot = None,
+            MousePane::WorkPanel => self.mouse.work_panel_snapshot = None,
+        }
+        self.clear_any_mouse_selection_for_pane(pane);
+        if self.mouse.focused_pane == Some(pane) {
+            self.mouse.focused_pane = None;
         }
     }
 
@@ -1023,15 +1305,10 @@ impl App {
         let Some(selection) = self.mouse.drag.or(self.mouse.selection) else {
             return;
         };
-        let area = match selection.pane {
-            MousePane::WorkspaceChrome => None,
-            MousePane::WorkspaceList => self.workspace.list_area,
-            MousePane::Chat => self.workspace.chat_area,
-        };
-        let Some(area) = area else {
+        let Some(snapshot) = self.mouse.snapshot_for_pane(selection.pane) else {
             return;
         };
-        for (x, y) in selected_cells(area, selection) {
+        for (x, y) in selected_snapshot_cells(snapshot, selection) {
             let style = crate::style::selection_overlay(buf[(x, y)].style());
             buf[(x, y)].set_style(style);
         }

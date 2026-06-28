@@ -8,4 +8,5 @@ pub use execution_plan::SandboxExecutionPlan;
 pub use orchestrator::ToolSafetyOrchestrator;
 pub use orchestrator::ToolSafetyRequest;
 pub use retry_policy::SandboxRetryPolicy;
-pub use tool_kind::ToolKind;
+pub use retry_policy::SandboxRetryRequest;
+pub use tool_kind::SafetyToolKind;

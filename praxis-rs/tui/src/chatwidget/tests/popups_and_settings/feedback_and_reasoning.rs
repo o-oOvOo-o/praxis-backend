@@ -21,8 +21,9 @@ async fn feedback_upload_consent_popup_snapshot() {
         chat.current_rollout_path.clone(),
         &praxis_feedback::feedback_diagnostics::FeedbackDiagnostics::new(vec![
             praxis_feedback::feedback_diagnostics::FeedbackDiagnostic {
-                headline: "OPENAI_BASE_URL is set and may affect connectivity.".to_string(),
-                details: vec!["OPENAI_BASE_URL = hello".to_string()],
+                headline: "Proxy environment variables are set and may affect connectivity."
+                    .to_string(),
+                details: vec!["HTTPS_PROXY = https://proxy.example.com:443".to_string()],
             },
         ]),
     ));
@@ -41,8 +42,9 @@ async fn feedback_good_result_consent_popup_includes_connectivity_diagnostics_fi
         chat.current_rollout_path.clone(),
         &praxis_feedback::feedback_diagnostics::FeedbackDiagnostics::new(vec![
             praxis_feedback::feedback_diagnostics::FeedbackDiagnostic {
-                headline: "OPENAI_BASE_URL is set and may affect connectivity.".to_string(),
-                details: vec!["OPENAI_BASE_URL = hello".to_string()],
+                headline: "Proxy environment variables are set and may affect connectivity."
+                    .to_string(),
+                details: vec!["HTTPS_PROXY = https://proxy.example.com:443".to_string()],
             },
         ]),
     ));

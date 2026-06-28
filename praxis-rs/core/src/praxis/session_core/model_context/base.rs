@@ -49,7 +49,7 @@ impl SessionModelRuntimeContext {
             &self.current_model_info,
             self.per_turn_config.model_provider_id.as_str(),
             &self.per_turn_config.model_provider,
-            self.product_profile,
+            self.product_profile.clone(),
             purpose,
         )
     }

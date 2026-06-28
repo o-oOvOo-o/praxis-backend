@@ -262,6 +262,7 @@ For casual greetings, acknowledgements, or other one-off conversational messages
 When using the shell, you must adhere to the following guidelines:
 
 - When searching for text or files, prefer using `rg` or `rg --files` respectively because `rg` is much faster than alternatives like `grep`. (If the `rg` command is not found, then use alternatives.)
+- When inspecting directory structure, prefer the `list_directory` tool over shell commands such as `ls`, `dir`, or `Get-ChildItem`; use `rg` for filename/content search and shell only for diagnostics or execution.
 - Do not use python scripts to attempt to output larger chunks of a file.
 
 ## `update_plan`

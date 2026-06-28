@@ -21,6 +21,7 @@ pub(super) struct PickerState {
     pub(super) active_source: SessionLookupSource,
     pub(super) source_switcher: Option<SourceSwitcher>,
     pub(super) sort_key: ThreadSortKey,
+    pub(super) archive_filter: ThreadArchiveFilter,
     pub(super) inline_error: Option<String>,
 }
 
@@ -67,6 +68,7 @@ pub(super) async fn load_app_gateway_page(
     include_non_interactive: bool,
     search_term: Option<String>,
     filter_cwd: Option<PathBuf>,
+    archive_filter: ThreadArchiveFilter,
 ) -> std::io::Result<PickerPage> {
     let response = app_gateway
         .thread_list(thread_list_params(
@@ -75,6 +77,7 @@ pub(super) async fn load_app_gateway_page(
             include_non_interactive,
             search_term,
             filter_cwd,
+            archive_filter,
         ))
         .await
         .map_err(std::io::Error::other)?;
@@ -171,6 +174,7 @@ impl PickerState {
             active_source: SessionLookupSource::Praxis,
             source_switcher: None,
             sort_key: ThreadSortKey::UpdatedAt,
+            archive_filter: ThreadArchiveFilter::Active,
             inline_error: None,
         }
     }
@@ -192,12 +196,8 @@ impl PickerState {
         self.apply_source(active_source);
     }
 
-    pub(super) fn has_source_switcher(&self) -> bool {
-        self.source_switcher.is_some()
-    }
-
     pub(super) fn shows_source_section(&self) -> bool {
-        self.has_source_switcher() || self.active_source.is_external()
+        self.source_views().len() > 1 || self.active_source.is_external()
     }
 
     pub(super) fn effective_action(&self) -> SessionPickerAction {
@@ -223,14 +223,54 @@ impl PickerState {
         self.page_loader = source_config.page_loader.clone();
     }
 
-    pub(super) fn switch_source(&mut self, source: SessionLookupSource) {
-        if !self.has_source_switcher() || self.active_source == source {
+    pub(super) fn apply_source_view(&mut self, view: PickerSourceView) {
+        self.archive_filter = view.archive_filter();
+        self.apply_source(view.source());
+    }
+
+    pub(super) fn switch_source_view(&mut self, view: PickerSourceView) {
+        if self.active_source_view() == view {
             return;
         }
 
         self.inline_error = None;
-        self.apply_source(source);
+        self.apply_source_view(view);
         self.start_initial_load();
+    }
+
+    pub(super) fn active_source_view(&self) -> PickerSourceView {
+        PickerSourceView::from_state(self.active_source, self.archive_filter)
+    }
+
+    pub(super) fn source_views(&self) -> Vec<PickerSourceView> {
+        if let Some(switcher) = self.source_switcher.as_ref() {
+            return switcher.views();
+        }
+        let mut views = vec![PickerSourceView::Source(self.active_source)];
+        if self.active_source == SessionLookupSource::Praxis {
+            views.push(PickerSourceView::Archived);
+        }
+        views
+    }
+
+    pub(super) fn previous_source_view(&self) -> Option<PickerSourceView> {
+        let views = self.source_views();
+        let active = self.active_source_view();
+        let index = views.iter().position(|view| *view == active)?;
+        index
+            .checked_sub(1)
+            .and_then(|previous| views.get(previous).copied())
+    }
+
+    pub(super) fn next_source_view(&self) -> Option<PickerSourceView> {
+        let views = self.source_views();
+        let active = self.active_source_view();
+        let index = views.iter().position(|view| *view == active)?;
+        views.get(index + 1).copied()
+    }
+
+    pub(super) fn first_source_view(&self) -> Option<PickerSourceView> {
+        self.source_views().first().copied()
     }
 
     pub(super) async fn handle_key(&mut self, key: KeyEvent) -> Result<Option<SessionSelection>> {
@@ -303,27 +343,27 @@ impl PickerState {
                 }
             }
             KeyCode::Left => {
-                if let Some(source) = self
-                    .source_switcher
-                    .as_ref()
-                    .and_then(|switcher| switcher.previous_source(self.active_source))
-                {
-                    self.switch_source(source);
+                if let Some(view) = self.previous_source_view() {
+                    self.switch_source_view(view);
                 }
                 self.request_frame();
             }
             KeyCode::Right => {
-                if let Some(source) = self
-                    .source_switcher
-                    .as_ref()
-                    .and_then(|switcher| switcher.next_source(self.active_source))
-                {
-                    self.switch_source(source);
+                if let Some(view) = self.next_source_view() {
+                    self.switch_source_view(view);
                 }
                 self.request_frame();
             }
             KeyCode::Tab => {
                 self.toggle_sort_key();
+                self.request_frame();
+            }
+            KeyCode::Char('a') | KeyCode::Char('A')
+                if key.modifiers.contains(crossterm::event::KeyModifiers::ALT) =>
+            {
+                if let Some(view) = self.next_source_view().or_else(|| self.first_source_view()) {
+                    self.switch_source_view(view);
+                }
                 self.request_frame();
             }
             KeyCode::Backspace => {
@@ -379,6 +419,7 @@ impl PickerState {
             search_term,
             filter_cwd: self.filter_cwd.clone(),
             sort_key: self.sort_key,
+            archive_filter: self.archive_filter,
         });
     }
 
@@ -549,6 +590,7 @@ impl PickerState {
             search_term: self.search_term(),
             filter_cwd: self.filter_cwd.clone(),
             sort_key: self.sort_key,
+            archive_filter: self.archive_filter,
         });
     }
 
@@ -616,6 +658,7 @@ pub(super) fn thread_list_params(
     include_non_interactive: bool,
     search_term: Option<String>,
     filter_cwd: Option<PathBuf>,
+    archive_filter: ThreadArchiveFilter,
 ) -> ThreadListParams {
     let mut params = common_thread_list_params(
         cursor,
@@ -625,6 +668,7 @@ pub(super) fn thread_list_params(
         },
         interactive_thread_source_kinds(include_non_interactive),
         search_term,
+        archive_filter,
     );
     params.cwd_scope = filter_cwd.map(|cwd| cwd.to_string_lossy().into_owned());
     params

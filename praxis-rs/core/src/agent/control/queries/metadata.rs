@@ -11,10 +11,6 @@ impl AgentControl {
         }
     }
 
-    pub(crate) fn get_agent_metadata(&self, agent_id: ThreadId) -> Option<AgentMetadata> {
-        self.state.agent_metadata_for_thread(agent_id)
-    }
-
     pub(crate) async fn get_agent_config_snapshot(
         &self,
         agent_id: ThreadId,

@@ -421,13 +421,13 @@ async fn tool_search_returns_deferred_tools_without_follow_up_tool_injection() -
     let mut builder = configured_builder(apps_server.chatgpt_base_url.clone());
     let test = builder.build(&server).await?;
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "Find the calendar create tool".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     let EventMsg::McpToolCallEnd(end) = wait_for_event(&test.thread, |event| {

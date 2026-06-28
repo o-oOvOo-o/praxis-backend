@@ -66,10 +66,7 @@ pub(super) struct SearchChunkHighlight {
 }
 
 impl SearchChunkHighlight {
-    pub(super) fn from_status(
-        status: &TranscriptSearchStatus,
-        chunk_index: usize,
-    ) -> Option<Self> {
+    pub(super) fn from_status(status: &TranscriptSearchStatus, chunk_index: usize) -> Option<Self> {
         (!status.query.is_empty()).then(|| Self {
             query: status.query.clone(),
             current_match: SearchMatchHighlight::from_status(status)

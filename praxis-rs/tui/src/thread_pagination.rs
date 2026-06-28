@@ -6,6 +6,19 @@ use praxis_app_gateway_protocol::ThreadSourceKind;
 
 pub(crate) const THREAD_PAGE_SIZE: usize = THREAD_LIST_DEFAULT_LIMIT as usize;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum ThreadArchiveFilter {
+    #[default]
+    Active,
+    Archived,
+}
+
+impl ThreadArchiveFilter {
+    fn archived_param(self) -> Option<bool> {
+        Some(matches!(self, Self::Archived))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct ThreadListPagination<Cursor> {
     pending_cursor: Option<Cursor>,
@@ -64,13 +77,29 @@ pub(crate) fn thread_list_params(
     source_kinds: Option<Vec<ThreadSourceKind>>,
     search_term: Option<String>,
 ) -> ThreadListParams {
+    thread_list_params_with_archive_filter(
+        cursor,
+        sort_key,
+        source_kinds,
+        search_term,
+        ThreadArchiveFilter::Active,
+    )
+}
+
+pub(crate) fn thread_list_params_with_archive_filter(
+    cursor: Option<String>,
+    sort_key: ThreadSortKey,
+    source_kinds: Option<Vec<ThreadSourceKind>>,
+    search_term: Option<String>,
+    archive_filter: ThreadArchiveFilter,
+) -> ThreadListParams {
     ThreadListParams {
         cursor,
         limit: Some(THREAD_LIST_DEFAULT_LIMIT),
         sort_key: Some(sort_key),
         model_providers: None,
         source_kinds,
-        archived: Some(false),
+        archived: archive_filter.archived_param(),
         cwd: None,
         cwd_scope: None,
         search_term,

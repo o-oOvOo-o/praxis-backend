@@ -2,7 +2,6 @@ use crate::context_manager::normalize;
 use crate::event_mapping::has_non_contextual_dev_message_content;
 use crate::event_mapping::is_contextual_dev_message_content;
 use crate::event_mapping::is_contextual_user_message_content;
-use crate::praxis::TurnContext;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use praxis_protocol::models::BaseInstructions;
@@ -131,17 +130,6 @@ impl ContextManager {
         self.items
     }
 
-    // Estimate token usage using byte-based heuristics from the truncation helpers.
-    // This is a coarse lower bound, not a tokenizer-accurate count.
-    pub(crate) fn estimate_token_count(&self, turn_context: &TurnContext) -> Option<i64> {
-        let model_info = &turn_context.model_info;
-        let personality = turn_context.personality.or(turn_context.config.personality);
-        let base_instructions = BaseInstructions {
-            text: model_info.get_model_instructions(personality),
-        };
-        self.estimate_token_count_with_base_instructions(&base_instructions)
-    }
-
     pub(crate) fn estimate_token_count_with_base_instructions(
         &self,
         base_instructions: &BaseInstructions,
@@ -158,18 +146,6 @@ impl ContextManager {
         Some(base_tokens.saturating_add(items_tokens))
     }
 
-    pub(crate) fn remove_first_item(&mut self) {
-        if !self.items.is_empty() {
-            // Remove the oldest item (front of the list). Items are ordered from
-            // oldest → newest, so index 0 is the first entry recorded.
-            let removed = self.items.remove(0);
-            // If the removed item participates in a call/output pair, also remove
-            // its corresponding counterpart to keep the invariants intact without
-            // running a full normalization pass.
-            normalize::remove_corresponding_for(&mut self.items, &removed);
-        }
-    }
-
     pub(crate) fn remove_last_item(&mut self) -> bool {
         if let Some(removed) = self.items.pop() {
             normalize::remove_corresponding_for(&mut self.items, &removed);
@@ -181,37 +157,6 @@ impl ContextManager {
 
     pub(crate) fn replace(&mut self, items: Vec<ResponseItem>) {
         self.items = items;
-    }
-
-    /// Replace image content in the last turn if it originated from a tool output.
-    /// Returns true when a tool image was replaced, false otherwise.
-    pub(crate) fn replace_last_turn_images(&mut self, placeholder: &str) -> bool {
-        let Some(index) = self.items.iter().rposition(|item| {
-            matches!(item, ResponseItem::FunctionCallOutput { .. }) || is_user_turn_boundary(item)
-        }) else {
-            return false;
-        };
-
-        match &mut self.items[index] {
-            ResponseItem::FunctionCallOutput { output, .. } => {
-                let Some(content_items) = output.content_items_mut() else {
-                    return false;
-                };
-                let mut replaced = false;
-                let placeholder = placeholder.to_string();
-                for item in content_items.iter_mut() {
-                    if matches!(item, FunctionCallOutputContentItem::InputImage { .. }) {
-                        *item = FunctionCallOutputContentItem::InputText {
-                            text: placeholder.clone(),
-                        };
-                        replaced = true;
-                    }
-                }
-                replaced
-            }
-            ResponseItem::Message { .. } => false,
-            _ => false,
-        }
     }
 
     /// Drop the last `num_turns` instruction turns from this history.

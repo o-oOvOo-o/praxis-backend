@@ -173,7 +173,7 @@ pub(crate) async fn fetch_remote_featured_plugin_ids(
         .get(&url)
         .query(&[(
             "platform",
-            openai_curated_featured_platform(product.unwrap_or(Product::Praxis)),
+            openai_curated_featured_platform(product.unwrap_or_else(Product::praxis)),
         )])
         .timeout(REMOTE_FEATURED_PLUGIN_FETCH_TIMEOUT);
 
@@ -206,11 +206,12 @@ pub(crate) async fn fetch_remote_featured_plugin_ids(
     })
 }
 
-fn openai_curated_featured_platform(product: Product) -> &'static str {
-    match product {
+fn openai_curated_featured_platform(product: Product) -> String {
+    if product.is_praxis() {
         // OpenAI curated plugins still expect the legacy hosted-agent platform id.
-        Product::Praxis => OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID,
-        other => other.to_app_platform(),
+        OPENAI_CURATED_PRAXIS_COMPAT_PLATFORM_ID.to_string()
+    } else {
+        product.to_app_platform().to_string()
     }
 }
 

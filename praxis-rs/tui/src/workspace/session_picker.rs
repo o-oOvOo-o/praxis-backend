@@ -1,9 +1,10 @@
 use crate::SessionLookupSource;
 use crate::resume_picker::SessionPickerAction;
 use crate::resume_picker::SessionSelection;
+use crate::thread_pagination::ThreadArchiveFilter;
 use crate::thread_pagination::ThreadListPagination;
 use crate::thread_pagination::interactive_thread_source_kinds;
-use crate::thread_pagination::thread_list_params;
+use crate::thread_pagination::thread_list_params_with_archive_filter;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
@@ -41,15 +42,17 @@ pub(crate) struct SessionPickerPageRequest {
     pub(crate) cursor: Option<String>,
     pub(crate) search_term: Option<String>,
     pub(crate) include_non_interactive: bool,
+    pub(crate) archive_filter: ThreadArchiveFilter,
 }
 
 impl SessionPickerPageRequest {
     pub(crate) fn thread_list_params(&self) -> praxis_app_gateway_protocol::ThreadListParams {
-        thread_list_params(
+        thread_list_params_with_archive_filter(
             self.cursor.clone(),
             ThreadSortKey::UpdatedAt,
             interactive_thread_source_kinds(self.include_non_interactive),
             self.search_term.clone(),
+            self.archive_filter,
         )
     }
 }
@@ -76,6 +79,7 @@ pub(crate) struct SessionPickerState {
     loading_request_id: Option<u64>,
     next_request_id: u64,
     include_non_interactive: bool,
+    archive_filter: ThreadArchiveFilter,
     inline_error: Option<String>,
 }
 
@@ -96,6 +100,51 @@ enum SessionPickerRowKey {
     Thread(ThreadId),
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum SessionPickerTab {
+    Praxis,
+    Archived,
+    Codex,
+    Cursor,
+}
+
+impl SessionPickerTab {
+    const ORDER: [Self; 4] = [Self::Praxis, Self::Archived, Self::Codex, Self::Cursor];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Praxis => "Praxis",
+            Self::Archived => "Archived",
+            Self::Codex => "Codex",
+            Self::Cursor => "Cursor",
+        }
+    }
+
+    fn source(self) -> SessionLookupSource {
+        match self {
+            Self::Praxis | Self::Archived => SessionLookupSource::Praxis,
+            Self::Codex => SessionLookupSource::Codex,
+            Self::Cursor => SessionLookupSource::Cursor,
+        }
+    }
+
+    fn archive_filter(self) -> ThreadArchiveFilter {
+        match self {
+            Self::Archived => ThreadArchiveFilter::Archived,
+            Self::Praxis | Self::Codex | Self::Cursor => ThreadArchiveFilter::Active,
+        }
+    }
+
+    fn from_state(source: SessionLookupSource, archive_filter: ThreadArchiveFilter) -> Self {
+        match (source, archive_filter) {
+            (SessionLookupSource::Praxis, ThreadArchiveFilter::Archived) => Self::Archived,
+            (SessionLookupSource::Praxis, ThreadArchiveFilter::Active) => Self::Praxis,
+            (SessionLookupSource::Codex, _) => Self::Codex,
+            (SessionLookupSource::Cursor, _) => Self::Cursor,
+        }
+    }
+}
+
 impl SessionPickerState {
     pub(crate) fn new(request: SessionPickerOpenRequest) -> Self {
         let mut state = Self {
@@ -111,9 +160,13 @@ impl SessionPickerState {
             loading_request_id: None,
             next_request_id: 1,
             include_non_interactive: request.include_non_interactive,
+            archive_filter: ThreadArchiveFilter::Active,
             inline_error: None,
         };
-        state.reset_for_source(request.source);
+        state.reset_for_tab(SessionPickerTab::from_state(
+            request.source,
+            ThreadArchiveFilter::Active,
+        ));
         state
     }
 
@@ -169,12 +222,9 @@ impl SessionPickerState {
                 self.ensure_selected_visible();
                 SessionPickerEffect::None
             }
-            KeyCode::Left => self.switch_source(self.previous_source()),
-            KeyCode::Right => self.switch_source(self.next_source()),
-            KeyCode::Tab => self.switch_source(
-                self.next_source()
-                    .or_else(|| Some(SessionLookupSource::Praxis)),
-            ),
+            KeyCode::Left => self.switch_tab(self.previous_tab()),
+            KeyCode::Right => self.switch_tab(self.next_tab()),
+            KeyCode::Tab => self.switch_tab(self.next_tab().or(Some(SessionPickerTab::Praxis))),
             KeyCode::Backspace => {
                 if self.query.pop().is_some() {
                     self.start_initial_load()
@@ -197,6 +247,11 @@ impl SessionPickerState {
                     self.query.clear();
                     self.start_initial_load()
                 }
+            }
+            KeyCode::Char('a') | KeyCode::Char('A')
+                if key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                self.switch_tab(self.next_tab().or(Some(SessionPickerTab::Praxis)))
             }
             KeyCode::Char(c)
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
@@ -301,11 +356,13 @@ impl SessionPickerState {
             cursor,
             search_term: self.search_term(),
             include_non_interactive: self.include_non_interactive,
+            archive_filter: self.archive_filter,
         })
     }
 
-    fn reset_for_source(&mut self, source: SessionLookupSource) {
-        self.source = source;
+    fn reset_for_tab(&mut self, tab: SessionPickerTab) {
+        self.source = tab.source();
+        self.archive_filter = tab.archive_filter();
         self.rows.clear();
         self.seen.clear();
         self.pagination.clear();
@@ -315,31 +372,37 @@ impl SessionPickerState {
         self.scroll = 0;
     }
 
-    fn switch_source(&mut self, source: Option<SessionLookupSource>) -> SessionPickerEffect {
-        let Some(source) = source else {
+    fn switch_tab(&mut self, tab: Option<SessionPickerTab>) -> SessionPickerEffect {
+        let Some(tab) = tab else {
             return SessionPickerEffect::None;
         };
-        if self.source == source {
+        if self.active_tab() == tab {
             return SessionPickerEffect::None;
         }
-        self.reset_for_source(source);
+        self.reset_for_tab(tab);
         self.start_initial_load()
     }
 
-    fn previous_source(&self) -> Option<SessionLookupSource> {
-        match self.source {
-            SessionLookupSource::Praxis => None,
-            SessionLookupSource::Codex => Some(SessionLookupSource::Praxis),
-            SessionLookupSource::Cursor => Some(SessionLookupSource::Codex),
-        }
+    fn active_tab(&self) -> SessionPickerTab {
+        SessionPickerTab::from_state(self.source, self.archive_filter)
     }
 
-    fn next_source(&self) -> Option<SessionLookupSource> {
-        match self.source {
-            SessionLookupSource::Praxis => Some(SessionLookupSource::Codex),
-            SessionLookupSource::Codex => Some(SessionLookupSource::Cursor),
-            SessionLookupSource::Cursor => None,
-        }
+    fn previous_tab(&self) -> Option<SessionPickerTab> {
+        let active = self.active_tab();
+        let index = SessionPickerTab::ORDER
+            .iter()
+            .position(|tab| *tab == active)?;
+        index
+            .checked_sub(1)
+            .and_then(|previous| SessionPickerTab::ORDER.get(previous).copied())
+    }
+
+    fn next_tab(&self) -> Option<SessionPickerTab> {
+        let active = self.active_tab();
+        let index = SessionPickerTab::ORDER
+            .iter()
+            .position(|tab| *tab == active)?;
+        SessionPickerTab::ORDER.get(index + 1).copied()
     }
 
     fn effective_action(&self) -> SessionPickerAction {
@@ -389,31 +452,27 @@ pub(super) fn render_session_picker(area: Rect, buf: &mut Buffer, state: &Sessio
         SessionPickerAction::Resume => "Resume thread",
         SessionPickerAction::Fork => "Fork into Praxis",
     };
-    let source_tabs = [
-        SessionLookupSource::Praxis,
-        SessionLookupSource::Codex,
-        SessionLookupSource::Cursor,
-    ]
-    .into_iter()
-    .map(|source| {
-        let selected = state.source == source;
-        Span::styled(
-            format!(" {} ", source.display_name()),
-            Style::default()
-                .fg(if selected { Color::Black } else { Color::Gray })
-                .bg(if selected {
-                    Color::Rgb(138, 190, 150)
-                } else {
-                    Color::Rgb(31, 34, 34)
-                })
-                .add_modifier(if selected {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        )
-    })
-    .collect::<Vec<_>>();
+    let source_tabs = SessionPickerTab::ORDER
+        .into_iter()
+        .map(|tab| {
+            let selected = state.active_tab() == tab;
+            Span::styled(
+                format!(" {} ", tab.label()),
+                Style::default()
+                    .fg(if selected { Color::Black } else { Color::Gray })
+                    .bg(if selected {
+                        Color::Rgb(138, 190, 150)
+                    } else {
+                        Color::Rgb(31, 34, 34)
+                    })
+                    .add_modifier(if selected {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
+            )
+        })
+        .collect::<Vec<_>>();
     Paragraph::new(Line::from(vec![
         Span::styled(
             format!(" {title} "),
@@ -427,6 +486,8 @@ pub(super) fn render_session_picker(area: Rect, buf: &mut Buffer, state: &Sessio
         source_tabs[1].clone(),
         Span::raw(" "),
         source_tabs[2].clone(),
+        Span::raw(" "),
+        source_tabs[3].clone(),
         Span::styled("   Esc back", Style::default().fg(Color::DarkGray)),
     ]))
     .render(header, buf);

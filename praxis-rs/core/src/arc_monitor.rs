@@ -73,10 +73,11 @@ struct ArcMonitorMetadata {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(dead_code)]
 struct ArcMonitorEvidence {
-    message: String,
-    why: String,
+    #[serde(rename = "message")]
+    _message: String,
+    #[serde(rename = "why")]
+    _why: String,
 }
 
 #[derive(Debug, Deserialize)]

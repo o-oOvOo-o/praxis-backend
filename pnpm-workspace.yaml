@@ -1,7 +1,0 @@
-packages:
-  - praxis-cli
-  - praxis-rs/responses-api-proxy/npm
-
-minimumReleaseAge: 10080
-
-blockExoticSubdeps: true

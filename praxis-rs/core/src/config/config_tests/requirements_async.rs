@@ -412,7 +412,7 @@ async fn feature_requirements_normalize_runtime_feature_mutations() -> std::io::
 }
 
 #[tokio::test]
-async fn feature_requirements_reject_collab_legacy_alias() {
+async fn feature_requirements_reject_removed_collab_alias() {
     let praxis_home = TempDir::new().expect("tempdir");
 
     let err = ConfigBuilder::default()
@@ -427,12 +427,12 @@ async fn feature_requirements_reject_collab_legacy_alias() {
         }))
         .build()
         .await
-        .expect_err("legacy aliases should be rejected");
+        .expect_err("removed aliases should be rejected");
 
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     assert!(
         err.to_string()
-            .contains("use canonical feature key `multi_agent`"),
+            .contains("invalid `features` requirement `collab`"),
         "{err}"
     );
 }

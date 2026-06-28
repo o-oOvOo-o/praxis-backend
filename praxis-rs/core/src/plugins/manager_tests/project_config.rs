@@ -36,7 +36,7 @@ fn load_plugins_ignores_project_config_files() {
     let outcome = load_plugins_from_layer_stack(
         &stack,
         &PluginStore::new(praxis_home.path().to_path_buf()),
-        Some(Product::Praxis),
+        Some(Product::praxis()),
     );
 
     assert_eq!(outcome, PluginLoadOutcome::default());

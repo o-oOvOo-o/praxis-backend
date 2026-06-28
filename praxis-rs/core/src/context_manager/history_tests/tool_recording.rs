@@ -1,27 +1,6 @@
 use super::*;
 
 #[test]
-fn remove_first_item_handles_custom_tool_pair() {
-    let items = vec![
-        ResponseItem::CustomToolCall {
-            id: None,
-            status: None,
-            call_id: "tool-1".to_string(),
-            name: "my_tool".to_string(),
-            input: "{}".to_string(),
-        },
-        ResponseItem::CustomToolCallOutput {
-            call_id: "tool-1".to_string(),
-            name: None,
-            output: FunctionCallOutputPayload::from_text("ok".to_string()),
-        },
-    ];
-    let mut h = create_history_with_items(items);
-    h.remove_first_item();
-    assert_eq!(h.raw_items(), vec![]);
-}
-
-#[test]
 fn normalization_retains_local_shell_outputs() {
     let items = vec![
         ResponseItem::LocalShellCall {

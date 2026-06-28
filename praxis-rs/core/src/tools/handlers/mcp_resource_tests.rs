@@ -94,16 +94,16 @@ fn call_tool_result_from_content_marks_success() {
 #[test]
 fn parse_arguments_handles_empty_and_json() {
     assert!(
-        parse_arguments(" \n\t").unwrap().is_none(),
+        parse_optional_value_arguments(" \n\t").unwrap().is_none(),
         "expected None for empty arguments"
     );
 
     assert!(
-        parse_arguments("null").unwrap().is_none(),
+        parse_optional_value_arguments("null").unwrap().is_none(),
         "expected None for null arguments"
     );
 
-    let value = parse_arguments(r#"{"server":"figma"}"#)
+    let value = parse_optional_value_arguments(r#"{"server":"figma"}"#)
         .expect("parse json")
         .expect("value present");
     assert_eq!(value["server"], json!("figma"));

@@ -47,13 +47,13 @@ async fn fork_thread_twice_drops_to_first_message() {
     // Send three user messages; wait for three completed turns.
     for text in ["first", "second", "third"] {
         codex
-            .submit(Op::UserInput {
-                items: vec![UserInput::Text {
+            .submit_user_turn(
+                vec![UserInput::Text {
                     text: text.to_string(),
                     text_elements: Vec::new(),
                 }],
-                final_output_json_schema: None,
-            })
+                None,
+            )
             .await
             .unwrap();
         let _ = wait_for_event(&praxis, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;

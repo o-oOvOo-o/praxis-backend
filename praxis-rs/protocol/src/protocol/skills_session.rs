@@ -1,43 +1,137 @@
 use super::*;
+use std::fmt;
+use std::ops::Deref;
+use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "lowercase")]
-#[ts(rename_all = "lowercase")]
-pub enum Product {
-    #[serde(alias = "CHATGPT")]
-    Chatgpt,
-    #[serde(alias = "CODEX", alias = "codex")]
-    Praxis,
-    #[serde(alias = "ATLAS")]
-    Atlas,
-    #[serde(alias = "CUNNING3D", alias = "c3d", alias = "C3D")]
-    Cunning3d,
-}
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(try_from = "String", into = "String")]
+#[schemars(with = "String")]
+#[ts(type = "string")]
+pub struct Product(String);
+
 impl Product {
-    pub fn to_app_platform(self) -> &'static str {
-        match self {
-            Self::Chatgpt => "chat",
-            Self::Praxis => "praxis",
-            Self::Atlas => "atlas",
-            Self::Cunning3d => "cunning3d",
+    pub const CHATGPT: &'static str = "chatgpt";
+    pub const PRAXIS: &'static str = "praxis";
+    pub const ATLAS: &'static str = "atlas";
+    pub const CUNNING3D: &'static str = "cunning3d";
+
+    pub fn new(value: impl AsRef<str>) -> Result<Self, String> {
+        let normalized = canonical_product_id(value.as_ref())?;
+        Ok(Self(normalized))
+    }
+
+    pub fn chatgpt() -> Self {
+        Self(Self::CHATGPT.to_string())
+    }
+
+    pub fn praxis() -> Self {
+        Self(Self::PRAXIS.to_string())
+    }
+
+    pub fn atlas() -> Self {
+        Self(Self::ATLAS.to_string())
+    }
+
+    pub fn cunning3d() -> Self {
+        Self(Self::CUNNING3D.to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub fn is_praxis(&self) -> bool {
+        self.as_str() == Self::PRAXIS
+    }
+
+    pub fn to_app_platform(&self) -> &str {
+        match self.as_str() {
+            Self::CHATGPT => "chat",
+            other => other,
         }
     }
 
     pub fn from_session_source_name(value: &str) -> Option<Self> {
-        let normalized = value.trim().to_ascii_lowercase();
-        match normalized.as_str() {
-            "chatgpt" => Some(Self::Chatgpt),
-            "praxis" | "codex" => Some(Self::Praxis),
-            "atlas" => Some(Self::Atlas),
-            "cunning3d" | "cunning3d-desktop" | "cunning3d_desktop" | "c3d" => {
-                Some(Self::Cunning3d)
-            }
-            _ => None,
-        }
+        Self::new(value).ok()
     }
 
     pub fn matches_product_restriction(&self, products: &[Product]) -> bool {
         products.is_empty() || products.contains(self)
+    }
+}
+
+impl TryFrom<String> for Product {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl TryFrom<&str> for Product {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl From<Product> for String {
+    fn from(value: Product) -> Self {
+        value.0
+    }
+}
+
+impl FromStr for Product {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
+    }
+}
+
+impl AsRef<str> for Product {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Deref for Product {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl fmt::Display for Product {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+fn canonical_product_id(value: &str) -> Result<String, String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err("product id must not be empty".to_string());
+    }
+    let canonical = match normalized.as_str() {
+        "codex" => Product::PRAXIS,
+        "c3d" | "cunning3d-desktop" | "cunning3d_desktop" => Product::CUNNING3D,
+        other => other,
+    };
+    validate_product_id(canonical)?;
+    Ok(canonical.to_string())
+}
+
+fn validate_product_id(value: &str) -> Result<(), String> {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
+    {
+        Ok(())
+    } else {
+        Err("product id must use lowercase letters, digits, '-' or '_'".to_string())
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -237,6 +331,24 @@ pub struct ThreadGoal {
     pub time_used_seconds: i64,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "protocol/")]
+pub struct ThreadHeartbeat {
+    pub thread_id: ThreadId,
+    pub enabled: bool,
+    pub interval_ms: i64,
+    pub next_wake_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub last_wake_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub controller: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]

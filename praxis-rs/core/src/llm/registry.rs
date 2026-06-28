@@ -46,10 +46,6 @@ impl LlmProfileRegistry {
             .find(|profile| profile.matches(ctx))
     }
 
-    pub(crate) fn model_catalogs(&self) -> &[LlmModelCatalogDescriptor] {
-        &self.model_catalogs
-    }
-
     pub(crate) fn provider_accepts_known_first_party_model(
         &self,
         provider_id: &str,

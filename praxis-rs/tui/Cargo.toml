@@ -50,6 +50,7 @@ praxis-utils-absolute-path = { workspace = true }
 praxis-utils-cli = { workspace = true }
 praxis-utils-elapsed = { workspace = true }
 praxis-utils-fuzzy-match = { workspace = true }
+praxis-utils-home-dir = { workspace = true }
 praxis-utils-oss = { workspace = true }
 praxis-utils-sandbox-summary = { workspace = true }
 praxis-utils-sleep-inhibitor = { workspace = true }

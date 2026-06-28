@@ -1,8 +1,8 @@
 use crate::ApprovalDecision;
 use crate::ApprovalRequest;
 use crate::state::ResolvedTurnPermissions;
+use crate::tool_safety::SafetyToolKind;
 use crate::tool_safety::SandboxExecutionPlan;
-use crate::tool_safety::ToolKind;
 use praxis_protocol::protocol::AskForApproval;
 
 #[derive(Debug, Clone)]
@@ -10,7 +10,7 @@ pub struct ToolSafetyRequest<'a> {
     pub id: &'a str,
     pub thread_id: Option<&'a str>,
     pub turn_id: Option<&'a str>,
-    pub kind: ToolKind,
+    pub kind: SafetyToolKind,
     pub permissions: &'a ResolvedTurnPermissions,
     pub approval_required: bool,
     pub reason: Option<&'a str>,

@@ -560,11 +560,11 @@ mod phase2 {
             assert!(report.timed_out.is_empty());
         }
 
-        fn user_input_ops_count(&self) -> usize {
+        fn user_turn_ops_count(&self) -> usize {
             self.manager
                 .captured_ops()
                 .into_iter()
-                .filter(|(_, op)| matches!(op, Op::UserInput { .. }))
+                .filter(|(_, op)| matches!(op, Op::UserTurn { .. }))
                 .count()
         }
     }
@@ -598,7 +598,7 @@ mod phase2 {
 
         phase2::run(&harness.session, Arc::clone(&harness.config)).await;
 
-        pretty_assertions::assert_eq!(harness.user_input_ops_count(), 0);
+        pretty_assertions::assert_eq!(harness.user_turn_ops_count(), 0);
         let thread_ids = harness.manager.list_thread_ids().await;
         pretty_assertions::assert_eq!(thread_ids.len(), 0);
     }
@@ -629,7 +629,7 @@ mod phase2 {
             .await
             .expect("claim while lock is still running");
         pretty_assertions::assert_eq!(running_claim, Phase2JobClaimOutcome::SkippedRunning);
-        pretty_assertions::assert_eq!(harness.user_input_ops_count(), 0);
+        pretty_assertions::assert_eq!(harness.user_turn_ops_count(), 0);
         let thread_ids = harness.manager.list_thread_ids().await;
         pretty_assertions::assert_eq!(thread_ids.len(), 0);
     }
@@ -664,8 +664,8 @@ mod phase2 {
             "stale-lock dispatch should either keep the reclaimed job running or finish it before re-claim"
         );
 
-        let user_input_ops = harness.user_input_ops_count();
-        pretty_assertions::assert_eq!(user_input_ops, 1);
+        let user_turn_ops = harness.user_turn_ops_count();
+        pretty_assertions::assert_eq!(user_turn_ops, 1);
         let thread_ids = harness.manager.list_thread_ids().await;
         pretty_assertions::assert_eq!(thread_ids.len(), 1);
         let thread_id = thread_ids[0];
@@ -808,7 +808,7 @@ mod phase2 {
             .await
             .expect("claim global job after empty consolidation success");
         pretty_assertions::assert_eq!(next_claim, Phase2JobClaimOutcome::SkippedNotDirty);
-        pretty_assertions::assert_eq!(harness.user_input_ops_count(), 0);
+        pretty_assertions::assert_eq!(harness.user_turn_ops_count(), 0);
         let thread_ids = harness.manager.list_thread_ids().await;
         pretty_assertions::assert_eq!(thread_ids.len(), 0);
 
@@ -835,7 +835,7 @@ mod phase2 {
             .await
             .expect("claim global job after sandbox policy failure");
         pretty_assertions::assert_eq!(retry_claim, Phase2JobClaimOutcome::SkippedNotDirty);
-        pretty_assertions::assert_eq!(harness.user_input_ops_count(), 0);
+        pretty_assertions::assert_eq!(harness.user_turn_ops_count(), 0);
         let thread_ids = harness.manager.list_thread_ids().await;
         pretty_assertions::assert_eq!(thread_ids.len(), 0);
     }
@@ -857,7 +857,7 @@ mod phase2 {
             .await
             .expect("claim global job after sync failure");
         pretty_assertions::assert_eq!(retry_claim, Phase2JobClaimOutcome::SkippedNotDirty);
-        pretty_assertions::assert_eq!(harness.user_input_ops_count(), 0);
+        pretty_assertions::assert_eq!(harness.user_turn_ops_count(), 0);
         let thread_ids = harness.manager.list_thread_ids().await;
         pretty_assertions::assert_eq!(thread_ids.len(), 0);
     }
@@ -879,7 +879,7 @@ mod phase2 {
             .await
             .expect("claim global job after rebuild failure");
         pretty_assertions::assert_eq!(retry_claim, Phase2JobClaimOutcome::SkippedNotDirty);
-        pretty_assertions::assert_eq!(harness.user_input_ops_count(), 0);
+        pretty_assertions::assert_eq!(harness.user_turn_ops_count(), 0);
         let thread_ids = harness.manager.list_thread_ids().await;
         pretty_assertions::assert_eq!(thread_ids.len(), 0);
     }

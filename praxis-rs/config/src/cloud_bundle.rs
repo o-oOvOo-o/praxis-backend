@@ -21,12 +21,12 @@ impl CloudConfigBundle {
             && self.requirements_toml.parsed_enterprise_managed.is_empty()
     }
 
-    pub fn from_legacy_requirements(requirements: ConfigRequirementsToml) -> Self {
+    pub fn from_single_requirements(requirements: ConfigRequirementsToml) -> Self {
         Self {
             config_toml: CloudConfigTomlBundle::default(),
             requirements_toml: CloudRequirementsTomlBundle {
                 parsed_enterprise_managed: vec![CloudRequirementsParsedFragment {
-                    id: "legacy-cloud-requirements".to_string(),
+                    id: "single-cloud-requirements".to_string(),
                     name: "Cloud requirements".to_string(),
                     requirements,
                 }],

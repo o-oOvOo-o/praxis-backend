@@ -9,6 +9,7 @@ use crate::llm::tasks::title::AutoTitleProfile;
 pub(crate) fn profile() -> ProfileDescriptor {
     ProfileDescriptor {
         id: BehaviorProfileId::OpenRouter,
+        #[cfg(test)]
         label: "OpenRouter",
         instructions: None,
         prompt_layers: &[],

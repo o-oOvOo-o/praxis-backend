@@ -16,6 +16,7 @@ use super::surface_layout::ChatWidgetLayout;
 use crate::history_cell;
 use crate::history_cell::ChatLane;
 use crate::history_cell::HistoryCell;
+use crate::history_cell::HistoryCellMouseAction;
 use crate::workspace::WorkspaceTranscriptRequest;
 use crate::workspace::WorkspaceTranscriptTail;
 use crate::workspace::WorkspaceTranscriptViewport;
@@ -50,6 +51,26 @@ impl ChatWidget {
                 .borrow_mut()
                 .viewport(request),
         )
+    }
+
+    pub(crate) fn workspace_transcript_mouse_action(
+        &self,
+        area: Rect,
+        transcript_cells: &[Arc<dyn HistoryCell>],
+        scroll_from_bottom: usize,
+        column: u16,
+        row: u16,
+    ) -> Option<HistoryCellMouseAction> {
+        let transcript_area = self
+            .embedded_mouse_selection_areas(area, transcript_cells)
+            .transcript?;
+        let layout = ChatWidgetLayout {
+            active_content_area: Some(transcript_area),
+            ..ChatWidgetLayout::default()
+        };
+        let viewport =
+            self.workspace_transcript_viewport(layout, transcript_cells, scroll_from_bottom)?;
+        viewport.mouse_action_at(column, row)
     }
 
     pub(super) fn workspace_transcript_scroll_limit(
@@ -93,6 +114,7 @@ impl ChatWidget {
                 .active_cell
                 .as_ref()
                 .and_then(|cell| cell.patch_cell_id()),
+            mouse_targets: cache.mouse_targets.clone(),
         })
     }
 
@@ -117,8 +139,16 @@ impl ChatWidget {
                 let cache = self.active_cell_render_cache(lane_width)?;
                 wrap_workspace_transcript_lines(cache.lines.clone(), lane_width)
             };
-            *self.workspace_active_tail_cache.borrow_mut() =
-                Some(WorkspaceActiveTailCache { key, lane, lines });
+            let mouse_targets = {
+                let cache = self.active_cell_render_cache(lane_width)?;
+                cache.mouse_targets.clone()
+            };
+            *self.workspace_active_tail_cache.borrow_mut() = Some(WorkspaceActiveTailCache {
+                key,
+                lane,
+                lines,
+                mouse_targets,
+            });
         }
 
         Some(Ref::map(

@@ -1,4 +1,5 @@
 use crate::CommandToolOptions;
+use crate::LIST_DIRECTORY_TOOL_NAME;
 use crate::REQUEST_USER_INPUT_TOOL_NAME;
 use crate::ShellToolOptions;
 use crate::SpawnAgentToolOptions;
@@ -27,7 +28,7 @@ use crate::create_exec_command_tool;
 use crate::create_get_goal_tool;
 use crate::create_image_generation_tool;
 use crate::create_list_agents_tool;
-use crate::create_list_dir_tool;
+use crate::create_list_directory_tool;
 use crate::create_list_mcp_resource_templates_tool;
 use crate::create_list_mcp_resources_tool;
 use crate::create_local_shell_tool;
@@ -59,6 +60,7 @@ use crate::dynamic_tool_to_responses_api_tool;
 use crate::mcp_tool_to_responses_api_tool;
 use crate::request_permissions_tool_description;
 use crate::request_user_input_tool_description;
+use crate::reverse_engineering_tool_specs;
 use crate::tool_registry_plan::build_tool_registry_plan;
 use crate::tool_registry_plan_types::agent_type_description;
 use praxis_protocol::openai_models::ApplyPatchToolType;
@@ -86,6 +88,7 @@ pub(crate) enum BuiltinToolPlugin {
     Utility,
     WebSearch,
     ImageGeneration,
+    ReverseEngineering,
     ViewImage,
     MultiAgent,
     AgentJobs,
@@ -93,7 +96,7 @@ pub(crate) enum BuiltinToolPlugin {
     Dynamic,
 }
 
-pub(crate) fn builtin_tool_plugins() -> [BuiltinToolPlugin; 15] {
+pub(crate) fn builtin_tool_plugins() -> [BuiltinToolPlugin; 16] {
     [
         BuiltinToolPlugin::CodeMode,
         BuiltinToolPlugin::Shell,
@@ -105,6 +108,7 @@ pub(crate) fn builtin_tool_plugins() -> [BuiltinToolPlugin; 15] {
         BuiltinToolPlugin::Utility,
         BuiltinToolPlugin::WebSearch,
         BuiltinToolPlugin::ImageGeneration,
+        BuiltinToolPlugin::ReverseEngineering,
         BuiltinToolPlugin::ViewImage,
         BuiltinToolPlugin::MultiAgent,
         BuiltinToolPlugin::AgentJobs,
@@ -131,6 +135,7 @@ impl ToolPlugin for BuiltinToolPlugin {
             Self::Utility => register_utility(plan, config),
             Self::WebSearch => register_web_search(plan, config),
             Self::ImageGeneration => register_image_generation(plan, config),
+            Self::ReverseEngineering => register_reverse_engineering(plan, config),
             Self::ViewImage => register_view_image(plan, config),
             Self::MultiAgent => register_multi_agent(plan, config, params),
             Self::AgentJobs => register_agent_jobs(plan, config),
@@ -393,17 +398,13 @@ fn register_apply_patch(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {
 }
 
 fn register_utility(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {
-    if config
-        .experimental_supported_tools
-        .iter()
-        .any(|tool| tool == "list_dir")
-    {
+    if config.file_navigation_tools {
         plan.push_spec(
-            create_list_dir_tool(),
+            create_list_directory_tool(),
             /*supports_parallel_tool_calls*/ true,
             config.code_mode_enabled,
         );
-        plan.register_handler("list_dir", ToolHandlerKind::ListDir);
+        plan.register_handler(LIST_DIRECTORY_TOOL_NAME, ToolHandlerKind::ListDirectory);
     }
 
     if config
@@ -447,6 +448,21 @@ fn register_image_generation(plan: &mut ToolRegistryPlan, config: &ToolsConfig) 
             /*supports_parallel_tool_calls*/ false,
             config.code_mode_enabled,
         );
+    }
+}
+
+fn register_reverse_engineering(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {
+    if !config.reverse_engineering_enabled {
+        return;
+    }
+    for spec in reverse_engineering_tool_specs() {
+        let name = spec.name().to_string();
+        plan.push_spec(
+            spec,
+            /*supports_parallel_tool_calls*/ false,
+            config.code_mode_enabled,
+        );
+        plan.register_handler(name, ToolHandlerKind::ReverseEngineering);
     }
 }
 

@@ -24,6 +24,7 @@ use core_test_support::responses::sse;
 use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::PraxisThread;
+use praxis_core::RolloutRecorder;
 use praxis_core::ThreadManager;
 use praxis_core::compact::SUMMARIZATION_PROMPT;
 use praxis_core::config::Config;
@@ -803,13 +804,13 @@ async fn start_test_conversation(
 
 async fn user_turn(conversation: &Arc<PraxisThread>, text: &str) {
     conversation
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: text.into(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await
         .expect("submit user turn");
     wait_for_event(conversation, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
@@ -846,10 +847,14 @@ async fn resume_conversation(
     let auth_manager = praxis_core::test_support::auth_manager_from_auth(
         praxis_login::OpenAiAccountAuth::from_api_key("dummy"),
     );
-    Box::pin(manager.resume_thread_from_rollout(
+    let initial_history = RolloutRecorder::get_rollout_history(&path)
+        .await
+        .expect("read rollout history");
+    Box::pin(manager.resume_thread_with_history(
         config.clone(),
-        path,
+        initial_history,
         auth_manager,
+        /*persist_extended_history*/ false,
         /*parent_trace*/ None,
     ))
     .await

@@ -17,7 +17,7 @@ impl SessionConfiguration {
     pub(crate) fn apply(&self, updates: &SessionSettingsUpdate) -> ConstraintResult<Self> {
         let mut next_configuration = self.clone();
         let file_system_policy_matches_legacy = self.file_system_sandbox_policy
-            == FileSystemSandboxPolicy::from_legacy_sandbox_policy(
+            == FileSystemSandboxPolicy::from_sandbox_policy(
                 self.sandbox_policy.get(),
                 &self.cwd,
             );
@@ -100,7 +100,7 @@ impl SessionConfiguration {
         next_configuration.cwd = absolute_cwd;
         if sandbox_policy_changed || (cwd_changed && file_system_policy_matches_legacy) {
             next_configuration.file_system_sandbox_policy =
-                FileSystemSandboxPolicy::from_legacy_sandbox_policy(
+                FileSystemSandboxPolicy::from_sandbox_policy(
                     next_configuration.sandbox_policy.get(),
                     &next_configuration.cwd,
                 );

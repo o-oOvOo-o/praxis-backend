@@ -93,9 +93,9 @@ pub struct GatewayCapability {
 #[serde(rename_all = "camelCase")]
 pub struct HostExtensionInfo {
     pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(default)]
     pub host_kind: HostKind,
@@ -498,15 +498,75 @@ client_request_definitions! {
         params: api::ThreadGoalClearParams,
         response: api::ThreadGoalClearResponse,
     },
-    #[experimental("thread/control/acquire")]
-    ThreadControlAcquire => "thread/control/acquire" {
-        params: api::ThreadControlAcquireParams,
-        response: api::ThreadControlAcquireResponse,
+    ThreadHeartbeatGet => "thread/heartbeat/get" {
+        params: api::ThreadHeartbeatGetParams,
+        response: api::ThreadHeartbeatGetResponse,
+    },
+    ThreadHeartbeatSet => "thread/heartbeat/set" {
+        params: api::ThreadHeartbeatSetParams,
+        response: api::ThreadHeartbeatSetResponse,
+    },
+    ThreadHeartbeatClear => "thread/heartbeat/clear" {
+        params: api::ThreadHeartbeatClearParams,
+        response: api::ThreadHeartbeatClearResponse,
+    },
+    AutomationList => "automation/list" {
+        params: api::AutomationListParams,
+        response: api::AutomationListResponse,
+    },
+    AutomationGet => "automation/get" {
+        params: api::AutomationGetParams,
+        response: api::AutomationGetResponse,
+    },
+    AutomationCreate => "automation/create" {
+        params: api::AutomationCreateParams,
+        response: api::AutomationCreateResponse,
+    },
+    AutomationUpdate => "automation/update" {
+        params: api::AutomationUpdateParams,
+        response: api::AutomationUpdateResponse,
+    },
+    AutomationDelete => "automation/delete" {
+        params: api::AutomationDeleteParams,
+        response: api::AutomationDeleteResponse,
+    },
+    AutomationHistory => "automation/history" {
+        params: api::AutomationHistoryParams,
+        response: api::AutomationHistoryResponse,
+    },
+    AutomationRunNow => "automation/runNow" {
+        params: api::AutomationRunNowParams,
+        response: api::AutomationRunNowResponse,
+    },
+    #[experimental("thread/control/snapshot")]
+    ThreadControlSnapshot => "thread/control/snapshot" {
+        params: api::ThreadControlSnapshotParams,
+        response: api::ThreadControlSnapshotResponse,
+    },
+    #[experimental("thread/control/claim")]
+    ThreadControlClaim => "thread/control/claim" {
+        params: api::ThreadControlClaimParams,
+        response: api::ThreadControlClaimResponse,
     },
     #[experimental("thread/control/release")]
     ThreadControlRelease => "thread/control/release" {
         params: api::ThreadControlReleaseParams,
         response: api::ThreadControlReleaseResponse,
+    },
+    #[experimental("thread/control/queue")]
+    ThreadControlQueue => "thread/control/queue" {
+        params: api::ThreadControlQueueParams,
+        response: api::ThreadControlQueueResponse,
+    },
+    #[experimental("thread/control/queue/cancel")]
+    ThreadControlQueueCancel => "thread/control/queue/cancel" {
+        params: api::ThreadControlQueueCancelParams,
+        response: api::ThreadControlQueueCancelResponse,
+    },
+    #[experimental("thread/control/queue/flush")]
+    ThreadControlQueueFlush => "thread/control/queue/flush" {
+        params: api::ThreadControlQueueFlushParams,
+        response: api::ThreadControlQueueFlushResponse,
     },
     SkillsList => "skills/list" {
         params: api::SkillsListParams,
@@ -995,12 +1055,6 @@ server_request_definitions! {
         response: api::DynamicToolCallResponse,
     },
 
-    /// Execute a product-level bridge command on an attached host extension.
-    Cunning3dBridgeCall => "cunning3d/bridge/call" {
-        params: api::Cunning3dBridgeCallParams,
-        response: api::Cunning3dBridgeCallResponse,
-    },
-
     ChatgptAuthTokensRefresh => "account/chatgptAuthTokens/refresh" {
         params: api::ChatgptAuthTokensRefreshParams,
         response: api::ChatgptAuthTokensRefreshResponse,
@@ -1104,6 +1158,8 @@ server_notification_definitions! {
     ThreadControlChanged => "thread/control/changed" (api::ThreadControlChangedNotification),
     ThreadGoalUpdated => "thread/goal/updated" (api::ThreadGoalUpdatedNotification),
     ThreadGoalCleared => "thread/goal/cleared" (api::ThreadGoalClearedNotification),
+    ThreadHeartbeatUpdated => "thread/heartbeat/updated" (api::ThreadHeartbeatUpdatedNotification),
+    AutomationRunUpdated => "automation/run/updated" (api::AutomationRunUpdatedNotification),
     ThreadModelChanged => "thread/model/changed" (api::ThreadModelChangedNotification),
     TurnStarted => "turn/started" (api::TurnStartedNotification),
     HookStarted => "hook/started" (api::HookStartedNotification),

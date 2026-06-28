@@ -35,7 +35,7 @@ pub(super) fn resolve_profile_prompt(
 
 pub(super) fn resolve_product_prompt(
     plugin_manifests: &[PluginLlmManifest],
-    product: ProductProfileId,
+    product: &ProductProfileId,
     purpose: LlmPromptPurpose,
 ) -> Option<String> {
     plugin_manifests
@@ -76,14 +76,14 @@ pub(super) fn profile_tools_policy_path(
 
 pub(super) fn product_task_policy_path(
     plugin_manifests: &[PluginLlmManifest],
-    product: ProductProfileId,
+    product: &ProductProfileId,
 ) -> Option<AbsolutePathBuf> {
     find_product(plugin_manifests, product).and_then(|plugin_product| plugin_product.tasks.clone())
 }
 
 pub(super) fn product_tools_policy_path(
     plugin_manifests: &[PluginLlmManifest],
-    product: ProductProfileId,
+    product: &ProductProfileId,
 ) -> Option<AbsolutePathBuf> {
     find_product(plugin_manifests, product).and_then(|plugin_product| plugin_product.tools.clone())
 }
@@ -120,10 +120,10 @@ fn find_profile<'a>(
         })
 }
 
-fn find_product(
-    plugin_manifests: &[PluginLlmManifest],
-    product: ProductProfileId,
-) -> Option<&praxis_plugin::PluginLlmProduct> {
+fn find_product<'a>(
+    plugin_manifests: &'a [PluginLlmManifest],
+    product: &ProductProfileId,
+) -> Option<&'a praxis_plugin::PluginLlmProduct> {
     plugin_manifests
         .iter()
         .flat_map(|manifest| manifest.products.iter())

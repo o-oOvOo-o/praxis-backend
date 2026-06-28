@@ -52,8 +52,8 @@ pub(super) async fn dispatch_op(
             override_turn_context::handle(sess, sub_id, op).await;
             DispatchOutcome::Continue
         }
-        op @ (Op::UserInput { .. } | Op::UserTurn { .. }) => {
-            sess.submit_user_input_or_turn(sub_id, op).await;
+        op @ Op::UserTurn { .. } => {
+            sess.submit_user_turn(sub_id, op).await;
             DispatchOutcome::Continue
         }
         Op::InterAgentCommunication { communication } => {

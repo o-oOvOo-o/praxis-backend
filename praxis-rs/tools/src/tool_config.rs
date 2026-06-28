@@ -117,7 +117,9 @@ pub struct ToolsConfig {
     pub web_search_tool_type: WebSearchToolType,
     pub tool_capabilities: ToolCapabilityConfig,
     pub image_gen_tool: bool,
+    pub reverse_engineering_enabled: bool,
     pub search_tool: bool,
+    pub file_navigation_tools: bool,
     pub tool_suggest: bool,
     pub exec_permission_approvals_enabled: bool,
     pub request_permissions_tool_enabled: bool,
@@ -164,6 +166,7 @@ impl ToolsConfig {
             include_request_user_input && features.enabled(Feature::DefaultModeRequestUserInput);
         let include_search_tool =
             model_info.supports_search_tool && features.enabled(Feature::ToolSearch);
+        let include_file_navigation_tools = features.enabled(Feature::FileNavigation);
         let default_web_search_backend = match web_search_mode {
             Some(WebSearchMode::Cached | WebSearchMode::Live) => {
                 Some(ToolWebSearchBackend::Responses)
@@ -176,6 +179,7 @@ impl ToolsConfig {
         let include_original_image_detail = can_request_original_image_detail(features, model_info);
         let include_image_gen_tool =
             features.enabled(Feature::ImageGeneration) && supports_image_generation(model_info);
+        let reverse_engineering_enabled = features.enabled(Feature::ReverseEngineering);
         let exec_permission_approvals_enabled = features.enabled(Feature::ExecPermissionApprovals);
         let request_permissions_tool_enabled = features.enabled(Feature::RequestPermissionsTool);
         let shell_command_backend =
@@ -233,7 +237,9 @@ impl ToolsConfig {
                 web_search_backend: default_web_search_backend,
             },
             image_gen_tool: include_image_gen_tool,
+            reverse_engineering_enabled,
             search_tool: include_search_tool,
+            file_navigation_tools: include_file_navigation_tools,
             tool_suggest: include_tool_suggest,
             exec_permission_approvals_enabled,
             request_permissions_tool_enabled,

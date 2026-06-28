@@ -1,6 +1,6 @@
 use crate::approval_response_bridge::command_execution_approval_response_outcome;
 use crate::approval_response_bridge::file_change_approval_response_outcome;
-use crate::approval_response_bridge::map_file_change_approval_decision;
+use crate::automation_projection::api_automation_run_from_state;
 use crate::client_response_decode::ClientResponseValue;
 use crate::client_response_decode::PendingClientResponse;
 use crate::client_response_decode::decode_response_value_or_default;
@@ -36,6 +36,7 @@ use crate::thread_status::ThreadWatchManager;
 use praxis_app_gateway_protocol::AccountRateLimitsUpdatedNotification;
 use praxis_app_gateway_protocol::AdditionalPermissionProfile as ApiAdditionalPermissionProfile;
 use praxis_app_gateway_protocol::AgentMessageDeltaNotification;
+use praxis_app_gateway_protocol::AutomationRunUpdatedNotification;
 use praxis_app_gateway_protocol::CommandAction as ApiParsedCommand;
 use praxis_app_gateway_protocol::CommandExecutionApprovalDecision;
 use praxis_app_gateway_protocol::CommandExecutionOutputDeltaNotification;
@@ -110,7 +111,6 @@ use praxis_core::review_format::render_review_output_text;
 use praxis_core::review_prompts;
 use praxis_protocol::ThreadId;
 use praxis_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDynamicToolCallOutputContentItem;
-use praxis_protocol::dynamic_tools::DynamicToolResponse as CoreDynamicToolResponse;
 use praxis_protocol::items::parse_hook_prompt_message;
 use praxis_protocol::plan_tool::UpdatePlanArgs;
 use praxis_protocol::protocol::ApplyPatchApprovalRequestEvent;
@@ -121,16 +121,16 @@ use praxis_protocol::protocol::ExecCommandEndEvent;
 use praxis_protocol::protocol::GuardianAssessmentEvent;
 use praxis_protocol::protocol::Op;
 use praxis_protocol::protocol::PraxisErrorInfo as CorePraxisErrorInfo;
-use praxis_protocol::protocol::ReviewOutputEvent;
 use praxis_protocol::protocol::TokenCountEvent;
 use praxis_protocol::protocol::TurnDiffEvent;
-use praxis_protocol::request_permissions::PermissionGrantScope as CorePermissionGrantScope;
 use praxis_protocol::request_permissions::RequestPermissionProfile as CoreRequestPermissionProfile;
 use praxis_protocol::request_permissions::RequestPermissionsResponse as CoreRequestPermissionsResponse;
 use praxis_protocol::request_user_input::RequestUserInputAnswer as CoreRequestUserInputAnswer;
 use praxis_protocol::request_user_input::RequestUserInputResponse as CoreRequestUserInputResponse;
 use praxis_sandboxing::policy_transforms::intersect_permission_profiles;
 use praxis_shell_command::parse_command::shlex_join;
+use praxis_state::AutomationRunStatus;
+use praxis_state::StateRuntime;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::path::Path;
@@ -146,19 +146,14 @@ mod turn_handlers;
 
 use approval_requests::{handle_apply_patch_approval_request, handle_exec_approval_request};
 use turn_handlers::{
-    complete_command_execution_item, complete_file_change_item, emit_turn_completed_with_status,
-    find_and_remove_turn_summary, handle_error, handle_thread_rollback_failed,
-    handle_token_count_event, handle_turn_complete, handle_turn_diff, handle_turn_interrupted,
-    handle_turn_plan_update, maybe_emit_hook_prompt_item_completed,
-    maybe_emit_raw_response_item_completed, mcp_server_elicitation_response_from_client_result,
+    complete_file_change_item, finish_automation_runs_for_turn, handle_error,
+    handle_thread_rollback_failed, handle_token_count_event, handle_turn_complete,
+    handle_turn_diff, handle_turn_interrupted, handle_turn_plan_update,
+    maybe_emit_hook_prompt_item_completed, maybe_emit_raw_response_item_completed,
     on_command_execution_request_approval_response, on_file_change_request_approval_response,
     on_mcp_server_elicitation_response, on_request_permissions_response,
-    on_request_user_input_response, request_permissions_response_from_client_result,
+    on_request_user_input_response,
 };
-
-use tracing::warn;
-
-type JsonValue = serde_json::Value;
 
 enum CommandExecutionApprovalPresentation {
     Network(ApiNetworkApprovalContext),
@@ -243,6 +238,7 @@ pub(crate) async fn apply_bespoke_event_handling(
     thread_watch_manager: ThreadWatchManager,
     fallback_model_provider: String,
     praxis_home: &Path,
+    state_db: Option<Arc<StateRuntime>>,
 ) {
     let Event {
         id: event_turn_id,
@@ -283,7 +279,19 @@ pub(crate) async fn apply_bespoke_event_handling(
             thread_watch_manager
                 .note_turn_completed(&conversation_id.to_string(), turn_failed)
                 .await;
-            handle_turn_complete(conversation_id, event_turn_id, &outgoing, &thread_state).await;
+            let turn_id = event_turn_id.clone();
+            let (status, error) =
+                handle_turn_complete(conversation_id, event_turn_id, &outgoing, &thread_state)
+                    .await;
+            finish_automation_runs_for_turn(
+                state_db.as_ref(),
+                &conversation_id,
+                turn_id.as_str(),
+                &status,
+                error.as_ref(),
+                &outgoing,
+            )
+            .await;
         }
         EventMsg::SkillsUpdateAvailable => {
             outgoing
@@ -1074,7 +1082,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             item_sink.item_completed(item).await;
         }
         // If this is a TurnAborted, reply to any pending interrupt requests.
-        EventMsg::TurnAborted(turn_aborted_event) => {
+        EventMsg::TurnAborted(_) => {
             // All per-thread requests are bound to a turn, so abort them.
             outgoing.abort_pending_server_requests().await;
             let pending = {
@@ -1090,7 +1098,19 @@ pub(crate) async fn apply_bespoke_event_handling(
             thread_watch_manager
                 .note_turn_interrupted(&conversation_id.to_string())
                 .await;
-            handle_turn_interrupted(conversation_id, event_turn_id, &outgoing, &thread_state).await;
+            let turn_id = event_turn_id.clone();
+            let (status, error) =
+                handle_turn_interrupted(conversation_id, event_turn_id, &outgoing, &thread_state)
+                    .await;
+            finish_automation_runs_for_turn(
+                state_db.as_ref(),
+                &conversation_id,
+                turn_id.as_str(),
+                &status,
+                error.as_ref(),
+                &outgoing,
+            )
+            .await;
         }
         EventMsg::ThreadRolledBack(_rollback_event) => {
             let pending = {

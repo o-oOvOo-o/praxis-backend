@@ -1,57 +1,6 @@
 use super::*;
 
 #[tokio::test]
-async fn managed_config_overrides_oauth_store_mode() -> anyhow::Result<()> {
-    let praxis_home = TempDir::new()?;
-    let managed_path = praxis_home.path().join("managed_config.toml");
-    let config_path = praxis_home.path().join(CONFIG_TOML_FILE);
-
-    std::fs::write(&config_path, "mcp_oauth_credentials_store = \"file\"\n")?;
-    std::fs::write(&managed_path, "mcp_oauth_credentials_store = \"keyring\"\n")?;
-
-    let overrides = LoaderOverrides {
-        managed_config_path: Some(managed_path.clone()),
-        #[cfg(target_os = "macos")]
-        managed_preferences_base64: None,
-        macos_managed_config_requirements_base64: None,
-    };
-
-    let cwd = praxis_home.path().abs();
-    let config_layer_stack = load_config_layers_state(
-        praxis_home.path(),
-        Some(cwd),
-        &Vec::new(),
-        overrides,
-        CloudRequirementsLoader::default(),
-    )
-    .await?;
-    let cfg = deserialize_config_toml_with_base(
-        config_layer_stack.effective_config(),
-        praxis_home.path(),
-    )
-    .map_err(|e| {
-        tracing::error!("Failed to deserialize overridden config: {e}");
-        e
-    })?;
-    assert_eq!(
-        cfg.mcp_oauth_credentials_store,
-        Some(OAuthCredentialsStoreMode::Keyring),
-    );
-
-    let final_config = Config::load_from_base_config_with_overrides(
-        cfg,
-        ConfigOverrides::default(),
-        praxis_home.path().to_path_buf(),
-    )?;
-    assert_eq!(
-        final_config.mcp_oauth_credentials_store_mode,
-        OAuthCredentialsStoreMode::Keyring,
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn load_global_mcp_servers_returns_empty_if_missing() -> anyhow::Result<()> {
     let praxis_home = TempDir::new()?;
 
@@ -127,47 +76,6 @@ async fn replace_mcp_servers_round_trips_entries() -> anyhow::Result<()> {
     let loaded = load_global_mcp_servers(praxis_home.path()).await?;
     assert!(loaded.is_empty());
 
-    Ok(())
-}
-
-#[tokio::test]
-async fn managed_config_wins_over_cli_overrides() -> anyhow::Result<()> {
-    let praxis_home = TempDir::new()?;
-    let managed_path = praxis_home.path().join("managed_config.toml");
-
-    std::fs::write(
-        praxis_home.path().join(CONFIG_TOML_FILE),
-        "model = \"base\"\n",
-    )?;
-    std::fs::write(&managed_path, "model = \"managed_config\"\n")?;
-
-    let overrides = LoaderOverrides {
-        managed_config_path: Some(managed_path),
-        #[cfg(target_os = "macos")]
-        managed_preferences_base64: None,
-        macos_managed_config_requirements_base64: None,
-    };
-
-    let cwd = praxis_home.path().abs();
-    let config_layer_stack = load_config_layers_state(
-        praxis_home.path(),
-        Some(cwd),
-        &[("model".to_string(), TomlValue::String("cli".to_string()))],
-        overrides,
-        CloudRequirementsLoader::default(),
-    )
-    .await?;
-
-    let cfg = deserialize_config_toml_with_base(
-        config_layer_stack.effective_config(),
-        praxis_home.path(),
-    )
-    .map_err(|e| {
-        tracing::error!("Failed to deserialize overridden config: {e}");
-        e
-    })?;
-
-    assert_eq!(cfg.model.as_deref(), Some("managed_config"));
     Ok(())
 }
 

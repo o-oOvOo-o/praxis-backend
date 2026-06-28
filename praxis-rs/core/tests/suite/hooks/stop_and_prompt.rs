@@ -440,13 +440,13 @@ async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Resu
     let test = builder.build_with_streaming_server(&server).await?;
 
     test.thread
-        .submit(Op::UserInput {
-            items: vec![UserInput::Text {
+        .submit_user_turn(
+            vec![UserInput::Text {
                 text: "initial prompt".to_string(),
                 text_elements: Vec::new(),
             }],
-            final_output_json_schema: None,
-        })
+            None,
+        )
         .await?;
 
     wait_for_event(&test.thread, |event| {
@@ -456,13 +456,13 @@ async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Resu
 
     for text in ["accepted queued prompt", "blocked queued prompt"] {
         test.thread
-            .submit(Op::UserInput {
-                items: vec![UserInput::Text {
+            .submit_user_turn(
+                vec![UserInput::Text {
                     text: text.to_string(),
                     text_elements: Vec::new(),
                 }],
-                final_output_json_schema: None,
-            })
+                None,
+            )
             .await?;
     }
 

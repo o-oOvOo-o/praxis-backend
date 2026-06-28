@@ -11,6 +11,9 @@ use std::time::Instant;
 use praxis_protocol::parse_command::ParsedCommand;
 use praxis_protocol::protocol::ExecCommandSource;
 
+use crate::transcript::ToolGroupKind;
+use crate::transcript::inspection_group_for_command;
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct CommandOutput {
     pub(crate) exit_code: i32,
@@ -64,7 +67,7 @@ impl ExecCell {
             duration: None,
             interaction_input,
         };
-        if self.is_exploring_cell() && Self::is_exploring_call(&call) {
+        if self.is_groupable_series() && Self::is_groupable_call(&call) {
             Some(Self {
                 calls: [self.calls.clone(), vec![call]].concat(),
                 animations_enabled: self.animations_enabled,
@@ -95,7 +98,7 @@ impl ExecCell {
     }
 
     pub(crate) fn should_flush(&self) -> bool {
-        !self.is_exploring_cell() && self.calls.iter().all(|c| c.output.is_some())
+        !self.is_groupable_series() && self.calls.iter().all(|c| c.output.is_some())
     }
 
     pub(crate) fn mark_failed(&mut self) {
@@ -118,6 +121,14 @@ impl ExecCell {
 
     pub(crate) fn is_exploring_cell(&self) -> bool {
         self.calls.iter().all(Self::is_exploring_call)
+    }
+
+    pub(crate) fn is_group_cell(&self) -> bool {
+        self.calls.len() > 1
+    }
+
+    pub(crate) fn is_groupable_series(&self) -> bool {
+        !self.calls.is_empty() && self.calls.iter().all(Self::is_groupable_call)
     }
 
     pub(crate) fn is_active(&self) -> bool {
@@ -154,14 +165,29 @@ impl ExecCell {
     pub(super) fn is_exploring_call(call: &ExecCall) -> bool {
         !matches!(call.source, ExecCommandSource::UserShell)
             && !call.parsed.is_empty()
-            && call.parsed.iter().all(|p| {
+            && (call.parsed.iter().all(|p| {
                 matches!(
                     p,
                     ParsedCommand::Read { .. }
                         | ParsedCommand::ListFiles { .. }
                         | ParsedCommand::Search { .. }
                 )
-            })
+            }) || Self::looks_like_inspection_command(call))
+    }
+
+    fn is_groupable_call(call: &ExecCall) -> bool {
+        !matches!(
+            call.source,
+            ExecCommandSource::UserShell | ExecCommandSource::UnifiedExecInteraction
+        )
+    }
+
+    fn looks_like_inspection_command(call: &ExecCall) -> bool {
+        let command = call.command.join(" ").to_ascii_lowercase();
+        !matches!(
+            inspection_group_for_command(&command),
+            ToolGroupKind::Shell | ToolGroupKind::Mixed
+        )
     }
 }
 

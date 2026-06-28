@@ -1,4 +1,3 @@
-mod layer_io;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -6,15 +5,12 @@ mod macos;
 mod tests;
 
 use crate::config::ConfigToml;
-use crate::config_loader::layer_io::LoadedConfigLayers;
 use dunce::canonicalize as normalize_path;
 use praxis_config::CONFIG_TOML_FILE;
 use praxis_config::ConfigRequirementsWithSources;
 use praxis_git_utils::resolve_root_git_project_for_trust;
 use praxis_protocol::config_layers::ConfigLayerSource;
-use praxis_protocol::config_types::SandboxMode;
 use praxis_protocol::config_types::TrustLevel;
-use praxis_protocol::protocol::AskForApproval;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use praxis_utils_absolute_path::AbsolutePathBufGuard;
 use praxis_utils_home_dir::external_codex_read_through_home;
@@ -103,9 +99,6 @@ pub(crate) async fn first_layer_config_error_from_entries(
 /// - system    `/etc/praxis/requirements.toml` (Unix) or
 ///   `%ProgramData%\OpenAI\Praxis\requirements.toml` (Windows)
 ///
-/// For backwards compatibility, we also load from
-/// `managed_config.toml` and map it to `requirements.toml`.
-///
 /// Configuration is built up from multiple layers in the following order:
 ///
 /// - admin:    managed preferences (*)
@@ -184,16 +177,6 @@ pub async fn load_config_layers_state(
     // Honor the system requirements.toml location.
     let requirements_toml_file = system_requirements_toml_file()?;
     load_requirements_toml(&mut config_requirements_toml, requirements_toml_file).await?;
-
-    // Make a best-effort to support the legacy `managed_config.toml` as a
-    // requirements specification.
-    let loaded_config_layers =
-        layer_io::load_config_layers_internal(praxis_home, overrides).await?;
-    load_requirements_from_legacy_scheme(
-        &mut config_requirements_toml,
-        loaded_config_layers.clone(),
-    )
-    .await?;
 
     let mut layers = Vec::<ConfigLayerEntry>::new();
 
@@ -304,47 +287,6 @@ pub async fn load_config_layers_state(
         layers.push(ConfigLayerEntry::new(
             ConfigLayerSource::SessionFlags,
             cli_overrides_layer,
-        ));
-    }
-
-    // Make a best-effort to support the legacy `managed_config.toml` as a
-    // config layer on top of everything else. For fields in
-    // `managed_config.toml` that do not have an equivalent in
-    // `ConfigRequirements`, note users can still override these values on a
-    // per-turn basis in the TUI and VS Code.
-    let LoadedConfigLayers {
-        managed_config,
-        managed_config_from_mdm,
-    } = loaded_config_layers;
-    if let Some(config) = managed_config {
-        let managed_parent = config.file.as_path().parent().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Managed config file {} has no parent directory",
-                    config.file.as_path().display()
-                ),
-            )
-        })?;
-        let managed_config =
-            resolve_relative_paths_in_config_toml(config.managed_config, managed_parent)?;
-        layers.push(ConfigLayerEntry::new(
-            ConfigLayerSource::LegacyManagedConfigTomlFromFile { file: config.file },
-            managed_config,
-        ));
-    }
-    if let Some(config) = managed_config_from_mdm {
-        // As a general rule, config from MDM should _not_ include relative
-        // paths, starting with `./`, but a path starting with `~/` _is_ a
-        // supported use case. Because resolve_relative_paths_in_config_toml()
-        // relies on AbsolutePathBufGuard to resolve `~/`, we must supply a
-        // value for base_dir, so praxis_home is as good a value as any.
-        let managed_config =
-            resolve_relative_paths_in_config_toml(config.managed_config, praxis_home)?;
-        layers.push(ConfigLayerEntry::new_with_raw_toml(
-            ConfigLayerSource::LegacyManagedConfigTomlFromMdm,
-            managed_config,
-            config.raw_toml,
         ));
     }
 
@@ -615,48 +557,6 @@ fn windows_program_data_dir_from_known_folder() -> io::Result<PathBuf> {
     };
 
     Ok(path)
-}
-
-async fn load_requirements_from_legacy_scheme(
-    config_requirements_toml: &mut ConfigRequirementsWithSources,
-    loaded_config_layers: LoadedConfigLayers,
-) -> io::Result<()> {
-    // In this implementation, earlier layers cannot be overwritten by later
-    // layers, so list managed_config_from_mdm first because it has the highest
-    // precedence.
-    let LoadedConfigLayers {
-        managed_config,
-        managed_config_from_mdm,
-    } = loaded_config_layers;
-
-    for (source, config) in managed_config_from_mdm
-        .map(|config| {
-            (
-                RequirementSource::LegacyManagedConfigTomlFromMdm,
-                config.managed_config,
-            )
-        })
-        .into_iter()
-        .chain(managed_config.map(|c| {
-            (
-                RequirementSource::LegacyManagedConfigTomlFromFile { file: c.file },
-                c.managed_config,
-            )
-        }))
-    {
-        let legacy_config: LegacyManagedConfigToml =
-            config.try_into().map_err(|err: toml::de::Error| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Failed to parse config requirements as TOML: {err}"),
-                )
-            })?;
-
-        let new_requirements_toml = ConfigRequirementsToml::from(legacy_config);
-        config_requirements_toml.merge_unset_fields(source, new_requirements_toml);
-    }
-
-    Ok(())
 }
 
 struct ProjectTrustContext {
@@ -983,45 +883,6 @@ async fn load_project_layers(
     Ok(layers)
 }
 
-/// The legacy mechanism for specifying admin-enforced configuration is to read
-/// from a file like `/etc/praxis/managed_config.toml` that has the same
-/// structure as `config.toml` where fields like `approval_policy` can specify
-/// exactly one value rather than a list of allowed values.
-///
-/// If present, re-interpret `managed_config.toml` as a `requirements.toml`
-/// where each specified field is treated as a constraint allowing only that
-/// value.
-#[derive(Deserialize, Debug, Clone, Default, PartialEq)]
-struct LegacyManagedConfigToml {
-    approval_policy: Option<AskForApproval>,
-    sandbox_mode: Option<SandboxMode>,
-}
-
-impl From<LegacyManagedConfigToml> for ConfigRequirementsToml {
-    fn from(legacy: LegacyManagedConfigToml) -> Self {
-        let mut config_requirements_toml = ConfigRequirementsToml::default();
-
-        let LegacyManagedConfigToml {
-            approval_policy,
-            sandbox_mode,
-        } = legacy;
-        if let Some(approval_policy) = approval_policy {
-            config_requirements_toml.allowed_approval_policies = Some(vec![approval_policy]);
-        }
-        if let Some(sandbox_mode) = sandbox_mode {
-            let required_mode: SandboxModeRequirement = sandbox_mode.into();
-            // Allowing read-only is a requirement for Praxis to function correctly.
-            // So in this backfill path, we append read-only if it's not already specified.
-            let mut allowed_modes = vec![SandboxModeRequirement::ReadOnly];
-            if required_mode != SandboxModeRequirement::ReadOnly {
-                allowed_modes.push(required_mode);
-            }
-            config_requirements_toml.allowed_sandbox_modes = Some(allowed_modes);
-        }
-        config_requirements_toml
-    }
-}
-
 // Cannot name this `mod tests` because of tests.rs in this folder.
 #[cfg(test)]
 mod unit_tests {
@@ -1065,24 +926,6 @@ foo = "xyzzy"
         expected_toml_value.insert("foo".to_string(), TomlValue::String("xyzzy".to_string()));
         assert_eq!(normalized_toml_value, TomlValue::Table(expected_toml_value));
         Ok(())
-    }
-
-    #[test]
-    fn legacy_managed_config_backfill_includes_read_only_sandbox_mode() {
-        let legacy = LegacyManagedConfigToml {
-            approval_policy: None,
-            sandbox_mode: Some(SandboxMode::WorkspaceWrite),
-        };
-
-        let requirements = ConfigRequirementsToml::from(legacy);
-
-        assert_eq!(
-            requirements.allowed_sandbox_modes,
-            Some(vec![
-                SandboxModeRequirement::ReadOnly,
-                SandboxModeRequirement::WorkspaceWrite
-            ])
-        );
     }
 
     #[cfg(windows)]

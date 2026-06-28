@@ -1,4 +1,4 @@
-use crate::tool_safety::ToolKind;
+use crate::tool_safety::SafetyToolKind;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -7,13 +7,13 @@ pub struct ApprovalRequest {
     pub id: String,
     pub thread_id: Option<String>,
     pub turn_id: Option<String>,
-    pub kind: ToolKind,
+    pub kind: SafetyToolKind,
     pub reason: Option<String>,
     pub permissions_generation: u64,
 }
 
 impl ApprovalRequest {
-    pub fn new(id: impl Into<String>, kind: ToolKind, permissions_generation: u64) -> Self {
+    pub fn new(id: impl Into<String>, kind: SafetyToolKind, permissions_generation: u64) -> Self {
         Self {
             id: id.into(),
             thread_id: None,

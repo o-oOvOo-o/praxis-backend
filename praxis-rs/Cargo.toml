@@ -14,6 +14,7 @@ members = [
     "debug-client",
     "tools/3rd/openai_apply_patch",
     "system_plugin/approval_control",
+    "system_plugin/reverse_engineering",
     "arg0",
     "feedback",
     "features",
@@ -83,6 +84,7 @@ members = [
     "utils/fuzzy-match",
     "utils/stream-parser",
     "utils/template",
+    "utils/time",
     "praxis-client",
     "praxis-api",
     "state",
@@ -117,6 +119,7 @@ praxis-app-gateway = { path = "app-gateway" }
 praxis-app-gateway-test-client = { path = "app-gateway-test-client" }
 praxis-apply-patch = { path = "tools/3rd/openai_apply_patch" }
 praxis-system-plugin-approval-control = { path = "system_plugin/approval_control" }
+praxis-system-plugin-reverse-engineering = { path = "system_plugin/reverse_engineering" }
 praxis-arg0 = { path = "arg0" }
 praxis-async-utils = { path = "async-utils" }
 praxis-backend-client = { path = "backend-client" }
@@ -191,6 +194,7 @@ praxis-utils-sleep-inhibitor = { path = "utils/sleep-inhibitor" }
 praxis-utils-stream-parser = { path = "utils/stream-parser" }
 praxis-utils-string = { path = "utils/string" }
 praxis-utils-template = { path = "utils/template" }
+praxis-utils-time = { path = "utils/time" }
 praxis-v8-poc = { path = "v8-poc" }
 praxis-windows-sandbox = { path = "system_plugin/3rd/openai_sandbox/windows-sandbox-rs" }
 core_test_support = { path = "core/tests/common" }
@@ -218,6 +222,7 @@ clap = "4"
 clap_complete = "4"
 color-eyre = "0.6.3"
 constant_time_eq = "0.3.1"
+cron = "0.15"
 crossbeam-channel = "0.5.15"
 crossterm = "0.28.1"
 csv = "1.3.1"

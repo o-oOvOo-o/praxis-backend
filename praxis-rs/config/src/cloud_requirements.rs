@@ -91,7 +91,7 @@ impl CloudRequirementsLoader {
         CloudConfigBundleLoader::new(async move {
             self.get()
                 .await
-                .map(|requirements| requirements.map(CloudConfigBundle::from_legacy_requirements))
+                .map(|requirements| requirements.map(CloudConfigBundle::from_single_requirements))
                 .map_err(Into::into)
         })
     }

@@ -9,56 +9,15 @@ use core_foundation::string::CFStringRef;
 use std::ffi::c_void;
 use std::io;
 use tokio::task;
-use toml::Value as TomlValue;
 
 const MANAGED_PREFERENCES_APPLICATION_ID: &str = "com.openai.praxis";
-const MANAGED_PREFERENCES_CONFIG_KEY: &str = "config_toml_base64";
 const MANAGED_PREFERENCES_REQUIREMENTS_KEY: &str = "requirements_toml_base64";
-
-#[derive(Debug, Clone)]
-pub(super) struct ManagedAdminConfigLayer {
-    pub config: TomlValue,
-    pub raw_toml: String,
-}
 
 pub(super) fn managed_preferences_requirements_source() -> RequirementSource {
     RequirementSource::MdmManagedPreferences {
         domain: MANAGED_PREFERENCES_APPLICATION_ID.to_string(),
         key: MANAGED_PREFERENCES_REQUIREMENTS_KEY.to_string(),
     }
-}
-
-pub(crate) async fn load_managed_admin_config_layer(
-    override_base64: Option<&str>,
-) -> io::Result<Option<ManagedAdminConfigLayer>> {
-    if let Some(encoded) = override_base64 {
-        let trimmed = encoded.trim();
-        return if trimmed.is_empty() {
-            Ok(None)
-        } else {
-            parse_managed_config_base64(trimmed).map(Some)
-        };
-    }
-
-    match task::spawn_blocking(load_managed_admin_config).await {
-        Ok(result) => result,
-        Err(join_err) => {
-            if join_err.is_cancelled() {
-                tracing::error!("Managed config load task was cancelled");
-            } else {
-                tracing::error!("Managed config load task failed: {join_err}");
-            }
-            Err(io::Error::other("Failed to load managed config"))
-        }
-    }
-}
-
-fn load_managed_admin_config() -> io::Result<Option<ManagedAdminConfigLayer>> {
-    load_managed_preference(MANAGED_PREFERENCES_CONFIG_KEY)?
-        .as_deref()
-        .map(str::trim)
-        .map(parse_managed_config_base64)
-        .transpose()
 }
 
 pub(crate) async fn load_managed_admin_requirements_toml(
@@ -128,29 +87,8 @@ fn load_managed_preference(key_name: &str) -> io::Result<Option<String>> {
     Ok(Some(value))
 }
 
-fn parse_managed_config_base64(encoded: &str) -> io::Result<ManagedAdminConfigLayer> {
-    let raw_toml = decode_managed_preferences_base64(encoded)?;
-    match toml::from_str::<TomlValue>(&raw_toml) {
-        Ok(TomlValue::Table(parsed)) => Ok(ManagedAdminConfigLayer {
-            config: TomlValue::Table(parsed),
-            raw_toml,
-        }),
-        Ok(other) => {
-            tracing::error!("Managed config TOML must have a table at the root, found {other:?}",);
-            Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "managed config root must be a table",
-            ))
-        }
-        Err(err) => {
-            tracing::error!("Failed to parse managed config TOML: {err}");
-            Err(io::Error::new(io::ErrorKind::InvalidData, err))
-        }
-    }
-}
-
 fn parse_managed_requirements_base64(encoded: &str) -> io::Result<ConfigRequirementsToml> {
-    toml::from_str::<ConfigRequirementsToml>(&decode_managed_preferences_base64(encoded)?).map_err(
+    toml::from_str::<ConfigRequirementsToml>(&decode_managed_requirements_base64(encoded)?).map_err(
         |err| {
             tracing::error!("Failed to parse managed requirements TOML: {err}");
             io::Error::new(io::ErrorKind::InvalidData, err)
@@ -158,7 +96,7 @@ fn parse_managed_requirements_base64(encoded: &str) -> io::Result<ConfigRequirem
     )
 }
 
-fn decode_managed_preferences_base64(encoded: &str) -> io::Result<String> {
+fn decode_managed_requirements_base64(encoded: &str) -> io::Result<String> {
     String::from_utf8(BASE64_STANDARD.decode(encoded.as_bytes()).map_err(|err| {
         tracing::error!("Failed to decode managed value as base64: {err}",);
         io::Error::new(io::ErrorKind::InvalidData, err)

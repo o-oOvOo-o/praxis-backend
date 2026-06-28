@@ -16,7 +16,6 @@ use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use tempfile::TempDir;
 
-mod op_user_input;
 mod sandbox_policy;
 mod serialization;
 mod session_source;

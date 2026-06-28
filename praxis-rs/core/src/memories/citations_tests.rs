@@ -16,17 +16,6 @@ fn get_thread_id_from_citations_extracts_thread_ids() {
 }
 
 #[test]
-fn get_thread_id_from_citations_supports_legacy_rollout_ids() {
-    let thread_id = ThreadId::new();
-
-    let citations = vec![format!(
-        "<memory_citation>\n<rollout_ids>\n{thread_id}\n</rollout_ids>\n</memory_citation>"
-    )];
-
-    assert_eq!(get_thread_id_from_citations(citations), vec![thread_id]);
-}
-
-#[test]
 fn parse_memory_citation_extracts_entries_and_rollout_ids() {
     let first = ThreadId::new();
     let second = ThreadId::new();

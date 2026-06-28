@@ -1,0 +1,43 @@
+{
+  "name": "praxis-reverse-engineering",
+  "description": "Authorized reverse engineering workflows for evidence-driven analysis, clean-room reconstruction, and decompiler-assisted research.",
+  "skills": "./skills",
+  "llm": {
+    "products": [
+      {
+        "id": "praxis-reverse-engineering",
+        "prompts": {
+          "base": "./llm/products/praxis-reverse-engineering/prompts/base.md"
+        }
+      }
+    ]
+  },
+  "interface": {
+    "displayName": "Praxis Reverse Engineering",
+    "shortDescription": "Authorized reverse engineering and decompiler-assisted research.",
+    "longDescription": "A Praxis product/plugin mode for legitimate reverse engineering tasks with authorization capture, evidence ledgers, toolchain diagnostics, decompiler artifact handling, black-box probes, parity checks, and clean-room implementation workflows.",
+    "developerName": "Praxis",
+    "category": "reverse-engineering",
+    "capabilities": [
+      "authorization scoping",
+      "safety red-team evaluation",
+      "guardrail failure taxonomy",
+      "toolchain diagnostics",
+      "artifact codec projections",
+      "static binary analysis",
+      "managed decompilation",
+      "native decompilation",
+      "shader reflection",
+      "black-box probes",
+      "clean-room reconstruction",
+      "defensive hardening",
+      "evidence ledger"
+    ],
+    "defaultPrompt": [
+      "Start an authorized reverse engineering evidence plan",
+      "Start a safety red-team evaluation without bypass payloads",
+      "Inspect reverse toolchain readiness",
+      "Convert findings into a clean-room implementation plan"
+    ]
+  }
+}

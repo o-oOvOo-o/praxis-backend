@@ -15,7 +15,6 @@ use praxis_features::FeatureConfigSource;
 use praxis_features::FeatureOverrides;
 use praxis_features::Features;
 use praxis_features::canonical_feature_for_key;
-use praxis_features::feature_for_key;
 
 /// Wrapper around [`Features`] which enforces constraints defined in
 /// `FeatureRequirementsToml` and provides normalization to ensure constraints
@@ -179,16 +178,6 @@ fn parse_feature_requirements(
             continue;
         }
 
-        if let Some(feature) = feature_for_key(&key) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "invalid `features` requirement `{key}` from {source}: use canonical feature key `{}`",
-                    feature.key()
-                ),
-            ));
-        }
-
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("invalid `features` requirement `{key}` from {source}"),
@@ -203,29 +192,15 @@ fn explicit_feature_settings_in_config(cfg: &ConfigToml) -> Vec<(String, Feature
 
     if let Some(features) = cfg.features.as_ref() {
         for (key, enabled) in &features.entries {
-            if let Some(feature) = feature_for_key(key) {
+            if let Some(feature) = canonical_feature_for_key(key) {
                 explicit_settings.push((format!("features.{key}"), feature, *enabled));
             }
         }
     }
-    if let Some(enabled) = cfg.experimental_use_unified_exec_tool {
-        explicit_settings.push((
-            "experimental_use_unified_exec_tool".to_string(),
-            Feature::UnifiedExec,
-            enabled,
-        ));
-    }
-    if let Some(enabled) = cfg.experimental_use_freeform_apply_patch {
-        explicit_settings.push((
-            "experimental_use_freeform_apply_patch".to_string(),
-            Feature::ApplyPatchFreeform,
-            enabled,
-        ));
-    }
     for (profile_name, profile) in &cfg.profiles {
         if let Some(features) = profile.features.as_ref() {
             for (key, enabled) in &features.entries {
-                if let Some(feature) = feature_for_key(key) {
+                if let Some(feature) = canonical_feature_for_key(key) {
                     explicit_settings.push((
                         format!("profiles.{profile_name}.features.{key}"),
                         feature,
@@ -233,27 +208,6 @@ fn explicit_feature_settings_in_config(cfg: &ConfigToml) -> Vec<(String, Feature
                     ));
                 }
             }
-        }
-        if let Some(enabled) = profile.include_apply_patch_tool {
-            explicit_settings.push((
-                format!("profiles.{profile_name}.include_apply_patch_tool"),
-                Feature::ApplyPatchFreeform,
-                enabled,
-            ));
-        }
-        if let Some(enabled) = profile.experimental_use_unified_exec_tool {
-            explicit_settings.push((
-                format!("profiles.{profile_name}.experimental_use_unified_exec_tool"),
-                Feature::UnifiedExec,
-                enabled,
-            ));
-        }
-        if let Some(enabled) = profile.experimental_use_freeform_apply_patch {
-            explicit_settings.push((
-                format!("profiles.{profile_name}.experimental_use_freeform_apply_patch"),
-                Feature::ApplyPatchFreeform,
-                enabled,
-            ));
         }
     }
 
@@ -311,16 +265,9 @@ pub(crate) fn validate_feature_requirements_in_config_toml(
         let configured_features = Features::from_sources(
             FeatureConfigSource {
                 features: cfg.features.as_ref(),
-                include_apply_patch_tool: None,
-                experimental_use_freeform_apply_patch: cfg.experimental_use_freeform_apply_patch,
-                experimental_use_unified_exec_tool: cfg.experimental_use_unified_exec_tool,
             },
             FeatureConfigSource {
                 features: profile.features.as_ref(),
-                include_apply_patch_tool: profile.include_apply_patch_tool,
-                experimental_use_freeform_apply_patch: profile
-                    .experimental_use_freeform_apply_patch,
-                experimental_use_unified_exec_tool: profile.experimental_use_unified_exec_tool,
             },
             FeatureOverrides::default(),
         );

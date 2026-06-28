@@ -1,6 +1,6 @@
 # `praxis-core` config loader
 
-This module is the canonical place to **load and describe Praxis configuration layers** (user config, CLI/session overrides, managed config, and MDM-managed preferences) and to produce:
+This module is the canonical place to **load and describe Praxis configuration layers** (user config, CLI/session overrides, system config, MDM requirements, and cloud requirements) and to produce:
 
 - An **effective merged** TOML config.
 - **Per-key origins** metadata (which layer “wins” for a given key).
@@ -24,8 +24,8 @@ Exported from `praxis_core::config_loader`:
 
 Precedence is **top overrides bottom**:
 
-1. **MDM** managed preferences (macOS only)
-2. **System** managed config (e.g. `managed_config.toml`)
+1. **MDM** managed requirements (macOS only)
+2. **System** administrator config
 3. **Session flags** (CLI overrides, applied as dotted-path TOML writes)
 4. **User** config (`config.toml`)
 

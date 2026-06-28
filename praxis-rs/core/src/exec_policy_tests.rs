@@ -90,8 +90,6 @@ async fn test_config() -> (TempDir, Config) {
     let config = ConfigBuilder::default()
         .praxis_home(home.path().to_path_buf())
         .loader_overrides(LoaderOverrides {
-            #[cfg(target_os = "macos")]
-            managed_preferences_base64: Some(String::new()),
             macos_managed_config_requirements_base64: Some(String::new()),
             ..LoaderOverrides::default()
         })

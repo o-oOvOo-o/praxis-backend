@@ -1,48 +1,6 @@
 use super::*;
 
 #[test]
-fn remove_first_item_removes_matching_output_for_function_call() {
-    let items = vec![
-        ResponseItem::FunctionCall {
-            id: None,
-            provider_metadata: None,
-            name: "do_it".to_string(),
-            namespace: None,
-            arguments: "{}".to_string(),
-            call_id: "call-1".to_string(),
-        },
-        ResponseItem::FunctionCallOutput {
-            call_id: "call-1".to_string(),
-            output: FunctionCallOutputPayload::from_text("ok".to_string()),
-        },
-    ];
-    let mut h = create_history_with_items(items);
-    h.remove_first_item();
-    assert_eq!(h.raw_items(), vec![]);
-}
-
-#[test]
-fn remove_first_item_removes_matching_call_for_output() {
-    let items = vec![
-        ResponseItem::FunctionCallOutput {
-            call_id: "call-2".to_string(),
-            output: FunctionCallOutputPayload::from_text("ok".to_string()),
-        },
-        ResponseItem::FunctionCall {
-            id: None,
-            provider_metadata: None,
-            name: "do_it".to_string(),
-            namespace: None,
-            arguments: "{}".to_string(),
-            call_id: "call-2".to_string(),
-        },
-    ];
-    let mut h = create_history_with_items(items);
-    h.remove_first_item();
-    assert_eq!(h.raw_items(), vec![]);
-}
-
-#[test]
 fn remove_last_item_removes_matching_call_for_output() {
     let items = vec![
         user_msg("before tool call"),
@@ -63,88 +21,6 @@ fn remove_last_item_removes_matching_call_for_output() {
 
     assert!(h.remove_last_item());
     assert_eq!(h.raw_items(), vec![user_msg("before tool call")]);
-}
-
-#[test]
-fn replace_last_turn_images_replaces_tool_output_images() {
-    let items = vec![
-        user_input_text_msg("hi"),
-        ResponseItem::FunctionCallOutput {
-            call_id: "call-1".to_string(),
-            output: FunctionCallOutputPayload {
-                body: FunctionCallOutputBody::ContentItems(vec![
-                    FunctionCallOutputContentItem::InputImage {
-                        image_url: "data:image/png;base64,AAA".to_string(),
-                        detail: None,
-                    },
-                ]),
-                success: Some(true),
-            },
-        },
-    ];
-    let mut history = create_history_with_items(items);
-
-    assert!(history.replace_last_turn_images("Invalid image"));
-
-    assert_eq!(
-        history.raw_items(),
-        vec![
-            user_input_text_msg("hi"),
-            ResponseItem::FunctionCallOutput {
-                call_id: "call-1".to_string(),
-                output: FunctionCallOutputPayload {
-                    body: FunctionCallOutputBody::ContentItems(vec![
-                        FunctionCallOutputContentItem::InputText {
-                            text: "Invalid image".to_string(),
-                        },
-                    ]),
-                    success: Some(true),
-                },
-            },
-        ]
-    );
-}
-
-#[test]
-fn replace_last_turn_images_does_not_touch_user_images() {
-    let items = vec![ResponseItem::Message {
-        id: None,
-        role: "user".to_string(),
-        content: vec![ContentItem::InputImage {
-            image_url: "data:image/png;base64,AAA".to_string(),
-        }],
-        end_turn: None,
-        phase: None,
-    }];
-    let mut history = create_history_with_items(items.clone());
-
-    assert!(!history.replace_last_turn_images("Invalid image"));
-    assert_eq!(history.raw_items(), items);
-}
-
-#[test]
-fn remove_first_item_handles_local_shell_pair() {
-    let items = vec![
-        ResponseItem::LocalShellCall {
-            id: None,
-            call_id: Some("call-3".to_string()),
-            status: LocalShellStatus::Completed,
-            action: LocalShellAction::Exec(LocalShellExecAction {
-                command: vec!["echo".to_string(), "hi".to_string()],
-                timeout_ms: None,
-                working_directory: None,
-                env: None,
-                user: None,
-            }),
-        },
-        ResponseItem::FunctionCallOutput {
-            call_id: "call-3".to_string(),
-            output: FunctionCallOutputPayload::from_text("ok".to_string()),
-        },
-    ];
-    let mut h = create_history_with_items(items);
-    h.remove_first_item();
-    assert_eq!(h.raw_items(), vec![]);
 }
 
 #[test]

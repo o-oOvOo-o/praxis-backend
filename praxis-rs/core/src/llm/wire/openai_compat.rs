@@ -1,20 +1,11 @@
-use super::plugin::WireDescriptor;
 use crate::api_bridge::CoreAuthProvider;
 use crate::client_common::Prompt;
 use crate::client_common::ResponseStream;
 use crate::error::Result;
-use crate::llm::ids::WireId;
 use crate::model_provider_info::ModelProviderInfo;
 use praxis_api::Provider;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
-
-pub(crate) fn descriptor() -> WireDescriptor {
-    WireDescriptor {
-        id: WireId::OpenAiCompat,
-        name: "OpenAI-compatible",
-    }
-}
 
 pub(crate) async fn stream_unary(
     api_provider: Provider,

@@ -152,13 +152,13 @@ fn read_declared_role(
     Ok((role_name, role))
 }
 
-fn merge_missing_role_fields(role: &mut AgentRoleConfig, fallback: &AgentRoleConfig) {
-    role.description = role.description.clone().or(fallback.description.clone());
-    role.config_file = role.config_file.clone().or(fallback.config_file.clone());
+fn merge_missing_role_fields(role: &mut AgentRoleConfig, inherited: &AgentRoleConfig) {
+    role.description = role.description.clone().or(inherited.description.clone());
+    role.config_file = role.config_file.clone().or(inherited.config_file.clone());
     role.base_name_candidates = role
         .base_name_candidates
         .clone()
-        .or(fallback.base_name_candidates.clone());
+        .or(inherited.base_name_candidates.clone());
 }
 
 fn agents_toml_from_layer(layer_toml: &TomlValue) -> std::io::Result<Option<AgentsToml>> {

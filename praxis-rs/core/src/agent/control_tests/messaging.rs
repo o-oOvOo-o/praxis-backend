@@ -18,16 +18,7 @@ async fn submit_turn_operation_submits_user_message() {
         .await
         .expect("submit_turn_operation should succeed");
     assert!(!submission_id.is_empty());
-    let expected = (
-        thread_id,
-        Op::UserInput {
-            items: vec![UserInput::Text {
-                text: "hello from tests".to_string(),
-                text_elements: Vec::new(),
-            }],
-            final_output_json_schema: None,
-        },
-    );
+    let expected = (thread_id, text_input("hello from tests"));
     let captured = harness
         .manager
         .captured_ops()

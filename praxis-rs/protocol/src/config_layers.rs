@@ -12,12 +12,9 @@ pub enum ConfigLayerSource {
     /// Managed preferences layer delivered by MDM (macOS only).
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
-    Mdm {
-        domain: String,
-        key: String,
-    },
+    Mdm { domain: String, key: String },
 
-    /// Managed config layer from a file (usually `managed_config.toml`).
+    /// System configuration layer from an administrator-controlled config file.
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
     System {
@@ -46,21 +43,10 @@ pub enum ConfigLayerSource {
     /// Path to a .praxis/ folder within a project.
     #[serde(rename_all = "camelCase")]
     #[ts(rename_all = "camelCase")]
-    Project {
-        dot_praxis_folder: AbsolutePathBuf,
-    },
+    Project { dot_praxis_folder: AbsolutePathBuf },
 
     /// Session-layer overrides supplied via `-c`/`--config`.
     SessionFlags,
-
-    /// Legacy managed config file layer preserved for requirements migration.
-    #[serde(rename_all = "camelCase")]
-    #[ts(rename_all = "camelCase")]
-    LegacyManagedConfigTomlFromFile {
-        file: AbsolutePathBuf,
-    },
-
-    LegacyManagedConfigTomlFromMdm,
 }
 
 impl ConfigLayerSource {
@@ -73,8 +59,6 @@ impl ConfigLayerSource {
             ConfigLayerSource::User { .. } => 20,
             ConfigLayerSource::Project { .. } => 25,
             ConfigLayerSource::SessionFlags => 30,
-            ConfigLayerSource::LegacyManagedConfigTomlFromFile { .. } => 40,
-            ConfigLayerSource::LegacyManagedConfigTomlFromMdm => 50,
         }
     }
 }

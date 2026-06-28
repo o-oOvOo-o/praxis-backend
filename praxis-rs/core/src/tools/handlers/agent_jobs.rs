@@ -642,12 +642,14 @@ async fn run_agent_job_loop(
                     text: prompt,
                     text_elements: Vec::new(),
                 }];
+                let spawn_config = options.spawn_config.clone();
+                let initial_operation = spawn_config.user_turn_op(items, None);
                 let thread_id = match session
                     .services
                     .agent_control
                     .spawn_agent(
-                        options.spawn_config.clone(),
-                        items.into(),
+                        spawn_config,
+                        initial_operation,
                         Some(SessionSource::SubAgent(SubAgentSource::Other(format!(
                             "agent_job:{job_id}"
                         )))),

@@ -153,7 +153,7 @@ pub struct RawMcpServerConfig {
     pub scopes: Option<Vec<String>>,
     #[serde(default)]
     pub oauth_resource: Option<String>,
-    /// Legacy display-name field accepted for backward compatibility.
+    /// Display-name alias accepted for existing MCP config files.
     #[serde(default, rename = "name")]
     pub _name: Option<String>,
     #[serde(default)]

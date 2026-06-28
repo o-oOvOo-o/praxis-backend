@@ -8,6 +8,7 @@ use crate::llm::ids::BehaviorProfileId;
 pub(crate) fn profile() -> ProfileDescriptor {
     ProfileDescriptor {
         id: BehaviorProfileId::Claude,
+        #[cfg(test)]
         label: "Claude",
         instructions: None,
         prompt_layers: &[],

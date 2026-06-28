@@ -202,13 +202,6 @@ impl App {
         let enhanced_keys_supported = tui.enhanced_keys_supported();
         let wait_for_initial_session_configured =
             Self::should_wait_for_initial_session(&session_selection);
-        let defer_empty_workspace_session = workspace_mode
-            && matches!(
-                session_selection,
-                SessionSelection::StartFresh | SessionSelection::Exit
-            )
-            && initial_prompt.as_deref().is_none_or(str::is_empty)
-            && initial_images.is_empty();
         let (mut chat_widget, initial_started_thread) = match session_selection {
             SessionSelection::StartFresh | SessionSelection::Exit => {
                 let startup_tooltip_override = prepare_startup_tooltip_override(
@@ -218,11 +211,7 @@ impl App {
                     is_first_run,
                 )
                 .await;
-                let started = if defer_empty_workspace_session {
-                    None
-                } else {
-                    Some(app_gateway.start_thread(&config).await?)
-                };
+                let started = app_gateway.start_thread(&config).await?;
                 let init = crate::chatwidget::ChatWidgetInit {
                     config: config.clone(),
                     tui_config: tui_config.clone(),
@@ -248,7 +237,7 @@ impl App {
                         .clone(),
                     session_telemetry: session_telemetry.clone(),
                 };
-                (ChatWidget::new_with_app_event(init), started)
+                (ChatWidget::new_with_app_event(init), Some(started))
             }
             SessionSelection::Resume(target_session) => {
                 let resumed = app_gateway

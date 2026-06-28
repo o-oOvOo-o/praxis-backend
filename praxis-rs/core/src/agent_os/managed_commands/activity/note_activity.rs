@@ -1,10 +1,9 @@
 use super::*;
 
 impl AgentOs {
-    pub(in crate::agent_os) async fn note_runtime_command_activity(
+    pub(in crate::agent_os) async fn note_worker_started_command(
         &self,
         thread_id: ThreadId,
-        activity: RuntimeCommandActivity,
     ) -> Vec<RuntimeCommandRecord> {
         let now = Utc::now();
         let ttl = AgentOsPolicy::get().ticket_ttl();
@@ -23,7 +22,7 @@ impl AgentOs {
                 if command.to_thread_id != thread_id {
                     continue;
                 }
-                if command.apply_activity(activity, current_task_id.as_deref(), now, ttl) {
+                if command.apply_worker_started_command(current_task_id.as_deref(), now, ttl) {
                     changed.push(command.clone());
                 }
             }
@@ -39,7 +38,7 @@ impl AgentOs {
                 None,
                 None,
                 json!({
-                    "activity": format!("{:?}", activity),
+                    "activity": "WorkerStartedCommand",
                     "changed_commands": changed
                         .iter()
                         .map(|command| json!({

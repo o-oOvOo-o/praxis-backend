@@ -56,5 +56,4 @@ pub(super) struct RolloutReplayPlan<'a> {
 #[derive(Debug)]
 pub(super) struct MaterializedHistory {
     pub(super) history: Vec<ResponseItem>,
-    pub(super) saw_legacy_compaction_without_replacement: bool,
 }

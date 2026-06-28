@@ -50,6 +50,7 @@ pub(crate) struct WorkspaceState {
     session_picker_page_loaders: SessionPickerPageLoaders,
     pub(crate) list_area: Option<Rect>,
     pub(crate) chat_area: Option<Rect>,
+    pub(crate) work_panel_area: Option<Rect>,
     pub(crate) chrome_bar_area: Option<Rect>,
     pub(crate) chrome_bar_areas: WorkspaceChromeBarAreas,
     pub(crate) toolbar_new_area: Option<Rect>,

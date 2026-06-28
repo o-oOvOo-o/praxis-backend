@@ -267,7 +267,7 @@ fn missing_project_dot_praxis_config_requires_approval() {
         exclude_slash_tmp: true,
     };
     let file_system_sandbox_policy =
-        FileSystemSandboxPolicy::from_legacy_sandbox_policy(&sandbox_policy, &cwd);
+        FileSystemSandboxPolicy::from_sandbox_policy(&sandbox_policy, &cwd);
 
     assert!(!is_write_patch_constrained_to_writable_paths(
         &action,

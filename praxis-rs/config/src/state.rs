@@ -10,16 +10,11 @@ use praxis_protocol::config_layers::ConfigLayerSource;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use toml::Value as TomlValue;
 
-/// LoaderOverrides overrides managed configuration inputs (primarily for tests).
+/// LoaderOverrides overrides managed configuration inputs.
 #[derive(Debug, Default, Clone)]
 pub struct LoaderOverrides {
-    pub managed_config_path: Option<PathBuf>,
-    //TODO(gt): Add a macos_ prefix to this field and remove the target_os check.
-    #[cfg(target_os = "macos")]
-    pub managed_preferences_base64: Option<String>,
     pub macos_managed_config_requirements_base64: Option<String>,
 }
 
@@ -103,8 +98,6 @@ impl ConfigLayerEntry {
             ConfigLayerSource::User { file } => file.parent(),
             ConfigLayerSource::Project { dot_praxis_folder } => Some(dot_praxis_folder.clone()),
             ConfigLayerSource::SessionFlags => None,
-            ConfigLayerSource::LegacyManagedConfigTomlFromFile { .. } => None,
-            ConfigLayerSource::LegacyManagedConfigTomlFromMdm => None,
         }
     }
 }
@@ -128,9 +121,8 @@ pub struct ConfigLayerStack {
     /// layers.
     requirements: ConfigRequirements,
 
-    /// Raw requirements data as loaded from requirements.toml/MDM/legacy
-    /// sources. This preserves the original allow-lists so they can be
-    /// surfaced via APIs.
+    /// Raw requirements data as loaded from requirements.toml, MDM, and cloud sources.
+    /// This preserves the original allow-lists so they can be surfaced via APIs.
     requirements_toml: ConfigRequirementsToml,
 }
 

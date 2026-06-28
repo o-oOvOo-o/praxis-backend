@@ -25,7 +25,7 @@ impl ThreadManagerServices {
     ) -> Self {
         let plugins_manager = Arc::new(PluginsManager::new_with_restriction_product(
             praxis_home.clone(),
-            restriction_product,
+            restriction_product.clone(),
         ));
         let mcp_manager = Arc::new(McpManager::new(Arc::clone(&plugins_manager)));
         let skills_manager = Arc::new(SkillsManager::new_with_restriction_product(

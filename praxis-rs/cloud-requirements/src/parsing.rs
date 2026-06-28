@@ -1,6 +1,7 @@
+#[cfg(test)]
+use crate::constants::CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE;
 use crate::constants::{
-    CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE, OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_ID,
-    OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_NAME,
+    OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_ID, OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_NAME,
 };
 use praxis_core::config_loader::{
     CloudConfigBundle, CloudConfigBundleLoadError, CloudConfigBundleLoadErrorCode,

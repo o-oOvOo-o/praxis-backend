@@ -10,6 +10,7 @@ use crate::llm::tasks::title::AutoTitleProfile;
 pub(crate) fn profile() -> ProfileDescriptor {
     ProfileDescriptor {
         id: BehaviorProfileId::Common,
+        #[cfg(test)]
         label: "OpenAI-compatible",
         instructions: Some(prompts::BASE),
         prompt_layers: &[],

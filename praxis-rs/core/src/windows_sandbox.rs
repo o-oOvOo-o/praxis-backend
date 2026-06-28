@@ -16,7 +16,7 @@ use std::time::Instant;
 /// Kill switch for the elevated sandbox NUX on Windows.
 ///
 /// When false, revert to the previous sandbox NUX, which only
-/// prompts users to enable the legacy sandbox feature.
+/// prompts users to enable the non-admin sandbox feature.
 pub const ELEVATED_SANDBOX_NUX_ENABLED: bool = true;
 
 pub trait WindowsSandboxLevelExt {

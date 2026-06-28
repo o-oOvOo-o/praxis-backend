@@ -69,7 +69,7 @@ pub(crate) fn resolve_model_instructions(
         };
 
     if let Some(product_instructions) = product_profile.and_then(|product| {
-        llm_runtime_catalog.resolve_product_prompt(product, LlmPromptPurpose::ModelInstructions)
+        llm_runtime_catalog.resolve_product_prompt(&product, LlmPromptPurpose::ModelInstructions)
     }) {
         instructions = join_prompt_layers(&instructions, &product_instructions);
     }
@@ -429,7 +429,7 @@ mod tests {
             &provider_id,
             &provider,
             None,
-            Some(ProductProfileId::Cunning3d),
+            Some(ProductProfileId::cunning3d()),
             &catalog,
         );
 

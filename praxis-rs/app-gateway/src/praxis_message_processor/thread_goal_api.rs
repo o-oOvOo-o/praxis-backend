@@ -7,10 +7,10 @@ impl PraxisMessageProcessor {
         params: ThreadGoalGetParams,
     ) {
         let thread = match self
-            .goal_thread_for_request(request_id.clone(), &params.thread_id)
+            .ensure_thread_for_request(&params.thread_id, &request_id)
             .await
         {
-            Some(thread) => thread,
+            Some((_, thread)) => thread,
             None => return,
         };
         match thread.get_thread_goal().await {
@@ -38,10 +38,10 @@ impl PraxisMessageProcessor {
     ) {
         let thread_id = params.thread_id.clone();
         let thread = match self
-            .goal_thread_for_request(request_id.clone(), &thread_id)
+            .ensure_thread_for_request(&thread_id, &request_id)
             .await
         {
-            Some(thread) => thread,
+            Some((_, thread)) => thread,
             None => return,
         };
         let token_budget = token_budget_update(params.token_budget, params.clear_token_budget);
@@ -54,7 +54,8 @@ impl PraxisMessageProcessor {
                 self.outgoing
                     .send_response(request_id, ThreadGoalSetResponse { goal: goal.clone() })
                     .await;
-                self.broadcast_goal_updated(thread_id, goal).await;
+                self.broadcast_goal_updated(thread_id.clone(), goal).await;
+                self.broadcast_heartbeat_updated(thread_id, None).await;
             }
             Err(err) => {
                 self.send_invalid_request_error(
@@ -73,10 +74,10 @@ impl PraxisMessageProcessor {
     ) {
         let thread_id = params.thread_id.clone();
         let thread = match self
-            .goal_thread_for_request(request_id.clone(), &thread_id)
+            .ensure_thread_for_request(&thread_id, &request_id)
             .await
         {
-            Some(thread) => thread,
+            Some((_, thread)) => thread,
             None => return,
         };
         let status = params.status.map(ThreadGoalStatus::to_core);
@@ -90,7 +91,8 @@ impl PraxisMessageProcessor {
                 self.outgoing
                     .send_response(request_id, ThreadGoalUpdateResponse { goal: goal.clone() })
                     .await;
-                self.broadcast_goal_updated(thread_id, goal).await;
+                self.broadcast_goal_updated(thread_id.clone(), goal).await;
+                self.broadcast_heartbeat_updated(thread_id, None).await;
             }
             Err(err) => {
                 self.send_invalid_request_error(
@@ -109,10 +111,10 @@ impl PraxisMessageProcessor {
     ) {
         let thread_id = params.thread_id.clone();
         let thread = match self
-            .goal_thread_for_request(request_id.clone(), &thread_id)
+            .ensure_thread_for_request(&thread_id, &request_id)
             .await
         {
-            Some(thread) => thread,
+            Some((_, thread)) => thread,
             None => return,
         };
         match thread.clear_thread_goal_from_user().await {
@@ -134,30 +136,6 @@ impl PraxisMessageProcessor {
                     format!("failed to clear thread goal: {err}"),
                 )
                 .await;
-            }
-        }
-    }
-
-    async fn goal_thread_for_request(
-        &self,
-        request_id: ConnectionRequestId,
-        thread_id: &str,
-    ) -> Option<Arc<PraxisThread>> {
-        let Some(thread_uuid) = self
-            .ensure_thread_id_for_request(thread_id, &request_id)
-            .await
-        else {
-            return None;
-        };
-        match self.thread_manager.get_thread(thread_uuid).await {
-            Ok(thread) => Some(thread),
-            Err(err) => {
-                self.send_invalid_request_error(
-                    request_id,
-                    format!("thread not loaded: {thread_uuid}: {err}"),
-                )
-                .await;
-                None
             }
         }
     }

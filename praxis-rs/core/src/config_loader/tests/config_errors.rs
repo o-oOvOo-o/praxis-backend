@@ -50,36 +50,6 @@ async fn returns_config_error_for_invalid_user_config_toml() {
 }
 
 #[tokio::test]
-async fn returns_config_error_for_invalid_managed_config_toml() {
-    let tmp = tempdir().expect("tempdir");
-    let managed_path = tmp.path().join("managed_config.toml");
-    let contents = "model = \"gpt-4\"\ninvalid = [";
-    std::fs::write(&managed_path, contents).expect("write managed config");
-
-    let overrides = LoaderOverrides {
-        managed_config_path: Some(managed_path.clone()),
-        ..Default::default()
-    };
-
-    let cwd = AbsolutePathBuf::try_from(tmp.path()).expect("cwd");
-    let err = load_config_layers_state(
-        tmp.path(),
-        Some(cwd),
-        &[] as &[(String, TomlValue)],
-        overrides,
-        CloudRequirementsLoader::default(),
-    )
-    .await
-    .expect_err("expected error");
-
-    let config_error = config_error_from_io(&err);
-    let expected_toml_error = toml::from_str::<TomlValue>(contents).expect_err("parse error");
-    let expected_config_error =
-        super::config_error_from_toml(&managed_path, contents, expected_toml_error);
-    assert_eq!(config_error, &expected_config_error);
-}
-
-#[tokio::test]
 async fn returns_config_error_for_schema_error_in_user_config() {
     let tmp = tempdir().expect("tempdir");
     let contents = "model_context_window = \"not_a_number\"";

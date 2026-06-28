@@ -1,7 +1,0 @@
-load("//:defs.bzl", "praxis_rust_crate")
-
-praxis_rust_crate(
-    name = "execpolicy-legacy",
-    crate_name = "praxis_execpolicy_legacy",
-    compile_data = ["src/default.policy"],
-)

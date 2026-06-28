@@ -11,6 +11,7 @@ use crate::llm::tasks::title::AutoTitleProfile;
 pub(crate) fn profile() -> ProfileDescriptor {
     ProfileDescriptor {
         id: BehaviorProfileId::OpenAiResponses,
+        #[cfg(test)]
         label: "OpenAI Responses",
         instructions: Some(prompts::RESPONSES),
         prompt_layers: &[],

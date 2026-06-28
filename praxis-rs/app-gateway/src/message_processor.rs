@@ -48,7 +48,6 @@ use praxis_app_gateway_protocol::FsRemoveParams;
 use praxis_app_gateway_protocol::FsUnwatchParams;
 use praxis_app_gateway_protocol::FsWatchParams;
 use praxis_app_gateway_protocol::FsWriteFileParams;
-use praxis_app_gateway_protocol::HostExtensionInfo;
 use praxis_app_gateway_protocol::InitializeResponse;
 use praxis_app_gateway_protocol::JSONRPCError;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
@@ -181,7 +180,6 @@ pub(crate) struct ConnectionSessionState {
     pub(crate) opted_out_notification_methods: HashSet<String>,
     pub(crate) app_gateway_client_name: Option<String>,
     pub(crate) client_version: Option<String>,
-    pub(crate) host_extensions: Vec<HostExtensionInfo>,
 }
 
 pub(crate) struct MessageProcessorArgs {
@@ -460,13 +458,9 @@ impl MessageProcessor {
         }
     }
 
-    pub(crate) async fn connection_initialized(
-        &self,
-        connection_id: ConnectionId,
-        host_extensions: Vec<HostExtensionInfo>,
-    ) {
+    pub(crate) async fn connection_initialized(&self, connection_id: ConnectionId) {
         self.praxis_message_processor
-            .connection_initialized_with_host_extensions(connection_id, host_extensions)
+            .connection_initialized(connection_id)
             .await;
     }
 
@@ -568,7 +562,6 @@ impl MessageProcessor {
                 // shared thread when another connected client did not opt into
                 // experimental API). Proposed direction is instance-global first-write-wins
                 // with initialize-time mismatch rejection.
-                let host_extensions = params.host_extensions.clone();
                 let analytics_experimental_api_enabled = params
                     .capabilities
                     .as_ref()
@@ -593,7 +586,6 @@ impl MessageProcessor {
                 } = params.client_info;
                 session.app_gateway_client_name = Some(name.clone());
                 session.client_version = Some(version.clone());
-                session.host_extensions = host_extensions;
                 let originator = name.clone();
                 if let Err(error) = set_default_originator(originator.clone()) {
                     match error {
@@ -666,10 +658,7 @@ impl MessageProcessor {
                     // initialize handling for the specific connection.
                     outbound_initialized.store(true, Ordering::Release);
                     self.praxis_message_processor
-                        .connection_initialized_with_host_extensions(
-                            connection_id,
-                            session.host_extensions.clone(),
-                        )
+                        .connection_initialized(connection_id)
                         .await;
                 }
                 return;

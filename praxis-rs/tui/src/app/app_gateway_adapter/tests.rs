@@ -576,11 +576,9 @@ mod tests {
     use super::turn_snapshot_events;
     use praxis_app_gateway_protocol::AgentMessageDeltaNotification;
     use praxis_app_gateway_protocol::CommandAction;
-    use praxis_app_gateway_protocol::CommandExecutionOutputDeltaNotification;
     use praxis_app_gateway_protocol::CommandExecutionSource;
     use praxis_app_gateway_protocol::CommandExecutionStatus;
     use praxis_app_gateway_protocol::ItemCompletedNotification;
-    use praxis_app_gateway_protocol::ItemStartedNotification;
     use praxis_app_gateway_protocol::PraxisErrorInfo;
     use praxis_app_gateway_protocol::ReasoningSummaryTextDeltaNotification;
     use praxis_app_gateway_protocol::ServerNotification;
@@ -686,101 +684,6 @@ mod tests {
         };
         assert_eq!(completed.turn_id, turn_id);
         assert_eq!(completed.last_agent_message, None);
-    }
-
-    #[test]
-    fn bridges_command_execution_notifications_into_legacy_exec_events() {
-        let thread_id = "019cee8c-b993-7e33-88c0-014d4e62612d".to_string();
-        let turn_id = "019cee8c-b9b4-7f10-a1b0-38caa876a012".to_string();
-        let item = ThreadItem::CommandExecution {
-            id: "cmd-1".to_string(),
-            command: "printf 'hello world\\n'".to_string(),
-            cwd: PathBuf::from("/tmp"),
-            process_id: None,
-            source: CommandExecutionSource::UserShell,
-            status: CommandExecutionStatus::InProgress,
-            command_actions: vec![CommandAction::Unknown {
-                command: "printf hello world".to_string(),
-            }],
-            aggregated_output: None,
-            exit_code: None,
-            duration_ms: None,
-        };
-
-        let (_, started_events) = server_notification_thread_events(
-            ServerNotification::ItemStarted(ItemStartedNotification {
-                item,
-                thread_id: thread_id.clone(),
-                turn_id: turn_id.clone(),
-            }),
-        )
-        .expect("command execution start should bridge");
-        let [started] = started_events.as_slice() else {
-            panic!("expected one started event");
-        };
-        let EventMsg::ExecCommandBegin(begin) = &started.msg else {
-            panic!("expected exec begin event");
-        };
-        assert_eq!(begin.call_id, "cmd-1");
-        assert_eq!(
-            begin.command,
-            vec!["printf".to_string(), "hello world\\n".to_string()]
-        );
-        assert_eq!(begin.cwd, PathBuf::from("/tmp"));
-        assert_eq!(begin.source, ExecCommandSource::UserShell);
-
-        let (_, delta_events) =
-            server_notification_thread_events(ServerNotification::CommandExecutionOutputDelta(
-                CommandExecutionOutputDeltaNotification {
-                    thread_id: thread_id.clone(),
-                    turn_id: turn_id.clone(),
-                    item_id: "cmd-1".to_string(),
-                    delta: "hello world\n".to_string(),
-                },
-            ))
-            .expect("command execution delta should bridge");
-        let [delta] = delta_events.as_slice() else {
-            panic!("expected one delta event");
-        };
-        let EventMsg::ExecCommandOutputDelta(delta) = &delta.msg else {
-            panic!("expected exec output delta event");
-        };
-        assert_eq!(delta.call_id, "cmd-1");
-        assert_eq!(delta.chunk, b"hello world\n");
-
-        let completed_item = ThreadItem::CommandExecution {
-            id: "cmd-1".to_string(),
-            command: "printf 'hello world\\n'".to_string(),
-            cwd: PathBuf::from("/tmp"),
-            process_id: None,
-            source: CommandExecutionSource::UserShell,
-            status: CommandExecutionStatus::Completed,
-            command_actions: vec![CommandAction::Unknown {
-                command: "printf hello world".to_string(),
-            }],
-            aggregated_output: Some("hello world\n".to_string()),
-            exit_code: Some(0),
-            duration_ms: Some(5),
-        };
-        let (_, completed_events) = server_notification_thread_events(
-            ServerNotification::ItemCompleted(ItemCompletedNotification {
-                item: completed_item,
-                thread_id,
-                turn_id,
-            }),
-        )
-        .expect("command execution completion should bridge");
-        let [completed] = completed_events.as_slice() else {
-            panic!("expected one completed event");
-        };
-        let EventMsg::ExecCommandEnd(end) = &completed.msg else {
-            panic!("expected exec end event");
-        };
-        assert_eq!(end.call_id, "cmd-1");
-        assert_eq!(end.exit_code, 0);
-        assert_eq!(end.formatted_output, "hello world\n");
-        assert_eq!(end.aggregated_output, "hello world\n");
-        assert_eq!(end.source, ExecCommandSource::UserShell);
     }
 
     #[test]
@@ -1077,66 +980,6 @@ mod tests {
             Some(praxis_protocol::protocol::PraxisErrorInfo::Other)
         );
         assert!(matches!(events[8].msg, EventMsg::TurnComplete(_)));
-    }
-
-    #[test]
-    fn bridges_non_message_snapshot_items_via_legacy_events() {
-        let events = turn_snapshot_events(
-            ThreadId::new(),
-            &Turn {
-                id: "turn-complete".to_string(),
-                items: vec![
-                    ThreadItem::Reasoning {
-                        id: "reasoning-1".to_string(),
-                        summary: vec!["Need to inspect config".to_string()],
-                        content: vec!["hidden chain".to_string()],
-                    },
-                    ThreadItem::WebSearch {
-                        id: "search-1".to_string(),
-                        query: "ratatui stylize".to_string(),
-                        action: Some(praxis_app_gateway_protocol::WebSearchAction::Other),
-                    },
-                    ThreadItem::ImageGeneration {
-                        id: "image-1".to_string(),
-                        status: "completed".to_string(),
-                        revised_prompt: Some("diagram".to_string()),
-                        result: "image.png".to_string(),
-                        saved_path: None,
-                    },
-                    ThreadItem::ContextCompaction {
-                        id: "compact-1".to_string(),
-                    },
-                ],
-                status: TurnStatus::Completed,
-                error: None,
-            },
-            /*show_raw_agent_reasoning*/ false,
-        );
-
-        assert_eq!(events.len(), 6);
-        assert!(matches!(events[0].msg, EventMsg::TurnStarted(_)));
-        let EventMsg::AgentReasoning(reasoning) = &events[1].msg else {
-            panic!("expected reasoning replay");
-        };
-        assert_eq!(reasoning.text, "Need to inspect config");
-        let EventMsg::WebSearchEnd(web_search) = &events[2].msg else {
-            panic!("expected web search replay");
-        };
-        assert_eq!(web_search.call_id, "search-1");
-        assert_eq!(web_search.query, "ratatui stylize");
-        assert_eq!(
-            web_search.action,
-            praxis_protocol::models::WebSearchAction::Other
-        );
-        let EventMsg::ImageGenerationEnd(image_generation) = &events[3].msg else {
-            panic!("expected image generation replay");
-        };
-        assert_eq!(image_generation.call_id, "image-1");
-        assert_eq!(image_generation.status, "completed");
-        assert_eq!(image_generation.revised_prompt.as_deref(), Some("diagram"));
-        assert_eq!(image_generation.result, "image.png");
-        assert!(matches!(events[4].msg, EventMsg::ContextCompacted(_)));
-        assert!(matches!(events[5].msg, EventMsg::TurnComplete(_)));
     }
 
     #[test]

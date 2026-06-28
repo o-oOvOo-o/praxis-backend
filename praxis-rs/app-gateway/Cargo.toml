@@ -59,6 +59,7 @@ praxis-utils-json-to-toml = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 constant_time_eq = { workspace = true }
+cron = { workspace = true }
 futures = { workspace = true }
 hmac = { workspace = true }
 jsonwebtoken = { workspace = true }

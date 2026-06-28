@@ -24,16 +24,11 @@ impl Session {
             replay.base_replacement_history,
             replay.rollout_suffix,
         );
-        let reference_context_item = if materialized.saw_legacy_compaction_without_replacement {
-            None
-        } else {
-            replay.reference_context_item.into_resolved()
-        };
 
         RolloutReconstruction {
             history: materialized.history,
             previous_turn_settings: replay.previous_turn_settings,
-            reference_context_item,
+            reference_context_item: replay.reference_context_item.into_resolved(),
         }
     }
 }

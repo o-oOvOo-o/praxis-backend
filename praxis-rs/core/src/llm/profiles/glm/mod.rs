@@ -11,6 +11,7 @@ use crate::llm::tasks::title::AutoTitleProfile;
 pub(crate) fn profile() -> ProfileDescriptor {
     ProfileDescriptor {
         id: BehaviorProfileId::Glm,
+        #[cfg(test)]
         label: "GLM",
         instructions: Some(prompts::BASE),
         prompt_layers: &[],

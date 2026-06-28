@@ -73,7 +73,7 @@ fn behavior_profile_aliases(behavior_id: BehaviorProfileId) -> &'static [&'stati
 
 pub(super) fn product_id_matches(
     plugin_product: &PluginLlmProduct,
-    product: ProductProfileId,
+    product: &ProductProfileId,
 ) -> bool {
     normalize_profile_id(&plugin_product.id) == product.as_str()
 }

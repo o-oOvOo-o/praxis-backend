@@ -26,7 +26,7 @@ plugins = true
     config.chatgpt_base_url = format!("{}/backend-api/", server.uri());
     let manager = PluginsManager::new_with_restriction_product(
         tmp.path().to_path_buf(),
-        Some(Product::Chatgpt),
+        Some(Product::chatgpt()),
     );
 
     let featured_plugin_ids = manager

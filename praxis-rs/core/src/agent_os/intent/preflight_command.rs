@@ -7,8 +7,7 @@ impl AgentOs {
         command: &[String],
         cwd: &Path,
     ) -> PraxisResult<CommandIntentPlan> {
-        self.note_runtime_command_activity(thread_id, RuntimeCommandActivity::WorkerStartedCommand)
-            .await;
+        self.note_worker_started_command(thread_id).await;
         let intent = classify_command(command, cwd);
         let now = Utc::now();
         let (thread, task, profile) = self.state.write().await.resolve_thread_context(

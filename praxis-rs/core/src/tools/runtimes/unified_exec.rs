@@ -40,6 +40,7 @@ use praxis_network_proxy::NetworkProxy;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_sandboxing::SandboxablePreference;
+use praxis_system_plugin_approval_control::tool_safety::SafetyToolKind;
 use praxis_tools::UnifiedExecShellMode;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -92,6 +93,10 @@ impl<'a> UnifiedExecRuntime<'a> {
 }
 
 impl Sandboxable for UnifiedExecRuntime<'_> {
+    fn tool_kind(&self) -> SafetyToolKind {
+        SafetyToolKind::Exec
+    }
+
     fn sandbox_preference(&self) -> SandboxablePreference {
         SandboxablePreference::Auto
     }

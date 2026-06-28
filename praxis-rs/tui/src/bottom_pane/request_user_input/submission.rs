@@ -175,7 +175,11 @@ impl RequestUserInputOverlay {
             .clamp(min_height, min_height.saturating_add(5))
     }
 
-    pub(super) fn apply_submission_to_draft(&mut self, text: String, text_elements: Vec<TextElement>) {
+    pub(super) fn apply_submission_to_draft(
+        &mut self,
+        text: String,
+        text_elements: Vec<TextElement>,
+    ) {
         let local_image_paths = self
             .composer
             .local_images()

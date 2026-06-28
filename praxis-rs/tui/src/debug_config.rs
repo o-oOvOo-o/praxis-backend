@@ -179,14 +179,11 @@ fn render_debug_config_lines(stack: &ConfigLayerStack) -> Vec<Line<'static>> {
 fn render_non_file_layer_details(layer: &ConfigLayerEntry) -> Vec<Line<'static>> {
     match &layer.name {
         ConfigLayerSource::SessionFlags => render_session_flag_details(&layer.config),
-        ConfigLayerSource::Mdm { .. } | ConfigLayerSource::LegacyManagedConfigTomlFromMdm => {
-            render_mdm_layer_details(layer)
-        }
+        ConfigLayerSource::Mdm { .. } => render_mdm_layer_details(layer),
         ConfigLayerSource::EnterpriseManaged { .. } => render_cloud_managed_layer_details(layer),
         ConfigLayerSource::System { .. }
         | ConfigLayerSource::User { .. }
-        | ConfigLayerSource::Project { .. }
-        | ConfigLayerSource::LegacyManagedConfigTomlFromFile { .. } => Vec::new(),
+        | ConfigLayerSource::Project { .. } => Vec::new(),
     }
 }
 
@@ -313,12 +310,6 @@ fn format_config_layer_source(source: &ConfigLayerSource) -> String {
             )
         }
         ConfigLayerSource::SessionFlags => "session-flags".to_string(),
-        ConfigLayerSource::LegacyManagedConfigTomlFromFile { file } => {
-            format!("legacy managed_config.toml ({})", file.as_path().display())
-        }
-        ConfigLayerSource::LegacyManagedConfigTomlFromMdm => {
-            "legacy managed_config.toml (MDM)".to_string()
-        }
         ConfigLayerSource::EnterpriseManaged { id, name } => {
             format!("cloud managed config {name} ({id})")
         }
@@ -553,7 +544,9 @@ mod tests {
                         },
                     },
                 )]),
-                RequirementSource::LegacyManagedConfigTomlFromMdm,
+                RequirementSource::SystemRequirementsToml {
+                    file: requirements_file.clone(),
+                },
             )),
             enforce_residency: ConstrainedWithSource::new(
                 Constrained::allow_any(Some(ResidencyRequirement::Us)),
@@ -632,7 +625,15 @@ mod tests {
                 "allowed_web_search_modes: cached, disabled (source: cloud requirements)"
             )
         );
-        assert!(rendered.contains("mcp_servers: docs (source: MDM managed_config.toml (legacy))"));
+        assert!(
+            rendered.contains(
+                format!(
+                    "mcp_servers: docs (source: {})",
+                    requirements_file.as_path().display()
+                )
+                .as_str()
+            )
+        );
         assert!(rendered.contains("enforce_residency: us (source: cloud requirements)"));
         assert!(rendered.contains(
             "experimental_network: enabled=true, domains={example.com=allow} (source: cloud requirements)"
@@ -702,34 +703,6 @@ writable_roots = ["/tmp"]
         assert!(rendered.contains("     - sandbox_workspace_write.network_access = true"));
         assert!(rendered.contains("sandbox_workspace_write.writable_roots"));
         assert!(rendered.contains("/tmp"));
-    }
-
-    #[test]
-    fn debug_config_output_shows_legacy_mdm_layer_value() {
-        let raw_mdm_toml = r#"
-# managed by MDM
-model = "managed_model"
-approval_policy = "never"
-"#;
-        let mdm_value = toml::from_str::<TomlValue>(raw_mdm_toml).expect("MDM value");
-
-        let stack = ConfigLayerStack::new(
-            vec![ConfigLayerEntry::new_with_raw_toml(
-                ConfigLayerSource::LegacyManagedConfigTomlFromMdm,
-                mdm_value,
-                raw_mdm_toml.to_string(),
-            )],
-            ConfigRequirements::default(),
-            ConfigRequirementsToml::default(),
-        )
-        .expect("config layer stack");
-
-        let rendered = render_to_text(&render_debug_config_lines(&stack));
-        assert!(rendered.contains("legacy managed_config.toml (MDM) (enabled)"));
-        assert!(rendered.contains("MDM value:"));
-        assert!(rendered.contains("# managed by MDM"));
-        assert!(rendered.contains("model = \"managed_model\""));
-        assert!(rendered.contains("approval_policy = \"never\""));
     }
 
     #[test]

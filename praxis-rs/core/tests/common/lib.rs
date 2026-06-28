@@ -321,7 +321,6 @@ pub fn sandbox_network_env_var() -> &'static str {
 }
 
 const REMOTE_ENV_ENV_VAR: &str = "PRAXIS_TEST_REMOTE_ENV";
-const LEGACY_REMOTE_ENV_ENV_VAR: &str = "PRAXIS_TEST_REMOTE_ENV";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RemoteEnvConfig {
@@ -329,9 +328,7 @@ pub struct RemoteEnvConfig {
 }
 
 pub fn get_remote_test_env() -> Option<RemoteEnvConfig> {
-    let container_name = std::env::var(REMOTE_ENV_ENV_VAR)
-        .or_else(|_| std::env::var(LEGACY_REMOTE_ENV_ENV_VAR))
-        .ok()?;
+    let container_name = std::env::var(REMOTE_ENV_ENV_VAR).ok()?;
     if container_name.trim().is_empty() {
         eprintln!("Skipping test because {REMOTE_ENV_ENV_VAR} is empty.");
         return None;

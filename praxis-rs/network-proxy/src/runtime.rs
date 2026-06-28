@@ -19,6 +19,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use globset::GlobSet;
 use praxis_utils_absolute_path::AbsolutePathBuf;
+use praxis_utils_time::unix_timestamp_seconds;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -27,7 +28,6 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use time::OffsetDateTime;
 use tokio::net::lookup_host;
 use tokio::sync::RwLock;
 use tokio::time::timeout;
@@ -133,7 +133,7 @@ impl BlockedRequest {
             decision,
             source,
             port,
-            timestamp: unix_timestamp(),
+            timestamp: unix_timestamp_seconds(),
         }
     }
 }
@@ -795,10 +795,6 @@ fn is_explicit_local_allowlisted(allowed_domains: &[String], host: &Host) -> boo
         }
         normalize_host(pattern) == normalized_host
     })
-}
-
-fn unix_timestamp() -> i64 {
-    OffsetDateTime::now_utc().unix_timestamp()
 }
 
 #[cfg(test)]

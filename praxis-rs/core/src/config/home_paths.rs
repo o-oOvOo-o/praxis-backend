@@ -30,10 +30,6 @@ pub fn default_external_codex_home() -> std::io::Result<PathBuf> {
     praxis_utils_home_dir::default_external_codex_home()
 }
 
-pub fn default_legacy_codep_home() -> std::io::Result<PathBuf> {
-    praxis_utils_home_dir::default_legacy_codep_home()
-}
-
 /// Returns the path to the folder where Praxis logs are stored. Does not verify
 /// that the directory exists.
 pub fn log_dir(cfg: &Config) -> std::io::Result<PathBuf> {

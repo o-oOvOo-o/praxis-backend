@@ -42,6 +42,7 @@ fn test_full_toolset_specs_for_gpt5_praxis_unified_exec_web_search() {
             exec_permission_approvals_enabled: false,
         }),
         create_write_stdin_tool(),
+        create_list_directory_tool(),
         create_update_plan_tool(),
         create_get_goal_tool(),
         create_create_goal_tool(),

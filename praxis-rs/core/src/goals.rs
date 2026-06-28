@@ -287,6 +287,7 @@ impl Session {
                     )
                 })?
         };
+        state_db.delete_thread_heartbeat(self.conversation_id).await?;
         let goal_id = goal.goal_id.clone();
         let protocol_goal = protocol_goal_from_state(goal);
         self.mark_active_goal_accounting(
@@ -329,6 +330,7 @@ impl Session {
                     self.conversation_id
                 )
             })?;
+        state_db.delete_thread_heartbeat(self.conversation_id).await?;
         let goal_id = goal.goal_id.clone();
         let protocol_goal = protocol_goal_from_state(goal);
         self.mark_active_goal_accounting(
@@ -419,6 +421,7 @@ impl Session {
                     self.conversation_id
                 )
             })?;
+        state_db.delete_thread_heartbeat(self.conversation_id).await?;
         let goal_id = goal.goal_id.clone();
         let goal_status = goal.status;
         let protocol_goal = protocol_goal_from_state(goal);

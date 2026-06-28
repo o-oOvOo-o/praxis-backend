@@ -329,7 +329,7 @@ fn managed_proxy_inner_command_requires_route_spec() {
 }
 
 #[test]
-fn resolve_sandbox_policies_derives_split_policies_from_legacy_policy() {
+fn resolve_sandbox_policies_derives_split_policies_from_protocol_policy() {
     let sandbox_policy = SandboxPolicy::new_read_only_policy();
 
     let resolved = resolve_sandbox_policies(
@@ -352,7 +352,7 @@ fn resolve_sandbox_policies_derives_split_policies_from_legacy_policy() {
 }
 
 #[test]
-fn resolve_sandbox_policies_derives_legacy_policy_from_split_policies() {
+fn resolve_sandbox_policies_derives_protocol_policy_from_split_policies() {
     let sandbox_policy = SandboxPolicy::new_read_only_policy();
     let file_system_sandbox_policy = FileSystemSandboxPolicy::from(&sandbox_policy);
     let network_sandbox_policy = NetworkSandboxPolicy::from(&sandbox_policy);

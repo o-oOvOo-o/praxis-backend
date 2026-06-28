@@ -251,7 +251,7 @@ impl SessionSource {
             | SessionSource::Exec
             | SessionSource::AppGateway
             | SessionSource::Mcp
-            | SessionSource::Unknown => Some(Product::Praxis),
+            | SessionSource::Unknown => Some(Product::praxis()),
             SessionSource::SubAgent(_) => None,
         }
     }

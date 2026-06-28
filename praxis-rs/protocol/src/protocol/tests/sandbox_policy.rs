@@ -454,7 +454,7 @@ fn restricted_file_system_policy_treats_read_entries_as_read_only_subpaths() {
 }
 
 #[test]
-fn legacy_workspace_write_nested_readable_root_stays_writable() {
+fn workspace_write_projection_nested_readable_root_stays_writable() {
     let cwd = TempDir::new().expect("tempdir");
     let docs =
         AbsolutePathBuf::resolve_path_against_base("docs", cwd.path()).expect("resolve docs");
@@ -474,7 +474,7 @@ fn legacy_workspace_write_nested_readable_root_stays_writable() {
 
     assert_eq!(
         sorted_writable_roots(
-            FileSystemSandboxPolicy::from_legacy_sandbox_policy(&policy, cwd.path())
+            FileSystemSandboxPolicy::from_sandbox_policy(&policy, cwd.path())
                 .get_writable_roots_with_cwd(cwd.path())
         ),
         vec![(canonical_cwd, vec![expected_dot_praxis.to_path_buf()])]
@@ -482,37 +482,7 @@ fn legacy_workspace_write_nested_readable_root_stays_writable() {
 }
 
 #[test]
-fn file_system_policy_rejects_legacy_bridge_for_non_workspace_writes() {
-    let cwd = if cfg!(windows) {
-        Path::new(r"C:\workspace")
-    } else {
-        Path::new("/tmp/workspace")
-    };
-    let external_write_path = if cfg!(windows) {
-        AbsolutePathBuf::from_absolute_path(r"C:\temp").expect("absolute windows temp path")
-    } else {
-        AbsolutePathBuf::from_absolute_path("/tmp").expect("absolute tmp path")
-    };
-    let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-        path: FileSystemPath::Path {
-            path: external_write_path,
-        },
-        access: FileSystemAccessMode::Write,
-    }]);
-
-    let err = policy
-        .to_legacy_sandbox_policy(NetworkSandboxPolicy::Restricted, cwd)
-        .expect_err("non-workspace writes should be rejected");
-
-    assert!(
-        err.to_string()
-            .contains("filesystem writes outside the workspace root"),
-        "{err}"
-    );
-}
-
-#[test]
-fn legacy_sandbox_policy_semantics_survive_split_bridge() {
+fn sandbox_policy_semantics_survive_split_projection() {
     let cwd = TempDir::new().expect("tempdir");
     let readable_root = AbsolutePathBuf::resolve_path_against_base("readable", cwd.path())
         .expect("resolve readable root");
@@ -569,8 +539,8 @@ fn legacy_sandbox_policy_semantics_survive_split_bridge() {
     ];
 
     for expected in policies {
-        let actual = FileSystemSandboxPolicy::from_legacy_sandbox_policy(&expected, cwd.path())
-            .to_legacy_sandbox_policy(NetworkSandboxPolicy::from(&expected), cwd.path())
+        let actual = FileSystemSandboxPolicy::from_sandbox_policy(&expected, cwd.path())
+            .to_sandbox_policy(NetworkSandboxPolicy::from(&expected), cwd.path())
             .expect("legacy bridge should preserve legacy policy semantics");
 
         assert_same_sandbox_policy_semantics(&expected, &actual, cwd.path());

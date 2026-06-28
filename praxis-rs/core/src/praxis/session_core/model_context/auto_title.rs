@@ -18,7 +18,7 @@ impl Session {
             &base.current_model_info,
             base.per_turn_config.model_provider_id.as_str(),
             &base.per_turn_config.model_provider,
-            base.product_profile,
+            base.product_profile.clone(),
         ) {
             if let Some(model_slug) = auto_title_policy.model_slug {
                 selection.model_slug = model_slug;

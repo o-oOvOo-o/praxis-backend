@@ -7,8 +7,7 @@ impl AgentOs {
         tool_name: &str,
         arguments_fingerprint_source: &str,
     ) -> PraxisResult<CommandIntentPlan> {
-        self.note_runtime_command_activity(thread_id, RuntimeCommandActivity::WorkerStartedCommand)
-            .await;
+        self.note_worker_started_command(thread_id).await;
         let intent = classify_mutating_tool(tool_name);
         let now = Utc::now();
         let action = vec![

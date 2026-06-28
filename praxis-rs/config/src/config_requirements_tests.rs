@@ -54,7 +54,10 @@ fn with_unknown_source(toml: ConfigRequirementsToml) -> ConfigRequirementsWithSo
 #[test]
 fn merge_unset_fields_copies_every_field_and_sets_sources() {
     let mut target = ConfigRequirementsWithSources::default();
-    let source = RequirementSource::LegacyManagedConfigTomlFromMdm;
+    let source = RequirementSource::MdmManagedPreferences {
+        domain: "com.openai.praxis".to_string(),
+        key: "requirements".to_string(),
+    };
 
     let allowed_approval_policies = vec![AskForApproval::UnlessTrusted, AskForApproval::Never];
     let allowed_sandbox_modes = vec![
@@ -153,7 +156,10 @@ fn merge_unset_fields_fills_missing_values() -> Result<()> {
 
 #[test]
 fn merge_unset_fields_does_not_overwrite_existing_values() -> Result<()> {
-    let existing_source = RequirementSource::LegacyManagedConfigTomlFromMdm;
+    let existing_source = RequirementSource::MdmManagedPreferences {
+        domain: "com.openai.praxis".to_string(),
+        key: "allowed_approval_policies".to_string(),
+    };
     let mut populated_target = ConfigRequirementsWithSources::default();
     let populated_requirements: ConfigRequirementsToml = from_str(
         r#"
@@ -364,7 +370,10 @@ fn merge_enablement_settings_descending_preserves_higher_false_when_lower_missin
 #[test]
 fn merge_unset_fields_merges_apps_across_sources_with_enabled_evaluation() {
     let higher_source = RequirementSource::CloudRequirements;
-    let lower_source = RequirementSource::LegacyManagedConfigTomlFromMdm;
+    let lower_source = RequirementSource::MdmManagedPreferences {
+        domain: "com.openai.praxis".to_string(),
+        key: "apps".to_string(),
+    };
     let mut target = ConfigRequirementsWithSources::default();
 
     target.merge_unset_fields(
@@ -412,7 +421,10 @@ fn merge_unset_fields_apps_empty_higher_source_does_not_block_lower_disables() {
         },
     );
     target.merge_unset_fields(
-        RequirementSource::LegacyManagedConfigTomlFromMdm,
+        RequirementSource::MdmManagedPreferences {
+            domain: "com.openai.praxis".to_string(),
+            key: "apps".to_string(),
+        },
         ConfigRequirementsToml {
             apps: Some(apps_requirements(&[("connector_123123", Some(false))])),
             ..Default::default()
@@ -836,110 +848,6 @@ fn network_requirements_are_preserved_as_constraints_with_source() -> Result<()>
     assert_eq!(sourced_network.value.allow_local_binding, Some(false));
 
     Ok(())
-}
-
-#[test]
-fn legacy_network_requirements_are_preserved_as_constraints_with_source() -> Result<()> {
-    let toml_str = r#"
-        [experimental_network]
-        enabled = true
-        allow_upstream_proxy = false
-        dangerously_allow_all_unix_sockets = true
-        allowed_domains = ["api.example.com", "*.openai.com"]
-        managed_allowed_domains_only = true
-        denied_domains = ["blocked.example.com"]
-        allow_unix_sockets = ["/tmp/example.sock"]
-        allow_local_binding = false
-    "#;
-
-    let source = RequirementSource::CloudRequirements;
-    let mut requirements_with_sources = ConfigRequirementsWithSources::default();
-    requirements_with_sources.merge_unset_fields(source.clone(), from_str(toml_str)?);
-
-    let requirements = ConfigRequirements::try_from(requirements_with_sources)?;
-    let sourced_network = requirements
-        .network
-        .expect("network requirements should be preserved as constraints");
-
-    assert_eq!(sourced_network.source, source);
-    assert_eq!(sourced_network.value.enabled, Some(true));
-    assert_eq!(sourced_network.value.allow_upstream_proxy, Some(false));
-    assert_eq!(
-        sourced_network.value.dangerously_allow_all_unix_sockets,
-        Some(true)
-    );
-    assert_eq!(
-        sourced_network.value.domains.as_ref(),
-        Some(&NetworkDomainPermissionsToml {
-            entries: BTreeMap::from([
-                (
-                    "*.openai.com".to_string(),
-                    NetworkDomainPermissionToml::Allow,
-                ),
-                (
-                    "api.example.com".to_string(),
-                    NetworkDomainPermissionToml::Allow,
-                ),
-                (
-                    "blocked.example.com".to_string(),
-                    NetworkDomainPermissionToml::Deny,
-                ),
-            ]),
-        })
-    );
-    assert_eq!(
-        sourced_network.value.managed_allowed_domains_only,
-        Some(true)
-    );
-    assert_eq!(
-        sourced_network.value.unix_sockets.as_ref(),
-        Some(&NetworkUnixSocketPermissionsToml {
-            entries: BTreeMap::from([(
-                "/tmp/example.sock".to_string(),
-                NetworkUnixSocketPermissionToml::Allow,
-            )]),
-        })
-    );
-    assert_eq!(sourced_network.value.allow_local_binding, Some(false));
-
-    Ok(())
-}
-
-#[test]
-fn mixed_legacy_and_canonical_network_requirements_are_rejected() {
-    let err = from_str::<ConfigRequirementsToml>(
-        r#"
-            [experimental_network]
-            allowed_domains = ["api.example.com"]
-
-            [experimental_network.domains]
-            "*.openai.com" = "allow"
-        "#,
-    )
-    .expect_err("mixed network domain shapes should fail");
-
-    assert!(
-        err.to_string()
-            .contains("`experimental_network.domains` cannot be combined"),
-        "unexpected error: {err:#}"
-    );
-
-    let err = from_str::<ConfigRequirementsToml>(
-        r#"
-            [experimental_network]
-            allow_unix_sockets = ["/tmp/example.sock"]
-
-            [experimental_network.unix_sockets]
-            "/tmp/another.sock" = "allow"
-        "#,
-    )
-    .expect_err("mixed network unix socket shapes should fail");
-
-    assert!(
-        err.to_string()
-            .contains("`experimental_network.unix_sockets` cannot be combined"),
-        "unexpected error: {err:#}"
-    );
 }
 
 #[test]

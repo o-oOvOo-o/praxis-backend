@@ -80,52 +80,6 @@ pub(super) fn build_schema_bundle(schemas: Vec<GeneratedSchema>) -> Result<Value
     Ok(Value::Object(root))
 }
 
-pub(super) fn ensure_referenced_definitions_present(schema: &Value, label: &str) -> Result<()> {
-    let definitions = schema
-        .get("definitions")
-        .and_then(Value::as_object)
-        .ok_or_else(|| anyhow!("expected definitions map in {label} schema"))?;
-    let mut missing = HashSet::new();
-    collect_missing_definitions(schema, definitions, &mut missing);
-    if missing.is_empty() {
-        return Ok(());
-    }
-    let mut missing_names: Vec<String> = missing.into_iter().collect();
-    missing_names.sort();
-    Err(anyhow!(
-        "{label} schema missing definitions: {}",
-        missing_names.join(", ")
-    ))
-}
-
-pub(super) fn collect_missing_definitions(
-    value: &Value,
-    definitions: &Map<String, Value>,
-    missing: &mut HashSet<String>,
-) {
-    match value {
-        Value::Object(obj) => {
-            if let Some(Value::String(reference)) = obj.get("$ref")
-                && let Some(name) = reference.strip_prefix("#/definitions/")
-            {
-                let name = name.split('/').next().unwrap_or(name);
-                if !definitions.contains_key(name) {
-                    missing.insert(name.to_string());
-                }
-            }
-            for child in obj.values() {
-                collect_missing_definitions(child, definitions, missing);
-            }
-        }
-        Value::Array(items) => {
-            for child in items {
-                collect_missing_definitions(child, definitions, missing);
-            }
-        }
-        _ => {}
-    }
-}
-
 pub(super) fn insert_into_namespace(
     definitions: &mut Map<String, Value>,
     namespace: &str,

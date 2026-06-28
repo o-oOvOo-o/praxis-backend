@@ -1,9 +1,8 @@
+use crate::sandbox_projection::split_sandbox_policy;
 use crate::state::PermissionStateSource;
 use crate::state::ThreadPermissionState;
 use praxis_protocol::config_types::ApprovalsReviewer;
 use praxis_protocol::config_types::WindowsSandboxLevel;
-use praxis_protocol::permissions::FileSystemSandboxPolicy;
-use praxis_protocol::permissions::NetworkSandboxPolicy;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
 use serde::Deserialize;
@@ -44,9 +43,10 @@ pub fn apply_permission_override(
         next.approvals_reviewer = approvals_reviewer;
     }
     if let Some(sandbox_policy) = override_state.sandbox_policy.clone() {
-        next.network_sandbox_policy = NetworkSandboxPolicy::from(&sandbox_policy);
-        next.file_system_sandbox_policy =
-            FileSystemSandboxPolicy::from_legacy_sandbox_policy(&sandbox_policy, cwd);
+        let (file_system_sandbox_policy, network_sandbox_policy) =
+            split_sandbox_policy(&sandbox_policy, cwd);
+        next.network_sandbox_policy = network_sandbox_policy;
+        next.file_system_sandbox_policy = file_system_sandbox_policy;
         next.sandbox_policy = sandbox_policy;
     }
     if let Some(windows_sandbox_level) = override_state.windows_sandbox_level {

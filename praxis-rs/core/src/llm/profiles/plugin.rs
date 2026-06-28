@@ -17,6 +17,7 @@ pub(crate) type FirstPartyModelMatcher = fn(&str) -> bool;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ProfileDescriptor {
     pub(crate) id: BehaviorProfileId,
+    #[cfg(test)]
     pub(crate) label: &'static str,
     pub(crate) instructions: Option<&'static str>,
     pub(crate) prompt_layers: &'static [ProfilePromptLayerDescriptor],

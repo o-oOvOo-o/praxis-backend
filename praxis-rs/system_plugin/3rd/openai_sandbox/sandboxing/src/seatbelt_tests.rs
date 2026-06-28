@@ -227,7 +227,7 @@ fn seatbelt_args_without_extension_profile_keep_legacy_preferences_read_access()
 }
 
 #[test]
-fn seatbelt_legacy_workspace_write_nested_readable_root_stays_writable() {
+fn seatbelt_workspace_write_projection_nested_readable_root_stays_writable() {
     let tmp = TempDir::new().expect("tempdir");
     let cwd = tmp.path().join("workspace");
     fs::create_dir_all(cwd.join("docs")).expect("create docs");

@@ -13,33 +13,6 @@ fn symlink_dir(original: &Path, link: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(original, link)
 }
 
-#[test]
-fn unknown_special_paths_are_ignored_by_legacy_bridge() -> std::io::Result<()> {
-    let policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-        path: FileSystemPath::Special {
-            value: FileSystemSpecialPath::unknown(":future_special_path", /*subpath*/ None),
-        },
-        access: FileSystemAccessMode::Write,
-    }]);
-
-    let sandbox_policy = policy.to_legacy_sandbox_policy(
-        NetworkSandboxPolicy::Restricted,
-        Path::new("/tmp/workspace"),
-    )?;
-
-    assert_eq!(
-        sandbox_policy,
-        SandboxPolicy::ReadOnly {
-            access: ReadOnlyAccess::Restricted {
-                include_platform_defaults: false,
-                readable_roots: Vec::new(),
-            },
-            network_access: false,
-        }
-    );
-    Ok(())
-}
-
 #[cfg(unix)]
 #[test]
 fn writable_roots_proactively_protect_missing_dot_praxis() {
@@ -117,7 +90,7 @@ fn writable_roots_skip_default_dot_praxis_when_explicit_user_rule_exists() {
 }
 
 #[test]
-fn legacy_workspace_write_projection_blocks_missing_dot_praxis_writes() {
+fn workspace_write_projection_projection_blocks_missing_dot_praxis_writes() {
     let cwd = TempDir::new().expect("tempdir");
     let dot_praxis_config = cwd.path().join(".praxis").join("config.toml");
     let policy = SandboxPolicy::WorkspaceWrite {
@@ -131,14 +104,13 @@ fn legacy_workspace_write_projection_blocks_missing_dot_praxis_writes() {
         exclude_slash_tmp: true,
     };
 
-    let file_system_policy =
-        FileSystemSandboxPolicy::from_legacy_sandbox_policy(&policy, cwd.path());
+    let file_system_policy = FileSystemSandboxPolicy::from_sandbox_policy(&policy, cwd.path());
 
     assert!(!file_system_policy.can_write_path_with_cwd(&dot_praxis_config, cwd.path()));
 }
 
 #[test]
-fn legacy_workspace_write_projection_accepts_relative_cwd() {
+fn workspace_write_projection_projection_accepts_relative_cwd() {
     let relative_cwd = Path::new("workspace");
     let expected_dot_praxis = AbsolutePathBuf::from_absolute_path(
         std::env::current_dir()
@@ -158,8 +130,7 @@ fn legacy_workspace_write_projection_accepts_relative_cwd() {
         exclude_slash_tmp: true,
     };
 
-    let file_system_policy =
-        FileSystemSandboxPolicy::from_legacy_sandbox_policy(&policy, relative_cwd);
+    let file_system_policy = FileSystemSandboxPolicy::from_sandbox_policy(&policy, relative_cwd);
 
     assert_eq!(
         file_system_policy,
@@ -663,12 +634,12 @@ fn split_only_nested_carveouts_need_direct_runtime_enforcement() {
 
     assert!(policy.needs_direct_runtime_enforcement(NetworkSandboxPolicy::Restricted, cwd.path(),));
 
-    let legacy_workspace_write = FileSystemSandboxPolicy::from_legacy_sandbox_policy(
+    let workspace_write_projection = FileSystemSandboxPolicy::from_sandbox_policy(
         &SandboxPolicy::new_workspace_write_policy(),
         cwd.path(),
     );
     assert!(
-        !legacy_workspace_write
+        !workspace_write_projection
             .needs_direct_runtime_enforcement(NetworkSandboxPolicy::Restricted, cwd.path(),)
     );
 }

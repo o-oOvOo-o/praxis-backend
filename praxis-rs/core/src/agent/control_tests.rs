@@ -12,12 +12,15 @@ use chrono::Utc;
 use praxis_features::Feature;
 use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::AgentPath;
+use praxis_protocol::config_types::ApprovalsReviewer;
 use praxis_protocol::config_types::ModeKind;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
+use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::ErrorEvent;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::InterAgentCommunication;
+use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
 use praxis_protocol::protocol::TurnAbortReason;
@@ -25,6 +28,7 @@ use praxis_protocol::protocol::TurnAbortedEvent;
 use praxis_protocol::protocol::TurnCompleteEvent;
 use praxis_protocol::protocol::TurnStartedEvent;
 use pretty_assertions::assert_eq;
+use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::time::Duration;
 use tokio::time::sleep;
@@ -39,8 +43,6 @@ async fn test_config_with_cli_overrides(
         .praxis_home(home.path().to_path_buf())
         .cli_overrides(cli_overrides)
         .loader_overrides(LoaderOverrides {
-            #[cfg(target_os = "macos")]
-            managed_preferences_base64: Some(String::new()),
             macos_managed_config_requirements_base64: Some(String::new()),
             ..LoaderOverrides::default()
         })
@@ -55,11 +57,24 @@ async fn test_config() -> (TempDir, Config) {
 }
 
 fn text_input(text: &str) -> Op {
-    vec![UserInput::Text {
-        text: text.to_string(),
-        text_elements: Vec::new(),
-    }]
-    .into()
+    Op::UserTurn {
+        items: vec![UserInput::Text {
+            text: text.to_string(),
+            text_elements: Vec::new(),
+        }],
+        cwd: PathBuf::from("."),
+        approval_policy: AskForApproval::Never,
+        approvals_reviewer: Some(ApprovalsReviewer::User),
+        sandbox_policy: SandboxPolicy::DangerFullAccess,
+        model: "gpt-5".to_string(),
+        model_provider: Some("openai".to_string()),
+        effort: None,
+        summary: None,
+        service_tier: None,
+        final_output_json_schema: None,
+        collaboration_mode: None,
+        personality: None,
+    }
 }
 
 mod completion_notifications;

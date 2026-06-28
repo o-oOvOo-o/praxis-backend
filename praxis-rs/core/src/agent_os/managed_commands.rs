@@ -21,4 +21,3 @@ pub(in crate::agent_os) use dirty_files::push_unique_dirty_files;
 pub(crate) use executions::AgentOsExecutionOpenRequest;
 pub(in crate::agent_os) use output_source::ManagedCommandOutputSource;
 pub(crate) use span::ManagedCommandSpan;
-pub(in crate::agent_os) use state::RuntimeCommandActivity;

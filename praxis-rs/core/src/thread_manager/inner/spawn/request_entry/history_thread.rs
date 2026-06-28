@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use praxis_protocol::protocol::InitialHistory;
@@ -8,7 +7,6 @@ use crate::agent::AgentControl;
 use crate::config::Config;
 use crate::error::Result as PraxisResult;
 use crate::exec_policy::ExecPolicyManager;
-use crate::rollout::RolloutRecorder;
 use crate::shell_snapshot::ShellSnapshot;
 
 use super::super::super::super::ThreadManagerInner;
@@ -16,16 +14,18 @@ use super::super::super::super::ThreadSpawnResult;
 use super::super::super::spawn_request::ThreadSpawnRequest;
 
 impl ThreadManagerInner {
+    #[cfg(test)]
     pub(crate) async fn resume_thread_from_rollout_with_source(
         &self,
         config: Config,
-        rollout_path: PathBuf,
+        rollout_path: std::path::PathBuf,
         agent_control: AgentControl,
-        session_source: SessionSource,
+        session_source: praxis_protocol::protocol::SessionSource,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<ExecPolicyManager>>,
     ) -> PraxisResult<ThreadSpawnResult> {
-        let initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
+        let initial_history = crate::rollout::RolloutRecorder::get_rollout_history(&rollout_path)
+            .await?;
         let request = ThreadSpawnRequest::new(
             config,
             initial_history,
