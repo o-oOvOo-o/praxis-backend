@@ -27,7 +27,7 @@ impl PraxisMessageProcessor {
             Err(err) => {
                 self.send_internal_error(
                     request_id,
-                    format!("failed to read thread heartbeat: {err}"),
+                    format!("failed to read thread heartbeat: {err:#}"),
                 )
                 .await;
             }
@@ -66,7 +66,7 @@ impl PraxisMessageProcessor {
             Err(err) => {
                 self.send_invalid_request_error(
                     request_id,
-                    format!("failed to set thread heartbeat: {err}"),
+                    format!("failed to set thread heartbeat: {err:#}"),
                 )
                 .await;
             }
@@ -98,7 +98,7 @@ impl PraxisMessageProcessor {
             Err(err) => {
                 self.send_invalid_request_error(
                     request_id,
-                    format!("failed to clear thread heartbeat: {err}"),
+                    format!("failed to clear thread heartbeat: {err:#}"),
                 )
                 .await;
             }

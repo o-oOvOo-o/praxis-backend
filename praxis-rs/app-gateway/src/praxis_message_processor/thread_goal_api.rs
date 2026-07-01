@@ -25,8 +25,11 @@ impl PraxisMessageProcessor {
                     .await;
             }
             Err(err) => {
-                self.send_internal_error(request_id, format!("failed to read thread goal: {err}"))
-                    .await;
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to read thread goal: {err:#}"),
+                )
+                .await;
             }
         }
     }
@@ -60,7 +63,7 @@ impl PraxisMessageProcessor {
             Err(err) => {
                 self.send_invalid_request_error(
                     request_id,
-                    format!("failed to set thread goal: {err}"),
+                    format!("failed to set thread goal: {err:#}"),
                 )
                 .await;
             }
@@ -97,7 +100,7 @@ impl PraxisMessageProcessor {
             Err(err) => {
                 self.send_invalid_request_error(
                     request_id,
-                    format!("failed to update thread goal: {err}"),
+                    format!("failed to update thread goal: {err:#}"),
                 )
                 .await;
             }
@@ -133,7 +136,7 @@ impl PraxisMessageProcessor {
             Err(err) => {
                 self.send_invalid_request_error(
                     request_id,
-                    format!("failed to clear thread goal: {err}"),
+                    format!("failed to clear thread goal: {err:#}"),
                 )
                 .await;
             }

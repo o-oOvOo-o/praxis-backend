@@ -74,10 +74,11 @@ impl ChatWidget {
     }
 
     pub(super) fn sync_work_panel_queue(&mut self) {
+        let pending_counts = self.praxis_thread_input_state().counts();
         self.work_panel.set_queue(WorkPanelQueueState {
-            queued_messages: self.queued_user_messages.len(),
-            pending_steers: self.pending_steers.len(),
-            rejected_steers: self.rejected_steers_queue.len(),
+            queued_messages: pending_counts.queued_messages,
+            pending_steers: pending_counts.pending_steers,
+            rejected_steers: pending_counts.rejected_steers,
             pending_approvals: self.pending_thread_approvals_count,
         });
     }

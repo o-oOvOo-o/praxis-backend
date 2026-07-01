@@ -292,6 +292,9 @@ fn server_notification_thread_id(notification: &ServerNotification) -> Option<&s
         ServerNotification::ThreadHeartbeatUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::WorkspaceChangeUpdated(notification) => {
+            Some(notification.thread_id.as_str())
+        }
         ServerNotification::AutomationRunUpdated(notification) => {
             notification.run.thread_id.as_deref()
         }

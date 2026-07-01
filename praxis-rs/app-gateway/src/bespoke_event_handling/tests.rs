@@ -806,6 +806,8 @@ async fn test_handle_turn_diff_emits_API_notification() -> Result<()> {
         ThreadScopedOutgoingMessageSender::new(outgoing, vec![ConnectionId(1)], ThreadId::new());
     let unified_diff = "--- a\n+++ b\n".to_string();
     let conversation_id = ThreadId::new();
+    let conversation_id_text = conversation_id.to_string();
+    let workspace_change_store = WorkspaceChangeStore::default();
 
     handle_turn_diff(
         conversation_id,
@@ -814,6 +816,8 @@ async fn test_handle_turn_diff_emits_API_notification() -> Result<()> {
             unified_diff: unified_diff.clone(),
         },
         &outgoing,
+        PathBuf::from("."),
+        &workspace_change_store,
     )
     .await;
 
@@ -822,9 +826,23 @@ async fn test_handle_turn_diff_emits_API_notification() -> Result<()> {
         OutgoingMessage::AppGatewayNotification(ServerNotification::TurnDiffUpdated(
             notification,
         )) => {
-            assert_eq!(notification.thread_id, conversation_id.to_string());
+            assert_eq!(notification.thread_id, conversation_id_text);
             assert_eq!(notification.turn_id, "turn-1");
             assert_eq!(notification.diff, unified_diff);
+        }
+        other => bail!("unexpected message: {other:?}"),
+    }
+    let msg = recv_broadcast_message(&mut rx).await?;
+    match msg {
+        OutgoingMessage::AppGatewayNotification(ServerNotification::WorkspaceChangeUpdated(
+            notification,
+        )) => {
+            assert_eq!(notification.thread_id, conversation_id_text);
+            assert_eq!(
+                notification.snapshot.thread_id.as_deref(),
+                Some(conversation_id_text.as_str())
+            );
+            assert_eq!(notification.snapshot.turn_id.as_deref(), Some("turn-1"));
         }
         other => bail!("unexpected message: {other:?}"),
     }

@@ -179,6 +179,13 @@ struct RawCompactTaskPolicy {
 }
 
 impl LlmToolVisibilityPolicy {
+    pub(crate) fn allow_none() -> Self {
+        Self {
+            visible_tools: Some(HashSet::new()),
+            hidden_tools: HashSet::new(),
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn from_tool_names(visible_tools: Option<&[&str]>, hidden_tools: &[&str]) -> Self {
         Self {

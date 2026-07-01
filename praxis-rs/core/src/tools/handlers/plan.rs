@@ -4,6 +4,7 @@ use crate::praxis::TurnContext;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
+use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use async_trait::async_trait;
@@ -90,15 +91,9 @@ pub(crate) async fn handle_update_plan(
             "update_plan is a TODO/checklist tool and is not allowed in Plan mode".to_string(),
         ));
     }
-    let args = parse_update_plan_arguments(&arguments)?;
+    let args: UpdatePlanArgs = parse_arguments(&arguments)?;
     session
         .send_event(turn_context, EventMsg::PlanUpdate(args))
         .await;
     Ok("Plan updated".to_string())
-}
-
-fn parse_update_plan_arguments(arguments: &str) -> Result<UpdatePlanArgs, FunctionCallError> {
-    serde_json::from_str::<UpdatePlanArgs>(arguments).map_err(|e| {
-        FunctionCallError::RespondToModel(format!("failed to parse function arguments: {e}"))
-    })
 }

@@ -48,6 +48,9 @@ pub fn provider_accepts_registered_model_catalog(
     provider: &ModelProviderInfo,
     model: &str,
 ) -> bool {
+    if is_native_local_provider(provider_id, provider) {
+        return true;
+    }
     crate::llm::registry::LlmProfileRegistry::builtin_static()
         .provider_accepts_known_first_party_model(provider_id, provider, model)
 }
@@ -125,6 +128,9 @@ pub struct ModelProviderCompatInfo {
     /// Which field name the provider expects for output token limits.
     pub max_tokens_field: Option<ModelProviderMaxTokensField>,
 
+    /// Optional output token cap to use with `max_tokens_field`.
+    pub max_tokens: Option<i64>,
+
     /// Whether tool-result messages must include the tool name.
     pub requires_tool_result_name: Option<bool>,
 
@@ -163,6 +169,8 @@ pub enum ModelProviderThinkingFormat {
     Zai,
     Qwen,
     QwenChatTemplate,
+    #[serde(alias = "llama_cpp_chat_template")]
+    ChatTemplateKwargs,
 }
 
 /// Serializable representation of a provider definition.
@@ -352,6 +360,7 @@ pub const DEFAULT_LMSTUDIO_PORT: u16 = 1234;
 pub const DEFAULT_OLLAMA_PORT: u16 = 11434;
 
 pub const LMSTUDIO_OSS_PROVIDER_ID: &str = "lmstudio";
+pub const NATIVE_LOCAL_PROVIDER_ID: &str = "praxis-native-local";
 pub const OLLAMA_OSS_PROVIDER_ID: &str = "ollama";
 
 const PRAXIS_OSS_PORT_ENV: &str = "PRAXIS_OSS_PORT";
@@ -378,10 +387,38 @@ pub fn built_in_model_providers(
             LMSTUDIO_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_LMSTUDIO_PORT, WireApi::Responses),
         ),
+        (NATIVE_LOCAL_PROVIDER_ID, create_native_local_provider()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect()
+}
+
+pub fn is_native_local_provider(provider_id: &str, provider: &ModelProviderInfo) -> bool {
+    provider_id == NATIVE_LOCAL_PROVIDER_ID
+        || provider.base_url.as_deref() == Some("praxis-native://local")
+}
+
+pub fn create_native_local_provider() -> ModelProviderInfo {
+    ModelProviderInfo {
+        name: "Praxis Native Local".into(),
+        base_url: Some("praxis-native://local".into()),
+        env_key: None,
+        env_key_instructions: None,
+        experimental_bearer_token: None,
+        auth: None,
+        wire_api: WireApi::OpenAiCompat,
+        compat: None,
+        query_params: None,
+        http_headers: None,
+        env_http_headers: None,
+        request_max_retries: None,
+        stream_max_retries: None,
+        stream_idle_timeout_ms: None,
+        websocket_connect_timeout_ms: None,
+        requires_openai_auth: false,
+        supports_websockets: false,
+    }
 }
 
 pub fn create_oss_provider(default_provider_port: u16, wire_api: WireApi) -> ModelProviderInfo {

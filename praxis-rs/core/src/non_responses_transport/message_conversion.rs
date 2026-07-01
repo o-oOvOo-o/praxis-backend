@@ -489,7 +489,7 @@ pub(super) fn apply_common_reasoning_config(
             };
             request.insert("thinking".to_string(), json!({ "type": thinking_type }));
         }
-        CommonThinkingRequestStyle::QwenChatTemplateKwargs => {
+        CommonThinkingRequestStyle::ChatTemplateKwargs => {
             request.insert(
                 "chat_template_kwargs".to_string(),
                 json!({

@@ -36,9 +36,30 @@ pub(crate) async fn stream_common_unary(
     model_info: &ModelInfo,
     effort: Option<ReasoningEffortConfig>,
 ) -> Result<ResponseStream> {
+    stream_common_unary_with_mode(
+        api_provider,
+        api_auth,
+        provider_info,
+        prompt,
+        model_info,
+        effort,
+        true,
+    )
+    .await
+}
+
+async fn stream_common_unary_with_mode(
+    api_provider: Provider,
+    api_auth: CoreAuthProvider,
+    provider_info: &ModelProviderInfo,
+    prompt: &Prompt,
+    model_info: &ModelInfo,
+    effort: Option<ReasoningEffortConfig>,
+    stream: bool,
+) -> Result<ResponseStream> {
     let common_compat = CommonRequestCompat::from_provider_and_model(provider_info, model_info);
     let thinking_policy = CommonThinkingPolicy::from_format(common_compat.thinking_format);
-    let request_body = build_common_request(prompt, model_info, provider_info, effort, true)?;
+    let request_body = build_common_request(prompt, model_info, provider_info, effort, stream)?;
     let response = send_request(
         &api_provider,
         &api_auth,

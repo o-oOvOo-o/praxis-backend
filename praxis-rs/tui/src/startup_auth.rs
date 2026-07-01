@@ -224,8 +224,7 @@ pub(super) fn active_provider_is_usable(login_status: LoginStatus, config: &Conf
     if config.model_provider.requires_openai_auth {
         return login_status != LoginStatus::NotAuthenticated;
     }
-    provider_has_configured_credentials(&config.model_provider)
-        || is_local_oss_provider(&config.model_provider_id, &config.model_provider)
+    provider_is_locally_usable(&config.model_provider_id, &config.model_provider)
 }
 
 pub(super) fn has_any_usable_provider(login_status: LoginStatus, config: &Config) -> bool {
@@ -242,9 +241,13 @@ pub(super) fn has_any_usable_provider(login_status: LoginStatus, config: &Config
 }
 
 pub(super) fn has_any_usable_non_openai_provider(config: &Config) -> bool {
-    config.model_providers.values().any(|provider| {
-        !provider.requires_openai_auth && provider_has_configured_credentials(provider)
-    })
+    config
+        .model_providers
+        .iter()
+        .any(|(provider_id, provider)| {
+            !provider.requires_openai_auth
+                && provider_is_locally_usable(provider_id.as_str(), provider)
+        })
 }
 
 pub(super) fn first_usable_non_openai_provider(
@@ -253,10 +256,22 @@ pub(super) fn first_usable_non_openai_provider(
     config
         .model_providers
         .iter()
-        .find(|(_provider_id, provider)| {
-            !provider.requires_openai_auth && provider_has_configured_credentials(provider)
+        .find(|(provider_id, provider)| {
+            !provider.requires_openai_auth
+                && provider_is_locally_usable(provider_id.as_str(), provider)
         })
         .map(|(provider_id, provider)| (provider_id.clone(), provider.clone()))
+}
+
+pub(super) fn provider_is_locally_usable(provider_id: &str, provider: &ModelProviderInfo) -> bool {
+    provider_has_configured_credentials(provider)
+        || is_local_oss_provider(provider_id, provider)
+        || is_native_local_provider(provider_id, provider)
+}
+
+pub(super) fn is_native_local_provider(provider_id: &str, provider: &ModelProviderInfo) -> bool {
+    provider_id == "praxis-native-local"
+        || provider.base_url.as_deref() == Some("praxis-native://local")
 }
 
 pub(super) fn provider_has_configured_credentials(provider: &ModelProviderInfo) -> bool {

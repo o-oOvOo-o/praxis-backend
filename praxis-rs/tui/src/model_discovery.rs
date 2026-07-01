@@ -9,6 +9,7 @@ use praxis_core::ModelProviderInfo;
 use praxis_core::OPENAI_PROVIDER_ID;
 use praxis_core::config::Config;
 use praxis_core::first_party_model_owner;
+use praxis_core::models_manager::manager::local_model_presets_for_config;
 use praxis_core::models_manager::manager::plugin_model_presets_for_config;
 use praxis_core::models_manager::model_presets::bundled_api_model_presets;
 use praxis_core::provider_accepts_registered_model_catalog;
@@ -112,6 +113,17 @@ pub(crate) fn build_model_catalog(
             plugin_model.provider_id.as_str(),
             &plugin_model.provider,
             plugin_model.preset,
+        );
+    }
+
+    for local_model in local_model_presets_for_config(config) {
+        push_provider_preset_trusted(
+            &mut models,
+            &mut metadata_by_preset_id,
+            &mut seen,
+            local_model.provider_id.as_str(),
+            &local_model.provider,
+            local_model.preset,
         );
     }
 

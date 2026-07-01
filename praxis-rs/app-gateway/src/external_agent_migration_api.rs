@@ -51,9 +51,6 @@ impl ExternalAgentMigrationApi {
                         CoreMigrationItemType::AgentsMd => {
                             ExternalAgentConfigMigrationItemType::AgentsMd
                         }
-                        CoreMigrationItemType::McpServerConfig => {
-                            ExternalAgentConfigMigrationItemType::McpServerConfig
-                        }
                     },
                     description: migration_item.description,
                     cwd: migration_item.cwd,
@@ -81,9 +78,6 @@ impl ExternalAgentMigrationApi {
                             }
                             ExternalAgentConfigMigrationItemType::AgentsMd => {
                                 CoreMigrationItemType::AgentsMd
-                            }
-                            ExternalAgentConfigMigrationItemType::McpServerConfig => {
-                                CoreMigrationItemType::McpServerConfig
                             }
                         },
                         description: migration_item.description,

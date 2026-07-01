@@ -1,4 +1,4 @@
-use crate::util::truncate_to_char_boundary;
+use praxis_utils_output_truncation::truncate_to_char_boundary;
 
 pub(in crate::agent_os) fn summarize_output(raw_output: &[u8]) -> String {
     let text = String::from_utf8_lossy(raw_output);

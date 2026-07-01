@@ -69,7 +69,12 @@ pub(super) fn build_common_request(
     if let Some(max_tokens_field) = compat.max_tokens_field {
         request.insert(
             common_max_tokens_field_name(max_tokens_field).to_string(),
-            Value::Number(DEFAULT_CLAUDE_MAX_TOKENS.into()),
+            Value::Number(
+                compat
+                    .max_tokens
+                    .unwrap_or(DEFAULT_CLAUDE_MAX_TOKENS)
+                    .into(),
+            ),
         );
     }
 
@@ -92,6 +97,7 @@ pub(super) struct CommonRequestCompat {
     pub(super) supports_reasoning_effort: bool,
     pub(super) reasoning_effort_map: Option<ModelProviderReasoningEffortMap>,
     pub(super) max_tokens_field: Option<ModelProviderMaxTokensField>,
+    pub(super) max_tokens: Option<i64>,
     pub(super) thinking_format: ModelProviderThinkingFormat,
     pub(super) preserve_tool_call_provider_metadata: bool,
     pub(super) requires_tool_result_name: bool,
@@ -105,7 +111,7 @@ pub(super) enum CommonThinkingRequestStyle {
     OpenRouterReasoningObject,
     EnableThinkingBool,
     ZaiThinkingObject,
-    QwenChatTemplateKwargs,
+    ChatTemplateKwargs,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -163,7 +169,14 @@ impl CommonThinkingPolicy {
                 complete_on_finish_reason: false,
             },
             ModelProviderThinkingFormat::QwenChatTemplate => Self {
-                request_style: CommonThinkingRequestStyle::QwenChatTemplateKwargs,
+                request_style: CommonThinkingRequestStyle::ChatTemplateKwargs,
+                replay_field: Some("reasoning_content"),
+                response_fields: &["reasoning_content", "reasoning"],
+                complete_on_message_idle: false,
+                complete_on_finish_reason: false,
+            },
+            ModelProviderThinkingFormat::ChatTemplateKwargs => Self {
+                request_style: CommonThinkingRequestStyle::ChatTemplateKwargs,
                 replay_field: Some("reasoning_content"),
                 response_fields: &["reasoning_content", "reasoning"],
                 complete_on_message_idle: false,
@@ -180,6 +193,7 @@ impl Default for CommonRequestCompat {
             supports_reasoning_effort: false,
             reasoning_effort_map: None,
             max_tokens_field: None,
+            max_tokens: None,
             thinking_format: ModelProviderThinkingFormat::Openai,
             preserve_tool_call_provider_metadata: false,
             requires_tool_result_name: false,
@@ -215,6 +229,7 @@ impl CommonRequestCompat {
                 .unwrap_or(false),
             reasoning_effort_map: compat.and_then(|compat| compat.reasoning_effort_map.clone()),
             max_tokens_field: compat.and_then(|compat| compat.max_tokens_field),
+            max_tokens: compat.and_then(|compat| compat.max_tokens),
             thinking_format,
             preserve_tool_call_provider_metadata: matches!(
                 thinking_format,
@@ -296,6 +311,7 @@ pub(super) fn merge_common_request_compat(
         .supports_parallel_tool_calls
         .or(inferred.supports_parallel_tool_calls);
     inferred.max_tokens_field = explicit.max_tokens_field.or(inferred.max_tokens_field);
+    inferred.max_tokens = explicit.max_tokens.or(inferred.max_tokens);
     inferred.requires_tool_result_name = explicit
         .requires_tool_result_name
         .or(inferred.requires_tool_result_name);

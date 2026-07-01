@@ -7,6 +7,7 @@ use crate::llm::prompts::LlmPromptPurpose;
 use crate::llm::registry::LlmProfileRegistry;
 use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::model_provider_info::ModelProviderInfo;
+use crate::model_provider_info::is_native_local_provider;
 use praxis_protocol::config_types::Personality;
 use praxis_protocol::openai_models::ModelInfo;
 
@@ -54,6 +55,18 @@ pub(crate) fn resolve_model_instructions(
     llm_runtime_catalog: &LlmRuntimeCatalog,
 ) -> String {
     let catalog_instructions = model_info.get_model_instructions(personality);
+    if is_native_local_provider(provider_id, provider) {
+        return product_profile
+            .and_then(|product| {
+                llm_runtime_catalog
+                    .resolve_product_prompt(&product, LlmPromptPurpose::ModelInstructions)
+            })
+            .map(|product_instructions| {
+                join_prompt_layers(&catalog_instructions, &product_instructions)
+            })
+            .unwrap_or(catalog_instructions);
+    }
+
     let mut instructions =
         if let Some(profile) = resolve_prompt_profile(model_info, provider_id, provider) {
             resolve_behavior_model_instructions(

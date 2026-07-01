@@ -154,7 +154,7 @@ impl PraxisMessageProcessor {
         }
     }
 
-    async fn load_thread_for_projection(
+    pub(in crate::praxis_message_processor) async fn load_thread_for_projection(
         &self,
         thread_uuid: ThreadId,
         include_turns: bool,

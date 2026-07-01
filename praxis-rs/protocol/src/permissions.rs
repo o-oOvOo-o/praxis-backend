@@ -43,6 +43,35 @@ impl NetworkSandboxPolicy {
     }
 }
 
+pub fn file_system_policy_from_sandbox_policy(
+    policy: &SandboxPolicy,
+    cwd: &Path,
+) -> FileSystemSandboxPolicy {
+    FileSystemSandboxPolicy::from_sandbox_policy(policy, cwd)
+}
+
+pub fn network_policy_from_sandbox_policy(policy: &SandboxPolicy) -> NetworkSandboxPolicy {
+    NetworkSandboxPolicy::from(policy)
+}
+
+pub fn split_sandbox_policy(
+    policy: &SandboxPolicy,
+    cwd: &Path,
+) -> (FileSystemSandboxPolicy, NetworkSandboxPolicy) {
+    (
+        file_system_policy_from_sandbox_policy(policy, cwd),
+        network_policy_from_sandbox_policy(policy),
+    )
+}
+
+pub fn sandbox_policy_from_split(
+    file_system: &FileSystemSandboxPolicy,
+    network: NetworkSandboxPolicy,
+    cwd: &Path,
+) -> io::Result<SandboxPolicy> {
+    file_system.to_sandbox_policy(network, cwd)
+}
+
 /// Access mode for a filesystem entry.
 ///
 /// When two equally specific entries target the same path, we compare these by

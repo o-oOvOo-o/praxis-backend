@@ -1,4 +1,5 @@
 use super::*;
+use praxis_app_core::praxis_model_change_divider_message;
 
 impl App {
     pub(super) async fn rebuild_config_for_cwd(
@@ -117,19 +118,14 @@ impl App {
                 tracing::info!(
                     "Selected provider: {provider_id}, Selected model: {model}, Selected effort: {effort_label}"
                 );
-                let mut message = if let Some(label) = configured_provider_label {
-                    format!("{label} provider configured; model changed to {model}")
-                } else {
-                    format!("Model changed to {model}")
-                };
-                if let Some(label) = Self::reasoning_label_for(&model, effort) {
-                    message.push(' ');
-                    message.push_str(label);
-                }
-                if let Some(profile) = profile {
-                    message.push_str(" for ");
-                    message.push_str(profile);
-                    message.push_str(" profile");
+                let profile_context = profile.map(|profile| format!("{profile} profile"));
+                let mut message = praxis_model_change_divider_message(
+                    model.as_str(),
+                    Self::reasoning_label_for(&model, effort),
+                    profile_context.as_deref(),
+                );
+                if let Some(label) = configured_provider_label {
+                    message = format!("{label} provider configured; {message}");
                 }
                 self.chat_widget.add_model_change_message(message);
             }

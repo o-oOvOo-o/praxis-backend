@@ -21,7 +21,6 @@ CREATE TABLE automation_runs (
     status TEXT NOT NULL,
     trigger_kind TEXT NOT NULL,
     thread_id TEXT,
-    turn_id TEXT,
     started_at_ms INTEGER NOT NULL,
     completed_at_ms INTEGER,
     error TEXT,
@@ -31,6 +30,3 @@ CREATE TABLE automation_runs (
 
 CREATE INDEX idx_automation_runs_automation_started
 ON automation_runs(automation_id, started_at_ms DESC);
-
-CREATE INDEX idx_automation_runs_thread_turn
-ON automation_runs(thread_id, turn_id);

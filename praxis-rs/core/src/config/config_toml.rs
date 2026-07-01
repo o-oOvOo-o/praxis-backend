@@ -2,6 +2,7 @@ use super::AgentsToml;
 use super::ConfigProfile;
 use super::GhostSnapshotToml;
 use super::LocalModelHostConfig;
+use super::LocalModelsConfig;
 use super::PermissionsToml;
 use super::ProjectConfig;
 use super::RealtimeAudioToml;
@@ -174,6 +175,10 @@ pub struct ConfigToml {
     /// Local model hosts available to the Praxis LLM runtime.
     #[serde(default)]
     pub local_model_hosts: BTreeMap<String, LocalModelHostConfig>,
+
+    /// Local model directories scanned by the Praxis native local model runtime.
+    #[serde(default)]
+    pub local_models: LocalModelsConfig,
 
     /// Speech-to-text providers and default behavior for voice input.
     #[serde(default)]

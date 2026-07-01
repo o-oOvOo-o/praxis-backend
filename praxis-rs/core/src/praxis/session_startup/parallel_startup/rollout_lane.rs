@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Context;
 use praxis_rollout::RolloutRecorderParams;
 use praxis_rollout::state_db;
 use praxis_rollout::state_db::StateDbHandle;
@@ -19,11 +20,20 @@ pub(super) async fn run(
         if config.ephemeral {
             Ok::<_, anyhow::Error>((None, None))
         } else {
-            let state_db_ctx = state_db::init(&config).await;
-            let rollout_recorder =
-                RolloutRecorder::new(&config, rollout_params, state_db_ctx.clone(), state_builder)
-                    .await?;
-            Ok((Some(rollout_recorder), state_db_ctx))
+            let state_db_ctx = state_db::try_get_state_db(&config).await.with_context(|| {
+                format!(
+                    "session startup requires state db at {}",
+                    config.sqlite_home.display()
+                )
+            })?;
+            let rollout_recorder = RolloutRecorder::new(
+                &config,
+                rollout_params,
+                Some(state_db_ctx.clone()),
+                state_builder,
+            )
+            .await?;
+            Ok((Some(rollout_recorder), Some(state_db_ctx)))
         }
     }
     .instrument(info_span!(

@@ -112,10 +112,10 @@ pub use praxis_config::Constrained;
 pub use praxis_config::ConstraintError;
 pub use praxis_config::ConstraintResult;
 pub use praxis_network_proxy::NetworkProxyAuditMetadata;
-pub use praxis_sandboxing::system_bwrap_warning;
-pub use praxis_utils_home_dir::PraxisHomeNamespace;
 use praxis_protocol::protocol::Op;
 use praxis_protocol::user_input::UserInput;
+pub use praxis_sandboxing::system_bwrap_warning;
+pub use praxis_utils_home_dir::PraxisHomeNamespace;
 pub use project_trust::set_project_trust_level;
 pub(crate) use project_trust::set_project_trust_level_inner;
 pub use runtime_config::Config;
@@ -126,6 +126,7 @@ pub use runtime_types::AgentsToml;
 pub use runtime_types::GhostSnapshotToml;
 pub use runtime_types::LocalModelHostConfig;
 pub use runtime_types::LocalModelHostKind;
+pub use runtime_types::LocalModelsConfig;
 pub use runtime_types::ProjectConfig;
 pub use runtime_types::RealtimeAudioConfig;
 pub use runtime_types::RealtimeAudioToml;
@@ -139,6 +140,7 @@ pub use runtime_types::TranscriptionProviderConfig;
 pub use runtime_types::TranscriptionProviderKind;
 pub use runtime_types::TranscriptionSubmitMode;
 use runtime_types::resolve_tool_suggest_config;
+use serde_json::Value as JsonValue;
 pub use service::ConfigService;
 pub use service::ConfigServiceError;
 pub use service_types::AppConfig as ServiceAppConfig;
@@ -159,7 +161,6 @@ pub use service_types::SandboxSettings;
 pub use service_types::Tools;
 pub use service_types::UserSavedConfig;
 pub use service_types::WriteStatus;
-use serde_json::Value as JsonValue;
 use web_search::resolve_web_search_config;
 use web_search::resolve_web_search_mode;
 pub(crate) use web_search::resolve_web_search_mode_for_turn;
@@ -215,7 +216,10 @@ impl Config {
             approval_policy: self.permissions.approval_policy.value(),
             approvals_reviewer: Some(self.approvals_reviewer.clone()),
             sandbox_policy: self.permissions.sandbox_policy.get().clone(),
-            model: self.model.clone().unwrap_or_else(|| "praxis-auto".to_string()),
+            model: self
+                .model
+                .clone()
+                .unwrap_or_else(|| "praxis-auto".to_string()),
             model_provider: Some(self.model_provider_id.clone()),
             effort: self.model_reasoning_effort.clone(),
             summary: self.model_reasoning_summary.clone(),
@@ -588,7 +592,10 @@ impl Config {
         let agent_roles =
             agent_roles::load_agent_roles(&cfg, &config_layer_stack, &mut startup_warnings)?;
 
-        let openai_base_url = cfg.openai_base_url.clone().filter(|value| !value.is_empty());
+        let openai_base_url = cfg
+            .openai_base_url
+            .clone()
+            .filter(|value| !value.is_empty());
 
         let mut model_providers = built_in_model_providers(openai_base_url);
         // Merge user-defined providers into the built-in list.
@@ -910,6 +917,7 @@ impl Config {
             mcp_oauth_callback_url: cfg.mcp_oauth_callback_url.clone(),
             model_providers,
             local_model_hosts: cfg.local_model_hosts,
+            local_models: cfg.local_models,
             transcription: cfg.transcription.unwrap_or_default(),
             project_doc_max_bytes: cfg.project_doc_max_bytes.unwrap_or(PROJECT_DOC_MAX_BYTES),
             project_doc_fallback_filenames: cfg

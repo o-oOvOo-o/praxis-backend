@@ -6,7 +6,6 @@ use super::model::parse_workspace_cwd;
 use super::model::parse_workspace_thread_heads;
 use std::io;
 use std::path::Path;
-use std::path::PathBuf;
 use tracing::warn;
 
 pub(super) async fn load_workspace_heads(
@@ -24,7 +23,10 @@ pub(super) async fn load_workspace_heads(
         if !state_db.is_file() {
             continue;
         }
-        let cwd = read_workspace_cwd(&workspace_dir).unwrap_or_else(|| fallback_cwd.to_path_buf());
+        let cwd = std::fs::read_to_string(workspace_dir.join("workspace.json"))
+            .ok()
+            .and_then(|workspace_json| parse_workspace_cwd(&workspace_json))
+            .unwrap_or_else(|| fallback_cwd.to_path_buf());
         let pool = match open_cursor_db(&state_db).await {
             Ok(pool) => pool,
             Err(err) => {
@@ -54,9 +56,4 @@ pub(super) async fn load_workspace_heads(
     }
 
     Ok(head_set.into_sorted_vec())
-}
-
-fn read_workspace_cwd(workspace_dir: &Path) -> Option<PathBuf> {
-    let workspace_json = std::fs::read_to_string(workspace_dir.join("workspace.json")).ok()?;
-    parse_workspace_cwd(&workspace_json)
 }

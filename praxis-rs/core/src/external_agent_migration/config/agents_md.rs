@@ -37,7 +37,9 @@ pub(super) fn import(source: &Path, target: &Path) -> io::Result<()> {
     }
 
     let Some(target_parent) = target.parent() else {
-        return Err(invalid_data_error("AGENTS.md target path has no parent"));
+        return Err(super::invalid_data_error(
+            "AGENTS.md target path has no parent",
+        ));
     };
     fs::create_dir_all(target_parent)?;
 
@@ -61,8 +63,4 @@ fn is_non_empty_text_file(path: &Path) -> io::Result<bool> {
     }
 
     Ok(!fs::read_to_string(path)?.trim().is_empty())
-}
-
-fn invalid_data_error(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.into())
 }

@@ -228,7 +228,7 @@ impl PraxisMessageProcessor {
             Err(err) => {
                 let error = JSONRPCErrorError {
                     code: INTERNAL_ERROR_CODE,
-                    message: format!("error resuming thread: {err}"),
+                    message: format!("error resuming thread: {err:#}"),
                     data: None,
                 };
                 self.outgoing.send_error(request_id, error).await;

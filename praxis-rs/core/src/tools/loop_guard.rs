@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 pub(crate) struct ToolLoopGuardState {
     empty_model_completions: AtomicUsize,
     subagent_tool_calls_seen: AtomicUsize,
+    any_tool_call_seen: std::sync::atomic::AtomicBool,
     terminal_list_agents_calls: AtomicUsize,
     suppress_list_agents: std::sync::atomic::AtomicBool,
     suppress_all_tools: std::sync::atomic::AtomicBool,
@@ -28,6 +29,7 @@ impl ToolLoopGuardState {
     }
 
     pub(crate) fn record_tool_call(&self, tool_name: &str) {
+        self.any_tool_call_seen.store(true, Ordering::Relaxed);
         if matches!(
             tool_name,
             "spawn_agent"
@@ -40,6 +42,10 @@ impl ToolLoopGuardState {
             self.subagent_tool_calls_seen
                 .fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    pub(crate) fn has_any_tool_call(&self) -> bool {
+        self.any_tool_call_seen.load(Ordering::Relaxed)
     }
 
     pub(crate) fn record_list_agents_terminal(

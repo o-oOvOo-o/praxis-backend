@@ -212,18 +212,6 @@ pub(crate) fn error_or_panic(message: impl std::string::ToString) {
     error!("{}", message.to_string());
 }
 
-pub(crate) fn truncate_to_char_boundary(value: &mut String, max_len: usize) {
-    if value.len() <= max_len {
-        return;
-    }
-
-    let mut boundary = max_len.min(value.len());
-    while boundary > 0 && !value.is_char_boundary(boundary) {
-        boundary -= 1;
-    }
-    value.truncate(boundary);
-}
-
 pub fn resolve_path(base: &Path, path: &PathBuf) -> PathBuf {
     if path.is_absolute() {
         path.clone()

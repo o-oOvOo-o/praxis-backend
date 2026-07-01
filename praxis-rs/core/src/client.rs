@@ -104,6 +104,7 @@ use crate::error::PraxisErr;
 use crate::error::Result;
 use crate::error::UnexpectedResponseError;
 use crate::flags::PRAXIS_RS_SSE_FIXTURE;
+use crate::llm::local_models::NativeLocalModelConfig;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::WireApi;
 use crate::response_debug_context::ResponseDebugContext;
@@ -156,6 +157,7 @@ struct ModelClientState {
     enable_request_compression: bool,
     include_timing_metrics: bool,
     beta_features_header: Option<String>,
+    native_local_config: NativeLocalModelConfig,
     disable_websockets: AtomicBool,
     cached_websocket_session: StdMutex<WebsocketSession>,
 }
@@ -280,6 +282,31 @@ impl ModelClient {
         include_timing_metrics: bool,
         beta_features_header: Option<String>,
     ) -> Self {
+        Self::new_with_native_local_config(
+            auth_manager,
+            conversation_id,
+            provider,
+            session_source,
+            model_verbosity,
+            enable_request_compression,
+            include_timing_metrics,
+            beta_features_header,
+            NativeLocalModelConfig::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_native_local_config(
+        auth_manager: Option<Arc<AuthManager>>,
+        conversation_id: ThreadId,
+        provider: ModelProviderInfo,
+        session_source: SessionSource,
+        model_verbosity: Option<VerbosityConfig>,
+        enable_request_compression: bool,
+        include_timing_metrics: bool,
+        beta_features_header: Option<String>,
+        native_local_config: NativeLocalModelConfig,
+    ) -> Self {
         let auth_manager = ProviderDecisionCenter::provider_auth_manager(auth_manager, &provider);
         let auth_env_telemetry =
             ProviderDecisionCenter::new(auth_manager.clone()).auth_env_telemetry(&provider);
@@ -294,6 +321,7 @@ impl ModelClient {
                 enable_request_compression,
                 include_timing_metrics,
                 beta_features_header,
+                native_local_config,
                 disable_websockets: AtomicBool::new(false),
                 cached_websocket_session: StdMutex::new(WebsocketSession::default()),
             }),

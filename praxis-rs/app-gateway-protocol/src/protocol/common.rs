@@ -510,6 +510,14 @@ client_request_definitions! {
         params: api::ThreadHeartbeatClearParams,
         response: api::ThreadHeartbeatClearResponse,
     },
+    WorkspaceChangeGet => "workspace/change/get" {
+        params: api::WorkspaceChangeGetParams,
+        response: api::WorkspaceChangeGetResponse,
+    },
+    WorkspaceChangeReviewHunk => "workspace/change/reviewHunk" {
+        params: api::WorkspaceChangeReviewHunkParams,
+        response: api::WorkspaceChangeReviewHunkResponse,
+    },
     AutomationList => "automation/list" {
         params: api::AutomationListParams,
         response: api::AutomationListResponse,
@@ -1159,6 +1167,7 @@ server_notification_definitions! {
     ThreadGoalUpdated => "thread/goal/updated" (api::ThreadGoalUpdatedNotification),
     ThreadGoalCleared => "thread/goal/cleared" (api::ThreadGoalClearedNotification),
     ThreadHeartbeatUpdated => "thread/heartbeat/updated" (api::ThreadHeartbeatUpdatedNotification),
+    WorkspaceChangeUpdated => "workspace/change/updated" (api::WorkspaceChangeUpdatedNotification),
     AutomationRunUpdated => "automation/run/updated" (api::AutomationRunUpdatedNotification),
     ThreadModelChanged => "thread/model/changed" (api::ThreadModelChangedNotification),
     TurnStarted => "turn/started" (api::TurnStartedNotification),

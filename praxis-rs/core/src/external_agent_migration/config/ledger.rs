@@ -54,7 +54,6 @@ pub(super) fn migration_metric_tags(
         ExternalAgentMigrationItemType::Config => "config",
         ExternalAgentMigrationItemType::Skills => "skills",
         ExternalAgentMigrationItemType::AgentsMd => "agents_md",
-        ExternalAgentMigrationItemType::McpServerConfig => "mcp_server_config",
     };
     let mut tags = vec![("migration_type", migration_type.to_string())];
     if item_type == ExternalAgentMigrationItemType::Skills {

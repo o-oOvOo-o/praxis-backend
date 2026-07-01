@@ -2,6 +2,7 @@ use anyhow::Context as _;
 use anyhow::Result;
 use anyhow::anyhow;
 use praxis_utils_home_dir::find_praxis_home;
+use praxis_utils_time::unix_timestamp_nanos;
 use rama_net::tls::ApplicationProtocol;
 use rama_tls_rustls::dep::pki_types::CertificateDer;
 use rama_tls_rustls::dep::pki_types::PrivateKeyDer;
@@ -26,8 +27,6 @@ use std::io::Write;
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 use tracing::info;
 
 pub(super) struct ManagedMitmCa {
@@ -180,10 +179,7 @@ fn write_atomic_create_new(path: &Path, contents: &[u8], mode: u32) -> Result<()
         .parent()
         .ok_or_else(|| anyhow!("missing parent directory"))?;
 
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    let nanos = unix_timestamp_nanos();
     let pid = std::process::id();
     let file_name = path.file_name().unwrap_or_default().to_string_lossy();
     let tmp_path = parent.join(format!(".{file_name}.tmp.{pid}.{nanos}"));

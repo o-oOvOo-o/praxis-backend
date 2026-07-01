@@ -10,6 +10,7 @@ use praxis_core::ThreadManager;
 use praxis_core::config::Config;
 use praxis_core::models_manager::manager::ModelsManager;
 use praxis_core::models_manager::manager::RefreshStrategy;
+use praxis_core::models_manager::manager::local_model_presets_for_config;
 use praxis_core::models_manager::model_presets::bundled_api_model_presets;
 use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::ModelInfo;
@@ -51,6 +52,26 @@ pub async fn supported_models(
             OPENAI_PROVIDER_ID,
             openai_provider,
             bundled_api_model_presets(),
+            include_hidden,
+            &mut models,
+            &mut seen_models,
+        )
+        .await;
+    }
+
+    let local_model_presets = local_model_presets_for_config(config);
+    if let Some(first) = local_model_presets.first() {
+        let provider_id = first.provider_id.clone();
+        let provider = first.provider.clone();
+        append_provider_models(
+            &models_manager,
+            config,
+            provider_id.as_str(),
+            &provider,
+            local_model_presets
+                .into_iter()
+                .map(|local_model| local_model.preset)
+                .collect(),
             include_hidden,
             &mut models,
             &mut seen_models,

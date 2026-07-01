@@ -5,15 +5,36 @@ pub(super) async fn handle_turn_diff(
     event_turn_id: &str,
     turn_diff_event: TurnDiffEvent,
     outgoing: &ThreadScopedOutgoingMessageSender,
+    root: PathBuf,
+    workspace_change_store: &WorkspaceChangeStore,
 ) {
+    let diff = turn_diff_event.unified_diff;
     {
         let notification = TurnDiffUpdatedNotification {
             thread_id: conversation_id.to_string(),
             turn_id: event_turn_id.to_string(),
-            diff: turn_diff_event.unified_diff,
+            diff: diff.clone(),
         };
         outgoing
             .send_server_notification(ServerNotification::TurnDiffUpdated(notification))
+            .await;
+    }
+    {
+        let snapshot = workspace_change_store
+            .update_from_diff(
+                root,
+                conversation_id.to_string(),
+                Some(event_turn_id.to_string()),
+                diff.as_str(),
+            )
+            .await;
+        outgoing
+            .send_server_notification(ServerNotification::WorkspaceChangeUpdated(
+                WorkspaceChangeUpdatedNotification {
+                    thread_id: conversation_id.to_string(),
+                    snapshot,
+                },
+            ))
             .await;
     }
 }

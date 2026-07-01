@@ -175,6 +175,7 @@ mod account_api;
 mod apps_api;
 mod apps_list_helpers;
 mod automation_api;
+mod automation_schedule;
 mod automation_scheduler;
 mod command_exec_api;
 mod config_derivation_api;
@@ -203,6 +204,7 @@ mod thread_store_api;
 mod transcription_api;
 mod turn_api;
 mod windows_sandbox_api;
+mod workspace_change_api;
 
 use account_api::ActiveLogin;
 use config_derivation_api::collect_resume_override_mismatches;
@@ -234,6 +236,7 @@ use thread_store_api::summary_from_state_db_metadata;
 use crate::thread_state::ThreadListenerCommand;
 use crate::thread_state::ThreadState;
 use crate::thread_state::ThreadStateManager;
+use crate::workspace_change_store::WorkspaceChangeStore;
 
 /// Handles JSON-RPC messages for Praxis threads.
 pub(crate) struct PraxisMessageProcessor {
@@ -251,6 +254,7 @@ pub(crate) struct PraxisMessageProcessor {
     thread_state_manager: ThreadStateManager,
     thread_watch_manager: ThreadWatchManager,
     command_exec_manager: CommandExecManager,
+    workspace_change_store: WorkspaceChangeStore,
     pending_fuzzy_searches: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     fuzzy_search_sessions: Arc<Mutex<HashMap<String, FuzzyFileSearchSession>>>,
     background_tasks: TaskTracker,
@@ -302,6 +306,7 @@ impl PraxisMessageProcessor {
             thread_state_manager: ThreadStateManager::new(),
             thread_watch_manager: ThreadWatchManager::new_with_outgoing(outgoing),
             command_exec_manager: CommandExecManager::default(),
+            workspace_change_store: WorkspaceChangeStore::default(),
             pending_fuzzy_searches: Arc::new(Mutex::new(HashMap::new())),
             fuzzy_search_sessions: Arc::new(Mutex::new(HashMap::new())),
             background_tasks: TaskTracker::new(),

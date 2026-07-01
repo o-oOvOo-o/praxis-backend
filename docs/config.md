@@ -18,6 +18,31 @@ Praxis stores per-tool approval overrides for custom MCP servers under
 approval_mode = "approve"
 ```
 
+## Local Models
+
+Praxis can scan local model directories and expose native local models through
+the built-in `praxis-native-local` provider.
+
+```toml
+model_provider = "praxis-native-local"
+
+[local_models]
+paths = ["D:/models", "F:/llms"]
+scan_max_depth = 6
+```
+
+Runnable native entries currently require a GGUF model file plus a
+`tokenizer.json` in the model directory or one of its ancestor directories under
+the configured root. You can also register a specific model explicitly:
+
+```toml
+[local_model_hosts.my-qwen]
+kind = "native_engine"
+models = ["my-qwen"]
+model_path = "D:/models/Qwen3-4B-Q4_K_M.gguf"
+tokenizer_path = "D:/models/tokenizer.json"
+```
+
 ## Apps (Connectors)
 
 Use `$` in the composer to insert a ChatGPT connector; the popover lists accessible

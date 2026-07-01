@@ -6,5 +6,6 @@ mod realtime_input;
 mod rollback;
 mod rollout_io;
 mod thread_metadata;
+mod thread_state_db;
 mod token_usage;
 mod turn_settings;

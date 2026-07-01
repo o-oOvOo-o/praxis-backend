@@ -1,7 +1,4 @@
 use crate::praxis::Session;
-use crate::state_db_bridge::StateDbHandle;
-use crate::state_db_bridge::{self as state_db};
-use anyhow::Context;
 use praxis_protocol::protocol::ThreadHeartbeat;
 use std::sync::Arc;
 
@@ -40,48 +37,11 @@ impl Session {
         state_db.delete_thread_heartbeat(self.conversation_id).await
     }
 
-    async fn state_db_for_thread_heartbeats(&self) -> anyhow::Result<Option<StateDbHandle>> {
-        self.ensure_rollout_materialized().await;
-        let state_db = match self.state_db() {
-            Some(state_db) => state_db,
-            None => {
-                let config = self.original_config().await;
-                if config.ephemeral {
-                    return Ok(None);
-                }
-                state_db::try_get_state_db(&config).await.with_context(|| {
-                    format!(
-                        "thread heartbeats require state db at {}",
-                        config.sqlite_home.display()
-                    )
-                })?
-            }
-        };
-        if state_db.get_thread(self.conversation_id).await?.is_none() {
-            if let Some(rollout_path) = self.current_rollout_path().await {
-                let config = self.original_config().await;
-                state_db::reconcile_rollout(
-                    Some(state_db.as_ref()),
-                    rollout_path.as_path(),
-                    config.model_provider_id.as_str(),
-                    None,
-                    &[],
-                    None,
-                    None,
-                )
-                .await;
-            }
-            if state_db.get_thread(self.conversation_id).await?.is_none() {
-                anyhow::bail!("thread heartbeats require materialized thread metadata");
-            }
-        }
-        Ok(Some(state_db))
-    }
-
-    async fn require_state_db_for_thread_heartbeats(&self) -> anyhow::Result<StateDbHandle> {
-        self.state_db_for_thread_heartbeats().await?.ok_or_else(|| {
-            anyhow::anyhow!("thread heartbeats require a persisted thread; this thread is ephemeral")
-        })
+    async fn require_state_db_for_thread_heartbeats(
+        &self,
+    ) -> anyhow::Result<crate::state_db_bridge::StateDbHandle> {
+        self.require_state_db_for_thread_feature("thread heartbeats")
+            .await
     }
 }
 

@@ -50,8 +50,8 @@ mod flags;
 #[cfg(test)]
 mod git_info_tests;
 mod goals;
-mod heartbeats;
 mod guardian;
+mod heartbeats;
 mod history_preview;
 mod hook_runtime;
 pub mod instructions;
@@ -128,6 +128,7 @@ pub use model_provider_info::ModelProviderInfo;
 pub use model_provider_info::ModelProviderMaxTokensField;
 pub use model_provider_info::ModelProviderReasoningEffortMap;
 pub use model_provider_info::ModelProviderThinkingFormat;
+pub use model_provider_info::NATIVE_LOCAL_PROVIDER_ID;
 pub use model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 pub use model_provider_info::OPENAI_PROVIDER_ID;
 pub use model_provider_info::WireApi;

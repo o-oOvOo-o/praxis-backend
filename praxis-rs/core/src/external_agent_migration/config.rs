@@ -21,7 +21,6 @@ pub enum ExternalAgentMigrationItemType {
     Config,
     Skills,
     AgentsMd,
-    McpServerConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -159,10 +158,6 @@ impl ExternalAgentMigrationService {
     }
 
     fn import_item(&self, migration_item: ExternalAgentMigrationItem) -> io::Result<()> {
-        if migration_item.item_type == ExternalAgentMigrationItemType::McpServerConfig {
-            return Ok(());
-        }
-
         let Some(scope) = self.migration_scope(migration_item.cwd.as_deref())? else {
             return Ok(());
         };
@@ -177,7 +172,6 @@ impl ExternalAgentMigrationService {
                 self.import_agents_md_from_scope(&scope)?;
                 None
             }
-            ExternalAgentMigrationItemType::McpServerConfig => unreachable!(),
         };
 
         emit_import_metric(migration_item.item_type, skills_count);
@@ -335,6 +329,10 @@ fn find_repo_root(cwd: Option<&Path>) -> io::Result<Option<PathBuf>> {
     }
 
     Ok(Some(fallback))
+}
+
+fn invalid_data_error(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
 #[cfg(test)]

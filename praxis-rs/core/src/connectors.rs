@@ -46,6 +46,7 @@ use praxis_mcp::mcp_connection_manager::McpConnectionManager;
 use praxis_mcp::mcp_connection_manager::SandboxState;
 use praxis_mcp::mcp_connection_manager::ToolInfo;
 use praxis_mcp::mcp_connection_manager::praxis_apps_tools_cache_key;
+use praxis_utils_output_truncation::truncate_utf8_bytes_with_ellipsis;
 
 pub use praxis_connectors::CONNECTORS_CACHE_TTL;
 const CONNECTORS_READY_TIMEOUT_ON_EMPTY_TOOLS: Duration = Duration::from_secs(30);
@@ -487,24 +488,13 @@ async fn chatgpt_get_request_with_token<T: DeserializeOwned>(
     } else {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        let preview = truncate_error_body_preview(&body);
+        let preview =
+            truncate_utf8_bytes_with_ellipsis(body.trim(), CHATGPT_ERROR_BODY_PREVIEW_BYTES);
         if preview.is_empty() {
             anyhow::bail!("request failed with status {status}");
         }
         anyhow::bail!("request failed with status {status}: {preview}");
     }
-}
-
-fn truncate_error_body_preview(body: &str) -> String {
-    let body = body.trim();
-    if body.len() <= CHATGPT_ERROR_BODY_PREVIEW_BYTES {
-        return body.to_string();
-    }
-    let mut end = CHATGPT_ERROR_BODY_PREVIEW_BYTES;
-    while !body.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &body[..end])
 }
 
 fn auth_manager_from_config(config: &Config) -> std::sync::Arc<AuthManager> {

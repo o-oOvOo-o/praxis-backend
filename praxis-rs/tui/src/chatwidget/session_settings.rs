@@ -1,4 +1,5 @@
 use super::*;
+use praxis_app_core::praxis_model_change_divider_message;
 
 impl ChatWidget {
     /// Set the approval policy in the widget's config copy.
@@ -558,22 +559,12 @@ impl ChatWidget {
         if previous_mode != next_mode
             && (previous_model != next_model || previous_effort != next_effort)
         {
-            let mut message = format!("Model changed to {next_model}");
-            if !next_model.starts_with("praxis-auto-") {
-                let reasoning_label = match next_effort {
-                    Some(ReasoningEffortConfig::Minimal) => "minimal",
-                    Some(ReasoningEffortConfig::Low) => "low",
-                    Some(ReasoningEffortConfig::Medium) => "medium",
-                    Some(ReasoningEffortConfig::High) => "high",
-                    Some(ReasoningEffortConfig::XHigh) => "xhigh",
-                    None | Some(ReasoningEffortConfig::None) => "default",
-                };
-                message.push(' ');
-                message.push_str(reasoning_label);
-            }
-            message.push_str(" for ");
-            message.push_str(next_mode.display_name());
-            message.push_str(" mode.");
+            let context = format!("{} mode", next_mode.display_name());
+            let message = praxis_model_change_divider_message(
+                next_model,
+                Some(Self::status_line_reasoning_effort_label(next_effort)),
+                Some(context.as_str()),
+            );
             self.add_model_change_message(message);
         }
         self.request_redraw();

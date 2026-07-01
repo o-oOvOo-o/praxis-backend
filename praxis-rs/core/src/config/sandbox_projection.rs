@@ -1,12 +1,13 @@
-use std::io;
 use std::path::Path;
 
 use praxis_config::Constrained;
 use praxis_config::types::SandboxWorkspaceWrite;
 use praxis_protocol::config_types::SandboxMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
-use praxis_protocol::permissions::FileSystemSandboxPolicy;
-use praxis_protocol::permissions::NetworkSandboxPolicy;
+pub use praxis_protocol::permissions::file_system_policy_from_sandbox_policy;
+pub use praxis_protocol::permissions::network_policy_from_sandbox_policy;
+pub use praxis_protocol::permissions::sandbox_policy_from_split;
+pub use praxis_protocol::permissions::split_sandbox_policy;
 use praxis_protocol::protocol::ReadOnlyAccess;
 use praxis_protocol::protocol::SandboxPolicy;
 
@@ -18,35 +19,6 @@ pub fn sandbox_policy_from_mode(mode: SandboxMode) -> SandboxPolicy {
         SandboxMode::WorkspaceWrite => SandboxPolicy::new_workspace_write_policy(),
         SandboxMode::DangerFullAccess => SandboxPolicy::DangerFullAccess,
     }
-}
-
-pub fn file_system_policy_from_sandbox_policy(
-    policy: &SandboxPolicy,
-    cwd: &Path,
-) -> FileSystemSandboxPolicy {
-    FileSystemSandboxPolicy::from_sandbox_policy(policy, cwd)
-}
-
-pub fn network_policy_from_sandbox_policy(policy: &SandboxPolicy) -> NetworkSandboxPolicy {
-    NetworkSandboxPolicy::from(policy)
-}
-
-pub fn split_sandbox_policy(
-    policy: &SandboxPolicy,
-    cwd: &Path,
-) -> (FileSystemSandboxPolicy, NetworkSandboxPolicy) {
-    (
-        file_system_policy_from_sandbox_policy(policy, cwd),
-        network_policy_from_sandbox_policy(policy),
-    )
-}
-
-pub fn sandbox_policy_from_split(
-    file_system: &FileSystemSandboxPolicy,
-    network: NetworkSandboxPolicy,
-    cwd: &Path,
-) -> io::Result<SandboxPolicy> {
-    file_system.to_sandbox_policy(network, cwd)
 }
 
 pub(crate) fn derive_sandbox_policy(

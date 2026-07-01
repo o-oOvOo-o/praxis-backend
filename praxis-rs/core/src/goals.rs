@@ -1,7 +1,6 @@
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::state_db_bridge::StateDbHandle;
-use crate::state_db_bridge::{self as state_db};
 use anyhow::Context;
 use futures::future::BoxFuture;
 use praxis_protocol::config_types::ModeKind;
@@ -53,6 +52,14 @@ pub(crate) struct GoalRuntimeState {
     accounting_lock: Semaphore,
     accounting: Mutex<GoalAccountingSnapshot>,
     continuation_lock: Semaphore,
+    // True when the most recent goal-continuation turn produced no tool calls,
+    // indicating the model stalled; further auto-continuation is suppressed
+    // until new user input arrives or a non-empty continuation turn occurs.
+    idle_stall_suppressed: Mutex<bool>,
+    // Sub-id of the turn launched by goal continuation, if any is pending.
+    // Compared at turn finish to decide whether the just-ended turn was an
+    // auto-continuation (and thus subject to idle-stall suppression).
+    pending_continuation_turn_id: Mutex<Option<String>>,
 }
 
 impl GoalRuntimeState {
@@ -61,6 +68,8 @@ impl GoalRuntimeState {
             accounting_lock: Semaphore::new(1),
             accounting: Mutex::new(GoalAccountingSnapshot::new()),
             continuation_lock: Semaphore::new(1),
+            idle_stall_suppressed: Mutex::new(false),
+            pending_continuation_turn_id: Mutex::new(None),
         }
     }
 
@@ -69,6 +78,22 @@ impl GoalRuntimeState {
             .acquire()
             .await
             .context("goal accounting semaphore closed")
+    }
+
+    async fn is_continuation_suppressed(&self) -> bool {
+        *self.idle_stall_suppressed.lock().await
+    }
+
+    async fn mark_continuation_suppressed(&self, suppressed: bool) {
+        *self.idle_stall_suppressed.lock().await = suppressed;
+    }
+
+    async fn pending_continuation_turn_id(&self) -> Option<String> {
+        self.pending_continuation_turn_id.lock().await.clone()
+    }
+
+    async fn set_pending_continuation_turn_id(&self, turn_id: Option<String>) {
+        *self.pending_continuation_turn_id.lock().await = turn_id;
     }
 }
 
@@ -287,7 +312,9 @@ impl Session {
                     )
                 })?
         };
-        state_db.delete_thread_heartbeat(self.conversation_id).await?;
+        state_db
+            .delete_thread_heartbeat(self.conversation_id)
+            .await?;
         let goal_id = goal.goal_id.clone();
         let protocol_goal = protocol_goal_from_state(goal);
         self.mark_active_goal_accounting(
@@ -330,7 +357,9 @@ impl Session {
                     self.conversation_id
                 )
             })?;
-        state_db.delete_thread_heartbeat(self.conversation_id).await?;
+        state_db
+            .delete_thread_heartbeat(self.conversation_id)
+            .await?;
         let goal_id = goal.goal_id.clone();
         let protocol_goal = protocol_goal_from_state(goal);
         self.mark_active_goal_accounting(
@@ -421,7 +450,9 @@ impl Session {
                     self.conversation_id
                 )
             })?;
-        state_db.delete_thread_heartbeat(self.conversation_id).await?;
+        state_db
+            .delete_thread_heartbeat(self.conversation_id)
+            .await?;
         let goal_id = goal.goal_id.clone();
         let goal_status = goal.status;
         let protocol_goal = protocol_goal_from_state(goal);
@@ -446,11 +477,22 @@ impl Session {
         if should_ignore_goal_for_mode(turn_context.collaboration_mode.mode) {
             return;
         }
+        // If this turn was not launched by goal continuation, treat it as user-
+        // or system-driven input that should clear any prior idle stall and let
+        // continuation resume once the goal goes idle again.
+        let is_continuation_turn = self
+            .goal_runtime
+            .pending_continuation_turn_id()
+            .await
+            .is_some_and(|pending| pending == turn_context.sub_id);
+        if !is_continuation_turn && self.goal_runtime.is_continuation_suppressed().await {
+            self.goal_runtime.mark_continuation_suppressed(false).await;
+        }
         let state_db = match self.state_db_for_thread_goals().await {
             Ok(Some(state_db)) => state_db,
             Ok(None) => return,
             Err(err) => {
-                tracing::warn!("failed to open state db for thread goal turn start: {err}");
+                tracing::warn!("failed to open state db for thread goal turn start: {err:#}");
                 return;
             }
         };
@@ -461,7 +503,7 @@ impl Session {
                 return;
             }
             Err(err) => {
-                tracing::warn!("failed to read thread goal at turn start: {err}");
+                tracing::warn!("failed to read thread goal at turn start: {err:#}");
                 return;
             }
         };
@@ -499,10 +541,40 @@ impl Session {
             praxis_state::GoalAccountingMode::ActiveOrStopped
         };
         if let Err(err) = self.account_thread_goal_progress(turn_context, mode).await {
-            tracing::warn!("failed to account thread goal progress at turn finish: {err}");
+            tracing::warn!("failed to account thread goal progress at turn finish: {err:#}");
         }
+        self.update_continuation_stall_state(turn_context).await;
         let mut accounting = self.goal_runtime.accounting.lock().await;
         accounting.turn = None;
+    }
+
+    // Decide whether goal continuation should be suppressed after this turn.
+    // A continuation turn that produced no tool calls is treated as an idle
+    // stall: continuation is suppressed until new user input clears it. A
+    // continuation turn that did call tools clears any prior stall. Non-
+    // continuation turns are left alone here; user input clears the stall flag
+    // when a new user-driven turn starts.
+    async fn update_continuation_stall_state(self: &Arc<Self>, turn_context: &TurnContext) {
+        let Some(pending) = self.goal_runtime.pending_continuation_turn_id().await else {
+            return;
+        };
+        // This was a goal-continuation turn only if the finished turn matches.
+        if pending != turn_context.sub_id {
+            return;
+        }
+        self.goal_runtime
+            .set_pending_continuation_turn_id(None)
+            .await;
+        let stalled = !turn_context.tool_loop_guard.has_any_tool_call();
+        self.goal_runtime
+            .mark_continuation_suppressed(stalled)
+            .await;
+        if stalled {
+            tracing::info!(
+                turn_id = %turn_context.sub_id,
+                "goal continuation turn produced no tool calls; suppressing further auto-continuation until new user input"
+            );
+        }
     }
 
     async fn handle_thread_goal_task_abort(self: &Arc<Self>, turn_context: Option<&TurnContext>) {
@@ -514,8 +586,13 @@ impl Session {
                 )
                 .await
         {
-            tracing::warn!("failed to account thread goal progress at abort: {err}");
+            tracing::warn!("failed to account thread goal progress at abort: {err:#}");
         }
+        // An abort is not a normal finish; clear any pending continuation tag so
+        // the next user-driven turn starts clean and is not mistaken for a stall.
+        self.goal_runtime
+            .set_pending_continuation_turn_id(None)
+            .await;
         let mut accounting = self.goal_runtime.accounting.lock().await;
         accounting.turn = None;
     }
@@ -628,7 +705,8 @@ impl Session {
         let Ok(_permit) = self.goal_runtime.continuation_lock.try_acquire() else {
             return;
         };
-        if self.active_turn.lock().await.is_some()
+        if self.goal_runtime.is_continuation_suppressed().await
+            || self.active_turn.lock().await.is_some()
             || self.has_pending_work_for_idle_turn().await
             || should_ignore_goal_for_mode(self.collaboration_mode().await.mode)
         {
@@ -638,7 +716,7 @@ impl Session {
             Ok(Some(state_db)) => state_db,
             Ok(None) => return,
             Err(err) => {
-                tracing::warn!("failed to open state db for goal continuation: {err}");
+                tracing::warn!("failed to open state db for goal continuation: {err:#}");
                 return;
             }
         };
@@ -646,13 +724,20 @@ impl Session {
             Ok(Some(goal)) if goal.status == praxis_state::ThreadGoalStatus::Active => goal,
             Ok(_) => return,
             Err(err) => {
-                tracing::warn!("failed to read thread goal for continuation: {err}");
+                tracing::warn!("failed to read thread goal for continuation: {err:#}");
                 return;
             }
         };
         let item = goal_context_input_item(continuation_prompt(&protocol_goal_from_state(goal)));
         self.queue_response_items_for_next_turn(vec![item]).await;
-        self.maybe_start_turn_for_pending_work().await;
+        // Tag the upcoming turn as a goal continuation so its tool-call activity
+        // can be checked at turn finish to suppress idle stalls.
+        let continuation_turn_id = uuid::Uuid::new_v4().to_string();
+        self.goal_runtime
+            .set_pending_continuation_turn_id(Some(continuation_turn_id.clone()))
+            .await;
+        self.maybe_start_turn_for_pending_work_with_sub_id(continuation_turn_id)
+            .await;
     }
 
     async fn emit_thread_goal_updated(&self, turn_context: &TurnContext, goal: ThreadGoal) {
@@ -668,47 +753,12 @@ impl Session {
     }
 
     async fn state_db_for_thread_goals(&self) -> anyhow::Result<Option<StateDbHandle>> {
-        self.ensure_rollout_materialized().await;
-        let state_db = match self.state_db() {
-            Some(state_db) => state_db,
-            None => {
-                let config = self.original_config().await;
-                if config.ephemeral {
-                    return Ok(None);
-                }
-                state_db::try_get_state_db(&config).await.with_context(|| {
-                    format!(
-                        "thread goals require state db at {}",
-                        config.sqlite_home.display()
-                    )
-                })?
-            }
-        };
-        if state_db.get_thread(self.conversation_id).await?.is_none() {
-            if let Some(rollout_path) = self.current_rollout_path().await {
-                let config = self.original_config().await;
-                state_db::reconcile_rollout(
-                    Some(state_db.as_ref()),
-                    rollout_path.as_path(),
-                    config.model_provider_id.as_str(),
-                    None,
-                    &[],
-                    None,
-                    None,
-                )
-                .await;
-            }
-            if state_db.get_thread(self.conversation_id).await?.is_none() {
-                anyhow::bail!("thread goals require materialized thread metadata");
-            }
-        }
-        Ok(Some(state_db))
+        self.state_db_for_thread_feature("thread goals").await
     }
 
     async fn require_state_db_for_thread_goals(&self) -> anyhow::Result<StateDbHandle> {
-        self.state_db_for_thread_goals().await?.ok_or_else(|| {
-            anyhow::anyhow!("thread goals require a persisted thread; this thread is ephemeral")
-        })
+        self.require_state_db_for_thread_feature("thread goals")
+            .await
     }
 }
 

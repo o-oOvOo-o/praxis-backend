@@ -76,6 +76,17 @@ pub fn plugin_model_presets_for_config(config: &Config) -> Vec<PluginModelPreset
     presets
 }
 
+pub fn local_model_presets_for_config(config: &Config) -> Vec<PluginModelPreset> {
+    crate::llm::local_models::local_model_presets_for_config(config)
+        .into_iter()
+        .map(|local_model| PluginModelPreset {
+            provider_id: local_model.provider_id,
+            provider: local_model.provider,
+            preset: local_model.preset,
+        })
+        .collect()
+}
+
 #[derive(Clone)]
 struct ModelsRequestTelemetry {
     auth_mode: Option<String>,
@@ -323,6 +334,13 @@ impl ModelsManager {
         config: &Config,
         refresh_strategy: RefreshStrategy,
     ) -> Vec<ModelPreset> {
+        if crate::llm::local_models::config_uses_native_local_provider(config) {
+            return local_model_presets_for_config(config)
+                .into_iter()
+                .map(|local_model| local_model.preset)
+                .collect();
+        }
+
         if self.provider == config.model_provider {
             return self.list_models(refresh_strategy).await;
         }
@@ -365,6 +383,13 @@ impl ModelsManager {
         &self,
         config: &Config,
     ) -> Result<Vec<ModelPreset>, TryLockError> {
+        if crate::llm::local_models::config_uses_native_local_provider(config) {
+            return Ok(local_model_presets_for_config(config)
+                .into_iter()
+                .map(|local_model| local_model.preset)
+                .collect());
+        }
+
         if self.provider == config.model_provider {
             return self.try_list_models();
         }
@@ -483,6 +508,13 @@ impl ModelsManager {
         candidates: &[ModelInfo],
         config: &Config,
     ) -> ModelInfo {
+        if crate::llm::local_models::config_uses_native_local_provider(config)
+            && let Some(model_info) =
+                crate::llm::local_models::local_model_info_for_config(config, model)
+        {
+            return model_info::with_config_overrides(model_info, config);
+        }
+
         // First use the normal longest-prefix match. If that misses, allow a narrowly scoped
         // retry for namespaced slugs like `custom/gpt-5.3-codex`.
         let remote = Self::find_model_by_longest_prefix(model, candidates)

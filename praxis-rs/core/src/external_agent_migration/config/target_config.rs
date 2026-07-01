@@ -24,7 +24,9 @@ pub(super) fn needs_values(target_config: &Path, migrated: &TomlValue) -> io::Re
 
 pub(super) fn merge_or_create(target_config: &Path, migrated: &TomlValue) -> io::Result<()> {
     let Some(target_parent) = target_config.parent() else {
-        return Err(invalid_data_error("config target path has no parent"));
+        return Err(super::invalid_data_error(
+            "config target path has no parent",
+        ));
     };
     fs::create_dir_all(target_parent)?;
 
@@ -49,7 +51,7 @@ fn parse_existing_toml_config(existing_raw: &str) -> io::Result<TomlValue> {
     }
 
     toml::from_str::<TomlValue>(existing_raw)
-        .map_err(|err| invalid_data_error(format!("invalid existing config.toml: {err}")))
+        .map_err(|err| super::invalid_data_error(format!("invalid existing config.toml: {err}")))
 }
 
 fn merge_missing_toml_values(existing: &mut TomlValue, incoming: &TomlValue) -> io::Result<bool> {
@@ -75,7 +77,7 @@ fn merge_missing_toml_values(existing: &mut TomlValue, incoming: &TomlValue) -> 
             }
             Ok(changed)
         }
-        _ => Err(invalid_data_error(
+        _ => Err(super::invalid_data_error(
             "expected TOML table while merging migrated config values",
         )),
     }
@@ -83,10 +85,6 @@ fn merge_missing_toml_values(existing: &mut TomlValue, incoming: &TomlValue) -> 
 
 fn write_toml_file(path: &Path, value: &TomlValue) -> io::Result<()> {
     let serialized = toml::to_string_pretty(value)
-        .map_err(|err| invalid_data_error(format!("failed to serialize config.toml: {err}")))?;
+        .map_err(|err| super::invalid_data_error(format!("failed to serialize config.toml: {err}")))?;
     fs::write(path, format!("{}\n", serialized.trim_end()))
-}
-
-fn invalid_data_error(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.into())
 }

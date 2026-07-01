@@ -46,8 +46,8 @@ pub(super) fn load_migrated_config(source_settings: &Path) -> io::Result<Option<
     }
 
     let raw_settings = fs::read_to_string(source_settings)?;
-    let settings: JsonValue =
-        serde_json::from_str(&raw_settings).map_err(|err| invalid_data_error(err.to_string()))?;
+    let settings: JsonValue = serde_json::from_str(&raw_settings)
+        .map_err(|err| super::invalid_data_error(err.to_string()))?;
     let migrated = build_config_migration(&settings)?;
     Ok((!is_empty_toml_table(&migrated)).then_some(migrated))
 }
@@ -117,7 +117,9 @@ fn is_word_byte(byte: u8) -> bool {
 
 fn build_config_migration(settings: &JsonValue) -> io::Result<TomlValue> {
     let Some(settings_obj) = settings.as_object() else {
-        return Err(invalid_data_error("Claude settings root must be an object"));
+        return Err(super::invalid_data_error(
+            "Claude settings root must be an object",
+        ));
     };
 
     let mut root = toml::map::Map::new();
@@ -182,8 +184,4 @@ fn is_empty_toml_table(value: &TomlValue) -> bool {
         | TomlValue::Datetime(_)
         | TomlValue::Array(_) => false,
     }
-}
-
-fn invalid_data_error(message: impl Into<String>) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message.into())
 }

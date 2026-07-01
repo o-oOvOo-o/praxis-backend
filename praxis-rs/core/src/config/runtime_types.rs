@@ -62,6 +62,31 @@ pub struct LocalModelHostConfig {
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
+const DEFAULT_LOCAL_MODEL_SCAN_MAX_DEPTH: usize = 6;
+
+fn default_local_model_scan_max_depth() -> usize {
+    DEFAULT_LOCAL_MODEL_SCAN_MAX_DEPTH
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct LocalModelsConfig {
+    #[serde(default)]
+    pub paths: Vec<AbsolutePathBuf>,
+    #[serde(default = "default_local_model_scan_max_depth")]
+    #[schemars(range(min = 1))]
+    pub scan_max_depth: usize,
+}
+
+impl Default for LocalModelsConfig {
+    fn default() -> Self {
+        Self {
+            paths: Vec::new(),
+            scan_max_depth: DEFAULT_LOCAL_MODEL_SCAN_MAX_DEPTH,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionProviderKind {

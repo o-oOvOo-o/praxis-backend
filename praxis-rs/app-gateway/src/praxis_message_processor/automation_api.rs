@@ -1,3 +1,4 @@
+use super::automation_schedule::validate_automation_schedule;
 use super::*;
 use crate::automation_projection::api_automation_run_from_state;
 use chrono::DateTime;
@@ -512,7 +513,7 @@ fn normalize_create_params(
         .map(|thread_id| non_empty("threadId", thread_id))
         .transpose()?;
     let kind = state_automation_kind_from_api(params.kind);
-    validate_schedule(kind, &params.schedule)?;
+    validate_automation_schedule(kind, &params.schedule)?;
     validate_object("config", &params.config)?;
     Ok(StateAutomationCreateParams {
         name,
@@ -545,7 +546,7 @@ fn normalize_update_params(
         return Err("prompt must not be empty".to_string());
     }
     let schedule = params.schedule.as_ref().unwrap_or(&existing.schedule_json);
-    validate_schedule(kind, schedule)?;
+    validate_automation_schedule(kind, schedule)?;
     let config = params.config.as_ref().unwrap_or(&existing.config_json);
     validate_object("config", config)?;
     Ok(StateAutomationUpdate {
@@ -594,32 +595,6 @@ fn validate_object(field: &str, value: &JsonValue) -> Result<(), String> {
     } else {
         Err(format!("{field} must be a JSON object"))
     }
-}
-
-fn validate_schedule(kind: StateAutomationKind, value: &JsonValue) -> Result<(), String> {
-    validate_object("schedule", value)?;
-    match kind {
-        StateAutomationKind::Heartbeat => {
-            let interval_ms = value
-                .get("intervalMs")
-                .and_then(JsonValue::as_i64)
-                .ok_or_else(|| "heartbeat schedule requires intervalMs".to_string())?;
-            if interval_ms <= 0 {
-                return Err("heartbeat schedule intervalMs must be greater than zero".to_string());
-            }
-        }
-        StateAutomationKind::Cron => {
-            let cron = value
-                .get("cron")
-                .and_then(JsonValue::as_str)
-                .map(str::trim)
-                .unwrap_or_default();
-            if cron.is_empty() {
-                return Err("cron schedule requires cron".to_string());
-            }
-        }
-    }
-    Ok(())
 }
 
 fn millis_to_datetime(value: i64) -> Result<DateTime<Utc>, String> {

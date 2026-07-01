@@ -13,6 +13,7 @@ struct ModelRuntimeRegistryState {
     enable_request_compression: bool,
     include_timing_metrics: bool,
     beta_features_header: Option<String>,
+    native_local_config: NativeLocalModelConfig,
     clients: StdMutex<HashMap<ModelRuntimeKey, ModelClient>>,
 }
 
@@ -86,6 +87,7 @@ impl ModelRuntimeRegistry {
         enable_request_compression: bool,
         include_timing_metrics: bool,
         beta_features_header: Option<String>,
+        native_local_config: NativeLocalModelConfig,
     ) -> Self {
         Self {
             state: Arc::new(ModelRuntimeRegistryState {
@@ -96,6 +98,7 @@ impl ModelRuntimeRegistry {
                 enable_request_compression,
                 include_timing_metrics,
                 beta_features_header,
+                native_local_config,
                 clients: StdMutex::new(HashMap::new()),
             }),
         }
@@ -116,7 +119,7 @@ impl ModelRuntimeRegistry {
             return client.clone();
         }
 
-        let client = ModelClient::new(
+        let client = ModelClient::new_with_native_local_config(
             self.state.auth_manager.clone(),
             self.state.conversation_id.clone(),
             provider.clone(),
@@ -125,6 +128,7 @@ impl ModelRuntimeRegistry {
             self.state.enable_request_compression,
             self.state.include_timing_metrics,
             self.state.beta_features_header.clone(),
+            self.state.native_local_config.clone(),
         );
         clients.insert(key, client.clone());
         client

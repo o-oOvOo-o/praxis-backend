@@ -638,6 +638,15 @@ impl ModelClientSession {
         service_tier: Option<ServiceTier>,
         turn_metadata_header: Option<&str>,
     ) -> Result<ResponseStream> {
+        if crate::model_provider_info::is_native_local_provider("", &self.client.state.provider) {
+            return crate::llm::local_models::stream_native_local_model(
+                self.client.state.native_local_config.clone(),
+                prompt,
+                model_info,
+            )
+            .await;
+        }
+
         let wire_api = self.client.state.provider.wire_api;
         match wire_api {
             WireApi::Responses => {

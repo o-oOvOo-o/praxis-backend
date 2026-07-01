@@ -1,6 +1,7 @@
 use super::AgentRoleConfig;
 use super::GhostSnapshotConfig;
 use super::LocalModelHostConfig;
+use super::LocalModelsConfig;
 use super::ManagedFeatures;
 use super::NetworkProxySpec;
 use super::ProjectConfig;
@@ -215,6 +216,9 @@ pub struct Config {
 
     /// Machine-local or managed local model hosts registered with the LLM runtime.
     pub local_model_hosts: BTreeMap<String, LocalModelHostConfig>,
+
+    /// Directories scanned for native local model files.
+    pub local_models: LocalModelsConfig,
 
     /// Generic speech-to-text configuration used by voice input surfaces.
     pub transcription: TranscriptionConfig,

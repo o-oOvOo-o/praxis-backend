@@ -7,7 +7,6 @@ pub mod live;
 pub mod outcome;
 pub mod request;
 pub mod resolve;
-mod sandbox_projection;
 pub mod state;
 pub mod store;
 pub mod sync;

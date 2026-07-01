@@ -1,5 +1,5 @@
 use crate::agent_os::records::WorkerRequestRecord;
-use crate::util::truncate_to_char_boundary;
+use praxis_utils_output_truncation::truncate_to_char_boundary;
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]

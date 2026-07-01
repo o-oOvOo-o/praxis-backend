@@ -86,6 +86,7 @@ mod thread_item_event_bridge;
 mod thread_state;
 mod thread_status;
 mod transport;
+mod workspace_change_store;
 
 pub use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 pub use crate::error_code::INVALID_PARAMS_ERROR_CODE;

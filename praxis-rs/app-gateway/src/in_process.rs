@@ -114,6 +114,7 @@ fn server_notification_requires_delivery(notification: &ServerNotification) -> b
             | ServerNotification::ThreadGoalUpdated(_)
             | ServerNotification::ThreadGoalCleared(_)
             | ServerNotification::ThreadHeartbeatUpdated(_)
+            | ServerNotification::WorkspaceChangeUpdated(_)
             | ServerNotification::AutomationRunUpdated(_)
             | ServerNotification::ThreadModelChanged(_)
             | ServerNotification::AgentMessageDelta(_)

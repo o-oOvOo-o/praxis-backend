@@ -33,6 +33,7 @@ use crate::thread_state::ThreadState;
 use crate::thread_state::TurnSummary;
 use crate::thread_status::ThreadWatchActiveGuard;
 use crate::thread_status::ThreadWatchManager;
+use crate::workspace_change_store::WorkspaceChangeStore;
 use praxis_app_gateway_protocol::AccountRateLimitsUpdatedNotification;
 use praxis_app_gateway_protocol::AdditionalPermissionProfile as ApiAdditionalPermissionProfile;
 use praxis_app_gateway_protocol::AgentMessageDeltaNotification;
@@ -103,6 +104,7 @@ use praxis_app_gateway_protocol::TurnPlanStep;
 use praxis_app_gateway_protocol::TurnPlanUpdatedNotification;
 use praxis_app_gateway_protocol::TurnStartedNotification;
 use praxis_app_gateway_protocol::TurnStatus;
+use praxis_app_gateway_protocol::WorkspaceChangeUpdatedNotification;
 use praxis_app_gateway_protocol::convert_patch_changes;
 use praxis_core::PraxisThread;
 use praxis_core::ThreadManager;
@@ -236,6 +238,7 @@ pub(crate) async fn apply_bespoke_event_handling(
     outgoing: ThreadScopedOutgoingMessageSender,
     thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     thread_watch_manager: ThreadWatchManager,
+    workspace_change_store: WorkspaceChangeStore,
     fallback_model_provider: String,
     praxis_home: &Path,
     state_db: Option<Arc<StateRuntime>>,
@@ -1180,7 +1183,16 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::TurnDiff(turn_diff_event) => {
-            handle_turn_diff(conversation_id, &event_turn_id, turn_diff_event, &outgoing).await;
+            let root = conversation.config_snapshot().await.cwd;
+            handle_turn_diff(
+                conversation_id,
+                &event_turn_id,
+                turn_diff_event,
+                &outgoing,
+                root,
+                &workspace_change_store,
+            )
+            .await;
         }
         EventMsg::PlanUpdate(plan_update_event) => {
             handle_turn_plan_update(

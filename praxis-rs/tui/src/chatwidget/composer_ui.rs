@@ -115,9 +115,8 @@ impl ChatWidget {
             && self.bottom_pane.is_task_running()
             && self.bottom_pane.no_modal_or_popup_active()
         {
-            self.submit_pending_steers_after_interrupt = true;
-            if !self.submit_op(AppCommand::interrupt()) {
-                self.submit_pending_steers_after_interrupt = false;
+            if self.request_pending_steer_interrupt() && !self.submit_op(AppCommand::interrupt()) {
+                self.rollback_pending_steer_interrupt();
             }
             return;
         }

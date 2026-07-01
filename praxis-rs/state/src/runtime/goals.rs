@@ -51,63 +51,6 @@ WHERE thread_id = ?
         row.map(|row| thread_goal_from_row(&row)).transpose()
     }
 
-    pub async fn replace_thread_goal(
-        &self,
-        thread_id: ThreadId,
-        objective: &str,
-        status: crate::ThreadGoalStatus,
-        token_budget: Option<i64>,
-    ) -> anyhow::Result<crate::ThreadGoal> {
-        let goal_id = Uuid::new_v4().to_string();
-        let now = datetime_to_millis(Utc::now());
-        let status = status_after_budget_limit(status, 0, token_budget);
-        let row = sqlx::query(
-            r#"
-INSERT INTO thread_goals (
-    thread_id,
-    goal_id,
-    objective,
-    status,
-    token_budget,
-    tokens_used,
-    time_used_seconds,
-    created_at_ms,
-    updated_at_ms
-) VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?)
-ON CONFLICT(thread_id) DO UPDATE SET
-    goal_id = excluded.goal_id,
-    objective = excluded.objective,
-    status = excluded.status,
-    token_budget = excluded.token_budget,
-    tokens_used = 0,
-    time_used_seconds = 0,
-    created_at_ms = excluded.created_at_ms,
-    updated_at_ms = excluded.updated_at_ms
-RETURNING
-    thread_id,
-    goal_id,
-    objective,
-    status,
-    token_budget,
-    tokens_used,
-    time_used_seconds,
-    created_at_ms,
-    updated_at_ms
-            "#,
-        )
-        .bind(thread_id.to_string())
-        .bind(goal_id)
-        .bind(objective)
-        .bind(status.as_str())
-        .bind(token_budget)
-        .bind(now)
-        .bind(now)
-        .fetch_one(self.pool.as_ref())
-        .await?;
-
-        thread_goal_from_row(&row)
-    }
-
     pub async fn insert_thread_goal(
         &self,
         thread_id: ThreadId,

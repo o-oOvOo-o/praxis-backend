@@ -122,14 +122,17 @@ impl StateRuntime {
         let pool = match open_state_sqlite(&state_path, &STATE_MIGRATOR).await {
             Ok(db) => Arc::new(db),
             Err(err) => {
-                warn!("failed to open state db at {}: {err}", state_path.display());
+                warn!(
+                    "failed to open state db at {}: {err:#}",
+                    state_path.display()
+                );
                 return Err(err);
             }
         };
         let logs_pool = match open_logs_sqlite(&logs_path, &LOGS_MIGRATOR).await {
             Ok(db) => Arc::new(db),
             Err(err) => {
-                warn!("failed to open logs db at {}: {err}", logs_path.display());
+                warn!("failed to open logs db at {}: {err:#}", logs_path.display());
                 return Err(err);
             }
         };

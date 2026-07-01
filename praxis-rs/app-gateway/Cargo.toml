@@ -32,6 +32,7 @@ axum = { workspace = true, default-features = false, features = [
 praxis-analytics = { workspace = true }
 praxis-arg0 = { workspace = true }
 praxis-cloud-requirements = { workspace = true }
+praxis-app-core = { workspace = true }
 praxis-config = { workspace = true }
 praxis-core = { workspace = true }
 praxis-exec-server = { workspace = true }

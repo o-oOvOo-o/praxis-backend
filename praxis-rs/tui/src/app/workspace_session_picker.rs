@@ -34,7 +34,7 @@ impl App {
             ),
             Err(err) => self
                 .chat_widget
-                .add_error_message(format!("Failed to read thread goal: {err}")),
+                .add_error_message(format!("Failed to read thread goal: {err:#}")),
         }
     }
 
@@ -56,7 +56,7 @@ impl App {
             ),
             Err(err) => self
                 .chat_widget
-                .add_error_message(format!("Failed to load thread goal: {err}")),
+                .add_error_message(format!("Failed to load thread goal: {err:#}")),
         }
     }
 
@@ -106,7 +106,7 @@ impl App {
             ),
             Err(err) => self
                 .chat_widget
-                .add_error_message(format!("Failed to set thread goal: {err}")),
+                .add_error_message(format!("Failed to set thread goal: {err:#}")),
         }
     }
 
@@ -126,7 +126,7 @@ impl App {
             ),
             Err(err) => self
                 .chat_widget
-                .add_error_message(format!("Failed to update thread goal: {err}")),
+                .add_error_message(format!("Failed to update thread goal: {err:#}")),
         }
     }
 
@@ -147,7 +147,7 @@ impl App {
             ),
             Err(err) => self
                 .chat_widget
-                .add_error_message(format!("Failed to clear thread goal: {err}")),
+                .add_error_message(format!("Failed to clear thread goal: {err:#}")),
         }
     }
 

@@ -1,8 +1,8 @@
-use crate::sandbox_projection::split_sandbox_policy;
 use crate::state::PermissionStateSource;
 use crate::state::ThreadPermissionState;
 use praxis_protocol::config_types::ApprovalsReviewer;
 use praxis_protocol::config_types::WindowsSandboxLevel;
+use praxis_protocol::permissions::split_sandbox_policy;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
 use serde::Deserialize;

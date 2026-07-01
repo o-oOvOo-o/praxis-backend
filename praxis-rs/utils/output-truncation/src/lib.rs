@@ -74,6 +74,15 @@ pub fn truncate_utf8_bytes_with_omitted_marker(content: &str, max_bytes: usize) 
     )
 }
 
+pub fn truncate_to_char_boundary(value: &mut String, max_len: usize) {
+    if value.len() <= max_len {
+        return;
+    }
+
+    let boundary = utf8_prefix_boundary(value, max_len);
+    value.truncate(boundary);
+}
+
 fn utf8_prefix_boundary(content: &str, max_bytes: usize) -> usize {
     let mut end = 0usize;
     for (index, _) in content.char_indices() {

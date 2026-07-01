@@ -1,4 +1,5 @@
 use super::*;
+use praxis_app_core::praxis_model_change_divider_message;
 use praxis_protocol::protocol::DeprecationNoticeEvent;
 
 impl ChatWidget {
@@ -287,6 +288,7 @@ impl ChatWidget {
             | ServerNotification::ThreadStarted(_)
             | ServerNotification::ThreadStatusChanged(_)
             | ServerNotification::ThreadHeartbeatUpdated(_)
+            | ServerNotification::WorkspaceChangeUpdated(_)
             | ServerNotification::AutomationRunUpdated(_)
             | ServerNotification::ThreadArchived(_)
             | ServerNotification::ThreadUnarchived(_)
@@ -345,13 +347,11 @@ impl ChatWidget {
 
         self.refresh_model_dependent_surfaces();
         if previous_model != model || previous_effort != effort {
-            let mut message = format!("Model changed to {model}");
-            if !model.starts_with("praxis-auto-") {
-                let reasoning_label = Self::status_line_reasoning_effort_label(effort);
-                message.push(' ');
-                message.push_str(reasoning_label);
-            }
-            message.push('.');
+            let message = praxis_model_change_divider_message(
+                model.as_str(),
+                Some(Self::status_line_reasoning_effort_label(effort)),
+                None,
+            );
             self.add_model_change_message(message);
         } else {
             self.request_redraw();

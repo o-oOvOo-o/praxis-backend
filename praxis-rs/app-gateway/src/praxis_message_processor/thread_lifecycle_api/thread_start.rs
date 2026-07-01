@@ -48,6 +48,7 @@ impl PraxisMessageProcessor {
             analytics_events_client: self.analytics_events_client.clone(),
             general_analytics_enabled: self.config.features.enabled(Feature::GeneralAnalytics),
             thread_watch_manager: self.thread_watch_manager.clone(),
+            workspace_change_store: self.workspace_change_store.clone(),
             fallback_model_provider: self.config.model_provider_id.clone(),
             praxis_home: self.config.praxis_home.clone(),
             state_db: get_state_db(self.config.as_ref()).await,
@@ -264,7 +265,7 @@ impl PraxisMessageProcessor {
             Err(err) => {
                 let error = JSONRPCErrorError {
                     code: INTERNAL_ERROR_CODE,
-                    message: format!("error creating thread: {err}"),
+                    message: format!("error creating thread: {err:#}"),
                     data: None,
                 };
                 listener_task_context

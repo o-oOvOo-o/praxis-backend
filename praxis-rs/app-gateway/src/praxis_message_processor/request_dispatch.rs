@@ -135,6 +135,14 @@ impl PraxisMessageProcessor {
                 self.thread_heartbeat_clear(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::WorkspaceChangeGet { request_id, params } => {
+                self.workspace_change_get(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::WorkspaceChangeReviewHunk { request_id, params } => {
+                self.workspace_change_review_hunk(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::AutomationList { request_id, params } => {
                 self.automation_list(to_connection_request_id(request_id), params)
                     .await;

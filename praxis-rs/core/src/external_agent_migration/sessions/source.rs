@@ -16,74 +16,31 @@ pub enum ExternalAgentSource {
     Cursor,
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ExternalAgentSourceIdentity {
-    import_model_provider_id: &'static str,
-    session_originator_id: &'static str,
-    bridge_state_dir_name: &'static str,
-    bridge_log_dir_name: &'static str,
-}
-
-impl ExternalAgentSourceIdentity {
-    const fn new(
-        import_model_provider_id: &'static str,
-        session_originator_id: &'static str,
-        bridge_state_dir_name: &'static str,
-        bridge_log_dir_name: &'static str,
-    ) -> Self {
-        Self {
-            import_model_provider_id,
-            session_originator_id,
-            bridge_state_dir_name,
-            bridge_log_dir_name,
-        }
-    }
-
-    const fn uniform(
-        source_id: &'static str,
-        bridge_state_dir_name: &'static str,
-        bridge_log_dir_name: &'static str,
-    ) -> Self {
-        Self::new(
-            source_id,
-            source_id,
-            bridge_state_dir_name,
-            bridge_log_dir_name,
-        )
-    }
-
-    fn apply_to_session_meta(self, meta: &mut SessionMeta) {
-        meta.originator = self.session_originator_id.to_string();
-        meta.model_provider = Some(self.import_model_provider_id.to_string());
-    }
-}
-
-const CODEX_IDENTITY: ExternalAgentSourceIdentity =
-    ExternalAgentSourceIdentity::uniform("codex", "codex_bridge_state", "codex_bridge");
-const CURSOR_IDENTITY: ExternalAgentSourceIdentity =
-    ExternalAgentSourceIdentity::uniform("cursor", "cursor_bridge_state", "cursor_bridge");
-
 impl ExternalAgentSource {
-    const fn identity(self) -> ExternalAgentSourceIdentity {
-        match self {
-            Self::Codex => CODEX_IDENTITY,
-            Self::Cursor => CURSOR_IDENTITY,
-        }
-    }
-
     pub(super) const fn import_model_provider_id(self) -> &'static str {
-        self.identity().import_model_provider_id
+        match self {
+            Self::Codex => "codex",
+            Self::Cursor => "cursor",
+        }
     }
 
     pub const fn bridge_state_dir_name(self) -> &'static str {
-        self.identity().bridge_state_dir_name
+        match self {
+            Self::Codex => "codex_bridge_state",
+            Self::Cursor => "cursor_bridge_state",
+        }
     }
 
     pub const fn bridge_log_dir_name(self) -> &'static str {
-        self.identity().bridge_log_dir_name
+        match self {
+            Self::Codex => "codex_bridge",
+            Self::Cursor => "cursor_bridge",
+        }
     }
 
     pub(super) fn apply_session_meta_identity(self, meta: &mut SessionMeta) {
-        self.identity().apply_to_session_meta(meta);
+        let source_id = self.import_model_provider_id().to_string();
+        meta.originator = source_id.clone();
+        meta.model_provider = Some(source_id);
     }
 }

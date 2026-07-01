@@ -316,9 +316,6 @@ pub enum ExternalAgentConfigMigrationItemType {
     #[serde(rename = "SKILLS")]
     #[ts(rename = "SKILLS")]
     Skills,
-    #[serde(rename = "MCP_SERVER_CONFIG")]
-    #[ts(rename = "MCP_SERVER_CONFIG")]
-    McpServerConfig,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
