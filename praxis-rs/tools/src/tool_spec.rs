@@ -7,9 +7,11 @@ use praxis_protocol::config_types::WebSearchFilters as ConfigWebSearchFilters;
 use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::config_types::WebSearchUserLocation as ConfigWebSearchUserLocation;
 use praxis_protocol::config_types::WebSearchUserLocationType;
+use praxis_protocol::openai_models::IMAGE_GENERATION_TOOL_NAME;
 use praxis_protocol::openai_models::WebSearchToolType;
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 const WEB_SEARCH_TEXT_AND_IMAGE_CONTENT_TYPES: [&str; 2] = ["text", "image"];
 
@@ -74,6 +76,42 @@ pub fn create_image_generation_tool(output_format: &str) -> ToolSpec {
     ToolSpec::ImageGeneration {
         output_format: output_format.to_string(),
     }
+}
+
+pub fn create_routed_image_generation_tool() -> ToolSpec {
+    let properties = BTreeMap::from([
+        (
+            "prompt".to_string(),
+            JsonSchema::String {
+                description: Some("Detailed natural-language prompt for the image to generate.".to_string()),
+            },
+        ),
+        (
+            "size".to_string(),
+            JsonSchema::String {
+                description: Some("Optional requested size or aspect ratio, such as 1024x1024, 1536x1024, portrait, landscape, or square.".to_string()),
+            },
+        ),
+        (
+            "quality".to_string(),
+            JsonSchema::String {
+                description: Some("Optional requested quality or rendering intent, such as draft, standard, high, or production.".to_string()),
+            },
+        ),
+    ]);
+
+    ToolSpec::Function(ResponsesApiTool {
+        name: IMAGE_GENERATION_TOOL_NAME.to_string(),
+        description: "Generate an image from a prompt. Praxis routes this through an OpenAI image-capable Responses model and returns the saved local image path.".to_string(),
+        strict: false,
+        defer_loading: None,
+        parameters: JsonSchema::Object {
+            properties,
+            required: Some(vec!["prompt".to_string()]),
+            additional_properties: Some(false.into()),
+        },
+        output_schema: None,
+    })
 }
 
 pub struct WebSearchToolOptions<'a> {

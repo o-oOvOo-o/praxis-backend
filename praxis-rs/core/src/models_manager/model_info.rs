@@ -75,6 +75,10 @@ pub(crate) fn with_known_model_capability_overrides(mut model: ModelInfo) -> Mod
     model.supports_image_detail_original |= known_model.supports_image_detail_original;
     model.supports_search_tool |= known_model.supports_search_tool;
     model.support_verbosity |= known_model.support_verbosity;
+    merge_strings(
+        &mut model.experimental_supported_tools,
+        &known_model.experimental_supported_tools,
+    );
     if model.apply_patch_tool_type.is_none() {
         model.apply_patch_tool_type = known_model.apply_patch_tool_type;
     }
@@ -91,6 +95,14 @@ fn merge_reasoning_levels(
             .any(|existing| existing.effort == preset.effort)
         {
             target.push(preset.clone());
+        }
+    }
+}
+
+fn merge_strings(target: &mut Vec<String>, overlay: &[String]) {
+    for item in overlay {
+        if !target.iter().any(|existing| existing == item) {
+            target.push(item.clone());
         }
     }
 }

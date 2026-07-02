@@ -19,6 +19,7 @@ pub enum ToolHandlerKind {
     DynamicTool,
     CreateGoal,
     GetGoal,
+    ImageGeneration,
     UpdateGoal,
     ListAgents,
     ListDirectory,

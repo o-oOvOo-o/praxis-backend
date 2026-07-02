@@ -4,7 +4,6 @@ use praxis_features::Features;
 use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
 use praxis_protocol::openai_models::ConfigShellToolType;
-use praxis_protocol::openai_models::InputModality;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionSource;
@@ -276,14 +275,13 @@ fn wire_profile_keeps_native_apply_patch_metadata() {
 }
 
 #[test]
-fn image_generation_requires_feature_and_supported_model() {
-    let supported_model_info = model_info();
+fn image_generation_selects_native_or_routed_backend() {
+    let mut supported_model_info = model_info();
+    supported_model_info.experimental_supported_tools = vec!["image_generation".to_string()];
     let mut unsupported_model_info = supported_model_info.clone();
-    unsupported_model_info.input_modalities = vec![InputModality::Text];
+    unsupported_model_info.experimental_supported_tools.clear();
 
     let default_features = Features::with_defaults();
-    let mut image_generation_features = default_features.clone();
-    image_generation_features.enable(Feature::ImageGeneration);
 
     let available_models = Vec::new();
     let default_tools_config = ToolsConfig::new(&ToolsConfigParams {
@@ -295,26 +293,28 @@ fn image_generation_requires_feature_and_supported_model() {
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
     });
-    let supported_tools_config = ToolsConfig::new(&ToolsConfigParams {
-        model_info: &supported_model_info,
-        available_models: &available_models,
-        features: &image_generation_features,
-        web_search_mode: Some(WebSearchMode::Cached),
-        session_source: SessionSource::Cli,
-        sandbox_policy: &SandboxPolicy::DangerFullAccess,
-        windows_sandbox_level: WindowsSandboxLevel::Disabled,
-    });
     let unsupported_tools_config = ToolsConfig::new(&ToolsConfigParams {
         model_info: &unsupported_model_info,
         available_models: &available_models,
-        features: &image_generation_features,
+        features: &default_features,
         web_search_mode: Some(WebSearchMode::Cached),
         session_source: SessionSource::Cli,
         sandbox_policy: &SandboxPolicy::DangerFullAccess,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
     });
 
-    assert!(!default_tools_config.image_gen_tool);
-    assert!(supported_tools_config.image_gen_tool);
-    assert!(!unsupported_tools_config.image_gen_tool);
+    assert_eq!(
+        default_tools_config.image_generation_backend,
+        Some(ImageGenerationToolBackend::NativeResponses)
+    );
+    assert_eq!(
+        unsupported_tools_config.image_generation_backend,
+        Some(ImageGenerationToolBackend::PraxisRouted)
+    );
+    assert_eq!(
+        default_tools_config
+            .with_tool_wire_profile(ToolWireProfile::Common)
+            .image_generation_backend,
+        Some(ImageGenerationToolBackend::PraxisRouted)
+    );
 }

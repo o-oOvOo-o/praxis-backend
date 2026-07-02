@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::test_config;
+use praxis_protocol::openai_models::IMAGE_GENERATION_TOOL_NAME;
 use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::openai_models::ReasoningEffortPreset;
 use pretty_assertions::assert_eq;
@@ -121,4 +122,19 @@ fn known_gpt55_capability_overlay_restores_xhigh_reasoning() {
 
     assert!(efforts.contains(&ReasoningEffort::Minimal));
     assert!(efforts.contains(&ReasoningEffort::XHigh));
+}
+
+#[test]
+fn known_gpt55_capability_overlay_restores_image_generation_tool() {
+    let mut remote_model = model_info_from_slug("gpt-5.5");
+    remote_model.experimental_supported_tools.clear();
+
+    let updated = with_known_model_capability_overrides(remote_model);
+
+    assert!(
+        updated
+            .experimental_supported_tools
+            .iter()
+            .any(|tool| tool == IMAGE_GENERATION_TOOL_NAME)
+    );
 }

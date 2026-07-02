@@ -42,6 +42,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::CreateGoalHandler;
     use crate::tools::handlers::DynamicToolHandler;
     use crate::tools::handlers::GetGoalHandler;
+    use crate::tools::handlers::ImageGenerationHandler;
     use crate::tools::handlers::ListDirectoryHandler;
     use crate::tools::handlers::McpHandler;
     use crate::tools::handlers::McpResourceHandler;
@@ -107,6 +108,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
     let create_goal_handler = Arc::new(CreateGoalHandler);
     let get_goal_handler = Arc::new(GetGoalHandler);
     let update_goal_handler = Arc::new(UpdateGoalHandler);
+    let image_generation_handler = Arc::new(ImageGenerationHandler);
     let apply_patch_handler = Arc::new(ApplyPatchHandler);
     let dynamic_tool_handler = Arc::new(DynamicToolHandler);
     let view_image_handler = Arc::new(ViewImageHandler);
@@ -162,6 +164,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
             }
             ToolHandlerKind::GetGoal => {
                 builder.register_handler(handler.name, get_goal_handler.clone());
+            }
+            ToolHandlerKind::ImageGeneration => {
+                builder.register_handler(handler.name, image_generation_handler.clone());
             }
             ToolHandlerKind::UpdateGoal => {
                 builder.register_handler(handler.name, update_goal_handler.clone());

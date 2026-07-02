@@ -607,6 +607,13 @@ impl ModelClientSession {
                 while let Some(event) = stream.next().await {
                     match event {
                         Ok(ResponseEvent::Completed { .. }) => break,
+                        Err(err) if Self::websocket_error_should_switch_to_http(&err) => {
+                            warn!(
+                                "websocket prewarm stream failed; switching this Praxis session to HTTP transport: {err:#}"
+                            );
+                            self.try_switch_http_transport(session_telemetry, model_info);
+                            return Ok(());
+                        }
                         Err(err) => return Err(err),
                         _ => {}
                     }
@@ -614,6 +621,13 @@ impl ModelClientSession {
                 Ok(())
             }
             Ok(WebsocketStreamOutcome::SwitchToHttp) => {
+                self.try_switch_http_transport(session_telemetry, model_info);
+                Ok(())
+            }
+            Err(err) if Self::websocket_error_should_switch_to_http(&err) => {
+                warn!(
+                    "websocket prewarm failed; switching this Praxis session to HTTP transport: {err:#}"
+                );
                 self.try_switch_http_transport(session_telemetry, model_info);
                 Ok(())
             }
@@ -664,12 +678,19 @@ impl ModelClientSession {
                             /*warmup*/ false,
                             request_trace,
                         )
-                        .await?
+                        .await
                     {
-                        WebsocketStreamOutcome::Stream(stream) => return Ok(stream),
-                        WebsocketStreamOutcome::SwitchToHttp => {
+                        Ok(WebsocketStreamOutcome::Stream(stream)) => return Ok(stream),
+                        Ok(WebsocketStreamOutcome::SwitchToHttp) => {
                             self.try_switch_http_transport(session_telemetry, model_info);
                         }
+                        Err(err) if Self::websocket_error_should_switch_to_http(&err) => {
+                            warn!(
+                                "websocket stream setup failed; switching this Praxis session to HTTP transport: {err:#}"
+                            );
+                            self.try_switch_http_transport(session_telemetry, model_info);
+                        }
+                        Err(err) => return Err(err),
                     }
                 }
 
@@ -763,6 +784,10 @@ impl ModelClientSession {
                 Err(err) => return Err(err),
             }
         }
+    }
+
+    fn websocket_error_should_switch_to_http(err: &PraxisErr) -> bool {
+        matches!(err, PraxisErr::Stream(_, _) | PraxisErr::Timeout)
     }
 
     /// Permanently disables WebSockets for this Praxis session and resets WebSocket state.

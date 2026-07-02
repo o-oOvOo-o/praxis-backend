@@ -1,4 +1,5 @@
 use crate::CommandToolOptions;
+use crate::ImageGenerationToolBackend;
 use crate::LIST_DIRECTORY_TOOL_NAME;
 use crate::REQUEST_USER_INPUT_TOOL_NAME;
 use crate::ShellToolOptions;
@@ -38,6 +39,7 @@ use crate::create_read_mcp_resource_tool;
 use crate::create_report_agent_job_result_tool;
 use crate::create_request_permissions_tool;
 use crate::create_request_user_input_tool;
+use crate::create_routed_image_generation_tool;
 use crate::create_send_message_tool;
 use crate::create_shell_command_tool;
 use crate::create_shell_tool;
@@ -442,12 +444,23 @@ fn register_web_search(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {
 }
 
 fn register_image_generation(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {
-    if config.image_gen_tool {
-        plan.push_spec(
-            create_image_generation_tool("png"),
-            /*supports_parallel_tool_calls*/ false,
-            config.code_mode_enabled,
-        );
+    match config.image_generation_backend {
+        Some(ImageGenerationToolBackend::NativeResponses) => {
+            plan.push_spec(
+                create_image_generation_tool("png"),
+                /*supports_parallel_tool_calls*/ false,
+                config.code_mode_enabled,
+            );
+        }
+        Some(ImageGenerationToolBackend::PraxisRouted) => {
+            plan.push_spec(
+                create_routed_image_generation_tool(),
+                /*supports_parallel_tool_calls*/ false,
+                config.code_mode_enabled,
+            );
+            plan.register_handler("image_generation", ToolHandlerKind::ImageGeneration);
+        }
+        None => {}
     }
 }
 

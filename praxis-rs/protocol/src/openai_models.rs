@@ -21,6 +21,7 @@ use crate::config_types::Verbosity;
 use crate::models::BASE_INSTRUCTIONS_DEFAULT;
 
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
+pub const IMAGE_GENERATION_TOOL_NAME: &str = "image_generation";
 
 /// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning
 #[derive(
@@ -450,7 +451,7 @@ fn openai_first_party_model_info(
         context_window: Some(272_000),
         auto_compact_token_limit: None,
         effective_context_window_percent: 95,
-        experimental_supported_tools: Vec::new(),
+        experimental_supported_tools: openai_first_party_supported_tools(),
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
@@ -476,6 +477,10 @@ fn frontier_reasoning_levels() -> Vec<ReasoningEffortPreset> {
             description: "Extra high reasoning depth for complex problems".to_string(),
         },
     ]
+}
+
+fn openai_first_party_supported_tools() -> Vec<String> {
+    vec![IMAGE_GENERATION_TOOL_NAME.to_string()]
 }
 
 fn deepseek_model_info(

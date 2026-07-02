@@ -21,7 +21,6 @@ use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::models::VIEW_IMAGE_TOOL_NAME;
-use praxis_protocol::openai_models::InputModality;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::WebSearchToolType;
 use praxis_protocol::protocol::SandboxPolicy;
@@ -38,18 +37,31 @@ const DEFAULT_WAIT_TIMEOUT_MS: i64 = 30_000;
 const MIN_WAIT_TIMEOUT_MS: i64 = 10_000;
 const MAX_WAIT_TIMEOUT_MS: i64 = 3_600_000;
 
+#[path = "tool_registry_plan_tests/app_search.rs"]
 mod app_search;
+#[path = "tool_registry_plan_tests/baseline.rs"]
 mod baseline;
+#[path = "tool_registry_plan_tests/code_mode_exec.rs"]
 mod code_mode_exec;
+#[path = "tool_registry_plan_tests/collab_agents.rs"]
 mod collab_agents;
+#[path = "tool_registry_plan_tests/file_navigation.rs"]
 mod file_navigation;
+#[path = "tool_registry_plan_tests/image_generation.rs"]
 mod image_generation;
+#[path = "tool_registry_plan_tests/mcp_resources.rs"]
 mod mcp_resources;
+#[path = "tool_registry_plan_tests/mcp_tools.rs"]
 mod mcp_tools;
+#[path = "tool_registry_plan_tests/model_support.rs"]
 mod model_support;
+#[path = "tool_registry_plan_tests/permissions_and_repl.rs"]
 mod permissions_and_repl;
+#[path = "tool_registry_plan_tests/tool_suggest.rs"]
 mod tool_suggest;
+#[path = "tool_registry_plan_tests/view_image.rs"]
 mod view_image;
+#[path = "tool_registry_plan_tests/web_search.rs"]
 mod web_search;
 
 fn model_info() -> ModelInfo {
