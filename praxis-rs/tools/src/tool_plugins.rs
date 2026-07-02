@@ -27,7 +27,6 @@ use crate::create_code_mode_tool;
 use crate::create_create_goal_tool;
 use crate::create_exec_command_tool;
 use crate::create_get_goal_tool;
-use crate::create_image_generation_tool;
 use crate::create_list_agents_tool;
 use crate::create_list_directory_tool;
 use crate::create_list_mcp_resource_templates_tool;
@@ -445,13 +444,6 @@ fn register_web_search(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {
 
 fn register_image_generation(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {
     match config.image_generation_backend {
-        Some(ImageGenerationToolBackend::NativeResponses) => {
-            plan.push_spec(
-                create_image_generation_tool("png"),
-                /*supports_parallel_tool_calls*/ false,
-                config.code_mode_enabled,
-            );
-        }
         Some(ImageGenerationToolBackend::PraxisRouted) => {
             plan.push_spec(
                 create_routed_image_generation_tool(),

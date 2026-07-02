@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn image_generation_tools_use_native_or_routed_backend() {
+fn image_generation_tools_use_praxis_routed_backend() {
     let mut supported_model_info = model_info();
     supported_model_info.experimental_supported_tools = vec!["image_generation".to_string()];
     let mut unsupported_model_info = supported_model_info.clone();
@@ -47,15 +47,6 @@ fn image_generation_tools_use_native_or_routed_backend() {
         &[],
     );
     assert_contains_tool_names(&supported_tools, &["image_generation"]);
-    let image_generation_tool = find_tool(&supported_tools, "image_generation");
-    assert_eq!(
-        serde_json::to_value(&image_generation_tool.spec).expect("serialize image tool"),
-        serde_json::json!({
-            "type": "image_generation",
-            "output_format": "png"
-        })
-    );
-
     let tools_config = ToolsConfig::new(&ToolsConfigParams {
         model_info: &unsupported_model_info,
         available_models: &available_models,
@@ -72,7 +63,26 @@ fn image_generation_tools_use_native_or_routed_backend() {
         &[],
     );
     assert_contains_tool_names(&tools, &["image_generation"]);
+    assert_routed_image_generation_tool(find_tool(&supported_tools, "image_generation"));
+    assert!(
+        handlers
+            .iter()
+            .any(|handler| handler.name == "image_generation"
+                && handler.kind == ToolHandlerKind::ImageGeneration),
+        "routed image_generation should register a core handler"
+    );
     let routed_image_tool = find_tool(&tools, "image_generation");
+    assert_routed_image_generation_tool(routed_image_tool);
+    assert!(
+        handlers
+            .iter()
+            .any(|handler| handler.name == "image_generation"
+                && handler.kind == ToolHandlerKind::ImageGeneration),
+        "routed image_generation should register a core handler"
+    );
+}
+
+fn assert_routed_image_generation_tool(routed_image_tool: &ConfiguredTool) {
     assert_eq!(
         serde_json::to_value(&routed_image_tool.spec).expect("serialize routed image tool"),
         serde_json::json!({
@@ -100,12 +110,5 @@ fn image_generation_tools_use_native_or_routed_backend() {
                 "additionalProperties": false
             }
         })
-    );
-    assert!(
-        handlers
-            .iter()
-            .any(|handler| handler.name == "image_generation"
-                && handler.kind == ToolHandlerKind::ImageGeneration),
-        "routed image_generation should register a core handler"
     );
 }

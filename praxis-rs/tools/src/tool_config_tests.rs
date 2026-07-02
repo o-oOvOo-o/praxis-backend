@@ -275,7 +275,7 @@ fn wire_profile_keeps_native_apply_patch_metadata() {
 }
 
 #[test]
-fn image_generation_selects_native_or_routed_backend() {
+fn image_generation_always_uses_praxis_routed_backend() {
     let mut supported_model_info = model_info();
     supported_model_info.experimental_supported_tools = vec!["image_generation".to_string()];
     let mut unsupported_model_info = supported_model_info.clone();
@@ -305,7 +305,7 @@ fn image_generation_selects_native_or_routed_backend() {
 
     assert_eq!(
         default_tools_config.image_generation_backend,
-        Some(ImageGenerationToolBackend::NativeResponses)
+        Some(ImageGenerationToolBackend::PraxisRouted)
     );
     assert_eq!(
         unsupported_tools_config.image_generation_backend,

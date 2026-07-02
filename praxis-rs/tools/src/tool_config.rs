@@ -6,7 +6,6 @@ use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
 use praxis_protocol::openai_models::ApplyPatchToolType;
 use praxis_protocol::openai_models::ConfigShellToolType;
-use praxis_protocol::openai_models::IMAGE_GENERATION_TOOL_NAME;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::WebSearchToolType;
@@ -42,10 +41,6 @@ impl ToolWireProfile {
     fn uses_function_wrapped_freeform_tools(self) -> bool {
         matches!(self, Self::Claude | Self::Common)
     }
-
-    fn supports_native_image_generation_tool(self) -> bool {
-        matches!(self, Self::Responses)
-    }
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -61,7 +56,6 @@ pub enum ToolWebSearchBackend {
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ImageGenerationToolBackend {
-    NativeResponses,
     PraxisRouted,
 }
 
@@ -187,13 +181,9 @@ impl ToolsConfig {
             && features.enabled(Feature::Apps)
             && features.enabled(Feature::Plugins);
         let include_original_image_detail = can_request_original_image_detail(features, model_info);
-        let image_generation_backend = features.enabled(Feature::ImageGeneration).then_some(
-            if supports_image_generation(model_info) {
-                ImageGenerationToolBackend::NativeResponses
-            } else {
-                ImageGenerationToolBackend::PraxisRouted
-            },
-        );
+        let image_generation_backend = features
+            .enabled(Feature::ImageGeneration)
+            .then_some(ImageGenerationToolBackend::PraxisRouted);
         let reverse_engineering_enabled = features.enabled(Feature::ReverseEngineering);
         let exec_permission_approvals_enabled = features.enabled(Feature::ExecPermissionApprovals);
         let request_permissions_tool_enabled = features.enabled(Feature::RequestPermissionsTool);
@@ -320,13 +310,6 @@ impl ToolsConfig {
         if self.apply_patch_tool_type.is_none() && profile.uses_function_wrapped_freeform_tools() {
             self.apply_patch_tool_type = Some(ApplyPatchToolType::Freeform);
         }
-        if matches!(
-            self.image_generation_backend,
-            Some(ImageGenerationToolBackend::NativeResponses)
-        ) && !profile.supports_native_image_generation_tool()
-        {
-            self.image_generation_backend = Some(ImageGenerationToolBackend::PraxisRouted);
-        }
         self
     }
 
@@ -336,13 +319,6 @@ impl ToolsConfig {
         nested.code_mode_only_enabled = false;
         nested
     }
-}
-
-fn supports_image_generation(model_info: &ModelInfo) -> bool {
-    model_info
-        .experimental_supported_tools
-        .iter()
-        .any(|tool| tool == IMAGE_GENERATION_TOOL_NAME || tool == "image_gen" || tool == "imagegen")
 }
 
 fn unified_exec_allowed_in_environment(
