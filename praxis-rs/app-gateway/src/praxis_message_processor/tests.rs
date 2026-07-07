@@ -1,6 +1,7 @@
 use super::*;
 use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessage;
+use crate::server_request_lifecycle::send_server_request;
 use anyhow::Result;
 use praxis_app_gateway_protocol::ServerRequestPayload;
 use praxis_app_gateway_protocol::ToolRequestUserInputParams;
@@ -601,6 +602,112 @@ async fn aborting_pending_request_clears_pending_state() -> Result<()> {
             .is_empty()
     );
     assert!(outgoing_rx.try_recv().is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn server_request_send_uses_live_thread_subscribers() -> Result<()> {
+    let manager = ThreadStateManager::new();
+    let thread_id = ThreadId::new();
+    let connection_id = ConnectionId(7);
+    manager.connection_initialized(connection_id).await;
+    let thread_state = manager
+        .try_ensure_connection_subscribed(
+            thread_id,
+            connection_id,
+            /*experimental_raw_events*/ false,
+        )
+        .await
+        .expect("connection should be live");
+
+    let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(8);
+    let outgoing = Arc::new(OutgoingMessageSender::new(outgoing_tx));
+    let thread_outgoing = ThreadScopedOutgoingMessageSender::new(outgoing, Vec::new(), thread_id);
+
+    let _pending_request = send_server_request(
+        &manager,
+        &thread_state,
+        &thread_outgoing,
+        ServerRequestPayload::ToolRequestUserInput(ToolRequestUserInputParams {
+            thread_id: thread_id.to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "call-1".to_string(),
+            questions: vec![],
+        }),
+    )
+    .await;
+
+    let request_message = outgoing_rx.recv().await.expect("request should be sent");
+    let OutgoingEnvelope::ToConnection {
+        connection_id: request_connection_id,
+        message: OutgoingMessage::Request(ServerRequest::ToolRequestUserInput { .. }),
+        ..
+    } = request_message
+    else {
+        panic!("expected tool request to be sent to the live subscriber");
+    };
+    assert_eq!(request_connection_id, connection_id);
+    Ok(())
+}
+
+#[tokio::test]
+async fn pending_server_request_replays_after_late_subscription() -> Result<()> {
+    let manager = ThreadStateManager::new();
+    let thread_id = ThreadId::new();
+    let connection_id = ConnectionId(9);
+    let thread_state = manager.thread_state(thread_id).await;
+
+    let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(8);
+    let outgoing = Arc::new(OutgoingMessageSender::new(outgoing_tx));
+    let thread_outgoing =
+        ThreadScopedOutgoingMessageSender::new(outgoing.clone(), Vec::new(), thread_id);
+
+    let _pending_request = send_server_request(
+        &manager,
+        &thread_state,
+        &thread_outgoing,
+        ServerRequestPayload::ToolRequestUserInput(ToolRequestUserInputParams {
+            thread_id: thread_id.to_string(),
+            turn_id: "turn-1".to_string(),
+            item_id: "call-1".to_string(),
+            questions: vec![],
+        }),
+    )
+    .await;
+    assert!(outgoing_rx.try_recv().is_err());
+
+    let pending_requests = manager.pending_server_requests(thread_id).await;
+    assert_eq!(pending_requests.len(), 1);
+    let expected_request_id = pending_requests[0].id().clone();
+
+    manager.connection_initialized(connection_id).await;
+    manager
+        .try_ensure_connection_subscribed(
+            thread_id,
+            connection_id,
+            /*experimental_raw_events*/ false,
+        )
+        .await
+        .expect("connection should be live");
+    outgoing
+        .replay_requests_to_connection_for_thread(connection_id, pending_requests)
+        .await;
+
+    let request_message = outgoing_rx.recv().await.expect("request should replay");
+    let OutgoingEnvelope::ToConnection {
+        connection_id: request_connection_id,
+        message:
+            OutgoingMessage::Request(ServerRequest::ToolRequestUserInput {
+                request_id: replayed_request_id,
+                ..
+            }),
+        ..
+    } = request_message
+    else {
+        panic!("expected pending tool request to replay to late subscriber");
+    };
+    assert_eq!(request_connection_id, connection_id);
+    assert_eq!(replayed_request_id, expected_request_id);
     Ok(())
 }
 

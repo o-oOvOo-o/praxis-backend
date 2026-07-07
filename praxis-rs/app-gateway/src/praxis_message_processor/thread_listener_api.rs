@@ -79,6 +79,8 @@ impl PraxisMessageProcessor {
         else {
             return Ok(EnsureConversationListenerResult::ConnectionClosed);
         };
+        let outgoing = listener_task_context.outgoing.clone();
+        let thread_state_manager = listener_task_context.thread_state_manager.clone();
         Self::ensure_listener_task_running_task(
             listener_task_context,
             conversation_id,
@@ -86,6 +88,12 @@ impl PraxisMessageProcessor {
             thread_state,
         )
         .await;
+        let pending_requests = thread_state_manager
+            .pending_server_requests(conversation_id)
+            .await;
+        outgoing
+            .replay_requests_to_connection_for_thread(connection_id, pending_requests)
+            .await;
         Ok(EnsureConversationListenerResult::Attached)
     }
 
@@ -208,6 +216,7 @@ impl PraxisMessageProcessor {
                             conversation.clone(),
                             thread_manager.clone(),
                             thread_outgoing,
+                            thread_state_manager.clone(),
                             thread_state.clone(),
                             thread_watch_manager.clone(),
                             workspace_change_store.clone(),
@@ -273,10 +282,11 @@ async fn handle_thread_listener_command(
             request_id,
             completion_tx,
         } => {
-            resolve_pending_server_request(
+            crate::server_request_lifecycle::resolve_pending_server_request(
                 conversation_id,
                 thread_state_manager,
                 outgoing,
+                thread_state,
                 request_id,
             )
             .await;
@@ -372,35 +382,16 @@ async fn handle_pending_thread_resume_request(
         history_entry_count,
     };
     outgoing.send_response(request_id, response).await;
-    outgoing
-        .replay_requests_to_connection_for_thread(connection_id, conversation_id)
-        .await;
-    let _attached = thread_state_manager
+    let attached = thread_state_manager
         .try_add_connection_to_thread(conversation_id, connection_id)
         .await;
-}
-
-async fn resolve_pending_server_request(
-    conversation_id: ThreadId,
-    thread_state_manager: &ThreadStateManager,
-    outgoing: &Arc<OutgoingMessageSender>,
-    request_id: RequestId,
-) {
-    let thread_id = conversation_id.to_string();
-    let subscribed_connection_ids = thread_state_manager
-        .subscribed_connection_ids(conversation_id)
+    if !attached {
+        return;
+    }
+    let pending_requests = thread_state_manager
+        .pending_server_requests(conversation_id)
         .await;
-    let outgoing = ThreadScopedOutgoingMessageSender::new(
-        outgoing.clone(),
-        subscribed_connection_ids,
-        conversation_id,
-    );
     outgoing
-        .send_server_notification(ServerNotification::ServerRequestResolved(
-            ServerRequestResolvedNotification {
-                thread_id,
-                request_id,
-            },
-        ))
+        .replay_requests_to_connection_for_thread(connection_id, pending_requests)
         .await;
 }

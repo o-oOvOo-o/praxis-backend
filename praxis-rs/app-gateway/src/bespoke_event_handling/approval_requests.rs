@@ -6,6 +6,7 @@ pub(super) async fn handle_apply_patch_approval_request(
     conversation_id: ThreadId,
     conversation: Arc<PraxisThread>,
     outgoing: ThreadScopedOutgoingMessageSender,
+    thread_state_manager: &ThreadStateManager,
     thread_state: Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
 ) {
@@ -49,6 +50,8 @@ pub(super) async fn handle_apply_patch_approval_request(
         grant_root,
     };
     let pending_request = send_server_request(
+        thread_state_manager,
+        &thread_state,
         &outgoing,
         ServerRequestPayload::FileChangeRequestApproval(params),
     )
@@ -75,6 +78,7 @@ pub(super) async fn handle_exec_approval_request(
     conversation_id: ThreadId,
     conversation: Arc<PraxisThread>,
     outgoing: ThreadScopedOutgoingMessageSender,
+    thread_state_manager: &ThreadStateManager,
     thread_state: Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
 ) {
@@ -157,6 +161,8 @@ pub(super) async fn handle_exec_approval_request(
         available_decisions: Some(available_decisions),
     };
     let pending_request = send_server_request(
+        thread_state_manager,
+        &thread_state,
         &outgoing,
         ServerRequestPayload::CommandExecutionRequestApproval(params),
     )

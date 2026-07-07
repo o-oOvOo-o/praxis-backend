@@ -20,7 +20,7 @@ async fn notify_request_permissions_response_ignores_unmatched_call_id() {
         )
         .await;
 
-    assert_eq!(session.granted_turn_permissions().await, None);
+    assert_eq!(session.granted_permissions(), None);
 }
 
 #[tokio::test]
@@ -334,28 +334,29 @@ async fn user_turn_updates_approvals_reviewer() {
     let (session, turn_context, _rx) = make_session_and_context_with_rx().await;
     let config = session.get_config().await;
 
-    session.submit_user_turn(
-        "sub-1".to_string(),
-        Op::UserTurn {
-            items: vec![UserInput::Text {
-                text: "hello".to_string(),
-                text_elements: Vec::new(),
-            }],
-            cwd: config.cwd.to_path_buf(),
-            approval_policy: config.permissions.approval_policy.value(),
-            approvals_reviewer: Some(praxis_config::types::ApprovalsReviewer::GuardianSubagent),
-            sandbox_policy: config.permissions.sandbox_policy.get().clone(),
-            model: turn_context.model_info.slug.clone(),
-            model_provider: Some(config.model_provider_id.clone()),
-            effort: config.model_reasoning_effort,
-            summary: config.model_reasoning_summary,
-            service_tier: None,
-            final_output_json_schema: None,
-            collaboration_mode: None,
-            personality: config.personality,
-        },
-    )
-    .await;
+    session
+        .submit_user_turn(
+            "sub-1".to_string(),
+            Op::UserTurn {
+                items: vec![UserInput::Text {
+                    text: "hello".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                cwd: config.cwd.to_path_buf(),
+                approval_policy: config.permissions.approval_policy.value(),
+                approvals_reviewer: Some(praxis_config::types::ApprovalsReviewer::GuardianSubagent),
+                sandbox_policy: config.permissions.sandbox_policy.get().clone(),
+                model: turn_context.model_info.slug.clone(),
+                model_provider: Some(config.model_provider_id.clone()),
+                effort: config.model_reasoning_effort,
+                summary: config.model_reasoning_summary,
+                service_tier: None,
+                final_output_json_schema: None,
+                collaboration_mode: None,
+                personality: config.personality,
+            },
+        )
+        .await;
 
     let state = session.state.lock().await;
     assert_eq!(

@@ -13,7 +13,6 @@ use praxis_apply_patch::Hunk;
 use praxis_protocol::models::FileSystemPermissions;
 use praxis_protocol::models::PermissionProfile;
 use praxis_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
-use praxis_sandboxing::policy_transforms::merge_permission_profiles;
 use praxis_sandboxing::policy_transforms::normalize_additional_permissions;
 use praxis_tools::ApplyPatchToolArgs;
 use praxis_utils_absolute_path::AbsolutePathBuf;
@@ -176,20 +175,15 @@ async fn effective_patch_permissions(
 ) {
     let file_paths = file_paths_for_action(action);
     let permissions = turn.effective_permissions();
-    let granted_permissions = merge_permission_profiles(
-        session.granted_session_permissions().await.as_ref(),
-        session.granted_turn_permissions().await.as_ref(),
-    );
     let file_system_sandbox_policy = effective_file_system_sandbox_policy(
         &permissions.file_system_sandbox_policy,
-        granted_permissions.as_ref(),
+        permissions.granted_permissions.as_ref(),
     );
     let effective_additional_permissions = apply_granted_turn_permissions(
         session,
         crate::sandboxing::SandboxPermissions::UseDefault,
         write_permissions_for_paths(&file_paths, &file_system_sandbox_policy, turn.cwd.as_path()),
-    )
-    .await;
+    );
 
     (
         file_paths,

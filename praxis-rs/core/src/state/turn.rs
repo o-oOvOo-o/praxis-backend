@@ -1,7 +1,6 @@
 //! Turn-scoped state and active turn metadata scaffolding.
 
 use indexmap::IndexMap;
-use praxis_sandboxing::policy_transforms::merge_permission_profiles;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -19,7 +18,6 @@ use tokio::sync::oneshot;
 
 use crate::praxis::TurnContext;
 use crate::tasks::AgentTask;
-use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::protocol::NonSteerableTurnKind;
 use praxis_protocol::protocol::ReviewDecision;
 use praxis_protocol::protocol::TokenUsage;
@@ -133,7 +131,6 @@ pub(crate) struct TurnState {
     pending_elicitations: HashMap<(String, RequestId), oneshot::Sender<ElicitationResponse>>,
     pending_dynamic_tools: HashMap<String, oneshot::Sender<DynamicToolResponse>>,
     pending_input: Vec<ResponseInputItem>,
-    granted_permissions: Option<PermissionProfile>,
     pub(crate) tool_calls: u64,
     pub(crate) token_usage_at_turn_start: TokenUsage,
 }
@@ -252,15 +249,6 @@ impl TurnState {
 
     pub(crate) fn has_pending_input(&self) -> bool {
         !self.pending_input.is_empty()
-    }
-
-    pub(crate) fn record_granted_permissions(&mut self, permissions: PermissionProfile) {
-        self.granted_permissions =
-            merge_permission_profiles(self.granted_permissions.as_ref(), Some(&permissions));
-    }
-
-    pub(crate) fn granted_permissions(&self) -> Option<PermissionProfile> {
-        self.granted_permissions.clone()
     }
 }
 

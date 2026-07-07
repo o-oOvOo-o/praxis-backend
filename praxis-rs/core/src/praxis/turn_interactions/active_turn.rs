@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use praxis_protocol::models::PermissionProfile;
 use tokio_util::sync::CancellationToken;
 
 use crate::praxis::Session;
@@ -24,17 +23,5 @@ impl Session {
             Arc::clone(&task.turn_context),
             task.cancellation_token.child_token(),
         ))
-    }
-
-    pub(crate) async fn granted_turn_permissions(&self) -> Option<PermissionProfile> {
-        let active = self.active_turn.lock().await;
-        let active = active.as_ref()?;
-        let ts = active.turn_state.lock().await;
-        ts.granted_permissions()
-    }
-
-    pub(crate) async fn granted_session_permissions(&self) -> Option<PermissionProfile> {
-        let state = self.state.lock().await;
-        state.granted_permissions()
     }
 }

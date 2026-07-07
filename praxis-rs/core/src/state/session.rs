@@ -1,8 +1,6 @@
 //! Session-wide mutable state.
 
-use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::models::ResponseItem;
-use praxis_sandboxing::policy_transforms::merge_permission_profiles;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -33,7 +31,6 @@ pub(crate) struct SessionState {
     pub(crate) startup_prewarm: Option<SessionStartupPrewarmHandle>,
     pub(crate) active_connector_selection: HashSet<String>,
     pub(crate) pending_session_start_source: Option<praxis_hooks::SessionStartSource>,
-    granted_permissions: Option<PermissionProfile>,
 }
 
 impl SessionState {
@@ -51,7 +48,6 @@ impl SessionState {
             startup_prewarm: None,
             active_connector_selection: HashSet::new(),
             pending_session_start_source: None,
-            granted_permissions: None,
         }
     }
 
@@ -207,15 +203,6 @@ impl SessionState {
         &mut self,
     ) -> Option<praxis_hooks::SessionStartSource> {
         self.pending_session_start_source.take()
-    }
-
-    pub(crate) fn record_granted_permissions(&mut self, permissions: PermissionProfile) {
-        self.granted_permissions =
-            merge_permission_profiles(self.granted_permissions.as_ref(), Some(&permissions));
-    }
-
-    pub(crate) fn granted_permissions(&self) -> Option<PermissionProfile> {
-        self.granted_permissions.clone()
     }
 }
 

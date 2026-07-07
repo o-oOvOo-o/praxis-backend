@@ -34,6 +34,7 @@ pub(super) async fn prepare_active_turn_state(
     session: &Arc<Session>,
     token_usage_at_turn_start: TokenUsage,
 ) {
+    session.clear_turn_permissions();
     let pending_input = session.drain_pending_input_for_started_turn().await;
     let turn_state = {
         let mut active = session.active_turn.lock().await;

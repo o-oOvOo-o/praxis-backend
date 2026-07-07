@@ -30,6 +30,7 @@ use crate::server_request_lifecycle::PendingServerRequest;
 use crate::server_request_lifecycle::send_server_request;
 use crate::thread_item_event_bridge::ThreadItemNotificationSink;
 use crate::thread_state::ThreadState;
+use crate::thread_state::ThreadStateManager;
 use crate::thread_state::TurnSummary;
 use crate::thread_status::ThreadWatchActiveGuard;
 use crate::thread_status::ThreadWatchManager;
@@ -236,6 +237,7 @@ pub(crate) async fn apply_bespoke_event_handling(
     conversation: Arc<PraxisThread>,
     thread_manager: Arc<ThreadManager>,
     outgoing: ThreadScopedOutgoingMessageSender,
+    thread_state_manager: ThreadStateManager,
     thread_state: Arc<tokio::sync::Mutex<ThreadState>>,
     thread_watch_manager: ThreadWatchManager,
     workspace_change_store: WorkspaceChangeStore,
@@ -364,6 +366,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 conversation_id,
                 conversation,
                 outgoing,
+                &thread_state_manager,
                 thread_state,
                 &thread_watch_manager,
             )
@@ -376,6 +379,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 conversation_id,
                 conversation,
                 outgoing,
+                &thread_state_manager,
                 thread_state,
                 &thread_watch_manager,
             )
@@ -412,6 +416,8 @@ pub(crate) async fn apply_bespoke_event_handling(
                 questions,
             };
             let pending_request = send_server_request(
+                &thread_state_manager,
+                &thread_state,
                 &outgoing,
                 ServerRequestPayload::ToolRequestUserInput(params),
             )
@@ -470,6 +476,8 @@ pub(crate) async fn apply_bespoke_event_handling(
                 request: request_body,
             };
             let pending_request = send_server_request(
+                &thread_state_manager,
+                &thread_state,
                 &outgoing,
                 ServerRequestPayload::McpServerElicitationRequest(params),
             )
@@ -499,6 +507,8 @@ pub(crate) async fn apply_bespoke_event_handling(
                 permissions: request.permissions.into(),
             };
             let pending_request = send_server_request(
+                &thread_state_manager,
+                &thread_state,
                 &outgoing,
                 ServerRequestPayload::PermissionsRequestApproval(params),
             )

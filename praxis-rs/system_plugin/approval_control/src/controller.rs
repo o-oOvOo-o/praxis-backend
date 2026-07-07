@@ -5,8 +5,10 @@ use crate::resolve::apply_permission_override;
 use crate::state::PermissionStateSource;
 use crate::state::ResolvedTurnPermissions;
 use crate::state::ThreadPermissionState;
+use crate::state::merge_permission_profiles;
 use crate::store::ApprovalCache;
 use crate::store::PendingApprovalStore;
+use praxis_protocol::models::PermissionProfile;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -64,6 +66,12 @@ impl PermissionController {
         if next.thread_id.is_none() {
             next.thread_id = guard.thread_id.clone();
         }
+        if next.granted_session_permissions.is_none() {
+            next.granted_session_permissions = guard.granted_session_permissions.clone();
+        }
+        if next.granted_turn_permissions.is_none() {
+            next.granted_turn_permissions = guard.granted_turn_permissions.clone();
+        }
 
         let changed = !guard.same_effective_permissions(&next)
             || guard.thread_id != next.thread_id
@@ -110,6 +118,36 @@ impl PermissionController {
         self.replace(next)
     }
 
+    pub fn grant_session_permissions(
+        &self,
+        permissions: PermissionProfile,
+    ) -> ResolvedTurnPermissions {
+        self.update_permissions(|state| {
+            state.granted_session_permissions = merge_permission_profiles(
+                state.granted_session_permissions.as_ref(),
+                Some(&permissions),
+            );
+        })
+    }
+
+    pub fn grant_turn_permissions(
+        &self,
+        permissions: PermissionProfile,
+    ) -> ResolvedTurnPermissions {
+        self.update_permissions(|state| {
+            state.granted_turn_permissions = merge_permission_profiles(
+                state.granted_turn_permissions.as_ref(),
+                Some(&permissions),
+            );
+        })
+    }
+
+    pub fn clear_turn_permissions(&self) -> ResolvedTurnPermissions {
+        self.update_permissions(|state| {
+            state.granted_turn_permissions = None;
+        })
+    }
+
     pub fn clear_runtime_approvals(&self) {
         self.inner
             .pending
@@ -121,5 +159,28 @@ impl PermissionController {
             .lock()
             .unwrap_or_else(|err| err.into_inner())
             .clear();
+    }
+
+    fn update_permissions(
+        &self,
+        update: impl FnOnce(&mut ThreadPermissionState),
+    ) -> ResolvedTurnPermissions {
+        let mut guard = self
+            .inner
+            .state
+            .lock()
+            .unwrap_or_else(|err| err.into_inner());
+        let previous = guard.clone();
+        update(&mut guard);
+        *guard = guard.clone().normalized();
+        if !previous.same_effective_permissions(&guard) {
+            guard.generation = previous.generation.saturating_add(1);
+        } else {
+            guard.generation = previous.generation;
+        }
+        let resolved = guard.resolved();
+        drop(guard);
+        self.inner.live.update(resolved.clone());
+        resolved
     }
 }

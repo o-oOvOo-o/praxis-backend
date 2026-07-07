@@ -2,6 +2,7 @@ use std::fmt::Debug;
 
 use praxis_protocol::config_types::ApprovalsReviewer;
 use praxis_protocol::config_types::WindowsSandboxLevel;
+use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::permissions::FileSystemSandboxPolicy;
 use praxis_protocol::permissions::NetworkSandboxPolicy;
 use praxis_protocol::protocol::AskForApproval;
@@ -23,6 +24,7 @@ pub(crate) struct EffectivePermissions {
     pub(crate) file_system_sandbox_policy: FileSystemSandboxPolicy,
     pub(crate) network_sandbox_policy: NetworkSandboxPolicy,
     pub(crate) windows_sandbox_level: WindowsSandboxLevel,
+    pub(crate) granted_permissions: Option<PermissionProfile>,
     pub(crate) generation: u64,
 }
 
@@ -35,6 +37,7 @@ impl EffectivePermissions {
             file_system_sandbox_policy: permissions.file_system_sandbox_policy,
             network_sandbox_policy: permissions.network_sandbox_policy,
             windows_sandbox_level: permissions.windows_sandbox_level,
+            granted_permissions: permissions.granted_permissions,
             generation: permissions.generation,
         }
     }
@@ -47,6 +50,7 @@ impl EffectivePermissions {
             file_system_sandbox_policy: self.file_system_sandbox_policy.clone(),
             network_sandbox_policy: self.network_sandbox_policy,
             windows_sandbox_level: self.windows_sandbox_level,
+            granted_permissions: self.granted_permissions.clone(),
             generation: self.generation,
         }
     }

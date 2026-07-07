@@ -1,5 +1,6 @@
 use praxis_protocol::config_types::ApprovalsReviewer;
 use praxis_protocol::config_types::WindowsSandboxLevel;
+use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::permissions::FileSystemSandboxKind;
 use praxis_protocol::permissions::FileSystemSandboxPolicy;
 use praxis_protocol::permissions::NetworkSandboxPolicy;
@@ -16,6 +17,7 @@ pub struct ResolvedTurnPermissions {
     pub file_system_sandbox_policy: FileSystemSandboxPolicy,
     pub network_sandbox_policy: NetworkSandboxPolicy,
     pub windows_sandbox_level: WindowsSandboxLevel,
+    pub granted_permissions: Option<PermissionProfile>,
     pub generation: u64,
 }
 

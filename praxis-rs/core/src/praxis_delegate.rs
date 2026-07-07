@@ -721,21 +721,15 @@ fn spawn_guardian_review(
     cancel_token: CancellationToken,
 ) -> oneshot::Receiver<ReviewDecision> {
     let (tx, rx) = oneshot::channel();
-    std::thread::spawn(move || {
-        let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        else {
-            let _ = tx.send(ReviewDecision::Denied);
-            return;
-        };
-        let decision = runtime.block_on(review_approval_request_with_cancel(
+    tokio::spawn(async move {
+        let decision = review_approval_request_with_cancel(
             &session,
             &turn,
             request,
             retry_reason,
             cancel_token,
-        ));
+        )
+        .await;
         let _ = tx.send(decision);
     });
     rx

@@ -167,6 +167,41 @@ impl ThreadScopedOutgoingMessageSender {
             .await
     }
 
+    pub(crate) fn thread_id(&self) -> ThreadId {
+        self.thread_id
+    }
+
+    pub(crate) fn outgoing_sender(&self) -> Arc<OutgoingMessageSender> {
+        Arc::clone(&self.outgoing)
+    }
+
+    pub(crate) async fn register_request(
+        &self,
+        payload: ServerRequestPayload,
+    ) -> (
+        RequestId,
+        oneshot::Receiver<ClientRequestResult>,
+        ServerRequest,
+    ) {
+        self.outgoing
+            .register_request_callback(payload, Some(self.thread_id))
+            .await
+    }
+
+    pub(crate) async fn send_registered_request_to_connections(
+        &self,
+        connection_ids: &[ConnectionId],
+        request: ServerRequest,
+    ) -> bool {
+        self.outgoing
+            .send_registered_request_to_connections(Some(connection_ids), request)
+            .await
+    }
+
+    pub(crate) async fn cancel_request(&self, id: &RequestId) -> bool {
+        self.outgoing.cancel_request(id).await
+    }
+
     pub(crate) async fn send_server_notification(&self, notification: ServerNotification) {
         if self.connection_ids.is_empty() {
             return;
@@ -290,15 +325,34 @@ impl OutgoingMessageSender {
         request: ServerRequestPayload,
         thread_id: Option<ThreadId>,
     ) -> (RequestId, oneshot::Receiver<ClientRequestResult>) {
-        let id = self.next_request_id();
-        let outgoing_message_id = id.clone();
-        let request = request.request_with_id(outgoing_message_id.clone());
+        let (request_id, receiver, request) =
+            self.register_request_callback(request, thread_id).await;
+        if !self
+            .send_registered_request_to_connections(connection_ids, request)
+            .await
+        {
+            self.cancel_request(&request_id).await;
+        }
+        (request_id, receiver)
+    }
+
+    async fn register_request_callback(
+        &self,
+        payload: ServerRequestPayload,
+        thread_id: Option<ThreadId>,
+    ) -> (
+        RequestId,
+        oneshot::Receiver<ClientRequestResult>,
+        ServerRequest,
+    ) {
+        let request_id = self.next_request_id();
+        let request = payload.request_with_id(request_id.clone());
 
         let (tx_approve, rx_approve) = oneshot::channel();
         {
             let mut request_id_to_callback = self.request_id_to_callback.lock().await;
             request_id_to_callback.insert(
-                id,
+                request_id.clone(),
                 PendingCallbackEntry {
                     callback: tx_approve,
                     thread_id,
@@ -307,6 +361,15 @@ impl OutgoingMessageSender {
             );
         }
 
+        (request_id, rx_approve, request)
+    }
+
+    async fn send_registered_request_to_connections(
+        &self,
+        connection_ids: Option<&[ConnectionId]>,
+        request: ServerRequest,
+    ) -> bool {
+        let outgoing_message_id = request.id().clone();
         let outgoing_message = OutgoingMessage::Request(request);
         let send_result = match connection_ids {
             None => {
@@ -341,18 +404,17 @@ impl OutgoingMessageSender {
 
         if let Err(err) = send_result {
             warn!("failed to send request {outgoing_message_id:?} to client: {err:?}");
-            let mut request_id_to_callback = self.request_id_to_callback.lock().await;
-            request_id_to_callback.remove(&outgoing_message_id);
+            return false;
         }
-        (outgoing_message_id, rx_approve)
+
+        true
     }
 
     pub(crate) async fn replay_requests_to_connection_for_thread(
         &self,
         connection_id: ConnectionId,
-        thread_id: ThreadId,
+        requests: Vec<ServerRequest>,
     ) {
-        let requests = self.pending_requests_for_thread(thread_id).await;
         for request in requests {
             if let Err(err) = self
                 .sender

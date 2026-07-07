@@ -1,5 +1,4 @@
 use praxis_protocol::request_permissions::PermissionGrantScope;
-use praxis_protocol::request_permissions::RequestPermissionProfile;
 use praxis_protocol::request_permissions::RequestPermissionsResponse;
 use tokio::sync::oneshot;
 use tracing::warn;
@@ -12,14 +11,9 @@ impl Session {
         call_id: &str,
         response: RequestPermissionsResponse,
     ) {
-        let (entry, granted_for_session) = self
-            .remove_pending_request_permissions_and_record_turn_grants(call_id, &response)
+        let entry = self
+            .remove_pending_request_permissions_and_record_grants(call_id, &response)
             .await;
-
-        if let Some(permissions) = granted_for_session {
-            let mut state = self.state.lock().await;
-            state.record_granted_permissions(permissions.into());
-        }
 
         match entry {
             Some(tx_response) => {
@@ -31,15 +25,11 @@ impl Session {
         }
     }
 
-    async fn remove_pending_request_permissions_and_record_turn_grants(
+    async fn remove_pending_request_permissions_and_record_grants(
         &self,
         call_id: &str,
         response: &RequestPermissionsResponse,
-    ) -> (
-        Option<oneshot::Sender<RequestPermissionsResponse>>,
-        Option<RequestPermissionProfile>,
-    ) {
-        let mut granted_for_session = None;
+    ) -> Option<oneshot::Sender<RequestPermissionsResponse>> {
         let entry = {
             let mut active = self.active_turn.lock().await;
             match active.as_mut() {
@@ -49,10 +39,10 @@ impl Session {
                     if entry.is_some() && !response.permissions.is_empty() {
                         match response.scope {
                             PermissionGrantScope::Turn => {
-                                ts.record_granted_permissions(response.permissions.clone().into());
+                                self.grant_turn_permissions(response.permissions.clone().into());
                             }
                             PermissionGrantScope::Session => {
-                                granted_for_session = Some(response.permissions.clone());
+                                self.grant_session_permissions(response.permissions.clone().into());
                             }
                         }
                     }
@@ -61,6 +51,6 @@ impl Session {
                 None => None,
             }
         };
-        (entry, granted_for_session)
+        entry
     }
 }

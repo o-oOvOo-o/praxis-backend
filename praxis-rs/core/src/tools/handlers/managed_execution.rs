@@ -25,7 +25,7 @@ pub(crate) struct ManagedExecutionPermissions {
     pub(crate) normalized_additional_permissions: Option<PermissionProfile>,
 }
 
-pub(crate) async fn prepare_managed_execution_permissions(
+pub(crate) fn prepare_managed_execution_permissions(
     session: &Session,
     sandbox_permissions: SandboxPermissions,
     requested_additional_permissions: Option<PermissionProfile>,
@@ -38,8 +38,7 @@ pub(crate) async fn prepare_managed_execution_permissions(
         session,
         sandbox_permissions,
         requested_additional_permissions.clone(),
-    )
-    .await;
+    );
     let additional_permissions_allowed = exec_permission_approvals_enabled
         || (session.features().enabled(Feature::RequestPermissionsTool)
             && effective.permissions_preapproved);

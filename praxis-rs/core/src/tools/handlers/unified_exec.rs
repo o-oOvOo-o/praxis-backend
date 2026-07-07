@@ -223,8 +223,7 @@ impl ToolHandler for UnifiedExecHandler {
                     additional_permissions,
                     permissions.approval_policy.value(),
                     &cwd,
-                )
-                .await?;
+                )?;
                 let effective_additional_permissions = managed_permissions.effective;
                 let normalized_additional_permissions =
                     managed_permissions.normalized_additional_permissions;

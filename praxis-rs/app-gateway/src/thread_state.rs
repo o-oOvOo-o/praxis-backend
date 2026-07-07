@@ -1,6 +1,7 @@
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
 use praxis_app_gateway_protocol::RequestId;
+use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::ThreadHistoryBuilder;
 use praxis_app_gateway_protocol::Turn;
 use praxis_app_gateway_protocol::TurnError;
@@ -8,6 +9,7 @@ use praxis_core::PraxisThread;
 use praxis_core::ThreadConfigSnapshot;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::EventMsg;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -18,6 +20,8 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 type PendingInterruptQueue = Vec<ConnectionRequestId>;
+// Listener cleanup backpressures instead of allocating an unbounded control queue.
+const LISTENER_COMMAND_CHANNEL_CAPACITY: usize = 64;
 
 pub(crate) struct PendingThreadResumeRequest {
     pub(crate) request_id: ConnectionRequestId,
@@ -54,7 +58,8 @@ pub(crate) struct ThreadState {
     pub(crate) cancel_tx: Option<oneshot::Sender<()>>,
     pub(crate) experimental_raw_events: bool,
     pub(crate) listener_generation: u64,
-    listener_command_tx: Option<mpsc::UnboundedSender<ThreadListenerCommand>>,
+    pending_server_requests: BTreeMap<RequestId, ServerRequest>,
+    listener_command_tx: Option<mpsc::Sender<ThreadListenerCommand>>,
     current_turn_history: ThreadHistoryBuilder,
     listener_thread: Option<Weak<PraxisThread>>,
 }
@@ -71,12 +76,13 @@ impl ThreadState {
         &mut self,
         cancel_tx: oneshot::Sender<()>,
         conversation: &Arc<PraxisThread>,
-    ) -> (mpsc::UnboundedReceiver<ThreadListenerCommand>, u64) {
+    ) -> (mpsc::Receiver<ThreadListenerCommand>, u64) {
         if let Some(previous) = self.cancel_tx.replace(cancel_tx) {
             let _ = previous.send(());
         }
         self.listener_generation = self.listener_generation.wrapping_add(1);
-        let (listener_command_tx, listener_command_rx) = mpsc::unbounded_channel();
+        let (listener_command_tx, listener_command_rx) =
+            mpsc::channel(LISTENER_COMMAND_CHANNEL_CAPACITY);
         self.listener_command_tx = Some(listener_command_tx);
         self.listener_thread = Some(Arc::downgrade(conversation));
         (listener_command_rx, self.listener_generation)
@@ -95,10 +101,21 @@ impl ThreadState {
         self.experimental_raw_events = enabled;
     }
 
-    pub(crate) fn listener_command_tx(
-        &self,
-    ) -> Option<mpsc::UnboundedSender<ThreadListenerCommand>> {
+    pub(crate) fn listener_command_tx(&self) -> Option<mpsc::Sender<ThreadListenerCommand>> {
         self.listener_command_tx.clone()
+    }
+
+    pub(crate) fn insert_pending_server_request(&mut self, request: ServerRequest) {
+        self.pending_server_requests
+            .insert(request.id().clone(), request);
+    }
+
+    pub(crate) fn remove_pending_server_request(&mut self, request_id: &RequestId) -> bool {
+        self.pending_server_requests.remove(request_id).is_some()
+    }
+
+    pub(crate) fn pending_server_requests(&self) -> Vec<ServerRequest> {
+        self.pending_server_requests.values().cloned().collect()
     }
 
     pub(crate) fn active_turn_snapshot(&self) -> Option<Turn> {
@@ -156,6 +173,20 @@ impl ThreadStateManager {
             .get(&thread_id)
             .map(|thread_entry| thread_entry.connection_ids.iter().copied().collect())
             .unwrap_or_default()
+    }
+
+    pub(crate) async fn pending_server_requests(&self, thread_id: ThreadId) -> Vec<ServerRequest> {
+        let thread_state = {
+            let state = self.state.lock().await;
+            state
+                .threads
+                .get(&thread_id)
+                .map(|thread_entry| thread_entry.state.clone())
+        };
+        let Some(thread_state) = thread_state else {
+            return Vec::new();
+        };
+        thread_state.lock().await.pending_server_requests()
     }
 
     pub(crate) async fn thread_state(&self, thread_id: ThreadId) -> Arc<Mutex<ThreadState>> {
