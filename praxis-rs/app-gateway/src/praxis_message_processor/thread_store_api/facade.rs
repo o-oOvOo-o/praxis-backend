@@ -1,4 +1,4 @@
-use super::history::{self, ThreadHistorySource};
+use super::history::{self, ThreadHistorySource, ThreadTurnHydration};
 use super::list::{self, ThreadStoreListPage, ThreadStoreListQuery};
 use super::paths;
 use super::summary::{self, ThreadStoreSummary};
@@ -135,16 +135,18 @@ impl ThreadStore<'_> {
 
     pub(in crate::praxis_message_processor) async fn read_turns_from_rollout(
         path: &Path,
+        hydration: ThreadTurnHydration,
     ) -> std::io::Result<Vec<Turn>> {
-        history::read_thread_turns_from_rollout(path).await
+        history::read_thread_turns_from_rollout(path, hydration).await
     }
 
     pub(in crate::praxis_message_processor) async fn hydrate_turns(
         thread: &mut Thread,
         source: ThreadHistorySource<'_>,
+        hydration: ThreadTurnHydration,
         active_turn: Option<&Turn>,
     ) -> std::result::Result<(), String> {
-        history::hydrate_thread_turns(thread, source, active_turn).await
+        history::hydrate_thread_turns(thread, source, hydration, active_turn).await
     }
 
     pub(in crate::praxis_message_processor) async fn read_rollout_summary(

@@ -12,12 +12,16 @@ impl Session {
         token_usage: Option<&TokenUsage>,
     ) {
         if let Some(token_usage) = token_usage {
-            let mut state = self.state.lock().await;
-            state.update_token_info_from_usage(
-                token_usage,
-                turn_context.model_context_window(),
-                effective_auto_compact_token_limit(self, turn_context),
-            );
+            let token_info = {
+                let mut state = self.state.lock().await;
+                state.update_token_info_from_usage(
+                    token_usage,
+                    turn_context.model_context_window(),
+                    effective_auto_compact_token_limit(self, turn_context),
+                );
+                state.token_info()
+            };
+            self.token_ledger.write().await.set_token_info(token_info);
         }
         self.send_token_count_event(turn_context).await;
     }
@@ -30,7 +34,7 @@ impl Session {
         else {
             return;
         };
-        {
+        let token_info = {
             let mut state = self.state.lock().await;
             let mut info = state.token_info().unwrap_or(TokenUsageInfo {
                 total_token_usage: TokenUsage::default(),
@@ -58,15 +62,25 @@ impl Session {
             }
 
             state.set_token_info(Some(info));
-        }
+            state.token_info()
+        };
+        self.token_ledger.write().await.set_token_info(token_info);
         self.send_token_count_event(turn_context).await;
     }
 
     pub(crate) async fn set_total_tokens_full(&self, turn_context: &TurnContext) {
-        if let Some(context_window) = turn_context.model_context_window() {
+        let token_info = if let Some(context_window) = turn_context.model_context_window() {
             let mut state = self.state.lock().await;
             state.set_token_usage_full(context_window);
-        }
+            state.token_info()
+        } else {
+            self.token_ledger
+                .read()
+                .await
+                .token_info_and_rate_limits()
+                .0
+        };
+        self.token_ledger.write().await.set_token_info(token_info);
         self.send_token_count_event(turn_context).await;
     }
 }

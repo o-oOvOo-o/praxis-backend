@@ -813,7 +813,7 @@ impl PluginsManager {
 
             let config = config.clone();
             let manager = Arc::clone(self);
-            tokio::spawn(async move {
+            spawn_logged_startup_task("startup-featured-plugin-cache-warm", async move {
                 let auth = auth_manager.auth().await;
                 if let Err(err) = manager
                     .featured_plugin_ids_for_config(&config, auth.as_ref())
@@ -834,40 +834,46 @@ impl PluginsManager {
         }
         let manager = Arc::clone(self);
         let praxis_home = self.praxis_home.clone();
-        if let Err(err) = std::thread::Builder::new()
-            .name("plugins-curated-repo-sync".to_string())
-            .spawn(
-                move || match sync_curated_plugins_repo(praxis_home.as_path()) {
-                    Ok(curated_plugin_version) => {
+        spawn_logged_startup_task("plugins-curated-repo-sync", async move {
+            match sync_curated_plugins_repo(praxis_home.as_path()).await {
+                Ok(curated_plugin_version) => {
+                    let praxis_home_for_refresh = praxis_home.clone();
+                    let refresh_result = tokio::task::spawn_blocking(move || {
                         let configured_curated_plugin_ids =
-                            configured_curated_plugin_ids_from_praxis_home(praxis_home.as_path());
-                        match refresh_curated_plugin_cache(
-                            praxis_home.as_path(),
+                            configured_curated_plugin_ids_from_praxis_home(
+                                praxis_home_for_refresh.as_path(),
+                            );
+                        refresh_curated_plugin_cache(
+                            praxis_home_for_refresh.as_path(),
                             &curated_plugin_version,
                             &configured_curated_plugin_ids,
-                        ) {
-                            Ok(cache_refreshed) => {
-                                if cache_refreshed {
-                                    manager.clear_cache();
-                                }
-                            }
-                            Err(err) => {
+                        )
+                    })
+                    .await;
+                    match refresh_result {
+                        Ok(Ok(cache_refreshed)) => {
+                            if cache_refreshed {
                                 manager.clear_cache();
-                                CURATED_REPO_SYNC_STARTED.store(false, Ordering::SeqCst);
-                                warn!("failed to refresh curated plugin cache after sync: {err}");
                             }
                         }
+                        Ok(Err(err)) => {
+                            manager.clear_cache();
+                            CURATED_REPO_SYNC_STARTED.store(false, Ordering::SeqCst);
+                            warn!("failed to refresh curated plugin cache after sync: {err}");
+                        }
+                        Err(err) => {
+                            manager.clear_cache();
+                            CURATED_REPO_SYNC_STARTED.store(false, Ordering::SeqCst);
+                            warn!("failed to join curated plugin cache refresh task: {err}");
+                        }
                     }
-                    Err(err) => {
-                        CURATED_REPO_SYNC_STARTED.store(false, Ordering::SeqCst);
-                        warn!("failed to sync curated plugins repo: {err}");
-                    }
-                },
-            )
-        {
-            CURATED_REPO_SYNC_STARTED.store(false, Ordering::SeqCst);
-            warn!("failed to start curated plugins repo sync task: {err}");
-        }
+                }
+                Err(err) => {
+                    CURATED_REPO_SYNC_STARTED.store(false, Ordering::SeqCst);
+                    warn!("failed to sync curated plugins repo: {err}");
+                }
+            }
+        });
     }
 
     fn configured_plugin_states(&self, config: &Config) -> (HashSet<String>, HashSet<String>) {

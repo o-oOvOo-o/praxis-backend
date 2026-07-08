@@ -77,18 +77,15 @@ impl TokenUsageInfo {
     }
 
     pub fn fill_to_context_window(&mut self, context_window: i64) {
-        let previous_total = self.total_token_usage.total_tokens;
-        let delta = (context_window - previous_total).max(0);
-
+        // Mark the CONTEXT as full so the auto-compact trigger (which reads
+        // `last_token_usage`) fires, but leave `total_token_usage` untouched:
+        // it is the cumulative ledger of real spend, and overwriting it to the
+        // window size on a (possibly provider-misreported) context-window
+        // error permanently corrupts goal token budgets and persisted usage.
         self.model_context_window = Some(context_window);
-        self.total_token_usage = TokenUsage {
+        self.last_token_usage = TokenUsage {
             input_tokens: context_window,
             total_tokens: context_window,
-            ..TokenUsage::default()
-        };
-        self.last_token_usage = TokenUsage {
-            input_tokens: delta,
-            total_tokens: delta,
             ..TokenUsage::default()
         };
     }

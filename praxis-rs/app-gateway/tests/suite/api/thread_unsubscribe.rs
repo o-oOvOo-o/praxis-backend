@@ -269,6 +269,7 @@ async fn thread_unsubscribe_clears_cached_status_before_resume() -> Result<()> {
         .send_thread_read_request(ThreadReadParams {
             thread_id: thread_id.clone(),
             include_turns: false,
+            turn_limit: None,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(

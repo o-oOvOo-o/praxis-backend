@@ -205,6 +205,7 @@ mod windows_sandbox_api;
 mod workspace_change_api;
 
 use account_api::ActiveLogin;
+use config_derivation_api::build_core_dynamic_tools;
 use config_derivation_api::collect_resume_override_mismatches;
 use config_derivation_api::config_load_error;
 use config_derivation_api::derive_config_for_cwd;

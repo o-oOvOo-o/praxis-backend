@@ -16,8 +16,8 @@ mod driver;
 mod opening;
 mod retry;
 mod retry_notice;
-mod transport_failover;
 mod retrying;
+mod transport_failover;
 
 pub(super) fn open_event_stream(
     input: PraxisModelStreamInput,

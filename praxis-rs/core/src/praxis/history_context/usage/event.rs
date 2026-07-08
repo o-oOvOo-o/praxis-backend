@@ -9,10 +9,7 @@ impl Session {
         &self,
         turn_context: &TurnContext,
     ) {
-        let (info, rate_limits) = {
-            let state = self.state.lock().await;
-            state.token_info_and_rate_limits()
-        };
+        let (info, rate_limits) = self.token_ledger.read().await.token_info_and_rate_limits();
         let event = EventMsg::TokenCount(TokenCountEvent { info, rate_limits });
         self.send_event(turn_context, event).await;
     }

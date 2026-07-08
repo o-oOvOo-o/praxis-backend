@@ -1,6 +1,7 @@
 use super::thread_runtime_api::project_thread_runtime_state_with_turn_cleanup_from_watch;
 use super::thread_store_api::ThreadHistorySource;
 use super::thread_store_api::ThreadStore;
+use super::thread_store_api::ThreadTurnHydration;
 use super::*;
 use crate::bespoke_event_handling::apply_bespoke_event_handling;
 use praxis_app_gateway_protocol::TurnStatus;
@@ -330,6 +331,7 @@ async fn handle_pending_thread_resume_request(
     if let Err(message) = ThreadStore::hydrate_turns(
         &mut thread,
         ThreadHistorySource::RolloutPath(pending.rollout_path.as_path()),
+        ThreadTurnHydration::recent(pending.turn_limit.map(|limit| limit as usize)),
         active_turn.as_ref(),
     )
     .await

@@ -17,10 +17,7 @@ impl SessionConfiguration {
     pub(crate) fn apply(&self, updates: &SessionSettingsUpdate) -> ConstraintResult<Self> {
         let mut next_configuration = self.clone();
         let file_system_policy_matches_legacy = self.file_system_sandbox_policy
-            == FileSystemSandboxPolicy::from_sandbox_policy(
-                self.sandbox_policy.get(),
-                &self.cwd,
-            );
+            == FileSystemSandboxPolicy::from_sandbox_policy(self.sandbox_policy.get(), &self.cwd);
         if let Some(model_provider_id) = updates.model_provider.as_ref() {
             if model_provider_id.is_empty() {
                 return Err(ConstraintError::empty_field("model_provider"));

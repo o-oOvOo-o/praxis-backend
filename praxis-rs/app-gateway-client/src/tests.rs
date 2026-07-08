@@ -248,6 +248,7 @@ async fn typed_request_reports_json_rpc_errors() {
             params: praxis_app_gateway_protocol::ThreadReadParams {
                 thread_id: "missing-thread".to_string(),
                 include_turns: false,
+                turn_limit: None,
             },
         })
         .await
@@ -302,6 +303,7 @@ async fn threads_started_via_app_gateway_are_visible_through_typed_requests() {
                 params: praxis_app_gateway_protocol::ThreadReadParams {
                     thread_id: response.thread.id.clone(),
                     include_turns: false,
+                    turn_limit: None,
                 },
             },
         )

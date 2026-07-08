@@ -149,11 +149,10 @@ async fn session_configuration_apply_rederives_legacy_file_system_policy_on_cwd_
             exclude_tmpdir_env_var: true,
             exclude_slash_tmp: true,
         });
-    session_configuration.file_system_sandbox_policy =
-        FileSystemSandboxPolicy::from_sandbox_policy(
-            session_configuration.sandbox_policy.get(),
-            &session_configuration.cwd,
-        );
+    session_configuration.file_system_sandbox_policy = FileSystemSandboxPolicy::from_sandbox_policy(
+        session_configuration.sandbox_policy.get(),
+        &session_configuration.cwd,
+    );
 
     let updated = session_configuration
         .apply(&SessionSettingsUpdate {
@@ -164,10 +163,7 @@ async fn session_configuration_apply_rederives_legacy_file_system_policy_on_cwd_
 
     assert_eq!(
         updated.file_system_sandbox_policy,
-        FileSystemSandboxPolicy::from_sandbox_policy(
-            updated.sandbox_policy.get(),
-            &project_root,
-        )
+        FileSystemSandboxPolicy::from_sandbox_policy(updated.sandbox_policy.get(), &project_root,)
     );
 }
 

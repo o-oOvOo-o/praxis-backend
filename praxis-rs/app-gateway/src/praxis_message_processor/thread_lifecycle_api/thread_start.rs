@@ -112,11 +112,9 @@ impl PraxisMessageProcessor {
             }
         };
 
-        let dynamic_tools = dynamic_tools.unwrap_or_default();
-        let core_dynamic_tools = if dynamic_tools.is_empty() {
-            Vec::new()
-        } else {
-            if let Err(message) = validate_dynamic_tools(&dynamic_tools) {
+        let core_dynamic_tools = match build_core_dynamic_tools(dynamic_tools) {
+            Ok(tools) => tools,
+            Err(message) => {
                 let error = JSONRPCErrorError {
                     code: INVALID_REQUEST_ERROR_CODE,
                     message,
@@ -128,15 +126,6 @@ impl PraxisMessageProcessor {
                     .await;
                 return;
             }
-            dynamic_tools
-                .into_iter()
-                .map(|tool| CoreDynamicToolSpec {
-                    name: tool.name,
-                    description: tool.description,
-                    input_schema: tool.input_schema,
-                    defer_loading: tool.defer_loading,
-                })
-                .collect()
         };
         let core_dynamic_tool_count = core_dynamic_tools.len();
 

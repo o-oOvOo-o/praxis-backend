@@ -382,9 +382,8 @@ pub async fn run() -> Result<()> {
             .await
         }
         CliCommand::ThreadResume { thread_id } => {
-            ensure_dynamic_tools_unused(&dynamic_tools, "thread-resume")?;
             let endpoint = resolve_endpoint(praxis_bin, url)?;
-            thread_resume_follow(&endpoint, &config_overrides, thread_id).await
+            thread_resume_follow(&endpoint, &config_overrides, thread_id, &dynamic_tools).await
         }
         CliCommand::Watch => {
             ensure_dynamic_tools_unused(&dynamic_tools, "watch")?;

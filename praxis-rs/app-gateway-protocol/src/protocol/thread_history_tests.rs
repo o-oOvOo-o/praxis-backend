@@ -580,6 +580,71 @@ fn uses_explicit_turn_boundaries_for_mid_turn_steering() {
     );
 }
 
+#[test]
+fn recent_turn_builder_matches_full_history_suffix() {
+    let items = ["turn-a", "turn-b", "turn-c"]
+        .into_iter()
+        .flat_map(explicit_turn_items)
+        .collect::<Vec<_>>();
+    let recent = build_recent_turns_from_rollout_items(&items, 2);
+
+    assert_eq!(recent, recent_from_full_history(&items, 2));
+    assert_eq!(
+        build_recent_turns_from_rollout_items(&items, 0),
+        Vec::<Turn>::new()
+    );
+}
+
+#[test]
+fn recent_turn_builder_preserves_rollback_semantics() {
+    let mut items = ["turn-a", "turn-b", "turn-c"]
+        .into_iter()
+        .flat_map(explicit_turn_items)
+        .collect::<Vec<_>>();
+    items.push(RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
+        ThreadRolledBackEvent { num_turns: 2 },
+    )));
+    items.extend(explicit_turn_items("turn-d"));
+
+    assert_eq!(
+        build_recent_turns_from_rollout_items(&items, 2),
+        recent_from_full_history(&items, 2)
+    );
+}
+
+fn explicit_turn_items(turn_id: &str) -> Vec<RolloutItem> {
+    vec![
+        RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+            turn_id: turn_id.into(),
+            model_context_window: None,
+            collaboration_mode_kind: Default::default(),
+        })),
+        RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            message: format!("user {turn_id}"),
+            images: None,
+            text_elements: Vec::new(),
+            local_images: Vec::new(),
+        })),
+        RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+            message: format!("agent {turn_id}"),
+            phase: None,
+            memory_citation: None,
+        })),
+        RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+            turn_id: turn_id.into(),
+            last_agent_message: None,
+        })),
+    ]
+}
+
+fn recent_from_full_history(items: &[RolloutItem], turn_limit: usize) -> Vec<Turn> {
+    let mut turns = build_turns_from_rollout_items(items);
+    if turns.len() <= turn_limit {
+        return turns;
+    }
+    turns.split_off(turns.len() - turn_limit)
+}
+
 #[path = "thread_history_tests/collab_items.rs"]
 mod collab_items;
 #[path = "thread_history_tests/errors_and_hooks.rs"]

@@ -113,8 +113,8 @@ fn remove_stale_curated_repo_temp_dirs_removes_only_matching_directories() {
 }
 
 #[cfg(unix)]
-#[test]
-fn sync_curated_plugins_repo_prefers_git_when_available() {
+#[tokio::test]
+async fn sync_curated_plugins_repo_prefers_git_when_available() {
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempdir().expect("tempdir");
@@ -163,6 +163,7 @@ exit 1
         git_path.to_str().expect("utf8 path"),
         "http://127.0.0.1:9",
     )
+    .await
     .expect("git sync should succeed");
 
     assert_eq!(synced_sha, sha);
@@ -200,17 +201,12 @@ async fn sync_curated_plugins_repo_falls_back_to_http_when_git_is_unavailable() 
         .mount(&server)
         .await;
 
-    let server_uri = server.uri();
-    let tmp_path = tmp.path().to_path_buf();
-    let synced_sha = tokio::task::spawn_blocking(move || {
-        sync_curated_plugins_repo_with_transport_overrides(
-            tmp_path.as_path(),
-            "missing-git-for-test",
-            &server_uri,
-        )
-    })
+    let synced_sha = sync_curated_plugins_repo_with_transport_overrides(
+        tmp.path(),
+        "missing-git-for-test",
+        &server.uri(),
+    )
     .await
-    .expect("sync task should join")
     .expect("fallback sync should succeed");
 
     let repo_path = curated_plugins_repo_path(tmp.path());
@@ -275,17 +271,12 @@ exit 1
         .mount(&server)
         .await;
 
-    let server_uri = server.uri();
-    let tmp_path = tmp.path().to_path_buf();
-    let synced_sha = tokio::task::spawn_blocking(move || {
-        sync_curated_plugins_repo_with_transport_overrides(
-            tmp_path.as_path(),
-            git_path.to_str().expect("utf8 path"),
-            &server_uri,
-        )
-    })
+    let synced_sha = sync_curated_plugins_repo_with_transport_overrides(
+        tmp.path(),
+        git_path.to_str().expect("utf8 path"),
+        &server.uri(),
+    )
     .await
-    .expect("sync task should join")
     .expect("fallback sync should succeed");
 
     let repo_path = curated_plugins_repo_path(tmp.path());
@@ -374,14 +365,9 @@ async fn sync_curated_plugins_repo_via_http_cleans_up_staged_dir_on_extract_fail
         .mount(&server)
         .await;
 
-    let server_uri = server.uri();
-    let tmp_path = tmp.path().to_path_buf();
-    let err = tokio::task::spawn_blocking(move || {
-        sync_curated_plugins_repo_via_http(tmp_path.as_path(), &server_uri)
-    })
-    .await
-    .expect("sync task should join")
-    .expect_err("http sync should fail");
+    let err = sync_curated_plugins_repo_via_http(tmp.path(), &server.uri())
+        .await
+        .expect_err("http sync should fail");
 
     assert!(err.contains("failed to open curated plugins zip archive"));
     assert!(!has_plugins_clone_dirs(tmp.path()));
@@ -416,17 +402,12 @@ async fn sync_curated_plugins_repo_skips_archive_download_when_sha_matches() {
         .mount(&server)
         .await;
 
-    let server_uri = server.uri();
-    let tmp_path = tmp.path().to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        sync_curated_plugins_repo_with_transport_overrides(
-            tmp_path.as_path(),
-            "missing-git-for-test",
-            &server_uri,
-        )
-    })
+    sync_curated_plugins_repo_with_transport_overrides(
+        tmp.path(),
+        "missing-git-for-test",
+        &server.uri(),
+    )
     .await
-    .expect("sync task should join")
     .expect("sync should succeed");
 
     assert_eq!(read_curated_plugins_sha(tmp.path()).as_deref(), Some(sha));

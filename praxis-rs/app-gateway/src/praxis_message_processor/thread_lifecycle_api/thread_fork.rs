@@ -200,6 +200,7 @@ impl PraxisMessageProcessor {
             if let Err(message) = ThreadStore::hydrate_turns(
                 &mut thread,
                 ThreadHistorySource::RolloutItems(&history_items),
+                ThreadTurnHydration::all(),
                 /*active_turn*/ None,
             )
             .await
@@ -214,6 +215,7 @@ impl PraxisMessageProcessor {
             && let Err(message) = ThreadStore::hydrate_turns(
                 &mut thread,
                 ThreadHistorySource::RolloutPath(fork_rollout_path.as_path()),
+                ThreadTurnHydration::all(),
                 /*active_turn*/ None,
             )
             .await

@@ -28,6 +28,7 @@ pub(crate) struct PendingThreadResumeRequest {
     pub(crate) rollout_path: PathBuf,
     pub(crate) config_snapshot: ThreadConfigSnapshot,
     pub(crate) thread_summary: praxis_app_gateway_protocol::Thread,
+    pub(crate) turn_limit: Option<u32>,
 }
 
 // ThreadListenerCommand is used to perform operations in the context of the thread listener, for serialization purposes.

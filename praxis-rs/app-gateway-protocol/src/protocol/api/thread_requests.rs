@@ -155,11 +155,18 @@ pub struct ThreadResumeParams {
     pub developer_instructions: Option<String>,
     #[ts(optional = nullable)]
     pub personality: Option<Personality>,
+    #[experimental("thread/resume.dynamicTools")]
+    #[ts(optional = nullable)]
+    pub dynamic_tools: Option<Vec<DynamicToolSpec>>,
     /// If true, persist additional rollout EventMsg variants required to
     /// reconstruct a richer thread history on subsequent resume/fork/read.
     #[experimental("thread/resume.persistFullHistory")]
     #[serde(default)]
     pub persist_extended_history: bool,
+
+    /// Optional cap on the number of most recent turns included in the returned thread snapshot.
+    #[ts(optional = nullable)]
+    pub turn_limit: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
@@ -652,6 +659,9 @@ pub struct ThreadLookupParams {
     /// When true, include turns and their items from rollout history.
     #[serde(default)]
     pub include_turns: bool,
+    /// Optional cap on the number of most recent turns when includeTurns is true.
+    #[ts(optional = nullable)]
+    pub turn_limit: Option<u32>,
     /// Optional source filter; when set, only sessions from these source kinds
     /// are considered. When omitted or empty, defaults to interactive sources.
     #[ts(optional = nullable)]
@@ -722,6 +732,9 @@ pub struct ThreadReadParams {
     /// When true, include turns and their items from rollout history.
     #[serde(default)]
     pub include_turns: bool,
+    /// Optional cap on the number of most recent turns when includeTurns is true.
+    #[ts(optional = nullable)]
+    pub turn_limit: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

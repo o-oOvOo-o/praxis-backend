@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use praxis_system_plugin_approval_control::PermissionController;
 use tokio::sync::Mutex;
 
 use super::automation_state;
@@ -8,8 +7,9 @@ use super::inbox_runtime;
 use super::input::SessionHandleInput;
 use super::live_channels;
 use super::runtime_state;
+use crate::praxis::PermissionLedger;
 use crate::praxis::Session;
-use crate::praxis::thread_permissions_from_session_configuration;
+use crate::state::SessionTokenLedger;
 
 pub(in crate::praxis::session_startup) fn build(input: SessionHandleInput<'_>) -> Arc<Session> {
     let live_channels::SessionLiveChannels {
@@ -32,18 +32,20 @@ pub(in crate::praxis::session_startup) fn build(input: SessionHandleInput<'_>) -
         auto_title_attempted,
         auto_summary_in_flight,
     } = automation_state::build();
-    let initial_permissions =
-        thread_permissions_from_session_configuration(input.session_configuration)
-            .with_thread_id(input.conversation_id.to_string());
-    let permission_controller = PermissionController::new(initial_permissions);
+    let permission_ledger = PermissionLedger::from_session_configuration(
+        &input.conversation_id,
+        input.session_configuration,
+    );
+    let token_ledger = SessionTokenLedger::from_state(&input.state);
 
     Arc::new(Session {
         conversation_id: input.conversation_id,
         tx_event: input.tx_event,
         agent_status: input.agent_status,
         out_of_band_elicitation_paused,
-        permission_controller,
+        permission_ledger,
         state: Mutex::new(input.state),
+        token_ledger: tokio::sync::RwLock::new(token_ledger),
         features: input.config.features.clone(),
         pending_mcp_server_refresh_config,
         conversation,

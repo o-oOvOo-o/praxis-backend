@@ -57,7 +57,13 @@ impl Session {
     }
 
     pub(crate) async fn set_server_reasoning_included(&self, included: bool) {
-        let mut state = self.state.lock().await;
-        state.set_server_reasoning_included(included);
+        {
+            let mut state = self.state.lock().await;
+            state.set_server_reasoning_included(included);
+        }
+        self.token_ledger
+            .write()
+            .await
+            .set_server_reasoning_included(included);
     }
 }

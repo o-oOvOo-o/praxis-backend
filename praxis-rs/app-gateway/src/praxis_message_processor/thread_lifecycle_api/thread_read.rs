@@ -12,6 +12,7 @@ impl PraxisMessageProcessor {
         let ThreadReadParams {
             thread_id,
             include_turns,
+            turn_limit,
         } = params;
 
         let Some(thread_uuid) = self
@@ -22,7 +23,7 @@ impl PraxisMessageProcessor {
         };
 
         let thread = match self
-            .load_thread_for_projection(thread_uuid, include_turns)
+            .load_thread_for_projection(thread_uuid, include_turns, turn_limit)
             .await
         {
             Ok(Some(thread)) => thread,
@@ -65,6 +66,7 @@ impl PraxisMessageProcessor {
         let ThreadLookupParams {
             selector,
             include_turns,
+            turn_limit,
             source_kinds,
             cwd_scope,
             archived,
@@ -74,12 +76,13 @@ impl PraxisMessageProcessor {
             ThreadLookupSelector::IdOrName { value } => {
                 if let Ok(thread_id) = ThreadId::from_string(&value) {
                     return self
-                        .load_thread_for_projection(thread_id, include_turns)
+                        .load_thread_for_projection(thread_id, include_turns, turn_limit)
                         .await;
                 }
                 self.lookup_thread_from_store_pages(
                     Some(value.as_str()),
                     include_turns,
+                    turn_limit,
                     source_kinds,
                     cwd_scope,
                     archived.unwrap_or(false),
@@ -90,6 +93,7 @@ impl PraxisMessageProcessor {
                 self.lookup_thread_from_store_pages(
                     None,
                     include_turns,
+                    turn_limit,
                     source_kinds,
                     cwd_scope,
                     archived.unwrap_or(false),
@@ -103,6 +107,7 @@ impl PraxisMessageProcessor {
         &self,
         exact_name: Option<&str>,
         include_turns: bool,
+        turn_limit: Option<u32>,
         source_kinds: Option<Vec<ApiThreadSourceKind>>,
         cwd_scope: Option<String>,
         archived: bool,
@@ -140,7 +145,7 @@ impl PraxisMessageProcessor {
                     continue;
                 }
                 if let Some(thread) = self
-                    .load_thread_for_projection(summary.conversation_id, include_turns)
+                    .load_thread_for_projection(summary.conversation_id, include_turns, turn_limit)
                     .await?
                 {
                     return Ok(Some(thread));
@@ -158,16 +163,31 @@ impl PraxisMessageProcessor {
         &self,
         thread_uuid: ThreadId,
         include_turns: bool,
+        turn_limit: Option<u32>,
     ) -> Result<Option<Thread>, JSONRPCErrorError> {
         let loaded_thread = self.thread_manager.get_thread(thread_uuid).await.ok();
-        let directory_summary = ThreadStore::new(&self.config)
+        let directory_summary = match ThreadStore::new(&self.config)
             .try_read_directory_summary(thread_uuid)
             .await
-            .map_err(|err| JSONRPCErrorError {
-                code: INTERNAL_ERROR_CODE,
-                message: format!("failed to read thread {thread_uuid}: {err}"),
-                data: None,
-            })?;
+        {
+            Ok(summary) => summary,
+            Err(err)
+                if loaded_thread.is_some()
+                    && directory_summary_error_allows_live_snapshot(&err) =>
+            {
+                tracing::debug!(
+                    "using live thread snapshot for {thread_uuid} after transient summary read error: {err}"
+                );
+                None
+            }
+            Err(err) => {
+                return Err(JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: format!("failed to read thread {thread_uuid}: {err}"),
+                    data: None,
+                });
+            }
+        };
         let mut rollout_path = directory_summary
             .as_ref()
             .map(|summary| summary.path.clone());
@@ -197,7 +217,12 @@ impl PraxisMessageProcessor {
         }
 
         if include_turns && let Some(rollout_path) = rollout_path.as_ref() {
-            match ThreadStore::read_turns_from_rollout(rollout_path).await {
+            match ThreadStore::read_turns_from_rollout(
+                rollout_path,
+                ThreadTurnHydration::recent(turn_limit.map(|limit| limit as usize)),
+            )
+            .await
+            {
                 Ok(turns) => {
                     thread.turns = turns;
                 }
@@ -233,4 +258,8 @@ impl PraxisMessageProcessor {
             .await;
         Ok(Some(thread))
     }
+}
+
+fn directory_summary_error_allows_live_snapshot(err: &std::io::Error) -> bool {
+    err.to_string().contains("empty session file")
 }

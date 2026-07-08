@@ -1,5 +1,6 @@
 use super::thread_store_api::ThreadStore;
 use super::thread_store_api::ThreadStoreSummary;
+use super::thread_store_api::ThreadTurnHydration;
 use chrono::DateTime;
 use chrono::Utc;
 use praxis_app_gateway_protocol::GitInfo as ApiGitInfo;
@@ -61,7 +62,7 @@ pub(crate) async fn project_rollback_thread_from_rollout(
     let mut thread = project_thread_from_rollout_summary(rollout_path, fallback_provider)
         .await
         .map_err(|err| format!("failed to load rollout `{}`: {err}", rollout_path.display()))?;
-    thread.turns = ThreadStore::read_turns_from_rollout(rollout_path)
+    thread.turns = ThreadStore::read_turns_from_rollout(rollout_path, ThreadTurnHydration::all())
         .await
         .map_err(|err| format!("failed to load rollout `{}`: {err}", rollout_path.display()))?;
     thread.name = ThreadStore::resolve_thread_name_from_home(praxis_home, thread_id.clone()).await;

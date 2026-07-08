@@ -57,16 +57,24 @@ pub(crate) fn read_curated_plugins_sha(praxis_home: &Path) -> Option<String> {
     read_sha_file(curated_plugins_sha_path(praxis_home).as_path())
 }
 
-pub(crate) fn sync_curated_plugins_repo(praxis_home: &Path) -> Result<String, String> {
+pub(crate) async fn sync_curated_plugins_repo(praxis_home: &Path) -> Result<String, String> {
     sync_curated_plugins_repo_with_transport_overrides(praxis_home, "git", GITHUB_API_BASE_URL)
+        .await
 }
 
-fn sync_curated_plugins_repo_with_transport_overrides(
+async fn sync_curated_plugins_repo_with_transport_overrides(
     praxis_home: &Path,
     git_binary: &str,
     api_base_url: &str,
 ) -> Result<String, String> {
-    match sync_curated_plugins_repo_via_git(praxis_home, git_binary) {
+    let praxis_home_for_git = praxis_home.to_path_buf();
+    let git_binary_for_git = git_binary.to_string();
+    match tokio::task::spawn_blocking(move || {
+        sync_curated_plugins_repo_via_git(&praxis_home_for_git, &git_binary_for_git)
+    })
+    .await
+    .map_err(|err| format!("failed to join curated plugins git sync task: {err}"))?
+    {
         Ok(remote_sha) => {
             emit_curated_plugins_startup_sync_metric("git", "success");
             emit_curated_plugins_startup_sync_final_metric("git", "success");
@@ -79,7 +87,7 @@ fn sync_curated_plugins_repo_with_transport_overrides(
                 git_binary,
                 "git sync failed for curated plugin sync; falling back to GitHub HTTP"
             );
-            let result = sync_curated_plugins_repo_via_http(praxis_home, api_base_url);
+            let result = sync_curated_plugins_repo_via_http(praxis_home, api_base_url).await;
             let status = if result.is_ok() { "success" } else { "failure" };
             emit_curated_plugins_startup_sync_metric("http", status);
             emit_curated_plugins_startup_sync_final_metric("http", status);
@@ -126,17 +134,13 @@ fn sync_curated_plugins_repo_via_git(
     Ok(remote_sha)
 }
 
-fn sync_curated_plugins_repo_via_http(
+async fn sync_curated_plugins_repo_via_http(
     praxis_home: &Path,
     api_base_url: &str,
 ) -> Result<String, String> {
     let repo_path = curated_plugins_repo_path(praxis_home);
     let sha_path = curated_plugins_sha_path(praxis_home);
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|err| format!("failed to create curated plugins sync runtime: {err}"))?;
-    let remote_sha = runtime.block_on(fetch_curated_repo_remote_sha(api_base_url))?;
+    let remote_sha = fetch_curated_repo_remote_sha(api_base_url).await?;
     let local_sha = read_sha_file(&sha_path);
 
     if local_sha.as_deref() == Some(remote_sha.as_str()) && repo_path.is_dir() {
@@ -144,10 +148,26 @@ fn sync_curated_plugins_repo_via_http(
     }
 
     let staged_repo_dir = prepare_curated_repo_parent_and_temp_dir(&repo_path)?;
-    let zipball_bytes = runtime.block_on(fetch_curated_repo_zipball(api_base_url, &remote_sha))?;
+    let zipball_bytes = fetch_curated_repo_zipball(api_base_url, &remote_sha).await?;
     extract_zipball_to_dir(&zipball_bytes, staged_repo_dir.path())?;
     activate_synced_curated_repo(&repo_path, &sha_path, staged_repo_dir, &remote_sha)?;
     Ok(remote_sha)
+}
+
+pub(super) fn spawn_logged_startup_task(
+    name: &'static str,
+    task: impl std::future::Future<Output = ()> + Send + 'static,
+) {
+    let handle = tokio::spawn(task);
+    tokio::spawn(async move {
+        if let Err(err) = handle.await {
+            warn!(
+                task = name,
+                error = %err,
+                "startup background task failed to join"
+            );
+        }
+    });
 }
 
 pub(super) fn start_startup_remote_plugin_sync_once(
@@ -161,7 +181,7 @@ pub(super) fn start_startup_remote_plugin_sync_once(
         return;
     }
 
-    tokio::spawn(async move {
+    spawn_logged_startup_task("startup-remote-plugin-sync", async move {
         if marker_path.is_file() {
             return;
         }

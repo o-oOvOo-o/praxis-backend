@@ -588,13 +588,28 @@ impl RolloutRecorder {
     pub async fn load_rollout_items(
         path: &Path,
     ) -> std::io::Result<(Vec<RolloutItem>, Option<ThreadId>, usize)> {
+        let mut items: Vec<RolloutItem> = Vec::new();
+        let (thread_id, parse_errors) = Self::scan_rollout_items(path, |item| {
+            items.push(item);
+        })
+        .await?;
+        Ok((items, thread_id, parse_errors))
+    }
+
+    pub async fn scan_rollout_items<F>(
+        path: &Path,
+        mut on_item: F,
+    ) -> std::io::Result<(Option<ThreadId>, usize)>
+    where
+        F: FnMut(RolloutItem),
+    {
         trace!("Resuming rollout from {path:?}");
         let file = tokio::fs::File::open(path).await?;
         let mut lines = BufReader::new(file).lines();
 
-        let mut items: Vec<RolloutItem> = Vec::new();
         let mut thread_id: Option<ThreadId> = None;
         let mut parse_errors = 0usize;
+        let mut item_count = 0usize;
         let mut saw_non_empty_line = false;
 
         while let Some(line) = lines.next_line().await? {
@@ -608,28 +623,17 @@ impl RolloutRecorder {
             // whole file into memory, parsed each line into serde_json::Value, cloned that
             // value, then parsed it again into RolloutLine.
             match serde_json::from_str::<RolloutLine>(line) {
-                Ok(rollout_line) => match rollout_line.item {
-                    RolloutItem::SessionMeta(session_meta_line) => {
-                        // Use the FIRST SessionMeta encountered in the file as the canonical
-                        // thread id and main session information. Keep all items intact.
+                Ok(rollout_line) => {
+                    let item = rollout_line.item;
+                    if let RolloutItem::SessionMeta(session_meta_line) = &item {
                         if thread_id.is_none() {
+                            // Use the FIRST SessionMeta encountered as the canonical thread id.
                             thread_id = Some(session_meta_line.meta.id);
                         }
-                        items.push(RolloutItem::SessionMeta(session_meta_line));
                     }
-                    RolloutItem::ResponseItem(item) => {
-                        items.push(RolloutItem::ResponseItem(item));
-                    }
-                    RolloutItem::Compacted(item) => {
-                        items.push(RolloutItem::Compacted(item));
-                    }
-                    RolloutItem::TurnContext(item) => {
-                        items.push(RolloutItem::TurnContext(item));
-                    }
-                    RolloutItem::EventMsg(_ev) => {
-                        items.push(RolloutItem::EventMsg(_ev));
-                    }
-                },
+                    item_count = item_count.saturating_add(1);
+                    on_item(item);
+                }
                 Err(e) => {
                     warn!("failed to parse rollout line: {line:?}, error: {e}");
                     parse_errors = parse_errors.saturating_add(1);
@@ -642,12 +646,12 @@ impl RolloutRecorder {
         }
 
         tracing::debug!(
-            "Resumed rollout with {} items, thread ID: {:?}, parse errors: {}",
-            items.len(),
+            "Scanned rollout with {} items, thread ID: {:?}, parse errors: {}",
+            item_count,
             thread_id,
             parse_errors,
         );
-        Ok((items, thread_id, parse_errors))
+        Ok((thread_id, parse_errors))
     }
 
     pub async fn get_rollout_history(path: &Path) -> std::io::Result<InitialHistory> {

@@ -5,29 +5,27 @@ use praxis_protocol::dynamic_tools::DynamicToolCallOutputContentItem as CoreDyna
 use praxis_protocol::dynamic_tools::DynamicToolResponse as CoreDynamicToolResponse;
 use praxis_protocol::protocol::Op;
 use std::sync::Arc;
-use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 use tracing::error;
 
-use crate::outgoing_message::ClientRequestResult;
-use crate::server_request_error::is_turn_transition_server_request_error;
+use crate::client_response_decode::ClientResponseValue;
+use crate::client_response_decode::PendingClientResponse;
+use crate::client_response_decode::decode_response_value_or_default;
+use crate::client_response_decode::response_value_or_cancel;
+use crate::server_request_lifecycle::PendingServerRequest;
+use crate::thread_state::ThreadState;
 
 pub(crate) async fn on_call_response(
     call_id: String,
-    receiver: oneshot::Receiver<ClientRequestResult>,
+    pending_request: PendingServerRequest,
     conversation: Arc<PraxisThread>,
+    thread_state: Arc<Mutex<ThreadState>>,
 ) {
-    let response = receiver.await;
-    let (response, _error) = match response {
-        Ok(Ok(value)) => decode_response(value),
-        Ok(Err(err)) if is_turn_transition_server_request_error(&err) => return,
-        Ok(Err(err)) => {
-            error!("request failed with client error: {err:?}");
-            fallback_response("dynamic tool request failed")
-        }
-        Err(err) => {
-            error!("request failed: {err:?}");
-            fallback_response("dynamic tool request failed")
-        }
+    let response = pending_request
+        .await_response_and_resolve(&thread_state)
+        .await;
+    let Some(response) = dynamic_tool_response_from_client_result(response) else {
+        return;
     };
 
     let DynamicToolCallResponse {
@@ -52,24 +50,23 @@ pub(crate) async fn on_call_response(
     }
 }
 
-fn decode_response(value: serde_json::Value) -> (DynamicToolCallResponse, Option<String>) {
-    match serde_json::from_value::<DynamicToolCallResponse>(value) {
-        Ok(response) => (response, None),
-        Err(err) => {
-            error!("failed to deserialize DynamicToolCallResponse: {err}");
+fn dynamic_tool_response_from_client_result(
+    response: PendingClientResponse,
+) -> Option<DynamicToolCallResponse> {
+    match response_value_or_cancel(response) {
+        ClientResponseValue::Value(value) => Some(decode_response_value_or_default(value, || {
             fallback_response("dynamic tool response was invalid")
-        }
+        })),
+        ClientResponseValue::TurnTransition => None,
+        ClientResponseValue::Fallback => Some(fallback_response("dynamic tool request failed")),
     }
 }
 
-fn fallback_response(message: &str) -> (DynamicToolCallResponse, Option<String>) {
-    (
-        DynamicToolCallResponse {
-            content_items: vec![DynamicToolCallOutputContentItem::InputText {
-                text: message.to_string(),
-            }],
-            success: false,
-        },
-        Some(message.to_string()),
-    )
+fn fallback_response(message: &str) -> DynamicToolCallResponse {
+    DynamicToolCallResponse {
+        content_items: vec![DynamicToolCallOutputContentItem::InputText {
+            text: message.to_string(),
+        }],
+        success: false,
+    }
 }

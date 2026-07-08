@@ -123,6 +123,7 @@ async fn thread_shell_command_runs_as_standalone_turn_and_persists_history() -> 
         .send_thread_read_request(ThreadReadParams {
             thread_id: thread.id,
             include_turns: true,
+            turn_limit: None,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(
@@ -292,6 +293,7 @@ async fn thread_shell_command_uses_existing_active_turn() -> Result<()> {
         .send_thread_read_request(ThreadReadParams {
             thread_id: thread.id,
             include_turns: true,
+            turn_limit: None,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(

@@ -79,7 +79,7 @@ impl Debug for LiveEffectivePermissions {
     }
 }
 
-pub(crate) fn thread_permissions_from_session_configuration(
+pub(in crate::praxis) fn thread_permissions_from_session_configuration(
     session_configuration: &SessionConfiguration,
 ) -> ThreadPermissionState {
     ThreadPermissionState::new(

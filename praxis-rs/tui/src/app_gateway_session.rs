@@ -120,6 +120,8 @@ use praxis_protocol::protocol::TokenUsageInfo;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+const THREAD_TURN_HYDRATION_LIMIT: u32 = 80;
+
 mod bootstrap;
 mod runtime_calls;
 mod thread_commands;
@@ -399,6 +401,7 @@ fn thread_resume_params_from_config(
         sandbox: sandbox_mode_from_policy(config.permissions.sandbox_policy.get().clone()),
         config: config_request_overrides_from_config(&config),
         persist_extended_history: true,
+        turn_limit: Some(THREAD_TURN_HYDRATION_LIMIT),
         ..ThreadResumeParams::default()
     }
 }

@@ -142,6 +142,7 @@ impl AppGatewaySession {
                 params: ThreadReadParams {
                     thread_id: thread_id.to_string(),
                     include_turns,
+                    turn_limit: include_turns.then_some(THREAD_TURN_HYDRATION_LIMIT),
                 },
             })
             .await

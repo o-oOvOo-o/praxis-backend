@@ -238,6 +238,26 @@ pub(crate) fn validate_dynamic_tools(tools: &[ApiDynamicToolSpec]) -> Result<(),
     Ok(())
 }
 
+pub(crate) fn build_core_dynamic_tools(
+    tools: Option<Vec<ApiDynamicToolSpec>>,
+) -> Result<Vec<CoreDynamicToolSpec>, String> {
+    let tools = tools.unwrap_or_default();
+    if tools.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    validate_dynamic_tools(&tools)?;
+    Ok(tools
+        .into_iter()
+        .map(|tool| CoreDynamicToolSpec {
+            name: tool.name,
+            description: tool.description,
+            input_schema: tool.input_schema,
+            defer_loading: tool.defer_loading,
+        })
+        .collect())
+}
+
 /// Derive the effective [`Config`] by layering three override sources.
 ///
 /// Precedence (lowest to highest):

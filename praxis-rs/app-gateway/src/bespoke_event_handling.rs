@@ -550,11 +550,21 @@ pub(crate) async fn apply_bespoke_event_handling(
                 tool: tool.clone(),
                 arguments: arguments.clone(),
             };
-            let (_pending_request_id, rx) = outgoing
-                .send_request(ServerRequestPayload::DynamicToolCall(params))
-                .await;
+            let pending_request = send_server_request(
+                &thread_state_manager,
+                &thread_state,
+                &outgoing,
+                ServerRequestPayload::DynamicToolCall(params),
+            )
+            .await;
             tokio::spawn(async move {
-                crate::dynamic_tools::on_call_response(call_id, rx, conversation).await;
+                crate::dynamic_tools::on_call_response(
+                    call_id,
+                    pending_request,
+                    conversation,
+                    thread_state,
+                )
+                .await;
             });
         }
         EventMsg::DynamicToolCallResponse(response) => {

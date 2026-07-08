@@ -147,6 +147,22 @@ async fn run_remote_compact_task_inner_impl(
     )
     .await;
 
+    // A flaky provider can "succeed" with an empty or content-free
+    // transcript. Replacing the history with that destroys the thread, so
+    // refuse and keep the existing history instead.
+    let has_real_content = new_history.iter().any(|item| match item {
+        ResponseItem::Message { role, .. } => role == "user" || role == "assistant",
+        ResponseItem::Compaction { .. } => true,
+        _ => false,
+    });
+    if !has_real_content {
+        return Err(PraxisErr::Stream(
+            "remote compaction returned an empty replacement history; keeping existing history"
+                .into(),
+            None,
+        ));
+    }
+
     if !ghost_snapshots.is_empty() {
         new_history.extend(ghost_snapshots);
     }

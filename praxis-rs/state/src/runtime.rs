@@ -46,6 +46,7 @@ use sqlx::Row;
 use sqlx::Sqlite;
 use sqlx::SqliteConnection;
 use sqlx::SqlitePool;
+use sqlx::migrate::MigrateError;
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::SqliteAutoVacuum;
 use sqlx::sqlite::SqliteConnectOptions;
@@ -121,6 +122,19 @@ impl StateRuntime {
         let logs_path = logs_db_path(praxis_home.as_path());
         let pool = match open_state_sqlite(&state_path, &STATE_MIGRATOR).await {
             Ok(db) => Arc::new(db),
+            Err(err) if is_recoverable_state_migration_error(&err) => {
+                warn!(
+                    "recovering state db at {} after migration checksum mismatch: {err:#}",
+                    state_path.display()
+                );
+                archive_current_db_files(
+                    praxis_home.as_path(),
+                    current_state_name.as_str(),
+                    "state",
+                )
+                .await?;
+                Arc::new(open_state_sqlite(&state_path, &STATE_MIGRATOR).await?)
+            }
             Err(err) => {
                 warn!(
                     "failed to open state db at {}: {err:#}",
@@ -176,7 +190,10 @@ async fn open_state_sqlite(path: &Path, migrator: &'static Migrator) -> anyhow::
         .max_connections(5)
         .connect_with(options)
         .await?;
-    migrator.run(&pool).await?;
+    if let Err(err) = migrator.run(&pool).await {
+        pool.close().await;
+        return Err(err.into());
+    }
     let auto_vacuum = sqlx::query_scalar::<_, i64>("PRAGMA auto_vacuum")
         .fetch_one(&pool)
         .await?;
@@ -194,6 +211,45 @@ async fn open_state_sqlite(path: &Path, migrator: &'static Migrator) -> anyhow::
         .execute(&pool)
         .await;
     Ok(pool)
+}
+
+fn is_recoverable_state_migration_error(err: &anyhow::Error) -> bool {
+    matches!(
+        err.downcast_ref::<MigrateError>(),
+        Some(MigrateError::VersionMismatch(_))
+    )
+}
+
+async fn archive_current_db_files(
+    praxis_home: &Path,
+    current_name: &str,
+    db_label: &str,
+) -> anyhow::Result<()> {
+    let archive_tag = format!(
+        "recovered-{}-{}",
+        Utc::now().timestamp_millis(),
+        std::process::id()
+    );
+    for suffix in ["-wal", "-shm", "-journal", ""] {
+        let source = praxis_home.join(format!("{current_name}{suffix}"));
+        if !tokio::fs::try_exists(&source).await? {
+            continue;
+        }
+        let archived = praxis_home.join(format!("{current_name}.{archive_tag}{suffix}"));
+        tokio::fs::rename(&source, &archived).await.map_err(|err| {
+            anyhow::anyhow!(
+                "failed to archive {db_label} db file {} to {}: {err}",
+                source.display(),
+                archived.display()
+            )
+        })?;
+        warn!(
+            "archived stale {db_label} db file {} to {}",
+            source.display(),
+            archived.display()
+        );
+    }
+    Ok(())
 }
 
 async fn open_logs_sqlite(path: &Path, migrator: &'static Migrator) -> anyhow::Result<SqlitePool> {
@@ -291,4 +347,60 @@ fn should_remove_db_file(file_name: &str, current_name: &str, base_name: &str) -
         return false;
     };
     !version_suffix.is_empty() && version_suffix.chars().all(|ch| ch.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use crate::runtime::test_support::unique_temp_dir;
+
+    #[tokio::test]
+    async fn init_archives_state_db_on_migration_checksum_mismatch() {
+        let praxis_home = unique_temp_dir();
+        let runtime = StateRuntime::init(praxis_home.clone(), "test-provider".to_string())
+            .await
+            .expect("initialize runtime");
+        drop(runtime);
+
+        let state_path = state_db_path(praxis_home.as_path());
+        let options = base_sqlite_options(state_path.as_path());
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .expect("open state db for checksum corruption");
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = X'00' WHERE version = 27")
+            .execute(&pool)
+            .await
+            .expect("corrupt migration checksum");
+        pool.close().await;
+
+        let runtime = StateRuntime::init(praxis_home.clone(), "test-provider".to_string())
+            .await
+            .expect("recover runtime after checksum mismatch");
+        drop(runtime);
+
+        assert!(
+            tokio::fs::try_exists(&state_path)
+                .await
+                .expect("check rebuilt state db"),
+            "expected rebuilt current state db"
+        );
+        let mut archived = false;
+        let mut entries = tokio::fs::read_dir(&praxis_home)
+            .await
+            .expect("read praxis_home");
+        let archive_prefix = format!("{}.recovered-", state_db_filename());
+        while let Some(entry) = entries.next_entry().await.expect("read dir entry") {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with(archive_prefix.as_str()) {
+                archived = true;
+                break;
+            }
+        }
+        assert!(archived, "expected stale state db archive");
+
+        let _ = tokio::fs::remove_dir_all(praxis_home).await;
+    }
 }

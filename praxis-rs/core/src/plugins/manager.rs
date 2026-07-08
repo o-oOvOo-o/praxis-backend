@@ -28,6 +28,7 @@ use super::remote::fetch_remote_featured_plugin_ids;
 use super::remote::fetch_remote_plugin_status;
 use super::remote::uninstall_remote_plugin;
 use super::startup_sync::read_curated_plugins_sha;
+use super::startup_sync::spawn_logged_startup_task;
 use super::startup_sync::start_startup_remote_plugin_sync_once;
 use super::startup_sync::sync_curated_plugins_repo;
 use super::store::PluginInstallResult as StorePluginInstallResult;

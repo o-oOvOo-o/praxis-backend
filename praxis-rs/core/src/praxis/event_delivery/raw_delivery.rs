@@ -19,8 +19,7 @@ impl Session {
         self.send_event_raw(event).await;
         self.maybe_notify_parent_of_terminal_turn(turn_context, &event_msg)
             .await;
-        self.maybe_mirror_event_text_to_realtime(&event_msg)
-            .await;
+        self.maybe_mirror_event_text_to_realtime(&event_msg).await;
         self.maybe_clear_realtime_handoff_for_event(&event_msg)
             .await;
     }

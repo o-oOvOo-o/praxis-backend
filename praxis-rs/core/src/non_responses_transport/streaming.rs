@@ -360,6 +360,9 @@ pub(super) async fn process_common_sse(
             }
             Ok(None) => {
                 if common_can_complete_on_stream_close(&state, thinking_policy) {
+                    tracing::warn!(
+                        "common stream closed before [DONE]; completing from buffered output"
+                    );
                     match emit_common_completion(&mut state, &tx_event).await {
                         Ok(()) => return,
                         Err(err) => {
@@ -886,18 +889,38 @@ pub(super) fn common_should_complete_now(
         .is_some_and(|deadline| Instant::now() >= deadline)
 }
 
+/// Whether this stream attempt has produced any real output so far.
+///
+/// A dying proxy connection can deliver a bare `finish_reason` chunk and then
+/// close without content and without `[DONE]`. Treating that as a successful
+/// completion produces a silent empty turn downstream, so completion-on-close
+/// and completion-on-timeout both require actual output.
+pub(super) fn common_stream_produced_output(state: &CommonStreamState) -> bool {
+    !state.message_text.is_empty()
+        || !state.reasoning_text.is_empty()
+        || !state.tool_calls.is_empty()
+        || state.tool_calls_emitted
+}
+
 pub(super) fn common_can_complete_on_timeout(
     state: &CommonStreamState,
     thinking_policy: CommonThinkingPolicy,
 ) -> bool {
-    state.saw_finish_reason || common_can_complete_on_message_idle(state, thinking_policy)
+    (state.saw_finish_reason && common_stream_produced_output(state))
+        || common_can_complete_on_message_idle(state, thinking_policy)
 }
 
 pub(super) fn common_can_complete_on_stream_close(
     state: &CommonStreamState,
     thinking_policy: CommonThinkingPolicy,
 ) -> bool {
-    state.saw_finish_reason || common_can_complete_on_message_idle(state, thinking_policy)
+    // An abrupt close (no `[DONE]`) only counts as completion when the server
+    // both said it finished and actually produced output. The message-idle
+    // tolerance is deliberately NOT honored here: a connection that dies
+    // mid-message must surface as a stream error so the retry layer runs,
+    // instead of presenting truncated text as a complete answer.
+    let _ = thinking_policy;
+    state.saw_finish_reason && common_stream_produced_output(state)
 }
 
 pub(super) fn common_completion_deadline(

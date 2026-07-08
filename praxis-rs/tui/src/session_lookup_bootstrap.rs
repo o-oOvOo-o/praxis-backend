@@ -62,6 +62,7 @@ pub(super) fn session_lookup_params(
     ThreadLookupParams {
         selector,
         include_turns: false,
+        turn_limit: None,
         source_kinds,
         cwd_scope,
         archived: Some(false),

@@ -1,6 +1,7 @@
 use super::thread_runtime_api::project_thread_runtime_state_from_watch;
 use super::thread_store_api::ThreadHistorySource;
 use super::thread_store_api::ThreadStore;
+use super::thread_store_api::ThreadTurnHydration;
 use super::*;
 use praxis_core::windows_sandbox::WindowsSandboxLevelExt;
 
@@ -64,7 +65,9 @@ impl PraxisMessageProcessor {
             base_instructions,
             developer_instructions,
             personality,
+            dynamic_tools,
             persist_extended_history,
+            turn_limit,
         } = params;
 
         let thread_history = if let Some(history) = history {
@@ -131,16 +134,36 @@ impl PraxisMessageProcessor {
 
         let fallback_model_provider = config.model_provider_id.clone();
         let response_history = thread_history.clone();
+        let core_dynamic_tools = match build_core_dynamic_tools(dynamic_tools) {
+            Ok(tools) => tools,
+            Err(message) => {
+                let error = JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message,
+                    data: None,
+                };
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+        let core_dynamic_tool_count = core_dynamic_tools.len();
 
         match self
             .thread_manager
-            .resume_thread_with_history(
+            .resume_thread_with_history_and_dynamic_tools(
                 config,
                 thread_history,
                 self.auth_manager.clone(),
+                core_dynamic_tools,
                 persist_extended_history,
                 self.request_trace_context(&request_id).await,
             )
+            .instrument(tracing::info_span!(
+                "app_gateway.thread_resume.create_thread",
+                otel.name = "app_gateway.thread_resume.create_thread",
+                thread_resume.dynamic_tool_count = core_dynamic_tool_count,
+                thread_resume.persist_extended_history = persist_extended_history,
+            ))
             .await
         {
             Ok(ThreadSpawnResult {
@@ -178,6 +201,7 @@ impl PraxisMessageProcessor {
                         rollout_path.as_path(),
                         fallback_model_provider.as_str(),
                         persisted_resume_metadata.as_ref(),
+                        turn_limit,
                     )
                     .await
                 {
@@ -368,6 +392,21 @@ impl PraxisMessageProcessor {
                 return true;
             }
 
+            if params
+                .dynamic_tools
+                .as_ref()
+                .is_some_and(|tools| !tools.is_empty())
+            {
+                self.send_invalid_request_error(
+                    request_id,
+                    format!(
+                        "cannot change dynamic tools for running thread {existing_thread_id}; close the thread before resuming it with dynamic tools"
+                    ),
+                )
+                .await;
+                return true;
+            }
+
             let rollout_path = match resolve_thread_rollout_path(
                 &self.config,
                 existing_thread_id,
@@ -457,9 +496,10 @@ impl PraxisMessageProcessor {
                     rollout_path: rollout_path.clone(),
                     config_snapshot,
                     thread_summary,
+                    turn_limit: params.turn_limit,
                 }),
             );
-            if listener_command_tx.send(command).is_err() {
+            if listener_command_tx.send(command).await.is_err() {
                 let err = JSONRPCErrorError {
                     code: INTERNAL_ERROR_CODE,
                     message: format!(
@@ -532,6 +572,7 @@ impl PraxisMessageProcessor {
         rollout_path: &Path,
         fallback_provider: &str,
         persisted_resume_metadata: Option<&ThreadMetadata>,
+        turn_limit: Option<u32>,
     ) -> std::result::Result<Thread, String> {
         let thread = match thread_history {
             InitialHistory::Resumed(resumed) => {
@@ -565,6 +606,7 @@ impl PraxisMessageProcessor {
         ThreadStore::hydrate_turns(
             &mut thread,
             ThreadHistorySource::RolloutItems(&history_items),
+            ThreadTurnHydration::recent(turn_limit.map(|limit| limit as usize)),
             /*active_turn*/ None,
         )
         .await?;

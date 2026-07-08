@@ -364,6 +364,7 @@ async fn thread_resume_and_read_interrupt_incomplete_rollout_turn_when_thread_is
         .send_thread_read_request(ThreadReadParams {
             thread_id: resumed_again.id,
             include_turns: true,
+            turn_limit: None,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(

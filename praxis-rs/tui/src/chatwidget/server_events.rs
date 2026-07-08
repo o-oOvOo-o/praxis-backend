@@ -531,6 +531,11 @@ impl ChatWidget {
                     self.enter_review_mode_with_hint(review, /*from_replay*/ false);
                 }
             }
+            ThreadItem::ContextCompaction { .. } => {
+                if !from_replay {
+                    self.set_status_header("Compacting context".to_string());
+                }
+            }
             _ => {}
         }
     }

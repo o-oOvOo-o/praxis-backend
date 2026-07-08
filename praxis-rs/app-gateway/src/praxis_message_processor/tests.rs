@@ -3,6 +3,7 @@ use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessage;
 use crate::server_request_lifecycle::send_server_request;
 use anyhow::Result;
+use praxis_app_gateway_protocol::DynamicToolCallParams;
 use praxis_app_gateway_protocol::ServerRequestPayload;
 use praxis_app_gateway_protocol::ToolRequestUserInputParams;
 use praxis_core::config_loader::CloudRequirementsLoadError;
@@ -118,7 +119,9 @@ fn collect_resume_override_mismatches_includes_service_tier() {
         base_instructions: None,
         developer_instructions: None,
         personality: None,
+        dynamic_tools: None,
         persist_extended_history: false,
+        turn_limit: None,
     };
     let config_snapshot = ThreadConfigSnapshot {
         model: "gpt-5".to_string(),
@@ -705,6 +708,68 @@ async fn pending_server_request_replays_after_late_subscription() -> Result<()> 
     } = request_message
     else {
         panic!("expected pending tool request to replay to late subscriber");
+    };
+    assert_eq!(request_connection_id, connection_id);
+    assert_eq!(replayed_request_id, expected_request_id);
+    Ok(())
+}
+
+#[tokio::test]
+async fn dynamic_tool_call_request_replays_after_late_subscription() -> Result<()> {
+    let manager = ThreadStateManager::new();
+    let thread_id = ThreadId::new();
+    let connection_id = ConnectionId(11);
+    let thread_state = manager.thread_state(thread_id).await;
+
+    let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(8);
+    let outgoing = Arc::new(OutgoingMessageSender::new(outgoing_tx));
+    let thread_outgoing =
+        ThreadScopedOutgoingMessageSender::new(outgoing.clone(), Vec::new(), thread_id);
+
+    let _pending_request = send_server_request(
+        &manager,
+        &thread_state,
+        &thread_outgoing,
+        ServerRequestPayload::DynamicToolCall(DynamicToolCallParams {
+            thread_id: thread_id.to_string(),
+            turn_id: "turn-1".to_string(),
+            call_id: "call-1".to_string(),
+            tool: "deferred-tool".to_string(),
+            arguments: json!({ "value": 1 }),
+        }),
+    )
+    .await;
+    assert!(outgoing_rx.try_recv().is_err());
+
+    let pending_requests = manager.pending_server_requests(thread_id).await;
+    assert_eq!(pending_requests.len(), 1);
+    let expected_request_id = pending_requests[0].id().clone();
+
+    manager.connection_initialized(connection_id).await;
+    manager
+        .try_ensure_connection_subscribed(
+            thread_id,
+            connection_id,
+            /*experimental_raw_events*/ false,
+        )
+        .await
+        .expect("connection should be live");
+    outgoing
+        .replay_requests_to_connection_for_thread(connection_id, pending_requests)
+        .await;
+
+    let request_message = outgoing_rx.recv().await.expect("request should replay");
+    let OutgoingEnvelope::ToConnection {
+        connection_id: request_connection_id,
+        message:
+            OutgoingMessage::Request(ServerRequest::DynamicToolCall {
+                request_id: replayed_request_id,
+                ..
+            }),
+        ..
+    } = request_message
+    else {
+        panic!("expected pending dynamic tool request to replay to late subscriber");
     };
     assert_eq!(request_connection_id, connection_id);
     assert_eq!(replayed_request_id, expected_request_id);

@@ -67,6 +67,7 @@ async fn thread_read_returns_summary_without_turns() -> Result<()> {
         .send_thread_read_request(ThreadReadParams {
             thread_id: conversation_id.clone(),
             include_turns: false,
+            turn_limit: None,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(
@@ -122,6 +123,7 @@ async fn thread_read_can_include_turns() -> Result<()> {
         .send_thread_read_request(ThreadReadParams {
             thread_id: conversation_id.clone(),
             include_turns: true,
+            turn_limit: None,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(
@@ -183,6 +185,62 @@ async fn thread_read_loaded_thread_returns_precomputed_path_before_materializati
         .send_thread_read_request(ThreadReadParams {
             thread_id: thread.id.clone(),
             include_turns: false,
+            turn_limit: None,
+        })
+        .await?;
+    let read_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(read_id)),
+    )
+    .await??;
+    let ThreadReadResponse { thread: read } = to_response::<ThreadReadResponse>(read_resp)?;
+
+    assert_eq!(read.id, thread.id);
+    assert_eq!(read.path, Some(thread_path));
+    assert!(read.preview.is_empty());
+    assert_eq!(read.turns.len(), 0);
+    assert_eq!(read.status, ThreadStatus::Idle);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_read_loaded_thread_uses_live_snapshot_while_rollout_file_is_empty() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let praxis_home = TempDir::new()?;
+    create_config_toml(praxis_home.path(), &server.uri())?;
+
+    let mut mcp = McpProcess::new(praxis_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let start_id = mcp
+        .send_thread_start_request(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let start_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+    )
+    .await??;
+    let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(start_resp)?;
+    let thread_path = thread.path.clone().expect("thread path");
+    if let Some(parent) = thread_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::File::create(&thread_path).await?;
+    assert_eq!(
+        tokio::fs::metadata(&thread_path).await?.len(),
+        0,
+        "test setup must leave the rollout file empty"
+    );
+
+    let read_id = mcp
+        .send_thread_read_request(ThreadReadParams {
+            thread_id: thread.id.clone(),
+            include_turns: false,
+            turn_limit: None,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(
@@ -250,6 +308,7 @@ async fn thread_name_set_is_reflected_in_read_list_and_resume() -> Result<()> {
         .send_thread_read_request(ThreadReadParams {
             thread_id: conversation_id.clone(),
             include_turns: false,
+            turn_limit: None,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(
@@ -388,6 +447,7 @@ async fn thread_read_include_turns_rejects_unmaterialized_loaded_thread() -> Res
         .send_thread_read_request(ThreadReadParams {
             thread_id: thread.id.clone(),
             include_turns: true,
+            turn_limit: None,
         })
         .await?;
     let read_err: JSONRPCError = timeout(
@@ -461,6 +521,7 @@ async fn thread_read_reports_system_error_idle_flag_after_failed_turn() -> Resul
         .send_thread_read_request(ThreadReadParams {
             thread_id: thread.id,
             include_turns: false,
+            turn_limit: None,
         })
         .await?;
     let read_resp: JSONRPCResponse = timeout(

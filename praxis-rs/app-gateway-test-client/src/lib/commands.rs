@@ -185,14 +185,13 @@ pub(super) async fn resume_message_api(
     user_message: String,
     dynamic_tools: &Option<Vec<DynamicToolSpec>>,
 ) -> Result<()> {
-    ensure_dynamic_tools_unused(dynamic_tools, "resume-message-api")?;
-
     with_client("resume-message-api", endpoint, config_overrides, |client| {
         let initialize = client.initialize()?;
         println!("< initialize response: {initialize:?}");
 
         let resume_response = client.thread_resume(ThreadResumeParams {
             thread_id,
+            dynamic_tools: dynamic_tools.clone(),
             ..Default::default()
         })?;
         println!("< thread/resume response: {resume_response:?}");
@@ -218,6 +217,7 @@ pub(super) async fn thread_resume_follow(
     endpoint: &Endpoint,
     config_overrides: &[String],
     thread_id: String,
+    dynamic_tools: &Option<Vec<DynamicToolSpec>>,
 ) -> Result<()> {
     with_client("thread-resume", endpoint, config_overrides, |client| {
         let initialize = client.initialize()?;
@@ -225,6 +225,7 @@ pub(super) async fn thread_resume_follow(
 
         let resume_response = client.thread_resume(ThreadResumeParams {
             thread_id,
+            dynamic_tools: dynamic_tools.clone(),
             ..Default::default()
         })?;
         println!("< thread/resume response: {resume_response:?}");
@@ -839,7 +840,7 @@ pub(super) fn ensure_dynamic_tools_unused(
 ) -> Result<()> {
     if dynamic_tools.is_some() {
         bail!(
-            "dynamic tools are only supported for thread/start; remove --dynamic-tools for {command} or use send-message-api"
+            "dynamic tools are only supported for thread/start and thread/resume; remove --dynamic-tools for {command} or use send-message-api"
         );
     }
     Ok(())

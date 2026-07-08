@@ -232,8 +232,49 @@ async fn run_compact_task_inner(
 
         match attempt_result {
             Ok(output_items) => {
-                compact_plan.summary_output = last_assistant_message_from_turn(&output_items)
-                    .map(|text| text.trim().to_string());
+                let summary = last_assistant_message_from_turn(&output_items)
+                    .map(|text| text.trim().to_string())
+                    .filter(|text| !text.is_empty());
+                if summary.is_none() {
+                    // A flaky provider can return a "successful" stream with no
+                    // assistant message. Accepting that would replace the whole
+                    // history with an empty summary and destroy the thread's
+                    // context, so treat it like a stream failure instead.
+                    let has_previous_summary = compact_plan
+                        .previous_summary
+                        .as_deref()
+                        .is_some_and(|summary| !summary.trim().is_empty());
+                    if retries < max_retries {
+                        retries += 1;
+                        let delay = backoff(retries);
+                        sess.notify_stream_error(
+                            turn_context.as_ref(),
+                            format!("Reconnecting... {retries}/{max_retries}"),
+                            PraxisErr::Stream(
+                                "compaction model returned no summary".into(),
+                                None,
+                            ),
+                        )
+                        .await;
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    } else if !has_previous_summary {
+                        let e = PraxisErr::Stream(
+                            "compaction model returned no summary; keeping existing history"
+                                .into(),
+                            None,
+                        );
+                        let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
+                        sess.send_event(&turn_context, event).await;
+                        return Err(e);
+                    }
+                    // Retries exhausted but an earlier summary exists: fall
+                    // through and let `take_summary_fallback` reuse it.
+                    error!(
+                        "compaction model returned no summary after {max_retries} retries; reusing previous summary"
+                    );
+                }
+                compact_plan.summary_output = summary;
                 if truncated_count > 0 {
                     sess.notify_background_event(
                         turn_context.as_ref(),

@@ -70,7 +70,10 @@ impl PraxisMessageProcessor {
         thread_uuid: ThreadId,
         request_id: &ConnectionRequestId,
     ) -> Option<PathBuf> {
-        match self.load_thread_for_projection(thread_uuid, false).await {
+        match self
+            .load_thread_for_projection(thread_uuid, false, /*turn_limit*/ None)
+            .await
+        {
             Ok(Some(thread)) => Some(thread.cwd),
             Ok(None) => {
                 self.send_invalid_request_error(

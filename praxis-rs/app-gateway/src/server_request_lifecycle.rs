@@ -5,7 +5,6 @@ use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
 use crate::thread_state::ThreadListenerCommand;
 use crate::thread_state::ThreadState;
 use crate::thread_state::ThreadStateManager;
-use crate::thread_status::ThreadWatchActiveGuard;
 use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequestPayload;
@@ -64,7 +63,6 @@ impl PendingServerRequest {
     pub(crate) async fn await_response_and_resolve(
         self,
         thread_state: &Arc<Mutex<ThreadState>>,
-        guard: ThreadWatchActiveGuard,
     ) -> PendingClientResponse {
         let response = self.receiver.await;
         resolve_server_request_on_thread_listener(
@@ -75,7 +73,6 @@ impl PendingServerRequest {
             self.request_id,
         )
         .await;
-        drop(guard);
         response
     }
 }

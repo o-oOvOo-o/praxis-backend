@@ -349,8 +349,9 @@ pub(super) async fn on_request_user_input_response(
     user_input_guard: ThreadWatchActiveGuard,
 ) {
     let response = pending_request
-        .await_response_and_resolve(&thread_state, user_input_guard)
+        .await_response_and_resolve(&thread_state)
         .await;
+    drop(user_input_guard);
     let Some(response) =
         try_decode_client_response_or_default::<ToolRequestUserInputResponse>(response, || {
             ToolRequestUserInputResponse {
@@ -395,8 +396,9 @@ pub(super) async fn on_mcp_server_elicitation_response(
     permission_guard: ThreadWatchActiveGuard,
 ) {
     let response = pending_request
-        .await_response_and_resolve(&thread_state, permission_guard)
+        .await_response_and_resolve(&thread_state)
         .await;
+    drop(permission_guard);
     let response = mcp_server_elicitation_response_from_client_result(response);
 
     if let Err(err) = conversation
@@ -448,8 +450,9 @@ pub(super) async fn on_request_permissions_response(
     request_permissions_guard: ThreadWatchActiveGuard,
 ) {
     let response = pending_request
-        .await_response_and_resolve(&thread_state, request_permissions_guard)
+        .await_response_and_resolve(&thread_state)
         .await;
+    drop(request_permissions_guard);
     let Some(response) =
         request_permissions_response_from_client_result(requested_permissions, response)
     else {
@@ -501,8 +504,9 @@ pub(super) async fn on_file_change_request_approval_response(
     permission_guard: ThreadWatchActiveGuard,
 ) {
     let response = pending_request
-        .await_response_and_resolve(&thread_state, permission_guard)
+        .await_response_and_resolve(&thread_state)
         .await;
+    drop(permission_guard);
     let Some((decision, completion_status)) = file_change_approval_response_outcome(response)
     else {
         return;
@@ -546,8 +550,9 @@ pub(super) async fn on_command_execution_request_approval_response(
     permission_guard: ThreadWatchActiveGuard,
 ) {
     let response = pending_request
-        .await_response_and_resolve(&thread_state, permission_guard)
+        .await_response_and_resolve(&thread_state)
         .await;
+    drop(permission_guard);
     let Some((decision, completion_status)) = command_execution_approval_response_outcome(response)
     else {
         return;

@@ -7,8 +7,8 @@ use praxis_protocol::ThreadId;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::McpServerRefreshConfig;
-use praxis_system_plugin_approval_control::PermissionController;
 use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio::sync::watch;
 
 use crate::agent::AgentStatus;
@@ -17,10 +17,12 @@ use crate::agent::MailboxReceiver;
 use crate::config::ManagedFeatures;
 use crate::guardian::GuardianReviewSessionManager;
 use crate::llm::runtime::LlmRuntimeCatalog;
+use crate::praxis::PermissionLedger;
 use crate::realtime_conversation::RealtimeConversationManager;
 use crate::state::ActiveTurn;
 use crate::state::SessionServices;
 use crate::state::SessionState;
+use crate::state::SessionTokenLedger;
 
 /// Long-lived state and service handle for one loaded agent thread.
 pub(crate) struct Session {
@@ -28,8 +30,9 @@ pub(crate) struct Session {
     pub(super) tx_event: Sender<Event>,
     pub(super) agent_status: watch::Sender<AgentStatus>,
     pub(super) out_of_band_elicitation_paused: watch::Sender<bool>,
-    pub(super) permission_controller: PermissionController,
+    pub(super) permission_ledger: PermissionLedger,
     pub(super) state: Mutex<SessionState>,
+    pub(super) token_ledger: RwLock<SessionTokenLedger>,
     /// The set of enabled features should be invariant for the lifetime of the session.
     pub(super) features: ManagedFeatures,
     pub(super) pending_mcp_server_refresh_config: Mutex<Option<McpServerRefreshConfig>>,

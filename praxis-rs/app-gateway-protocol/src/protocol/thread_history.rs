@@ -51,6 +51,7 @@ use praxis_protocol::protocol::ViewImageToolCallEvent;
 use praxis_protocol::protocol::WebSearchBeginEvent;
 use praxis_protocol::protocol::WebSearchEndEvent;
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use tracing::warn;
 use uuid::Uuid;
 
@@ -76,6 +77,20 @@ pub fn build_turns_from_rollout_items(items: &[RolloutItem]) -> Vec<Turn> {
     builder.finish()
 }
 
+pub fn build_recent_turns_from_rollout_items(
+    items: &[RolloutItem],
+    turn_limit: usize,
+) -> Vec<Turn> {
+    if turn_limit == 0 {
+        return Vec::new();
+    }
+    let mut builder = ThreadHistoryBuilder::with_max_finished_turns(turn_limit);
+    for item in items {
+        builder.handle_rollout_item(item);
+    }
+    builder.finish()
+}
+
 fn collab_interaction_tool(kind: CollabAgentInteractionKind) -> CollabAgentTool {
     match kind {
         CollabAgentInteractionKind::SendMessage => CollabAgentTool::SendMessage,
@@ -89,6 +104,8 @@ pub struct ThreadHistoryBuilder {
     next_item_index: i64,
     current_rollout_index: usize,
     next_rollout_index: usize,
+    max_finished_turns: Option<usize>,
+    dropped_turns: VecDeque<Turn>,
 }
 
 impl Default for ThreadHistoryBuilder {
@@ -105,15 +122,26 @@ impl ThreadHistoryBuilder {
             next_item_index: 1,
             current_rollout_index: 0,
             next_rollout_index: 0,
+            max_finished_turns: None,
+            dropped_turns: VecDeque::new(),
         }
     }
 
+    pub fn with_max_finished_turns(max_finished_turns: usize) -> Self {
+        let mut builder = Self::new();
+        builder.max_finished_turns = Some(max_finished_turns);
+        builder
+    }
+
     pub fn reset(&mut self) {
+        let max_finished_turns = self.max_finished_turns;
         *self = Self::new();
+        self.max_finished_turns = max_finished_turns;
     }
 
     pub fn finish(mut self) -> Vec<Turn> {
         self.finish_current_turn();
+        self.trim_finished_turns();
         self.turns
     }
 
@@ -220,6 +248,7 @@ impl ThreadHistoryBuilder {
             RolloutItem::ResponseItem(item) => self.handle_response_item(item),
             RolloutItem::TurnContext(_) | RolloutItem::SessionMeta(_) => {}
         }
+        self.trim_finished_turns();
     }
 
     fn handle_response_item(&mut self, item: &praxis_protocol::models::ResponseItem) {
@@ -981,14 +1010,21 @@ impl ThreadHistoryBuilder {
     fn handle_thread_rollback(&mut self, payload: &ThreadRolledBackEvent) {
         self.finish_current_turn();
 
-        let n = usize::try_from(payload.num_turns).unwrap_or(usize::MAX);
-        if n >= self.turns.len() {
-            self.turns.clear();
-        } else {
-            self.turns.truncate(self.turns.len().saturating_sub(n));
+        let mut remaining = usize::try_from(payload.num_turns).unwrap_or(usize::MAX);
+        while remaining > 0 {
+            if self.turns.pop().is_some() {
+                remaining = remaining.saturating_sub(1);
+                continue;
+            }
+            if self.dropped_turns.pop_back().is_some() {
+                remaining = remaining.saturating_sub(1);
+                continue;
+            }
+            break;
         }
+        self.refill_finished_turn_window();
 
-        let item_count: usize = self.turns.iter().map(|t| t.items.len()).sum();
+        let item_count = self.effective_finished_item_count();
         self.next_item_index = i64::try_from(item_count.saturating_add(1)).unwrap_or(i64::MAX);
     }
 
@@ -999,6 +1035,35 @@ impl ThreadHistoryBuilder {
             }
             self.turns.push(turn.into());
         }
+    }
+
+    fn trim_finished_turns(&mut self) {
+        let Some(max_finished_turns) = self.max_finished_turns else {
+            return;
+        };
+        while self.turns.len() > max_finished_turns {
+            let turn = self.turns.remove(0);
+            self.dropped_turns.push_back(turn);
+        }
+    }
+
+    fn refill_finished_turn_window(&mut self) {
+        let Some(max_finished_turns) = self.max_finished_turns else {
+            return;
+        };
+        while self.turns.len() < max_finished_turns {
+            let Some(turn) = self.dropped_turns.pop_back() else {
+                break;
+            };
+            self.turns.insert(0, turn);
+        }
+    }
+
+    fn effective_finished_item_count(&self) -> usize {
+        let dropped_item_count: usize =
+            self.dropped_turns.iter().map(|turn| turn.items.len()).sum();
+        let retained_item_count: usize = self.turns.iter().map(|turn| turn.items.len()).sum();
+        dropped_item_count.saturating_add(retained_item_count)
     }
 
     fn new_turn(&mut self, id: Option<String>) -> PendingTurn {
