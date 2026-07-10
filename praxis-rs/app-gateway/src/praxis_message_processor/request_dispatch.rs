@@ -223,6 +223,10 @@ impl PraxisMessageProcessor {
                 self.plugin_sync(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::PluginCommandExecute { request_id, params } => {
+                self.plugin_command_execute(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::AppsList { request_id, params } => {
                 self.apps_list(to_connection_request_id(request_id), params)
                     .await;

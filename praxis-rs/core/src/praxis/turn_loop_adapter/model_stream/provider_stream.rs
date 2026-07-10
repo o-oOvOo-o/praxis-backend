@@ -11,6 +11,7 @@ use super::PraxisModelStreamInput;
 use super::provider_projection;
 use super::provider_projection::ProviderStreamStep;
 use super::stream_run_state::ProviderStreamRunState;
+use crate::tools::code_mode::CodeModeTurnWorker;
 
 mod driver;
 mod opening;
@@ -24,7 +25,7 @@ pub(super) fn open_event_stream(
     prompt: Prompt,
     turn_metadata_header: Option<String>,
     cancellation_token: CancellationToken,
-    code_mode_worker: Option<praxis_code_mode::CodeModeTurnWorker>,
+    code_mode_worker: Option<CodeModeTurnWorker>,
 ) -> ModelEventStream {
     let stream = try_stream! {
         let input = input;

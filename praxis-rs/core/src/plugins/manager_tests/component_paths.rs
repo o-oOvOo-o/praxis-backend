@@ -261,6 +261,7 @@ fn load_plugins_preserves_disabled_plugins_without_effective_contributions() {
             has_enabled_skills: false,
             mcp_servers: HashMap::new(),
             apps: Vec::new(),
+            commands: Vec::new(),
             llm: None,
             error: None,
         }]

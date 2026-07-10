@@ -362,6 +362,12 @@ impl App {
                     }
                 }
             }
+            AppEvent::FetchPluginCommand { command } => {
+                self.fetch_plugin_command(app_gateway, command);
+            }
+            AppEvent::PluginCommandLoaded { command, result } => {
+                self.chat_widget.on_plugin_command_loaded(command, result);
+            }
             AppEvent::FetchMcpInventory => {
                 self.fetch_mcp_inventory(app_gateway);
             }

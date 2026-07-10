@@ -780,6 +780,7 @@ pub(super) fn plugins_test_interface(
         composer_icon: None,
         logo: None,
         screenshots: Vec::new(),
+        commands: Vec::new(),
     }
 }
 

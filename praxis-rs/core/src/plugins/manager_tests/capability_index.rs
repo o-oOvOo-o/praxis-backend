@@ -33,6 +33,7 @@ fn capability_index_filters_inactive_and_zero_capability_plugins() {
         has_enabled_skills: false,
         mcp_servers: HashMap::new(),
         apps: Vec::new(),
+        commands: Vec::new(),
         llm: None,
         error: None,
     };

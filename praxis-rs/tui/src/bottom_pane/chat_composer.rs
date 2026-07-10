@@ -146,6 +146,8 @@ use super::chat_composer_history::HistoryEntry;
 use super::command_popup::CommandItem;
 use super::command_popup::CommandPopup;
 use super::command_popup::CommandPopupFlags;
+use super::command_popup::PluginCommandInvocation;
+use super::command_popup::PluginCommandItem;
 use super::file_search_popup::FileSearchPopup;
 use super::footer::CollaborationModeIndicator;
 use super::footer::FooterMode;
@@ -236,6 +238,7 @@ pub enum InputResult {
     },
     Command(SlashCommand),
     CommandWithArgs(SlashCommand, String, Vec<TextElement>),
+    PluginCommand(PluginCommandInvocation),
     ThreadCommand(ExternalThreadCommandIntent),
     None,
 }

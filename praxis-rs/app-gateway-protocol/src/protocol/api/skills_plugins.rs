@@ -78,6 +78,27 @@ pub struct PluginSyncResponse {
     pub error: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCommandExecuteParams {
+    pub plugin_id: String,
+    pub command_name: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCommandExecuteResponse {
+    pub plugin_id: String,
+    pub command_name: String,
+    pub title: Option<String>,
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginActivationDelta {
@@ -319,6 +340,15 @@ pub struct PluginInterface {
     pub composer_icon: Option<AbsolutePathBuf>,
     pub logo: Option<AbsolutePathBuf>,
     pub screenshots: Vec<AbsolutePathBuf>,
+    #[serde(default)]
+    pub commands: Vec<PluginCommandSummary>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCommandSummary {
+    pub name: String,
+    pub description: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

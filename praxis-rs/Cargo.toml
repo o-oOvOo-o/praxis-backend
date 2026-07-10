@@ -170,7 +170,7 @@ praxis-skills = { path = "skills" }
 praxis-state = { path = "state" }
 praxis-stdio-to-uds = { path = "stdio-to-uds" }
 praxis-terminal-detection = { path = "terminal-detection" }
-praxis-tools = { path = "tools" }
+praxis-tools = { path = "tools", default-features = false }
 praxis-tui = { path = "tui" }
 praxis-utils-absolute-path = { path = "utils/absolute-path" }
 praxis-utils-approval-presets = { path = "utils/approval-presets" }
@@ -202,7 +202,7 @@ mcp_test_support = { path = "mcp-server/tests/common" }
 
 # External
 age = "0.11.1"
-allocative = "0.3.3"
+allocative = "=0.3.4"
 ansi-to-tui = "8.0.1"
 anyhow = "1"
 arboard = { version = "3", features = ["wayland-data-control"] }

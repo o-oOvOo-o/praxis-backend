@@ -234,6 +234,7 @@ pub(super) fn load_plugin(
         mcp_servers: HashMap::new(),
         apps: Vec::new(),
         llm: None,
+        commands: Vec::new(),
         error: None,
     };
 
@@ -276,6 +277,20 @@ pub(super) fn load_plugin(
         .or_else(|| Some(manifest.name.clone()));
     loaded_plugin.manifest_description = manifest.description.clone();
     loaded_plugin.llm = manifest.llm.clone();
+    loaded_plugin.commands = manifest
+        .interface
+        .as_ref()
+        .map(|interface| {
+            interface
+                .commands
+                .iter()
+                .map(|command| praxis_plugin::PluginCommandSummary {
+                    name: command.name.clone(),
+                    description: command.description.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     loaded_plugin.skill_roots = plugin_skill_roots(plugin_root.as_path(), manifest_paths);
     let resolved_skills = load_plugin_skills(
         plugin_root.as_path(),
@@ -499,6 +514,20 @@ pub fn plugin_telemetry_metadata_from_root(
             has_llm: manifest.llm.is_some(),
             mcp_server_names,
             app_connector_ids: load_plugin_apps(plugin_root),
+            commands: manifest
+                .interface
+                .as_ref()
+                .map(|interface| {
+                    interface
+                        .commands
+                        .iter()
+                        .map(|command| praxis_plugin::PluginCommandSummary {
+                            name: command.name.clone(),
+                            description: command.description.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }),
     }
 }

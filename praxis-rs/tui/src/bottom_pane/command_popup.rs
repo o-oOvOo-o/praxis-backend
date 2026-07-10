@@ -17,14 +17,32 @@ use crate::slash_command::SlashCommand;
 const ALIAS_COMMANDS: &[SlashCommand] = &[SlashCommand::Quit, SlashCommand::Approvals];
 
 /// A selectable item in the popup.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CommandItem {
     Builtin(SlashCommand),
+    Plugin(PluginCommandItem),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PluginCommandItem {
+    pub(crate) plugin_id: String,
+    pub(crate) plugin_display_name: String,
+    pub(crate) name: String,
+    pub(crate) description: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PluginCommandInvocation {
+    pub(crate) plugin_id: String,
+    pub(crate) plugin_display_name: String,
+    pub(crate) name: String,
+    pub(crate) args: String,
 }
 
 pub(crate) struct CommandPopup {
     command_filter: String,
     builtins: Vec<(&'static str, SlashCommand)>,
+    plugins: Vec<PluginCommandItem>,
     state: ScrollState,
 }
 
@@ -57,6 +75,13 @@ impl From<CommandPopupFlags> for slash_commands::BuiltinCommandFlags {
 
 impl CommandPopup {
     pub(crate) fn new(flags: CommandPopupFlags) -> Self {
+        Self::with_plugin_commands(flags, Vec::new())
+    }
+
+    pub(crate) fn with_plugin_commands(
+        flags: CommandPopupFlags,
+        plugins: Vec<PluginCommandItem>,
+    ) -> Self {
         // Keep built-in availability in sync with the composer.
         let builtins: Vec<(&'static str, SlashCommand)> =
             slash_commands::builtins_for_input(flags.into())
@@ -67,6 +92,7 @@ impl CommandPopup {
         Self {
             command_filter: String::new(),
             builtins,
+            plugins,
             state: ScrollState::new(),
         }
     }
@@ -124,6 +150,9 @@ impl CommandPopup {
                 }
                 out.push((CommandItem::Builtin(*cmd), None));
             }
+            for plugin in &self.plugins {
+                out.push((CommandItem::Plugin(plugin.clone()), None));
+            }
             return out;
         }
 
@@ -157,6 +186,14 @@ impl CommandPopup {
         for (_, cmd) in self.builtins.iter() {
             push_match(CommandItem::Builtin(*cmd), cmd.command(), None, 0);
         }
+        for plugin in &self.plugins {
+            push_match(
+                CommandItem::Plugin(plugin.clone()),
+                plugin.name.as_str(),
+                None,
+                0,
+            );
+        }
 
         out.extend(exact);
         out.extend(prefix);
@@ -174,16 +211,27 @@ impl CommandPopup {
         matches
             .into_iter()
             .map(|(item, indices)| {
-                let CommandItem::Builtin(cmd) = item;
-                let name = format!("/{}", cmd.command());
-                let description = cmd.description().to_string();
+                let (name, description, category_tag) = match item {
+                    CommandItem::Builtin(cmd) => (
+                        format!("/{}", cmd.command()),
+                        Some(cmd.description().to_string()),
+                        None,
+                    ),
+                    CommandItem::Plugin(plugin) => (
+                        format!("/{}", plugin.name),
+                        plugin.description.or_else(|| {
+                            Some(format!("{} plugin command", plugin.plugin_display_name))
+                        }),
+                        Some("[Plugin]".to_string()),
+                    ),
+                };
                 GenericDisplayRow {
                     name,
                     name_prefix_spans: Vec::new(),
                     match_indices: indices.map(|v| v.into_iter().map(|i| i + 1).collect()),
                     display_shortcut: None,
-                    description: Some(description),
-                    category_tag: None,
+                    description,
+                    category_tag,
                     wrap_indent: None,
                     is_disabled: false,
                     disabled_reason: None,
@@ -212,7 +260,7 @@ impl CommandPopup {
         let matches = self.filtered_items();
         self.state
             .selected_idx
-            .and_then(|idx| matches.get(idx).copied())
+            .and_then(|idx| matches.get(idx).cloned())
     }
 }
 
@@ -249,6 +297,7 @@ mod tests {
         let matches = popup.filtered_items();
         let has_init = matches.iter().any(|item| match item {
             CommandItem::Builtin(cmd) => cmd.command() == "init",
+            CommandItem::Plugin(_) => false,
         });
         assert!(
             has_init,
@@ -266,6 +315,9 @@ mod tests {
         let selected = popup.selected_item();
         match selected {
             Some(CommandItem::Builtin(cmd)) => assert_eq!(cmd.command(), "init"),
+            Some(CommandItem::Plugin(command)) => {
+                panic!("expected built-in init command, got plugin command {command:?}")
+            }
             None => panic!("expected a selected command for exact match"),
         }
     }
@@ -277,7 +329,7 @@ mod tests {
         let matches = popup.filtered_items();
         match matches.first() {
             Some(CommandItem::Builtin(cmd)) => assert_eq!(cmd.command(), "model"),
-            None => panic!("expected at least one match for '/mo'"),
+            other => panic!("expected built-in model match for '/mo', got {other:?}"),
         }
     }
 
@@ -291,6 +343,7 @@ mod tests {
             .into_iter()
             .map(|item| match item {
                 CommandItem::Builtin(cmd) => cmd.command(),
+                CommandItem::Plugin(_) => "",
             })
             .collect();
         assert_eq!(cmds, vec!["model", "mention", "mcp"]);
@@ -306,6 +359,7 @@ mod tests {
             .into_iter()
             .map(|item| match item {
                 CommandItem::Builtin(cmd) => cmd.command(),
+                CommandItem::Plugin(_) => "",
             })
             .collect();
         assert!(
@@ -336,6 +390,7 @@ mod tests {
             .into_iter()
             .map(|item| match item {
                 CommandItem::Builtin(cmd) => cmd.command(),
+                CommandItem::Plugin(_) => "",
             })
             .collect();
         assert!(
@@ -407,6 +462,7 @@ mod tests {
             .into_iter()
             .map(|item| match item {
                 CommandItem::Builtin(cmd) => cmd.command(),
+                CommandItem::Plugin(_) => "",
             })
             .collect();
         assert!(
@@ -454,6 +510,7 @@ mod tests {
             .into_iter()
             .map(|item| match item {
                 CommandItem::Builtin(cmd) => cmd.command(),
+                CommandItem::Plugin(_) => "",
             })
             .collect();
 
@@ -471,6 +528,7 @@ mod tests {
             .into_iter()
             .map(|item| match item {
                 CommandItem::Builtin(cmd) => cmd.command(),
+                CommandItem::Plugin(_) => "",
             })
             .collect();
 

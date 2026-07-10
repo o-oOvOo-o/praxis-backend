@@ -97,6 +97,13 @@ impl ChatWidget {
         self.bottom_pane.pending_thread_approvals()
     }
 
+    pub(crate) fn handle_bottom_pane_mouse_event(
+        &mut self,
+        mouse_event: &crossterm::event::MouseEvent,
+    ) -> bool {
+        self.bottom_pane.handle_mouse_event(mouse_event)
+    }
+
     #[cfg(test)]
     pub(crate) fn has_active_view(&self) -> bool {
         self.bottom_pane.has_active_view()

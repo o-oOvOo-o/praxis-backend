@@ -1,7 +1,81 @@
 use super::*;
+use crate::bottom_pane::PluginCommandInvocation;
+use crate::bottom_pane::PluginStatusDocument;
+use praxis_app_gateway_protocol::PluginCommandExecuteResponse;
 use praxis_app_gateway_protocol::ThreadGoalStatus as AppGatewayThreadGoalStatus;
 
 impl ChatWidget {
+    pub(super) fn dispatch_plugin_command(&mut self, command: PluginCommandInvocation) {
+        let title = format!("/{}", command.name);
+        self.bottom_pane
+            .show_plugin_status_view(PluginStatusDocument::loading(
+                title,
+                format!("Loading {}", command.plugin_display_name),
+            ));
+        self.app_event_tx
+            .send(AppEvent::FetchPluginCommand { command });
+        self.request_redraw();
+    }
+
+    fn plugin_command_invocation(
+        &self,
+        name: &str,
+        args: String,
+    ) -> Option<PluginCommandInvocation> {
+        self.bottom_pane.plugins()?.iter().find_map(|plugin| {
+            plugin
+                .commands
+                .iter()
+                .find(|command| command.name == name)
+                .map(|command| PluginCommandInvocation {
+                    plugin_id: plugin.config_name.clone(),
+                    plugin_display_name: plugin.display_name.clone(),
+                    name: command.name.clone(),
+                    args: args.clone(),
+                })
+        })
+    }
+
+    pub(crate) fn on_plugin_command_loaded(
+        &mut self,
+        command: PluginCommandInvocation,
+        result: Result<PluginCommandExecuteResponse, String>,
+    ) {
+        let title = format!("/{}", command.name);
+        let document = match result {
+            Ok(response) => {
+                if response.exit_code.is_some_and(|code| code != 0) {
+                    let message = if response.stderr.is_empty() {
+                        format!("Command exited with code {:?}", response.exit_code)
+                    } else {
+                        response.stderr
+                    };
+                    PluginStatusDocument::error(title, message)
+                } else {
+                    serde_json::from_str::<PluginStatusDocument>(&response.stdout).unwrap_or_else(
+                        |err| {
+                            let mut message =
+                                format!("Plugin output was not a status panel: {err}");
+                            if !response.stderr.is_empty() {
+                                message.push_str(" | stderr: ");
+                                message.push_str(&response.stderr);
+                            }
+                            PluginStatusDocument::error(title, message)
+                        },
+                    )
+                }
+            }
+            Err(err) => PluginStatusDocument::error(title, err),
+        };
+        if !self
+            .bottom_pane
+            .replace_plugin_status_view_if_active(document.clone())
+        {
+            self.bottom_pane.show_plugin_status_view(document);
+        }
+        self.request_redraw();
+    }
+
     pub(super) fn dispatch_command(&mut self, cmd: SlashCommand) {
         if !cmd.available_during_task() && self.bottom_pane.is_task_running() {
             let message = format!(
@@ -727,6 +801,10 @@ impl ChatWidget {
             return true;
         }
         let Ok(cmd) = SlashCommand::from_str(name) else {
+            if let Some(command) = self.plugin_command_invocation(name, rest.trim().to_string()) {
+                self.dispatch_plugin_command(command);
+                return true;
+            }
             return false;
         };
         if cmd == SlashCommand::Goal {

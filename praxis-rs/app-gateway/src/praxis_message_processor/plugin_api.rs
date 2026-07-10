@@ -1,11 +1,16 @@
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::time::Duration;
 
 use praxis_app_gateway_protocol::MarketplaceInterface;
 use praxis_app_gateway_protocol::MarketplaceLoadErrorInfo;
 use praxis_app_gateway_protocol::PluginActivationDelta as ApiPluginActivationDelta;
 use praxis_app_gateway_protocol::PluginAuthPolicy;
+use praxis_app_gateway_protocol::PluginCommandExecuteParams;
+use praxis_app_gateway_protocol::PluginCommandExecuteResponse;
+use praxis_app_gateway_protocol::PluginCommandSummary;
 use praxis_app_gateway_protocol::PluginDetail;
 use praxis_app_gateway_protocol::PluginDiagnostic;
 use praxis_app_gateway_protocol::PluginDiagnosticSeverity;
@@ -37,17 +42,24 @@ use praxis_core::plugins::MarketplacePluginSource;
 use praxis_core::plugins::OPENAI_CURATED_MARKETPLACE_NAME;
 use praxis_core::plugins::PluginActivationDelta as CorePluginActivationDelta;
 use praxis_core::plugins::PluginDiagnosticSeverity as CorePluginDiagnosticSeverity;
+use praxis_core::plugins::PluginId;
 use praxis_core::plugins::PluginInstallError as CorePluginInstallError;
 use praxis_core::plugins::PluginInstallRequest;
+use praxis_core::plugins::PluginManifestCommandAction;
 use praxis_core::plugins::PluginReadRequest;
 use praxis_core::plugins::PluginSetEnabledError as CorePluginSetEnabledError;
 use praxis_core::plugins::PluginUninstallError as CorePluginUninstallError;
+use praxis_core::plugins::load_plugin_manifest;
+use tokio::process::Command as TokioCommand;
+use tokio::time::timeout;
 use tracing::info;
 use tracing::warn;
 
 use super::PraxisMessageProcessor;
 use super::plugin_app_helpers;
 use crate::outgoing_message::ConnectionRequestId;
+
+const DEFAULT_PLUGIN_COMMAND_TIMEOUT_MS: u64 = 15_000;
 
 impl PraxisMessageProcessor {
     pub(super) async fn plugin_list(
@@ -377,6 +389,113 @@ impl PraxisMessageProcessor {
                         },
                     )
                     .await;
+            }
+        }
+    }
+
+    pub(super) async fn plugin_command_execute(
+        &self,
+        request_id: ConnectionRequestId,
+        params: PluginCommandExecuteParams,
+    ) {
+        let config = match self.load_latest_config(/*fallback_cwd*/ None).await {
+            Ok(config) => config,
+            Err(err) => {
+                self.outgoing.send_error(request_id, err).await;
+                return;
+            }
+        };
+        let plugins_manager = self.thread_manager.plugins_manager();
+        let outcome = plugins_manager.plugins_for_config(&config);
+        let Some(plugin) = outcome
+            .plugins()
+            .iter()
+            .find(|plugin| plugin.config_name == params.plugin_id && plugin.is_active())
+        else {
+            self.send_invalid_request_error(
+                request_id,
+                format!(
+                    "plugin `{}` is not installed and enabled for command execution",
+                    params.plugin_id
+                ),
+            )
+            .await;
+            return;
+        };
+
+        let Some(plugin_id) = PluginId::parse(&params.plugin_id).ok() else {
+            self.send_invalid_request_error(
+                request_id,
+                format!("invalid plugin id `{}`", params.plugin_id),
+            )
+            .await;
+            return;
+        };
+        let Some(manifest) = load_plugin_manifest(plugin.root.as_path()) else {
+            self.send_invalid_request_error(
+                request_id,
+                format!("plugin `{}` has no readable manifest", params.plugin_id),
+            )
+            .await;
+            return;
+        };
+        let command = manifest
+            .interface
+            .as_ref()
+            .and_then(|interface| {
+                interface
+                    .commands
+                    .iter()
+                    .find(|command| command.name == params.command_name)
+            })
+            .cloned();
+        let Some(command) = command else {
+            self.send_invalid_request_error(
+                request_id,
+                format!(
+                    "plugin `{}` does not declare command `{}`",
+                    params.plugin_id, params.command_name
+                ),
+            )
+            .await;
+            return;
+        };
+
+        let response = match command.action {
+            PluginManifestCommandAction::Process {
+                command,
+                mut args,
+                cwd,
+                timeout_ms,
+            } => {
+                args.extend(params.args.clone());
+                run_plugin_process_command(
+                    plugin.root.as_path(),
+                    &params.plugin_id,
+                    &params.command_name,
+                    &command,
+                    &args,
+                    cwd.as_ref().map(|path| path.as_path()),
+                    timeout_ms,
+                )
+                .await
+            }
+        };
+
+        match response {
+            Ok(response) => {
+                self.outgoing.send_response(request_id, response).await;
+            }
+            Err(err) => {
+                self.send_internal_error(
+                    request_id,
+                    format!(
+                        "failed to execute plugin command `{}` from `{}`: {err}",
+                        params.command_name,
+                        plugin_id.as_key()
+                    ),
+                )
+                .await;
             }
         }
     }
@@ -768,6 +887,46 @@ fn plugin_activation_delta_to_api(
     }
 }
 
+async fn run_plugin_process_command(
+    plugin_root: &Path,
+    plugin_id: &str,
+    command_name: &str,
+    program: &str,
+    args: &[String],
+    cwd: Option<&Path>,
+    timeout_ms: Option<u64>,
+) -> Result<PluginCommandExecuteResponse, String> {
+    let cwd = cwd.unwrap_or(plugin_root);
+    let mut command = TokioCommand::new(program);
+    command
+        .args(args)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_PLUGIN_COMMAND_TIMEOUT_MS);
+    let output = timeout(Duration::from_millis(timeout_ms), command.output())
+        .await
+        .map_err(|_| format!("command timed out after {timeout_ms}ms"))?
+        .map_err(|err| format!("failed to spawn process `{program}`: {err}"))?;
+
+    Ok(PluginCommandExecuteResponse {
+        plugin_id: plugin_id.to_string(),
+        command_name: command_name.to_string(),
+        title: Some(format!("/{command_name}")),
+        stdout: String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr)
+            .trim_end()
+            .to_string(),
+        exit_code: output.status.code(),
+        timed_out: false,
+    })
+}
+
 fn plugin_skills_to_info(
     skills: &[praxis_core::skills::SkillMetadata],
     disabled_skill_paths: &std::collections::HashSet<PathBuf>,
@@ -810,6 +969,14 @@ fn plugin_interface_to_info(
         composer_icon: interface.composer_icon,
         logo: interface.logo,
         screenshots: interface.screenshots,
+        commands: interface
+            .commands
+            .into_iter()
+            .map(|command| PluginCommandSummary {
+                name: command.name,
+                description: command.description,
+            })
+            .collect(),
     }
 }
 

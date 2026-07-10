@@ -592,6 +592,10 @@ client_request_definitions! {
         params: api::PluginSyncParams,
         response: api::PluginSyncResponse,
     },
+    PluginCommandExecute => "pluginCommand/execute" {
+        params: api::PluginCommandExecuteParams,
+        response: api::PluginCommandExecuteResponse,
+    },
     AppsList => "app/list" {
         params: api::AppsListParams,
         response: api::AppsListResponse,

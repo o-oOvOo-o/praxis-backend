@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 
 use praxis_app_gateway_protocol::McpServerStatus;
+use praxis_app_gateway_protocol::PluginCommandExecuteResponse;
 use praxis_app_gateway_protocol::PluginInstallResponse;
 use praxis_app_gateway_protocol::PluginListResponse;
 use praxis_app_gateway_protocol::PluginReadParams;
@@ -31,6 +32,7 @@ use praxis_utils_approval_presets::ApprovalPreset;
 
 use crate::SessionLookupSource;
 use crate::bottom_pane::ApprovalRequest;
+use crate::bottom_pane::PluginCommandInvocation;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
 use crate::history_cell::HistoryCell;
@@ -327,6 +329,17 @@ pub(crate) enum AppEvent {
         plugin_id: String,
         plugin_display_name: String,
         result: Result<PluginUninstallResponse, String>,
+    },
+
+    /// Execute a plugin-provided slash command through App Gateway.
+    FetchPluginCommand {
+        command: PluginCommandInvocation,
+    },
+
+    /// Result of executing a plugin-provided slash command.
+    PluginCommandLoaded {
+        command: PluginCommandInvocation,
+        result: Result<PluginCommandExecuteResponse, String>,
     },
 
     /// Advance the post-install plugin app-auth flow.

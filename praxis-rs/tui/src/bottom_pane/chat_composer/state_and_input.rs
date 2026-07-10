@@ -128,6 +128,29 @@ impl ChatComposer {
         self.sync_popups();
     }
 
+    pub(super) fn plugin_command_items(&self) -> Vec<PluginCommandItem> {
+        let Some(plugins) = self.plugins.as_ref() else {
+            return Vec::new();
+        };
+        plugins
+            .iter()
+            .flat_map(|plugin| {
+                plugin.commands.iter().map(|command| PluginCommandItem {
+                    plugin_id: plugin.config_name.clone(),
+                    plugin_display_name: plugin.display_name.clone(),
+                    name: command.name.clone(),
+                    description: command.description.clone(),
+                })
+            })
+            .collect()
+    }
+
+    pub(super) fn find_plugin_command(&self, name: &str) -> Option<PluginCommandItem> {
+        self.plugin_command_items()
+            .into_iter()
+            .find(|command| command.name == name)
+    }
+
     pub fn set_plugins_command_enabled(&mut self, enabled: bool) {
         self.plugins_command_enabled = enabled;
     }

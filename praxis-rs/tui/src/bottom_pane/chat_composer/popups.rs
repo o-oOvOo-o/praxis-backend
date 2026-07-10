@@ -66,18 +66,22 @@ impl ChatComposer {
                 let first_line = self.textarea.text().lines().next().unwrap_or("");
                 popup.on_composer_text_change(first_line.to_string());
                 if let Some(sel) = popup.selected_item() {
-                    let CommandItem::Builtin(cmd) = sel;
-                    if cmd == SlashCommand::Skills {
-                        self.textarea.set_text_clearing_elements("");
-                        return (InputResult::Command(cmd), true);
-                    }
-
+                    let command_name = match sel {
+                        CommandItem::Builtin(cmd) => {
+                            if cmd == SlashCommand::Skills {
+                                self.textarea.set_text_clearing_elements("");
+                                return (InputResult::Command(cmd), true);
+                            }
+                            cmd.command().to_string()
+                        }
+                        CommandItem::Plugin(command) => command.name,
+                    };
                     let starts_with_cmd = first_line
                         .trim_start()
-                        .starts_with(&format!("/{}", cmd.command()));
+                        .starts_with(&format!("/{command_name}"));
                     if !starts_with_cmd {
                         self.textarea
-                            .set_text_clearing_elements(&format!("/{} ", cmd.command()));
+                            .set_text_clearing_elements(&format!("/{command_name} "));
                     }
                     if !self.textarea.text().is_empty() {
                         self.textarea.set_cursor(self.textarea.text().len());
@@ -91,9 +95,19 @@ impl ChatComposer {
                 ..
             } => {
                 if let Some(sel) = popup.selected_item() {
-                    let CommandItem::Builtin(cmd) = sel;
                     self.textarea.set_text_clearing_elements("");
-                    return (InputResult::Command(cmd), true);
+                    return match sel {
+                        CommandItem::Builtin(cmd) => (InputResult::Command(cmd), true),
+                        CommandItem::Plugin(command) => (
+                            InputResult::PluginCommand(PluginCommandInvocation {
+                                plugin_id: command.plugin_id,
+                                plugin_display_name: command.plugin_display_name,
+                                name: command.name,
+                                args: String::new(),
+                            }),
+                            true,
+                        ),
+                    };
                 }
                 // Fallback to default newline handling if no command selected.
                 self.handle_key_event_without_popup(key_event)

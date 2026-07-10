@@ -16,6 +16,10 @@ path = "src/bin/config_schema.rs"
 [lints]
 workspace = true
 
+[features]
+default = []
+code_mode = ["dep:praxis-code-mode", "praxis-tools/code_mode"]
+
 [dependencies]
 anyhow = { workspace = true }
 arc-swap = { workspace = true }
@@ -32,7 +36,7 @@ praxis-analytics = { workspace = true }
 praxis-api = { workspace = true }
 praxis-apply-patch = { workspace = true }
 praxis-async-utils = { workspace = true }
-praxis-code-mode = { workspace = true }
+praxis-code-mode = { workspace = true, optional = true }
 praxis-connectors = { workspace = true }
 praxis-config = { workspace = true }
 praxis-core-skills = { workspace = true }
@@ -56,7 +60,7 @@ praxis-rollout = { workspace = true }
 praxis-rmcp-client = { workspace = true }
 praxis-sandboxing = { workspace = true }
 praxis-state = { workspace = true }
-praxis-tools = { workspace = true }
+praxis-tools = { workspace = true, default-features = false }
 praxis-utils-absolute-path = { workspace = true }
 praxis-utils-cache = { workspace = true }
 praxis-utils-image = { workspace = true }

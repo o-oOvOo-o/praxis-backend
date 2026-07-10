@@ -383,12 +383,20 @@ impl App {
                 Ok(None)
             }
             MouseEventKind::ScrollUp => {
+                if self.handle_bottom_pane_mouse_scroll(&mouse_event) {
+                    tui.frame_requester().schedule_frame();
+                    return Ok(None);
+                }
                 if self.handle_workspace_mouse_scroll(mouse_event.column, mouse_event.row, -3) {
                     tui.frame_requester().schedule_scroll_frame();
                 }
                 Ok(None)
             }
             MouseEventKind::ScrollDown => {
+                if self.handle_bottom_pane_mouse_scroll(&mouse_event) {
+                    tui.frame_requester().schedule_frame();
+                    return Ok(None);
+                }
                 if self.handle_workspace_mouse_scroll(mouse_event.column, mouse_event.row, 3) {
                     tui.frame_requester().schedule_scroll_frame();
                 }
@@ -417,6 +425,28 @@ impl App {
         }
         tui.frame_requester()
             .schedule_frame_in(TERMINAL_ZOOM_MOUSE_RELEASE);
+        true
+    }
+
+    fn handle_bottom_pane_mouse_scroll(&mut self, mouse_event: &MouseEvent) -> bool {
+        if !matches!(
+            mouse_event.kind,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+        ) {
+            return false;
+        }
+        if !self
+            .workspace
+            .chat_area
+            .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row))
+        {
+            return false;
+        }
+        if !self.chat_widget.handle_bottom_pane_mouse_event(mouse_event) {
+            return false;
+        }
+        self.clear_mouse_selection_for_pane(MousePane::Chat);
+        self.mouse.focused_pane = Some(MousePane::Chat);
         true
     }
 

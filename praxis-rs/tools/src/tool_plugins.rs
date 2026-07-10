@@ -1,3 +1,7 @@
+#[cfg(feature = "code_mode")]
+use crate::CODE_MODE_PUBLIC_TOOL_NAME;
+#[cfg(feature = "code_mode")]
+use crate::CODE_MODE_WAIT_TOOL_NAME;
 use crate::CommandToolOptions;
 use crate::ImageGenerationToolBackend;
 use crate::LIST_DIRECTORY_TOOL_NAME;
@@ -16,6 +20,7 @@ use crate::ToolWebSearchBackend;
 use crate::ToolsConfig;
 use crate::ViewImageToolOptions;
 use crate::WebSearchToolOptions;
+#[cfg(feature = "code_mode")]
 use crate::collect_code_mode_tool_definitions;
 use crate::collect_tool_search_app_infos;
 use crate::collect_tool_suggest_entries;
@@ -23,6 +28,7 @@ use crate::create_apply_patch_freeform_tool;
 use crate::create_apply_patch_json_tool;
 use crate::create_assign_task_tool;
 use crate::create_close_agent_tool;
+#[cfg(feature = "code_mode")]
 use crate::create_code_mode_tool;
 use crate::create_create_goal_tool;
 use crate::create_exec_command_tool;
@@ -54,6 +60,7 @@ use crate::create_update_runtime_command_tool;
 use crate::create_update_worker_request_tool;
 use crate::create_view_image_tool;
 use crate::create_wait_agent_tool;
+#[cfg(feature = "code_mode")]
 use crate::create_wait_tool;
 use crate::create_web_search_tool;
 use crate::create_write_stdin_tool;
@@ -62,6 +69,7 @@ use crate::mcp_tool_to_responses_api_tool;
 use crate::request_permissions_tool_description;
 use crate::request_user_input_tool_description;
 use crate::reverse_engineering_tool_specs;
+#[cfg(feature = "code_mode")]
 use crate::tool_registry_plan::build_tool_registry_plan;
 use crate::tool_registry_plan_types::agent_type_description;
 use praxis_protocol::openai_models::ApplyPatchToolType;
@@ -151,45 +159,51 @@ fn register_code_mode(
     config: &ToolsConfig,
     params: ToolRegistryPlanParams<'_>,
 ) {
-    if !config.code_mode_enabled {
+    #[cfg(not(feature = "code_mode"))]
+    {
+        let _ = (plan, params);
+        if config.code_mode_enabled {
+            tracing::warn!("Code Mode requested but this Praxis build lacks the code_mode feature");
+        }
         return;
     }
 
-    let nested_config = config.for_code_mode_nested_tools();
-    let nested_plan = build_tool_registry_plan(
-        &nested_config,
-        ToolRegistryPlanParams {
-            discoverable_tools: None,
-            ..params
-        },
-    );
-    let enabled_tools = collect_code_mode_tool_definitions(
-        nested_plan
-            .specs
-            .iter()
-            .map(|configured_tool| &configured_tool.spec),
-    )
-    .into_iter()
-    .map(|tool| (tool.name, tool.description))
-    .collect::<Vec<_>>();
-    plan.push_spec(
-        create_code_mode_tool(&enabled_tools, config.code_mode_only_enabled),
-        /*supports_parallel_tool_calls*/ false,
-        config.code_mode_enabled,
-    );
-    plan.register_handler(
-        praxis_code_mode::PUBLIC_TOOL_NAME,
-        ToolHandlerKind::CodeModeExecute,
-    );
-    plan.push_spec(
-        create_wait_tool(),
-        /*supports_parallel_tool_calls*/ false,
-        config.code_mode_enabled,
-    );
-    plan.register_handler(
-        praxis_code_mode::WAIT_TOOL_NAME,
-        ToolHandlerKind::CodeModeWait,
-    );
+    #[cfg(feature = "code_mode")]
+    {
+        if !config.code_mode_enabled {
+            return;
+        }
+
+        let nested_config = config.for_code_mode_nested_tools();
+        let nested_plan = build_tool_registry_plan(
+            &nested_config,
+            ToolRegistryPlanParams {
+                discoverable_tools: None,
+                ..params
+            },
+        );
+        let enabled_tools = collect_code_mode_tool_definitions(
+            nested_plan
+                .specs
+                .iter()
+                .map(|configured_tool| &configured_tool.spec),
+        )
+        .into_iter()
+        .map(|tool| (tool.name, tool.description))
+        .collect::<Vec<_>>();
+        plan.push_spec(
+            create_code_mode_tool(&enabled_tools, config.code_mode_only_enabled),
+            /*supports_parallel_tool_calls*/ false,
+            config.code_mode_enabled,
+        );
+        plan.register_handler(CODE_MODE_PUBLIC_TOOL_NAME, ToolHandlerKind::CodeModeExecute);
+        plan.push_spec(
+            create_wait_tool(),
+            /*supports_parallel_tool_calls*/ false,
+            config.code_mode_enabled,
+        );
+        plan.register_handler(CODE_MODE_WAIT_TOOL_NAME, ToolHandlerKind::CodeModeWait);
+    }
 }
 
 fn register_shell(plan: &mut ToolRegistryPlan, config: &ToolsConfig) {

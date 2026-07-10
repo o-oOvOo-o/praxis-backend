@@ -5,6 +5,7 @@ use praxis_protocol::models::ResponseItem;
 use tokio_util::sync::CancellationToken;
 
 use crate::client_common::Prompt;
+use crate::tools::code_mode::CodeModeTurnWorker;
 
 use super::super::PraxisModelStreamInput;
 use super::super::code_mode_worker;
@@ -13,7 +14,7 @@ use super::tools;
 
 pub(super) struct PreparedTooling {
     pub(super) prompt: Prompt,
-    pub(super) code_mode_worker: Option<praxis_code_mode::CodeModeTurnWorker>,
+    pub(super) code_mode_worker: Option<CodeModeTurnWorker>,
 }
 
 pub(super) async fn prepare_tooling(

@@ -1,13 +1,43 @@
+#[cfg(feature = "code_mode")]
 use crate::FreeformTool;
+#[cfg(feature = "code_mode")]
 use crate::FreeformToolFormat;
+#[cfg(feature = "code_mode")]
 use crate::JsonSchema;
+#[cfg(feature = "code_mode")]
 use crate::ResponsesApiTool;
 use crate::ToolSpec;
+#[cfg(feature = "code_mode")]
 use praxis_code_mode::CodeModeToolKind;
+#[cfg(feature = "code_mode")]
 use praxis_code_mode::ToolDefinition as CodeModeToolDefinition;
+#[cfg(not(feature = "code_mode"))]
+use serde_json::Value as JsonValue;
+#[cfg(feature = "code_mode")]
 use std::collections::BTreeMap;
 
+pub const PUBLIC_TOOL_NAME: &str = "exec";
+pub const WAIT_TOOL_NAME: &str = "wait";
+
+#[cfg(not(feature = "code_mode"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CodeModeToolKind {
+    Function,
+    Freeform,
+}
+
+#[cfg(not(feature = "code_mode"))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CodeModeToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub kind: CodeModeToolKind,
+    pub input_schema: Option<JsonValue>,
+    pub output_schema: Option<JsonValue>,
+}
+
 /// Augment tool descriptions with code-mode-specific exec samples.
+#[cfg(feature = "code_mode")]
 pub fn augment_tool_spec_for_code_mode(spec: ToolSpec) -> ToolSpec {
     let Some(description) = code_mode_tool_definition_for_spec(&spec)
         .map(praxis_code_mode::augment_tool_definition)
@@ -29,14 +59,26 @@ pub fn augment_tool_spec_for_code_mode(spec: ToolSpec) -> ToolSpec {
     }
 }
 
+#[cfg(not(feature = "code_mode"))]
+pub fn augment_tool_spec_for_code_mode(spec: ToolSpec) -> ToolSpec {
+    spec
+}
+
 /// Convert a supported nested tool spec into the code-mode runtime shape,
 /// including the code-mode-specific description sample.
+#[cfg(feature = "code_mode")]
 pub fn tool_spec_to_code_mode_tool_definition(spec: &ToolSpec) -> Option<CodeModeToolDefinition> {
     let definition = code_mode_tool_definition_for_spec(spec)?;
     praxis_code_mode::is_code_mode_nested_tool(&definition.name)
         .then(|| praxis_code_mode::augment_tool_definition(definition))
 }
 
+#[cfg(not(feature = "code_mode"))]
+pub fn tool_spec_to_code_mode_tool_definition(_spec: &ToolSpec) -> Option<CodeModeToolDefinition> {
+    None
+}
+
+#[cfg(feature = "code_mode")]
 pub fn collect_code_mode_tool_definitions<'a>(
     specs: impl IntoIterator<Item = &'a ToolSpec>,
 ) -> Vec<CodeModeToolDefinition> {
@@ -49,6 +91,14 @@ pub fn collect_code_mode_tool_definitions<'a>(
     tool_definitions
 }
 
+#[cfg(not(feature = "code_mode"))]
+pub fn collect_code_mode_tool_definitions<'a>(
+    _specs: impl IntoIterator<Item = &'a ToolSpec>,
+) -> Vec<CodeModeToolDefinition> {
+    Vec::new()
+}
+
+#[cfg(feature = "code_mode")]
 pub fn create_wait_tool() -> ToolSpec {
     let properties = BTreeMap::from([
         (
@@ -100,6 +150,12 @@ pub fn create_wait_tool() -> ToolSpec {
     })
 }
 
+#[cfg(not(feature = "code_mode"))]
+pub fn create_wait_tool() -> ToolSpec {
+    panic!("Code Mode wait tool is unavailable without the `code_mode` feature")
+}
+
+#[cfg(feature = "code_mode")]
 pub fn create_code_mode_tool(
     enabled_tools: &[(String, String)],
     code_mode_only_enabled: bool,
@@ -128,6 +184,25 @@ SOURCE: /[\s\S]+/
     })
 }
 
+#[cfg(not(feature = "code_mode"))]
+pub fn create_code_mode_tool(
+    _enabled_tools: &[(String, String)],
+    _code_mode_only_enabled: bool,
+) -> ToolSpec {
+    panic!("Code Mode exec tool is unavailable without the `code_mode` feature")
+}
+
+#[cfg(feature = "code_mode")]
+pub fn is_code_mode_nested_tool(tool_name: &str) -> bool {
+    praxis_code_mode::is_code_mode_nested_tool(tool_name)
+}
+
+#[cfg(not(feature = "code_mode"))]
+pub fn is_code_mode_nested_tool(tool_name: &str) -> bool {
+    tool_name != PUBLIC_TOOL_NAME && tool_name != WAIT_TOOL_NAME
+}
+
+#[cfg(feature = "code_mode")]
 fn code_mode_tool_definition_for_spec(spec: &ToolSpec) -> Option<CodeModeToolDefinition> {
     match spec {
         ToolSpec::Function(tool) => Some(CodeModeToolDefinition {
@@ -151,6 +226,6 @@ fn code_mode_tool_definition_for_spec(spec: &ToolSpec) -> Option<CodeModeToolDef
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "code_mode"))]
 #[path = "code_mode_tests.rs"]
 mod tests;

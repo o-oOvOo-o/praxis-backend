@@ -179,6 +179,7 @@ fn set_plugin_mentions_refreshes_open_mention_popup() {
         has_llm: false,
         mcp_server_names: vec!["sample".to_string()],
         app_connector_ids: Vec::new(),
+        commands: Vec::new(),
     }]));
 
     let ActivePopup::Skill(popup) = &composer.active_popup else {
@@ -234,6 +235,7 @@ fn mention_items_show_plugin_owned_skill_and_app_duplicates() {
         app_connector_ids: vec![praxis_core::plugins::AppConnectorId(
             "google_calendar".to_string(),
         )],
+        commands: Vec::new(),
     }]));
     composer.set_connector_mentions(Some(ConnectorsSnapshot {
         connectors: vec![AppInfo {
@@ -290,6 +292,7 @@ fn plugin_mention_popup_snapshot() {
                 app_connector_ids: vec![praxis_core::plugins::AppConnectorId(
                     "calendar".to_string(),
                 )],
+                commands: Vec::new(),
             }]));
         },
     );
@@ -332,6 +335,7 @@ fn mention_popup_type_prefixes_snapshot() {
                 has_llm: false,
                 mcp_server_names: vec!["google-calendar".to_string()],
                 app_connector_ids: Vec::new(),
+                commands: Vec::new(),
             }]));
             composer.set_connector_mentions(Some(ConnectorsSnapshot {
                 connectors: vec![AppInfo {

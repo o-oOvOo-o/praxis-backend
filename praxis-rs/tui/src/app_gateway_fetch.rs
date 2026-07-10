@@ -10,6 +10,8 @@ use praxis_app_gateway_protocol::GetAccountRateLimitsResponse;
 use praxis_app_gateway_protocol::ListMcpServerStatusParams;
 use praxis_app_gateway_protocol::ListMcpServerStatusResponse;
 use praxis_app_gateway_protocol::McpServerStatus;
+use praxis_app_gateway_protocol::PluginCommandExecuteParams;
+use praxis_app_gateway_protocol::PluginCommandExecuteResponse;
 use praxis_app_gateway_protocol::PluginInstallParams;
 use praxis_app_gateway_protocol::PluginInstallResponse;
 use praxis_app_gateway_protocol::PluginListParams;
@@ -24,6 +26,8 @@ use praxis_protocol::protocol::RateLimitSnapshot;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use std::path::PathBuf;
 use uuid::Uuid;
+
+use crate::bottom_pane::PluginCommandInvocation;
 
 pub(crate) async fn fetch_all_mcp_server_statuses(
     request_handle: AppGatewayRequestHandle,
@@ -132,6 +136,31 @@ pub(crate) async fn fetch_plugin_uninstall(
         })
         .await
         .wrap_err("plugin/uninstall failed in TUI")
+}
+
+pub(crate) async fn fetch_plugin_command_execute(
+    request_handle: AppGatewayRequestHandle,
+    command: &PluginCommandInvocation,
+) -> Result<PluginCommandExecuteResponse> {
+    let request_id = RequestId::String(format!("plugin-command-{}", Uuid::new_v4()));
+    let args = shlex::split(command.args.as_str()).unwrap_or_else(|| {
+        if command.args.trim().is_empty() {
+            Vec::new()
+        } else {
+            vec![command.args.trim().to_string()]
+        }
+    });
+    request_handle
+        .request_typed(ClientRequest::PluginCommandExecute {
+            request_id,
+            params: PluginCommandExecuteParams {
+                plugin_id: command.plugin_id.clone(),
+                command_name: command.name.clone(),
+                args,
+            },
+        })
+        .await
+        .wrap_err("pluginCommand/execute failed in TUI")
 }
 
 pub(crate) fn build_feedback_upload_params(

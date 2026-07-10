@@ -211,6 +211,9 @@ impl ChatWidget {
                 InputResult::CommandWithArgs(cmd, args, text_elements) => {
                     self.dispatch_command_with_args(cmd, args, text_elements);
                 }
+                InputResult::PluginCommand(command) => {
+                    self.dispatch_plugin_command(command);
+                }
                 InputResult::ThreadCommand(intent) => {
                     self.dispatch_external_thread_command(intent);
                 }

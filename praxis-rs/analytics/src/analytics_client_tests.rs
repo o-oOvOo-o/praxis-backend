@@ -636,6 +636,7 @@ fn sample_plugin_metadata() -> PluginTelemetryMetadata {
                 AppConnectorId("calendar".to_string()),
                 AppConnectorId("drive".to_string()),
             ],
+            commands: Vec::new(),
         }),
     }
 }

@@ -23,6 +23,7 @@ fn plugin(config_name: &str, display_name: &str) -> PluginCapabilitySummary {
         has_llm: false,
         mcp_server_names: Vec::new(),
         app_connector_ids: Vec::new(),
+        commands: Vec::new(),
     }
 }
 

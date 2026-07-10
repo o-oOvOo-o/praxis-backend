@@ -13,6 +13,7 @@ fn render_plugins_section_includes_descriptions_and_skill_naming_guidance() {
         display_name: "sample".to_string(),
         description: Some("inspect sample data".to_string()),
         has_skills: true,
+        commands: Vec::new(),
         ..PluginCapabilitySummary::default()
     }])
     .expect("plugin section should render");

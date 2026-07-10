@@ -1,0 +1,35 @@
+{
+  "name": "cunning3d-gaea-flywheel",
+  "description": "Show Cunning3D Gaea flywheel node progress inside Praxis.",
+  "interface": {
+    "displayName": "Cunning3D Gaea Flywheel",
+    "shortDescription": "Inspect Gaea flywheel node progress from the local ledger.",
+    "longDescription": "Cunning3D product plugin that renders Gaea flywheel node status, parity progress, blockers, and next commands in a Praxis chat TUI.",
+    "developerName": "Cunning3D",
+    "category": "dcc-tooling",
+    "capabilities": [
+      "Gaea flywheel progress",
+      "node parity status",
+      "acceptance matrix status",
+      "flywheel blocker triage"
+    ],
+    "commands": [
+      {
+        "name": "gaeawheel",
+        "description": "Open the Gaea flywheel node progress panel.",
+        "action": {
+          "type": "process",
+          "command": "powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "./scripts/gaeawheel-status.ps1"
+          ],
+          "timeoutMs": 60000
+        }
+      }
+    ]
+  }
+}

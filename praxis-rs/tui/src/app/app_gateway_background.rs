@@ -3,6 +3,7 @@ use super::app_gateway_fetch::build_feedback_upload_params;
 use super::app_gateway_fetch::fetch_account_rate_limits;
 use super::app_gateway_fetch::fetch_all_mcp_server_statuses;
 use super::app_gateway_fetch::fetch_feedback_upload;
+use super::app_gateway_fetch::fetch_plugin_command_execute;
 use super::app_gateway_fetch::fetch_plugin_detail;
 use super::app_gateway_fetch::fetch_plugin_install;
 use super::app_gateway_fetch::fetch_plugin_uninstall;
@@ -79,6 +80,21 @@ impl App {
                 .await
                 .map_err(|err| err.to_string());
             app_event_tx.send(AppEvent::PluginDetailLoaded { cwd, result });
+        });
+    }
+
+    pub(super) fn fetch_plugin_command(
+        &mut self,
+        app_gateway: &AppGatewaySession,
+        command: crate::bottom_pane::PluginCommandInvocation,
+    ) {
+        let request_handle = app_gateway.request_handle();
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = fetch_plugin_command_execute(request_handle, &command)
+                .await
+                .map_err(|err| err.to_string());
+            app_event_tx.send(AppEvent::PluginCommandLoaded { command, result });
         });
     }
 

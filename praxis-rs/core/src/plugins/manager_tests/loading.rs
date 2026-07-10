@@ -85,6 +85,7 @@ fn load_plugins_loads_default_skills_and_mcp_servers() {
                 },
             )]),
             apps: vec![AppConnectorId("connector_example".to_string())],
+            commands: Vec::new(),
             llm: None,
             error: None,
         }]
@@ -99,6 +100,7 @@ fn load_plugins_loads_default_skills_and_mcp_servers() {
             has_llm: false,
             mcp_server_names: vec!["sample".to_string()],
             app_connector_ids: vec![AppConnectorId("connector_example".to_string())],
+            commands: Vec::new(),
         }]
     );
     assert_eq!(
@@ -192,6 +194,7 @@ enabled = true
             has_llm: false,
             mcp_server_names: Vec::new(),
             app_connector_ids: Vec::new(),
+            commands: Vec::new(),
         }]
     );
 }
@@ -217,6 +220,7 @@ fn llm_only_plugin_contributes_effective_llm_manifest_without_prompt_capability_
         has_enabled_skills: false,
         mcp_servers: HashMap::new(),
         apps: Vec::new(),
+        commands: Vec::new(),
         llm: Some(llm.clone()),
         error: None,
     }]);
@@ -266,6 +270,7 @@ fn plugin_telemetry_metadata_uses_default_mcp_config_path() {
             has_llm: false,
             mcp_server_names: vec!["sample".to_string()],
             app_connector_ids: Vec::new(),
+            commands: Vec::new(),
         })
     );
 }

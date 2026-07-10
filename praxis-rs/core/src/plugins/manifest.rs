@@ -8,6 +8,7 @@ use std::path::Component;
 use std::path::Path;
 const MAX_DEFAULT_PROMPT_COUNT: usize = 3;
 const MAX_DEFAULT_PROMPT_LEN: usize = 128;
+const MAX_PLUGIN_COMMAND_TIMEOUT_MS: u64 = 120_000;
 
 pub use praxis_plugin::PluginLlmManifest as PluginManifestLlm;
 pub use praxis_plugin::PluginLlmModel as PluginManifestLlmModel;
@@ -39,12 +40,12 @@ struct RawPluginManifest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PluginManifest {
-    pub(crate) name: String,
-    pub(crate) description: Option<String>,
-    pub(crate) paths: PluginManifestPaths,
-    pub(crate) interface: Option<PluginManifestInterface>,
-    pub(crate) llm: Option<PluginManifestLlm>,
+pub struct PluginManifest {
+    pub name: String,
+    pub description: Option<String>,
+    pub paths: PluginManifestPaths,
+    pub interface: Option<PluginManifestInterface>,
+    pub llm: Option<PluginManifestLlm>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +71,24 @@ pub struct PluginManifestInterface {
     pub composer_icon: Option<AbsolutePathBuf>,
     pub logo: Option<AbsolutePathBuf>,
     pub screenshots: Vec<AbsolutePathBuf>,
+    pub commands: Vec<PluginManifestCommand>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginManifestCommand {
+    pub name: String,
+    pub description: Option<String>,
+    pub action: PluginManifestCommandAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginManifestCommandAction {
+    Process {
+        command: String,
+        args: Vec<String>,
+        cwd: Option<AbsolutePathBuf>,
+        timeout_ms: Option<u64>,
+    },
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -106,6 +125,33 @@ struct RawPluginManifestInterface {
     logo: Option<String>,
     #[serde(default)]
     screenshots: Vec<String>,
+    #[serde(default)]
+    commands: Vec<RawPluginManifestCommand>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPluginManifestCommand {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+    action: Option<RawPluginManifestCommandAction>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum RawPluginManifestCommandAction {
+    Process {
+        #[serde(default)]
+        command: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        cwd: Option<String>,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
+    },
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -211,7 +257,7 @@ enum RawPluginManifestDefaultPromptEntry {
     Invalid(JsonValue),
 }
 
-pub(crate) fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest> {
+pub fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest> {
     let manifest_path = plugin_root.join(PLUGIN_MANIFEST_PATH);
     if !manifest_path.is_file() {
         return None;
@@ -250,6 +296,7 @@ pub(crate) fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest>
                     composer_icon,
                     logo,
                     screenshots,
+                    commands,
                 } = interface;
 
                 let interface = PluginManifestInterface {
@@ -284,6 +331,7 @@ pub(crate) fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest>
                             )
                         })
                         .collect(),
+                    commands: resolve_plugin_commands(plugin_root, commands),
                 };
 
                 let has_fields = interface.display_name.is_some()
@@ -299,7 +347,8 @@ pub(crate) fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest>
                     || interface.brand_color.is_some()
                     || interface.composer_icon.is_some()
                     || interface.logo.is_some()
-                    || !interface.screenshots.is_empty();
+                    || !interface.screenshots.is_empty()
+                    || !interface.commands.is_empty();
 
                 has_fields.then_some(interface)
             });
@@ -335,6 +384,104 @@ fn resolve_interface_asset_path(
     path: Option<&str>,
 ) -> Option<AbsolutePathBuf> {
     resolve_manifest_path(plugin_root, field, path)
+}
+
+fn resolve_plugin_commands(
+    plugin_root: &Path,
+    commands: Vec<RawPluginManifestCommand>,
+) -> Vec<PluginManifestCommand> {
+    commands
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, command)| resolve_plugin_command(plugin_root, index, command))
+        .collect()
+}
+
+fn resolve_plugin_command(
+    plugin_root: &Path,
+    index: usize,
+    command: RawPluginManifestCommand,
+) -> Option<PluginManifestCommand> {
+    let field = format!("interface.commands[{index}]");
+    let Some(name) = normalize_manifest_string(&command.name) else {
+        warn_invalid_plugin_command(plugin_root, &field, "name must not be empty");
+        return None;
+    };
+    if !is_valid_plugin_command_name(&name) {
+        warn_invalid_plugin_command(
+            plugin_root,
+            &format!("{field}.name"),
+            "name must be lower-case ASCII letters, numbers, or '-'",
+        );
+        return None;
+    }
+
+    let Some(action) = command.action else {
+        warn_invalid_plugin_command(
+            plugin_root,
+            &format!("{field}.action"),
+            "action is required",
+        );
+        return None;
+    };
+    let action = resolve_plugin_command_action(plugin_root, &field, action)?;
+
+    Some(PluginManifestCommand {
+        name,
+        description: normalize_optional_manifest_string(command.description),
+        action,
+    })
+}
+
+fn resolve_plugin_command_action(
+    plugin_root: &Path,
+    field: &str,
+    action: RawPluginManifestCommandAction,
+) -> Option<PluginManifestCommandAction> {
+    match action {
+        RawPluginManifestCommandAction::Process {
+            command,
+            args,
+            cwd,
+            timeout_ms,
+        } => {
+            let Some(command) = normalize_manifest_string(&command) else {
+                warn_invalid_plugin_command(
+                    plugin_root,
+                    &format!("{field}.action.command"),
+                    "command must not be empty",
+                );
+                return None;
+            };
+            let cwd =
+                resolve_manifest_path(plugin_root, &format!("{field}.action.cwd"), cwd.as_deref());
+            let timeout_ms = timeout_ms
+                .filter(|timeout_ms| *timeout_ms > 0)
+                .map(|timeout_ms| timeout_ms.min(MAX_PLUGIN_COMMAND_TIMEOUT_MS));
+
+            Some(PluginManifestCommandAction::Process {
+                command,
+                args,
+                cwd,
+                timeout_ms,
+            })
+        }
+    }
+}
+
+fn is_valid_plugin_command_name(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn warn_invalid_plugin_command(plugin_root: &Path, field: &str, message: &str) {
+    let manifest_path = plugin_root.join(PLUGIN_MANIFEST_PATH);
+    tracing::warn!(
+        path = %manifest_path.display(),
+        "ignoring {field}: {message}"
+    );
 }
 
 fn resolve_default_prompts(

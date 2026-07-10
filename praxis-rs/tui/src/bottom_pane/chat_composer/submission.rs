@@ -43,10 +43,11 @@ impl ChatComposer {
         {
             let treat_as_plain_text = input_starts_with_space || name.contains('/');
             if !treat_as_plain_text {
-                let is_builtin = parse_external_thread_command(text.as_str()).is_some()
+                let is_known_command = parse_external_thread_command(text.as_str()).is_some()
                     || slash_commands::find_builtin_command(name, self.builtin_command_flags())
-                        .is_some();
-                if !is_builtin {
+                        .is_some()
+                    || self.find_plugin_command(name).is_some();
+                if !is_known_command {
                     let message = format!(
                         r#"Unrecognized command '/{name}'. Type "/" for a list of supported commands."#
                     );
@@ -249,6 +250,18 @@ impl ChatComposer {
                 Some(InputResult::Command(cmd))
             }
         } else {
+            if let Some((name, rest, _rest_offset)) = parse_slash_name(&first_line)
+                && rest.is_empty()
+                && let Some(command) = self.find_plugin_command(name)
+            {
+                self.textarea.set_text_clearing_elements("");
+                return Some(InputResult::PluginCommand(PluginCommandInvocation {
+                    plugin_id: command.plugin_id,
+                    plugin_display_name: command.plugin_display_name,
+                    name: command.name,
+                    args: String::new(),
+                }));
+            }
             None
         }
     }
@@ -273,43 +286,58 @@ impl ChatComposer {
             return None;
         }
 
-        let (cmd, inline_suffix) =
-            slash_commands::find_builtin_command_with_suffix(name, self.builtin_command_flags())?;
-        if rest.is_empty() && inline_suffix.is_none() {
-            return None;
-        }
+        if let Some((cmd, inline_suffix)) =
+            slash_commands::find_builtin_command_with_suffix(name, self.builtin_command_flags())
+        {
+            if rest.is_empty() && inline_suffix.is_none() {
+                return None;
+            }
 
-        if !cmd.supports_inline_args() {
-            return None;
-        }
-        if self.reject_slash_command_if_unavailable(cmd) {
-            return Some(InputResult::None);
-        }
+            if !cmd.supports_inline_args() {
+                return None;
+            }
+            if self.reject_slash_command_if_unavailable(cmd) {
+                return Some(InputResult::None);
+            }
 
-        let (raw_args, mut args_elements) = if let Some(suffix) = inline_suffix {
-            let args = if rest.trim().is_empty() {
-                suffix.to_string()
+            let (raw_args, mut args_elements) = if let Some(suffix) = inline_suffix {
+                let args = if rest.trim().is_empty() {
+                    suffix.to_string()
+                } else {
+                    format!("{suffix} {}", rest.trim())
+                };
+                (args, Vec::new())
             } else {
-                format!("{suffix} {}", rest.trim())
+                (
+                    rest.to_string(),
+                    Self::slash_command_args_elements(
+                        rest,
+                        rest_offset,
+                        &self.textarea.text_elements(),
+                    ),
+                )
             };
-            (args, Vec::new())
-        } else {
-            (
-                rest.to_string(),
-                Self::slash_command_args_elements(
-                    rest,
-                    rest_offset,
-                    &self.textarea.text_elements(),
-                ),
-            )
-        };
-        let trimmed_rest = raw_args.trim();
-        args_elements = Self::trim_text_elements(raw_args.as_str(), trimmed_rest, args_elements);
-        Some(InputResult::CommandWithArgs(
-            cmd,
-            trimmed_rest.to_string(),
-            args_elements,
-        ))
+            let trimmed_rest = raw_args.trim();
+            args_elements =
+                Self::trim_text_elements(raw_args.as_str(), trimmed_rest, args_elements);
+            return Some(InputResult::CommandWithArgs(
+                cmd,
+                trimmed_rest.to_string(),
+                args_elements,
+            ));
+        }
+
+        if let Some(command) = self.find_plugin_command(name) {
+            self.textarea.set_text_clearing_elements("");
+            return Some(InputResult::PluginCommand(PluginCommandInvocation {
+                plugin_id: command.plugin_id,
+                plugin_display_name: command.plugin_display_name,
+                name: command.name,
+                args: rest.trim().to_string(),
+            }));
+        }
+
+        None
     }
 
     /// Expand pending placeholders and extract normalized inline-command args.

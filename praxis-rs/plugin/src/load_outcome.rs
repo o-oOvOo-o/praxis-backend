@@ -6,6 +6,7 @@ use praxis_utils_absolute_path::AbsolutePathBuf;
 
 use crate::AppConnectorId;
 use crate::PluginCapabilitySummary;
+use crate::PluginCommandSummary;
 use crate::PluginLlmManifest;
 
 const MAX_CAPABILITY_SUMMARY_DESCRIPTION_LEN: usize = 1024;
@@ -24,6 +25,7 @@ pub struct LoadedPlugin<M> {
     pub mcp_servers: HashMap<String, M>,
     pub apps: Vec<AppConnectorId>,
     pub llm: Option<PluginLlmManifest>,
+    pub commands: Vec<PluginCommandSummary>,
     pub error: Option<String>,
 }
 
@@ -54,11 +56,13 @@ fn plugin_capability_summary_from_loaded<M>(
         has_llm: plugin.llm.is_some(),
         mcp_server_names,
         app_connector_ids: plugin.apps.clone(),
+        commands: plugin.commands.clone(),
     };
 
     (summary.has_skills
         || !summary.mcp_server_names.is_empty()
-        || !summary.app_connector_ids.is_empty())
+        || !summary.app_connector_ids.is_empty()
+        || !summary.commands.is_empty())
     .then_some(summary)
 }
 

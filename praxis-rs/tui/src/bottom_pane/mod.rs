@@ -29,6 +29,7 @@ use bottom_pane_view::BottomPaneView;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
+use crossterm::event::MouseEvent;
 use praxis_core::plugins::PluginCapabilitySummary;
 use praxis_core::skills::model::SkillMetadata;
 use praxis_features::Features;
@@ -106,6 +107,7 @@ pub(crate) use title_setup::TerminalTitleSetupView;
 mod paste_burst;
 mod pending_input_preview;
 mod pending_thread_approvals;
+mod plugin_status_view;
 pub mod popup_consts;
 #[cfg(not(target_os = "linux"))]
 mod recording_meter;
@@ -114,7 +116,11 @@ mod scroll_state;
 mod selection_popup_common;
 mod textarea;
 mod unified_exec_footer;
+pub(crate) use command_popup::PluginCommandInvocation;
 pub(crate) use feedback_view::FeedbackNoteView;
+pub(crate) use plugin_status_view::PLUGIN_STATUS_VIEW_ID;
+pub(crate) use plugin_status_view::PluginStatusDocument;
+pub(crate) use plugin_status_view::PluginStatusView;
 
 /// How long the "press again to quit" hint stays visible.
 ///
@@ -460,6 +466,30 @@ impl BottomPane {
         }
     }
 
+    pub fn handle_mouse_event(&mut self, mouse_event: &MouseEvent) -> bool {
+        if self.view_stack.is_empty() {
+            return false;
+        }
+
+        let (handled, view_complete, view_in_paste_burst) = {
+            let last_index = self.view_stack.len() - 1;
+            let view = &mut self.view_stack[last_index];
+            let handled = view.handle_mouse_event(mouse_event);
+            (handled, view.is_complete(), view.is_in_paste_burst())
+        };
+
+        if view_complete {
+            self.view_stack.clear();
+            self.on_active_view_complete();
+        } else if view_in_paste_burst {
+            self.request_redraw_in(ChatComposer::recommended_paste_flush_delay());
+        }
+        if handled || view_complete || view_in_paste_burst {
+            self.request_redraw();
+        }
+        handled || view_complete
+    }
+
     /// Handles a Ctrl+C press within the bottom pane.
     ///
     /// An active modal view is given the first chance to consume the key (typically to dismiss
@@ -797,6 +827,27 @@ impl BottomPane {
     pub(crate) fn show_selection_view(&mut self, params: list_selection_view::SelectionViewParams) {
         let view = list_selection_view::ListSelectionView::new(params, self.app_event_tx.clone());
         self.push_view(Box::new(view));
+    }
+
+    pub(crate) fn show_plugin_status_view(&mut self, document: PluginStatusDocument) {
+        self.push_view(Box::new(PluginStatusView::new(document)));
+    }
+
+    pub(crate) fn replace_plugin_status_view_if_active(
+        &mut self,
+        document: PluginStatusDocument,
+    ) -> bool {
+        let is_match = self
+            .view_stack
+            .last()
+            .is_some_and(|view| view.view_id() == Some(PLUGIN_STATUS_VIEW_ID));
+        if !is_match {
+            return false;
+        }
+
+        self.view_stack.pop();
+        self.show_plugin_status_view(document);
+        true
     }
 
     pub(crate) fn has_active_view(&self) -> bool {

@@ -227,6 +227,20 @@ impl From<PluginDetail> for PluginCapabilitySummary {
             has_llm: value.llm.is_some(),
             mcp_server_names: value.mcp_server_names,
             app_connector_ids: value.apps,
+            commands: value
+                .interface
+                .as_ref()
+                .map(|interface| {
+                    interface
+                        .commands
+                        .iter()
+                        .map(|command| praxis_plugin::PluginCommandSummary {
+                            name: command.name.clone(),
+                            description: command.description.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 }

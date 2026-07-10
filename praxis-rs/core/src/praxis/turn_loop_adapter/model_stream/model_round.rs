@@ -3,6 +3,7 @@ use praxis_loop::services::ModelRequest;
 use tokio_util::sync::CancellationToken;
 
 use crate::client_common::Prompt;
+use crate::tools::code_mode::CodeModeTurnWorker;
 
 use super::PraxisModelStreamInput;
 use super::request_context;
@@ -17,7 +18,7 @@ pub(super) struct PreparedModelRound {
     pub(super) input: PraxisModelStreamInput,
     pub(super) prompt: Prompt,
     pub(super) turn_metadata_header: Option<String>,
-    pub(super) code_mode_worker: Option<praxis_code_mode::CodeModeTurnWorker>,
+    pub(super) code_mode_worker: Option<CodeModeTurnWorker>,
 }
 
 pub(super) async fn prepare_model_round(

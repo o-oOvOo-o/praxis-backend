@@ -70,7 +70,7 @@ impl ToolRouter {
             specs
                 .iter()
                 .filter_map(|configured_tool| {
-                    if !praxis_code_mode::is_code_mode_nested_tool(configured_tool.name()) {
+                    if !crate::tools::code_mode::is_code_mode_nested_tool(configured_tool.name()) {
                         Some(configured_tool.spec.clone())
                     } else {
                         None

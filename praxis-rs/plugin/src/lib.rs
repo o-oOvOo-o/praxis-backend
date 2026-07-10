@@ -47,6 +47,13 @@ pub struct PluginCapabilitySummary {
     pub has_llm: bool,
     pub mcp_server_names: Vec<String>,
     pub app_connector_ids: Vec<AppConnectorId>,
+    pub commands: Vec<PluginCommandSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PluginCommandSummary {
+    pub name: String,
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
