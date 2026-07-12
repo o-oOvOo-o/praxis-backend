@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -5,13 +6,12 @@ use praxis_app_gateway_protocol::Model;
 use praxis_app_gateway_protocol::ModelUpgradeInfo;
 use praxis_app_gateway_protocol::ReasoningEffortOption;
 use praxis_core::ModelProviderInfo;
-use praxis_core::OPENAI_PROVIDER_ID;
 use praxis_core::ThreadManager;
 use praxis_core::config::Config;
 use praxis_core::models_manager::manager::ModelsManager;
 use praxis_core::models_manager::manager::RefreshStrategy;
+use praxis_core::models_manager::manager::first_party_model_presets_for_config;
 use praxis_core::models_manager::manager::local_model_presets_for_config;
-use praxis_core::models_manager::model_presets::bundled_api_model_presets;
 use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelPreset;
@@ -43,15 +43,24 @@ pub async fn supported_models(
     )
     .await;
 
-    if config.model_provider_id != OPENAI_PROVIDER_ID
-        && let Some(openai_provider) = config.model_providers.get(OPENAI_PROVIDER_ID)
-    {
+    let mut first_party_catalogs = BTreeMap::new();
+    for model in first_party_model_presets_for_config(config) {
+        if model.provider_id == config.model_provider_id {
+            continue;
+        }
+        first_party_catalogs
+            .entry(model.provider_id)
+            .or_insert_with(|| (model.provider, Vec::new()))
+            .1
+            .push(model.preset);
+    }
+    for (provider_id, (provider, presets)) in first_party_catalogs {
         append_provider_models(
             &models_manager,
             config,
-            OPENAI_PROVIDER_ID,
-            openai_provider,
-            bundled_api_model_presets(),
+            provider_id.as_str(),
+            &provider,
+            presets,
             include_hidden,
             &mut models,
             &mut seen_models,
@@ -169,9 +178,10 @@ fn reasoning_efforts_from_preset(
     efforts: Vec<ReasoningEffortPreset>,
 ) -> Vec<ReasoningEffortOption> {
     efforts
-        .iter()
+        .into_iter()
         .map(|preset| ReasoningEffortOption {
             reasoning_effort: preset.effort,
+            display_name: preset.display_name,
             description: preset.description.to_string(),
         })
         .collect()

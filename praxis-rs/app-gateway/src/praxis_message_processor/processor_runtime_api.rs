@@ -1,5 +1,6 @@
 use super::thread_rollout_locator::find_thread_rollout_path;
 use super::*;
+use crate::thread_state::TurnControllerReservationError;
 
 impl PraxisMessageProcessor {
     pub(crate) fn clear_plugin_related_caches(&self) {
@@ -196,6 +197,55 @@ impl PraxisMessageProcessor {
         thread
             .submit_with_trace(op, self.request_trace_context(request_id).await)
             .await
+    }
+
+    pub(crate) async fn submit_connection_owned_turn(
+        &self,
+        request_id: &ConnectionRequestId,
+        thread_id: ThreadId,
+        thread: &PraxisThread,
+        op: Op,
+    ) -> Result<String, String> {
+        let reservation = match self
+            .thread_state_manager
+            .reserve_turn_controller(thread_id, request_id.connection_id)
+            .await
+        {
+            Ok(reservation) => reservation,
+            Err(TurnControllerReservationError::ConnectionClosed) => {
+                return Err(
+                    "controlling app-gateway connection closed before turn submission".to_string(),
+                );
+            }
+            Err(TurnControllerReservationError::ReservationPending) => {
+                return Err(
+                    "another turn submission is already reserving control of this thread"
+                        .to_string(),
+                );
+            }
+        };
+        let turn_id = match self.submit_core_op(request_id, thread, op).await {
+            Ok(turn_id) => turn_id,
+            Err(err) => {
+                self.thread_state_manager
+                    .cancel_turn_controller_reservation(reservation)
+                    .await;
+                return Err(err.to_string());
+            }
+        };
+        if !self
+            .thread_state_manager
+            .commit_turn_controller(reservation, turn_id.as_str())
+            .await
+        {
+            warn!(
+                %thread_id,
+                %turn_id,
+                connection_id = ?request_id.connection_id,
+                "turn started after its controlling app-gateway connection closed"
+            );
+        }
+        Ok(turn_id)
     }
 
     pub(crate) async fn send_invalid_request_error(

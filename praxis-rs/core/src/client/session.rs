@@ -9,8 +9,8 @@ impl Drop for ModelClientSession {
 }
 
 impl ModelClientSession {
-    pub(crate) fn matches_provider(&self, provider: &ModelProviderInfo) -> bool {
-        self.client.state.provider == *provider
+    pub(crate) fn matches_provider(&self, provider_id: &str, provider: &ModelProviderInfo) -> bool {
+        self.client.state.provider_id == provider_id && self.client.state.provider == *provider
     }
 
     fn reset_websocket_session(&mut self) {
@@ -33,10 +33,12 @@ impl ModelClientSession {
         let instructions = &prompt.base_instructions.text;
         let input = sanitize_input_for_responses_api(prompt.get_formatted_input());
         let tools = create_tools_json_for_responses_api(&prompt.tools)?;
-        let default_reasoning_effort = model_info.default_reasoning_level;
+        let default_reasoning_effort = model_info.default_reasoning_level.clone();
         let reasoning = if model_info.supports_reasoning_summaries {
             Some(Reasoning {
-                effort: effort.or(default_reasoning_effort),
+                effort: effort
+                    .or(default_reasoning_effort)
+                    .map(reasoning_effort_for_request),
                 summary: if summary == ReasoningSummaryConfig::None {
                     None
                 } else {
@@ -384,7 +386,7 @@ impl ModelClientSession {
                 &client_setup.api_provider,
                 prompt,
                 model_info,
-                effort,
+                effort.clone(),
                 summary,
                 service_tier,
             )?;
@@ -466,7 +468,7 @@ impl ModelClientSession {
                 &client_setup.api_provider,
                 prompt,
                 model_info,
-                effort,
+                effort.clone(),
                 summary,
                 service_tier,
             )?;
@@ -671,7 +673,7 @@ impl ModelClientSession {
                             prompt,
                             model_info,
                             session_telemetry,
-                            effort,
+                            effort.clone(),
                             summary,
                             service_tier,
                             turn_metadata_header,
@@ -698,7 +700,7 @@ impl ModelClientSession {
                     prompt,
                     model_info,
                     session_telemetry,
-                    effort,
+                    effort.clone(),
                     summary,
                     service_tier,
                     turn_metadata_header,
@@ -748,8 +750,10 @@ impl ModelClientSession {
                     crate::llm::wire::claude_messages::stream_unary(
                         client_setup.api_provider,
                         client_setup.api_auth,
+                        &self.client.state.provider,
                         prompt,
                         model_info,
+                        effort.clone(),
                     )
                     .await
                 }
@@ -760,7 +764,7 @@ impl ModelClientSession {
                         &self.client.state.provider,
                         prompt,
                         model_info,
-                        effort,
+                        effort.clone(),
                     )
                     .await
                 }

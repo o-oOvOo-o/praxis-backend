@@ -1,6 +1,7 @@
 use crate::can_request_original_image_detail;
 use praxis_features::Feature;
 use praxis_features::Features;
+use praxis_protocol::config_types::MultiAgentMode;
 use praxis_protocol::config_types::WebSearchConfig;
 use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::config_types::WindowsSandboxLevel;
@@ -131,6 +132,7 @@ pub struct ToolsConfig {
     pub code_mode_only_enabled: bool,
     pub can_request_original_image_detail: bool,
     pub collab_tools: bool,
+    pub multi_agent_mode: MultiAgentMode,
     pub request_user_input: bool,
     pub default_mode_request_user_input: bool,
     pub experimental_supported_tools: Vec<String>,
@@ -252,6 +254,7 @@ impl ToolsConfig {
             code_mode_only_enabled: include_code_mode_only,
             can_request_original_image_detail: include_original_image_detail,
             collab_tools: include_collab_tools,
+            multi_agent_mode: MultiAgentMode::ExplicitRequestOnly,
             request_user_input: include_request_user_input,
             default_mode_request_user_input: include_default_mode_request_user_input,
             experimental_supported_tools: model_info.experimental_supported_tools.clone(),
@@ -263,6 +266,16 @@ impl ToolsConfig {
 
     pub fn with_agent_type_description(mut self, agent_type_description: String) -> Self {
         self.agent_type_description = agent_type_description;
+        self
+    }
+
+    pub fn with_multi_agent_mode(mut self, multi_agent_mode: MultiAgentMode) -> Self {
+        self.multi_agent_mode = multi_agent_mode;
+        self
+    }
+
+    pub fn with_collab_tools(mut self, collab_tools: bool) -> Self {
+        self.collab_tools = collab_tools;
         self
     }
 

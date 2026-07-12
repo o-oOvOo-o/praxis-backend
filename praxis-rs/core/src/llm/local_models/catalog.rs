@@ -235,10 +235,7 @@ fn local_model_discovery_cache_key(config: &NativeLocalModelConfig) -> String {
         hasher.update([0]);
     }
     let digest = hasher.finalize();
-    digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn native_local_provider(config: &Config) -> ModelProviderInfo {
@@ -278,6 +275,7 @@ fn model_info_from_entry(
         default_reasoning_level: Some(ReasoningEffort::None),
         supported_reasoning_levels: vec![ReasoningEffortPreset {
             effort: ReasoningEffort::None,
+            display_name: None,
             description: "Local GPU inference does not expose provider reasoning controls."
                 .to_string(),
         }],
@@ -305,6 +303,7 @@ fn model_info_from_entry(
         input_modalities: vec![InputModality::Text],
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
     }
 }
 

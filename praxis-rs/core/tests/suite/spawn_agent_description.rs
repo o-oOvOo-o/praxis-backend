@@ -66,6 +66,7 @@ fn test_model_info(
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
         priority: 1,
         upgrade: None,
         base_instructions: "base instructions".to_string(),
@@ -117,10 +118,12 @@ async fn spawn_agent_description_lists_visible_models_and_reasoning_efforts() ->
                     vec![
                         ReasoningEffortPreset {
                             effort: ReasoningEffort::Low,
+                            display_name: None,
                             description: "Quick scan".to_string(),
                         },
                         ReasoningEffortPreset {
                             effort: ReasoningEffort::High,
+                            display_name: None,
                             description: "Deep dive".to_string(),
                         },
                     ],
@@ -133,6 +136,7 @@ async fn spawn_agent_description_lists_visible_models_and_reasoning_efforts() ->
                     ReasoningEffort::Low,
                     vec![ReasoningEffortPreset {
                         effort: ReasoningEffort::Low,
+                        display_name: None,
                         description: "Not visible".to_string(),
                     }],
                 ),

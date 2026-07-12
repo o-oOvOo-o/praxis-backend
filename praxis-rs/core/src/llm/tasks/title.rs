@@ -51,7 +51,7 @@ pub(crate) fn select_auto_title_model(
     let Some(profile) = LlmProfileRegistry::builtin_static().resolve(&ctx) else {
         return default_selection();
     };
-    let Some(auto_title) = profile.task_policy.auto_title else {
+    let Some(auto_title) = profile.task_policy.auto_title.clone() else {
         return default_selection();
     };
     AutoTitleModelSelection {

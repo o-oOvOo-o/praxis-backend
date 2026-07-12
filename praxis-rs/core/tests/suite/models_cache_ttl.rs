@@ -327,10 +327,12 @@ fn test_remote_model(slug: &str, priority: i32) -> ModelInfo {
         supported_reasoning_levels: vec![
             ReasoningEffortPreset {
                 effort: ReasoningEffort::Low,
+                display_name: None,
                 description: "low".to_string(),
             },
             ReasoningEffortPreset {
                 effort: ReasoningEffort::Medium,
+                display_name: None,
                 description: "medium".to_string(),
             },
         ],
@@ -358,5 +360,6 @@ fn test_remote_model(slug: &str, priority: i32) -> ModelInfo {
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
     }
 }

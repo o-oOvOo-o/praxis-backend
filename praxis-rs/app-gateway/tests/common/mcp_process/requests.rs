@@ -166,6 +166,15 @@ impl McpProcess {
         self.send_request("thread/read", params).await
     }
 
+    /// Send a `thread/history/read` JSON-RPC request.
+    pub async fn send_thread_history_read_request(
+        &mut self,
+        params: ThreadHistoryReadParams,
+    ) -> anyhow::Result<i64> {
+        let params = Some(serde_json::to_value(params)?);
+        self.send_request("thread/history/read", params).await
+    }
+
     /// Send a `model/list` JSON-RPC request.
     pub async fn send_list_models_request(
         &mut self,

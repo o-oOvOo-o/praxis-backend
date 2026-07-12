@@ -360,7 +360,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
         personality: None,
         collaboration_mode: None,
         realtime_active: Some(false),
-        effort: primary_session.reasoning_effort,
+        effort: primary_session.reasoning_effort.clone(),
         summary: app.config.model_reasoning_summary.unwrap_or_default(),
         user_instructions: None,
         developer_instructions: None,

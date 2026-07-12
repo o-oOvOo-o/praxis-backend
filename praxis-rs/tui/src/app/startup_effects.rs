@@ -383,18 +383,18 @@ pub(super) async fn handle_model_migration_prompt_if_needed(
                 });
 
                 let mapped_effort = if let Some(reasoning_effort_mapping) = reasoning_effort_mapping
-                    && let Some(reasoning_effort) = config.model_reasoning_effort
+                    && let Some(reasoning_effort) = config.model_reasoning_effort.as_ref()
                 {
                     reasoning_effort_mapping
                         .get(&reasoning_effort)
                         .cloned()
-                        .or(config.model_reasoning_effort)
+                        .or_else(|| config.model_reasoning_effort.clone())
                 } else {
-                    config.model_reasoning_effort
+                    config.model_reasoning_effort.clone()
                 };
 
                 config.model = Some(target_model.clone());
-                config.model_reasoning_effort = mapped_effort;
+                config.model_reasoning_effort = mapped_effort.clone();
                 let provider_id = config.model_provider_id.clone();
                 app_event_tx.send(AppEvent::ApplyModelSelection {
                     model: target_model.clone(),

@@ -523,6 +523,7 @@ pub struct AuthManager {
     auth_credentials_store_mode: AuthCredentialsStoreMode,
     forced_chatgpt_workspace_id: RwLock<Option<String>>,
     refresh_lock: AsyncMutex<()>,
+    anthropic_oauth_lock: AsyncMutex<()>,
     external_auth: RwLock<Option<Arc<dyn ExternalAuth>>>,
 }
 
@@ -572,6 +573,7 @@ impl AuthManager {
             auth_credentials_store_mode,
             forced_chatgpt_workspace_id: RwLock::new(None),
             refresh_lock: AsyncMutex::new(()),
+            anthropic_oauth_lock: AsyncMutex::new(()),
             external_auth: RwLock::new(None),
         }
     }
@@ -590,6 +592,7 @@ impl AuthManager {
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
             forced_chatgpt_workspace_id: RwLock::new(None),
             refresh_lock: AsyncMutex::new(()),
+            anthropic_oauth_lock: AsyncMutex::new(()),
             external_auth: RwLock::new(None),
         })
     }
@@ -610,6 +613,7 @@ impl AuthManager {
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
             forced_chatgpt_workspace_id: RwLock::new(None),
             refresh_lock: AsyncMutex::new(()),
+            anthropic_oauth_lock: AsyncMutex::new(()),
             external_auth: RwLock::new(None),
         })
     }
@@ -625,6 +629,7 @@ impl AuthManager {
             auth_credentials_store_mode: AuthCredentialsStoreMode::File,
             forced_chatgpt_workspace_id: RwLock::new(None),
             refresh_lock: AsyncMutex::new(()),
+            anthropic_oauth_lock: AsyncMutex::new(()),
             external_auth: RwLock::new(Some(
                 Arc::new(BearerTokenRefresher::new(config)) as Arc<dyn ExternalAuth>
             )),
@@ -818,6 +823,22 @@ impl AuthManager {
 
     pub fn praxis_api_key_env_enabled(&self) -> bool {
         self.enable_praxis_api_key_env
+    }
+
+    /// Resolve a provider-scoped API key from the operating system credential store.
+    pub fn provider_api_key(
+        &self,
+        credential_id: &str,
+    ) -> Result<Option<crate::ProviderApiKey>, crate::ProviderApiKeyError> {
+        crate::load_provider_api_key(&self.praxis_home, credential_id)
+    }
+
+    /// Resolve a Praxis-owned Anthropic OAuth token, importing the local Claude Code login once.
+    pub async fn anthropic_oauth_token(
+        &self,
+    ) -> Result<Option<crate::AnthropicOauthAccessToken>, crate::AnthropicOauthError> {
+        let _guard = self.anthropic_oauth_lock.lock().await;
+        crate::load_import_and_refresh_anthropic_oauth(&self.praxis_home).await
     }
 
     /// Convenience constructor returning an `Arc` wrapper.

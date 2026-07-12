@@ -17,64 +17,37 @@ struct ModelRuntimeRegistryState {
     clients: StdMutex<HashMap<ModelRuntimeKey, ModelClient>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 struct ModelRuntimeKey {
     provider_id: String,
-    name: String,
-    base_url: Option<String>,
-    env_key: Option<String>,
-    experimental_bearer_token: Option<String>,
-    auth: Option<String>,
-    wire_api: String,
-    compat: Option<String>,
-    query_params: Vec<(String, String)>,
-    http_headers: Vec<(String, String)>,
-    env_http_headers: Vec<(String, String)>,
-    request_max_retries: Option<u64>,
-    stream_max_retries: Option<u64>,
-    stream_idle_timeout_ms: Option<u64>,
-    websocket_connect_timeout_ms: Option<u64>,
-    requires_openai_auth: bool,
-    supports_websockets: bool,
+    configuration_digest: [u8; 32],
 }
 
 impl ModelRuntimeKey {
     fn from_provider(provider_id: &str, provider: &ModelProviderInfo) -> Self {
+        use sha2::Digest;
+        use sha2::Sha256;
+
+        let mut hasher = Sha256::new();
+        if let Err(err) = serde_json::to_writer(&mut hasher, provider) {
+            hasher.update(b"praxis-provider-serialization-error\0");
+            hasher.update(err.to_string().as_bytes());
+        }
         Self {
             provider_id: provider_id.to_string(),
-            name: provider.name.clone(),
-            base_url: provider.base_url.clone(),
-            env_key: provider.env_key.clone(),
-            experimental_bearer_token: provider.experimental_bearer_token.clone(),
-            auth: provider
-                .auth
-                .as_ref()
-                .map(|auth| serde_json::to_string(auth).unwrap_or_else(|_| format!("{auth:?}"))),
-            wire_api: provider.wire_api.to_string(),
-            compat: provider.compat.as_ref().map(|compat| {
-                serde_json::to_string(compat).unwrap_or_else(|_| format!("{compat:?}"))
-            }),
-            query_params: sorted_string_map(provider.query_params.as_ref()),
-            http_headers: sorted_string_map(provider.http_headers.as_ref()),
-            env_http_headers: sorted_string_map(provider.env_http_headers.as_ref()),
-            request_max_retries: provider.request_max_retries,
-            stream_max_retries: provider.stream_max_retries,
-            stream_idle_timeout_ms: provider.stream_idle_timeout_ms,
-            websocket_connect_timeout_ms: provider.websocket_connect_timeout_ms,
-            requires_openai_auth: provider.requires_openai_auth,
-            supports_websockets: provider.supports_websockets,
+            configuration_digest: hasher.finalize().into(),
         }
     }
 }
 
-fn sorted_string_map(map: Option<&HashMap<String, String>>) -> Vec<(String, String)> {
-    let mut entries = map.map_or_else(Vec::new, |map| {
-        map.iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect::<Vec<_>>()
-    });
-    entries.sort();
-    entries
+impl std::fmt::Debug for ModelRuntimeKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ModelRuntimeKey")
+            .field("provider_id", &self.provider_id)
+            .field("configuration_digest", &"[SHA-256]")
+            .finish()
+    }
 }
 
 impl ModelRuntimeRegistry {
@@ -122,6 +95,7 @@ impl ModelRuntimeRegistry {
         let client = ModelClient::new_with_native_local_config(
             self.state.auth_manager.clone(),
             self.state.conversation_id.clone(),
+            provider_id.to_string(),
             provider.clone(),
             self.state.session_source.clone(),
             self.state.model_verbosity,

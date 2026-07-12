@@ -1,5 +1,5 @@
-use super::catalog::LocalModelEntry;
 use super::catalog::LocalModelArchitecture;
+use super::catalog::LocalModelEntry;
 use super::catalog::LocalModelFormat;
 use super::catalog::LocalModelWire;
 use super::catalog::NativeLocalModelConfig;
@@ -17,6 +17,7 @@ use crate::error::Result as PraxisResult;
 use crate::model_provider_info::ModelProviderCompatInfo;
 use crate::model_provider_info::ModelProviderMaxTokensField;
 use crate::model_provider_info::ModelProviderThinkingFormat;
+use crate::model_provider_info::NATIVE_LOCAL_PROVIDER_ID;
 use crate::model_provider_info::create_native_local_provider;
 use crate::provider_decision_center::AuthRequestPurpose;
 use crate::provider_decision_center::ProviderDecisionCenter;
@@ -49,7 +50,11 @@ pub(crate) async fn stream_native_local_model(
 
     let provider_info = local_gpu_provider_info(api_base_url, &entry, host);
     let setup = ProviderDecisionCenter::new(None)
-        .setup_provider(&provider_info, AuthRequestPurpose::ModelTurn)
+        .setup_provider(
+            NATIVE_LOCAL_PROVIDER_ID,
+            &provider_info,
+            AuthRequestPurpose::ModelTurn,
+        )
         .await?;
     let stream = crate::non_responses_transport::stream_common_unary(
         setup.api_provider,
@@ -112,8 +117,12 @@ fn local_gpu_provider_info(
         .cloned();
     provider.stream_idle_timeout_ms = Some(local_stream_idle_timeout_ms(host));
     provider.compat = Some(ModelProviderCompatInfo {
-        supports_developer_role: Some(metadata_bool(host, "supports_developer_role").unwrap_or(false)),
-        supports_reasoning_effort: Some(metadata_bool(host, "supports_reasoning_effort").unwrap_or(false)),
+        supports_developer_role: Some(
+            metadata_bool(host, "supports_developer_role").unwrap_or(false),
+        ),
+        supports_reasoning_effort: Some(
+            metadata_bool(host, "supports_reasoning_effort").unwrap_or(false),
+        ),
         supports_parallel_tool_calls: Some(
             metadata_bool(host, "supports_parallel_tool_calls").unwrap_or(false),
         ),

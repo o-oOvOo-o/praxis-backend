@@ -84,7 +84,7 @@ async fn saving_api_key_is_blocked_when_chatgpt_forced() {
     let (mut widget, _tmp) = widget_forced_chatgpt().await;
 
     let mut state = ApiKeyInputState::new(ProviderSetupKind::DeepSeek);
-    state.api_key = "sk-test".to_string();
+    state.api_key = Zeroizing::new("sk-test".to_string());
     widget.save_provider_key(state);
 
     assert_eq!(

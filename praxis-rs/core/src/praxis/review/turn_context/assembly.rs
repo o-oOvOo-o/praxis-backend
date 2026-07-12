@@ -39,7 +39,7 @@ pub(super) fn build(input: ReviewTurnContextAssemblyInput<'_>) -> Arc<TurnContex
         .session_telemetry
         .clone()
         .with_model(model.as_str(), model_info.slug.as_str());
-    let reasoning_effort = per_turn_config.model_reasoning_effort;
+    let reasoning_effort = per_turn_config.model_reasoning_effort.clone();
     let reasoning_summary = per_turn_config
         .model_reasoning_summary
         .unwrap_or(model_info.default_reasoning_summary);

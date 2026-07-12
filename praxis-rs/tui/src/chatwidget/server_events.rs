@@ -335,14 +335,14 @@ impl ChatWidget {
         }
         self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
             Some(model.clone()),
-            Some(effort),
+            Some(effort.clone()),
             /*developer_instructions*/ None,
         );
         if self.collaboration_modes_enabled()
             && let Some(mask) = self.active_collaboration_mask.as_mut()
         {
             mask.model = Some(model.clone());
-            mask.reasoning_effort = Some(effort);
+            mask.reasoning_effort = Some(effort.clone());
         }
 
         self.refresh_model_dependent_surfaces();

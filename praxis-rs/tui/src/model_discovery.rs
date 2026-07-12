@@ -9,9 +9,9 @@ use praxis_core::ModelProviderInfo;
 use praxis_core::OPENAI_PROVIDER_ID;
 use praxis_core::config::Config;
 use praxis_core::first_party_model_owner;
+use praxis_core::models_manager::manager::first_party_model_presets_for_config;
 use praxis_core::models_manager::manager::local_model_presets_for_config;
 use praxis_core::models_manager::manager::plugin_model_presets_for_config;
-use praxis_core::models_manager::model_presets::bundled_api_model_presets;
 use praxis_core::provider_accepts_registered_model_catalog;
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::ReasoningEffort;
@@ -92,17 +92,15 @@ pub(crate) fn build_model_catalog(
         );
     }
 
-    if let Some(openai_provider) = config.model_providers.get(OPENAI_PROVIDER_ID) {
-        for preset in bundled_api_model_presets() {
-            push_provider_preset(
-                &mut models,
-                &mut metadata_by_preset_id,
-                &mut seen,
-                OPENAI_PROVIDER_ID,
-                openai_provider,
-                preset,
-            );
-        }
+    for first_party_model in first_party_model_presets_for_config(config) {
+        push_provider_preset_trusted(
+            &mut models,
+            &mut metadata_by_preset_id,
+            &mut seen,
+            first_party_model.provider_id.as_str(),
+            &first_party_model.provider,
+            first_party_model.preset,
+        );
     }
 
     for plugin_model in plugin_model_presets_for_config(config) {
@@ -185,28 +183,6 @@ fn local_frontier_model_rank(preset: &ModelPreset) -> (u8, i32) {
     known_openai_compatible_model_info(preset.model.as_str())
         .map(|info| (0, info.priority))
         .unwrap_or((1, 0))
-}
-
-fn push_provider_preset(
-    models: &mut Vec<ModelPreset>,
-    metadata_by_preset_id: &mut HashMap<String, ModelCatalogSelectionMetadata>,
-    seen: &mut BTreeSet<(String, String)>,
-    provider_id: &str,
-    provider: &ModelProviderInfo,
-    preset: ModelPreset,
-) {
-    if !provider_accepts_registered_model_catalog(provider_id, provider, preset.model.as_str()) {
-        return;
-    }
-
-    push_provider_preset_trusted(
-        models,
-        metadata_by_preset_id,
-        seen,
-        provider_id,
-        provider,
-        preset,
-    );
 }
 
 fn push_provider_preset_trusted(
@@ -497,6 +473,7 @@ fn imported_model_preset(model: &DiscoveredModel, preset_id: &str) -> ModelPrese
         default_reasoning_effort: ReasoningEffort::None,
         supported_reasoning_efforts: vec![ReasoningEffortPreset {
             effort: ReasoningEffort::None,
+            display_name: None,
             description: "Use the provider default reasoning mode.".to_owned(),
         }],
         supports_personality: false,
@@ -605,6 +582,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use praxis_core::ANTHROPIC_PROVIDER_ID;
     use praxis_core::config::ConfigBuilder;
 
     fn test_preset(model: &str) -> ModelPreset {
@@ -616,6 +594,7 @@ mod tests {
             default_reasoning_effort: ReasoningEffort::Medium,
             supported_reasoning_efforts: vec![ReasoningEffortPreset {
                 effort: ReasoningEffort::Medium,
+                display_name: None,
                 description: "medium".to_string(),
             }],
             supports_personality: false,
@@ -659,6 +638,40 @@ mod tests {
             .get(&preset_id)
             .expect("GPT-5.5 should carry provider selection metadata");
         assert_eq!(metadata.provider_id, OPENAI_PROVIDER_ID);
+    }
+
+    #[tokio::test]
+    async fn model_catalog_backfills_anthropic_models_when_current_provider_is_openai() {
+        let praxis_home = tempfile::tempdir().expect("temp praxis home");
+        let config = ConfigBuilder::default()
+            .praxis_home(praxis_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("config");
+        assert_eq!(config.model_provider_id, OPENAI_PROVIDER_ID);
+        assert!(config.model_providers.contains_key(ANTHROPIC_PROVIDER_ID));
+
+        let catalog = build_model_catalog(&config, Vec::new());
+        for model in [
+            "claude-sonnet-5",
+            "claude-opus-4-8",
+            "claude-fable-5",
+            "claude-haiku-4-5",
+        ] {
+            let preset_id = provider_scoped_preset_id(ANTHROPIC_PROVIDER_ID, model);
+            let preset = catalog
+                .models
+                .iter()
+                .find(|preset| preset.id == preset_id)
+                .unwrap_or_else(|| panic!("{model} should be present in the TUI model picker"));
+            assert!(preset.show_in_picker);
+            let metadata = catalog
+                .metadata_by_preset_id
+                .get(&preset_id)
+                .unwrap_or_else(|| panic!("{model} should carry Anthropic provider metadata"));
+            assert_eq!(metadata.provider_id, ANTHROPIC_PROVIDER_ID);
+            assert!(metadata.provider.is_anthropic());
+        }
     }
 
     #[tokio::test]

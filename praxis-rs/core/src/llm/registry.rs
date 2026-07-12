@@ -42,7 +42,7 @@ impl LlmProfileRegistry {
     pub(crate) fn resolve(&self, ctx: &ProfileMatchContext<'_>) -> Option<ProfileDescriptor> {
         self.profiles
             .iter()
-            .copied()
+            .cloned()
             .find(|profile| profile.matches(ctx))
     }
 

@@ -90,7 +90,7 @@ impl HttpTransport for RecordingTransport {
 struct NoAuth;
 
 impl AuthProvider for NoAuth {
-    fn bearer_token(&self) -> Option<String> {
+    fn bearer_token(&self) -> Option<&str> {
         None
     }
 }
@@ -111,12 +111,12 @@ impl StaticAuth {
 }
 
 impl AuthProvider for StaticAuth {
-    fn bearer_token(&self) -> Option<String> {
-        Some(self.token.clone())
+    fn bearer_token(&self) -> Option<&str> {
+        Some(self.token.as_str())
     }
 
-    fn account_id(&self) -> Option<String> {
-        Some(self.account_id.clone())
+    fn account_id(&self) -> Option<&str> {
+        Some(self.account_id.as_str())
     }
 }
 

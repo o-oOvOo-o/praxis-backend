@@ -440,6 +440,7 @@ fn config_summary_entries(
             "reasoning effort",
             config
                 .model_reasoning_effort
+                .as_ref()
                 .map(|effort| effort.to_string())
                 .unwrap_or_else(|| "none".to_string()),
         ));

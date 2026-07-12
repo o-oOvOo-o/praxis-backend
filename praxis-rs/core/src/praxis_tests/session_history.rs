@@ -91,6 +91,7 @@ fn test_model_client_session() -> crate::client::ModelClientSession {
         /*auth_manager*/ None,
         ThreadId::try_from("00000000-0000-4000-8000-000000000001")
             .expect("test thread id should be valid"),
+        crate::model_provider_info::OPENAI_PROVIDER_ID.to_string(),
         crate::model_provider_info::ModelProviderInfo::create_openai_provider(
             /* base_url */ /*base_url*/ None,
         ),

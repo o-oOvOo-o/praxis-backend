@@ -4,12 +4,21 @@
 //! are used to preserve compatibility when older payloads omit newly introduced attributes.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::str::FromStr;
 
 use schemars::JsonSchema;
+use schemars::r#gen::SchemaGenerator;
+use schemars::schema::InstanceType;
+use schemars::schema::Metadata;
+use schemars::schema::Schema;
+use schemars::schema::SchemaObject;
+use schemars::schema::StringValidation;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
-use strum::IntoEnumIterator;
+use serde::Serializer;
+use serde::de::Error;
 use strum_macros::Display;
 use strum_macros::EnumIter;
 use tracing::warn;
@@ -19,28 +28,38 @@ use crate::config_types::Personality;
 use crate::config_types::ReasoningSummary;
 use crate::config_types::Verbosity;
 use crate::models::BASE_INSTRUCTIONS_DEFAULT;
+use crate::models::BASE_INSTRUCTIONS_GPT_5_6;
 
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 pub const IMAGE_GENERATION_TOOL_NAME: &str = "image_generation";
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, TS, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum MultiAgentVersion {
+    Disabled,
+    V1,
+    V2,
+}
+
+fn deserialize_optional_multi_agent_version<'de, D>(
+    deserializer: D,
+) -> Result<Option<MultiAgentVersion>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(match value.as_deref() {
+        Some("disabled") => Some(MultiAgentVersion::Disabled),
+        Some("v1") => Some(MultiAgentVersion::V1),
+        Some("v2") => Some(MultiAgentVersion::V2),
+        _ => None,
+    })
+}
+
 /// See https://platform.openai.com/docs/guides/reasoning?api-mode=responses#get-started-with-reasoning
-#[derive(
-    Debug,
-    Serialize,
-    Deserialize,
-    Default,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Display,
-    JsonSchema,
-    TS,
-    EnumIter,
-    Hash,
-)]
-#[serde(rename_all = "lowercase")]
-#[strum(serialize_all = "lowercase")]
+#[derive(Debug, Default, Clone, PartialEq, Eq, TS, Hash)]
+#[ts(type = "string")]
 pub enum ReasoningEffort {
     None,
     Minimal,
@@ -49,14 +68,106 @@ pub enum ReasoningEffort {
     Medium,
     High,
     XHigh,
+    Max,
+    Ultra,
+    /// A model-defined effort value that this client does not know yet.
+    Custom(String),
+}
+
+impl ReasoningEffort {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "xhigh",
+            Self::Max => "max",
+            Self::Ultra => "ultra",
+            Self::Custom(effort) => effort,
+        }
+    }
+
+    pub fn known_values() -> impl Iterator<Item = Self> {
+        [
+            Self::None,
+            Self::Minimal,
+            Self::Low,
+            Self::Medium,
+            Self::High,
+            Self::XHigh,
+            Self::Max,
+            Self::Ultra,
+        ]
+        .into_iter()
+    }
+}
+
+impl fmt::Display for ReasoningEffort {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl JsonSchema for ReasoningEffort {
+    fn schema_name() -> String {
+        "ReasoningEffort".to_string()
+    }
+
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+        Schema::Object(SchemaObject {
+            instance_type: Some(InstanceType::String.into()),
+            metadata: Some(Box::new(Metadata {
+                description: Some(
+                    "A non-empty reasoning effort value advertised by the model.".to_string(),
+                ),
+                ..Default::default()
+            })),
+            string: Some(Box::new(StringValidation {
+                min_length: Some(1),
+                ..Default::default()
+            })),
+            ..Default::default()
+        })
+    }
+}
+
+impl Serialize for ReasoningEffort {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ReasoningEffort {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let effort = String::deserialize(deserializer)?;
+        effort.parse().map_err(D::Error::custom)
+    }
 }
 
 impl FromStr for ReasoningEffort {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        serde_json::from_value(serde_json::Value::String(s.to_string()))
-            .map_err(|_| format!("invalid reasoning_effort: {s}"))
+        match s {
+            "none" => Ok(Self::None),
+            "minimal" => Ok(Self::Minimal),
+            "low" => Ok(Self::Low),
+            "medium" => Ok(Self::Medium),
+            "high" => Ok(Self::High),
+            "xhigh" => Ok(Self::XHigh),
+            "max" => Ok(Self::Max),
+            "ultra" => Ok(Self::Ultra),
+            "" => Err("reasoning_effort must not be empty".to_string()),
+            effort => Ok(Self::Custom(effort.to_string())),
+        }
     }
 }
 
@@ -97,8 +208,35 @@ pub fn default_input_modalities() -> Vec<InputModality> {
 pub struct ReasoningEffortPreset {
     /// Effort level that the model supports.
     pub effort: ReasoningEffort,
+    /// Optional product-facing name; the wire effort remains unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub display_name: Option<String>,
     /// Short human description shown next to the effort in UIs.
     pub description: String,
+}
+
+impl ReasoningEffortPreset {
+    pub fn new(effort: ReasoningEffort, description: impl Into<String>) -> Self {
+        Self {
+            effort,
+            display_name: None,
+            description: description.into(),
+        }
+    }
+
+    pub fn with_display_name(mut self, display_name: impl Into<String>) -> Self {
+        let display_name = display_name.into();
+        self.display_name = (!display_name.trim().is_empty()).then_some(display_name);
+        self
+    }
+
+    pub fn effective_display_name(&self) -> &str {
+        self.display_name
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| self.effort.as_str())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]
@@ -293,9 +431,21 @@ pub struct ModelInfo {
     pub used_fallback_model_metadata: bool,
     #[serde(default)]
     pub supports_search_tool: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_multi_agent_version"
+    )]
+    pub multi_agent_version: Option<MultiAgentVersion>,
 }
 
 impl ModelInfo {
+    pub fn supports_reasoning_effort(&self, effort: &ReasoningEffort) -> bool {
+        self.supported_reasoning_levels
+            .iter()
+            .any(|preset| &preset.effort == effort)
+    }
+
     pub fn auto_compact_token_limit(&self) -> Option<i64> {
         let context_limit = self
             .context_window
@@ -345,18 +495,22 @@ pub fn provider_neutral_reasoning_levels() -> (Option<ReasoningEffort>, Vec<Reas
         vec![
             ReasoningEffortPreset {
                 effort: ReasoningEffort::Low,
+                display_name: None,
                 description: "Enable model thinking.".to_string(),
             },
             ReasoningEffortPreset {
                 effort: ReasoningEffort::High,
+                display_name: None,
                 description: "Enable deeper model thinking.".to_string(),
             },
             ReasoningEffortPreset {
                 effort: ReasoningEffort::XHigh,
+                display_name: None,
                 description: "Use maximum model thinking depth.".to_string(),
             },
             ReasoningEffortPreset {
                 effort: ReasoningEffort::None,
+                display_name: None,
                 description: "Disable model thinking.".to_string(),
             },
         ],
@@ -367,17 +521,55 @@ pub fn provider_neutral_reasoning_levels() -> (Option<ReasoningEffort>, Vec<Reas
 pub fn known_openai_compatible_model_info(model_id: &str) -> Option<ModelInfo> {
     let normalized = model_id.to_ascii_lowercase();
     match normalized.as_str() {
+        "gpt-5.6-sol" => Some(with_gpt56_prompt(openai_first_party_model_info(
+            model_id,
+            "GPT-5.6-Sol",
+            "Latest frontier agentic coding model.",
+            Some(ReasoningEffort::Medium),
+            gpt56_reasoning_levels(/*supports_ultra*/ true),
+            Some(372_000),
+            Some(MultiAgentVersion::V2),
+            /*priority*/ 1,
+        ))),
+        "gpt-5.6-terra" => Some(with_gpt56_prompt(openai_first_party_model_info(
+            model_id,
+            "GPT-5.6-Terra",
+            "Balanced agentic coding model for everyday work.",
+            Some(ReasoningEffort::Medium),
+            gpt56_reasoning_levels(/*supports_ultra*/ true),
+            Some(372_000),
+            Some(MultiAgentVersion::V2),
+            /*priority*/ 2,
+        ))),
+        "gpt-5.6-luna" => Some(with_gpt56_prompt(openai_first_party_model_info(
+            model_id,
+            "GPT-5.6-Luna",
+            "Fast and affordable agentic coding model.",
+            Some(ReasoningEffort::Medium),
+            gpt56_reasoning_levels(/*supports_ultra*/ false),
+            Some(372_000),
+            Some(MultiAgentVersion::V1),
+            /*priority*/ 3,
+        ))),
         "gpt-5.5" => Some(openai_first_party_model_info(
             model_id,
             "GPT-5.5",
             "Latest frontier agentic coding model.",
-            /*priority*/ 0,
+            Some(ReasoningEffort::Medium),
+            frontier_reasoning_levels(),
+            Some(272_000),
+            None,
+            /*priority*/ 20,
         )),
         "gpt-5.5-pro" => Some(openai_first_party_model_info(
             model_id,
             "GPT-5.5 Pro",
             "Latest frontier agentic coding model for the hardest tasks.",
-            /*priority*/ 1,
+            Some(ReasoningEffort::Medium),
+            frontier_reasoning_levels(),
+            Some(272_000),
+            None,
+            /*priority*/ 21,
         )),
         "deepseek-v4-pro" => Some(deepseek_model_info(
             model_id,
@@ -413,24 +605,34 @@ pub fn known_openai_compatible_model_info(model_id: &str) -> Option<ModelInfo> {
 
 /// Local first-party model metadata that should be available in pickers even before remote catalog refresh catches up.
 pub fn known_openai_compatible_picker_model_infos() -> Vec<ModelInfo> {
-    ["gpt-5.5", "gpt-5.5-pro"]
-        .into_iter()
-        .filter_map(known_openai_compatible_model_info)
-        .collect()
+    [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-5.5",
+        "gpt-5.5-pro",
+    ]
+    .into_iter()
+    .filter_map(known_openai_compatible_model_info)
+    .collect()
 }
 
 fn openai_first_party_model_info(
     model_id: &str,
     display_name: &str,
     description: &str,
+    default_reasoning_level: Option<ReasoningEffort>,
+    supported_reasoning_levels: Vec<ReasoningEffortPreset>,
+    context_window: Option<i64>,
+    multi_agent_version: Option<MultiAgentVersion>,
     priority: i32,
 ) -> ModelInfo {
     ModelInfo {
         slug: model_id.to_string(),
         display_name: display_name.to_string(),
         description: Some(description.to_string()),
-        default_reasoning_level: Some(ReasoningEffort::Medium),
-        supported_reasoning_levels: frontier_reasoning_levels(),
+        default_reasoning_level,
+        supported_reasoning_levels,
         shell_type: ConfigShellToolType::ShellCommand,
         visibility: ModelVisibility::List,
         supported_in_api: true,
@@ -448,13 +650,31 @@ fn openai_first_party_model_info(
         truncation_policy: TruncationPolicyConfig::tokens(/*limit*/ 10_000),
         supports_parallel_tool_calls: true,
         supports_image_detail_original: true,
-        context_window: Some(272_000),
+        context_window,
         auto_compact_token_limit: None,
         effective_context_window_percent: 95,
         experimental_supported_tools: openai_first_party_supported_tools(),
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version,
+    }
+}
+
+fn with_gpt56_prompt(mut model: ModelInfo) -> ModelInfo {
+    model.base_instructions = BASE_INSTRUCTIONS_GPT_5_6.to_string();
+    model.model_messages = Some(gpt56_model_messages());
+    model
+}
+
+fn gpt56_model_messages() -> ModelMessages {
+    ModelMessages {
+        instructions_template: Some(BASE_INSTRUCTIONS_GPT_5_6.to_string()),
+        instructions_variables: Some(ModelInstructionsVariables {
+            personality_default: Some(String::new()),
+            personality_friendly: Some(String::new()),
+            personality_pragmatic: Some(String::new()),
+        }),
     }
 }
 
@@ -462,21 +682,42 @@ fn frontier_reasoning_levels() -> Vec<ReasoningEffortPreset> {
     vec![
         ReasoningEffortPreset {
             effort: ReasoningEffort::Low,
+            display_name: None,
             description: "Fast responses with lighter reasoning".to_string(),
         },
         ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: None,
             description: "Balances speed and reasoning depth for everyday tasks".to_string(),
         },
         ReasoningEffortPreset {
             effort: ReasoningEffort::High,
+            display_name: None,
             description: "Greater reasoning depth for complex problems".to_string(),
         },
         ReasoningEffortPreset {
             effort: ReasoningEffort::XHigh,
+            display_name: None,
             description: "Extra high reasoning depth for complex problems".to_string(),
         },
     ]
+}
+
+fn gpt56_reasoning_levels(supports_ultra: bool) -> Vec<ReasoningEffortPreset> {
+    let mut levels = frontier_reasoning_levels();
+    levels.push(ReasoningEffortPreset {
+        effort: ReasoningEffort::Max,
+        display_name: None,
+        description: "Maximum reasoning depth for the hardest problems".to_string(),
+    });
+    if supports_ultra {
+        levels.push(ReasoningEffortPreset {
+            effort: ReasoningEffort::Ultra,
+            display_name: None,
+            description: "Maximum reasoning with automatic task delegation".to_string(),
+        });
+    }
+    levels
 }
 
 fn openai_first_party_supported_tools() -> Vec<String> {
@@ -521,6 +762,7 @@ fn deepseek_model_info(
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
     }
 }
 
@@ -671,16 +913,17 @@ fn reasoning_effort_mapping_from_presets(
     }
 
     // Map every canonical effort to the closest supported effort for the new model.
-    let supported: Vec<ReasoningEffort> = presets.iter().map(|p| p.effort).collect();
+    let supported: Vec<ReasoningEffort> =
+        presets.iter().map(|preset| preset.effort.clone()).collect();
     let mut map = HashMap::new();
-    for effort in ReasoningEffort::iter() {
-        let nearest = nearest_effort(effort, &supported);
+    for effort in ReasoningEffort::known_values() {
+        let nearest = nearest_effort(effort.clone(), &supported);
         map.insert(effort, nearest);
     }
     Some(map)
 }
 
-fn effort_rank(effort: ReasoningEffort) -> i32 {
+fn effort_rank(effort: &ReasoningEffort) -> i32 {
     match effort {
         ReasoningEffort::None => 0,
         ReasoningEffort::Minimal => 1,
@@ -688,15 +931,21 @@ fn effort_rank(effort: ReasoningEffort) -> i32 {
         ReasoningEffort::Medium => 3,
         ReasoningEffort::High => 4,
         ReasoningEffort::XHigh => 5,
+        ReasoningEffort::Max => 6,
+        ReasoningEffort::Ultra => 7,
+        ReasoningEffort::Custom(_) => 3,
     }
 }
 
 fn nearest_effort(target: ReasoningEffort, supported: &[ReasoningEffort]) -> ReasoningEffort {
-    let target_rank = effort_rank(target);
+    if supported.contains(&target) {
+        return target;
+    }
+    let target_rank = effort_rank(&target);
     supported
         .iter()
-        .copied()
-        .min_by_key(|candidate| (effort_rank(*candidate) - target_rank).abs())
+        .cloned()
+        .min_by_key(|candidate| (effort_rank(candidate) - target_rank).abs())
         .unwrap_or(target)
 }
 
@@ -736,6 +985,7 @@ mod tests {
             input_modalities: default_input_modalities(),
             used_fallback_model_metadata: false,
             supports_search_tool: false,
+            multi_agent_version: None,
         }
     }
 
@@ -751,14 +1001,77 @@ mod tests {
     fn reasoning_effort_from_str_accepts_known_values() {
         assert_eq!("high".parse(), Ok(ReasoningEffort::High));
         assert_eq!("minimal".parse(), Ok(ReasoningEffort::Minimal));
+        assert_eq!("max".parse(), Ok(ReasoningEffort::Max));
+        assert_eq!("ultra".parse(), Ok(ReasoningEffort::Ultra));
     }
 
     #[test]
-    fn reasoning_effort_from_str_rejects_unknown_values() {
+    fn reasoning_effort_from_str_preserves_unknown_values() {
         assert_eq!(
-            "unsupported".parse::<ReasoningEffort>(),
-            Err("invalid reasoning_effort: unsupported".to_string())
+            "future".parse::<ReasoningEffort>(),
+            Ok(ReasoningEffort::Custom("future".to_string()))
         );
+    }
+
+    #[test]
+    fn unknown_multi_agent_version_is_treated_as_unsupported() {
+        let mut value = serde_json::to_value(test_model(None)).unwrap();
+        value["multi_agent_version"] = serde_json::json!("v3");
+
+        let model: ModelInfo = serde_json::from_value(value).unwrap();
+
+        assert_eq!(model.multi_agent_version, None);
+    }
+
+    #[test]
+    fn known_gpt56_models_match_official_reasoning_capabilities() {
+        let sol = known_openai_compatible_model_info("gpt-5.6-sol").unwrap();
+        let terra = known_openai_compatible_model_info("gpt-5.6-terra").unwrap();
+        let luna = known_openai_compatible_model_info("gpt-5.6-luna").unwrap();
+
+        assert_eq!(sol.default_reasoning_level, Some(ReasoningEffort::Medium));
+        assert_eq!(terra.default_reasoning_level, Some(ReasoningEffort::Medium));
+        assert_eq!(luna.default_reasoning_level, Some(ReasoningEffort::Medium));
+        assert_eq!(sol.context_window, Some(372_000));
+        assert_eq!(sol.multi_agent_version, Some(MultiAgentVersion::V2));
+        assert_eq!(terra.multi_agent_version, Some(MultiAgentVersion::V2));
+        assert_eq!(luna.multi_agent_version, Some(MultiAgentVersion::V1));
+        assert_eq!(sol.base_instructions, BASE_INSTRUCTIONS_GPT_5_6);
+        assert_eq!(terra.base_instructions, BASE_INSTRUCTIONS_GPT_5_6);
+        assert_eq!(luna.base_instructions, BASE_INSTRUCTIONS_GPT_5_6);
+        assert!(sol.model_messages.is_some());
+        assert!(sol.base_instructions.contains("## Context efficiency"));
+        assert!(sol.base_instructions.contains("xN count"));
+        assert!(
+            sol.supported_reasoning_levels
+                .iter()
+                .any(|p| p.effort == ReasoningEffort::Ultra)
+        );
+        assert!(
+            terra
+                .supported_reasoning_levels
+                .iter()
+                .any(|p| p.effort == ReasoningEffort::Ultra)
+        );
+        assert!(
+            luna.supported_reasoning_levels
+                .iter()
+                .any(|p| p.effort == ReasoningEffort::Max)
+        );
+        assert!(
+            !luna
+                .supported_reasoning_levels
+                .iter()
+                .any(|p| p.effort == ReasoningEffort::Ultra)
+        );
+    }
+
+    #[test]
+    fn gpt56_prompt_does_not_leak_into_older_models() {
+        let model = known_openai_compatible_model_info("gpt-5.5").unwrap();
+
+        assert_eq!(model.base_instructions, BASE_INSTRUCTIONS_DEFAULT);
+        assert!(model.model_messages.is_none());
     }
 
     #[test]

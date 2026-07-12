@@ -3,29 +3,46 @@ use super::*;
 pub(super) fn build_claude_request(
     prompt: &Prompt,
     model_info: &ModelInfo,
+    provider_info: &ModelProviderInfo,
+    effort: Option<ReasoningEffortConfig>,
     stream: bool,
 ) -> Result<Value> {
     let formatted_input = prompt.get_formatted_input();
     let system = collect_system_prompt(prompt, &formatted_input);
-    let messages = formatted_input
-        .iter()
-        .filter_map(response_item_to_claude_message)
-        .collect::<Vec<_>>();
+    let messages = build_claude_messages(&formatted_input)?;
     let tools = prompt
         .tools
         .iter()
-        .filter_map(tool_spec_to_claude_tool)
+        .map(tool_spec_to_claude_tool)
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
         .collect::<Vec<_>>();
+    let max_tokens = provider_info
+        .compat
+        .as_ref()
+        .and_then(|compat| compat.max_tokens)
+        .unwrap_or(DEFAULT_CLAUDE_MAX_TOKENS);
+    if max_tokens <= 0 {
+        return Err(PraxisErr::InvalidRequest(
+            "Claude max_tokens must be greater than zero".to_string(),
+        ));
+    }
 
     let mut request = serde_json::Map::from_iter([
         ("model".to_string(), Value::String(model_info.slug.clone())),
-        (
-            "max_tokens".to_string(),
-            Value::Number(DEFAULT_CLAUDE_MAX_TOKENS.into()),
-        ),
+        ("max_tokens".to_string(), Value::Number(max_tokens.into())),
         ("messages".to_string(), Value::Array(messages)),
         ("stream".to_string(), Value::Bool(stream)),
+        ("cache_control".to_string(), json!({ "type": "ephemeral" })),
     ]);
+
+    apply_claude_thinking_config(
+        &mut request,
+        model_info.slug.as_str(),
+        model_info.supports_reasoning_summaries,
+        effort.or_else(|| model_info.default_reasoning_level.clone()),
+    )?;
 
     if !system.is_empty() {
         request.insert("system".to_string(), Value::String(system));
@@ -35,6 +52,153 @@ pub(super) fn build_claude_request(
     }
 
     Ok(Value::Object(request))
+}
+
+pub(super) fn apply_claude_oauth_request_profile(request: &mut Value) -> Result<()> {
+    let Value::Object(request) = request else {
+        return Err(PraxisErr::InvalidRequest(
+            "Claude OAuth request must be a JSON object".to_string(),
+        ));
+    };
+    let existing_system = request.remove("system");
+    let mut system = vec![json!({
+        "type": "text",
+        "text": "You are Claude Code, Anthropic's official CLI for Claude."
+    })];
+    match existing_system {
+        Some(Value::String(text)) if !text.trim().is_empty() => {
+            system.push(json!({ "type": "text", "text": text }));
+        }
+        Some(Value::Array(mut blocks)) => system.append(&mut blocks),
+        Some(_) | None => {}
+    }
+    request.insert("system".to_string(), Value::Array(system));
+    Ok(())
+}
+
+pub(super) fn build_claude_messages(formatted_input: &[ResponseItem]) -> Result<Vec<Value>> {
+    let mut messages = Vec::new();
+    for item in formatted_input {
+        if let Some(message) = response_item_to_claude_message(item)? {
+            push_or_merge_claude_message(&mut messages, message);
+        }
+    }
+    Ok(messages)
+}
+
+pub(super) fn push_or_merge_claude_message(messages: &mut Vec<Value>, mut message: Value) {
+    let role = message
+        .get("role")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let mut incoming = message
+        .get_mut("content")
+        .and_then(Value::as_array_mut)
+        .map(std::mem::take)
+        .unwrap_or_default();
+
+    if let Some(existing) = messages
+        .last_mut()
+        .filter(|existing| existing.get("role").and_then(Value::as_str) == Some(role.as_str()))
+        && let Some(content) = existing.get_mut("content").and_then(Value::as_array_mut)
+    {
+        append_claude_content_blocks(content, &mut incoming, role.as_str());
+        return;
+    }
+
+    let mut content = Vec::new();
+    append_claude_content_blocks(&mut content, &mut incoming, role.as_str());
+    messages.push(json!({
+        "role": role,
+        "content": content,
+    }));
+}
+
+pub(super) fn append_claude_content_blocks(
+    content: &mut Vec<Value>,
+    incoming: &mut Vec<Value>,
+    role: &str,
+) {
+    if role != "user" {
+        content.append(incoming);
+        return;
+    }
+
+    let mut tool_results = Vec::new();
+    let mut non_tool_results = Vec::new();
+    for block in std::mem::take(incoming) {
+        if block.get("type").and_then(Value::as_str) == Some("tool_result") {
+            tool_results.push(block);
+        } else {
+            non_tool_results.push(block);
+        }
+    }
+    let insert_at = content
+        .iter()
+        .position(|block| block.get("type").and_then(Value::as_str) != Some("tool_result"))
+        .unwrap_or(content.len());
+    content.splice(insert_at..insert_at, tool_results.drain(..));
+    content.append(&mut non_tool_results);
+}
+
+pub(super) fn apply_claude_thinking_config(
+    request: &mut serde_json::Map<String, Value>,
+    model: &str,
+    supports_adaptive_thinking: bool,
+    effort: Option<ReasoningEffortConfig>,
+) -> Result<()> {
+    if effort
+        .as_ref()
+        .is_some_and(|effort| !matches!(effort, ReasoningEffortConfig::None))
+        && !supports_adaptive_thinking
+    {
+        return Err(PraxisErr::InvalidRequest(format!(
+            "Claude model `{model}` is not declared to support adaptive thinking"
+        )));
+    }
+    if matches!(effort.as_ref(), Some(ReasoningEffortConfig::None)) {
+        if model.eq_ignore_ascii_case("claude-sonnet-5") {
+            request.insert("thinking".to_string(), json!({ "type": "disabled" }));
+        }
+        return Ok(());
+    }
+    let Some(effort) = effort
+        .as_ref()
+        .map(claude_effort_value)
+        .transpose()?
+        .flatten()
+    else {
+        return Ok(());
+    };
+
+    request.insert("thinking".to_string(), json!({ "type": "adaptive" }));
+    request.insert("output_config".to_string(), json!({ "effort": effort }));
+    Ok(())
+}
+
+pub(super) fn claude_effort_value(effort: &ReasoningEffortConfig) -> Result<Option<&str>> {
+    let value = match effort {
+        ReasoningEffortConfig::None => return Ok(None),
+        ReasoningEffortConfig::Minimal | ReasoningEffortConfig::Low => "low",
+        ReasoningEffortConfig::Medium => "medium",
+        ReasoningEffortConfig::High => "high",
+        ReasoningEffortConfig::XHigh => "xhigh",
+        ReasoningEffortConfig::Max | ReasoningEffortConfig::Ultra => "max",
+        ReasoningEffortConfig::Custom(value) => match value.trim() {
+            "low" => "low",
+            "medium" => "medium",
+            "high" => "high",
+            "xhigh" => "xhigh",
+            "max" => "max",
+            unsupported => {
+                return Err(PraxisErr::InvalidRequest(format!(
+                    "Claude reasoning effort `{unsupported}` is unsupported; expected low, medium, high, xhigh, or max"
+                )));
+            }
+        },
+    };
+    Ok(Some(value))
 }
 
 pub(super) fn build_common_request(
@@ -63,7 +227,7 @@ pub(super) fn build_common_request(
     apply_common_reasoning_config(
         &mut request,
         &compat,
-        effort.or(model_info.default_reasoning_level),
+        effort.or_else(|| model_info.default_reasoning_level.clone()),
     );
 
     if let Some(max_tokens_field) = compat.max_tokens_field {
@@ -72,7 +236,7 @@ pub(super) fn build_common_request(
             Value::Number(
                 compat
                     .max_tokens
-                    .unwrap_or(DEFAULT_CLAUDE_MAX_TOKENS)
+                    .unwrap_or(DEFAULT_COMMON_MAX_TOKENS)
                     .into(),
             ),
         );

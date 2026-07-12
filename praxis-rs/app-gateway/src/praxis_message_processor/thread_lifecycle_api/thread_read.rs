@@ -1,9 +1,79 @@
 use super::thread_list::ThreadListFilters;
 use super::*;
+use crate::praxis_message_processor::thread_store_api::ThreadHistoryPageReadError;
 use praxis_app_gateway_protocol::THREAD_LIST_MAX_LIMIT;
 use praxis_core::ThreadSortKey as CoreThreadSortKey;
 
 impl PraxisMessageProcessor {
+    pub(in crate::praxis_message_processor) async fn thread_history_read(
+        &mut self,
+        request_id: ConnectionRequestId,
+        params: ThreadHistoryReadParams,
+    ) {
+        let ThreadHistoryReadParams {
+            thread_id,
+            cursor,
+            limit,
+        } = params;
+        let Some(thread_uuid) = self
+            .ensure_thread_id_for_request(&thread_id, &request_id)
+            .await
+        else {
+            return;
+        };
+
+        let preferred_path = self
+            .thread_manager
+            .get_thread(thread_uuid)
+            .await
+            .ok()
+            .and_then(|thread| thread.rollout_path());
+        let rollout_path =
+            match resolve_thread_rollout_path(&self.config, thread_uuid, preferred_path).await {
+                Ok(path) => path,
+                Err(error) => {
+                    self.outgoing.send_error(request_id, error).await;
+                    return;
+                }
+            };
+
+        let page =
+            match ThreadStore::read_turn_page_from_rollout(&rollout_path, cursor, limit).await {
+                Ok(page) => page,
+                Err(error @ ThreadHistoryPageReadError::InvalidCursor { .. })
+                | Err(error @ ThreadHistoryPageReadError::InvalidLimit { .. }) => {
+                    self.send_invalid_request_error(
+                        request_id,
+                        format!("invalid history page: {error}"),
+                    )
+                    .await;
+                    return;
+                }
+                Err(ThreadHistoryPageReadError::Io(error)) => {
+                    self.send_internal_error(
+                        request_id,
+                        format!(
+                            "failed to load rollout `{}` for thread {thread_uuid}: {error}",
+                            rollout_path.display()
+                        ),
+                    )
+                    .await;
+                    return;
+                }
+            };
+
+        self.outgoing
+            .send_response(
+                request_id,
+                ThreadHistoryReadResponse {
+                    thread_id: thread_uuid.to_string(),
+                    turns: page.turns,
+                    page: page.page,
+                },
+            )
+            .await;
+    }
+
     pub(in crate::praxis_message_processor) async fn thread_read(
         &mut self,
         request_id: ConnectionRequestId,

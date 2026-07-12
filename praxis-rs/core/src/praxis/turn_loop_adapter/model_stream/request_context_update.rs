@@ -23,12 +23,14 @@ pub(super) async fn apply_round_settings(
         .with_model(settings.model_slug, &session.services.models_manager)
         .await;
     let mut effective_config = (*effective_context.config).clone();
-    let effective_reasoning = settings.reasoning.or(effective_context.reasoning_effort);
+    let effective_reasoning = settings
+        .reasoning
+        .or_else(|| effective_context.reasoning_effort.clone());
     let effective_service_tier = settings.service_tier.or(effective_config.service_tier);
-    effective_config.model_reasoning_effort = effective_reasoning;
+    effective_config.model_reasoning_effort = effective_reasoning.clone();
     effective_config.service_tier = effective_service_tier;
     effective_context.config = Arc::new(effective_config);
-    effective_context.reasoning_effort = effective_reasoning;
+    effective_context.reasoning_effort = effective_reasoning.clone();
     effective_context.collaboration_mode = effective_context.collaboration_mode.with_updates(
         Some(effective_context.model_info.slug.clone()),
         Some(effective_reasoning),

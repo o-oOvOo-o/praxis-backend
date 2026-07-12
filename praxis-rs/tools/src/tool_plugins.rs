@@ -511,6 +511,7 @@ fn register_multi_agent(
         create_spawn_agent_tool(SpawnAgentToolOptions {
             available_models: &config.available_models,
             agent_type_description,
+            multi_agent_mode: &config.multi_agent_mode,
         }),
         /*supports_parallel_tool_calls*/ false,
         config.code_mode_enabled,

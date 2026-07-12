@@ -331,7 +331,7 @@ impl PraxisMessageProcessor {
                 return;
             }
         };
-        let Some((_, thread)) = self
+        let Some((thread_id, thread)) = self
             .ensure_thread_for_request(params.thread_id.as_str(), &request_id)
             .await
         else {
@@ -368,8 +368,9 @@ impl PraxisMessageProcessor {
         };
 
         let turn_id = self
-            .submit_core_op(
+            .submit_connection_owned_turn(
                 &request_id,
+                thread_id,
                 thread.as_ref(),
                 thread.config_snapshot().await.user_turn_op(
                     vec![CoreUserInput::Text {

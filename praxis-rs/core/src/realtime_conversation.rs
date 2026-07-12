@@ -459,7 +459,11 @@ async fn prepare_realtime_start(
         .auth_manager()
         .unwrap_or_else(|| Arc::clone(&sess.services.auth_manager));
     let setup = ProviderDecisionCenter::new(Some(auth_manager))
-        .setup_provider(&provider, AuthRequestPurpose::Realtime)
+        .setup_provider(
+            &config.model_provider_id,
+            &provider,
+            AuthRequestPurpose::Realtime,
+        )
         .await?;
     let mut api_provider = setup.api_provider;
     if let Some(realtime_ws_base_url) = &config.experimental_realtime_ws_base_url {

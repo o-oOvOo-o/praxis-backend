@@ -43,7 +43,8 @@ fn model_from_preset(preset: &ModelPreset) -> Model {
             .supported_reasoning_efforts
             .iter()
             .map(|preset| ReasoningEffortOption {
-                reasoning_effort: preset.effort,
+                reasoning_effort: preset.effort.clone(),
+                display_name: preset.display_name.clone(),
                 description: preset.description.clone(),
             })
             .collect(),

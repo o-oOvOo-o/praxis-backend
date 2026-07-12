@@ -14,7 +14,7 @@ pub(crate) type ProfileMatcher = for<'a> fn(&ProfileMatchContext<'a>) -> bool;
 pub(crate) type FirstPartyProviderMatcher = fn(&str, &ModelProviderInfo) -> bool;
 pub(crate) type FirstPartyModelMatcher = fn(&str) -> bool;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ProfileDescriptor {
     pub(crate) id: BehaviorProfileId,
     #[cfg(test)]
@@ -29,7 +29,7 @@ pub(crate) struct ProfileDescriptor {
 }
 
 impl ProfileDescriptor {
-    pub(crate) fn matches(self, ctx: &ProfileMatchContext<'_>) -> bool {
+    pub(crate) fn matches(&self, ctx: &ProfileMatchContext<'_>) -> bool {
         (self.matcher)(ctx)
     }
 }
@@ -39,6 +39,7 @@ pub(crate) struct ProfilePromptLayerDescriptor {
     pub(crate) id: &'static str,
     pub(crate) purpose: LlmPromptPurpose,
     pub(crate) content: &'static str,
+    matcher: Option<ProfileMatcher>,
 }
 
 impl ProfilePromptLayerDescriptor {
@@ -47,7 +48,25 @@ impl ProfilePromptLayerDescriptor {
             id,
             purpose: LlmPromptPurpose::ModelInstructions,
             content,
+            matcher: None,
         }
+    }
+
+    pub(crate) const fn model_instructions_for(
+        id: &'static str,
+        content: &'static str,
+        matcher: ProfileMatcher,
+    ) -> Self {
+        Self {
+            id,
+            purpose: LlmPromptPurpose::ModelInstructions,
+            content,
+            matcher: Some(matcher),
+        }
+    }
+
+    pub(crate) fn matches(&self, ctx: &ProfileMatchContext<'_>) -> bool {
+        self.matcher.is_none_or(|matcher| matcher(ctx))
     }
 }
 
@@ -91,7 +110,7 @@ impl ProfileProviderPolicy {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct ProfileTaskPolicyDescriptor {
     pub(crate) auto_title: Option<ProfileAutoTitlePolicyDescriptor>,
     pub(crate) compact_execution: Option<CompactExecutionPolicy>,
@@ -164,7 +183,7 @@ impl ProfileToolCapabilityDescriptor {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ProfileAutoTitlePolicyDescriptor {
     pub(crate) model: ProfileAutoTitleModel,
     pub(crate) profile: AutoTitleProfile,

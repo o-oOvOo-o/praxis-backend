@@ -6451,6 +6451,7 @@ dependencies = [
  "tungstenite",
  "url",
  "wiremock",
+ "zeroize",
 ]
 
 [[package]]
@@ -7035,6 +7036,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "sha1",
+ "sha2",
  "shlex",
  "similar",
  "sqlx",
@@ -7057,6 +7059,7 @@ dependencies = [
  "which 8.0.0",
  "windows-sys 0.52.0",
  "wiremock",
+ "zeroize",
  "zip 2.4.2",
  "zstd",
 ]
@@ -7341,6 +7344,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "core_test_support",
+ "dunce",
  "keyring",
  "once_cell",
  "os_info",
@@ -7369,6 +7373,7 @@ dependencies = [
  "urlencoding",
  "webbrowser",
  "wiremock",
+ "zeroize",
 ]
 
 [[package]]
@@ -7921,6 +7926,7 @@ dependencies = [
  "which 8.0.0",
  "windows-sys 0.52.0",
  "winsplit",
+ "zeroize",
 ]
 
 [[package]]

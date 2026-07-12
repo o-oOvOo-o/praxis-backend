@@ -220,7 +220,7 @@ fn build_agent_shared_config(turn: &TurnContext) -> Result<Config, FunctionCallE
     config.model = Some(turn.model_info.slug.clone());
     config.model_provider_id = turn.config.model_provider_id.clone();
     config.model_provider = turn.provider.clone();
-    config.model_reasoning_effort = turn.reasoning_effort;
+    config.model_reasoning_effort = turn.reasoning_effort.clone();
     config.model_reasoning_summary = Some(turn.reasoning_summary);
     config.developer_instructions = turn.developer_instructions.clone();
     config.compact_prompt = turn.compact_prompt.clone();
@@ -321,13 +321,13 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
             .await;
 
         config.model = Some(selected_model_name.clone());
-        if let Some(reasoning_effort) = requested_reasoning_effort {
+        if let Some(reasoning_effort) = requested_reasoning_effort.as_ref() {
             validate_spawn_agent_reasoning_effort(
                 &selected_model_name,
                 &selected_model_info.supported_reasoning_levels,
                 reasoning_effort,
             )?;
-            config.model_reasoning_effort = Some(reasoning_effort);
+            config.model_reasoning_effort = Some(reasoning_effort.clone());
         } else {
             config.model_reasoning_effort = selected_model_info.default_reasoning_level;
         }
@@ -349,13 +349,13 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
             .get_model_info(&selected_model_name, config)
             .await;
         config.model = Some(selected_model_name.clone());
-        if let Some(reasoning_effort) = requested_reasoning_effort {
+        if let Some(reasoning_effort) = requested_reasoning_effort.as_ref() {
             validate_spawn_agent_reasoning_effort(
                 &selected_model_name,
                 &selected_model_info.supported_reasoning_levels,
                 reasoning_effort,
             )?;
-            config.model_reasoning_effort = Some(reasoning_effort);
+            config.model_reasoning_effort = Some(reasoning_effort.clone());
         } else {
             config.model_reasoning_effort = selected_model_info.default_reasoning_level;
         }
@@ -363,13 +363,13 @@ pub(crate) async fn apply_requested_spawn_agent_model_overrides(
         return Ok(());
     }
 
-    if let Some(reasoning_effort) = requested_reasoning_effort {
+    if let Some(reasoning_effort) = requested_reasoning_effort.as_ref() {
         validate_spawn_agent_reasoning_effort(
             &turn.model_info.slug,
             &turn.model_info.supported_reasoning_levels,
             reasoning_effort,
         )?;
-        config.model_reasoning_effort = Some(reasoning_effort);
+        config.model_reasoning_effort = Some(reasoning_effort.clone());
     }
 
     Ok(())
@@ -596,7 +596,9 @@ fn normalize_spawn_agent_model_aliases(requested_model: &str) -> Vec<String> {
 }
 
 fn strip_embedded_reasoning_suffix(model: &str) -> Option<String> {
-    for suffix in ["-xhigh", "-x-high", "-high", "xhigh", "x-high"] {
+    for suffix in [
+        "-ultra", "-max", "-xhigh", "-x-high", "-high", "ultra", "xhigh", "x-high",
+    ] {
         if let Some(base) = model.strip_suffix(suffix)
             && !base.is_empty()
         {
@@ -614,6 +616,12 @@ fn spawn_agent_embedded_reasoning_effort(requested_model: &str) -> Option<Reason
         .to_ascii_lowercase();
     if normalized.is_empty() {
         return None;
+    }
+    if normalized.ends_with("-ultra") || normalized.ends_with("ultra") {
+        return Some(ReasoningEffort::Ultra);
+    }
+    if normalized.ends_with("-max") || normalized.ends_with("max") {
+        return Some(ReasoningEffort::Max);
     }
     if normalized.ends_with("-xhigh")
         || normalized.ends_with("-x-high")
@@ -661,6 +669,14 @@ mod tests {
         assert_eq!(
             spawn_agent_embedded_reasoning_effort("gpt5.5-high"),
             Some(ReasoningEffort::High)
+        );
+        assert!(
+            spawn_agent_model_candidates("gpt 5.6 sol ultra", &migrations)
+                .contains(&"gpt-5.6-sol".to_string())
+        );
+        assert_eq!(
+            spawn_agent_embedded_reasoning_effort("gpt 5.6 sol ultra"),
+            Some(ReasoningEffort::Ultra)
         );
     }
 
@@ -729,11 +745,11 @@ mod tests {
 fn validate_spawn_agent_reasoning_effort(
     model: &str,
     supported_reasoning_levels: &[ReasoningEffortPreset],
-    requested_reasoning_effort: ReasoningEffort,
+    requested_reasoning_effort: &ReasoningEffort,
 ) -> Result<(), FunctionCallError> {
     if supported_reasoning_levels
         .iter()
-        .any(|preset| preset.effort == requested_reasoning_effort)
+        .any(|preset| &preset.effort == requested_reasoning_effort)
     {
         return Ok(());
     }

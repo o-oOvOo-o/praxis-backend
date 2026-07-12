@@ -17,18 +17,42 @@ use crate::model_provider_info::ModelProviderInfo;
 impl ProviderDecisionCenter {
     pub(crate) async fn resolve(
         &self,
+        provider_id: &str,
         provider: &ModelProviderInfo,
         purpose: AuthRequestPurpose,
     ) -> Result<AuthResolution> {
         let interface = ProviderInterface::from_provider(provider, None);
 
-        if let Some((env_key, api_key)) = provider_env_api_key(provider)? {
+        if provider.is_anthropic()
+            && let Some(auth_manager) = self.auth_manager.as_ref()
+        {
+            let oauth = auth_manager
+                .anthropic_oauth_token()
+                .await
+                .map_err(|error| {
+                    PraxisErr::Io(std::io::Error::other(format!(
+                        "failed to resolve Anthropic OAuth credential: {error}"
+                    )))
+                })?;
+            if let Some(token) = oauth {
+                return Ok(AuthResolution {
+                    auth: None,
+                    auth_mode: None,
+                    api_auth: CoreAuthProvider::from_anthropic_oauth(token),
+                    source: AuthDecisionSource::AnthropicOauthCredentialStore,
+                    realm: AuthRealm::AnthropicOauth,
+                    interface: ProviderInterface::ClaudeMessages,
+                });
+            }
+        }
+
+        if let Some((source, realm, api_auth)) = self.provider_api_key(provider_id, provider)? {
             return Ok(AuthResolution {
                 auth: None,
                 auth_mode: Some(AuthMode::ApiKey),
-                api_auth: CoreAuthProvider::new(Some(api_key), None),
-                source: AuthDecisionSource::ProviderEnvKey(env_key),
-                realm: AuthRealm::ProviderEnvironment,
+                api_auth,
+                source,
+                realm,
                 interface: ProviderInterface::from_provider(provider, Some(AuthMode::ApiKey)),
             });
         }
@@ -79,6 +103,57 @@ impl ProviderDecisionCenter {
         provider.can_use_managed_auth()
     }
 
+    fn provider_api_key(
+        &self,
+        provider_id: &str,
+        provider: &ModelProviderInfo,
+    ) -> Result<Option<(AuthDecisionSource, AuthRealm, CoreAuthProvider)>> {
+        let Some(env_key) = provider.env_key.as_ref() else {
+            return Ok(None);
+        };
+        if let Some(api_key) = std::env::var(env_key)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+        {
+            let api_key = praxis_login::ProviderApiKey::new(api_key).map_err(|_| {
+                PraxisErr::InvalidRequest(format!(
+                    "environment variable `{env_key}` contains an invalid provider API key"
+                ))
+            })?;
+            return Ok(Some((
+                AuthDecisionSource::ProviderEnvKey(env_key.clone()),
+                AuthRealm::ProviderEnvironment,
+                CoreAuthProvider::from_provider_api_key(api_key, provider.wire_api),
+            )));
+        }
+
+        if let Some(auth_manager) = self.auth_manager.as_ref() {
+            let credential_id =
+                praxis_login::provider_api_key_credential_id(provider_id).map_err(|err| {
+                    PraxisErr::InvalidRequest(format!(
+                        "invalid provider ID `{provider_id}` for credential storage: {err}"
+                    ))
+                })?;
+            let stored = auth_manager.provider_api_key(&credential_id).map_err(|err| {
+                PraxisErr::Io(std::io::Error::other(format!(
+                    "failed to load provider credential `{credential_id}` from the operating system credential store: {err}"
+                )))
+            })?;
+            if let Some(api_key) = stored {
+                return Ok(Some((
+                    AuthDecisionSource::ProviderCredentialStore(credential_id.clone()),
+                    AuthRealm::ProviderCredentialStore,
+                    CoreAuthProvider::from_provider_api_key(api_key, provider.wire_api),
+                )));
+            }
+        }
+
+        Err(PraxisErr::EnvVar(EnvVarError {
+            var: env_key.clone(),
+            instructions: provider.env_key_instructions.clone(),
+        }))
+    }
+
     fn resolve_from_managed_auth(
         &self,
         provider: &ModelProviderInfo,
@@ -125,20 +200,4 @@ impl ProviderDecisionCenter {
             interface,
         })
     }
-}
-
-fn provider_env_api_key(provider: &ModelProviderInfo) -> Result<Option<(String, String)>> {
-    let Some(env_key) = provider.env_key.as_ref() else {
-        return Ok(None);
-    };
-    let api_key = std::env::var(env_key)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            PraxisErr::EnvVar(EnvVarError {
-                var: env_key.clone(),
-                instructions: provider.env_key_instructions.clone(),
-            })
-        })?;
-    Ok(Some((env_key.clone(), api_key)))
 }

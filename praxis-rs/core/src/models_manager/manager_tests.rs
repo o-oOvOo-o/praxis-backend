@@ -103,6 +103,35 @@ fn provider_for(base_url: String) -> ModelProviderInfo {
     }
 }
 
+#[tokio::test]
+async fn identical_provider_configs_do_not_alias_distinct_provider_ids() {
+    let praxis_home = tempdir().expect("temp dir");
+    let provider = ModelProviderInfo::create_anthropic_provider();
+    let auth_manager =
+        AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("unused"));
+    let manager = ModelsManager::new_with_provider(
+        praxis_home.path().to_path_buf(),
+        auth_manager,
+        None,
+        CollaborationModesConfig::default(),
+        "provider-a".to_string(),
+        provider.clone(),
+    );
+    *manager.remote_models.write().await = vec![remote_model("sentinel-a", "Sentinel A", 0)];
+
+    let mut config = ConfigBuilder::default()
+        .praxis_home(praxis_home.path().to_path_buf())
+        .build()
+        .await
+        .expect("load default test config");
+    config.model_provider_id = "provider-b".to_string();
+    config.model_provider = provider;
+
+    let models = manager.remote_models_for_config(&config).await;
+    assert!(!models.iter().any(|model| model.slug == "sentinel-a"));
+    assert!(models.iter().any(|model| model.slug == "claude-sonnet-5"));
+}
+
 struct ProviderAuthScript {
     tempdir: TempDir,
     command: String,
@@ -262,7 +291,7 @@ async fn get_model_info_tracks_fallback_usage() {
 }
 
 #[tokio::test]
-async fn list_models_includes_known_gpt55_picker_models() {
+async fn list_models_includes_known_openai_picker_models() {
     let praxis_home = tempdir().expect("temp dir");
     let auth_manager =
         AuthManager::from_auth_for_testing(OpenAiAccountAuth::from_api_key("Test API Key"));
@@ -274,6 +303,18 @@ async fn list_models_includes_known_gpt55_picker_models() {
     );
 
     let models = manager.list_models(RefreshStrategy::Offline).await;
+    let gpt56_sol = models
+        .iter()
+        .find(|model| model.model == "gpt-5.6-sol")
+        .expect("GPT-5.6 Sol should be picker-visible from local known catalog");
+    let gpt56_terra = models
+        .iter()
+        .find(|model| model.model == "gpt-5.6-terra")
+        .expect("GPT-5.6 Terra should be picker-visible from local known catalog");
+    let gpt56_luna = models
+        .iter()
+        .find(|model| model.model == "gpt-5.6-luna")
+        .expect("GPT-5.6 Luna should be picker-visible from local known catalog");
     let gpt55 = models
         .iter()
         .find(|model| model.model == "gpt-5.5")
@@ -283,6 +324,29 @@ async fn list_models_includes_known_gpt55_picker_models() {
         .find(|model| model.model == "gpt-5.5-pro")
         .expect("GPT-5.5 Pro should be picker-visible from local known catalog");
 
+    assert!(gpt56_sol.show_in_picker);
+    assert!(gpt56_terra.show_in_picker);
+    assert!(gpt56_luna.show_in_picker);
+    assert_eq!(
+        gpt56_sol.default_reasoning_effort,
+        Some(praxis_protocol::openai_models::ReasoningEffort::Low)
+    );
+    assert_eq!(
+        gpt56_terra.default_reasoning_effort,
+        Some(praxis_protocol::openai_models::ReasoningEffort::Medium)
+    );
+    assert!(
+        gpt56_sol
+            .supported_reasoning_efforts
+            .iter()
+            .any(|preset| preset.effort == praxis_protocol::openai_models::ReasoningEffort::Ultra)
+    );
+    assert!(
+        !gpt56_luna
+            .supported_reasoning_efforts
+            .iter()
+            .any(|preset| preset.effort == praxis_protocol::openai_models::ReasoningEffort::Ultra)
+    );
     assert!(gpt55.show_in_picker);
     assert!(gpt55_pro.show_in_picker);
     assert!(

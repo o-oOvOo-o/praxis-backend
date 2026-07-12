@@ -1,42 +1,56 @@
 use super::*;
 
-pub(super) fn response_item_to_claude_message(item: &ResponseItem) -> Option<Value> {
-    match item {
+pub(super) fn response_item_to_claude_message(item: &ResponseItem) -> Result<Option<Value>> {
+    let message = match item {
         ResponseItem::Message { role, content, .. } if role == "user" || role == "assistant" => {
-            let blocks = claude_content_blocks(content);
+            let blocks = claude_content_blocks(content)?;
             (!blocks.is_empty()).then_some(json!({
                 "role": role,
                 "content": blocks,
             }))
         }
+        ResponseItem::Reasoning {
+            encrypted_content, ..
+        } => decode_claude_reasoning_block(encrypted_content.as_deref())?.map(|block| {
+            json!({
+                "role": "assistant",
+                "content": [block],
+            })
+        }),
         ResponseItem::FunctionCall {
             name,
             arguments,
             call_id,
             ..
-        } => Some(json!({
-            "role": "assistant",
-            "content": [{
-                "type": "tool_use",
-                "id": call_id,
-                "name": name,
-                "input": normalize_function_arguments(arguments),
-            }],
-        })),
+        } => {
+            validate_claude_tool_name(name)?;
+            Some(json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": call_id,
+                    "name": name,
+                    "input": normalize_function_arguments(arguments),
+                }],
+            }))
+        }
         ResponseItem::CustomToolCall {
             name,
             input,
             call_id,
             ..
-        } => Some(json!({
-            "role": "assistant",
-            "content": [{
-                "type": "tool_use",
-                "id": call_id,
-                "name": name,
-                "input": { "input": input },
-            }],
-        })),
+        } => {
+            validate_claude_tool_name(name)?;
+            Some(json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "tool_use",
+                    "id": call_id,
+                    "name": name,
+                    "input": { "input": input },
+                }],
+            }))
+        }
         ResponseItem::LocalShellCall {
             call_id,
             id,
@@ -95,7 +109,99 @@ pub(super) fn response_item_to_claude_message(item: &ResponseItem) -> Option<Val
             }],
         })),
         _ => None,
+    };
+    Ok(message)
+}
+
+pub(super) fn validate_claude_tool_name(name: &str) -> Result<()> {
+    let valid = !name.is_empty()
+        && name.len() <= CLAUDE_TOOL_NAME_MAX_BYTES
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
+    if valid {
+        return Ok(());
     }
+
+    Err(PraxisErr::InvalidRequest(format!(
+        "invalid Anthropic tool name `{name}`: expected 1-{CLAUDE_TOOL_NAME_MAX_BYTES} ASCII letters, digits, underscores, or hyphens"
+    )))
+}
+
+pub(super) fn encode_claude_reasoning_block(block: &Value) -> Result<String> {
+    Ok(format!(
+        "{CLAUDE_REASONING_BLOCK_PREFIX}{}",
+        serde_json::to_string(block)?
+    ))
+}
+
+pub(super) fn decode_claude_reasoning_block(encoded: Option<&str>) -> Result<Option<Value>> {
+    let Some(encoded) = encoded else {
+        return Ok(None);
+    };
+    let Some(payload) = encoded.strip_prefix(CLAUDE_REASONING_BLOCK_PREFIX) else {
+        return Ok(None);
+    };
+    let block: Value = serde_json::from_str(payload).map_err(|_| {
+        PraxisErr::InvalidRequest("stored Claude thinking metadata is invalid".to_string())
+    })?;
+    validate_claude_reasoning_block(&block)?;
+    Ok(Some(block))
+}
+
+pub(super) fn validate_claude_reasoning_block(block: &Value) -> Result<()> {
+    match block.get("type").and_then(Value::as_str) {
+        Some("thinking")
+            if block.get("thinking").and_then(Value::as_str).is_some()
+                && block
+                    .get("signature")
+                    .and_then(Value::as_str)
+                    .is_some_and(|signature| !signature.is_empty()) =>
+        {
+            Ok(())
+        }
+        Some("redacted_thinking")
+            if block
+                .get("data")
+                .and_then(Value::as_str)
+                .is_some_and(|data| !data.is_empty()) =>
+        {
+            Ok(())
+        }
+        Some("thinking") => Err(PraxisErr::InvalidRequest(
+            "stored Claude thinking block is missing its thinking text or signature".to_string(),
+        )),
+        Some("redacted_thinking") => Err(PraxisErr::InvalidRequest(
+            "stored Claude redacted thinking block is missing its opaque data".to_string(),
+        )),
+        _ => Err(PraxisErr::InvalidRequest(
+            "stored Claude thinking metadata has an unsupported block type".to_string(),
+        )),
+    }
+}
+
+pub(super) fn claude_reasoning_item(block: Value, id: String) -> Result<ResponseItem> {
+    validate_claude_reasoning_block(&block)?;
+    let content = match block.get("type").and_then(Value::as_str) {
+        Some("thinking") => block
+            .get("thinking")
+            .and_then(Value::as_str)
+            .filter(|thinking| !thinking.is_empty())
+            .map(|thinking| {
+                vec![ReasoningItemContent::ReasoningText {
+                    text: thinking.to_string(),
+                }]
+            }),
+        Some("redacted_thinking") => None,
+        _ => unreachable!("validated Claude reasoning block type"),
+    };
+    let encrypted_content = Some(encode_claude_reasoning_block(&block)?);
+    Ok(ResponseItem::Reasoning {
+        id,
+        summary: Vec::new(),
+        content,
+        encrypted_content,
+    })
 }
 
 pub(super) fn response_item_to_common_message(
@@ -521,6 +627,13 @@ pub(super) fn map_common_reasoning_effort(
         ReasoningEffortConfig::XHigh => mapping
             .and_then(|mapping| mapping.xhigh.clone())
             .unwrap_or_else(|| effort.to_string()),
+        ReasoningEffortConfig::Max => mapping
+            .and_then(|mapping| mapping.max.clone())
+            .unwrap_or_else(|| effort.to_string()),
+        ReasoningEffortConfig::Ultra => mapping
+            .and_then(|mapping| mapping.max.clone())
+            .unwrap_or_else(|| ReasoningEffortConfig::Max.to_string()),
+        ReasoningEffortConfig::Custom(_) => effort.to_string(),
     }
 }
 
@@ -540,7 +653,7 @@ pub(super) fn common_max_tokens_field_name(field: ModelProviderMaxTokensField) -
 
 pub(super) fn tool_result_to_claude_message(
     call_id: &str,
-    name: Option<&str>,
+    _name: Option<&str>,
     output: &FunctionCallOutputPayload,
 ) -> Value {
     let mut block = serde_json::Map::from_iter([
@@ -554,16 +667,13 @@ pub(super) fn tool_result_to_claude_message(
     if let Some(false) = output.success {
         block.insert("is_error".to_string(), Value::Bool(true));
     }
-    if let Some(name) = name {
-        block.insert("name".to_string(), Value::String(name.to_string()));
-    }
     json!({
         "role": "user",
         "content": [Value::Object(block)],
     })
 }
 
-pub(super) fn claude_content_blocks(content: &[ContentItem]) -> Vec<Value> {
+pub(super) fn claude_content_blocks(content: &[ContentItem]) -> Result<Vec<Value>> {
     let mut blocks = Vec::new();
     for item in content {
         match item {
@@ -577,6 +687,17 @@ pub(super) fn claude_content_blocks(content: &[ContentItem]) -> Vec<Value> {
             }
             ContentItem::InputImage { image_url } => {
                 if let Some((media_type, data)) = parse_data_url(image_url) {
+                    if !matches!(
+                        media_type.as_str(),
+                        "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+                    ) || data.is_empty()
+                        || !is_valid_base64(&data)
+                    {
+                        return Err(PraxisErr::InvalidRequest(
+                            "Claude image data must be non-empty JPEG, PNG, GIF, or WebP base64"
+                                .to_string(),
+                        ));
+                    }
                     blocks.push(json!({
                         "type": "image",
                         "source": {
@@ -585,16 +706,26 @@ pub(super) fn claude_content_blocks(content: &[ContentItem]) -> Vec<Value> {
                             "data": data,
                         }
                     }));
-                } else {
+                } else if url::Url::parse(image_url).is_ok_and(|url| {
+                    matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+                }) {
                     blocks.push(json!({
-                        "type": "text",
-                        "text": format!("[Image URL: {image_url}]"),
+                        "type": "image",
+                        "source": {
+                            "type": "url",
+                            "url": image_url,
+                        }
                     }));
+                } else {
+                    return Err(PraxisErr::InvalidRequest(
+                        "Claude image input must be a supported base64 data URL or an HTTP(S) URL"
+                            .to_string(),
+                    ));
                 }
             }
         }
     }
-    blocks
+    Ok(blocks)
 }
 
 pub(super) fn common_message_content(content: &[ContentItem]) -> Value {
@@ -642,13 +773,24 @@ pub(super) fn parse_data_url(image_url: &str) -> Option<(String, String)> {
     Some((media_type.to_string(), data.to_string()))
 }
 
-pub(super) fn tool_spec_to_claude_tool(tool: &ToolSpec) -> Option<Value> {
-    let function = tool_spec_to_function_definition(tool)?;
-    Some(json!({
+fn is_valid_base64(data: &str) -> bool {
+    let mut decoder = base64::read::DecoderReader::new(
+        data.as_bytes(),
+        &base64::engine::general_purpose::STANDARD,
+    );
+    std::io::copy(&mut decoder, &mut std::io::sink()).is_ok()
+}
+
+pub(super) fn tool_spec_to_claude_tool(tool: &ToolSpec) -> Result<Option<Value>> {
+    let Some(function) = tool_spec_to_function_definition(tool) else {
+        return Ok(None);
+    };
+    validate_claude_tool_name(&function.name)?;
+    Ok(Some(json!({
         "name": function.name,
         "description": function.description,
         "input_schema": function.parameters,
-    }))
+    })))
 }
 
 pub(super) fn tool_spec_to_common_tool(tool: &ToolSpec) -> Option<Value> {
@@ -693,8 +835,8 @@ pub(super) fn tool_spec_to_function_definition(tool: &ToolSpec) -> Option<Provid
         ToolSpec::Freeform(tool) => Some(ProviderFunctionTool {
             name: tool.name.clone(),
             description: format!(
-                "{}\n\nPass the full raw tool input string in the `input` field.",
-                tool.description
+                "{}\n\nThis provider exposes the freeform tool through a function wrapper. Pass the complete raw payload as the `input` string. The payload must satisfy this {} grammar:\n\n{}",
+                tool.description, tool.format.syntax, tool.format.definition
             ),
             parameters: serde_json::to_value(freeform_tool_schema()).ok()?,
         }),

@@ -2,6 +2,7 @@ use super::*;
 use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessage;
 use crate::server_request_lifecycle::send_server_request;
+use crate::thread_state::TurnControllerReservationError;
 use anyhow::Result;
 use praxis_app_gateway_protocol::DynamicToolCallParams;
 use praxis_app_gateway_protocol::ServerRequestPayload;
@@ -609,19 +610,36 @@ async fn aborting_pending_request_clears_pending_state() -> Result<()> {
 }
 
 #[tokio::test]
-async fn server_request_send_uses_live_thread_subscribers() -> Result<()> {
+async fn server_request_send_uses_turn_controller_not_other_subscribers() -> Result<()> {
     let manager = ThreadStateManager::new();
     let thread_id = ThreadId::new();
-    let connection_id = ConnectionId(7);
-    manager.connection_initialized(connection_id).await;
+    let controller_connection_id = ConnectionId(7);
+    let other_connection_id = ConnectionId(8);
+    manager
+        .connection_initialized(controller_connection_id)
+        .await;
+    manager.connection_initialized(other_connection_id).await;
     let thread_state = manager
         .try_ensure_connection_subscribed(
             thread_id,
-            connection_id,
+            controller_connection_id,
             /*experimental_raw_events*/ false,
         )
         .await
         .expect("connection should be live");
+    manager
+        .try_ensure_connection_subscribed(
+            thread_id,
+            other_connection_id,
+            /*experimental_raw_events*/ false,
+        )
+        .await
+        .expect("connection should be live");
+    let reservation = manager
+        .reserve_turn_controller(thread_id, controller_connection_id)
+        .await
+        .expect("controller connection should be live");
+    assert!(manager.commit_turn_controller(reservation, "turn-1").await);
 
     let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(8);
     let outgoing = Arc::new(OutgoingMessageSender::new(outgoing_tx));
@@ -631,6 +649,7 @@ async fn server_request_send_uses_live_thread_subscribers() -> Result<()> {
         &manager,
         &thread_state,
         &thread_outgoing,
+        "turn-1",
         ServerRequestPayload::ToolRequestUserInput(ToolRequestUserInputParams {
             thread_id: thread_id.to_string(),
             turn_id: "turn-1".to_string(),
@@ -649,15 +668,15 @@ async fn server_request_send_uses_live_thread_subscribers() -> Result<()> {
     else {
         panic!("expected tool request to be sent to the live subscriber");
     };
-    assert_eq!(request_connection_id, connection_id);
+    assert_eq!(request_connection_id, controller_connection_id);
+    assert!(outgoing_rx.try_recv().is_err());
     Ok(())
 }
 
 #[tokio::test]
-async fn pending_server_request_replays_after_late_subscription() -> Result<()> {
+async fn server_request_without_turn_controller_fails_closed() -> Result<()> {
     let manager = ThreadStateManager::new();
     let thread_id = ThreadId::new();
-    let connection_id = ConnectionId(9);
     let thread_state = manager.thread_state(thread_id).await;
 
     let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(8);
@@ -665,10 +684,11 @@ async fn pending_server_request_replays_after_late_subscription() -> Result<()> 
     let thread_outgoing =
         ThreadScopedOutgoingMessageSender::new(outgoing.clone(), Vec::new(), thread_id);
 
-    let _pending_request = send_server_request(
+    let pending_request = send_server_request(
         &manager,
         &thread_state,
         &thread_outgoing,
+        "turn-1",
         ServerRequestPayload::ToolRequestUserInput(ToolRequestUserInputParams {
             thread_id: thread_id.to_string(),
             turn_id: "turn-1".to_string(),
@@ -678,48 +698,50 @@ async fn pending_server_request_replays_after_late_subscription() -> Result<()> 
     )
     .await;
     assert!(outgoing_rx.try_recv().is_err());
-
-    let pending_requests = manager.pending_server_requests(thread_id).await;
-    assert_eq!(pending_requests.len(), 1);
-    let expected_request_id = pending_requests[0].id().clone();
-
-    manager.connection_initialized(connection_id).await;
-    manager
-        .try_ensure_connection_subscribed(
-            thread_id,
-            connection_id,
-            /*experimental_raw_events*/ false,
-        )
+    let response = pending_request
+        .await_response_and_resolve(&thread_state)
         .await
-        .expect("connection should be live");
-    outgoing
-        .replay_requests_to_connection_for_thread(connection_id, pending_requests)
-        .await;
-
-    let request_message = outgoing_rx.recv().await.expect("request should replay");
-    let OutgoingEnvelope::ToConnection {
-        connection_id: request_connection_id,
-        message:
-            OutgoingMessage::Request(ServerRequest::ToolRequestUserInput {
-                request_id: replayed_request_id,
-                ..
-            }),
-        ..
-    } = request_message
-    else {
-        panic!("expected pending tool request to replay to late subscriber");
-    };
-    assert_eq!(request_connection_id, connection_id);
-    assert_eq!(replayed_request_id, expected_request_id);
+        .expect("missing controller should resolve through an explicit error");
+    let error = response.expect_err("missing controller must reject the request");
+    assert_eq!(
+        error.data,
+        Some(json!({ "reason": "missingTurnController" }))
+    );
+    assert!(manager.pending_server_requests(thread_id).await.is_empty());
     Ok(())
 }
 
 #[tokio::test]
-async fn dynamic_tool_call_request_replays_after_late_subscription() -> Result<()> {
+async fn pending_server_request_replays_only_to_turn_controller() -> Result<()> {
     let manager = ThreadStateManager::new();
     let thread_id = ThreadId::new();
-    let connection_id = ConnectionId(11);
-    let thread_state = manager.thread_state(thread_id).await;
+    let controller_connection_id = ConnectionId(11);
+    let other_connection_id = ConnectionId(12);
+    manager
+        .connection_initialized(controller_connection_id)
+        .await;
+    manager.connection_initialized(other_connection_id).await;
+    let thread_state = manager
+        .try_ensure_connection_subscribed(
+            thread_id,
+            controller_connection_id,
+            /*experimental_raw_events*/ false,
+        )
+        .await
+        .expect("controller connection should be live");
+    manager
+        .try_ensure_connection_subscribed(
+            thread_id,
+            other_connection_id,
+            /*experimental_raw_events*/ false,
+        )
+        .await
+        .expect("other connection should be live");
+    let reservation = manager
+        .reserve_turn_controller(thread_id, controller_connection_id)
+        .await
+        .expect("controller connection should be live");
+    assert!(manager.commit_turn_controller(reservation, "turn-1").await);
 
     let (outgoing_tx, mut outgoing_rx) = tokio::sync::mpsc::channel(8);
     let outgoing = Arc::new(OutgoingMessageSender::new(outgoing_tx));
@@ -730,6 +752,7 @@ async fn dynamic_tool_call_request_replays_after_late_subscription() -> Result<(
         &manager,
         &thread_state,
         &thread_outgoing,
+        "turn-1",
         ServerRequestPayload::DynamicToolCall(DynamicToolCallParams {
             thread_id: thread_id.to_string(),
             turn_id: "turn-1".to_string(),
@@ -739,23 +762,26 @@ async fn dynamic_tool_call_request_replays_after_late_subscription() -> Result<(
         }),
     )
     .await;
-    assert!(outgoing_rx.try_recv().is_err());
+    let initial_request = outgoing_rx.recv().await.expect("request should be sent");
+    assert!(matches!(
+        initial_request,
+        OutgoingEnvelope::ToConnection {
+            connection_id,
+            message: OutgoingMessage::Request(ServerRequest::DynamicToolCall { .. }),
+            ..
+        } if connection_id == controller_connection_id
+    ));
 
     let pending_requests = manager.pending_server_requests(thread_id).await;
     assert_eq!(pending_requests.len(), 1);
     let expected_request_id = pending_requests[0].id().clone();
 
-    manager.connection_initialized(connection_id).await;
-    manager
-        .try_ensure_connection_subscribed(
-            thread_id,
-            connection_id,
-            /*experimental_raw_events*/ false,
-        )
-        .await
-        .expect("connection should be live");
     outgoing
-        .replay_requests_to_connection_for_thread(connection_id, pending_requests)
+        .replay_requests_to_connection_for_thread(other_connection_id, pending_requests.clone())
+        .await;
+    assert!(outgoing_rx.try_recv().is_err());
+    outgoing
+        .replay_requests_to_connection_for_thread(controller_connection_id, pending_requests)
         .await;
 
     let request_message = outgoing_rx.recv().await.expect("request should replay");
@@ -769,11 +795,61 @@ async fn dynamic_tool_call_request_replays_after_late_subscription() -> Result<(
         ..
     } = request_message
     else {
-        panic!("expected pending dynamic tool request to replay to late subscriber");
+        panic!("expected pending dynamic tool request to replay to its controller");
     };
-    assert_eq!(request_connection_id, connection_id);
+    assert_eq!(request_connection_id, controller_connection_id);
     assert_eq!(replayed_request_id, expected_request_id);
     Ok(())
+}
+
+#[tokio::test]
+async fn disconnect_removes_controller_for_unsubscribed_thread() {
+    let manager = ThreadStateManager::new();
+    let thread_id = ThreadId::new();
+    let connection_id = ConnectionId(13);
+    manager.connection_initialized(connection_id).await;
+    manager.thread_state(thread_id).await;
+    let reservation = manager
+        .reserve_turn_controller(thread_id, connection_id)
+        .await
+        .expect("connection should be live");
+    assert!(manager.commit_turn_controller(reservation, "turn-1").await);
+
+    manager.remove_connection(connection_id).await;
+
+    assert_eq!(manager.turn_controller(thread_id, "turn-1").await, None);
+}
+
+#[tokio::test]
+async fn concurrent_turn_controller_reservation_does_not_overwrite_first() {
+    let manager = ThreadStateManager::new();
+    let thread_id = ThreadId::new();
+    let first_connection_id = ConnectionId(14);
+    let second_connection_id = ConnectionId(15);
+    manager.connection_initialized(first_connection_id).await;
+    manager.connection_initialized(second_connection_id).await;
+    let first_reservation = manager
+        .reserve_turn_controller(thread_id, first_connection_id)
+        .await
+        .expect("first controller reservation should succeed");
+
+    let second_reservation = manager
+        .reserve_turn_controller(thread_id, second_connection_id)
+        .await;
+
+    assert_eq!(
+        second_reservation,
+        Err(TurnControllerReservationError::ReservationPending)
+    );
+    assert!(
+        manager
+            .commit_turn_controller(first_reservation, "turn-1")
+            .await
+    );
+    assert_eq!(
+        manager.turn_controller(thread_id, "turn-1").await,
+        Some(first_connection_id)
+    );
 }
 
 #[test]

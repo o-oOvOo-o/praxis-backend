@@ -5,7 +5,8 @@ impl App {
         matches!(
             event,
             AppEvent::OpenProviderLoginPrompt { .. }
-                | AppEvent::ShowAnthropicLoginStatement
+                | AppEvent::BeginAnthropicOauthLogin
+                | AppEvent::AnthropicOauthLoginCompleted { .. }
                 | AppEvent::ApplyProviderSetup { .. }
                 | AppEvent::ApplyModelSelection { .. }
                 | AppEvent::PluginUninstallLoaded { .. }
@@ -35,25 +36,96 @@ impl App {
         event: AppEvent,
     ) -> Result<AppRunControl> {
         match event {
+            AppEvent::BeginAnthropicOauthLogin => {
+                self.chat_widget.add_info_message(
+                    "Opening Claude Pro/Max authorization in your browser.".to_string(),
+                    Some(
+                        "Praxis will store its own OAuth credential after authorization."
+                            .to_string(),
+                    ),
+                );
+                let praxis_home = self.config.praxis_home.clone();
+                let tx = self.app_event_tx.clone();
+                tokio::spawn(async move {
+                    let result = praxis_login::login_anthropic_oauth(&praxis_home)
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| error.to_string());
+                    tx.send(AppEvent::AnthropicOauthLoginCompleted { result });
+                });
+            }
+            AppEvent::AnthropicOauthLoginCompleted { result } => match result {
+                Ok(()) => self.chat_widget.add_info_message(
+                    "Claude Pro/Max authorization completed.".to_string(),
+                    Some("Praxis now has an independent Anthropic OAuth credential.".to_string()),
+                ),
+                Err(error) => self
+                    .chat_widget
+                    .add_error_message(format!("Claude authorization failed: {error}")),
+            },
             AppEvent::OpenProviderLoginPrompt { provider } => {
                 self.chat_widget.open_provider_login_prompt(provider);
-            }
-            AppEvent::ShowAnthropicLoginStatement => {
-                self.chat_widget.show_anthropic_login_statement();
             }
             AppEvent::ApplyProviderSetup {
                 model,
                 provider_id,
                 provider,
                 effort,
+                api_key,
             } => {
+                if provider.env_key.is_none() {
+                    self.chat_widget.add_error_message(format!(
+                        "Cannot securely store the {} API key: provider has no API-key environment reference.",
+                        provider.name
+                    ));
+                    return Ok(AppRunControl::Continue);
+                }
+                let credential_id = match praxis_login::provider_api_key_credential_id(&provider_id)
+                {
+                    Ok(credential_id) => credential_id,
+                    Err(err) => {
+                        self.chat_widget.add_error_message(format!(
+                            "Cannot securely store the {} API key: {err}",
+                            provider.name
+                        ));
+                        return Ok(AppRunControl::Continue);
+                    }
+                };
+                let praxis_home = self.config.praxis_home.clone();
+                let save_result = tokio::task::spawn_blocking(move || {
+                    praxis_login::save_provider_api_key(
+                        &praxis_home,
+                        &credential_id,
+                        api_key.expose_secret(),
+                    )
+                })
+                .await;
+                match save_result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to save provider API key in the operating system credential store: {err}"
+                        ));
+                        return Ok(AppRunControl::Continue);
+                    }
+                    Err(err) => {
+                        self.chat_widget
+                            .add_error_message(format!("Provider credential task failed: {err}"));
+                        return Ok(AppRunControl::Continue);
+                    }
+                }
                 let provider_label = provider.name.clone();
+                let write_mode = if provider.is_anthropic() {
+                    ProviderConfigWriteMode::UpsertIfMissing
+                } else {
+                    ProviderConfigWriteMode::ForceUpsert
+                };
                 self.apply_model_provider_selection(
                     model,
                     provider_id,
                     Some(provider),
                     effort,
-                    ProviderConfigWriteMode::ForceUpsert,
+                    write_mode,
                     Some(provider_label),
                 )
                 .await;
@@ -356,7 +428,7 @@ impl App {
                 self.chat_widget.set_rate_limit_switch_prompt_hidden(hidden);
             }
             AppEvent::UpdatePlanModeReasoningEffort(effort) => {
-                self.config.plan_mode_reasoning_effort = effort;
+                self.config.plan_mode_reasoning_effort = effort.clone();
                 self.chat_widget.set_plan_mode_reasoning_effort(effort);
             }
             AppEvent::PersistFullAccessWarningAcknowledged => {

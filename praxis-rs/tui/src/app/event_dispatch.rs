@@ -1096,7 +1096,8 @@ impl App {
                     .await;
             }
             event @ (AppEvent::OpenProviderLoginPrompt { .. }
-            | AppEvent::ShowAnthropicLoginStatement
+            | AppEvent::BeginAnthropicOauthLogin
+            | AppEvent::AnthropicOauthLoginCompleted { .. }
             | AppEvent::ApplyProviderSetup { .. }
             | AppEvent::ApplyModelSelection { .. }
             | AppEvent::PluginUninstallLoaded { .. }

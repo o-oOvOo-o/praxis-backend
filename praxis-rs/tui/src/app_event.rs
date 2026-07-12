@@ -22,6 +22,7 @@ use praxis_app_gateway_protocol::ThreadListResponse;
 use praxis_chatgpt::connectors::AppInfo;
 use praxis_core::ModelProviderInfo;
 use praxis_file_search::FileMatch;
+use praxis_login::ProviderApiKey;
 use praxis_protocol::ThreadId;
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::protocol::GetHistoryEntryResponseEvent;
@@ -395,8 +396,13 @@ pub(crate) enum AppEvent {
         provider: ProviderSetupKind,
     },
 
-    /// Show the policy statement behind the Anthropic sign-in entry.
-    ShowAnthropicLoginStatement,
+    /// Start the first-party Anthropic OAuth browser flow.
+    BeginAnthropicOauthLogin,
+
+    /// Finish the Anthropic OAuth browser flow without carrying any secret through the UI.
+    AnthropicOauthLoginCompleted {
+        result: Result<(), String>,
+    },
 
     /// Configure a provider definition and switch the active model to it.
     ApplyProviderSetup {
@@ -404,6 +410,7 @@ pub(crate) enum AppEvent {
         provider_id: String,
         provider: ModelProviderInfo,
         effort: Option<ReasoningEffort>,
+        api_key: ProviderApiKey,
     },
 
     /// Update the active collaboration mask in the running app and widget.

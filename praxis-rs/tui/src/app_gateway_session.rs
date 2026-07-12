@@ -320,6 +320,7 @@ fn model_preset_from_api_model(model: ApiModel) -> ModelPreset {
             .into_iter()
             .map(|effort| ReasoningEffortPreset {
                 effort: effort.reasoning_effort,
+                display_name: effort.display_name,
                 description: effort.description,
             })
             .collect(),
@@ -495,7 +496,7 @@ async fn thread_session_state_from_thread_start_response(
         response.approvals_reviewer.to_core(),
         response.sandbox.to_core(),
         response.cwd.clone(),
-        response.reasoning_effort,
+        response.reasoning_effort.clone(),
         response.thread.selfwork_plan_path.clone(),
         response.history_log_id,
         response.history_entry_count,
@@ -517,7 +518,7 @@ async fn thread_session_state_from_thread_resume_response(
         response.approvals_reviewer.to_core(),
         response.sandbox.to_core(),
         response.cwd.clone(),
-        response.reasoning_effort,
+        response.reasoning_effort.clone(),
         response.thread.selfwork_plan_path.clone(),
         response.history_log_id,
         response.history_entry_count,
@@ -539,7 +540,7 @@ async fn thread_session_state_from_thread_fork_response(
         response.approvals_reviewer.to_core(),
         response.sandbox.to_core(),
         response.cwd.clone(),
-        response.reasoning_effort,
+        response.reasoning_effort.clone(),
         response.thread.selfwork_plan_path.clone(),
         response.history_log_id,
         response.history_entry_count,

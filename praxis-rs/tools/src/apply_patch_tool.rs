@@ -9,6 +9,24 @@ use std::collections::BTreeMap;
 
 const APPLY_PATCH_LARK_GRAMMAR: &str = include_str!("tool_apply_patch.lark");
 
+const APPLY_PATCH_FREEFORM_TOOL_DESCRIPTION: &str = r#"Apply file edits with Praxis patch syntax. The freeform payload itself must be raw patch text, not JSON or a markdown code fence.
+
+Every payload starts with `*** Begin Patch` and ends with `*** End Patch`. Inside it, use one or more relative-path operations:
+- `*** Add File: path` followed by content lines prefixed with `+`.
+- `*** Update File: path` followed by one or more `@@` hunks containing context lines prefixed with a space, removed lines prefixed with `-`, and added lines prefixed with `+`.
+- `*** Delete File: path` with no following content.
+- Put `*** Move to: new/path` immediately after an Update header to rename while editing.
+
+Keep hunk context small but unique. A patch is atomic: if context does not match, inspect the current file and send a corrected patch instead of guessing.
+
+Example:
+*** Begin Patch
+*** Update File: src/main.rs
+@@ fn answer()
+-    41
++    42
+*** End Patch"#;
+
 const APPLY_PATCH_JSON_TOOL_DESCRIPTION: &str = r#"Use the `apply_patch` tool to edit files.
 Your patch language is a stripped‑down, file‑oriented diff format designed to be easy to parse and safe to apply. You can think of it as a high‑level envelope:
 
@@ -90,7 +108,7 @@ pub struct ApplyPatchToolArgs {
 pub fn create_apply_patch_freeform_tool() -> ToolSpec {
     ToolSpec::Freeform(FreeformTool {
         name: "apply_patch".to_string(),
-        description: "Use the `apply_patch` tool to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.".to_string(),
+        description: APPLY_PATCH_FREEFORM_TOOL_DESCRIPTION.to_string(),
         format: FreeformToolFormat {
             r#type: "grammar".to_string(),
             syntax: "lark".to_string(),

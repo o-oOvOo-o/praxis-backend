@@ -3,6 +3,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use http::HeaderMap;
 use praxis_api::AuthProvider as ApiAuthProvider;
+use praxis_api::AuthScheme as ApiAuthScheme;
 use praxis_api::TransportError;
 use praxis_api::error::ApiError;
 use praxis_api::rate_limits::parse_promo_message;
@@ -10,6 +11,9 @@ use praxis_api::rate_limits::parse_rate_limit_for_limit;
 use praxis_login::token_data::PlanType;
 use serde::Deserialize;
 use serde_json::Value;
+use std::fmt;
+use std::sync::Arc;
+use zeroize::Zeroizing;
 
 use crate::error::PraxisErr;
 use crate::error::RetryLimitReachedError;
@@ -175,46 +179,128 @@ struct UsageErrorBody {
     resets_at: Option<i64>,
 }
 
-#[derive(Clone, Default)]
-pub(crate) struct CoreAuthProvider {
-    token: Option<String>,
-    account_id: Option<String>,
+enum CoreAuthSecret {
+    Owned(Zeroizing<String>),
+    ProviderApiKey(praxis_login::ProviderApiKey),
+    AnthropicOauth(praxis_login::AnthropicOauthAccessToken),
 }
 
-impl CoreAuthProvider {
-    pub(crate) fn new(token: Option<String>, account_id: Option<String>) -> Self {
-        Self { token, account_id }
-    }
-
-    pub(crate) fn bearer_token_value(&self) -> Option<&str> {
-        self.token.as_deref()
-    }
-
-    pub(crate) fn auth_header_attached(&self) -> bool {
-        self.token
-            .as_ref()
-            .is_some_and(|token| http::HeaderValue::from_str(&format!("Bearer {token}")).is_ok())
-    }
-
-    pub(crate) fn auth_header_name(&self) -> Option<&'static str> {
-        self.auth_header_attached().then_some("authorization")
-    }
-
-    #[cfg(test)]
-    pub(crate) fn for_test(token: Option<&str>, account_id: Option<&str>) -> Self {
-        Self {
-            token: token.map(str::to_string),
-            account_id: account_id.map(str::to_string),
+impl CoreAuthSecret {
+    fn expose_secret(&self) -> &str {
+        match self {
+            Self::Owned(secret) => secret.as_str(),
+            Self::ProviderApiKey(secret) => secret.expose_secret(),
+            Self::AnthropicOauth(secret) => secret.expose_secret(),
         }
     }
 }
 
-impl ApiAuthProvider for CoreAuthProvider {
-    fn bearer_token(&self) -> Option<String> {
-        self.token.clone()
+impl fmt::Debug for CoreAuthSecret {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("CoreAuthSecret([REDACTED])")
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct CoreAuthProvider {
+    token: Option<Arc<CoreAuthSecret>>,
+    auth_scheme: ApiAuthScheme,
+    account_id: Option<String>,
+    request_profile: ProviderRequestAuthProfile,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum ProviderRequestAuthProfile {
+    #[default]
+    Standard,
+    AnthropicOauth,
+}
+
+impl CoreAuthProvider {
+    pub(crate) fn new(token: Option<String>, account_id: Option<String>) -> Self {
+        Self {
+            token: token.map(|token| Arc::new(CoreAuthSecret::Owned(Zeroizing::new(token)))),
+            auth_scheme: ApiAuthScheme::Bearer,
+            account_id,
+            request_profile: ProviderRequestAuthProfile::Standard,
+        }
     }
 
-    fn account_id(&self) -> Option<String> {
-        self.account_id.clone()
+    pub(crate) fn from_provider_api_key(
+        api_key: praxis_login::ProviderApiKey,
+        wire_api: crate::model_provider_info::WireApi,
+    ) -> Self {
+        Self {
+            token: Some(Arc::new(CoreAuthSecret::ProviderApiKey(api_key))),
+            auth_scheme: auth_scheme_for_wire(wire_api),
+            account_id: None,
+            request_profile: ProviderRequestAuthProfile::Standard,
+        }
+    }
+
+    pub(crate) fn from_anthropic_oauth(token: praxis_login::AnthropicOauthAccessToken) -> Self {
+        Self {
+            token: Some(Arc::new(CoreAuthSecret::AnthropicOauth(token))),
+            auth_scheme: ApiAuthScheme::Bearer,
+            account_id: None,
+            request_profile: ProviderRequestAuthProfile::AnthropicOauth,
+        }
+    }
+
+    pub(crate) fn is_anthropic_oauth(&self) -> bool {
+        self.request_profile == ProviderRequestAuthProfile::AnthropicOauth
+    }
+
+    pub(crate) fn bearer_token_value(&self) -> Option<&str> {
+        self.token.as_deref().map(CoreAuthSecret::expose_secret)
+    }
+
+    pub(crate) fn auth_header_attached(&self) -> bool {
+        self.bearer_token_value()
+            .is_some_and(|token| http::HeaderValue::from_str(token).is_ok())
+    }
+
+    pub(crate) fn auth_header_name(&self) -> Option<&'static str> {
+        self.auth_header_attached()
+            .then_some(match self.auth_scheme {
+                ApiAuthScheme::Bearer => "authorization",
+                ApiAuthScheme::XApiKey => "x-api-key",
+            })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(token: Option<&str>, account_id: Option<&str>) -> Self {
+        Self::new(token.map(str::to_string), account_id.map(str::to_string))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test_claude_api_key(token: Option<&str>) -> Self {
+        token.map_or_else(Self::default, |token| {
+            let api_key = praxis_login::ProviderApiKey::new(token.to_string())
+                .expect("test Claude API key must be valid");
+            Self::from_provider_api_key(api_key, crate::model_provider_info::WireApi::Claude)
+        })
+    }
+}
+
+fn auth_scheme_for_wire(wire_api: crate::model_provider_info::WireApi) -> ApiAuthScheme {
+    match wire_api {
+        crate::model_provider_info::WireApi::Claude => ApiAuthScheme::XApiKey,
+        crate::model_provider_info::WireApi::Responses
+        | crate::model_provider_info::WireApi::OpenAiCompat => ApiAuthScheme::Bearer,
+    }
+}
+
+impl ApiAuthProvider for CoreAuthProvider {
+    fn bearer_token(&self) -> Option<&str> {
+        self.bearer_token_value()
+    }
+
+    fn auth_scheme(&self) -> ApiAuthScheme {
+        self.auth_scheme
+    }
+
+    fn account_id(&self) -> Option<&str> {
+        self.account_id.as_deref()
     }
 }

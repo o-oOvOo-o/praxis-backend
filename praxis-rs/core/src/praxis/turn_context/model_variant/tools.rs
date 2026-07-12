@@ -7,6 +7,7 @@ use crate::config::ManagedFeatures;
 use crate::models_manager::manager::ModelsManager;
 use crate::models_manager::manager::RefreshStrategy;
 
+use super::super::super::multi_agent_mode_for_turn_model;
 use super::super::super::tool_wire_profile_for_wire_api;
 use super::super::TurnContext;
 
@@ -38,5 +39,9 @@ pub(super) async fn rebuild_for_model(
     .with_allow_login_shell(turn_context.tools_config.allow_login_shell)
     .with_agent_type_description(crate::agent::role::spawn_tool_spec::build(
         &config.agent_roles,
+    ))
+    .with_multi_agent_mode(multi_agent_mode_for_turn_model(
+        model_info,
+        turn_context.reasoning_effort.as_ref(),
     ))
 }

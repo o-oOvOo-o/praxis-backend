@@ -24,7 +24,7 @@ use wiremock::matchers::path;
 struct DummyAuth;
 
 impl AuthProvider for DummyAuth {
-    fn bearer_token(&self) -> Option<String> {
+    fn bearer_token(&self) -> Option<&str> {
         None
     }
 }
@@ -95,6 +95,7 @@ async fn models_client_hits_models_endpoint() {
             input_modalities: default_input_modalities(),
             used_fallback_model_metadata: false,
             supports_search_tool: false,
+            multi_agent_version: None,
         }],
     };
 

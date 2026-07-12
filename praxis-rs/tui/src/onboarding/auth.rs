@@ -15,6 +15,7 @@ use praxis_app_gateway_protocol::LoginAccountResponse;
 use praxis_core::config::edit::ConfigEditsBuilder;
 use praxis_login::AuthCredentialsStoreMode;
 use praxis_login::DeviceCode;
+use praxis_login::ProviderApiKey;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
@@ -36,6 +37,7 @@ use praxis_protocol::config_types::ForcedLoginMethod;
 use std::sync::Arc;
 use std::sync::RwLock;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::LoginStatus;
 use crate::custom_terminal::mark_hyperlink_cells;
@@ -76,7 +78,6 @@ pub(crate) enum SignInState {
     ApiKeyConfigured {
         provider_label: String,
     },
-    ClaudeNotice,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,7 +98,7 @@ fn onboarding_request_id() -> praxis_app_gateway_protocol::RequestId {
 pub(crate) struct ApiKeyInputState {
     provider: ProviderSetupKind,
     active_field: ApiKeyInputField,
-    api_key: String,
+    api_key: Zeroizing<String>,
     base_url: String,
     model: String,
     prepopulated_from_env: bool,
@@ -131,13 +132,14 @@ impl ApiKeyInputField {
 impl ApiKeyInputState {
     fn new(provider: ProviderSetupKind) -> Self {
         let prefill_from_env = provider.prefilled_api_key();
+        let prepopulated_from_env = prefill_from_env.is_some();
         Self {
             provider,
             active_field: ApiKeyInputField::ApiKey,
-            api_key: prefill_from_env.clone().unwrap_or_default(),
+            api_key: prefill_from_env.unwrap_or_else(|| Zeroizing::new(String::new())),
             base_url: provider.default_base_url().to_string(),
             model: provider.default_model().to_string(),
-            prepopulated_from_env: prefill_from_env.is_some(),
+            prepopulated_from_env,
         }
     }
 
@@ -349,7 +351,11 @@ impl AuthModeWidget {
                 }
             }
             SignInOption::Anthropic => {
-                self.show_anthropic_notice();
+                if self.is_api_login_allowed() {
+                    self.start_provider_key_entry(ProviderSetupKind::Anthropic);
+                } else {
+                    self.disallow_api_login();
+                }
             }
         }
     }
@@ -448,8 +454,8 @@ impl AuthModeWidget {
                     lines.extend(create_mode_item(
                         idx,
                         option,
-                        "Sign in with Anthropic",
-                        "Connect your Anthropic account",
+                        "Configure Anthropic API key",
+                        "Use the official Claude Messages API (Console billing)",
                     ));
                 }
             }
@@ -576,8 +582,8 @@ impl AuthModeWidget {
                 " provider configured".fg(Color::Green),
             ]),
             "".into(),
-            "  Praxis saved this provider under model_providers.".into(),
-            "  ChatGPT/OpenAI auth remains available when configured."
+            "  The API key is stored in the operating system credential store.".into(),
+            "  Provider configuration contains only a credential reference."
                 .dim()
                 .into(),
         ];
@@ -609,14 +615,15 @@ impl AuthModeWidget {
                 format!("Configure {}", state.provider.label()).bold(),
             ]),
             "".into(),
-            "  This writes a Praxis model provider and switches the active model to it.".into(),
-            "  It does not write auth.json or replace ChatGPT/OpenAI credentials."
+            "  This switches the active model and stores the key in the OS credential store."
+                .into(),
+            "  It does not copy Claude Code OAuth or replace ChatGPT/OpenAI credentials."
                 .dim()
                 .into(),
             "".into(),
         ];
         if state.prepopulated_from_env {
-            let env_key = state.provider.env_key().unwrap_or("provider API key");
+            let env_key = state.provider.env_key();
             intro_lines.push(format!("  Detected {env_key} environment variable.").into());
             intro_lines.push(
                 "  Paste a different key if you prefer to use another account."
@@ -636,6 +643,7 @@ impl AuthModeWidget {
             &state.api_key,
             "Paste or type the provider API key",
             state.active_field == ApiKeyInputField::ApiKey,
+            true,
         );
         self.render_api_key_field(
             base_url_area,
@@ -644,6 +652,7 @@ impl AuthModeWidget {
             &state.base_url,
             "https://api.example.com",
             state.active_field == ApiKeyInputField::BaseUrl,
+            false,
         );
         self.render_api_key_field(
             model_area,
@@ -652,6 +661,7 @@ impl AuthModeWidget {
             &state.model,
             "model-name",
             state.active_field == ApiKeyInputField::Model,
+            false,
         );
 
         let mut footer_lines: Vec<Line> = vec![
@@ -676,6 +686,7 @@ impl AuthModeWidget {
         value: &str,
         placeholder: &'static str,
         active: bool,
+        redact: bool,
     ) {
         let border_style = if active {
             Style::default().fg(Color::Cyan)
@@ -684,6 +695,8 @@ impl AuthModeWidget {
         };
         let content_line: Line = if value.is_empty() {
             vec![placeholder.dim()].into()
+        } else if redact {
+            Line::from("•".repeat(value.chars().count().min(64)))
         } else {
             Line::from(value.to_string())
         };
@@ -696,35 +709,6 @@ impl AuthModeWidget {
                     .border_type(BorderType::Rounded)
                     .border_style(border_style),
             )
-            .render(area, buf);
-    }
-
-    fn render_claude_notice(&self, area: Rect, buf: &mut Buffer) {
-        let lines: Vec<Line> = vec![
-            Line::from(vec![
-                "> ".into(),
-                "Claude Placeholder / Anthropic Statement".bold(),
-            ]),
-            "".into(),
-            "  This is a placeholder, not a Claude adapter.".into(),
-            "  Praxis is not rewarding Anthropic with a first-class route here.".into(),
-            "".into(),
-            "  Anthropic has built a public moral posture around opposition to distillation,"
-                .into(),
-            "  while benefiting from the same open research, shared engineering practice,".into(),
-            "  and industry-wide iteration that made modern agent systems possible.".into(),
-            "".into(),
-            "  Praxis will not treat that contradiction as a first-class integration target."
-                .into(),
-            "  Adapter work is reserved for model systems with clear interfaces, reliable".into(),
-            "  behavior, and product direction that materially strengthens users and agents."
-                .into(),
-            "".into(),
-            "  Press Esc to go back".dim().into(),
-        ];
-
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
             .render(area, buf);
     }
 
@@ -789,14 +773,6 @@ impl AuthModeWidget {
                         _ => {}
                     }
                 }
-                SignInState::ClaudeNotice => match key_event.code {
-                    KeyCode::Esc | KeyCode::Enter => {
-                        *guard = SignInState::PickMode;
-                        self.set_error(/*message*/ None);
-                        should_request_frame = true;
-                    }
-                    _ => {}
-                },
                 _ => return false,
             }
         }
@@ -810,6 +786,7 @@ impl AuthModeWidget {
     }
 
     fn handle_provider_key_entry_paste(&mut self, pasted: String) -> bool {
+        let pasted = Zeroizing::new(pasted);
         let trimmed = pasted.trim();
         if trimmed.is_empty() {
             return false;
@@ -818,7 +795,7 @@ impl AuthModeWidget {
         let mut guard = self.sign_in_state.write().unwrap();
         if let SignInState::ApiKeyEntry(state) = &mut *guard {
             if state.active_field == ApiKeyInputField::ApiKey && state.prepopulated_from_env {
-                state.api_key = trimmed.to_string();
+                state.api_key = Zeroizing::new(trimmed.to_string());
                 state.prepopulated_from_env = false;
             } else {
                 state.active_value_mut().push_str(trimmed);
@@ -844,12 +821,6 @@ impl AuthModeWidget {
         self.request_frame.schedule_frame();
     }
 
-    fn show_anthropic_notice(&mut self) {
-        self.set_error(/*message*/ None);
-        *self.sign_in_state.write().unwrap() = SignInState::ClaudeNotice;
-        self.request_frame.schedule_frame();
-    }
-
     fn validate_provider_key_state(&self, state: &ApiKeyInputState) -> Option<String> {
         if state.api_key.trim().is_empty() {
             return Some("API key cannot be empty".to_string());
@@ -860,11 +831,10 @@ impl AuthModeWidget {
         if state.model.trim().is_empty() {
             return Some("Model cannot be empty".to_string());
         }
+        if let Err(err) = state.provider.normalize_base_url(&state.base_url) {
+            return Some(err);
+        }
         None
-    }
-
-    fn normalize_common_base_url(&self, raw: &str) -> String {
-        raw.trim().trim_end_matches('/').to_string()
     }
 
     fn save_provider_key(&mut self, state: ApiKeyInputState) {
@@ -877,18 +847,69 @@ impl AuthModeWidget {
         let sign_in_state = self.sign_in_state.clone();
         let error = self.error.clone();
         let request_frame = self.request_frame.clone();
-        let api_key = state.api_key.trim().to_string();
-        let base_url = self.normalize_common_base_url(&state.base_url);
+        let api_key = match ProviderApiKey::new(state.api_key.trim().to_string()) {
+            Ok(api_key) => api_key,
+            Err(err) => {
+                self.set_error(Some(err.to_string()));
+                self.request_frame.schedule_frame();
+                return;
+            }
+        };
+        let base_url = match state.provider.normalize_base_url(&state.base_url) {
+            Ok(base_url) => base_url,
+            Err(err) => {
+                self.set_error(Some(err));
+                self.request_frame.schedule_frame();
+                return;
+            }
+        };
         let model = state.model.trim().to_string();
-        let provider = state.provider.build_provider(api_key, base_url);
+        let provider = state.provider.build_provider(base_url);
         let provider_id = state.provider.provider_id().to_string();
+        let credential_id = match praxis_login::provider_api_key_credential_id(&provider_id) {
+            Ok(credential_id) => credential_id,
+            Err(err) => {
+                self.set_error(Some(format!(
+                    "Cannot securely store the {} API key: {err}",
+                    state.provider.label()
+                )));
+                self.request_frame.schedule_frame();
+                return;
+            }
+        };
+        let provider_is_builtin = state.provider.is_builtin();
         let provider_label = state.provider.label().to_string();
         let default_effort = state.provider.default_effort();
         let retry_state = state.clone();
 
         tokio::spawn(async move {
-            let result = ConfigEditsBuilder::new(&praxis_home)
-                .upsert_model_provider(provider_id.as_str(), &provider)
+            let credential_home = praxis_home.clone();
+            let credential_result = tokio::task::spawn_blocking(move || {
+                praxis_login::save_provider_api_key(
+                    &credential_home,
+                    &credential_id,
+                    api_key.expose_secret(),
+                )
+            })
+            .await;
+            let credential_result = match credential_result {
+                Ok(result) => result,
+                Err(_) => Err(praxis_login::ProviderApiKeyError::SaveFailed),
+            };
+            if let Err(err) = credential_result {
+                *error.write().unwrap() = Some(format!(
+                    "Failed to save provider API key in the operating system credential store: {err}"
+                ));
+                *sign_in_state.write().unwrap() = SignInState::ApiKeyEntry(retry_state);
+                request_frame.schedule_frame();
+                return;
+            }
+
+            let mut builder = ConfigEditsBuilder::new(&praxis_home);
+            if !provider_is_builtin {
+                builder = builder.upsert_model_provider(provider_id.as_str(), &provider);
+            }
+            let result = builder
                 .set_model_provider(Some(provider_id.as_str()))
                 .set_model(Some(model.as_str()), default_effort)
                 .apply()
@@ -1020,7 +1041,6 @@ impl StepStateProvider for AuthModeWidget {
         match &*sign_in_state {
             SignInState::PickMode
             | SignInState::ApiKeyEntry(_)
-            | SignInState::ClaudeNotice
             | SignInState::ChatGptContinueInBrowser(_)
             | SignInState::ChatGptDeviceCode(_)
             | SignInState::ChatGptSuccessMessage => StepState::InProgress,
@@ -1055,9 +1075,6 @@ impl WidgetRef for AuthModeWidget {
             }
             SignInState::ApiKeyConfigured { provider_label } => {
                 self.render_api_key_configured(area, buf, provider_label);
-            }
-            SignInState::ClaudeNotice => {
-                self.render_claude_notice(area, buf);
             }
         }
     }

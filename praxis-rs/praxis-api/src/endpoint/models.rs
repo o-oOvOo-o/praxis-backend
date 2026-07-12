@@ -143,6 +143,7 @@ fn openai_model_to_model_info(model_id: &str) -> ModelInfo {
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
     }
 }
 
@@ -205,7 +206,7 @@ mod tests {
     struct DummyAuth;
 
     impl AuthProvider for DummyAuth {
-        fn bearer_token(&self) -> Option<String> {
+        fn bearer_token(&self) -> Option<&str> {
             None
         }
     }
@@ -365,7 +366,7 @@ mod tests {
             models[0]
                 .supported_reasoning_levels
                 .iter()
-                .map(|preset| preset.effort)
+                .map(|preset| preset.effort.clone())
                 .collect::<Vec<_>>(),
             vec![
                 ReasoningEffort::Low,
@@ -389,7 +390,7 @@ mod tests {
             models[0]
                 .supported_reasoning_levels
                 .iter()
-                .map(|preset| preset.effort)
+                .map(|preset| preset.effort.clone())
                 .collect::<Vec<_>>(),
             vec![
                 ReasoningEffort::Low,

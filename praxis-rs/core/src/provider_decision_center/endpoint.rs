@@ -76,7 +76,8 @@ fn resolve_provider_headers(provider: &ModelProviderInfo) -> Result<ProviderHead
     if let Some(static_headers) = provider.http_headers.as_ref() {
         for (header, value) in static_headers {
             let name = parse_provider_header_name(provider, header)?;
-            let value = parse_provider_header_value(provider, header, value)?;
+            let mut value = parse_provider_header_value(provider, header, value)?;
+            value.set_sensitive(true);
             headers.insert(name, value);
             sources.push(ProviderHeaderSource::Static {
                 header: header.clone(),
@@ -99,7 +100,8 @@ fn resolve_provider_headers(provider: &ModelProviderInfo) -> Result<ProviderHead
             let Some(value) = env_value else {
                 continue;
             };
-            let value = parse_provider_header_value(provider, header, &value)?;
+            let mut value = parse_provider_header_value(provider, header, &value)?;
+            value.set_sensitive(true);
             headers.insert(name, value);
         }
     }

@@ -742,3 +742,58 @@ pub struct ThreadReadParams {
 pub struct ThreadReadResponse {
     pub thread: Thread,
 }
+
+pub const THREAD_HISTORY_MAX_PAGE_SIZE: u32 = 200;
+
+/// Stable oldest-based cursor for loading turns that precede an already loaded page.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryCursor {
+    /// Exclusive zero-based turn ordinal measured from the oldest canonical turn.
+    #[ts(type = "number")]
+    pub before_turn: u64,
+}
+
+/// Deterministic half-open range of canonical turns returned by a history page.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryRange {
+    /// Inclusive zero-based turn ordinal measured from the oldest canonical turn.
+    #[ts(type = "number")]
+    pub start_turn: u64,
+    /// Exclusive zero-based turn ordinal measured from the oldest canonical turn.
+    #[ts(type = "number")]
+    pub end_turn: u64,
+    /// Total canonical turn count at read time.
+    #[ts(type = "number")]
+    pub total_turns: u64,
+}
+
+/// Metadata for continuing history pagination toward older turns.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryPage {
+    pub range: ThreadHistoryRange,
+    #[ts(optional = nullable)]
+    pub older_cursor: Option<ThreadHistoryCursor>,
+}
+
+/// Reads one typed page of canonical turns without changing `thread/read` semantics.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryReadParams {
+    pub thread_id: String,
+    /// Omit to start at the newest canonical turn.
+    #[ts(optional = nullable)]
+    pub cursor: Option<ThreadHistoryCursor>,
+    /// Positive page size capped by `THREAD_HISTORY_MAX_PAGE_SIZE`.
+    pub limit: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadHistoryReadResponse {
+    pub thread_id: String,
+    pub turns: Vec<Turn>,
+    pub page: ThreadHistoryPage,
+}

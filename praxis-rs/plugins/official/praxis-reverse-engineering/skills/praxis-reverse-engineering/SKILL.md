@@ -100,11 +100,11 @@ Result shape:
 For Cunning3D/Gaea reverse work, use the existing flywheel command contract from `D:\ghost1.0\Cunning3D_1.0`:
 
 ```powershell
-.\tools\c3d_devflywheeltool\run.ps1 -- toolchain-doctor --json
-.\tools\c3d_devflywheeltool\run.ps1 -- reverse --node <Node> --json
-.\tools\c3d_devflywheeltool\run.ps1 -- blackbox-scan --json
-.\tools\c3d_devflywheeltool\run.ps1 -- plan --node <Node> --json
-.\tools\c3d_devflywheeltool\run.ps1 -- verify --node <Node> --json
+/gaea toolchain-doctor --json
+/gaea reverse --node <Node> --json
+/gaea blackbox-scan --json
+/gaea plan --node <Node> --json
+/gaea verify --node <Node> --json
 ```
 
 Use the wrapper, not direct probe binaries, unless the flywheel tool exposes the probe through `probe-bin`.

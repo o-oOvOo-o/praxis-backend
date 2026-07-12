@@ -110,7 +110,7 @@ fn plugin_model_info(model: &PluginLlmModel, slug: String, index: i32) -> ModelI
         info.auto_compact_token_limit = Some((context_window * 9) / 10);
     }
     if model.default_reasoning_effort.is_some() {
-        info.default_reasoning_level = model.default_reasoning_effort;
+        info.default_reasoning_level = model.default_reasoning_effort.clone();
     }
     info
 }
@@ -147,5 +147,6 @@ fn provider_neutral_plugin_model_info(slug: &str, index: i32) -> ModelInfo {
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
     }
 }

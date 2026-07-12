@@ -91,6 +91,7 @@ async fn responses_stream_includes_subagent_header_on_review() {
     let client = ModelClient::new(
         /*auth_manager*/ None,
         conversation_id,
+        "test-provider".to_string(),
         provider.clone(),
         session_source,
         config.model_verbosity,
@@ -206,6 +207,7 @@ async fn responses_stream_includes_subagent_header_on_other() {
     let client = ModelClient::new(
         /*auth_manager*/ None,
         conversation_id,
+        "test-provider".to_string(),
         provider.clone(),
         session_source,
         config.model_verbosity,
@@ -321,6 +323,7 @@ async fn responses_respects_model_info_overrides_from_config() {
     let client = ModelClient::new(
         /*auth_manager*/ None,
         conversation_id,
+        "test-provider".to_string(),
         provider.clone(),
         session_source,
         config.model_verbosity,

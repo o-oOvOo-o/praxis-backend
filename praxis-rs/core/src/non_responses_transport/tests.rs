@@ -101,6 +101,15 @@ fn common_provider_info(
     }
 }
 
+fn claude_provider_info(
+    compat: Option<crate::model_provider_info::ModelProviderCompatInfo>,
+) -> ModelProviderInfo {
+    let mut provider = common_provider_info(compat);
+    provider.name = "Claude Test Provider".to_string();
+    provider.wire_api = crate::model_provider_info::WireApi::Claude;
+    provider
+}
+
 fn gemini_provider_info() -> ModelProviderInfo {
     let mut provider = common_provider_info(None);
     provider.name = "Gemini".to_string();
@@ -162,8 +171,10 @@ async fn run_manual_glm_claude_prompt(user_text: &str) -> String {
     let stream = stream_claude_unary(
         provider(base_url),
         CoreAuthProvider::for_test(Some(token.as_str()), None),
+        &claude_provider_info(None),
         &prompt,
         &info,
+        None,
     )
     .await
     .expect("GLM Claude-compatible stream should succeed");

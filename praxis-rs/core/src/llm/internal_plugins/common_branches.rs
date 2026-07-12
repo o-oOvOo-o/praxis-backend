@@ -1,10 +1,17 @@
 use crate::llm::internal_plugins::LlmPluginRegistryBuilder;
+use crate::llm::internal_plugins::provider_model_catalog;
 use crate::llm::profiles::claude;
 use crate::llm::profiles::openrouter;
 
 pub(super) fn register_common_branches(registry: &mut LlmPluginRegistryBuilder) {
     let openrouter_profile = openrouter::profile();
     let claude_profile = claude::profile();
+    registry.add_model_catalog(provider_model_catalog(
+        "anthropic-claude-models",
+        "Anthropic Claude models",
+        claude::is_first_party_provider,
+        claude::is_first_party_model,
+    ));
     #[cfg(test)]
     {
         register_common_branch(

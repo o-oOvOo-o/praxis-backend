@@ -71,6 +71,7 @@ impl Session {
             user_shell,
             shell_zsh_path,
             main_execve_wrapper_exe,
+            reasoning_effort: reasoning_effort.as_ref(),
         });
 
         let cwd = session_configuration.cwd.clone();

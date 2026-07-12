@@ -8,6 +8,10 @@ use praxis_app_gateway_protocol::JSONRPCError;
 use praxis_app_gateway_protocol::JSONRPCResponse;
 use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::SessionSource;
+use praxis_app_gateway_protocol::ThreadHistoryCursor;
+use praxis_app_gateway_protocol::ThreadHistoryRange;
+use praxis_app_gateway_protocol::ThreadHistoryReadParams;
+use praxis_app_gateway_protocol::ThreadHistoryReadResponse;
 use praxis_app_gateway_protocol::ThreadItem;
 use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadListResponse;
@@ -200,6 +204,81 @@ async fn thread_read_loaded_thread_returns_precomputed_path_before_materializati
     assert!(read.preview.is_empty());
     assert_eq!(read.turns.len(), 0);
     assert_eq!(read.status, ThreadStatus::Idle);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_history_read_returns_typed_page_and_deterministic_range() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let praxis_home = TempDir::new()?;
+    create_config_toml(praxis_home.path(), &server.uri())?;
+
+    let preview = "Typed history message";
+    let conversation_id = create_fake_rollout_with_text_elements(
+        praxis_home.path(),
+        "2025-01-05T12-00-00",
+        "2025-01-05T12:00:00Z",
+        preview,
+        Vec::new(),
+        Some("mock_provider"),
+        None,
+    )?;
+    let mut mcp = McpProcess::new(praxis_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let read_id = mcp
+        .send_thread_history_read_request(ThreadHistoryReadParams {
+            thread_id: conversation_id.clone(),
+            cursor: None,
+            limit: 2,
+        })
+        .await?;
+    let read_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(read_id)),
+    )
+    .await??;
+    let ThreadHistoryReadResponse {
+        thread_id,
+        turns,
+        page,
+    } = to_response::<ThreadHistoryReadResponse>(read_resp)?;
+
+    assert_eq!(thread_id, conversation_id);
+    assert_eq!(
+        page.range,
+        ThreadHistoryRange {
+            start_turn: 0,
+            end_turn: 1,
+            total_turns: 1,
+        }
+    );
+    assert_eq!(page.older_cursor, None);
+    assert!(matches!(
+        &turns[0].items[0],
+        ThreadItem::UserMessage { content, .. }
+            if matches!(&content[0], UserInput::Text { text, .. } if text == preview)
+    ));
+
+    let boundary_id = mcp
+        .send_thread_history_read_request(ThreadHistoryReadParams {
+            thread_id: conversation_id,
+            cursor: Some(ThreadHistoryCursor { before_turn: 0 }),
+            limit: 2,
+        })
+        .await?;
+    let boundary_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(boundary_id)),
+    )
+    .await??;
+    let boundary = to_response::<ThreadHistoryReadResponse>(boundary_resp)?;
+    assert!(boundary.turns.is_empty());
+    assert_eq!(boundary.page.range.start_turn, 0);
+    assert_eq!(boundary.page.range.end_turn, 0);
+    assert_eq!(boundary.page.range.total_turns, 1);
+    assert_eq!(boundary.page.older_cursor, None);
 
     Ok(())
 }

@@ -57,6 +57,7 @@ use praxis_app_gateway_protocol::SkillsListParams;
 use praxis_app_gateway_protocol::ThreadArchiveParams;
 use praxis_app_gateway_protocol::ThreadCompactStartParams;
 use praxis_app_gateway_protocol::ThreadForkParams;
+use praxis_app_gateway_protocol::ThreadHistoryReadParams;
 use praxis_app_gateway_protocol::ThreadListParams;
 use praxis_app_gateway_protocol::ThreadLoadedListParams;
 use praxis_app_gateway_protocol::ThreadMetadataUpdateParams;

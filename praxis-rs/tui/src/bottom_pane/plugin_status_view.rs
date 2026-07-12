@@ -135,6 +135,48 @@ impl PluginStatusDocument {
             }],
         }
     }
+
+    pub(crate) fn process_output(
+        title: String,
+        stdout: String,
+        stderr: String,
+        exit_code: Option<i32>,
+    ) -> Self {
+        let mut details = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            serde_json::to_string_pretty(&value)
+                .unwrap_or(stdout)
+                .lines()
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        } else {
+            stdout.lines().map(str::to_string).collect::<Vec<_>>()
+        };
+        if !stderr.is_empty() {
+            details.push("stderr".to_string());
+            details.extend(stderr.lines().map(str::to_string));
+        }
+        let succeeded = exit_code == Some(0);
+        Self {
+            title,
+            subtitle: Some(format!(
+                "Process exited with {}",
+                exit_code.map_or_else(
+                    || "unknown status".to_string(),
+                    |code| format!("code {code}")
+                )
+            )),
+            filters: Vec::new(),
+            rows: vec![PluginStatusRow {
+                name: if succeeded { "Completed" } else { "Failed" }.to_string(),
+                description: Some("Canonical plugin process output".to_string()),
+                category: Some("Command".to_string()),
+                status: Some(if succeeded { "Ready" } else { "Error" }.to_string()),
+                progress_percent: Some(if succeeded { 100.0 } else { 0.0 }),
+                filter: None,
+                details,
+            }],
+        }
+    }
 }
 
 impl PluginStatusView {
@@ -1014,5 +1056,30 @@ mod tests {
     fn overview_empty_documents_keep_a_small_body() {
         let view = PluginStatusView::new(status_document(0));
         assert_eq!(view.desired_height(96), 2 + 1 + 3);
+    }
+
+    #[test]
+    fn process_output_preserves_non_panel_json_and_failure_status() {
+        let document = PluginStatusDocument::process_output(
+            "/gaea".to_string(),
+            r#"{"failed_count":1,"artifact_dir":"D:/artifacts"}"#.to_string(),
+            "strict gate failed".to_string(),
+            Some(1),
+        );
+
+        assert_eq!(document.rows[0].name, "Failed");
+        assert_eq!(document.rows[0].status.as_deref(), Some("Error"));
+        assert!(
+            document.rows[0]
+                .details
+                .iter()
+                .any(|line| line.contains("failed_count"))
+        );
+        assert!(
+            document.rows[0]
+                .details
+                .iter()
+                .any(|line| line == "strict gate failed")
+        );
     }
 }

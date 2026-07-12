@@ -142,6 +142,13 @@ const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
 pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
     Duration::from_millis(crate::model_provider_info::DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
 
+fn reasoning_effort_for_request(effort: ReasoningEffortConfig) -> ReasoningEffortConfig {
+    match effort {
+        ReasoningEffortConfig::Ultra => ReasoningEffortConfig::Max,
+        effort => effort,
+    }
+}
+
 /// Provider-scoped state shared by all [`ModelClient`] clones.
 ///
 /// This is intentionally kept minimal so `ModelClient` does not need to hold a full `Config`. Most
@@ -150,6 +157,7 @@ pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
 struct ModelClientState {
     auth_manager: Option<Arc<AuthManager>>,
     conversation_id: ThreadId,
+    provider_id: String,
     provider: ModelProviderInfo,
     auth_env_telemetry: AuthEnvTelemetry,
     session_source: SessionSource,
@@ -275,6 +283,7 @@ impl ModelClient {
     pub fn new(
         auth_manager: Option<Arc<AuthManager>>,
         conversation_id: ThreadId,
+        provider_id: String,
         provider: ModelProviderInfo,
         session_source: SessionSource,
         model_verbosity: Option<VerbosityConfig>,
@@ -285,6 +294,7 @@ impl ModelClient {
         Self::new_with_native_local_config(
             auth_manager,
             conversation_id,
+            provider_id,
             provider,
             session_source,
             model_verbosity,
@@ -299,6 +309,7 @@ impl ModelClient {
     pub(crate) fn new_with_native_local_config(
         auth_manager: Option<Arc<AuthManager>>,
         conversation_id: ThreadId,
+        provider_id: String,
         provider: ModelProviderInfo,
         session_source: SessionSource,
         model_verbosity: Option<VerbosityConfig>,
@@ -314,6 +325,7 @@ impl ModelClient {
             state: Arc::new(ModelClientState {
                 auth_manager,
                 conversation_id,
+                provider_id,
                 provider,
                 auth_env_telemetry,
                 session_source,
@@ -506,7 +518,7 @@ impl ModelClient {
             model: model_info.slug.clone(),
             raw_memories,
             reasoning: effort.map(|effort| Reasoning {
-                effort: Some(effort),
+                effort: Some(reasoning_effort_for_request(effort)),
                 summary: None,
             }),
         };
@@ -558,7 +570,9 @@ impl ModelClient {
     ) -> Option<Reasoning> {
         if model_info.supports_reasoning_summaries {
             Some(Reasoning {
-                effort: effort.or(model_info.default_reasoning_level),
+                effort: effort
+                    .or_else(|| model_info.default_reasoning_level.clone())
+                    .map(reasoning_effort_for_request),
                 summary: if summary == ReasoningSummaryConfig::None {
                     None
                 } else {
@@ -590,7 +604,11 @@ impl ModelClient {
     /// lockstep when auth/provider resolution changes.
     async fn current_client_setup(&self) -> Result<CurrentClientSetup> {
         let setup = ProviderDecisionCenter::new(self.state.auth_manager.clone())
-            .setup_provider(&self.state.provider, AuthRequestPurpose::ModelTurn)
+            .setup_provider(
+                &self.state.provider_id,
+                &self.state.provider,
+                AuthRequestPurpose::ModelTurn,
+            )
             .await?;
         let header_sources = setup.header_source_labels();
         trace!(
@@ -741,12 +759,18 @@ fn sanitize_input_for_responses_api(input: Vec<ResponseItem>) -> Vec<ResponseIte
                 summary,
                 encrypted_content: Some(encrypted_content),
                 ..
-            } if !encrypted_content.is_empty() => Some(ResponseItem::Reasoning {
-                id,
-                summary,
-                content: Some(Vec::new()),
-                encrypted_content: Some(encrypted_content),
-            }),
+            } if !encrypted_content.is_empty()
+                && !crate::non_responses_transport::is_claude_reasoning_content(
+                    &encrypted_content,
+                ) =>
+            {
+                Some(ResponseItem::Reasoning {
+                    id,
+                    summary,
+                    content: Some(Vec::new()),
+                    encrypted_content: Some(encrypted_content),
+                })
+            }
             ResponseItem::Reasoning { .. } => None,
             ResponseItem::FunctionCall {
                 id,

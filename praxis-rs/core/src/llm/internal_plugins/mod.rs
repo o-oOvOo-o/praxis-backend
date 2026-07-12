@@ -494,6 +494,7 @@ mod tests {
         assert!(extension_ids.contains("common/claude/prompts"));
         assert!(extension_ids.contains("common/claude/tasks"));
         assert!(extension_ids.contains("common/claude/tools"));
+        assert!(extension_ids.contains("anthropic-claude-models"));
         assert!(extension_ids.contains("deepseek/smarter"));
         assert!(!extension_ids.contains("praxis/web_search"));
         assert!(!extension_ids.contains("praxis/web_search/obscura"));
@@ -507,6 +508,7 @@ mod tests {
     fn provider_model_visibility_comes_from_registered_catalogs() {
         let registry = builtin_registry();
         let openai = ModelProviderInfo::create_openai_provider(None);
+        let anthropic = ModelProviderInfo::create_anthropic_provider();
         let deepseek = ModelProviderInfo {
             name: "deepseek".to_string(),
             base_url: Some("https://api.deepseek.com".to_string()),
@@ -600,6 +602,18 @@ mod tests {
         ));
         assert!(crate::llm::registry::provider_accepts_model_from_catalogs(
             registry.model_catalogs(),
+            "anthropic",
+            &anthropic,
+            "claude-sonnet-4-6"
+        ));
+        assert!(!crate::llm::registry::provider_accepts_model_from_catalogs(
+            registry.model_catalogs(),
+            "anthropic",
+            &anthropic,
+            "gpt-5.2-codex"
+        ));
+        assert!(crate::llm::registry::provider_accepts_model_from_catalogs(
+            registry.model_catalogs(),
             "deepseek",
             &deepseek,
             "deepseek-v4-pro"
@@ -657,6 +671,12 @@ mod tests {
             "custom",
             &custom,
             "qwen3-coder"
+        ));
+        assert!(crate::llm::registry::provider_accepts_model_from_catalogs(
+            registry.model_catalogs(),
+            "custom",
+            &custom,
+            "claude-sonnet-4-6"
         ));
     }
 

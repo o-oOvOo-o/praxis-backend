@@ -5,11 +5,13 @@ use crate::config::Config;
 use crate::error::PraxisErr;
 use crate::error::Result as CoreResult;
 use crate::llm::runtime::LlmRuntimeCatalog;
+use crate::model_provider_info::ANTHROPIC_PROVIDER_ID;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::OPENAI_PROVIDER_ID;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::collaboration_mode_presets::builtin_collaboration_mode_presets;
 use crate::models_manager::model_info;
+use crate::models_manager::model_presets::bundled_api_model_presets;
 use crate::plugins::PluginsManager;
 use crate::provider_decision_center::AuthRequestPurpose;
 use crate::provider_decision_center::ProviderDecisionCenter;
@@ -26,6 +28,8 @@ use praxis_login::AuthManager;
 use praxis_login::AuthMode;
 use praxis_login::default_client::build_direct_reqwest_client;
 use praxis_login::default_client::build_reqwest_client;
+use praxis_login::default_client::try_build_direct_reqwest_client_without_redirects;
+use praxis_login::default_client::try_build_reqwest_client_without_redirects;
 use praxis_otel::TelemetryAuthMode;
 use praxis_protocol::config_types::CollaborationModeMask;
 use praxis_protocol::openai_models::ModelInfo;
@@ -49,13 +53,45 @@ const MODELS_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
 const MODELS_ENDPOINT: &str = "/models";
 
 #[derive(Debug, Clone)]
-pub struct PluginModelPreset {
+pub struct ProviderModelPreset {
     pub provider_id: String,
     pub provider: ModelProviderInfo,
     pub preset: ModelPreset,
 }
 
-pub fn plugin_model_presets_for_config(config: &Config) -> Vec<PluginModelPreset> {
+pub fn first_party_model_presets_for_config(config: &Config) -> Vec<ProviderModelPreset> {
+    let catalogs = [
+        (OPENAI_PROVIDER_ID, bundled_api_model_presets()),
+        (
+            ANTHROPIC_PROVIDER_ID,
+            model_info::anthropic_model_infos()
+                .into_iter()
+                .map(ModelPreset::from)
+                .collect(),
+        ),
+    ];
+    let mut presets = Vec::new();
+    for (provider_id, provider_presets) in catalogs {
+        let Some(provider) = config.model_providers.get(provider_id) else {
+            continue;
+        };
+        presets.extend(provider_presets.into_iter().filter_map(|preset| {
+            crate::model_provider_info::provider_accepts_registered_model_catalog(
+                provider_id,
+                provider,
+                preset.model.as_str(),
+            )
+            .then(|| ProviderModelPreset {
+                provider_id: provider_id.to_string(),
+                provider: provider.clone(),
+                preset,
+            })
+        }));
+    }
+    presets
+}
+
+pub fn plugin_model_presets_for_config(config: &Config) -> Vec<ProviderModelPreset> {
     let plugins_manager = PluginsManager::new(config.praxis_home.clone());
     let plugin_outcome = plugins_manager.plugins_for_config(config);
     let runtime_catalog =
@@ -66,7 +102,7 @@ pub fn plugin_model_presets_for_config(config: &Config) -> Vec<PluginModelPreset
             runtime_catalog
                 .model_infos_for_provider(provider_id, provider)
                 .into_iter()
-                .map(|model| PluginModelPreset {
+                .map(|model| ProviderModelPreset {
                     provider_id: provider_id.clone(),
                     provider: provider.clone(),
                     preset: ModelPreset::from(model),
@@ -76,10 +112,10 @@ pub fn plugin_model_presets_for_config(config: &Config) -> Vec<PluginModelPreset
     presets
 }
 
-pub fn local_model_presets_for_config(config: &Config) -> Vec<PluginModelPreset> {
+pub fn local_model_presets_for_config(config: &Config) -> Vec<ProviderModelPreset> {
     crate::llm::local_models::local_model_presets_for_config(config)
         .into_iter()
-        .map(|local_model| PluginModelPreset {
+        .map(|local_model| ProviderModelPreset {
             provider_id: local_model.provider_id,
             provider: local_model.provider,
             preset: local_model.preset,
@@ -248,6 +284,7 @@ pub struct ModelsManager {
     auth_manager: Arc<AuthManager>,
     etag: RwLock<Option<String>>,
     cache_manager: ModelsCacheManager,
+    provider_id: String,
     provider: ModelProviderInfo,
 }
 
@@ -268,6 +305,7 @@ impl ModelsManager {
             auth_manager,
             model_catalog,
             collaboration_modes_config,
+            OPENAI_PROVIDER_ID.to_string(),
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
         )
     }
@@ -278,6 +316,7 @@ impl ModelsManager {
         auth_manager: Arc<AuthManager>,
         model_catalog: Option<ModelsResponse>,
         collaboration_modes_config: CollaborationModesConfig,
+        provider_id: String,
         provider: ModelProviderInfo,
     ) -> Self {
         let cache_path = praxis_home.join(MODEL_CACHE_FILE);
@@ -293,6 +332,8 @@ impl ModelsManager {
                 if provider.is_openai() {
                     Self::load_remote_models_from_file()
                         .unwrap_or_else(|err| panic!("failed to load bundled models.json: {err}"))
+                } else if provider.is_anthropic() {
+                    model_info::anthropic_model_infos()
                 } else {
                     Vec::new()
                 }
@@ -304,6 +345,7 @@ impl ModelsManager {
             auth_manager,
             etag: RwLock::new(None),
             cache_manager,
+            provider_id,
             provider,
         }
     }
@@ -341,7 +383,7 @@ impl ModelsManager {
                 .collect();
         }
 
-        if self.provider == config.model_provider {
+        if self.provider_id == config.model_provider_id && self.provider == config.model_provider {
             return self.list_models(refresh_strategy).await;
         }
 
@@ -390,7 +432,7 @@ impl ModelsManager {
                 .collect());
         }
 
-        if self.provider == config.model_provider {
+        if self.provider_id == config.model_provider_id && self.provider == config.model_provider {
             return self.try_list_models();
         }
 
@@ -604,10 +646,14 @@ impl ModelsManager {
             praxis_otel::start_global_timer("praxis.remote_models.fetch_update.duration_ms", &[]);
         let auth_manager = self.auth_manager_for_provider(&self.provider);
         let setup = ProviderDecisionCenter::new(Some(Arc::clone(&auth_manager)))
-            .setup_provider(&self.provider, AuthRequestPurpose::ModelList)
+            .setup_provider(
+                &self.provider_id,
+                &self.provider,
+                AuthRequestPurpose::ModelList,
+            )
             .await?;
         let auth_env = setup.auth_env_telemetry.clone();
-        let transport = ReqwestTransport::new(self.build_models_reqwest_client());
+        let transport = ReqwestTransport::new(self.build_models_reqwest_client()?);
         let request_telemetry: Arc<dyn RequestTelemetry> = Arc::new(ModelsRequestTelemetry {
             auth_mode: setup
                 .auth_mode
@@ -640,11 +686,22 @@ impl ModelsManager {
         self.etag.read().await.clone()
     }
 
-    fn build_models_reqwest_client(&self) -> reqwest::Client {
-        if self.provider.is_openai() || self.provider.has_command_auth() {
-            build_reqwest_client()
+    fn build_models_reqwest_client(&self) -> CoreResult<reqwest::Client> {
+        if self.provider.wire_api == crate::model_provider_info::WireApi::Claude {
+            if self.provider.is_openai() || self.provider.has_command_auth() {
+                try_build_reqwest_client_without_redirects()
+            } else {
+                try_build_direct_reqwest_client_without_redirects()
+            }
+            .map_err(|_| {
+                PraxisErr::InvalidRequest(
+                    "failed to build secure Anthropic models HTTP client".to_string(),
+                )
+            })
+        } else if self.provider.is_openai() || self.provider.has_command_auth() {
+            Ok(build_reqwest_client())
         } else {
-            build_direct_reqwest_client()
+            Ok(build_direct_reqwest_client())
         }
     }
 
@@ -673,13 +730,15 @@ impl ModelsManager {
     fn static_remote_models_for_provider(provider: &ModelProviderInfo) -> Vec<ModelInfo> {
         if provider.is_openai() {
             Self::load_remote_models_from_file().unwrap_or_default()
+        } else if provider.is_anthropic() {
+            model_info::anthropic_model_infos()
         } else {
             Vec::new()
         }
     }
 
     async fn remote_models_for_config(&self, config: &Config) -> Vec<ModelInfo> {
-        if self.provider == config.model_provider {
+        if self.provider_id == config.model_provider_id && self.provider == config.model_provider {
             self.get_remote_models().await
         } else if matches!(self.catalog_mode, CatalogMode::Custom) {
             self.get_remote_models().await
@@ -714,11 +773,7 @@ impl ModelsManager {
 
     /// Build picker-ready presets from the active catalog snapshot.
     fn build_available_models(&self, remote_models: Vec<ModelInfo>) -> Vec<ModelPreset> {
-        self.build_available_models_for_provider(
-            remote_models,
-            model_catalog_provider_id_for_provider(&self.provider),
-            &self.provider,
-        )
+        self.build_available_models_for_provider(remote_models, &self.provider_id, &self.provider)
     }
 
     fn build_available_models_for_provider(
@@ -782,6 +837,7 @@ impl ModelsManager {
             auth_manager,
             /*model_catalog*/ None,
             CollaborationModesConfig::default(),
+            model_catalog_provider_id_for_provider(&provider).to_string(),
             provider,
         )
     }
@@ -819,6 +875,8 @@ impl ModelsManager {
 fn model_catalog_provider_id_for_provider(provider: &ModelProviderInfo) -> &str {
     if provider.is_openai() {
         OPENAI_PROVIDER_ID
+    } else if provider.is_anthropic() {
+        crate::model_provider_info::ANTHROPIC_PROVIDER_ID
     } else {
         provider.name.as_str()
     }

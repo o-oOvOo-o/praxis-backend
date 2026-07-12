@@ -59,7 +59,46 @@ pub(crate) fn server_notification_requires_delivery(notification: &ServerNotific
             | ServerNotification::ReasoningSummaryTextDelta(_)
             | ServerNotification::ReasoningSummaryPartAdded(_)
             | ServerNotification::ReasoningTextDelta(_)
+            | ServerNotification::TerminalInteraction(_)
+            | ServerNotification::HookStarted(_)
+            | ServerNotification::HookCompleted(_)
+            | ServerNotification::ItemGuardianApprovalReviewStarted(_)
+            | ServerNotification::ItemGuardianApprovalReviewCompleted(_)
+            | ServerNotification::ServerRequestResolved(_)
+            | ServerNotification::ThreadClosed(_)
     )
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::*;
+    use praxis_app_gateway_protocol::{ConfigWarningNotification, TerminalInteractionNotification};
+
+    #[test]
+    fn terminal_interactions_are_lossless() {
+        let notification =
+            ServerNotification::TerminalInteraction(TerminalInteractionNotification {
+                thread_id: "thread-1".to_owned(),
+                turn_id: "turn-1".to_owned(),
+                item_id: "item-1".to_owned(),
+                process_id: "process-1".to_owned(),
+                stdin: "yes\n".to_owned(),
+            });
+
+        assert!(server_notification_requires_delivery(&notification));
+    }
+
+    #[test]
+    fn configuration_warnings_remain_best_effort() {
+        let notification = ServerNotification::ConfigWarning(ConfigWarningNotification {
+            summary: "warning".to_owned(),
+            details: None,
+            path: None,
+            range: None,
+        });
+
+        assert!(!server_notification_requires_delivery(&notification));
+    }
 }
 
 /// Outcome of attempting to forward a single event to the consumer channel.

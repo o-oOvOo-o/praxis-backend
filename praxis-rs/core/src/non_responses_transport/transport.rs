@@ -3,10 +3,15 @@ use super::*;
 pub(crate) async fn stream_claude_unary(
     api_provider: Provider,
     api_auth: CoreAuthProvider,
+    provider_info: &ModelProviderInfo,
     prompt: &Prompt,
     model_info: &ModelInfo,
+    effort: Option<ReasoningEffortConfig>,
 ) -> Result<ResponseStream> {
-    let request_body = build_claude_request(prompt, model_info, true)?;
+    let mut request_body = build_claude_request(prompt, model_info, provider_info, effort, true)?;
+    if api_auth.is_anthropic_oauth() {
+        apply_claude_oauth_request_profile(&mut request_body)?;
+    }
     let response = send_request(
         &api_provider,
         &api_auth,
@@ -24,7 +29,7 @@ pub(crate) async fn stream_claude_unary(
         ));
     }
 
-    let response_json = read_json_response(response).await?;
+    let response_json = read_claude_json_response(response).await?;
     build_response_stream(parse_claude_response(response_json)?)
 }
 
@@ -118,9 +123,25 @@ pub(super) async fn send_request(
     family: RequestFamily,
     transport_policy: ProviderTransportPolicy,
 ) -> Result<reqwest::Response> {
-    let client = match transport_policy {
-        ProviderTransportPolicy::SystemProxy => build_reqwest_client(),
-        ProviderTransportPolicy::Direct => build_direct_reqwest_client(),
+    let client = match (family, transport_policy) {
+        (RequestFamily::Claude, ProviderTransportPolicy::SystemProxy) => {
+            try_build_reqwest_client_without_redirects().map_err(|_| {
+                PraxisErr::Stream(
+                    "failed to build secure Claude HTTP client".to_string(),
+                    None,
+                )
+            })?
+        }
+        (RequestFamily::Claude, ProviderTransportPolicy::Direct) => {
+            try_build_direct_reqwest_client_without_redirects().map_err(|_| {
+                PraxisErr::Stream(
+                    "failed to build secure Claude HTTP client".to_string(),
+                    None,
+                )
+            })?
+        }
+        (RequestFamily::Common, ProviderTransportPolicy::SystemProxy) => build_reqwest_client(),
+        (RequestFamily::Common, ProviderTransportPolicy::Direct) => build_direct_reqwest_client(),
     };
     let url = api_provider.url_for_path(endpoint_path);
     let headers = build_request_headers(api_provider, api_auth, family)?;
@@ -131,18 +152,33 @@ pub(super) async fn send_request(
         .json(request_body)
         .send()
         .await
-        .map_err(map_reqwest_error)?;
+        .map_err(|err| match family {
+            RequestFamily::Claude => map_claude_reqwest_error(err),
+            RequestFamily::Common => map_reqwest_error(err),
+        })?;
 
     let status = response.status();
     if !status.is_success() {
-        let response_url = response.url().to_string();
-        let response_headers = response.headers().clone();
-        let body = response.text().await.map_err(map_reqwest_error)?;
+        let (response_url, response_headers, body) = match family {
+            RequestFamily::Claude => (
+                None,
+                None,
+                Some(format!(
+                    "Anthropic API request failed with HTTP status {status}"
+                )),
+            ),
+            RequestFamily::Common => {
+                let response_url = response.url().to_string();
+                let response_headers = response.headers().clone();
+                let body = response.text().await.map_err(map_reqwest_error)?;
+                (Some(response_url), Some(response_headers), Some(body))
+            }
+        };
         let transport = TransportError::Http {
             status,
-            url: Some(response_url),
-            headers: Some(response_headers),
-            body: Some(body),
+            url: response_url,
+            headers: response_headers,
+            body,
         };
         return Err(map_api_error(ApiError::Transport(transport)));
     }
@@ -150,9 +186,25 @@ pub(super) async fn send_request(
     Ok(response)
 }
 
+pub(super) async fn read_claude_json_response(response: reqwest::Response) -> Result<Value> {
+    let body = response.text().await.map_err(map_claude_reqwest_error)?;
+    serde_json::from_str(&body).map_err(|_| {
+        PraxisErr::InvalidRequest("provider returned invalid Claude JSON response".to_string())
+    })
+}
+
 pub(super) async fn read_json_response(response: reqwest::Response) -> Result<Value> {
     let body = response.text().await.map_err(map_reqwest_error)?;
     serde_json::from_str(&body).map_err(PraxisErr::from)
+}
+
+pub(super) fn map_claude_reqwest_error(err: reqwest::Error) -> PraxisErr {
+    if err.is_timeout() {
+        return map_api_error(ApiError::Transport(TransportError::Timeout));
+    }
+    map_api_error(ApiError::Transport(TransportError::Network(
+        "claude request transport failed".to_string(),
+    )))
 }
 
 pub(super) fn build_request_headers(
@@ -164,44 +216,62 @@ pub(super) fn build_request_headers(
 
     match family {
         RequestFamily::Claude => {
-            insert_header_if_missing(&mut headers, "anthropic-version", CLAUDE_API_VERSION)?;
-            attach_token_if_missing(&mut headers, api_auth, TokenHeaderMode::ClaudeApiKey)?;
+            insert_header_if_missing(&mut headers, "anthropic-version", ANTHROPIC_API_VERSION)?;
+            if api_auth.is_anthropic_oauth() {
+                insert_header_if_missing(
+                    &mut headers,
+                    "anthropic-beta",
+                    "claude-code-20250219,oauth-2025-04-20",
+                )?;
+                insert_header_if_missing(
+                    &mut headers,
+                    "anthropic-dangerous-direct-browser-access",
+                    "true",
+                )?;
+                insert_header_if_missing(&mut headers, "user-agent", "claude-cli/2.1.207")?;
+                insert_header_if_missing(&mut headers, "x-app", "cli")?;
+            }
+            attach_token_if_missing(&mut headers, api_auth)?;
         }
         RequestFamily::Common => {
-            attach_token_if_missing(&mut headers, api_auth, TokenHeaderMode::Bearer)?;
+            attach_token_if_missing(&mut headers, api_auth)?;
         }
     }
 
     Ok(headers)
 }
 
-pub(super) enum TokenHeaderMode {
-    Bearer,
-    ClaudeApiKey,
-}
-
 pub(super) fn attach_token_if_missing(
     headers: &mut HeaderMap,
     api_auth: &CoreAuthProvider,
-    mode: TokenHeaderMode,
 ) -> Result<()> {
     let Some(token) = api_auth.bearer_token() else {
         return Ok(());
     };
 
-    if headers.contains_key(AUTHORIZATION) || headers.contains_key("x-api-key") {
-        return Ok(());
-    }
-
-    match mode {
-        TokenHeaderMode::Bearer => {
-            let value = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|err| {
+    match api_auth.auth_scheme() {
+        praxis_api::AuthScheme::Bearer => {
+            if headers.contains_key(AUTHORIZATION) {
+                return Ok(());
+            }
+            let encoded = zeroize::Zeroizing::new(format!("Bearer {token}"));
+            let mut value = HeaderValue::from_str(encoded.as_str()).map_err(|err| {
                 PraxisErr::InvalidRequest(format!("failed to encode bearer token header: {err}"))
             })?;
+            value.set_sensitive(true);
             headers.insert(AUTHORIZATION, value);
         }
-        TokenHeaderMode::ClaudeApiKey => {
-            insert_header_if_missing(headers, "x-api-key", &token)?;
+        praxis_api::AuthScheme::XApiKey => {
+            if headers.contains_key("x-api-key") {
+                return Ok(());
+            }
+            let mut value = HeaderValue::from_str(token).map_err(|err| {
+                PraxisErr::InvalidRequest(format!(
+                    "failed to encode Anthropic API key header: {err}"
+                ))
+            })?;
+            value.set_sensitive(true);
+            headers.insert("x-api-key", value);
         }
     }
 

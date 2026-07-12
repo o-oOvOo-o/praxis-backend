@@ -4,6 +4,7 @@ use crate::praxis::TurnContext;
 use crate::shell::Shell;
 use praxis_execpolicy::Policy;
 use praxis_features::Feature;
+use praxis_protocol::config_types::MultiAgentMode;
 use praxis_protocol::config_types::Personality;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::DeveloperInstructions;
@@ -66,6 +67,20 @@ fn build_collaboration_mode_update_item(
     } else {
         None
     }
+}
+
+fn build_multi_agent_mode_update_item(
+    previous: Option<&TurnContextItem>,
+    next: &TurnContext,
+) -> Option<DeveloperInstructions> {
+    if !next.tools_config.collab_tools {
+        return None;
+    }
+    let previous_mode =
+        MultiAgentMode::for_reasoning_effort(previous.and_then(|item| item.effort.as_ref()));
+    let next_mode = next.tools_config.multi_agent_mode.clone();
+    (previous_mode != next_mode)
+        .then(|| DeveloperInstructions::new(next_mode.developer_instructions()))
 }
 
 pub(crate) fn build_realtime_update_item(
@@ -205,6 +220,7 @@ pub(crate) fn build_settings_update_items(
         build_model_instructions_update_item(previous_turn_settings, next),
         build_permissions_update_item(previous, next, exec_policy),
         build_collaboration_mode_update_item(previous, next),
+        build_multi_agent_mode_update_item(previous, next),
         build_realtime_update_item(previous, previous_turn_settings, next),
         build_personality_update_item(previous, next, personality_feature_enabled),
     ]

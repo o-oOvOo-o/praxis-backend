@@ -3,6 +3,7 @@ use super::ModelClient;
 use super::PendingUnauthorizedRetry;
 use super::UnauthorizedRecoveryExecution;
 use super::handle_unauthorized_unexpected_status;
+use super::reasoning_effort_for_request;
 use super::sanitize_input_for_responses_api;
 use http::StatusCode;
 use praxis_otel::SessionTelemetry;
@@ -12,6 +13,7 @@ use praxis_protocol::models::ReasoningItemContent;
 use praxis_protocol::models::ReasoningItemReasoningSummary;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::openai_models::ModelInfo;
+use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
 use pretty_assertions::assert_eq;
@@ -25,6 +27,7 @@ fn test_model_client(session_source: SessionSource) -> ModelClient {
     ModelClient::new(
         /*auth_manager*/ None,
         ThreadId::new(),
+        "test-provider".to_string(),
         provider,
         session_source,
         /*model_verbosity*/ None,
@@ -77,6 +80,24 @@ fn test_session_telemetry() -> SessionTelemetry {
         "test-terminal".to_string(),
         SessionSource::Cli,
     )
+}
+
+#[test]
+fn client_session_identity_includes_provider_id() {
+    let client = test_model_client(SessionSource::Cli);
+    let provider = client.state.provider.clone();
+    let session = client.new_session();
+
+    assert!(session.matches_provider("test-provider", &provider));
+    assert!(!session.matches_provider("different-provider", &provider));
+}
+
+#[test]
+fn ultra_uses_max_reasoning_on_the_provider_wire() {
+    assert_eq!(
+        reasoning_effort_for_request(ReasoningEffort::Ultra),
+        ReasoningEffort::Max
+    );
 }
 
 #[test]
@@ -180,6 +201,24 @@ fn responses_input_keeps_encrypted_reasoning_without_content() {
             encrypted_content: Some("ciphertext".to_string()),
         }]
     );
+}
+
+#[test]
+fn responses_input_drops_claude_reasoning_metadata() {
+    let claude_reasoning = ResponseItem::Reasoning {
+        id: "reasoning-claude".to_string(),
+        summary: Vec::new(),
+        content: Some(vec![ReasoningItemContent::ReasoningText {
+            text: "provider-local thinking".to_string(),
+        }]),
+        encrypted_content: Some(
+            "praxis-anthropic-thinking-v1:{\"type\":\"thinking\",\"thinking\":\"provider-local thinking\",\"signature\":\"claude-signature\"}".to_string(),
+        ),
+    };
+
+    let sanitized = sanitize_input_for_responses_api(vec![claude_reasoning]);
+
+    assert!(sanitized.is_empty());
 }
 
 #[tokio::test]

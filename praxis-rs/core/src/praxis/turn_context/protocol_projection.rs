@@ -19,7 +19,7 @@ impl TurnContext {
             personality: self.personality,
             collaboration_mode: Some(self.collaboration_mode.clone()),
             realtime_active: Some(self.realtime_active),
-            effort: self.reasoning_effort,
+            effort: self.reasoning_effort.clone(),
             summary: self.reasoning_summary,
             user_instructions: self.user_instructions.clone(),
             developer_instructions: self.developer_instructions.clone(),

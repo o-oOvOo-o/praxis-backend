@@ -37,12 +37,14 @@ pub(crate) enum ProviderInterface {
     OpenAiResponsesLogin,
     ResponsesApiKey,
     OpenAiCompatible,
-    ClaudeCode,
+    ClaudeMessages,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum AuthDecisionSource {
+    AnthropicOauthCredentialStore,
     ProviderEnvKey(String),
+    ProviderCredentialStore(String),
     ProviderInlineBearer,
     ProviderCommand,
     ManagedOpenAi,
@@ -52,7 +54,9 @@ pub(crate) enum AuthDecisionSource {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum AuthRealm {
+    AnthropicOauth,
     ProviderEnvironment,
+    ProviderCredentialStore,
     ProviderInlineConfig,
     ProviderCommand,
     ManagedOpenAi,
@@ -143,10 +147,11 @@ impl ProviderDecisionCenter {
 
     pub(crate) async fn setup_provider(
         &self,
+        provider_id: &str,
         provider: &ModelProviderInfo,
         purpose: AuthRequestPurpose,
     ) -> Result<ProviderRequestSetup> {
-        let resolution = self.resolve(provider, purpose).await?;
+        let resolution = self.resolve(provider_id, provider, purpose).await?;
         let endpoint = resolve_provider_endpoint(provider, resolution.auth_mode)?;
         Ok(ProviderRequestSetup {
             auth: resolution.auth,
@@ -172,7 +177,7 @@ impl ProviderInterface {
                     Self::ResponsesApiKey
                 }
             }
-            WireApi::Claude => Self::ClaudeCode,
+            WireApi::Claude => Self::ClaudeMessages,
             WireApi::OpenAiCompat => Self::OpenAiCompatible,
         }
     }

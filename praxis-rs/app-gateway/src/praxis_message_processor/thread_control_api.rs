@@ -326,8 +326,9 @@ impl PraxisMessageProcessor {
             Err(_) => return Ok(item),
         };
         let turn_id = self
-            .submit_core_op(
+            .submit_connection_owned_turn(
                 &request_id,
+                thread_id,
                 thread.as_ref(),
                 thread.config_snapshot().await.user_turn_op(
                     vec![CoreUserInput::Text {

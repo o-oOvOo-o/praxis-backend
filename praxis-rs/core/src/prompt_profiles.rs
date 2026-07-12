@@ -15,6 +15,7 @@ use praxis_protocol::openai_models::ModelInfo;
 pub(crate) enum PromptProfileId {
     OpenAiResponses,
     CommonBase,
+    Claude,
     DeepSeek,
     Gemini,
     Glm,
@@ -26,6 +27,7 @@ impl PromptProfileId {
         match self {
             Self::OpenAiResponses => OPENAI_RESPONSES_PROFILE_ID,
             Self::CommonBase => "common/base",
+            Self::Claude => "claude/base",
             Self::DeepSeek => "deepseek/base",
             Self::Gemini => "gemini/base",
             Self::Glm => "glm/base",
@@ -37,11 +39,12 @@ impl PromptProfileId {
         match profile_id {
             BehaviorProfileId::OpenAiResponses => Some(Self::OpenAiResponses),
             BehaviorProfileId::Common => Some(Self::CommonBase),
+            BehaviorProfileId::Claude => Some(Self::Claude),
             BehaviorProfileId::DeepSeek => Some(Self::DeepSeek),
             BehaviorProfileId::Gemini => Some(Self::Gemini),
             BehaviorProfileId::Glm => Some(Self::Glm),
             BehaviorProfileId::Qwen => Some(Self::Qwen),
-            BehaviorProfileId::Claude | BehaviorProfileId::OpenRouter => None,
+            BehaviorProfileId::OpenRouter => None,
         }
     }
 }
@@ -99,7 +102,7 @@ fn resolve_behavior_model_instructions(
     llm_runtime_catalog: &LlmRuntimeCatalog,
 ) -> String {
     if let Some(plugin_instructions) = llm_runtime_catalog.resolve_profile_prompt(
-        profile,
+        profile.clone(),
         provider_id,
         provider,
         LlmPromptPurpose::ModelInstructions,
@@ -130,7 +133,13 @@ fn resolve_behavior_model_instructions(
         None => catalog_instructions.to_string(),
     };
 
-    join_profile_prompt_layers(instructions, profile, LlmPromptPurpose::ModelInstructions)
+    let ctx = ProfileMatchContext::new(model_info, provider_id, provider);
+    join_profile_prompt_layers(
+        instructions,
+        profile,
+        LlmPromptPurpose::ModelInstructions,
+        &ctx,
+    )
 }
 
 fn join_prompt_layers(base: &str, product: &str) -> String {
@@ -148,11 +157,12 @@ fn join_profile_prompt_layers(
     mut instructions: String,
     profile: ProfileDescriptor,
     purpose: LlmPromptPurpose,
+    ctx: &ProfileMatchContext<'_>,
 ) -> String {
     for layer in profile
         .prompt_layers
         .iter()
-        .filter(|layer| layer.purpose == purpose)
+        .filter(|layer| layer.purpose == purpose && layer.matches(ctx))
     {
         let content = layer.content.trim();
         if content.is_empty() {
@@ -270,6 +280,14 @@ mod tests {
     }
 
     #[test]
+    fn anthropic_model_resolves_claude_profile() {
+        let (provider_id, provider) =
+            provider("anthropic", "https://api.anthropic.com/v1", WireApi::Claude);
+        let profile = infer_prompt_profile_id(&model("claude-fable-5"), &provider_id, &provider);
+        assert_eq!(profile, Some(PromptProfileId::Claude));
+    }
+
+    #[test]
     fn common_openai_compatible_profile_uses_common_instructions() {
         let (provider_id, provider) = provider(
             "custom-provider",
@@ -328,6 +346,48 @@ mod tests {
                     .find("# DeepSeek Smarter Orchestration")
                     .unwrap()
         );
+    }
+
+    #[test]
+    fn claude_fable_profile_applies_base_and_model_layer() {
+        let (provider_id, provider) =
+            provider("anthropic", "https://api.anthropic.com/v1", WireApi::Claude);
+
+        let instructions = resolve_model_instructions(
+            &model("claude-fable-5"),
+            &provider_id,
+            &provider,
+            None,
+            None,
+            &LlmRuntimeCatalog::default(),
+        );
+
+        assert!(instructions.starts_with("你是 Praxis"));
+        assert!(instructions.contains("# Claude Fable 5 运行配置"));
+        assert!(instructions.contains("Praxis 可能把连续重复的工具输出无损折叠"));
+        assert!(instructions.contains("freeform 工具被 Praxis 包装成 function tool"));
+        assert!(
+            instructions.find("# 身份与边界").unwrap()
+                < instructions.find("# Claude Fable 5 运行配置").unwrap()
+        );
+    }
+
+    #[test]
+    fn claude_non_fable_profile_uses_base_without_fable_layer() {
+        let (provider_id, provider) =
+            provider("anthropic", "https://api.anthropic.com/v1", WireApi::Claude);
+
+        let instructions = resolve_model_instructions(
+            &model("claude-sonnet-5"),
+            &provider_id,
+            &provider,
+            None,
+            None,
+            &LlmRuntimeCatalog::default(),
+        );
+
+        assert!(instructions.starts_with("你是 Praxis"));
+        assert!(!instructions.contains("# Claude Fable 5 运行配置"));
     }
 
     #[test]

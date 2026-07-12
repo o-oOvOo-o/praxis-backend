@@ -972,6 +972,8 @@ When an upstream HTTP status is available (for example, from the Responses API o
 
 Certain actions (shell commands or modifying files) may require explicit user approval depending on the user's config. When `turn/start` is used, the app-gateway drives an approval flow by sending a server-initiated JSON-RPC request to the client. The client must respond to tell Praxis whether to proceed. UIs should present these requests inline with the active turn so users can review the proposed command or diff before choosing.
 
+Approval and other interactive requests for a turn are bound to the App Gateway connection that started that turn. Responses from another connection are rejected without resolving the request. If the controlling connection disconnects, pending requests fail closed so the turn cannot remain blocked on an unreachable reviewer.
+
 - Requests include `threadId` and `turnId`—use them to scope UI state to the active conversation.
 - Respond with a single `{ "decision": ... }` payload. Command approvals support `accept`, `acceptForSession`, `acceptWithExecpolicyAmendment`, `applyNetworkPolicyAmendment`, `decline`, or `cancel`. The server resumes or declines the work and ends the item with `item/completed`.
 

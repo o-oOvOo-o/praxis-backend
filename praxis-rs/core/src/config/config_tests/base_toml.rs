@@ -64,6 +64,36 @@ wire_api = "openai_compat"
 }
 
 #[test]
+fn claude_model_selects_built_in_anthropic_provider() -> std::io::Result<()> {
+    let cfg: ConfigToml = toml::from_str(
+        r#"
+model = "claude-sonnet-4-6"
+"#,
+    )
+    .expect("TOML deserialization should succeed");
+    let praxis_home = tempdir()?;
+
+    let config = Config::load_from_base_config_with_overrides(
+        cfg,
+        ConfigOverrides {
+            cwd: Some(praxis_home.path().to_path_buf()),
+            ..Default::default()
+        },
+        praxis_home.path().to_path_buf(),
+    )?;
+
+    assert_eq!(config.model_provider_id, crate::ANTHROPIC_PROVIDER_ID);
+    assert!(config.model_provider.is_anthropic());
+    assert!(
+        config
+            .startup_warnings
+            .iter()
+            .any(|warning| warning.contains("switched provider"))
+    );
+    Ok(())
+}
+
+#[test]
 fn test_toml_parsing() {
     let history_with_persistence = r#"
 [history]
@@ -223,4 +253,18 @@ command = "print-token"
         err.to_string()
             .contains("model_providers.corp: provider auth cannot be combined with env_key")
     );
+}
+
+#[test]
+fn rejects_noncanonical_provider_id_that_could_alias_a_credential() {
+    let err = toml::from_str::<ConfigToml>(
+        r#"
+[model_providers." corp "]
+name = "Corp"
+env_key = "CORP_TOKEN"
+"#,
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("model provider ID ` corp `"));
 }

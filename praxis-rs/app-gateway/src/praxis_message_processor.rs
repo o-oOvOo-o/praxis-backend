@@ -69,6 +69,8 @@ use praxis_app_gateway_protocol::ThreadHistoryAppendParams;
 use praxis_app_gateway_protocol::ThreadHistoryAppendResponse;
 use praxis_app_gateway_protocol::ThreadHistoryEntryGetParams;
 use praxis_app_gateway_protocol::ThreadHistoryEntryGetResponse;
+use praxis_app_gateway_protocol::ThreadHistoryReadParams;
+use praxis_app_gateway_protocol::ThreadHistoryReadResponse;
 use praxis_app_gateway_protocol::ThreadIncrementElicitationParams;
 use praxis_app_gateway_protocol::ThreadIncrementElicitationResponse;
 use praxis_app_gateway_protocol::ThreadLookupParams;

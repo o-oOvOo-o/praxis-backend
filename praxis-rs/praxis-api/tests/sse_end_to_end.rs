@@ -53,7 +53,7 @@ impl HttpTransport for FixtureSseTransport {
 struct NoAuth;
 
 impl AuthProvider for NoAuth {
-    fn bearer_token(&self) -> Option<String> {
+    fn bearer_token(&self) -> Option<&str> {
         None
     }
 }

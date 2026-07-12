@@ -16,7 +16,6 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
-use strum::IntoEnumIterator;
 
 use super::ChatWidget;
 use super::LAUNCH_STRIP_RANK_MAX;
@@ -185,7 +184,7 @@ impl ChatWidget {
         let should_prompt_plan_mode_scope = self.should_prompt_plan_mode_reasoning_scope(
             model.as_str(),
             selection.provider_id.as_str(),
-            Some(preset.default_reasoning_effort),
+            Some(preset.default_reasoning_effort.clone()),
         );
         let actions = Self::model_selection_actions(
             model,
@@ -219,26 +218,30 @@ impl ChatWidget {
 
     fn workspace_reasoning_explicit_effort(&self) -> Option<ReasoningEffortConfig> {
         if self.collaboration_modes_enabled() && self.active_mode_kind() == ModeKind::Plan {
-            return self.config.plan_mode_reasoning_effort;
+            return self.config.plan_mode_reasoning_effort.clone();
         }
         self.current_collaboration_mode.reasoning_effort()
     }
 
     fn workspace_reasoning_display_label(&self) -> String {
         self.effective_reasoning_effort()
-            .map(Self::reasoning_effort_label)
-            .unwrap_or("Default")
-            .to_string()
+            .map(|effort| Self::reasoning_effort_label(&effort))
+            .unwrap_or_else(|| "Default".to_string())
     }
 
-    fn workspace_reasoning_effort_description(effort: ReasoningEffortConfig) -> &'static str {
+    fn workspace_reasoning_effort_description(effort: &ReasoningEffortConfig) -> &'static str {
         match effort {
             ReasoningEffortConfig::None => "Disable explicit model thinking.",
             ReasoningEffortConfig::Minimal => "Use the smallest advertised thinking budget.",
             ReasoningEffortConfig::Low => "Use lightweight model thinking.",
             ReasoningEffortConfig::Medium => "Use balanced model thinking.",
             ReasoningEffortConfig::High => "Use deeper model thinking.",
-            ReasoningEffortConfig::XHigh => "Use maximum model thinking depth.",
+            ReasoningEffortConfig::XHigh => "Use extra-high model thinking depth.",
+            ReasoningEffortConfig::Max => "Use maximum single-agent reasoning depth.",
+            ReasoningEffortConfig::Ultra => {
+                "Use maximum reasoning with proactive multi-agent delegation."
+            }
+            ReasoningEffortConfig::Custom(_) => "Use this model-defined reasoning level.",
         }
     }
 
@@ -249,11 +252,17 @@ impl ChatWidget {
         let default_display = effective_effort.or_else(|| {
             current_preset
                 .as_ref()
-                .map(|preset| preset.default_reasoning_effort)
+                .map(|preset| preset.default_reasoning_effort.clone())
         });
         let default_name = default_display.map_or_else(
             || "Default".to_string(),
-            |effort| format!("Default ({})", Self::reasoning_effort_label(effort)),
+            |effort| {
+                let label = current_preset.as_ref().map_or_else(
+                    || Self::reasoning_effort_label(&effort),
+                    |preset| Self::preset_reasoning_effort_label(preset, &effort),
+                );
+                format!("Default ({label})")
+            },
         );
         let mut choices = vec![WorkspaceReasoningChoice {
             effort: None,
@@ -264,37 +273,42 @@ impl ChatWidget {
 
         if let Some(preset) = current_preset.as_ref() {
             for option in preset.supported_reasoning_efforts.iter() {
-                let effort = option.effort;
-                if choices.iter().any(|choice| choice.effort == Some(effort)) {
+                let effort = option.effort.clone();
+                if choices
+                    .iter()
+                    .any(|choice| choice.effort.as_ref() == Some(&effort))
+                {
                     continue;
                 }
                 choices.push(WorkspaceReasoningChoice {
-                    effort: Some(effort),
-                    name: Self::reasoning_effort_label(effort).to_string(),
+                    effort: Some(effort.clone()),
+                    name: Self::preset_reasoning_effort_label(preset, &effort),
                     description: Some(option.description.clone())
                         .filter(|description| !description.trim().is_empty()),
-                    is_current: explicit_effort == Some(effort),
+                    is_current: explicit_effort.as_ref() == Some(&effort),
                 });
             }
         }
 
         if choices.len() == 1 {
-            for effort in ReasoningEffortConfig::iter() {
+            for effort in ReasoningEffortConfig::known_values() {
                 choices.push(WorkspaceReasoningChoice {
-                    effort: Some(effort),
-                    name: Self::reasoning_effort_label(effort).to_string(),
+                    effort: Some(effort.clone()),
+                    name: Self::reasoning_effort_label(&effort),
                     description: Some(
-                        Self::workspace_reasoning_effort_description(effort).to_string(),
+                        Self::workspace_reasoning_effort_description(&effort).to_string(),
                     ),
-                    is_current: explicit_effort == Some(effort),
+                    is_current: explicit_effort.as_ref() == Some(&effort),
                 });
             }
         } else if let Some(effort) = explicit_effort
-            && !choices.iter().any(|choice| choice.effort == Some(effort))
+            && !choices
+                .iter()
+                .any(|choice| choice.effort.as_ref() == Some(&effort))
         {
             choices.push(WorkspaceReasoningChoice {
-                effort: Some(effort),
-                name: format!("{} (current)", Self::reasoning_effort_label(effort)),
+                effort: Some(effort.clone()),
+                name: format!("{} (current)", Self::reasoning_effort_label(&effort)),
                 description: Some(
                     "Current reasoning level is not advertised by the selected model.".to_string(),
                 ),
@@ -331,7 +345,7 @@ impl ChatWidget {
 
         if self.collaboration_modes_enabled() && self.active_mode_kind() == ModeKind::Plan {
             self.app_event_tx
-                .send(AppEvent::UpdatePlanModeReasoningEffort(effort));
+                .send(AppEvent::UpdatePlanModeReasoningEffort(effort.clone()));
             self.app_event_tx
                 .send(AppEvent::PersistPlanModeReasoningEffort(effort));
         } else {

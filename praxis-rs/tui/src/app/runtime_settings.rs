@@ -8,6 +8,9 @@ impl App {
             Some(ReasoningEffortConfig::Medium) => "medium",
             Some(ReasoningEffortConfig::High) => "high",
             Some(ReasoningEffortConfig::XHigh) => "xhigh",
+            Some(ReasoningEffortConfig::Max) => "max",
+            Some(ReasoningEffortConfig::Ultra) => "ultra",
+            Some(ReasoningEffortConfig::Custom(_)) => "custom",
             None | Some(ReasoningEffortConfig::None) => "default",
         }
     }
@@ -25,7 +28,7 @@ impl App {
 
     pub(super) fn on_update_reasoning_effort(&mut self, effort: Option<ReasoningEffortConfig>) {
         // New session construction still reads reasoning defaults from Config.
-        self.config.model_reasoning_effort = effort;
+        self.config.model_reasoning_effort = effort.clone();
         self.chat_widget.set_reasoning_effort(effort);
     }
 

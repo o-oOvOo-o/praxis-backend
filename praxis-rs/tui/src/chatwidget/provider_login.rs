@@ -36,7 +36,7 @@ impl ChatWidget {
             });
         })];
         let anthropic_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
-            tx.send(AppEvent::ShowAnthropicLoginStatement);
+            tx.send(AppEvent::BeginAnthropicOauthLogin);
         })];
 
         let mut header = ColumnRenderable::new();
@@ -45,7 +45,7 @@ impl ChatWidget {
             "Manage credentials without blocking startup when another provider is usable.".dim(),
         ));
         header.push(Line::from(
-            "Tip: /login deepseek <api_key> or /login common api_key=... base_url=... model=..."
+            "Tip: Praxis can import the local Claude Code Pro/Max OAuth login without exposing it."
                 .dim(),
         ));
 
@@ -81,8 +81,11 @@ impl ChatWidget {
                     ..Default::default()
                 },
                 SelectionItem {
-                    name: "Anthropic account".to_string(),
-                    description: Some("Show the Praxis integration statement.".to_string()),
+                    name: "Claude Pro/Max or Anthropic API key".to_string(),
+                    description: Some(
+                        "Use the local Claude Code OAuth login when available, otherwise enter a Console API key."
+                            .to_string(),
+                    ),
                     actions: anthropic_actions,
                     dismiss_on_select: true,
                     ..Default::default()
@@ -94,18 +97,21 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_provider_login_prompt(&mut self, provider: ProviderSetupKind) {
+        if provider == ProviderSetupKind::Anthropic {
+            self.app_event_tx.send(AppEvent::BeginAnthropicOauthLogin);
+            return;
+        }
         let tx = self.app_event_tx.clone();
-        let view = CustomPromptView::new(
-            provider.input_title(),
-            provider.input_placeholder(),
-            provider.input_context_label(),
-            Box::new(move |raw: String| match provider.parse_selection(&raw) {
+        let on_submit = Box::new(move |raw: String| {
+            let raw = zeroize::Zeroizing::new(raw);
+            match provider.parse_selection(raw.as_str()) {
                 Ok(selection) => {
                     tx.send(AppEvent::ApplyProviderSetup {
                         model: selection.model,
                         provider_id: selection.provider_id,
                         provider: selection.provider,
                         effort: selection.effort,
+                        api_key: selection.api_key,
                     });
                 }
                 Err(err) => {
@@ -113,24 +119,16 @@ impl ChatWidget {
                         history_cell::new_error_event(err),
                     )));
                 }
-            }),
+            }
+        });
+        let view = CustomPromptView::new_secret(
+            provider.input_title(),
+            provider.input_placeholder(),
+            provider.input_context_label(),
+            on_submit,
         );
         self.bottom_pane.show_view(Box::new(view));
         self.request_redraw();
-    }
-
-    pub(crate) fn show_anthropic_login_statement(&mut self) {
-        self.add_plain_history_lines(vec![
-            Line::from("Anthropic account integration").bold(),
-            Line::from(""),
-            Line::from(
-                "Praxis does not provide Anthropic account integration. The company publicly objects to model distillation while benefiting from the same industry-wide extraction dynamics it condemns.",
-            ),
-            Line::from(
-                "We will not spend the Praxis login surface normalizing that posture. Use ChatGPT/OpenAI, DeepSeek, or a common OpenAI-compatible endpoint instead.",
-            )
-            .dim(),
-        ]);
     }
 
     pub(super) fn handle_login_command_args(&mut self, args: &str) {
@@ -145,11 +143,12 @@ impl ChatWidget {
         let rest = parts.next().unwrap_or_default().trim();
         match Self::login_provider_target(target) {
             Some(provider) if rest.is_empty() => self.open_provider_login_prompt(provider),
-            Some(provider) => self.submit_provider_setup_from_raw(provider, rest),
-            None if target.eq_ignore_ascii_case("anthropic")
-                || target.eq_ignore_ascii_case("claude") =>
-            {
-                self.show_anthropic_login_statement();
+            Some(provider) => {
+                self.add_error_message(format!(
+                    "Do not place the {} API key in a slash command. Run `/login {}` and enter it in the masked prompt.",
+                    provider.label(),
+                    provider.provider_id()
+                ));
             }
             None if target.eq_ignore_ascii_case("chatgpt")
                 || target.eq_ignore_ascii_case("codex")
@@ -164,30 +163,17 @@ impl ChatWidget {
                 );
             }
             None => self
-                .add_error_message("Usage: /login [deepseek|common|chatgpt|anthropic]".to_string()),
+                .add_error_message("Usage: /login [anthropic|deepseek|common|chatgpt]".to_string()),
         }
         self.bottom_pane.drain_pending_submission_state();
     }
 
     fn login_provider_target(target: &str) -> Option<ProviderSetupKind> {
         match target.to_ascii_lowercase().as_str() {
+            "anthropic" | "claude" => Some(ProviderSetupKind::Anthropic),
             "deepseek" | "ds" => Some(ProviderSetupKind::DeepSeek),
             "common" | "openai-compatible" | "compatible" => Some(ProviderSetupKind::Common),
             _ => None,
-        }
-    }
-
-    fn submit_provider_setup_from_raw(&mut self, provider: ProviderSetupKind, raw: &str) {
-        match provider.parse_selection(raw) {
-            Ok(selection) => {
-                self.app_event_tx.send(AppEvent::ApplyProviderSetup {
-                    model: selection.model,
-                    provider_id: selection.provider_id,
-                    provider: selection.provider,
-                    effort: selection.effort,
-                });
-            }
-            Err(err) => self.add_error_message(err),
         }
     }
 }

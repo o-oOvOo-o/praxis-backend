@@ -139,7 +139,7 @@ pub(crate) fn merge_persisted_resume_metadata(
 
     typesafe_overrides.model = persisted_metadata.model.clone();
 
-    if let Some(reasoning_effort) = persisted_metadata.reasoning_effort {
+    if let Some(reasoning_effort) = &persisted_metadata.reasoning_effort {
         request_overrides.get_or_insert_with(HashMap::new).insert(
             "model_reasoning_effort".to_string(),
             serde_json::Value::String(reasoning_effort.to_string()),

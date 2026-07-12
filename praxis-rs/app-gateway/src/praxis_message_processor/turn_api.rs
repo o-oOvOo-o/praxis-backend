@@ -187,7 +187,7 @@ impl PraxisMessageProcessor {
             output_schema,
             collaboration_mode,
         } = params;
-        let Some((_, thread)) = self
+        let Some((thread_id, thread)) = self
             .ensure_thread_for_request(&thread_id, &request_id)
             .await
         else {
@@ -235,7 +235,9 @@ impl PraxisMessageProcessor {
         };
 
         // Start the turn by submitting the user input. Return its submission id as turn_id.
-        let turn_id = self.submit_core_op(&request_id, thread.as_ref(), op).await;
+        let turn_id = self
+            .submit_connection_owned_turn(&request_id, thread_id, thread.as_ref(), op)
+            .await;
 
         match turn_id {
             Ok(turn_id) => {

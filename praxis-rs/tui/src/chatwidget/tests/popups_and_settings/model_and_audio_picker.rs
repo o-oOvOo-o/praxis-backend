@@ -88,6 +88,7 @@ async fn model_picker_hides_show_in_picker_false_models_from_cache() {
         default_reasoning_effort: ReasoningEffortConfig::Medium,
         supported_reasoning_efforts: vec![ReasoningEffortPreset {
             effort: ReasoningEffortConfig::Medium,
+            display_name: None,
             description: "medium".to_string(),
         }],
         supports_personality: false,
@@ -127,6 +128,7 @@ async fn model_picker_shows_gpt55_on_primary_screen() {
         default_reasoning_effort: ReasoningEffortConfig::Medium,
         supported_reasoning_efforts: vec![ReasoningEffortPreset {
             effort: ReasoningEffortConfig::Medium,
+            display_name: None,
             description: "medium".to_string(),
         }],
         supports_personality: false,
@@ -257,11 +259,43 @@ async fn reasoning_popup_shows_extra_high_with_space() {
 }
 
 #[tokio::test]
+async fn reasoning_picker_uses_model_defined_effort_names() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let preset = ModelPreset {
+        id: "anthropic::claude-fable-5".to_string(),
+        model: "claude-fable-5".to_string(),
+        display_name: "Claude Fable 5".to_string(),
+        description: String::new(),
+        default_reasoning_effort: ReasoningEffortConfig::High,
+        supported_reasoning_efforts: vec![
+            ReasoningEffortPreset::new(ReasoningEffortConfig::High, "Deep reasoning"),
+            ReasoningEffortPreset::new(ReasoningEffortConfig::Ultra, "xhigh + workflows")
+                .with_display_name("ultracode"),
+        ],
+        supports_personality: false,
+        is_default: false,
+        upgrade: None,
+        show_in_picker: true,
+        availability_nux: None,
+        supported_in_api: true,
+        input_modalities: default_input_modalities(),
+    };
+
+    chat.open_reasoning_popup(preset, "anthropic".to_string(), None);
+    let popup = render_bottom_popup(&chat, /*width*/ 100);
+
+    assert!(popup.contains("ultracode"), "popup: {popup}");
+    assert!(popup.contains("xhigh + workflows"), "popup: {popup}");
+    assert!(!popup.contains("Ultra ("), "popup: {popup}");
+}
+
+#[tokio::test]
 async fn single_reasoning_option_skips_selection() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     let single_effort = vec![ReasoningEffortPreset {
         effort: ReasoningEffortConfig::High,
+        display_name: None,
         description: "Greater reasoning depth for complex or ambiguous problems".to_string(),
     }];
     let preset = ModelPreset {

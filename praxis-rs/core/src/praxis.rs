@@ -73,6 +73,7 @@ pub(crate) use thread_lifecycle::session_loop_termination_from_handle;
 pub(crate) use turn_context::TurnContext;
 
 use turn_time_context::local_time_context;
+use turn_tool_config::multi_agent_mode_for_turn_model;
 use turn_tool_config::tool_capabilities_for_turn_model;
 use turn_tool_config::tool_wire_profile_for_wire_api;
 

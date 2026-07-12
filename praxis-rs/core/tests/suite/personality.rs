@@ -641,6 +641,7 @@ async fn remote_model_friendly_personality_instructions_with_feature() -> anyhow
         default_reasoning_level: Some(ReasoningEffort::Medium),
         supported_reasoning_levels: vec![ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: None,
             description: ReasoningEffort::Medium.to_string(),
         }],
         shell_type: ConfigShellToolType::UnifiedExec,
@@ -674,6 +675,7 @@ async fn remote_model_friendly_personality_instructions_with_feature() -> anyhow
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
     };
 
     let _models_mock = mount_models_once(
@@ -757,6 +759,7 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
         default_reasoning_level: Some(ReasoningEffort::Medium),
         supported_reasoning_levels: vec![ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: None,
             description: ReasoningEffort::Medium.to_string(),
         }],
         shell_type: ConfigShellToolType::UnifiedExec,
@@ -790,6 +793,7 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
     };
 
     let _models_mock = mount_models_once(

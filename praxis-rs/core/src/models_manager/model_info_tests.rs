@@ -68,7 +68,7 @@ fn fallback_common_model_exposes_optional_thinking_efforts() {
         model
             .supported_reasoning_levels
             .iter()
-            .map(|preset| preset.effort)
+            .map(|preset| preset.effort.clone())
             .collect::<Vec<_>>(),
         vec![
             ReasoningEffort::Low,
@@ -97,18 +97,22 @@ fn known_gpt55_capability_overlay_restores_xhigh_reasoning() {
     remote_model.supported_reasoning_levels = vec![
         ReasoningEffortPreset {
             effort: ReasoningEffort::Minimal,
+            display_name: None,
             description: "Remote minimal".to_string(),
         },
         ReasoningEffortPreset {
             effort: ReasoningEffort::Low,
+            display_name: None,
             description: "Remote low".to_string(),
         },
         ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: None,
             description: "Remote medium".to_string(),
         },
         ReasoningEffortPreset {
             effort: ReasoningEffort::High,
+            display_name: None,
             description: "Remote high".to_string(),
         },
     ];
@@ -117,11 +121,62 @@ fn known_gpt55_capability_overlay_restores_xhigh_reasoning() {
     let efforts = updated
         .supported_reasoning_levels
         .iter()
-        .map(|preset| preset.effort)
+        .map(|preset| preset.effort.clone())
         .collect::<Vec<_>>();
 
     assert!(efforts.contains(&ReasoningEffort::Minimal));
     assert!(efforts.contains(&ReasoningEffort::XHigh));
+}
+
+#[test]
+fn anthropic_catalog_uses_current_messages_api_capabilities() {
+    let models = anthropic_model_infos();
+    let sonnet = models
+        .iter()
+        .find(|model| model.slug == "claude-sonnet-5")
+        .expect("Claude Sonnet catalog entry");
+
+    assert_eq!(sonnet.context_window, Some(1_000_000));
+    assert_eq!(sonnet.auto_compact_token_limit(), Some(900_000));
+    assert_eq!(sonnet.default_reasoning_level, Some(ReasoningEffort::High));
+    assert!(sonnet.supports_reasoning_summaries);
+    assert!(sonnet.supports_parallel_tool_calls);
+    assert!(sonnet.supports_reasoning_effort(&ReasoningEffort::Max));
+    assert!(sonnet.supports_reasoning_effort(&ReasoningEffort::XHigh));
+    assert!(sonnet.supports_reasoning_effort(&ReasoningEffort::None));
+    assert!(!sonnet.used_fallback_model_metadata);
+
+    let fable = models
+        .iter()
+        .find(|model| model.slug == "claude-fable-5")
+        .expect("Claude Fable catalog entry");
+    assert!(!fable.supports_reasoning_effort(&ReasoningEffort::None));
+    let ultracode = fable
+        .supported_reasoning_levels
+        .iter()
+        .find(|preset| preset.effort == ReasoningEffort::Ultra)
+        .expect("Fable ultracode effort");
+    assert_eq!(ultracode.effective_display_name(), "ultracode");
+    assert_eq!(ultracode.description, "xhigh + workflows");
+}
+
+#[test]
+fn known_gpt56_capability_overlay_restores_ultra_reasoning() {
+    let mut remote_model = model_info_from_slug("gpt-5.6-sol");
+    remote_model.supported_reasoning_levels = vec![ReasoningEffortPreset {
+        effort: ReasoningEffort::High,
+        display_name: None,
+        description: "Remote high".to_string(),
+    }];
+
+    let updated = with_known_model_capability_overrides(remote_model);
+
+    assert!(updated.supports_reasoning_effort(&ReasoningEffort::Ultra));
+    assert_eq!(updated.context_window, Some(372_000));
+    assert_eq!(
+        updated.multi_agent_version,
+        Some(praxis_protocol::openai_models::MultiAgentVersion::V2)
+    );
 }
 
 #[test]

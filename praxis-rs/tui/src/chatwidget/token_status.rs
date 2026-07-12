@@ -355,6 +355,9 @@ impl ChatWidget {
             Some(ReasoningEffortConfig::Medium) => "medium",
             Some(ReasoningEffortConfig::High) => "high",
             Some(ReasoningEffortConfig::XHigh) => "xhigh",
+            Some(ReasoningEffortConfig::Max) => "max",
+            Some(ReasoningEffortConfig::Ultra) => "ultra",
+            Some(ReasoningEffortConfig::Custom(_)) => "custom",
             None | Some(ReasoningEffortConfig::None) => "default",
         }
     }
@@ -421,7 +424,7 @@ impl ChatWidget {
                     /*windows_sandbox_level*/ None,
                     Some(switch_provider_id_for_events.clone()),
                     Some(switch_model_for_events.clone()),
-                    Some(Some(default_effort)),
+                    Some(Some(default_effort.clone())),
                     /*summary*/ None,
                     /*service_tier*/ None,
                     /*collaboration_mode*/ None,
@@ -433,7 +436,9 @@ impl ChatWidget {
                 model: switch_model_for_events.clone(),
                 provider_id: switch_provider_id_for_events.clone(),
             });
-            tx.send(AppEvent::UpdateReasoningEffort(Some(default_effort)));
+            tx.send(AppEvent::UpdateReasoningEffort(Some(
+                default_effort.clone(),
+            )));
         })];
 
         let keep_actions: Vec<SelectionAction> = Vec::new();

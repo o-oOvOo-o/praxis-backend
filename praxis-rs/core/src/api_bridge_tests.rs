@@ -133,11 +133,16 @@ fn map_api_error_extracts_identity_auth_details_from_headers() {
 
 #[test]
 fn core_auth_provider_reports_when_auth_header_will_attach() {
-    let auth = CoreAuthProvider {
-        token: Some("access-token".to_string()),
-        account_id: None,
-    };
+    let auth = CoreAuthProvider::for_test(Some("access-token"), None);
 
     assert!(auth.auth_header_attached());
     assert_eq!(auth.auth_header_name(), Some("authorization"));
+}
+
+#[test]
+fn core_auth_provider_reports_claude_api_key_header() {
+    let auth = CoreAuthProvider::for_test_claude_api_key(Some("claude-key"));
+
+    assert!(auth.auth_header_attached());
+    assert_eq!(auth.auth_header_name(), Some("x-api-key"));
 }

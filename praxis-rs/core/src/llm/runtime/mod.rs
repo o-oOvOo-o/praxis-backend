@@ -183,7 +183,7 @@ impl LlmRuntimeCatalog {
         let profile = self.resolve_builtin_profile(model_info, provider_id, provider)?;
         let mut policy = LlmToolVisibilityPolicy::default();
 
-        if let Some(path) = self.profile_tools_policy_path(profile, provider_id, provider)
+        if let Some(path) = self.profile_tools_policy_path(profile.clone(), provider_id, provider)
             && let Some(profile_policy) =
                 read_tool_visibility_policy(path.as_path(), profile.id, "profile.tools")
         {
@@ -228,7 +228,7 @@ impl LlmRuntimeCatalog {
             web_search_backend: profile.tool_capabilities.web_search_backend,
         };
 
-        if let Some(path) = self.profile_tools_policy_path(profile, provider_id, provider)
+        if let Some(path) = self.profile_tools_policy_path(profile.clone(), provider_id, provider)
             && let Some(profile_capabilities) =
                 read_tool_capability_policy(path.as_path(), profile.id, "profile.tools")
         {
@@ -311,8 +311,8 @@ impl LlmRuntimeCatalog {
         product: Option<ProductProfileId>,
     ) -> Option<LlmTaskPolicy> {
         let profile = self.resolve_builtin_profile(model_info, provider_id, provider)?;
-        let mut policy = LlmTaskPolicy::from_profile_descriptor(profile.task_policy);
-        if let Some(path) = self.profile_task_policy_path(profile, provider_id, provider)
+        let mut policy = LlmTaskPolicy::from_profile_descriptor(profile.task_policy.clone());
+        if let Some(path) = self.profile_task_policy_path(profile.clone(), provider_id, provider)
             && let Some(profile_policy) = read_task_policy(path.as_path(), profile.id)
         {
             policy.merge(profile_policy);

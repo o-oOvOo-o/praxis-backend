@@ -80,6 +80,7 @@ mod models;
 mod outgoing_message;
 mod praxis_message_processor;
 mod realtime_event_bridge;
+mod server_request_callbacks;
 mod server_request_error;
 mod server_request_lifecycle;
 mod thread_item_event_bridge;
@@ -778,7 +779,7 @@ pub async fn run_main_with_transport(
                                             warn!("dropping response from unknown connection: {connection_id:?}");
                                             continue;
                                         }
-                                        processor.process_response(response).await;
+                                        processor.process_response(connection_id, response).await;
                                     }
                                     JSONRPCMessage::Notification(notification) => {
                                         if !connections.contains_key(&connection_id) {
@@ -792,7 +793,7 @@ pub async fn run_main_with_transport(
                                             warn!("dropping error from unknown connection: {connection_id:?}");
                                             continue;
                                         }
-                                        processor.process_error(err).await;
+                                        processor.process_error(connection_id, err).await;
                                     }
                                 }
                             }

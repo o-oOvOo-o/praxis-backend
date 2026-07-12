@@ -33,7 +33,9 @@ impl ChatWidget {
 
         match tool {
             CollabAgentTool::SpawnAgent => {
-                if let (Some(model), Some(reasoning_effort)) = (model.clone(), reasoning_effort) {
+                if let (Some(model), Some(reasoning_effort)) =
+                    (model.clone(), reasoning_effort.clone())
+                {
                     self.pending_collab_spawn_requests.insert(
                         id.clone(),
                         multi_agents::SpawnRequestSummary {
@@ -47,7 +49,7 @@ impl ChatWidget {
                     let spawn_request =
                         self.pending_collab_spawn_requests.remove(&id).or_else(|| {
                             model
-                                .zip(reasoning_effort)
+                                .zip(reasoning_effort.clone())
                                 .map(|(model, reasoning_effort)| {
                                     multi_agents::SpawnRequestSummary {
                                         model,

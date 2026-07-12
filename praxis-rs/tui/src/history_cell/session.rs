@@ -381,12 +381,15 @@ impl SessionHeaderHistoryCell {
     }
 
     fn reasoning_label(&self) -> Option<&'static str> {
-        self.reasoning_effort.map(|effort| match effort {
+        self.reasoning_effort.as_ref().map(|effort| match effort {
             ReasoningEffortConfig::Minimal => "minimal",
             ReasoningEffortConfig::Low => "low",
             ReasoningEffortConfig::Medium => "medium",
             ReasoningEffortConfig::High => "high",
             ReasoningEffortConfig::XHigh => "xhigh",
+            ReasoningEffortConfig::Max => "max",
+            ReasoningEffortConfig::Ultra => "ultra",
+            ReasoningEffortConfig::Custom(_) => "custom",
             ReasoningEffortConfig::None => "none",
         })
     }

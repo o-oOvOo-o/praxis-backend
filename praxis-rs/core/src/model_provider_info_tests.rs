@@ -132,6 +132,29 @@ wire_api = "claude"
 }
 
 #[test]
+fn built_in_anthropic_provider_uses_official_messages_api_auth() {
+    let providers = built_in_model_providers(None);
+    let provider = providers
+        .get(ANTHROPIC_PROVIDER_ID)
+        .expect("Anthropic should be a built-in provider");
+
+    assert!(provider.is_anthropic());
+    assert_eq!(provider.base_url.as_deref(), Some(ANTHROPIC_API_BASE_URL));
+    assert_eq!(provider.env_key.as_deref(), Some(ANTHROPIC_API_KEY_ENV_VAR));
+    assert_eq!(provider.wire_api, WireApi::Claude);
+    assert_eq!(
+        provider
+            .http_headers
+            .as_ref()
+            .and_then(|headers| headers.get("anthropic-version"))
+            .map(String::as_str),
+        Some(ANTHROPIC_API_VERSION)
+    );
+    assert!(provider.experimental_bearer_token.is_none());
+    assert!(provider.auth.is_none());
+}
+
+#[test]
 fn test_deserialize_openai_compat_wire_api() {
     let provider_toml = r#"
 name = "OpenAI Compatible"
@@ -292,4 +315,37 @@ refresh_interval_ms = 0
     let auth = provider.auth.expect("auth config should deserialize");
     assert_eq!(auth.refresh_interval_ms, 0);
     assert_eq!(auth.refresh_interval(), None);
+}
+
+#[test]
+fn provider_debug_redacts_all_inline_secret_values() {
+    let mut provider = ModelProviderInfo::create_anthropic_provider();
+    provider.base_url =
+        Some("https://user:password@example.com/v1?api_key=url-secret#fragment".to_string());
+    provider.experimental_bearer_token = Some("inline-secret".to_string());
+    provider.query_params = Some(
+        [("api_key".to_string(), "query-secret".to_string())]
+            .into_iter()
+            .collect(),
+    );
+    provider.http_headers = Some(
+        [("x-provider-key".to_string(), "header-secret".to_string())]
+            .into_iter()
+            .collect(),
+    );
+
+    let debug = format!("{provider:?}");
+    for secret in [
+        "user",
+        "password",
+        "url-secret",
+        "inline-secret",
+        "query-secret",
+        "header-secret",
+    ] {
+        assert!(!debug.contains(secret), "debug output leaked {secret}");
+    }
+    assert!(debug.contains("api_key"));
+    assert!(debug.contains("x-provider-key"));
+    assert!(debug.contains("[REDACTED]"));
 }

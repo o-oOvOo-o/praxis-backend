@@ -243,6 +243,19 @@ pub fn try_build_reqwest_client() -> Result<reqwest::Client, BuildCustomCaTransp
     build_reqwest_client_with_custom_ca(builder)
 }
 
+pub fn try_build_reqwest_client_without_redirects()
+-> Result<reqwest::Client, BuildCustomCaTransportError> {
+    let ua = get_praxis_user_agent();
+    let mut builder = reqwest::Client::builder()
+        .user_agent(ua)
+        .default_headers(default_headers())
+        .redirect(reqwest::redirect::Policy::none());
+    if is_sandboxed() {
+        builder = builder.no_proxy();
+    }
+    build_reqwest_client_with_custom_ca(builder)
+}
+
 /// Tries to build a Praxis reqwest client that bypasses system proxy discovery.
 pub fn try_build_direct_reqwest_client() -> Result<reqwest::Client, BuildCustomCaTransportError> {
     let ua = get_praxis_user_agent();
@@ -252,6 +265,17 @@ pub fn try_build_direct_reqwest_client() -> Result<reqwest::Client, BuildCustomC
         .default_headers(default_headers())
         .no_proxy();
 
+    build_reqwest_client_with_custom_ca(builder)
+}
+
+pub fn try_build_direct_reqwest_client_without_redirects()
+-> Result<reqwest::Client, BuildCustomCaTransportError> {
+    let ua = get_praxis_user_agent();
+    let builder = reqwest::Client::builder()
+        .user_agent(ua)
+        .default_headers(default_headers())
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none());
     build_reqwest_client_with_custom_ca(builder)
 }
 

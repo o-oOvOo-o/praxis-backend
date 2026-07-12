@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use praxis_protocol::openai_models::ModelInfo;
+use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_tools::ToolsConfig;
 use praxis_tools::ToolsConfigParams;
 
@@ -11,6 +12,7 @@ use crate::models_manager::manager::ModelsManager;
 use crate::shell;
 
 use super::super::SessionConfiguration;
+use super::super::multi_agent_mode_for_turn_model;
 use super::super::tool_capabilities_for_turn_model;
 use super::super::tool_wire_profile_for_wire_api;
 
@@ -24,6 +26,7 @@ pub(super) struct TurnToolsConfigInput<'a> {
     pub(super) user_shell: &'a shell::Shell,
     pub(super) shell_zsh_path: Option<&'a PathBuf>,
     pub(super) main_execve_wrapper_exe: Option<&'a PathBuf>,
+    pub(super) reasoning_effort: Option<&'a ReasoningEffort>,
 }
 
 pub(super) fn build(input: TurnToolsConfigInput<'_>) -> ToolsConfig {
@@ -37,6 +40,7 @@ pub(super) fn build(input: TurnToolsConfigInput<'_>) -> ToolsConfig {
         user_shell,
         shell_zsh_path,
         main_execve_wrapper_exe,
+        reasoning_effort,
     } = input;
     let session_source = session_configuration.session_source.clone();
     let tool_capabilities = tool_capabilities_for_turn_model(
@@ -69,5 +73,9 @@ pub(super) fn build(input: TurnToolsConfigInput<'_>) -> ToolsConfig {
     .with_allow_login_shell(per_turn_config.permissions.allow_login_shell)
     .with_agent_type_description(crate::agent::role::spawn_tool_spec::build(
         &per_turn_config.agent_roles,
+    ))
+    .with_multi_agent_mode(multi_agent_mode_for_turn_model(
+        model_info,
+        reasoning_effort,
     ))
 }

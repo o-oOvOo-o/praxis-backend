@@ -18,6 +18,7 @@ pub(super) fn build_context(
     );
     ctx.reasoning = turn_context
         .reasoning_effort
+        .clone()
         .map(|reasoning_effort| reasoning_effort.to_string());
     ctx.service_tier = turn_context
         .config

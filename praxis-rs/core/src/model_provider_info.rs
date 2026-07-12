@@ -24,6 +24,11 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+const ANTHROPIC_PROVIDER_NAME: &str = "Anthropic";
+pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
+pub const ANTHROPIC_API_KEY_ENV_VAR: &str = "ANTHROPIC_API_KEY";
+pub const ANTHROPIC_API_BASE_URL: &str = "https://api.anthropic.com";
+pub const ANTHROPIC_API_VERSION: &str = "2023-06-01";
 const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"responses\"` in your provider config.";
 pub(crate) const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
 pub(crate) const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.";
@@ -150,6 +155,7 @@ pub struct ModelProviderReasoningEffortMap {
     pub medium: Option<String>,
     pub high: Option<String>,
     pub xhigh: Option<String>,
+    pub max: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
@@ -174,7 +180,7 @@ pub enum ModelProviderThinkingFormat {
 }
 
 /// Serializable representation of a provider definition.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ModelProviderInfo {
     /// Friendly display name.
@@ -241,6 +247,76 @@ pub struct ModelProviderInfo {
     /// Whether this provider supports the Responses API WebSocket transport.
     #[serde(default)]
     pub supports_websockets: bool,
+}
+
+impl fmt::Debug for ModelProviderInfo {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let base_url = self.base_url.as_deref().map(redacted_provider_url);
+        formatter
+            .debug_struct("ModelProviderInfo")
+            .field("name", &self.name)
+            .field("base_url", &base_url)
+            .field("env_key", &self.env_key)
+            .field(
+                "env_key_instructions",
+                &self.env_key_instructions.as_ref().map(|_| "[CONFIGURED]"),
+            )
+            .field(
+                "experimental_bearer_token",
+                &self
+                    .experimental_bearer_token
+                    .as_ref()
+                    .map(|_| "[REDACTED]"),
+            )
+            .field("auth", &self.auth.as_ref().map(|_| "[CONFIGURED]"))
+            .field("wire_api", &self.wire_api)
+            .field("compat", &self.compat)
+            .field(
+                "query_param_names",
+                &sorted_map_keys(self.query_params.as_ref()),
+            )
+            .field(
+                "http_header_names",
+                &sorted_map_keys(self.http_headers.as_ref()),
+            )
+            .field(
+                "env_http_header_names",
+                &sorted_map_keys(self.env_http_headers.as_ref()),
+            )
+            .field("request_max_retries", &self.request_max_retries)
+            .field("stream_max_retries", &self.stream_max_retries)
+            .field("stream_idle_timeout_ms", &self.stream_idle_timeout_ms)
+            .field(
+                "websocket_connect_timeout_ms",
+                &self.websocket_connect_timeout_ms,
+            )
+            .field("requires_openai_auth", &self.requires_openai_auth)
+            .field("supports_websockets", &self.supports_websockets)
+            .finish()
+    }
+}
+
+fn sorted_map_keys(map: Option<&HashMap<String, String>>) -> Vec<&str> {
+    let mut keys: Vec<&str> = map
+        .map(|map| map.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    keys.sort_unstable();
+    keys
+}
+
+fn redacted_provider_url(raw: &str) -> String {
+    let Ok(mut url) = url::Url::parse(raw) else {
+        return "[UNPARSEABLE URL]".to_string();
+    };
+    if !url.username().is_empty() {
+        let _ = url.set_username("[REDACTED]");
+    }
+    if url.password().is_some() {
+        let _ = url.set_password(Some("[REDACTED]"));
+    }
+    url.set_query(None);
+    url.set_fragment(None);
+    url.to_string()
 }
 
 impl ModelProviderInfo {
@@ -339,8 +415,50 @@ impl ModelProviderInfo {
         }
     }
 
+    pub fn create_anthropic_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: ANTHROPIC_PROVIDER_NAME.into(),
+            base_url: Some(ANTHROPIC_API_BASE_URL.into()),
+            env_key: Some(ANTHROPIC_API_KEY_ENV_VAR.into()),
+            env_key_instructions: Some(
+                "Run `/login anthropic` to use the local Claude Pro/Max OAuth login, or provide a Claude Console API key with ANTHROPIC_API_KEY."
+                    .into(),
+            ),
+            experimental_bearer_token: None,
+            auth: None,
+            wire_api: WireApi::Claude,
+            compat: Some(ModelProviderCompatInfo {
+                supports_reasoning_effort: Some(true),
+                max_tokens: Some(64 * 1024),
+                ..Default::default()
+            }),
+            query_params: None,
+            http_headers: Some(
+                [(
+                    "anthropic-version".to_string(),
+                    ANTHROPIC_API_VERSION.to_string(),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        }
+    }
+
     pub fn is_openai(&self) -> bool {
         self.name == OPENAI_PROVIDER_NAME
+    }
+
+    pub fn is_anthropic(&self) -> bool {
+        self.name == ANTHROPIC_PROVIDER_NAME
+            && self.wire_api == WireApi::Claude
+            && self.base_url.as_deref() == Some(ANTHROPIC_API_BASE_URL)
     }
 
     pub(crate) fn uses_managed_openai_auth(&self) -> bool {
@@ -372,13 +490,11 @@ pub fn built_in_model_providers(
 ) -> HashMap<String, ModelProviderInfo> {
     use ModelProviderInfo as P;
     let openai_provider = P::create_openai_provider(openai_base_url);
+    let anthropic_provider = P::create_anthropic_provider();
 
-    // We do not want to be in the business of adjucating which third-party
-    // providers are bundled with Praxis CLI, so we only include the OpenAI and
-    // open source ("oss") providers by default. Users are encouraged to add to
-    // `model_providers` in config.toml to add their own providers.
     [
         (OPENAI_PROVIDER_ID, openai_provider),
+        (ANTHROPIC_PROVIDER_ID, anthropic_provider),
         (
             OLLAMA_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),

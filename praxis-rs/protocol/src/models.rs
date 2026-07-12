@@ -351,6 +351,7 @@ pub enum ResponseItem {
 }
 
 pub const BASE_INSTRUCTIONS_DEFAULT: &str = include_str!("prompts/base_instructions/default.md");
+pub const BASE_INSTRUCTIONS_GPT_5_6: &str = include_str!("prompts/base_instructions/gpt_5_6.md");
 
 /// Base instructions for the model in a thread. Corresponds to the `instructions` field in the ResponsesAPI.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]

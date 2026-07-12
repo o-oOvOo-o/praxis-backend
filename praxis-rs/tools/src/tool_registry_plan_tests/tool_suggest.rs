@@ -41,6 +41,7 @@ fn tool_suggest_is_not_registered_without_feature_flag() {
 fn tool_suggest_can_be_registered_without_search_tool() {
     let model_info = ModelInfo {
         supports_search_tool: false,
+        multi_agent_version: None,
         ..search_capable_model_info()
     };
     let mut features = Features::with_defaults();

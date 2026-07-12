@@ -61,7 +61,7 @@ impl PraxisMessageProcessor {
             windows_sandbox_level: None,
             model_provider: Some(model_provider.clone()),
             model: Some(model.clone()),
-            effort: reasoning_effort,
+            effort: reasoning_effort.clone(),
             summary: None,
             service_tier: None,
             collaboration_mode: None,
@@ -102,10 +102,10 @@ impl PraxisMessageProcessor {
             thread: thread_projection.clone(),
             previous_model_provider: before.model_provider_id.clone(),
             previous_model: before.model.clone(),
-            previous_reasoning_effort: before.reasoning_effort,
+            previous_reasoning_effort: before.reasoning_effort.clone(),
             model_provider: after.model_provider_id.clone(),
             model: after.model.clone(),
-            reasoning_effort: after.reasoning_effort,
+            reasoning_effort: after.reasoning_effort.clone(),
         };
         self.outgoing.send_response(request_id, response).await;
 
@@ -142,8 +142,12 @@ impl PraxisMessageProcessor {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         loop {
             let snapshot = thread.config_snapshot().await;
-            let mismatches =
-                thread_model_set_mismatches(&snapshot, model_provider, model, reasoning_effort);
+            let mismatches = thread_model_set_mismatches(
+                &snapshot,
+                model_provider,
+                model,
+                reasoning_effort.clone(),
+            );
             if mismatches.is_empty() {
                 return Some(snapshot);
             }
@@ -190,7 +194,7 @@ fn thread_model_set_mismatches(
         mismatches.push(format!(
             "reasoningEffort expected `{}`, got `{}`",
             display_reasoning_effort(reasoning_effort),
-            display_reasoning_effort(snapshot.reasoning_effort)
+            display_reasoning_effort(snapshot.reasoning_effort.clone())
         ));
     }
     mismatches

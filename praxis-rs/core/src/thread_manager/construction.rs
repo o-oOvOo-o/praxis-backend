@@ -48,6 +48,7 @@ impl ThreadManager {
                     auth_manager,
                     config.model_catalog.clone(),
                     collaboration_modes_config,
+                    config.model_provider_id.clone(),
                     config.model_provider.clone(),
                 )),
                 environment_manager,

@@ -8,7 +8,7 @@ use std::path::Component;
 use std::path::Path;
 const MAX_DEFAULT_PROMPT_COUNT: usize = 3;
 const MAX_DEFAULT_PROMPT_LEN: usize = 128;
-const MAX_PLUGIN_COMMAND_TIMEOUT_MS: u64 = 120_000;
+const MAX_PLUGIN_COMMAND_TIMEOUT_MS: u64 = 30 * 60 * 1_000;
 
 pub use praxis_plugin::PluginLlmManifest as PluginManifestLlm;
 pub use praxis_plugin::PluginLlmModel as PluginManifestLlmModel;

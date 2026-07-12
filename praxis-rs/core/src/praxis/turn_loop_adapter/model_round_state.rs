@@ -20,7 +20,12 @@ impl PraxisModelRoundState {
         prewarmed_client_session: Option<ModelClientSession>,
     ) -> Self {
         let client_session = match prewarmed_client_session {
-            Some(client_session) if client_session.matches_provider(&turn_context.provider) => {
+            Some(client_session)
+                if client_session.matches_provider(
+                    &turn_context.config.model_provider_id,
+                    &turn_context.provider,
+                ) =>
+            {
                 client_session
             }
             Some(_) | None => sess.services.model_runtime.new_session_for(

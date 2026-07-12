@@ -24,7 +24,7 @@ pub(super) fn resolve_profile_prompt(
         .iter()
         .flat_map(|manifest| manifest.profiles.iter())
         .filter(|plugin_profile| {
-            plugin_profile_matches(plugin_profile, profile, provider_id, provider)
+            plugin_profile_matches(plugin_profile, profile.clone(), provider_id, provider)
         })
         .find_map(|plugin_profile| {
             resolve_prompt_slot(plugin_profile.prompts.iter(), purpose).and_then(|slot| {
@@ -116,7 +116,7 @@ fn find_profile<'a>(
         .iter()
         .flat_map(|manifest| manifest.profiles.iter())
         .find(|plugin_profile| {
-            plugin_profile_matches(plugin_profile, profile, provider_id, provider)
+            plugin_profile_matches(plugin_profile, profile.clone(), provider_id, provider)
         })
 }
 

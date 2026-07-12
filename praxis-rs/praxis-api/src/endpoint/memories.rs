@@ -102,7 +102,7 @@ mod tests {
     struct DummyAuth;
 
     impl AuthProvider for DummyAuth {
-        fn bearer_token(&self) -> Option<String> {
+        fn bearer_token(&self) -> Option<&str> {
             None
         }
     }

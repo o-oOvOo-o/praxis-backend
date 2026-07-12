@@ -4,8 +4,14 @@ pub(super) fn parse_claude_response(response_json: Value) -> Result<ParsedProvid
     let response_id = response_json
         .get("id")
         .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| format!("claude-{}", Uuid::new_v4()));
+        .ok_or_else(|| {
+            PraxisErr::InvalidRequest(
+                "provider returned invalid claude response: missing `id`".to_string(),
+            )
+        })?;
 
     let content = response_json
         .get("content")
@@ -17,16 +23,21 @@ pub(super) fn parse_claude_response(response_json: Value) -> Result<ParsedProvid
         })?;
 
     let mut items = Vec::new();
-    let mut text_parts = Vec::new();
 
-    for part in content {
+    for (index, part) in content.iter().enumerate() {
         match part.get("type").and_then(Value::as_str) {
             Some("text") => {
                 if let Some(text) = part.get("text").and_then(Value::as_str)
                     && !text.is_empty()
                 {
-                    text_parts.push(text.to_string());
+                    push_common_message_item(&mut items, text.to_string());
                 }
+            }
+            Some("thinking") | Some("redacted_thinking") => {
+                items.push(claude_reasoning_item(
+                    part.clone(),
+                    format!("claude-reasoning-{index}-{response_id}"),
+                )?);
             }
             Some("tool_use") => {
                 let name = part
@@ -39,12 +50,36 @@ pub(super) fn parse_claude_response(response_json: Value) -> Result<ParsedProvid
                         )
                     })?
                     .to_string();
+                validate_claude_tool_name(&name).map_err(|_| {
+                    PraxisErr::InvalidRequest(
+                        "provider returned invalid claude response: tool_use has an invalid `name`"
+                            .to_string(),
+                    )
+                })?;
                 let call_id = part
                     .get("id")
                     .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|call_id| !call_id.is_empty())
                     .map(str::to_string)
-                    .unwrap_or_else(|| format!("claude-tool-{}", Uuid::new_v4()));
-                let input = part.get("input").cloned().unwrap_or_else(|| json!({}));
+                    .ok_or_else(|| {
+                        PraxisErr::InvalidRequest(
+                            "provider returned invalid claude response: tool_use missing `id`"
+                                .to_string(),
+                        )
+                    })?;
+                let input = part.get("input").cloned().ok_or_else(|| {
+                    PraxisErr::InvalidRequest(
+                        "provider returned invalid claude response: tool_use missing `input`"
+                            .to_string(),
+                    )
+                })?;
+                if !input.is_object() {
+                    return Err(PraxisErr::InvalidRequest(
+                        "provider returned invalid claude response: tool_use `input` must be an object"
+                            .to_string(),
+                    ));
+                }
                 items.push(ResponseItem::FunctionCall {
                     id: None,
                     provider_metadata: None,
@@ -56,21 +91,6 @@ pub(super) fn parse_claude_response(response_json: Value) -> Result<ParsedProvid
             }
             _ => {}
         }
-    }
-
-    if !text_parts.is_empty() {
-        items.insert(
-            0,
-            ResponseItem::Message {
-                id: None,
-                role: "assistant".to_string(),
-                content: vec![ContentItem::OutputText {
-                    text: text_parts.join(""),
-                }],
-                end_turn: None,
-                phase: None,
-            },
-        );
     }
 
     Ok(ParsedProviderResponse {
@@ -277,10 +297,11 @@ pub(super) fn extract_common_response_text(content: Option<&Value>) -> Option<St
 
 pub(super) fn parse_claude_usage(usage: Option<&Value>) -> Option<TokenUsage> {
     let usage = usage?;
-    let input_tokens = usage
+    let uncached_input_tokens = usage
         .get("input_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(0);
     let output_tokens = usage
         .get("output_tokens")
         .and_then(Value::as_i64)
@@ -288,11 +309,20 @@ pub(super) fn parse_claude_usage(usage: Option<&Value>) -> Option<TokenUsage> {
     let cached_input_tokens = usage
         .get("cache_read_input_tokens")
         .and_then(Value::as_i64)
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(0);
+    let cache_creation_input_tokens = usage
+        .get("cache_creation_input_tokens")
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0);
+    let input_tokens = uncached_input_tokens
+        .saturating_add(cached_input_tokens)
+        .saturating_add(cache_creation_input_tokens);
     let cache_reported_input_tokens = if usage.get("cache_read_input_tokens").is_some()
         || usage.get("cache_creation_input_tokens").is_some()
     {
-        input_tokens.max(0)
+        input_tokens
     } else {
         0
     };

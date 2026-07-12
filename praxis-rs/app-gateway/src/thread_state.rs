@@ -134,6 +134,9 @@ impl ThreadState {
 struct ThreadEntry {
     state: Arc<Mutex<ThreadState>>,
     connection_ids: HashSet<ConnectionId>,
+    next_turn_controller_generation: u64,
+    pending_turn_controller: Option<TurnControllerReservation>,
+    turn_controllers: HashMap<String, ConnectionId>,
 }
 
 impl Default for ThreadEntry {
@@ -141,8 +144,24 @@ impl Default for ThreadEntry {
         Self {
             state: Arc::new(Mutex::new(ThreadState::default())),
             connection_ids: HashSet::new(),
+            next_turn_controller_generation: 0,
+            pending_turn_controller: None,
+            turn_controllers: HashMap::new(),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct TurnControllerReservation {
+    thread_id: ThreadId,
+    connection_id: ConnectionId,
+    generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TurnControllerReservationError {
+    ConnectionClosed,
+    ReservationPending,
 }
 
 #[derive(Default)]
@@ -174,6 +193,108 @@ impl ThreadStateManager {
             .get(&thread_id)
             .map(|thread_entry| thread_entry.connection_ids.iter().copied().collect())
             .unwrap_or_default()
+    }
+
+    pub(crate) async fn reserve_turn_controller(
+        &self,
+        thread_id: ThreadId,
+        connection_id: ConnectionId,
+    ) -> Result<TurnControllerReservation, TurnControllerReservationError> {
+        let mut state = self.state.lock().await;
+        if !state.live_connections.contains(&connection_id) {
+            return Err(TurnControllerReservationError::ConnectionClosed);
+        }
+        let thread_entry = state.threads.entry(thread_id).or_default();
+        if thread_entry.pending_turn_controller.is_some() {
+            return Err(TurnControllerReservationError::ReservationPending);
+        }
+        thread_entry.next_turn_controller_generation =
+            thread_entry.next_turn_controller_generation.wrapping_add(1);
+        let reservation = TurnControllerReservation {
+            thread_id,
+            connection_id,
+            generation: thread_entry.next_turn_controller_generation,
+        };
+        thread_entry.pending_turn_controller = Some(reservation);
+        Ok(reservation)
+    }
+
+    pub(crate) async fn commit_turn_controller(
+        &self,
+        reservation: TurnControllerReservation,
+        turn_id: &str,
+    ) -> bool {
+        let mut state = self.state.lock().await;
+        let Some(thread_entry) = state.threads.get_mut(&reservation.thread_id) else {
+            return false;
+        };
+        if thread_entry.turn_controllers.get(turn_id) == Some(&reservation.connection_id) {
+            if thread_entry.pending_turn_controller == Some(reservation) {
+                thread_entry.pending_turn_controller = None;
+            }
+            return true;
+        }
+        if thread_entry.pending_turn_controller != Some(reservation) {
+            return false;
+        }
+        thread_entry.pending_turn_controller = None;
+        thread_entry
+            .turn_controllers
+            .insert(turn_id.to_string(), reservation.connection_id);
+        true
+    }
+
+    pub(crate) async fn bind_pending_turn_controller(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+    ) -> bool {
+        let mut state = self.state.lock().await;
+        let Some(thread_entry) = state.threads.get_mut(&thread_id) else {
+            return false;
+        };
+        if thread_entry.turn_controllers.contains_key(turn_id) {
+            return true;
+        }
+        let Some(reservation) = thread_entry.pending_turn_controller.take() else {
+            return false;
+        };
+        thread_entry
+            .turn_controllers
+            .insert(turn_id.to_string(), reservation.connection_id);
+        true
+    }
+
+    pub(crate) async fn cancel_turn_controller_reservation(
+        &self,
+        reservation: TurnControllerReservation,
+    ) {
+        let mut state = self.state.lock().await;
+        if let Some(thread_entry) = state.threads.get_mut(&reservation.thread_id)
+            && thread_entry.pending_turn_controller == Some(reservation)
+        {
+            thread_entry.pending_turn_controller = None;
+        }
+    }
+
+    pub(crate) async fn turn_controller(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+    ) -> Option<ConnectionId> {
+        self.state
+            .lock()
+            .await
+            .threads
+            .get(&thread_id)
+            .and_then(|thread_entry| thread_entry.turn_controllers.get(turn_id).copied())
+    }
+
+    pub(crate) async fn release_turn_controller(&self, thread_id: ThreadId, turn_id: &str) {
+        let mut state = self.state.lock().await;
+        if let Some(thread_entry) = state.threads.get_mut(&thread_id) {
+            thread_entry.turn_controllers.remove(turn_id);
+        }
     }
 
     pub(crate) async fn pending_server_requests(&self, thread_id: ThreadId) -> Vec<ServerRequest> {
@@ -351,6 +472,17 @@ impl ThreadStateManager {
                 if let Some(thread_entry) = state.threads.get_mut(thread_id) {
                     thread_entry.connection_ids.remove(&connection_id);
                 }
+            }
+            for thread_entry in state.threads.values_mut() {
+                if thread_entry
+                    .pending_turn_controller
+                    .is_some_and(|reservation| reservation.connection_id == connection_id)
+                {
+                    thread_entry.pending_turn_controller = None;
+                }
+                thread_entry
+                    .turn_controllers
+                    .retain(|_, controller| *controller != connection_id);
             }
             thread_ids
                 .into_iter()

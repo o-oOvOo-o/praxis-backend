@@ -14,12 +14,12 @@ impl TurnContext {
         config.model = Some(model.clone());
         let model_info = models_manager.get_model_info(model.as_str(), &config).await;
         let truncation_policy = model_info.truncation_policy.into();
-        let reasoning_effort = reasoning::resolve(self.reasoning_effort, &model_info);
-        config.model_reasoning_effort = reasoning_effort;
+        let reasoning_effort = reasoning::resolve(self.reasoning_effort.clone(), &model_info);
+        config.model_reasoning_effort = reasoning_effort.clone();
 
         let collaboration_mode = self.collaboration_mode.with_updates(
             Some(model.clone()),
-            Some(reasoning_effort),
+            Some(reasoning_effort.clone()),
             /*developer_instructions*/ None,
         );
         let features = self.features.clone();
@@ -38,7 +38,7 @@ impl TurnContext {
                 .clone()
                 .with_model(model.as_str(), model_info.slug.as_str()),
             provider: self.provider.clone(),
-            reasoning_effort,
+            reasoning_effort: reasoning_effort.clone(),
             reasoning_summary: self.reasoning_summary,
             session_source: self.session_source.clone(),
             environment: Arc::clone(&self.environment),

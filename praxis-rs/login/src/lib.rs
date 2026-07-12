@@ -1,4 +1,6 @@
+mod anthropic_oauth;
 pub mod auth;
+mod provider_api_key;
 pub mod token_data;
 
 mod device_code_auth;
@@ -15,6 +17,11 @@ pub use server::ServerOptions;
 pub use server::ShutdownHandle;
 pub use server::run_login_server;
 
+pub use anthropic_oauth::AnthropicOauthAccessToken;
+pub use anthropic_oauth::AnthropicOauthError;
+pub use anthropic_oauth::has_anthropic_oauth;
+pub use anthropic_oauth::load_import_and_refresh_anthropic_oauth;
+pub use anthropic_oauth::login_anthropic_oauth;
 pub use auth::AuthConfig;
 pub use auth::AuthCredentialsStoreMode;
 pub use auth::AuthDotJson;
@@ -40,4 +47,10 @@ pub use auth::read_openai_api_key_from_env;
 pub use auth::read_praxis_api_key_from_env;
 pub use auth::save_auth;
 pub use praxis_protocol::auth::AuthMode;
+pub use provider_api_key::ProviderApiKey;
+pub use provider_api_key::ProviderApiKeyError;
+pub use provider_api_key::delete_provider_api_key;
+pub use provider_api_key::load_provider_api_key;
+pub use provider_api_key::provider_api_key_credential_id;
+pub use provider_api_key::save_provider_api_key;
 pub use token_data::TokenData;

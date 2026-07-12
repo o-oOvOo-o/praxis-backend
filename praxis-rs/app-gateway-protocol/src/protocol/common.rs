@@ -482,6 +482,10 @@ client_request_definitions! {
         params: api::ThreadReadParams,
         response: api::ThreadReadResponse,
     },
+    ThreadHistoryRead => "thread/history/read" {
+        params: api::ThreadHistoryReadParams,
+        response: api::ThreadHistoryReadResponse,
+    },
     ThreadGoalGet => "thread/goal/get" {
         params: api::ThreadGoalGetParams,
         response: api::ThreadGoalGetResponse,

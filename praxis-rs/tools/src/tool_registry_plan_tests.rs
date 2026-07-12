@@ -102,6 +102,7 @@ fn model_info() -> ModelInfo {
 fn search_capable_model_info() -> ModelInfo {
     ModelInfo {
         supports_search_tool: true,
+        multi_agent_version: None,
         ..model_info()
     }
 }
@@ -235,6 +236,7 @@ fn spawn_agent_tool_options(config: &ToolsConfig) -> SpawnAgentToolOptions<'_> {
     SpawnAgentToolOptions {
         available_models: &config.available_models,
         agent_type_description: agent_type_description(config, DEFAULT_AGENT_TYPE_DESCRIPTION),
+        multi_agent_mode: &config.multi_agent_mode,
     }
 }
 

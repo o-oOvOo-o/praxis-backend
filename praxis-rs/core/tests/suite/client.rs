@@ -291,6 +291,7 @@ async fn send_provider_auth_request(server: &MockServer, auth: ModelProviderAuth
             OpenAiAccountAuth::from_api_key("unused-api-key"),
         )),
         conversation_id,
+        "test-provider".to_string(),
         provider,
         SessionSource::Exec,
         config.model_verbosity,

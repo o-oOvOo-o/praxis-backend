@@ -1,0 +1,2078 @@
+{
+  "schema_version": 2,
+  "contracts": [
+    {
+      "id": "mountain.recipe",
+      "label": "Mountain recipe",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "ledger_operators": [
+        "mountain.recipe"
+      ],
+      "owner_nodes": [
+        "Mountain"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Mountain"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\mountain.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_mountain_reverse.md"
+      ],
+      "next_commands": [
+        "/gaea status --node Mountain --json",
+        "/gaea audit --node Mountain --case all --run --json"
+      ],
+      "notes": "Mountain is the first audited Gaea Art recipe and is the main PE reuse source."
+    },
+    {
+      "id": "canyon.bridge_oracle",
+      "label": "Canyon bridge oracle",
+      "kind": "bridge_oracle",
+      "layer": "L5",
+      "ledger_operators": [
+        "canyon.bridge_oracle"
+      ],
+      "owner_nodes": [
+        "Canyon"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Canyon"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\canyon_bridge.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\praxis-backend\\praxis-rs\\plugins\\official\\cunning3d-gaea-flywheel\\runtime\\c3d_devflywheeltool\\src\\main.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_canyon_reverse.md"
+      ],
+      "next_commands": [
+        "/gaea canyon-bridge-probe --node Canyon --resolution 256 --run --json"
+      ],
+      "notes": "Reusable invoke-static oracle pattern for generator nodes with multi-output raw buffers."
+    },
+    {
+      "id": "canyon.recipe",
+      "label": "Canyon recipe",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "ledger_operators": [
+        "canyon.recipe"
+      ],
+      "owner_nodes": [
+        "Canyon"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Canyon"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\canyon.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\nodes\\heightfield\\canyon.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_canyon_reverse.md"
+      ],
+      "next_commands": [
+        "/gaea canyon-compare --node Canyon --style Both --resolution 256 --epsilon 0.000001 --run --json"
+      ],
+      "notes": "Focused closed for default and small non-default probes; wider sweeps still gate full certification."
+    },
+    {
+      "id": "pe.trace.bilinear_anchor",
+      "label": "PE trace bilinear anchor",
+      "kind": "substrate",
+      "layer": "L2",
+      "ledger_operators": [
+        "pe_trace.bilinear_anchor"
+      ],
+      "owner_nodes": [
+        "Mountain"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Mountain",
+        "Canyon",
+        "River",
+        "EasyErosion",
+        "Erosion2"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_pe_trace.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra\\pe_candidate_eval\\decompiled.c"
+      ],
+      "next_commands": [
+        "/gaea ledger --operator pe_trace.bilinear_anchor --json"
+      ],
+      "notes": "Shared Parallel Erosion trace sampling contract."
+    },
+    {
+      "id": "pe.commit.capacity_with_extra",
+      "label": "PE commit capacity with extra",
+      "kind": "substrate",
+      "layer": "L2",
+      "ledger_operators": [
+        "pe_commit.capacity_with_extra"
+      ],
+      "owner_nodes": [
+        "Mountain"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Mountain",
+        "Canyon",
+        "River",
+        "EasyErosion",
+        "Erosion2"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_pe_commit.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra\\pe_candidate_commit\\decompiled.c"
+      ],
+      "next_commands": [
+        "/gaea ledger --operator pe_commit.capacity_with_extra --json"
+      ],
+      "notes": "Shared Parallel Erosion carrying-capacity contract."
+    },
+    {
+      "id": "pe.frontier.packet_route_state",
+      "label": "PE packet route state",
+      "kind": "substrate",
+      "layer": "L3",
+      "ledger_operators": [
+        "pe_frontier.packet_route_state"
+      ],
+      "owner_nodes": [
+        "Mountain"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Mountain",
+        "Canyon",
+        "River",
+        "EasyErosion",
+        "Erosion2"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\mountain.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_pe_packets.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessNativePeCommitCapture.cs"
+      ],
+      "next_commands": [
+        "/gaea matrix --node Mountain --suite frontier --direct-bin --run --json"
+      ],
+      "notes": "Shared PE frontier routing and packet-state contract."
+    },
+    {
+      "id": "pe.compare.event_key_post_delta",
+      "label": "PE event-key post-delta compare",
+      "kind": "compare_contract",
+      "layer": "L3",
+      "ledger_operators": [
+        "pe_compare.event_key_post_delta"
+      ],
+      "owner_nodes": [
+        "Mountain"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Mountain",
+        "Canyon",
+        "River",
+        "EasyErosion",
+        "Erosion2"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_mountain_packet_serial_compare.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_flywheel\\matrix\\mountain_frontier_1777346410"
+      ],
+      "next_commands": [
+        "/gaea ledger --operator pe_compare.event_key_post_delta --json"
+      ],
+      "notes": "Reusable compare schema for PE event streams."
+    },
+    {
+      "id": "voronoi.raw_substrate",
+      "label": "Voronoi raw substrate",
+      "kind": "substrate",
+      "layer": "L1",
+      "ledger_operators": [
+        "voronoi.raw_substrate"
+      ],
+      "owner_nodes": [
+        "Voronoi"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Voronoi",
+        "Canyon",
+        "Mountain",
+        "CraterField",
+        "Volcano"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_voronoi.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_voronoi_raw_substrate_parity_loop.md"
+      ],
+      "next_commands": [
+        "/gaea ledger --operator voronoi.raw_substrate --json"
+      ],
+      "notes": "Reusable raw Voronoi/noise substrate."
+    },
+    {
+      "id": "fractal_warp.virtual_identity_sampling",
+      "label": "FractalWarp virtual identity sampling",
+      "kind": "substrate",
+      "layer": "L1",
+      "status": "focused_closed",
+      "owner_nodes": [
+        "Canyon",
+        "Mountain"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Canyon",
+        "Mountain",
+        "Island",
+        "Volcano",
+        "Ridge"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_warp.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\scratch\\canyon_strata_after_scalar_identity_fix"
+      ],
+      "next_commands": [
+        "/gaea canyon-compare --node Canyon --style Strata --resolution 64 --epsilon 0.000001 --run --json"
+      ],
+      "notes": "Virtual warp samples identity vector field first; direct scalar bilinear shortcuts are not bit-equivalent after PE amplification."
+    },
+    {
+      "id": "combiner.subtract_ratio_mix",
+      "label": "Combiner subtract ratio mix",
+      "kind": "substrate",
+      "layer": "L0",
+      "status": "focused_closed",
+      "owner_nodes": [
+        "Canyon"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Canyon",
+        "Mountain",
+        "River",
+        "Volcano"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_recipe_primitives.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\scratch\\canyon_stage_64_eroded_bridge_500"
+      ],
+      "next_commands": [
+        "/gaea canyon-compare --node Canyon --resolution 64 --epsilon 0.000001 --run --json"
+      ],
+      "notes": "Gaea subtract ratio is mix(lhs, lhs - rhs, ratio), not lhs - rhs * ratio."
+    },
+    {
+      "id": "fractal_terrace.height_path",
+      "label": "Fractal Terrace height path",
+      "kind": "substrate",
+      "layer": "L1",
+      "status": "focused_closed",
+      "owner_nodes": [
+        "Canyon"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Canyon",
+        "Ridge",
+        "Mountain",
+        "Volcano",
+        "EasyErosion"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_profiles.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\scratch\\canyon_strata_stage_dump_after_name_cleanup"
+      ],
+      "next_commands": [
+        "/gaea canyon-compare --node Canyon --style Strata --resolution 64 --epsilon 0.000001 --run --json"
+      ],
+      "notes": "Live path computes height only; debug path can still capture full internals."
+    },
+    {
+      "id": "fractal_terraces.node_runtime",
+      "label": "FractalTerraces node runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "focused_closed",
+      "ledger_operators": [
+        "fractal_terraces.node_runtime"
+      ],
+      "owner_nodes": [
+        "FractalTerraces"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "FractalTerraces"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\fractal_terraces.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_profiles.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_fractal_terraces_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessFractalTerracesBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\fractal-terraces-bridge-probe\\matrix_1779862224678144900_50304_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\fractal-terraces-bridge-probe\\1779862619049\\command_0_stdout.json"
+      ],
+      "next_commands": [
+        "/gaea fractal-terraces-bridge-probe --node FractalTerraces --matrix focused --epsilon 0 --direct-bin --run --json"
+      ],
+      "notes": "Focused raw Bridge/native closure for HeightField and Layers. Style C primary warp is VoronoiA via Gaea nodes int constant key 2 -> enum value 3."
+    },
+    {
+      "id": "sea.global_no_coastal",
+      "label": "Sea Global no-coastal runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "sea.global_no_coastal"
+      ],
+      "owner_nodes": [
+        "Sea"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Sea"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\sea.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\sea_bridge.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_sea_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessSeaBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779846853395802300_59580_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779873925293637000_66548_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874231676571400_13304_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874801813762800_61820_0\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea sea-bridge-probe --node Sea --matrix focused --epsilon 0 --direct-bin --run --json",
+        "/gaea sea-bridge-probe --node Sea --matrix full-promotion --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json"
+      ],
+      "notes": "Scoped raw Bridge/native closure for Global/no-coastal height, sea, depth, shore, and surface outputs. Latest Sea full-promotion gate is 24/24 exact."
+    },
+    {
+      "id": "sea.surrounding_no_coastal",
+      "label": "Sea Surrounding no-coastal runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "sea.surrounding_no_coastal"
+      ],
+      "owner_nodes": [
+        "Sea"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Sea"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\sea.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\sea_bridge.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_sea_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessSeaBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779863461220364000_51456_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779863484477859700_41708_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779873925376736000_61676_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874231676571400_13304_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874801813762800_61820_0\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea sea-bridge-probe --node Sea --matrix surrounding-no-coastal --epsilon 0 --direct-bin --run --json",
+        "/gaea sea-bridge-probe --node Sea --matrix branch-diagnostic --epsilon 0 --direct-bin --run --json",
+        "/gaea sea-bridge-probe --node Sea --matrix full-promotion --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json"
+      ],
+      "notes": "Scoped raw Bridge/native closure for Surrounding/no-coastal EdgeFill behavior. Latest Sea full-promotion gate is 24/24 exact."
+    },
+    {
+      "id": "sea.global_coastal",
+      "label": "Sea Global coastal runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "sea.global_coastal"
+      ],
+      "owner_nodes": [
+        "Sea"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Sea"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\sea.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gabor.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_sea_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessSeaBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779873925420076300_50164_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874231676571400_13304_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874801813762800_61820_0\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea sea-bridge-probe --node Sea --matrix coastal-diagnostic --epsilon 0 --direct-bin --run --json",
+        "/gaea sea-bridge-probe --node Sea --matrix branch-diagnostic --epsilon 0 --direct-bin --run --json",
+        "/gaea sea-bridge-probe --node Sea --matrix full-promotion --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json"
+      ],
+      "notes": "Scoped raw Bridge/native closure for Global/coastal shoreface, BGBlurI64, DistanceTransform, and cliff-noise behavior."
+    },
+    {
+      "id": "sea.surrounding_coastal",
+      "label": "Sea Surrounding coastal runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "sea.surrounding_coastal"
+      ],
+      "owner_nodes": [
+        "Sea"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Sea"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\sea.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gabor.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_sea_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessSeaBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779873879113601600_65220_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874231676571400_13304_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874801813762800_61820_0\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea sea-bridge-probe --node Sea --matrix surrounding-coastal --epsilon 0 --direct-bin --run --json",
+        "/gaea sea-bridge-probe --node Sea --matrix branch-diagnostic --epsilon 0 --direct-bin --run --json",
+        "/gaea sea-bridge-probe --node Sea --matrix full-promotion --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json"
+      ],
+      "notes": "Scoped raw Bridge/native closure for Surrounding/coastal EdgeFill and shoreface behavior, including closed-basin no-mask rejection."
+    },
+    {
+      "id": "sea.node_runtime",
+      "label": "Sea node runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "sea.node_runtime"
+      ],
+      "owner_nodes": [
+        "Sea"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Sea"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\sea.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gabor.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_sea_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessSeaBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779873925293637000_66548_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779873925376736000_61676_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779873879113601600_65220_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779873925420076300_50164_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874231676571400_13304_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\sea-bridge-probe\\matrix_1779874801813762800_61820_0\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea sea-bridge-probe --node Sea --matrix full-promotion --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea sea-bridge-probe --node Sea --matrix branch-diagnostic --epsilon 0 --direct-bin --run --json"
+      ],
+      "notes": "Full current Sea branch matrix is exact: Global/no-coastal, Surrounding/no-coastal, Global/coastal, and Surrounding/coastal are all covered by a 24/24 epsilon-0 raw buffer promotion gate."
+    },
+    {
+      "id": "snow.node_runtime_frontier",
+      "label": "Snow runtime frontier",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "focused_closed",
+      "ledger_operators": [
+        "snow.node_runtime"
+      ],
+      "owner_nodes": [
+        "Snow"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Snow"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\snow.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\snow_bridge.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_snow_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessSnowBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779872101960568700_53980_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779876061671938100_59760_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779876953670530500_58308_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779877157998520700_57432_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779878029111137000_30136_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779878684261782900_66684_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779879593011046600_11160_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779880373310987500_51372_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\1779894830113\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779894898087531100_65476_0\\matrix_report.json",
+        "F:\\ghost1_snowfield_artifacts\\snow_focused_matrix_epsilon0_stdout.json",
+        "F:\\ghost1_snowfield_artifacts\\snow_v6_cascade00_actual_input_probe"
+      ],
+      "next_commands": [
+        "/gaea snow-bridge-probe --node Snow --matrix focused --compare-native --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea snow-bridge-probe --node Snow --resolution 8 --source cone --compare-native --epsilon 0 --diagnostics-dir D:\\ghost1.0\\_c3d_devflywheeltool\\snow-diagnostics\\cone8_next --direct-bin --run --json"
+      ],
+      "notes": "Focused raw Bridge/native frontier for HeightField, Snow, SoftMask, and HardMask. Latest strict devflywheeltool focused matrix D:\\ghost1.0\\_c3d_devflywheeltool\\snow-bridge-probe\\matrix_1779894898087531100_65476_0\\matrix_report.json exits 0 under --require-all-pass --require-exact and is 4/4 exact at epsilon 0 with HeightField/Snow/SoftMask/HardMask exact_count=4/4, worst_max_abs_delta=0, and worst_max_ulp_delta=0. Closure depends on native Erosion1 interleaved tick row order plus LAB_180002170 final writeback order. Keep this focused_closed until wider parameter and Snowfield cascade re-hit coverage are promoted."
+    },
+    {
+      "id": "snowfield.node_runtime_frontier",
+      "label": "Snowfield runtime frontier",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "focused_closed",
+      "ledger_operators": [
+        "snowfield.node_runtime"
+      ],
+      "owner_nodes": [
+        "Snowfield"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Snowfield",
+        "Glacier"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\snowfield.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\snowfield_bridge.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\snow.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_profiles.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_snowfield_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessSnowfieldRuntimeBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\latest_snowfield_cone16_surface0_no_snap_patch.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\cone16_surface0_no_snap_patch",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\latest_snowfield_cone8_surface0_no_snap_saved.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\fastblur_radius_probe",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\latest_snowfield_focused_matrix.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\matrix_1779885931705671700_58024_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\latest_snowfield_focused_matrix_devtool.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\latest_snowfield_focused_matrix_devtool_strict.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\1779891529082\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\matrix_1779891529156455100_69480_0\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea snowfield-bridge-probe --node Snowfield --matrix focused --compare-native --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea snowfield-bridge-probe --node Snowfield --resolution 16 --source cone --surface-details 0 --stage-diagnostics --diagnostics-dir D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\cone16_surface0_next --compare-native --epsilon 0 --direct-bin --run --json"
+      ],
+      "notes": "Focused no-GroundTexture Snowfield closure: the built-in focused matrix covers cone8 and cone16 and the strict devflywheeltool wrapper artifact D:\\ghost1.0\\_c3d_devflywheeltool\\snowfield-bridge-probe\\matrix_1779891529156455100_69480_0\\matrix_report.json reports 2/2 exact at epsilon 0, with Height/Depth/Snow/Hard exact_count=2/2 and worst_max_abs_delta=0. Closure depends on Snow focused closure, Adjustments.Blur amount-to-radius divisor 40, Profile.FastBlur4 radius-scale preservation, and removing the non-Gaea ULP snap. Keep SurfaceDetails/GroundTexture and Flows outside this closure until their own raw gates pass."
+    },
+    {
+      "id": "denoise.graphic_eq_modes",
+      "label": "Denoise GraphicEQ modes",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "denoise.graphic_eq_modes"
+      ],
+      "owner_nodes": [
+        "Denoise"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Denoise"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\denoise.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_denoise_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessDenoiseBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\denoise-bridge-probe\\matrix_1779865161861665600_64104_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\denoise-bridge-probe\\1779865079338\\command_0_stdout.json"
+      ],
+      "next_commands": [
+        "/gaea denoise-bridge-probe --node Denoise --matrix focused --epsilon 0 --direct-bin --run --json",
+        "/gaea denoise-bridge-probe --node Denoise --matrix focused --include-pixels --epsilon 0 --direct-bin --run --json"
+      ],
+      "notes": "Scoped raw Bridge/native closure for OnePass and TwoPass GraphicEQ-backed modes. Pixels/HardDenoise remains excluded because the bridge path exposes order-dependent in-place mutation."
+    },
+    {
+      "id": "gabor.node_runtime",
+      "label": "Gabor node runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "gabor.node_runtime"
+      ],
+      "owner_nodes": [
+        "Gabor",
+        "DuneSea"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Gabor",
+        "DuneSea"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gabor.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_gabor_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessGaborProbe.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\gabor-bridge-probe\\matrix_1779865280977678100_51480_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\gabor-bridge-probe\\1779865266298\\command_0_stdout.json"
+      ],
+      "next_commands": [
+        "/gaea gabor-bridge-probe --node Gabor --matrix focused --epsilon 0 --direct-bin --run --json",
+        "/gaea ledger --node DuneSea --json"
+      ],
+      "notes": "Raw Bridge/native closure for the shared Gabor scalar and anisotropy-modulated path. DuneSea still needs downstream recipe closure."
+    },
+    {
+      "id": "distance.node_runtime",
+      "label": "Distance node runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "distance.node_runtime"
+      ],
+      "owner_nodes": [
+        "Distance"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Distance",
+        "Plates",
+        "HydroFix"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\distance.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_distance_bridge_native_compare.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessDistanceBridge.cs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\praxis-backend\\praxis-rs\\plugins\\official\\cunning3d-gaea-flywheel\\runtime\\c3d_devflywheeltool\\src\\main.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\distance-bridge-native-compare\\matrix_1779909998513611600_47720_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\distance-bridge-probe\\1779910268227\\command_0_stdout.json"
+      ],
+      "next_commands": [
+        "/gaea distance-bridge-probe --node Distance --matrix focused --epsilon 0 --direct-bin --allow-stale-direct-bin --run --json --require-all-pass --require-exact",
+        "/gaea ledger --operator distance.node_runtime --json"
+      ],
+      "notes": "Shared Distance/Morphology substrate covering Morphology.DistanceTransform and Morph.DistanceRT focused raw parity. Downstream Plates and HydroFix series closure remains the next gate."
+    },
+    {
+      "id": "lake.node_runtime",
+      "label": "Lake node runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "open",
+      "ledger_operators": [
+        "lake.node_runtime"
+      ],
+      "owner_nodes": [
+        "Lake"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Lake"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\lake.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\lake_bridge.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_lake_bridge_probe.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\praxis-backend\\praxis-rs\\plugins\\official\\cunning3d-gaea-flywheel\\runtime\\c3d_devflywheeltool\\src\\main.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessLakeBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779865537449754000_62704_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779866105541464100_19864_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779866600721561300_35776_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\1779866676484\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779866691035745500_4448_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\1779869080614\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779869080665068700_63584_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779875338879506500_13132_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\latest_lake_status_with_diagnostics.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\schema_smoke\\artifact_manifest.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\1779865358100\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\latest_lake_focused_matrix_with_ulp.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779888505896666900_32280_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\latest_lake_focused_matrix_with_ulp_devtool_strict_fail.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\1779888648348\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779888660722286300_60872_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\latest_lake_status_after_ulp_strict_gate.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\latest_lake_focused_matrix_default_v3_strict_fail.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\1779890726826\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779890727119951400_48728_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\latest_lake_focused_matrix_fixed_false_strict_fail_v3.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779890539855271900_67616_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\latest_lake_focused_matrix_fixed_true_strict_fail.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779890684140686500_3876_0\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\latest_lake_focused_matrix_native_model_diag_strict_fail.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\1779895466810\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779895569814218000_65860_0\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea lake-bridge-probe --node Lake --matrix focused --compare-native --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea lake-bridge-probe --node Lake --matrix focused --compare-native --epsilon 0 --fixed-threads false --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea acceptance-matrix --node Lake --json"
+      ],
+      "notes": "Flat Lake case is exact and Surface is exact across the focused matrix. Latest product-path strict diagnostic matrix D:\\ghost1.0\\_c3d_devflywheeltool\\lake-bridge-probe\\matrix_1779895569814218000_65860_0\\matrix_report.json preserves 1/7 exact and water 5/7 exact, adds native_preview_model diagnostics for provisional level, retained volume ratio, target volume, final level, and retention loss terms, and splits blockers into f32_tail_only=1, level_retention=3, water_mask_topology=1, and zero_depth_water_topology=1. The new model diagnostics show native retained_volume_ratio overshoots the Bridge-required ratio for basin16 by 0.000194790759257768 and ramp16 by about 0.00157-0.00159, while cone16 is the opposite sign at 0.000020400242698468. RampX/RampY also have slightly different Bridge target levels despite the symmetric native model, so scalar coefficient tuning is not a valid closure path. Direct ErosionWrapperW --fixed-threads false and true have identical lower-level summaries with 2 f32_tail_only and 2 level_retention cases, so thread count is not the active blocker. Full runtime remains open on retained-level/writeback ordering, fragmented boundary water masks, near-zero edge water-mask behavior, and shore propagation."
+    },
+    {
+      "id": "linear_gradient.triangle_domain",
+      "label": "Linear gradient triangle domain",
+      "kind": "substrate",
+      "layer": "L0",
+      "status": "focused_closed",
+      "owner_nodes": [
+        "Canyon"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Canyon",
+        "Ridge",
+        "Volcano"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_profiles.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\scratch\\canyon_strata_bridge_stages"
+      ],
+      "next_commands": [
+        "/gaea canyon-compare --node Canyon --style Classic --resolution 64 --epsilon 0 --run --json"
+      ],
+      "notes": "Gradient domain, wrapping, and direction constants are reusable across art recipes."
+    },
+    {
+      "id": "normalize_finalize.minimum_axis",
+      "label": "Normalize/finalize minimum-axis adjustment",
+      "kind": "substrate",
+      "layer": "L0",
+      "status": "focused_closed",
+      "owner_nodes": [
+        "Canyon"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Canyon",
+        "Mountain",
+        "Island",
+        "Volcano"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_recipe_primitives.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\scratch\\canyon_matrix_after_cleanup_Classic"
+      ],
+      "next_commands": [
+        "/gaea canyon-compare --node Canyon --style Classic --resolution 64 --epsilon 0 --run --json"
+      ],
+      "notes": "Shared normalize/invert/finalize tail semantics for generator outputs."
+    },
+    {
+      "id": "heightfield.map.scalar_first_ports",
+      "label": "Scalar-first map and port contract",
+      "kind": "substrate",
+      "layer": "L0",
+      "status": "focused_closed",
+      "owner_nodes": [
+        "Mountain",
+        "EasyErosion",
+        "Erosion"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Mountain",
+        "Canyon",
+        "EasyErosion",
+        "Erosion",
+        "Erosion2",
+        "FlowMap",
+        "Thermal2"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_heightfield_core_reverse.md",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_easy_erosion_reverse.md",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Engine\\QuadSpinner\\Gaea\\Engine\\Fx\\PortType.cs"
+      ],
+      "next_commands": [
+        "/gaea reverse --node Erosion2 --json",
+        "/gaea reverse --node EasyErosion --json"
+      ],
+      "notes": "Captures scalar height carrier, inherited primary input, auxiliary map outputs, and explicit connection-point counts."
+    },
+    {
+      "id": "erosions.pe.public_shell",
+      "label": "Erosions.PE public shell",
+      "kind": "substrate",
+      "layer": "L2",
+      "status": "audited_closed",
+      "owner_nodes": [
+        "Mountain",
+        "EasyErosion"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Mountain",
+        "Canyon",
+        "EasyErosion",
+        "Erosion2",
+        "Volcano",
+        "River"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_pe_gpu.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_pe_trace.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_pe_commit.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Erosions.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\dossiers\\kernels\\ParallelErosion.md",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_easy_erosion_reverse.md"
+      ],
+      "next_commands": [
+        "/gaea ledger --operator pe_trace.bilinear_anchor --json",
+        "/gaea gpu-wave --node Mountain --case all --epsilon 0.0001 --direct-bin --run --json --require-gpu-active"
+      ],
+      "notes": "Public PE wrapper parameter order and output slot remap: height, flow, wear, deposition."
+    },
+    {
+      "id": "easy_erosion.recipe_stack",
+      "label": "EasyErosion QuickErosion recipe stack",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "focused_closed",
+      "owner_nodes": [
+        "EasyErosion"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "EasyErosion"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\EasyErosion.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\QuickErosion.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_easy_erosion_reverse.md"
+      ],
+      "next_commands": [
+        "/gaea reverse --node EasyErosion --json",
+        "/gaea status --node EasyErosion --json"
+      ],
+      "notes": "Thin recipe shell: bias overlay, QuickErosion branch selection, PE preset stack, and save-slot wiring."
+    },
+    {
+      "id": "combiner.minmax_height_shell",
+      "label": "Combiner min/max height shell",
+      "kind": "substrate",
+      "layer": "L0",
+      "status": "focused_closed",
+      "owner_nodes": [
+        "EasyErosion",
+        "Canyon"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "EasyErosion",
+        "Canyon",
+        "River",
+        "Volcano",
+        "Ridge"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_recipe_primitives.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_easy_erosion_reverse.md",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Erosions.cs"
+      ],
+      "next_commands": [
+        "/gaea ledger --node Canyon --json"
+      ],
+      "notes": "Shared `Combiner.Min` and `Combiner.Max` height composition used by EasyErosion exposed/flows/strata branches."
+    },
+    {
+      "id": "gradient.linear_bias_overlay",
+      "label": "Linear gradient bias overlay",
+      "kind": "substrate",
+      "layer": "L1",
+      "status": "open",
+      "owner_nodes": [
+        "EasyErosion"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "EasyErosion",
+        "FlowMap",
+        "Thermal2"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_profiles.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_easy_erosion_reverse.md",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\EasyErosion.cs"
+      ],
+      "next_commands": [
+        "/gaea reverse --node EasyErosion --json"
+      ],
+      "notes": "EasyErosion optional bias uses add-before/subtract-after height-only overlay; generic `Gradients.LinearGradient` still needs closure."
+    },
+    {
+      "id": "rock_core.shared_substrate",
+      "label": "RockCore shared substrate",
+      "kind": "substrate",
+      "layer": "L2",
+      "status": "open",
+      "ledger_operators": [
+        "rock_core.shared_substrate"
+      ],
+      "owner_nodes": [
+        "RockCore"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "RockNoise",
+        "Rockscape",
+        "Outcrops",
+        "Craggy",
+        "Rugged",
+        "Sandstone",
+        "Glacier",
+        "EasyErosion"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_rock_core.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_rock_core_compare.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Core\\RockCore.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\_runtime\\rockcore_probe\\rockcore_large_default_32.json",
+        "D:\\ghost1.0\\_gaea_decompiled\\_runtime\\rockcore_probe\\rockcore_large_perlin_fbm_seed0_32_wrapped_perlin.json",
+        "D:\\ghost1.0\\_gaea_decompiled\\_runtime\\rockcore_probe\\rockcore_large_perlin_fbm_seed1_32_wrapped_perlin.json",
+        "D:\\ghost1.0\\_gaea_decompiled\\_runtime\\rockcore_probe\\rockcore_large_perlin_billowy_seed2_32_wrapped_perlin.json",
+        "D:\\ghost1.0\\_gaea_decompiled\\_runtime\\rockcore_probe\\rockcore_noise_defaults_32.json",
+        "D:\\ghost1.0\\_gaea_decompiled\\_runtime\\rockcore_probe\\rockcore_outcrops_node_defaults_cone_32.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\rock-core-compare\\latest_rockcore_focused_static_oracle_devtool_strict_fail_v4.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\rock-core-compare\\1779901399923\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\rock-core-compare\\matrix_1779901400015178700_65768_0\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea rock-core-compare --node RockCore --matrix focused --epsilon 0 --repeat 1 --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea reverse --node RockCore --json"
+      ],
+      "notes": "RockCore now has a strict static rawf32 oracle compare gate over Large, Noise, and Outcrops plus three bottom-layer Large Perlin stage oracles from the real Gaea harness. The latest matrix remains open at 3/8 exact: Large.Perlin is 3/3 bit-exact, but Large final still first-mismatches at sample 0, Noise is 0/1 exact, Outcrops is 0/3 exact with cone/node-default drift up to 0.12241623, and the flat16 Outcrops oracle is all NaN with 256 nonfinite mismatches while native currently sanitizes to finite values. This narrows RockCore.Large below Perlin and before promotion to BGBlurI64/FractalWarp/Voronoi/Recurve/final composition, while MultiTransform placement/filtering, SlopeBlur/Crumble, and Gaea nonfinite behavior remain open for dependent nodes."
+    },
+    {
+      "id": "rock_series.focused_raw_parity",
+      "label": "Rock series focused raw parity",
+      "kind": "node_recipe",
+      "layer": "L5",
+      "status": "focused_closed",
+      "ledger_operators": [
+        "rock_noise.node_runtime",
+        "rockscape.node_runtime",
+        "craggy.node_runtime",
+        "rugged.node_runtime"
+      ],
+      "owner_nodes": [
+        "RockNoise",
+        "Rockscape",
+        "Craggy",
+        "Rugged"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "RockNoise",
+        "Rockscape",
+        "Craggy",
+        "Rugged"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_rock_core.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\rock_noise.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\rockscape.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\craggy.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\rugged.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_rock_series_bridge_native_compare.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessRockSeriesBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\rock-series-bridge-native-compare\\focused_rocknoise_styles_20260529_run1\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\rock-series-bridge-native-compare\\all_rocknoise_styles_20260529_run1\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\rock-series-bridge-native-compare\\bridge_mountain_rocknoise_styles_20260529_run1\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\rugged-m3-stage-bridge-native-compare\\m6_stage_direct_ridge_carrier_20260529_run1\\report.json"
+      ],
+      "next_commands": [
+        "/gaea probe-bin --bin gaea_rock_series_bridge_native_compare -- --matrix all --epsilon 0 --repeat 3 --json --require-pass",
+        "/gaea probe-bin --bin gaea_rock_series_bridge_native_compare -- --matrix bridge_mountain --epsilon 0 --repeat 3 --json --require-pass"
+      ],
+      "notes": "Focused Rock series raw parity covers RockNoise Raw/Blur/Warp, Rockscape default Off/Off, Craggy default required-input flow, Rugged A-E, synthetic cone inputs, and Bridge Mountain connected upstream. It deliberately does not promote generic RockCore.Large/Outcrops, Rockscape cluster/relief sweeps, or Scree/Slump/Outcrops full runtime."
+    },
+    {
+      "id": "slump.node_runtime",
+      "label": "Slump node runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "slump.node_runtime"
+      ],
+      "owner_nodes": [
+        "Slump"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Slump"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\slump.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\nodes\\heightfield\\slump.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_slump_stage_bridge_native_compare.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessSlumpStagesBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\slump-compare\\matrix_focused_1780417616882\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\slump-compare\\matrix_production_1780417639238\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea slump-compare --node Slump --matrix focused --epsilon 0 --repeat 3 --direct-bin --run --json --require-all-pass",
+        "/gaea slump-compare --node Slump --matrix production --epsilon 0 --repeat 3 --target-speedup 20 --require-speedup --direct-bin --run --json --require-all-pass"
+      ],
+      "notes": "Raw Bridge/native closure for Slump Scale/Style/Seed surface, Style A stage buffers, B/C/D Rugged final buffers, optional input multiply path in the Rust node runtime, and the production 20x speed gate. Focused matrix passes 7/7 exact at epsilon 0; production matrix passes 11/11 exact at epsilon 0 with min speedup 53.39189695442037x against the Bridge process."
+    },
+    {
+      "id": "rockcore.noise.overlay",
+      "label": "RockCore noise overlay",
+      "kind": "substrate",
+      "layer": "L1",
+      "status": "open",
+      "owner_nodes": [
+        "EasyErosion"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "EasyErosion",
+        "Rocky",
+        "Volcano"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_noise.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_easy_erosion_reverse.md",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Core\\RockCore.cs"
+      ],
+      "next_commands": [
+        "/gaea reverse --node EasyErosion --json"
+      ],
+      "notes": "Used by EasyErosion Rocky branch; exact callsite arguments are known, but the reusable RockCore substrate remains open."
+    },
+    {
+      "id": "erosions.classic.wrapper",
+      "label": "Classic erosion wrapper",
+      "kind": "legacy_native_wrapper",
+      "layer": "L2",
+      "status": "focused_closed",
+      "ledger_operators": [
+        "erosions.classic.wrapper"
+      ],
+      "owner_nodes": [
+        "Erosion"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Erosion",
+        "Wizard"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Erosions.cs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\erosion.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_erosion_classic_substrate_probe.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\praxis-backend\\praxis-rs\\plugins\\official\\cunning3d-gaea-flywheel\\runtime\\c3d_devflywheeltool\\src\\main.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_reverse_notes.md",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Erosion.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\Gaea.Nodes_strings.tsv",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-bridge-probe\\default_cone32_1780392464470\\erosion_classic_bridge_probe_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780552042136\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780552120266\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780552191805\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780552194286\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780552196118\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553052860\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553133811\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553146186\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553305816\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553316915\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553963825\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780554102527\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780554102671\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780556108333\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780556229547\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780556229694\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780556229601\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780556229789\\erosion_classic_substrate_compare_summary.json"
+      ],
+      "next_commands": [
+        "/gaea erosion-classic-substrate-compare --node Erosion --resolution 8 --source cone --max-steps 16 --volume 0.75 --debris 0.45 --area-effect ErosionStrength --area-mask map:checker:8:0.2:0.9:2 --sediment-removal 0.2 --sediment-removal-mask map:rampx:8:0.1:0.8 --direct-bin --run --json",
+        "/gaea reverse --node Erosion --json"
+      ],
+      "notes": "`Erosion` uses legacy `ErosionWrapper`, not the PE path. The focused Classic wrapper is exact under the decoded slot contract: slot0 height, slot1 wear, slot2 flow, slot3 deposits. The current probe coverage includes no-mask, explicit area-mask, explicit sediment-removal-mask, no-external-area-mask bias parameter paths, and non-default volume/debris paths. Volume/debris closure required matching native 44c0 cleanup between active 60f0 iterations and the lagged flow_aux marker coordinate contract. Full node promotion still depends on broader parameter/randomized sweeps, non-square, GPU, and desktop-app performance coverage."
+    },
+    {
+      "id": "erosion.mask_bias_contract",
+      "label": "Erosion area and sediment masks",
+      "kind": "substrate",
+      "layer": "L1",
+      "status": "focused_closed",
+      "owner_nodes": [
+        "Erosion"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Erosion",
+        "Thermal2",
+        "FlowMap"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Erosion.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Erosions.cs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_erosion_classic_substrate_probe.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\praxis-backend\\praxis-rs\\plugins\\official\\cunning3d-gaea-flywheel\\runtime\\c3d_devflywheeltool\\src\\main.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_reverse_notes.md",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553133811\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553146186\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553305816\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553316915\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780553963825\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780554102527\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780554102671\\erosion_classic_substrate_compare_summary.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\erosion-classic-substrate-compare\\old_baseline_1780556229601\\erosion_classic_substrate_compare_summary.json"
+      ],
+      "next_commands": [
+        "/gaea erosion-classic-substrate-compare --node Erosion --resolution 8 --source cone --max-steps 16 --area-effect RockSoftness --bias-type Slope --bias 0.35 --direct-bin --run --json",
+        "/gaea reverse --node Erosion --json"
+      ],
+      "notes": "External area-mask, sediment-removal-mask, no-external-area-mask altitude/slope bias parameter paths, and masked volume/debris paths have focused Bridge/native exact evidence. Wider randomized mask/effect parameter sweeps remain outside this focused closure."
+    },
+    {
+      "id": "erosion2.inhibitor_mask_contract",
+      "label": "Erosion2 inhibitor and rain-shadow mask",
+      "kind": "substrate",
+      "layer": "L1",
+      "status": "open",
+      "owner_nodes": [
+        "Erosion2"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Erosion2",
+        "Thermal2",
+        "FlowMap"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Erosion2.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native_kernel_report.md",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Erosion2.cs"
+      ],
+      "next_commands": [
+        "/gaea reverse --node Erosion2 --json"
+      ],
+      "notes": "Erosion2 PE input mask is built from slope, normalized height, optional external mask, optional directional rain-shadow lighting, and reverse."
+    },
+    {
+      "id": "flow_map.node_runtime",
+      "label": "FlowMap node runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "open",
+      "ledger_operators": [
+        "flow_map.node_runtime"
+      ],
+      "owner_nodes": [
+        "FlowMap"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "FlowMap",
+        "Scree"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\flow_map.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\flow_map_bridge.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_flow_map_bridge_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessFlowProbe.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\dossiers\\kernels\\Flow.md",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\matrix_1779860585158\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\matrix_1779878389186\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\matrix_1779878703737\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\matrix_1779886935040\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\latest_flowmap_focused_matrix_require_gate_direct_fail.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\latest_flowmap_focused_matrix_require_gate_devtool_fail.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\1779887715556\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\matrix_1779887726917\\matrix_report.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\latest_flowmap_status_after_strict_gate.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\latest_flowmap_status_after_ledger_refresh.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\latest_flowmap_focused_matrix_strict_refresh_fail.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\1779895986490\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\matrix_1779895999501\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea flow-map-bridge-probe --node FlowMap --matrix focused --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea reverse --node FlowMap --json"
+      ],
+      "notes": "FlowMap bridge/native focused matrix D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\matrix_1779895999501\\matrix_report.json remains open at 1/4 exact and the strict gate exits 1 with --require-all-pass --require-exact. Devflywheeltool preserved the failed child stdout in D:\\ghost1.0\\_c3d_devflywheeltool\\flow-map-bridge-probe\\1779895986490\\command_0_stdout.json while returning nonzero. The probe buckets boundary/interior and bridge-only/native-only residuals; latest evidence still points at real FlowSimulation routing/normalization semantics, not wrapper ABI, f32 tail, or output-amplitude tuning."
+    },
+    {
+      "id": "crater.new_bridge_native_acceptance",
+      "label": "Crater New style Bridge/native acceptance",
+      "kind": "acceptance_gate",
+      "layer": "L5",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "crater.new_bridge_native_acceptance"
+      ],
+      "owner_nodes": [
+        "Crater"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Crater"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\crater.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\crater_bridge.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\crater_backend_compare.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_crater_bridge_native_compare.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\praxis-backend\\praxis-rs\\plugins\\official\\cunning3d-gaea-flywheel\\runtime\\c3d_devflywheeltool\\src\\main.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\crater-compare\\latest_crater_new_128_sweep8_strict_scoped_v2.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\crater-compare\\1779893546233\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\crater-compare\\latest_crater_new_128_native_timing_repeat20.json"
+      ],
+      "next_commands": [
+        "/gaea crater-compare --node Crater --resolution 128 --sweep 8 --sweep-seed 177984 --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea acceptance-matrix --node Crater --json"
+      ],
+      "notes": "Strict scoped New-style gate: 128x128 sweep seed 177984 passes 8/8 exact with audit_scope=focused and promotion_scope=crater.new_bridge_native_acceptance. Classic style and optional-input composition remain outside this acceptance."
+    },
+    {
+      "id": "stones.node_runtime",
+      "label": "Stones node runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_closed",
+      "ledger_operators": [
+        "stones.node_runtime"
+      ],
+      "owner_nodes": [
+        "Stones"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Stones"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\stones.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\craterfield.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_stones_bridge_native_compare.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\praxis-backend\\praxis-rs\\plugins\\official\\cunning3d-gaea-flywheel\\runtime\\c3d_devflywheeltool\\src\\main.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\stones-compare\\matrix_focused_1779893910976\\matrix_report.json"
+      ],
+      "next_commands": [
+        "/gaea stones-compare --node Stones --matrix focused --epsilon 0 --repeat 5 --require-all-pass --direct-bin --run --json",
+        "/gaea acceptance-matrix --node Stones --json"
+      ],
+      "notes": "Connected-node runtime gate: focused matrix passes 6/6 exact across HeightField and Stones outputs, with audit_scope=node_runtime and promotion_scope=stones.node_runtime. Broader randomized sweeps, GPU-resident migration, and Gaea desktop app speed baseline are separate performance gates."
+    },
+    {
+      "id": "weathering.node_runtime",
+      "label": "Weathering node runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "open",
+      "ledger_operators": [
+        "weathering.node_runtime"
+      ],
+      "owner_nodes": [
+        "Weathering"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Weathering"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_weathering.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\nodes\\heightfield\\weathering.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_weathering_native_probe.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Weathering.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Core\\Texturize.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Core\\ColorCore.cs",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780419800410\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780490685981\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780490259038\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780490278535\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780490281127\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780490284021\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780491955667\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780493045781\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780493838225\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780494237233\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780495002171\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780495705802\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780498715275\\command_0_stdout.json",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\shade_ao_sphere_setup\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_hybrid_ao_worker\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_midpoint_norm_factor\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_hybrid_ao_kernel_avx512_or_high\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_hybrid_ao_trace_worker\\decompiled.c",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780512810191\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780513267086\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780513418161\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780513958884\\command_0_stdout.json",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\shade_context_setup_355a0\\shade_context_setup\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\shade_ispc_context_fields\\shade_setup_a\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\shade_ispc_context_fields\\shade_setup_b\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\shade_ispc_context_fields\\shade_ispc_export\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_hybrid_ao\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\sun_integral_prepare_aux_worker_avx\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_root_reconstruct_row\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\sun_integral_subdivide_sphere\\decompiled.c",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780514823973\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780515158142\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780515524069\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780516162273\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780516475418\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780516504206\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780516831672\\command_0_stderr.txt"
+      ],
+      "next_commands": [
+        "/gaea reverse --node Weathering --json",
+        "/gaea probe-bin --run --release-bin --direct-bin --bin gaea_weathering_native_probe -- --resolution 32 --input sine --json --require-pass"
+      ],
+      "notes": "Weathering is opened as a native-preview runtime with the decompiled Soil2/equalize/shape/Screen base chain implemented. Base scalar explicit-weather closure is tracked separately at weathering.base_scalar_runtime. Current AO-only Bridge/native diagnostics keep Dirt AmbientOcclusion open: latest focused artifact D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780512810191\\command_0_stdout.json preserves raw residual mean_abs=0.004996341856895015/max_abs=0.031635344/rms_abs=0.00786705569871721 at q4/o2/normal_z=32/sky_z_min=-0.15, with managed Lighting2 and reconstructed NativeLighting.Parameters both proving AOModel=Hybrid, ShadowQuality=5, HybridAOQuality=4, HybridAOOctaves=2, and RaytracedAOQuality=4. Rust sphere diagnostics remain q4 with all_direction_count=2562, accepted_direction_count=1477, and accepted_direction_sha256_f32_xyz_le=56232540bfa40309933cb829f2ccab5be99e5d5175f2e9c157afc7d1c65f11ec, matching the native shade_ao_sphere_setup acceptance evidence of z > -0.15 and nonzero xy. The diagnostic helper now synchronizes a single bilinear option across base/entry/wrap sampling, restoring the production raw baseline; split-only bilinear candidates are kept as report-only localization evidence with best rank 67, while all-bilinear direct remains the best report-only raw candidate at rank 1 mean_abs=0.00183579002623446/max_abs=0.026271284. Rejected standalone fixes still include literal-key q5/o3, q3/o3 production, normal_z_scale=8, terminal-hit-drop, simple non-uniform ray_weight, direct uniform_half photon scaling, and native-offset wrap_reset_current_cell. Exact closure should continue below runtime q4/o2 and sphere acceptance/order in ShadeIspc trace-worker bilinear/index/entry/wrap semantics, then still cover missing-weather fallback, ColorTransport WashedOut branch, and RGB HSL support. Current-source ramp-x/ramp-y/sine AO artifacts reject native_clamp_fraction as a closure point and show sine best report-only improvement comes from scharr_clamp/octaves=1/direct bilinear, so AO closure must continue in native ShadeIspc normal/octave semantics rather than promoting report-only candidates. Fresh direct-bin AO artifacts 1780514823973/1780515158142/1780515524069 raise the focused report grid to policy_count=510 and keep speed gates true while rejecting native_clamp_fraction, global Scharr, and NativeGhidra root-detail as standalone closures; native evidence now proves Scharr 3/10/3 normals and terrain_width/resolution*32 z scaling, so the remaining AO closure should test root-normal versus lowest-layer photon-normal separation and layer reconstruction semantics. Split-normal AO diagnostics 1780516162273/1780516475418/1780516504206 show that root-vs-lowest normal separation is a real AO component: ramp-x/ramp-y still prefer the existing Sobel/direct/z22-z26 localization, but sine best raw moves to root Sobel plus lowest Scharr at q4/o2/z32/direct with mean_abs=0.016785434789198916 and max_abs=0.14170921. Reconstruct sampling is the next focused gate, but the current reconstruct_variant patch has not been runtime-verified because an unrelated RELAX/VEX scripting rebuild blocker stops the probe; see D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780516831672\\command_0_stderr.txt."
+    },
+    {
+      "id": "weathering.lighting2_hybrid_ao_reconstruct_diagnostics",
+      "label": "Weathering Lighting2 Hybrid AO reconstruct diagnostics",
+      "kind": "diagnostic_contract",
+      "layer": "L3",
+      "status": "open",
+      "ledger_operators": [
+        "weathering.lighting2_hybrid_ao_reconstruct_diagnostics",
+        "weathering.node_runtime"
+      ],
+      "owner_nodes": [
+        "Weathering"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Weathering"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_lighting.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_weathering_native_probe.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_hybrid_ao\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_root_reconstruct_parallel\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_root_reconstruct_row\\decompiled.c",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780518880119\\command_0_stdout.json"
+      ],
+      "next_commands": [
+        "/gaea probe-bin --run --release-bin --bin gaea_weathering_native_probe --json -- --ao-only --resolution 64 --input sine --fresh-bridge-cache --json"
+      ],
+      "notes": "Scoped evidence node for Weathering Lighting2 Hybrid AO reconstruct diagnostics. Artifact 1780518880119 verifies current-source rebuild after the RELAX/VEX blocker was cleared; reconstruct_variant best remains quarter_offset, matching native 9/3/3/1 reconstruct evidence. Direct and half-offset reconstruct rows are report-only rejects. Native reconstruct evidence also shows the core reconstruct kernel writes height_lf and AO, not normal_cos; for current q4/o2/default root detail, normal_cos writeback is not a live-output closure point."
+    },
+    {
+      "id": "weathering.lighting2_sycl_lower_state_diagnostics",
+      "label": "Weathering Lighting2 SYCL lower-state diagnostics",
+      "kind": "diagnostic_contract",
+      "layer": "L3",
+      "status": "open",
+      "ledger_operators": [
+        "weathering.lighting2_sycl_lower_state_diagnostics",
+        "weathering.node_runtime"
+      ],
+      "owner_nodes": [
+        "Weathering"
+      ],
+      "reusable": true,
+      "unlocks": [
+        "Weathering"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_lighting.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_weathering_native_probe.rs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Engine\\QuadSpinner\\Gaea\\Engine\\Processing\\Lighting2.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Engine\\QuadSpinner\\Gaea\\Engine\\Sycl\\ShadeDelegate.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Engine\\QuadSpinner\\Gaea\\Engine\\Sycl\\ShadeInternalDelegate.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_adaptivecpp_lighting_weathering_20260604c\\shade_internal_dispatch\\decompiled.c",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_native\\ghidra_lighting\\lighting_root_reconstruct_row\\decompiled.c",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780542053243\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780541890329\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780542745294\\command_0_stdout.json",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780543002990\\command_0_stderr.txt",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\sine64_oct1\\sine64_oct1_manual_sycl_replay_compare.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\sine64_oct1\\sine64_oct1_manual_sycl_replay_runtime.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\cone64_oct1\\cone64_oct1_manual_sycl_replay_compare.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\cone64_oct1\\cone64_oct1_manual_sycl_replay_runtime.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\flat64_oct1\\flat64_oct1_ambient_occlusion.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\flat64_oct1\\flat64_oct1_manual_sycl_replay_compare.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\flat64_oct2\\flat64_oct2_ambient_occlusion.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\flat64_oct2\\flat64_oct2_manual_sycl_replay_compare.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\sine64_oct2\\sine64_oct2_ambient_occlusion.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\sine64_oct2\\sine64_oct2_manual_sycl_replay_compare.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\sine64_oct2\\sine64_oct2_manual_sycl_replay_runtime.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\cone64_oct2\\cone64_oct2_ambient_occlusion.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\cone64_oct2\\cone64_oct2_manual_sycl_replay_compare.json",
+        "F:\\cunning3d_gaea_lighting2_manual_sycl_probe_178054_weathering\\cone64_oct2\\cone64_oct2_manual_sycl_replay_runtime.json"
+      ],
+      "next_commands": [
+        "/gaea probe-bin --run --file-capture --bin gaea_weathering_native_probe -- --resolution 64 --input cone --ao-only --json"
+      ],
+      "notes": "Scoped Weathering Lighting2 SYCL lower-state localization. Fresh AO-only artifacts 1780542053243/sine, 1780541890329/ramp-y, and 1780542745294/cone all report required_lower_delta_not_explained_by_exposed_lower_state with policy_count=889. Required-lower ray-policy scans do not close the residual: sine best mean improvement is 1.382431946694851e-9, ramp-y best mean improvement is 4.773028194904327e-9, and cone improvement is 0.0. The production downsample default is managed_cubic_4x4, and box/separable/downsample variants are rejected by the focused reports. Runtime metadata for the focused direct Lighting2 bridge predicts managed_sycl_functions_shade on CUDA GPU rather than static ShadeIspc. New F-backed harness diagnostics add manual SYCL replay with pre/post array dumps: sine64_oct1 and cone64_oct1 both compare managed_shade vs manual_sycl_replay exact with mismatch_count=0, mean_abs_delta=0, max_abs_delta=0, native_result=Success on RTX 5070 Ti CUDA. Flat64 oct1 and oct2 both produce constant AO SHA 51f7c927265a92ef951f39116ed3891ef2984fdd685a35f37c1e60f81434c369 and manual_sycl_replay exact with mismatch_count=0; the constant 0.9975742101669312 aligns within a small photon-integer rounding window with the Rust q4 all-sphere denominator and positive-z contribution model. Fresh q4/o2 F-backed Weathering-shape replays show the actual two-octave non-flat Lighting2 path also has exact managed/manual SYCL parity: sine64_oct2 AO SHA 25ba3dea811eb4016a0fec14ada3716ec611331ba200a06ec2aa9ec2c395a37c and cone64_oct2 AO SHA 0ec711e38e3feb266c59db3abb71fe74b173279295c25349794746042e63be2f, both mismatch_count=0. CPU lighting_root_reconstruct_row's height-detail nonpositive multiplier 1.0 is not promotable for the current CUDA SYCL Weathering path: native_ghidra_height_nonpositive_1p0 rows are rejected at sine rank 79 mean_abs=0.0033957545856537763/max_abs=0.028775275, ramp-y rank 80 mean_abs=0.000498862806125544/max_abs=0.010959387, and cone rank 114 mean_abs=0.0023294775310205296/max_abs=0.023295939. This closes managed wrapper/parameter glue, two-octave managed dispatch, CPU height-nonpositive root-detail promotion, and broad flat sphere/reconstruct drift as residual sources, pushing the next closure gate inside native SYCL Shade's non-flat lower AO and spectral layer state. A follow-up Rust source rebuild after updating report wording is blocked by unrelated RELAX/VEX compile errors in artifact 1780543002990; do not treat that blocker as Weathering AO evidence."
+    },
+    {
+      "id": "weathering.base_scalar_runtime",
+      "label": "Weathering base scalar runtime",
+      "kind": "node_recipe",
+      "layer": "L4",
+      "status": "audited_cpu_raw_closed_method_perf_closed",
+      "ledger_operators": [
+        "weathering.base_scalar_runtime"
+      ],
+      "owner_nodes": [
+        "Weathering"
+      ],
+      "reusable": false,
+      "unlocks": [
+        "Weathering"
+      ],
+      "implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_weathering.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_combiner.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_weathering_bridge.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_weathering_native_probe.rs",
+        "D:\\ghost1.0\\tools\\gaea\\GaeaReverseHarness\\HarnessWeatheringRuntimeBridge.cs"
+      ],
+      "evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Weathering.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Core\\Texturize.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Core\\ColorCore.cs",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\weathering-native-probe\\1780441353897\\command_0_stdout.json"
+      ],
+      "next_commands": [
+        "/gaea weathering-native-probe --node Weathering --matrix focused --compare-bridge --fresh-bridge-cache --epsilon 0 --target-speedup 20 --require-exact --require-speedup --direct-bin --run --json",
+        "/gaea status --node Weathering --json"
+      ],
+      "notes": "Focused exact closure for the explicit-weather scalar branch only: Dirt=0, WashedOut=false, HSL controls zero. Fresh strict matrix passes 5/5 exact final height and actual Build stages with min native speedup 752.4472167862577x versus Bridge-stage elapsed time. Full Weathering remains open through weathering.node_runtime for Dirt/AO, ColorTransport, HSL, missing-weather fallback, and flat degenerate Bridge behavior."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "Mountain",
+      "label": "Mountain",
+      "domain": "Gaea HeightField Art",
+      "kind": "generator",
+      "priority": "critical",
+      "depends_on": [
+        "mountain.recipe",
+        "pe.trace.bilinear_anchor",
+        "pe.commit.capacity_with_extra",
+        "pe.frontier.packet_route_state",
+        "pe.compare.event_key_post_delta",
+        "voronoi.raw_substrate",
+        "fractal_warp.virtual_identity_sampling",
+        "combiner.subtract_ratio_mix",
+        "normalize_finalize.minimum_axis"
+      ],
+      "outputs": [
+        "height",
+        "flow",
+        "wear",
+        "deposition"
+      ],
+      "next_commands": [
+        "/gaea status --node Mountain --json",
+        "/gaea gpu-wave --node Mountain --case all --epsilon 0.0001 --direct-bin --run --json --require-gpu-active"
+      ],
+      "notes": "Audited recipe and primary source of PE substrate closure."
+    },
+    {
+      "id": "Canyon",
+      "label": "Canyon",
+      "domain": "Gaea HeightField Art",
+      "kind": "generator_multi_output",
+      "priority": "critical",
+      "depends_on": [
+        "canyon.bridge_oracle",
+        "canyon.recipe",
+        "combiner.subtract_ratio_mix",
+        "fractal_warp.virtual_identity_sampling",
+        "fractal_terrace.height_path",
+        "linear_gradient.triangle_domain",
+        "normalize_finalize.minimum_axis",
+        "pe.trace.bilinear_anchor",
+        "pe.commit.capacity_with_extra",
+        "pe.frontier.packet_route_state",
+        "pe.compare.event_key_post_delta",
+        "voronoi.raw_substrate"
+      ],
+      "outputs": [
+        "height",
+        "depth"
+      ],
+      "next_commands": [
+        "/gaea canyon-compare --node Canyon --style Both --resolution 256 --epsilon 0.000001 --run --json",
+        "/gaea plan --node Volcano --json"
+      ],
+      "notes": "Focused closed generator with depth output; good template for multi-output Gaea nodes."
+    },
+    {
+      "id": "Voronoi",
+      "label": "Voronoi",
+      "domain": "Gaea HeightField Art",
+      "kind": "noise_substrate",
+      "priority": "high",
+      "depends_on": [
+        "voronoi.raw_substrate"
+      ],
+      "outputs": [
+        "height"
+      ],
+      "next_commands": [
+        "/gaea ledger --operator voronoi.raw_substrate --json"
+      ],
+      "notes": "Reusable substrate node; its closure impacts several generators."
+    },
+    {
+      "id": "Ridge",
+      "label": "Ridge",
+      "domain": "Gaea HeightField Art",
+      "kind": "generator",
+      "priority": "high",
+      "depends_on": [
+        "fractal_terrace.height_path",
+        "linear_gradient.triangle_domain",
+        "fractal_warp.virtual_identity_sampling"
+      ],
+      "outputs": [
+        "height"
+      ],
+      "next_commands": [
+        "/gaea ridge-compare --node Ridge --resolution 16 --run --json --require-exact",
+        "/gaea ridge-compare --node Ridge --resolution 16 --sweep 4 --sweep-seed 1780408553 --run --json --require-exact",
+        "/gaea ridge-compare --node Ridge --resolution 128 --sweep 20 --sweep-seed 1780423001 --run --json --require-exact",
+        "/gaea ledger --node Ridge --json"
+      ],
+      "notes": "Ridge is audited_closed: default r16, 4-case r16 focused sweep, default r32, and a 20-case randomized resolution-128 sweep (1780423102625) all pass exact Bridge/native raw buffer parity at epsilon 0, covering Scale/Height/Definition/Seed/ScaleX/ScaleY branches. Remaining gates: source-input sweep (cone/radial/sine/rampx/checker), performance acceptance matrix entry with Gaea desktop-app cook baseline, and GPU-resident promotion."
+    },
+    {
+      "id": "Volcano",
+      "label": "Volcano",
+      "domain": "Gaea HeightField Art",
+      "kind": "generator",
+      "priority": "high",
+      "depends_on": [
+        "voronoi.raw_substrate",
+        "fractal_warp.virtual_identity_sampling",
+        "combiner.subtract_ratio_mix",
+        "fractal_terrace.height_path",
+        "linear_gradient.triangle_domain",
+        "normalize_finalize.minimum_axis"
+      ],
+      "outputs": [
+        "height",
+        "mask"
+      ],
+      "next_commands": [
+        "/gaea reverse --node Volcano --json",
+        "/gaea ledger --node Volcano --json"
+      ],
+      "notes": "Planned generator expected to reuse most Canyon/Mountain recipe primitives."
+    },
+    {
+      "id": "River",
+      "label": "River",
+      "domain": "Gaea HeightField Art",
+      "kind": "connected_operator",
+      "priority": "medium",
+      "depends_on": [
+        "pe.trace.bilinear_anchor",
+        "pe.commit.capacity_with_extra",
+        "pe.frontier.packet_route_state",
+        "pe.compare.event_key_post_delta",
+        "combiner.subtract_ratio_mix"
+      ],
+      "outputs": [
+        "height",
+        "water",
+        "mask"
+      ],
+      "next_commands": [
+        "/gaea river-connected-probe --node River --resolution 256 --run --json"
+      ],
+      "notes": "Connected node; depends heavily on shared erosion and mask/combiner contracts."
+    },
+    {
+      "id": "Island",
+      "label": "Island",
+      "domain": "Gaea HeightField Art",
+      "kind": "generator",
+      "priority": "medium",
+      "depends_on": [
+        "fractal_warp.virtual_identity_sampling",
+        "normalize_finalize.minimum_axis"
+      ],
+      "outputs": [
+        "height"
+      ],
+      "next_commands": [
+        "/gaea island-process-sweep --node Island --samples 5 --resolution-choices 128,256 --epsilon 0.000001 --run --json"
+      ],
+      "notes": "Already has process probes; graph makes its reusable dependencies explicit."
+    },
+    {
+      "id": "CraterField",
+      "label": "CraterField",
+      "domain": "Gaea HeightField Art",
+      "kind": "generator",
+      "priority": "medium",
+      "depends_on": [
+        "voronoi.raw_substrate",
+        "normalize_finalize.minimum_axis"
+      ],
+      "outputs": [
+        "height"
+      ],
+      "next_commands": [
+        "/gaea ledger --node CraterField --json"
+      ],
+      "notes": "Generator expected to benefit from closed raw noise and finalization contracts."
+    },
+    {
+      "id": "Crater",
+      "label": "Crater",
+      "domain": "Gaea HeightField Art",
+      "kind": "generator",
+      "priority": "medium",
+      "depends_on": [
+        "crater.new_bridge_native_acceptance",
+        "normalize_finalize.minimum_axis"
+      ],
+      "outputs": [
+        "height"
+      ],
+      "next_commands": [
+        "/gaea crater-compare --node Crater --resolution 128 --sweep 8 --sweep-seed 177984 --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea acceptance-matrix --node Crater --json",
+        "/gaea status --node Crater --json"
+      ],
+      "notes": "New style Bridge/native flat-map acceptance is strict scoped-closed. Full Crater remains open because Classic style, Rim/Shape semantics, optional input composition, and ThermalShaper are not promoted by the New-style gate."
+    },
+    {
+      "id": "Stones",
+      "label": "Stones",
+      "domain": "Gaea HeightField Art",
+      "kind": "connected_operator_multi_output",
+      "priority": "medium",
+      "depends_on": [
+        "stones.node_runtime",
+        "CraterField",
+        "normalize_finalize.minimum_axis"
+      ],
+      "input_ports": [
+        {
+          "name": "height",
+          "role": "primary",
+          "required": true
+        }
+      ],
+      "output_ports": [
+        {
+          "name": "height",
+          "role": "primary",
+          "slot": 0,
+          "source_slot": 0
+        },
+        {
+          "name": "stones",
+          "role": "aux",
+          "slot": 1,
+          "source_slot": 1
+        }
+      ],
+      "outputs": [
+        "height",
+        "stones"
+      ],
+      "next_commands": [
+        "/gaea stones-compare --node Stones --matrix focused --epsilon 0 --repeat 5 --require-all-pass --direct-bin --run --json",
+        "/gaea acceptance-matrix --node Stones --json",
+        "/gaea status --node Stones --json"
+      ],
+      "notes": "Focused connected-node matrix is node_runtime closed for current Bridge/native raw buffers: 6/6 exact across HeightField and Stones outputs. Performance claim still needs a measured Gaea desktop baseline."
+    },
+    {
+      "id": "EasyErosion",
+      "label": "EasyErosion",
+      "domain": "Gaea HeightField Art",
+      "kind": "connected_operator_multi_output",
+      "priority": "critical",
+      "depends_on": [
+        "heightfield.map.scalar_first_ports",
+        "easy_erosion.recipe_stack",
+        "erosions.pe.public_shell",
+        "pe.trace.bilinear_anchor",
+        "pe.commit.capacity_with_extra",
+        "pe.frontier.packet_route_state",
+        "pe.compare.event_key_post_delta",
+        "fractal_terrace.height_path",
+        "combiner.minmax_height_shell",
+        "gradient.linear_bias_overlay",
+        "rockcore.noise.overlay"
+      ],
+      "input_ports": [
+        {
+          "name": "height",
+          "role": "primary",
+          "required": true
+        }
+      ],
+      "output_ports": [
+        {
+          "name": "height",
+          "role": "primary",
+          "slot": 0,
+          "source_slot": 0
+        },
+        {
+          "name": "flow",
+          "role": "aux",
+          "slot": 1,
+          "source_slot": 1
+        },
+        {
+          "name": "wear",
+          "role": "aux",
+          "slot": 2,
+          "source_slot": 2
+        },
+        {
+          "name": "deposits",
+          "role": "aux",
+          "slot": 3,
+          "source_slot": 3
+        }
+      ],
+      "outputs": [
+        "height",
+        "flow",
+        "wear",
+        "deposits"
+      ],
+      "shared_operators": [
+        "Erosions.PE",
+        "ParallelErosion",
+        "Profiles.ComplexTerraces",
+        "Combiner.Min",
+        "Combiner.Max",
+        "Gradients.LinearGradient",
+        "RockCore.Noise"
+      ],
+      "recipe_families": [
+        "PE-only",
+        "PE plus post-combine",
+        "pre-terrace",
+        "pre-rock-noise",
+        "multi-pass PE"
+      ],
+      "next_commands": [
+        "/gaea probe-bin --bin gaea_easy_erosion_bridge_native_compare --direct-bin --allow-stale-direct-bin --run -- --resolution 32 --epsilon 0 --matrix focused --require-all-pass --require-exact --json",
+        "/gaea easy-erosion-compare --node EasyErosion --matrix focused --resolution 32 --epsilon 0 --require-all-pass --require-exact --direct-bin --run --json",
+        "/gaea acceptance-matrix --node EasyErosion --json",
+        "/gaea status --node EasyErosion --json"
+      ],
+      "notes": "Connected one-input/four-output erosion recipe. The strict focused supported-subset gate now passes 9/9 exact at resolution 32 across Input, HeightField, Flow, Wear, and Deposits, with all_exact=true and worst_max_abs_delta=0 in probe-bin artifact 1780556397182. Current branch coverage includes Simple, Ancient, Alpine, Exposed, Flows, Flows2, Flows3, Rocky, Strata, Withered, SoftSoil, SoftSoil2, Dessicated, Thin, and BiasAngle X/N/E/S/W. Ancient2, broader randomized sweeps, non-square, GPU, and desktop-app performance coverage remain open."
+    },
+    {
+      "id": "Erosion2",
+      "label": "Erosion2",
+      "domain": "Gaea HeightField Art",
+      "kind": "connected_operator_multi_output",
+      "priority": "critical",
+      "depends_on": [
+        "heightfield.map.scalar_first_ports",
+        "erosions.pe.public_shell",
+        "pe.trace.bilinear_anchor",
+        "pe.commit.capacity_with_extra",
+        "pe.frontier.packet_route_state",
+        "pe.compare.event_key_post_delta",
+        "erosion2.inhibitor_mask_contract"
+      ],
+      "input_ports": [
+        {
+          "name": "height",
+          "role": "primary",
+          "required": true
+        },
+        {
+          "name": "mask",
+          "role": "mask",
+          "required": false
+        }
+      ],
+      "output_ports": [
+        {
+          "name": "height",
+          "role": "primary",
+          "slot": 0,
+          "source_slot": 0
+        },
+        {
+          "name": "flow",
+          "role": "aux",
+          "slot": 1,
+          "source_slot": 1
+        },
+        {
+          "name": "wear",
+          "role": "aux",
+          "slot": 2,
+          "source_slot": 2
+        },
+        {
+          "name": "deposits",
+          "role": "aux",
+          "slot": 3,
+          "source_slot": 3
+        }
+      ],
+      "outputs": [
+        "height",
+        "flow",
+        "wear",
+        "deposits"
+      ],
+      "shared_operators": [
+        "Erosions.PE",
+        "ParallelErosion",
+        "AspectMaps.GetSlope",
+        "AspectMaps.GetHeightNormalized",
+        "Lighting2"
+      ],
+      "recipe_families": [
+        "PE parameter surface",
+        "inhibitor mask",
+        "directional precipitation"
+      ],
+      "next_commands": [
+        "/gaea reverse --node Erosion2 --json"
+      ],
+      "notes": "Recommended modern erosion node. PE substrate is bright; inhibitor/rain-shadow mask contract remains the open edge."
+    },
+    {
+      "id": "Erosion",
+      "label": "Erosion",
+      "domain": "Gaea HeightField Art",
+      "kind": "connected_operator",
+      "priority": "critical",
+      "depends_on": [
+        "heightfield.map.scalar_first_ports",
+        "erosions.classic.wrapper",
+        "erosion.mask_bias_contract"
+      ],
+      "input_ports": [
+        {
+          "name": "height",
+          "role": "primary",
+          "required": true
+        },
+        {
+          "name": "area_mask",
+          "role": "mask",
+          "required": false
+        },
+        {
+          "name": "sediment_removal_mask",
+          "role": "mask",
+          "required": false
+        }
+      ],
+      "output_ports": [
+        {
+          "name": "height",
+          "role": "primary",
+          "slot": 0,
+          "source_slot": 0
+        },
+        {
+          "name": "wear",
+          "role": "aux",
+          "slot": 1,
+          "source_slot": 1
+        },
+        {
+          "name": "flow",
+          "role": "aux",
+          "slot": 2,
+          "source_slot": 2
+        },
+        {
+          "name": "deposits",
+          "role": "aux",
+          "slot": 3,
+          "source_slot": 3
+        }
+      ],
+      "outputs": [
+        "height",
+        "wear",
+        "flow",
+        "deposits"
+      ],
+      "shared_operators": [
+        "Erosions.Classic",
+        "ErosionWrapper",
+        "AspectMaps.GetHeight",
+        "AspectMaps.GetSlopeNormalized",
+        "MapHelper masks"
+      ],
+      "recipe_families": [
+        "classic erosion",
+        "area mask",
+        "sediment removal mask",
+        "altitude/slope bias"
+      ],
+      "next_commands": [
+        "/gaea erosion-classic-bridge-probe --node Erosion --case default_cone32 --resolution 32 --run --json",
+        "/gaea reverse --node Erosion --json"
+      ],
+      "notes": "Legacy connected erosion node. It is not PE-backed; the focused Classic wrapper now has Bridge/native raw parity, decoded output labels, explicit external area/sediment mask exact cases, no-external-area-mask bias parameter exact cases, and focused non-default volume/debris exact cases. Remaining promotion gates are broader parameter/randomized sweeps, non-square, GPU, and desktop-app performance coverage."
+    },
+    {
+      "id": "Weathering",
+      "label": "Weathering",
+      "domain": "Gaea HeightField Art",
+      "kind": "connected_operator",
+      "priority": "high",
+      "depends_on": [
+        "heightfield.map.scalar_first_ports",
+        "weathering.base_scalar_runtime",
+        "weathering.node_runtime"
+      ],
+      "input_ports": [
+        {
+          "name": "source",
+          "role": "primary",
+          "required": true
+        },
+        {
+          "name": "surface",
+          "role": "weather_map",
+          "required": false
+        }
+      ],
+      "output_ports": [
+        {
+          "name": "height",
+          "role": "primary",
+          "slot": 0,
+          "source_slot": 0
+        }
+      ],
+      "outputs": [
+        "height"
+      ],
+      "shared_operators": [
+        "Texturize.Soil2",
+        "Combiner.Screen",
+        "Lighting2",
+        "AmbientOcclusion",
+        "ColorTransport",
+        "ColorCore.HSL"
+      ],
+      "recipe_families": [
+        "soil mask",
+        "weathering CLUT",
+        "dirt ambient occlusion",
+        "washed-out color transport",
+        "HSL color adjustment"
+      ],
+      "next_commands": [
+        "/gaea reverse --node Weathering --json",
+        "/gaea ledger --node Weathering --json",
+        "/gaea probe-bin --run --release-bin --direct-bin --bin gaea_weathering_native_probe -- --resolution 32 --input sine --json --require-pass"
+      ],
+      "notes": "High-frequency rock/weathering post-process. The explicit-weather scalar Soil2/equalize/shape/CLUT/Screen path is focused-closed by weathering.base_scalar_runtime. Full-node parity remains open for Dirt AO, Lighting2/ShadeIspc Hybrid AO trace-worker bilinear/index/entry/wrap semantics, ColorTransport, HSL, missing-weather fallback, flat degenerate Bridge behavior, and broader randomized sweeps. Current focused AO diagnostics promote only the native-evidenced AO ray acceptance filter z > -0.15 and q4/o2 runtime settings; latest artifact D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_weathering_native_probe\\1780512810191\\command_0_stdout.json keeps the production raw residual at mean_abs=0.004996341856895015/max_abs=0.031635344, records the Rust q4/o2 sphere/order fingerprint, and proves split-only bilinear candidates are report-only rather than promotable fixes. The best report-only ramp-x64 raw candidate remains wrap_then_bilinear_clamp_sky_z_gt_0_octaves_2_normal_z_26_bilinear_direct, so exact closure must continue below runtime q4/o2 and sphere acceptance/order in lower-level ShadeIspc trace-worker semantics. Fresh AO artifacts 1780513267086/1780513418161/1780513958884 update the open risk: native_clamp_fraction is report-only/rejected, and sine points to normal/octave semantics below Lighting2 q4/o2."
+    }
+  ]
+}

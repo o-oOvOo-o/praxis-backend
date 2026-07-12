@@ -1,6 +1,7 @@
 use crate::JsonSchema;
 use crate::ResponsesApiTool;
 use crate::ToolSpec;
+use praxis_protocol::config_types::MultiAgentMode;
 use praxis_protocol::openai_models::ModelPreset;
 use std::collections::BTreeMap;
 
@@ -11,6 +12,7 @@ use output_schema::*;
 pub struct SpawnAgentToolOptions<'a> {
     pub available_models: &'a [ModelPreset],
     pub agent_type_description: String,
+    pub multi_agent_mode: &'a MultiAgentMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +50,7 @@ pub fn create_spawn_agent_tool(options: SpawnAgentToolOptions<'_>) -> ToolSpec {
         description: spawn_agent_tool_description(
             &available_models_description,
             return_value_description,
+            options.multi_agent_mode,
         ),
         strict: false,
         defer_loading: None,
@@ -476,7 +479,7 @@ fn spawn_agent_common_properties(agent_type_description: &str) -> BTreeMap<Strin
             "model".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Optional model override for the new agent. Replaces the inherited model; known first-party model ids can also switch the provider automatically. For the strongest OpenAI-backed Praxis coding worker, use `gpt-5.5`; natural aliases like `5.5`, `gpt5.5`, and `gpt 5.5 xhigh` are accepted."
+                    "Optional model override for the new agent. Replaces the inherited model; known first-party model ids can also switch the provider automatically. For the strongest OpenAI-backed Praxis coding worker, use `gpt-5.6-sol`; natural aliases like `5.6 sol`, `gpt5.6-sol`, and `gpt 5.6 sol ultra` are accepted."
                         .to_string(),
                 ),
             },
@@ -485,7 +488,7 @@ fn spawn_agent_common_properties(agent_type_description: &str) -> BTreeMap<Strin
             "reasoning_effort".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort. Use `xhigh` for maximum reasoning; aliases like `x-high`, `extra high`, and `maximum` are accepted."
+                    "Optional reasoning effort override for the new agent. Replaces the inherited reasoning effort. Use `max` for maximum single-agent reasoning or `ultra` for maximum reasoning with proactive delegation on supported models."
                         .to_string(),
                 ),
             },
@@ -496,17 +499,26 @@ fn spawn_agent_common_properties(agent_type_description: &str) -> BTreeMap<Strin
 fn spawn_agent_tool_description(
     available_models_description: &str,
     return_value_description: &str,
+    multi_agent_mode: &MultiAgentMode,
 ) -> String {
+    let delegation_policy = match multi_agent_mode {
+        MultiAgentMode::ExplicitRequestOnly => {
+            "Only use `spawn_agent` if and only if the user explicitly asks for sub-agents, delegation, or parallel agent work. Requests for depth, thoroughness, research, investigation, or detailed codebase analysis do not count as permission to spawn."
+        }
+        MultiAgentMode::Proactive => {
+            "Proactive multi-agent delegation is active. Use `spawn_agent` whenever parallel work would materially improve speed or quality; no explicit user request is required."
+        }
+        MultiAgentMode::Custom(instructions) => instructions.as_str(),
+    };
     format!(
         r#"
-        Only use `spawn_agent` if and only if the user explicitly asks for sub-agents, delegation, or parallel agent work.
-        Requests for depth, thoroughness, research, investigation, or detailed codebase analysis do not count as permission to spawn.
-        Agent-role guidance below only helps choose which agent to use after spawning is already authorized; it never authorizes spawning by itself.
+        {delegation_policy}
+        The delegation policy above is authoritative. Agent-role guidance below only helps choose the right worker after that policy permits spawning.
         Spawn a sub-agent for a well-scoped task. {return_value_description} This spawn_agent tool provides you access to smaller but more efficient sub-agents. A mini model can solve many tasks faster than the main model. You should follow the rules and guidelines below to use this tool.
 
 {available_models_description}
 ### Cross-provider coding workers
-- Picker-visible models above may only reflect the current provider. When an OpenAI-backed Praxis worker is needed and the OpenAI provider is configured, you may still explicitly set `model_provider` to `openai`, `model` to `gpt-5.5`, and `reasoning_effort` to `xhigh`. Natural model aliases such as `5.5`, `gpt5.5`, and `gpt 5.5 xhigh` are accepted, but explicit fields are more reliable.
+- Picker-visible models above may only reflect the current provider. When an OpenAI-backed Praxis worker is needed and the OpenAI provider is configured, you may explicitly choose `gpt-5.6-luna` for economical bounded work, `gpt-5.6-terra` for balanced implementation, or `gpt-5.6-sol` for the hardest work. Explicit `model_provider`, `model`, and `reasoning_effort` fields are the most reliable.
 
 ### When to delegate vs. do the subtask yourself
 - First, quickly analyze the overall user task and form a succinct high-level plan. Identify which tasks are immediate blockers on the critical path, and which tasks are sidecar tasks that are needed but can run in parallel without blocking the next local step. As part of that plan, explicitly decide what immediate task you should do locally right now. Do this planning step before delegating to agents so you do not hand off the immediate blocking task to a submodel and then waste time waiting on it.

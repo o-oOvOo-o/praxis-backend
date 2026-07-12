@@ -61,12 +61,12 @@ impl ChatWidget {
         self.session_header.set_model(&model_for_header);
         self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
             Some(model_for_header.clone()),
-            Some(event.reasoning_effort),
+            Some(event.reasoning_effort.clone()),
             /*developer_instructions*/ None,
         );
         if let Some(mask) = self.active_collaboration_mask.as_mut() {
             mask.model = Some(model_for_header.clone());
-            mask.reasoning_effort = Some(event.reasoning_effort);
+            mask.reasoning_effort = Some(event.reasoning_effort.clone());
         }
         self.refresh_model_display();
         self.refresh_status_surfaces();

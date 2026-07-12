@@ -58,7 +58,7 @@ impl ToolHandler for Handler {
                     .clone()
                     .or_else(|| args.model_provider.clone())
                     .unwrap_or_default(),
-                args.reasoning_effort.unwrap_or_default(),
+                args.reasoning_effort.clone().unwrap_or_default(),
             )
             .await;
         let mut config = build_agent_spawn_config(turn.as_ref())?;
@@ -68,7 +68,7 @@ impl ToolHandler for Handler {
             &mut config,
             args.model_provider.as_deref(),
             args.model.as_deref(),
-            args.reasoning_effort,
+            args.reasoning_effort.clone(),
         )
         .await?;
         apply_role_to_config(&mut config, role_name)
@@ -148,8 +148,8 @@ impl ToolHandler for Handler {
             .unwrap_or_else(|| args.model.clone().unwrap_or_default());
         let effective_reasoning_effort = agent_snapshot
             .as_ref()
-            .and_then(|snapshot| snapshot.reasoning_effort)
-            .unwrap_or(args.reasoning_effort.unwrap_or_default());
+            .and_then(|snapshot| snapshot.reasoning_effort.clone())
+            .unwrap_or(args.reasoning_effort.clone().unwrap_or_default());
         let result_agent_base_name = new_agent_base_name.clone();
         let result_agent_title = new_agent_title.clone();
         let result_agent_display_name = new_agent_display_name.clone();
@@ -323,7 +323,9 @@ fn parse_spawn_agent_reasoning_effort(value: &str) -> Result<ReasoningEffort, St
         "low" => Ok(ReasoningEffort::Low),
         "medium" | "med" | "default" => Ok(ReasoningEffort::Medium),
         "high" => Ok(ReasoningEffort::High),
-        "xhigh" | "extrahigh" | "max" | "maximum" | "highest" => Ok(ReasoningEffort::XHigh),
+        "xhigh" | "extrahigh" => Ok(ReasoningEffort::XHigh),
+        "max" | "maximum" | "highest" => Ok(ReasoningEffort::Max),
+        "ultra" => Ok(ReasoningEffort::Ultra),
         _ => value.parse(),
     }
 }
@@ -355,7 +357,7 @@ mod tests {
             r#"{"message":"do it","task_name":"worker","title":"负责实现","reasoning_effort":"maximum"}"#,
         )
         .expect("maximum effort should parse");
-        assert_eq!(args.reasoning_effort, Some(ReasoningEffort::XHigh));
+        assert_eq!(args.reasoning_effort, Some(ReasoningEffort::Max));
     }
 
     #[test]

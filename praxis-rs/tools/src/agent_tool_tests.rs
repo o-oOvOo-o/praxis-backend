@@ -43,6 +43,7 @@ fn spawn_agent_tool_requires_task_name_and_lists_visible_models() {
             model_preset("hidden", /*show_in_picker*/ false),
         ],
         agent_type_description: "role help".to_string(),
+        multi_agent_mode: &praxis_protocol::config_types::MultiAgentMode::ExplicitRequestOnly,
     });
 
     let ToolSpec::Function(ResponsesApiTool {
@@ -97,6 +98,21 @@ fn spawn_agent_tool_requires_task_name_and_lists_visible_models() {
             "next_action"
         ])
     );
+}
+
+#[test]
+fn spawn_agent_tool_uses_proactive_policy_for_ultra_mode() {
+    let tool = create_spawn_agent_tool(SpawnAgentToolOptions {
+        available_models: &[],
+        agent_type_description: String::new(),
+        multi_agent_mode: &praxis_protocol::config_types::MultiAgentMode::Proactive,
+    });
+    let ToolSpec::Function(ResponsesApiTool { description, .. }) = tool else {
+        panic!("spawn_agent should be a function tool");
+    };
+    assert!(description.contains("Proactive multi-agent delegation is active"));
+    assert!(description.contains("no explicit user request is required"));
+    assert!(!description.contains("Only use `spawn_agent` if and only if"));
 }
 
 #[test]

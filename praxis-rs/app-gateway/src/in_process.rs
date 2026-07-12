@@ -670,7 +670,7 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                                             );
                                             continue;
                                         }
-                                        processor.process_response(response).await;
+                                        processor.process_response(connection_id, response).await;
                                     }
                                     JSONRPCMessage::Notification(notification) => {
                                         if !external_connections.contains_key(&connection_id) {
@@ -688,7 +688,7 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                                             );
                                             continue;
                                         }
-                                        processor.process_error(err).await;
+                                        processor.process_error(connection_id, err).await;
                                     }
                                 }
                             }
@@ -838,12 +838,20 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                         }
                         Some(InProcessClientMessage::ServerRequestResponse { request_id, result }) => {
                             outgoing_message_sender
-                                .notify_client_response(request_id, result)
+                                .notify_client_response(
+                                    IN_PROCESS_CONNECTION_ID,
+                                    request_id,
+                                    result,
+                                )
                                 .await;
                         }
                         Some(InProcessClientMessage::ServerRequestError { request_id, error }) => {
                             outgoing_message_sender
-                                .notify_client_error(request_id, error)
+                                .notify_client_error(
+                                    IN_PROCESS_CONNECTION_ID,
+                                    request_id,
+                                    error,
+                                )
                                 .await;
                         }
                         Some(InProcessClientMessage::Shutdown { done_tx }) => {
@@ -905,6 +913,7 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                                 };
                                 outgoing_message_sender
                                     .notify_client_error(
+                                        IN_PROCESS_CONNECTION_ID,
                                         request_id,
                                         JSONRPCErrorError {
                                             code,

@@ -107,6 +107,10 @@ impl PraxisMessageProcessor {
                 self.thread_read(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::ThreadHistoryRead { request_id, params } => {
+                self.thread_history_read(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::ThreadGoalGet { request_id, params } => {
                 self.thread_goal_get(to_connection_request_id(request_id), params)
                     .await;

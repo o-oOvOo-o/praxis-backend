@@ -113,7 +113,7 @@ impl ThreadEventStore {
         {
             session.model_provider_id = notification.model_provider.clone();
             session.model = notification.model.clone();
-            session.reasoning_effort = notification.reasoning_effort;
+            session.reasoning_effort = notification.reasoning_effort.clone();
         }
         match &notification {
             ServerNotification::TurnStarted(turn) => {

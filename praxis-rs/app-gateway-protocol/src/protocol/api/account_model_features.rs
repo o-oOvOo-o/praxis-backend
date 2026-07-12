@@ -239,6 +239,9 @@ pub struct ModelUpgradeInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ReasoningEffortOption {
     pub reasoning_effort: ReasoningEffort,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub display_name: Option<String>,
     pub description: String,
 }
 

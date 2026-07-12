@@ -73,7 +73,7 @@ impl App {
 
         match builder
             .set_model_provider(Some(provider_id.as_str()))
-            .set_model(Some(model.as_str()), effort)
+            .set_model(Some(model.as_str()), effort.clone())
             .apply()
             .await
         {
@@ -95,7 +95,7 @@ impl App {
                     &provider_id,
                     Some(&provider_for_selection),
                 );
-                self.on_update_reasoning_effort(effort);
+                self.on_update_reasoning_effort(effort.clone());
                 self.chat_widget.submit_op(AppCommand::reload_user_config());
                 self.chat_widget
                     .submit_op(AppCommand::override_turn_context(
@@ -106,13 +106,14 @@ impl App {
                         /*windows_sandbox_level*/ None,
                         Some(provider_id.clone()),
                         Some(model.clone()),
-                        Some(effort),
+                        Some(effort.clone()),
                         /*summary*/ None,
                         /*service_tier*/ None,
                         /*collaboration_mode*/ None,
                         /*personality*/ None,
                     ));
                 let effort_label = effort
+                    .as_ref()
                     .map(|selected_effort| selected_effort.to_string())
                     .unwrap_or_else(|| "default".to_string());
                 tracing::info!(

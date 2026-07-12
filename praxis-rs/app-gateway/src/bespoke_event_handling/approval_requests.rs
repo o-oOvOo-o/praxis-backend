@@ -53,6 +53,7 @@ pub(super) async fn handle_apply_patch_approval_request(
         thread_state_manager,
         &thread_state,
         &outgoing,
+        turn_id.as_str(),
         ServerRequestPayload::FileChangeRequestApproval(params),
     )
     .await;
@@ -164,6 +165,7 @@ pub(super) async fn handle_exec_approval_request(
         thread_state_manager,
         &thread_state,
         &outgoing,
+        turn_id.as_str(),
         ServerRequestPayload::CommandExecutionRequestApproval(params),
     )
     .await;

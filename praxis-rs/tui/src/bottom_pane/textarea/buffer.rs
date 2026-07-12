@@ -68,6 +68,17 @@ impl TextArea {
         &self.text
     }
 
+    pub(crate) fn zeroize_contents(&mut self) {
+        use zeroize::Zeroize;
+
+        self.text.zeroize();
+        self.kill_buffer.zeroize();
+        self.cursor_pos = 0;
+        self.elements.clear();
+        self.wrap_cache.replace(None);
+        self.preferred_col = None;
+    }
+
     pub fn insert_str(&mut self, text: &str) {
         self.insert_str_at(self.cursor_pos, text);
     }

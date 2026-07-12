@@ -173,7 +173,11 @@ async fn run_routed_image_generation(
         &provider,
     );
     let setup = ProviderDecisionCenter::new(auth_manager)
-        .setup_provider(&provider, AuthRequestPurpose::ModelTurn)
+        .setup_provider(
+            crate::model_provider_info::OPENAI_PROVIDER_ID,
+            &provider,
+            AuthRequestPurpose::ModelTurn,
+        )
         .await
         .map_err(|err| format!("image_generation auth setup failed: {err}"))?;
 

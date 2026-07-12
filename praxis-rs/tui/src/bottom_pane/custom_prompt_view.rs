@@ -34,6 +34,7 @@ pub(crate) struct CustomPromptView {
     // UI state
     textarea: TextArea,
     textarea_state: RefCell<TextAreaState>,
+    redact_input: bool,
     complete: bool,
 }
 
@@ -51,8 +52,20 @@ impl CustomPromptView {
             on_submit,
             textarea: TextArea::new(),
             textarea_state: RefCell::new(TextAreaState::default()),
+            redact_input: false,
             complete: false,
         }
+    }
+
+    pub(crate) fn new_secret(
+        title: String,
+        placeholder: String,
+        context_label: Option<String>,
+        on_submit: PromptSubmitted,
+    ) -> Self {
+        let mut view = Self::new(title, placeholder, context_label, on_submit);
+        view.redact_input = true;
+        view
     }
 
     pub(crate) fn new_with_initial_text(
@@ -66,6 +79,14 @@ impl CustomPromptView {
         view.textarea.set_text_clearing_elements(&initial_text);
         view.textarea.set_cursor(initial_text.len());
         view
+    }
+}
+
+impl Drop for CustomPromptView {
+    fn drop(&mut self) {
+        if self.redact_input {
+            self.textarea.zeroize_contents();
+        }
     }
 }
 
@@ -113,7 +134,12 @@ impl BottomPaneView for CustomPromptView {
         if pasted.is_empty() {
             return false;
         }
-        self.textarea.insert_str(&pasted);
+        if self.redact_input {
+            let pasted = zeroize::Zeroizing::new(pasted);
+            self.textarea.insert_str(pasted.as_str());
+        } else {
+            self.textarea.insert_str(&pasted);
+        }
         true
     }
 }
@@ -193,7 +219,20 @@ impl Renderable for CustomPromptView {
                     height: text_area_height,
                 };
                 let mut state = self.textarea_state.borrow_mut();
-                StatefulWidgetRef::render_ref(&(&self.textarea), textarea_rect, buf, &mut state);
+                if self.redact_input && !self.textarea.text().is_empty() {
+                    let masked = "•".repeat(self.textarea.text().chars().count().min(64));
+                    let mut textarea = TextArea::new();
+                    textarea.set_text_clearing_elements(&masked);
+                    textarea.set_cursor(masked.len());
+                    StatefulWidgetRef::render_ref(&(&textarea), textarea_rect, buf, &mut state);
+                } else {
+                    StatefulWidgetRef::render_ref(
+                        &(&self.textarea),
+                        textarea_rect,
+                        buf,
+                        &mut state,
+                    );
+                }
                 if self.textarea.text().is_empty() {
                     Paragraph::new(Line::from(self.placeholder.clone().dim()))
                         .render(textarea_rect, buf);

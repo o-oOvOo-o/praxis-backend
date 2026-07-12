@@ -328,7 +328,7 @@ impl ConfigDocument {
                 );
                 mutated |= self.write_profile_value(
                     &["model_reasoning_effort"],
-                    effort.map(|effort| value(effort.to_string())),
+                    effort.as_ref().map(|effort| value(effort.to_string())),
                 );
                 mutated
             }),

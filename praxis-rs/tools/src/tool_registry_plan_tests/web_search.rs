@@ -175,6 +175,7 @@ fn search_tool_requires_model_capability_and_feature_flag() {
     let tools_config = ToolsConfig::new(&ToolsConfigParams {
         model_info: &ModelInfo {
             supports_search_tool: false,
+            multi_agent_version: None,
             ..model_info.clone()
         },
         available_models: &available_models,

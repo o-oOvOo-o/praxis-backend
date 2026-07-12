@@ -1,10 +1,12 @@
 use crate::client_response_decode::PendingClientResponse;
+use crate::error_code::INTERNAL_ERROR_CODE;
 use crate::outgoing_message::ClientRequestResult;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
 use crate::thread_state::ThreadListenerCommand;
 use crate::thread_state::ThreadState;
 use crate::thread_state::ThreadStateManager;
+use praxis_app_gateway_protocol::JSONRPCErrorError;
 use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequestPayload;
@@ -27,23 +29,42 @@ pub(crate) async fn send_server_request(
     thread_state_manager: &ThreadStateManager,
     thread_state: &Arc<Mutex<ThreadState>>,
     outgoing: &ThreadScopedOutgoingMessageSender,
+    turn_id: &str,
     payload: ServerRequestPayload,
 ) -> PendingServerRequest {
-    let (request_id, receiver, request) = outgoing.register_request(payload).await;
+    let thread_id = outgoing.thread_id();
+    let response_connection_id = thread_state_manager
+        .turn_controller(thread_id, turn_id)
+        .await;
+    let (request_id, receiver, request) = outgoing
+        .register_request(payload, response_connection_id)
+        .await;
     {
         let mut state = thread_state.lock().await;
         state.insert_pending_server_request(request.clone());
     }
 
-    let thread_id = outgoing.thread_id();
-    let connection_ids = thread_state_manager
-        .subscribed_connection_ids(thread_id)
-        .await;
-    if !outgoing
-        .send_registered_request_to_connections(&connection_ids, request)
-        .await
-    {
-        outgoing.cancel_request(&request_id).await;
+    let sent = match response_connection_id {
+        Some(connection_id) => {
+            outgoing
+                .send_registered_request_to_connection(connection_id, request)
+                .await
+        }
+        None => false,
+    };
+    if !sent {
+        outgoing
+            .fail_request(
+                &request_id,
+                JSONRPCErrorError {
+                    code: INTERNAL_ERROR_CODE,
+                    message: "server request has no live controlling connection".to_string(),
+                    data: Some(serde_json::json!({
+                        "reason": "missingTurnController",
+                    })),
+                },
+            )
+            .await;
         thread_state
             .lock()
             .await

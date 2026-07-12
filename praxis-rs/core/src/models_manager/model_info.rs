@@ -4,6 +4,7 @@ use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelInstructionsVariables;
 use praxis_protocol::openai_models::ModelMessages;
 use praxis_protocol::openai_models::ModelVisibility;
+use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::openai_models::ReasoningEffortPreset;
 use praxis_protocol::openai_models::TruncationMode;
 use praxis_protocol::openai_models::TruncationPolicyConfig;
@@ -75,6 +76,9 @@ pub(crate) fn with_known_model_capability_overrides(mut model: ModelInfo) -> Mod
     model.supports_image_detail_original |= known_model.supports_image_detail_original;
     model.supports_search_tool |= known_model.supports_search_tool;
     model.support_verbosity |= known_model.support_verbosity;
+    if known_model.multi_agent_version.is_some() {
+        model.multi_agent_version = known_model.multi_agent_version;
+    }
     merge_strings(
         &mut model.experimental_supported_tools,
         &known_model.experimental_supported_tools,
@@ -104,6 +108,141 @@ fn merge_strings(target: &mut Vec<String>, overlay: &[String]) {
         if !target.iter().any(|existing| existing == item) {
             target.push(item.clone());
         }
+    }
+}
+
+pub(crate) fn anthropic_model_infos() -> Vec<ModelInfo> {
+    vec![
+        anthropic_model_info(
+            "claude-sonnet-5",
+            "Claude Sonnet 5",
+            "Best combination of speed and intelligence for coding and agentic work.",
+            Some(ReasoningEffort::High),
+            Some(1_000_000),
+            true,
+            false,
+            0,
+        ),
+        anthropic_model_info(
+            "claude-opus-4-8",
+            "Claude Opus 4.8",
+            "High-capability Claude model for complex reasoning and long-horizon agentic coding.",
+            Some(ReasoningEffort::High),
+            Some(1_000_000),
+            true,
+            false,
+            1,
+        ),
+        anthropic_model_info(
+            "claude-fable-5",
+            "Claude Fable 5",
+            "Anthropic's highest-capability generally available Claude model.",
+            Some(ReasoningEffort::High),
+            Some(1_000_000),
+            false,
+            true,
+            2,
+        ),
+        anthropic_model_info(
+            "claude-haiku-4-5",
+            "Claude Haiku 4.5",
+            "Fast Claude model for latency-sensitive work.",
+            None,
+            Some(200_000),
+            false,
+            false,
+            3,
+        ),
+    ]
+}
+
+fn anthropic_model_info(
+    slug: &str,
+    display_name: &str,
+    description: &str,
+    default_reasoning_level: Option<ReasoningEffort>,
+    context_window: Option<i64>,
+    supports_disabling_adaptive_thinking: bool,
+    supports_ultracode: bool,
+    priority: i32,
+) -> ModelInfo {
+    let supports_adaptive_thinking = default_reasoning_level.is_some();
+    let supported_reasoning_levels = if default_reasoning_level.is_some() {
+        vec![
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::Low,
+                display_name: None,
+                description: "Use less compute for faster, lower-cost responses.".into(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::Medium,
+                display_name: None,
+                description: "Balance response depth, latency, and cost.".into(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::High,
+                display_name: None,
+                description: "Use deep adaptive thinking for complex work.".into(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::XHigh,
+                display_name: None,
+                description: "Use extended capability for long-horizon coding and agents.".into(),
+            },
+            ReasoningEffortPreset {
+                effort: ReasoningEffort::Max,
+                display_name: None,
+                description: "Use the model's maximum supported effort.".into(),
+            },
+        ]
+    } else {
+        Vec::new()
+    };
+    let mut supported_reasoning_levels = supported_reasoning_levels;
+    if supports_ultracode {
+        supported_reasoning_levels.push(
+            ReasoningEffortPreset::new(ReasoningEffort::Ultra, "xhigh + workflows")
+                .with_display_name("ultracode"),
+        );
+    }
+    if supports_disabling_adaptive_thinking {
+        supported_reasoning_levels.push(ReasoningEffortPreset {
+            effort: ReasoningEffort::None,
+            display_name: None,
+            description: "Disable adaptive thinking for this model.".into(),
+        });
+    }
+    ModelInfo {
+        slug: slug.into(),
+        display_name: display_name.into(),
+        description: Some(description.into()),
+        default_reasoning_level,
+        supported_reasoning_levels,
+        shell_type: ConfigShellToolType::Default,
+        visibility: ModelVisibility::List,
+        supported_in_api: true,
+        priority,
+        availability_nux: None,
+        upgrade: None,
+        base_instructions: BASE_INSTRUCTIONS.into(),
+        model_messages: None,
+        supports_reasoning_summaries: supports_adaptive_thinking,
+        default_reasoning_summary: ReasoningSummary::Auto,
+        support_verbosity: false,
+        default_verbosity: None,
+        apply_patch_tool_type: None,
+        web_search_tool_type: WebSearchToolType::Text,
+        truncation_policy: TruncationPolicyConfig::bytes(10_000),
+        supports_parallel_tool_calls: true,
+        supports_image_detail_original: false,
+        context_window,
+        auto_compact_token_limit: context_window.map(|window| window * 9 / 10),
+        effective_context_window_percent: 95,
+        experimental_supported_tools: Vec::new(),
+        input_modalities: default_input_modalities(),
+        used_fallback_model_metadata: false,
+        supports_search_tool: false,
+        multi_agent_version: None,
     }
 }
 
@@ -146,6 +285,7 @@ pub(crate) fn model_info_from_slug(slug: &str) -> ModelInfo {
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: true, // this is the fallback model metadata
         supports_search_tool: false,
+        multi_agent_version: None,
     }
 }
 

@@ -191,6 +191,17 @@ impl PraxisMessageProcessor {
                             }
                         };
 
+                        if let EventMsg::TurnStarted(payload) = &event.msg {
+                            thread_state_manager
+                                .bind_pending_turn_controller(
+                                    conversation_id,
+                                    payload.turn_id.as_str(),
+                                )
+                                .await;
+                        }
+                        let completed_turn_id = matches!(&event.msg, EventMsg::TurnComplete(_))
+                            .then(|| event.id.clone());
+
                         // Track the event before emitting any typed
                         // translations so thread-local state such as raw event
                         // opt-in stays synchronized with the conversation.
@@ -226,6 +237,11 @@ impl PraxisMessageProcessor {
                             state_db.clone(),
                         )
                         .await;
+                        if let Some(turn_id) = completed_turn_id {
+                            thread_state_manager
+                                .release_turn_controller(conversation_id, turn_id.as_str())
+                                .await;
+                        }
                     }
                     listener_command = listener_command_rx.recv() => {
                         let Some(listener_command) = listener_command else {

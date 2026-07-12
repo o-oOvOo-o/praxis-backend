@@ -419,6 +419,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &thread_state_manager,
                 &thread_state,
                 &outgoing,
+                event_turn_id.as_str(),
                 ServerRequestPayload::ToolRequestUserInput(params),
             )
             .await;
@@ -479,6 +480,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &thread_state_manager,
                 &thread_state,
                 &outgoing,
+                event_turn_id.as_str(),
                 ServerRequestPayload::McpServerElicitationRequest(params),
             )
             .await;
@@ -510,6 +512,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &thread_state_manager,
                 &thread_state,
                 &outgoing,
+                event_turn_id.as_str(),
                 ServerRequestPayload::PermissionsRequestApproval(params),
             )
             .await;
@@ -554,6 +557,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &thread_state_manager,
                 &thread_state,
                 &outgoing,
+                event_turn_id.as_str(),
                 ServerRequestPayload::DynamicToolCall(params),
             )
             .await;

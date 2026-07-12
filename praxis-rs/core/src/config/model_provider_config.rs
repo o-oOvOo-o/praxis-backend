@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
+use crate::model_provider_info::ANTHROPIC_PROVIDER_ID;
 use crate::model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use crate::model_provider_info::ModelProviderInfo;
 use crate::model_provider_info::OLLAMA_OSS_PROVIDER_ID;
 use crate::model_provider_info::OPENAI_PROVIDER_ID;
 use serde::Deserialize;
 
-const RESERVED_MODEL_PROVIDER_IDS: [&str; 3] = [
+const RESERVED_MODEL_PROVIDER_IDS: [&str; 4] = [
     OPENAI_PROVIDER_ID,
+    ANTHROPIC_PROVIDER_ID,
     OLLAMA_OSS_PROVIDER_ID,
     LMSTUDIO_OSS_PROVIDER_ID,
 ];
@@ -37,6 +39,11 @@ pub(super) fn validate_model_providers(
 ) -> Result<(), String> {
     validate_reserved_model_provider_ids(model_providers)?;
     for (key, provider) in model_providers {
+        praxis_login::provider_api_key_credential_id(key).map_err(|_| {
+            format!(
+                "model provider ID `{key}` must be a non-empty printable ASCII identifier without whitespace"
+            )
+        })?;
         provider
             .validate()
             .map_err(|message| format!("model_providers.{key}: {message}"))?;

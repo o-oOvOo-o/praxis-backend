@@ -294,7 +294,7 @@ pub(super) async fn run_guardian_review_session(
             preset.supported_reasoning_efforts.iter().any(|effort| {
                 effort.effort == praxis_protocol::openai_models::ReasoningEffort::Low
             }),
-            Some(preset.default_reasoning_effort),
+            Some(preset.default_reasoning_effort.clone()),
         );
         (
             super::GUARDIAN_PREFERRED_MODEL.to_string(),
@@ -309,7 +309,8 @@ pub(super) async fn run_guardian_review_session(
                     preset.effort == praxis_protocol::openai_models::ReasoningEffort::Low
                 }),
             turn.reasoning_effort
-                .or(turn.model_info.default_reasoning_level),
+                .clone()
+                .or_else(|| turn.model_info.default_reasoning_level.clone()),
         );
         (turn.model_info.slug.clone(), reasoning_effort)
     };
@@ -317,7 +318,7 @@ pub(super) async fn run_guardian_review_session(
         turn.config.as_ref(),
         live_network_config.clone(),
         guardian_model.as_str(),
-        guardian_reasoning_effort,
+        guardian_reasoning_effort.clone(),
     );
     let guardian_config = match guardian_config {
         Ok(config) => config,

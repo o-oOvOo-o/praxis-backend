@@ -288,6 +288,23 @@ fn common_request_uses_generic_reasoning_effort_for_non_openai_base_url() {
 }
 
 #[test]
+fn common_request_maps_ultra_to_max_on_the_provider_wire() {
+    let mut provider = common_provider_info(None);
+    provider.base_url = Some("https://api.example.com".to_string());
+
+    let request = build_common_request(
+        &Prompt::default(),
+        &model_info(),
+        &provider,
+        Some(ReasoningEffortConfig::Ultra),
+        true,
+    )
+    .expect("common request should build");
+
+    assert_eq!(request["reasoning_effort"], "max");
+}
+
+#[test]
 fn common_request_can_disable_generic_reasoning_effort() {
     let provider =
         common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {

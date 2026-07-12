@@ -354,6 +354,7 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
                 default_reasoning_level: None,
                 supported_reasoning_levels: vec![ReasoningEffortPreset {
                     effort: praxis_protocol::openai_models::ReasoningEffort::Medium,
+                    display_name: None,
                     description: "Medium".to_string(),
                 }],
                 shell_type: ConfigShellToolType::Default,
@@ -380,6 +381,7 @@ async fn stdio_image_responses_are_sanitized_for_text_only_model() -> anyhow::Re
                 input_modalities: vec![InputModality::Text],
                 used_fallback_model_metadata: false,
                 supports_search_tool: false,
+                multi_agent_version: None,
             }],
         },
     )

@@ -131,10 +131,12 @@ async fn remote_models_long_model_slug_is_sent_with_high_reasoning() -> Result<(
     remote_model.supported_reasoning_levels = vec![
         ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: None,
             description: ReasoningEffort::Medium.to_string(),
         },
         ReasoningEffortPreset {
             effort: ReasoningEffort::High,
+            display_name: None,
             description: ReasoningEffort::High.to_string(),
         },
     ];
@@ -291,6 +293,7 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
         default_reasoning_level: Some(ReasoningEffort::Medium),
         supported_reasoning_levels: vec![ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: None,
             description: ReasoningEffort::Medium.to_string(),
         }],
         shell_type: ConfigShellToolType::UnifiedExec,
@@ -299,6 +302,7 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
         priority: 1,
         upgrade: None,
         base_instructions: "base instructions".to_string(),
@@ -536,6 +540,7 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
         default_reasoning_level: Some(ReasoningEffort::Medium),
         supported_reasoning_levels: vec![ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: None,
             description: ReasoningEffort::Medium.to_string(),
         }],
         shell_type: ConfigShellToolType::ShellCommand,
@@ -544,6 +549,7 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
         priority: 1,
         upgrade: None,
         base_instructions: remote_base.to_string(),
@@ -1017,6 +1023,7 @@ fn test_remote_model_with_policy(
         default_reasoning_level: Some(ReasoningEffort::Medium),
         supported_reasoning_levels: vec![ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: None,
             description: ReasoningEffort::Medium.to_string(),
         }],
         shell_type: ConfigShellToolType::ShellCommand,
@@ -1025,6 +1032,7 @@ fn test_remote_model_with_policy(
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
         priority,
         upgrade: None,
         base_instructions: "base instructions".to_string(),

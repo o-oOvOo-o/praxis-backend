@@ -224,7 +224,11 @@ pub(super) fn active_provider_is_usable(login_status: LoginStatus, config: &Conf
     if config.model_provider.requires_openai_auth {
         return login_status != LoginStatus::NotAuthenticated;
     }
-    provider_is_locally_usable(&config.model_provider_id, &config.model_provider)
+    provider_is_locally_usable(
+        &config.praxis_home,
+        &config.model_provider_id,
+        &config.model_provider,
+    )
 }
 
 pub(super) fn has_any_usable_provider(login_status: LoginStatus, config: &Config) -> bool {
@@ -246,7 +250,7 @@ pub(super) fn has_any_usable_non_openai_provider(config: &Config) -> bool {
         .iter()
         .any(|(provider_id, provider)| {
             !provider.requires_openai_auth
-                && provider_is_locally_usable(provider_id.as_str(), provider)
+                && provider_is_locally_usable(&config.praxis_home, provider_id.as_str(), provider)
         })
 }
 
@@ -258,13 +262,17 @@ pub(super) fn first_usable_non_openai_provider(
         .iter()
         .find(|(provider_id, provider)| {
             !provider.requires_openai_auth
-                && provider_is_locally_usable(provider_id.as_str(), provider)
+                && provider_is_locally_usable(&config.praxis_home, provider_id.as_str(), provider)
         })
         .map(|(provider_id, provider)| (provider_id.clone(), provider.clone()))
 }
 
-pub(super) fn provider_is_locally_usable(provider_id: &str, provider: &ModelProviderInfo) -> bool {
-    provider_has_configured_credentials(provider)
+pub(super) fn provider_is_locally_usable(
+    praxis_home: &Path,
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+) -> bool {
+    provider_has_configured_credentials(praxis_home, provider_id, provider)
         || is_local_oss_provider(provider_id, provider)
         || is_native_local_provider(provider_id, provider)
 }
@@ -274,11 +282,18 @@ pub(super) fn is_native_local_provider(provider_id: &str, provider: &ModelProvid
         || provider.base_url.as_deref() == Some("praxis-native://local")
 }
 
-pub(super) fn provider_has_configured_credentials(provider: &ModelProviderInfo) -> bool {
+pub(super) fn provider_has_configured_credentials(
+    praxis_home: &Path,
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+) -> bool {
     if provider.requires_openai_auth {
         return false;
     }
     if provider.auth.is_some() {
+        return true;
+    }
+    if provider.is_anthropic() && praxis_login::has_anthropic_oauth(praxis_home) {
         return true;
     }
     if provider
@@ -292,6 +307,15 @@ pub(super) fn provider_has_configured_credentials(provider: &ModelProviderInfo) 
         && std::env::var(env_key)
             .ok()
             .is_some_and(|value| !value.trim().is_empty())
+    {
+        return true;
+    }
+    if provider.env_key.is_some()
+        && let Ok(credential_id) = praxis_login::provider_api_key_credential_id(provider_id)
+        && praxis_login::load_provider_api_key(praxis_home, &credential_id)
+            .ok()
+            .flatten()
+            .is_some()
     {
         return true;
     }
@@ -376,7 +400,7 @@ pub(super) fn normalize_active_provider_model(
     Some(PersistedRuntimeModelSelection {
         provider_id: config.model_provider_id.clone(),
         model,
-        effort: config.model_reasoning_effort,
+        effort: config.model_reasoning_effort.clone(),
     })
 }
 

@@ -449,7 +449,7 @@ impl CollaborationMode {
     }
 
     pub fn reasoning_effort(&self) -> Option<ReasoningEffort> {
-        self.settings_ref().reasoning_effort
+        self.settings_ref().reasoning_effort.clone()
     }
 
     /// Updates the collaboration mode with new model and/or effort values.
@@ -468,7 +468,7 @@ impl CollaborationMode {
         let settings = self.settings_ref();
         let updated_settings = Settings {
             model: model.unwrap_or_else(|| settings.model.clone()),
-            reasoning_effort: effort.unwrap_or(settings.reasoning_effort),
+            reasoning_effort: effort.unwrap_or(settings.reasoning_effort.clone()),
             developer_instructions: developer_instructions
                 .unwrap_or_else(|| settings.developer_instructions.clone()),
         };
@@ -490,7 +490,10 @@ impl CollaborationMode {
             mode: mask.mode.unwrap_or(self.mode),
             settings: Settings {
                 model: mask.model.clone().unwrap_or_else(|| settings.model.clone()),
-                reasoning_effort: mask.reasoning_effort.unwrap_or(settings.reasoning_effort),
+                reasoning_effort: mask
+                    .reasoning_effort
+                    .clone()
+                    .unwrap_or(settings.reasoning_effort.clone()),
                 developer_instructions: mask
                     .developer_instructions
                     .clone()
@@ -635,5 +638,51 @@ mod tests {
         };
 
         assert_eq!(expected, base.merge(&overlay));
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum MultiAgentMode {
+    ExplicitRequestOnly,
+    Proactive,
+    Custom(String),
+}
+
+impl MultiAgentMode {
+    pub fn for_reasoning_effort(effort: Option<&ReasoningEffort>) -> Self {
+        match effort {
+            Some(ReasoningEffort::Ultra) => Self::Proactive,
+            _ => Self::ExplicitRequestOnly,
+        }
+    }
+
+    pub fn developer_instructions(&self) -> String {
+        let policy = match self {
+            Self::ExplicitRequestOnly => {
+                "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work."
+            }
+            Self::Proactive => {
+                "Proactive multi-agent delegation is active. Any earlier instruction requiring an explicit user request before spawning sub-agents no longer applies. Use sub-agents when parallel work would materially improve speed or quality. This mode remains active until a later multi-agent mode developer message changes it."
+            }
+            Self::Custom(instructions) => instructions,
+        };
+        format!("<multi_agent_mode>\n{policy}\n</multi_agent_mode>")
+    }
+}
+
+#[cfg(test)]
+mod multi_agent_mode_tests {
+    use super::*;
+
+    #[test]
+    fn ultra_enables_proactive_multi_agent_mode() {
+        assert_eq!(
+            MultiAgentMode::for_reasoning_effort(Some(&ReasoningEffort::Ultra)),
+            MultiAgentMode::Proactive
+        );
+        assert_eq!(
+            MultiAgentMode::for_reasoning_effort(Some(&ReasoningEffort::Max)),
+            MultiAgentMode::ExplicitRequestOnly
+        );
     }
 }

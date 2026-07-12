@@ -426,14 +426,15 @@ ignored = [
 ]
 
 [profile.release]
-lto = "fat"
+lto = false
 split-debuginfo = "off"
 # Because we bundle some of these executables with the TypeScript CLI, we
 # remove everything to make the binary as small as possible.
 strip = "symbols"
 
-# Keep codegen units low because several shipped binaries have tight package-size budgets.
-codegen-units = 1
+# Keep local release builds responsive while preserving full optimization inside each unit.
+codegen-units = 16
+incremental = true
 
 [profile.ci-test]
 debug = 1         # Reduce debug symbol size

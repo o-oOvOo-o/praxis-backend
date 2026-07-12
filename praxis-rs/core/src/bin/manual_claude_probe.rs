@@ -5,6 +5,8 @@ use praxis_core::ModelClient;
 use praxis_core::ModelProviderInfo;
 use praxis_core::Prompt;
 use praxis_core::ResponseEvent;
+use praxis_login::AuthCredentialsStoreMode;
+use praxis_login::AuthManager;
 use praxis_otel::SessionTelemetry;
 use praxis_protocol::ThreadId;
 use praxis_protocol::config_types::ReasoningSummary;
@@ -23,20 +25,34 @@ async fn main() -> Result<()> {
         "usage: cargo run -p praxis-core --bin manual_claude_probe -- <prompt>"
     );
 
-    let base_url = std::env::var("ANTHROPIC_BASE_URL").context("ANTHROPIC_BASE_URL must be set")?;
+    let base_url = std::env::var("ANTHROPIC_BASE_URL")
+        .unwrap_or_else(|_| "https://api.anthropic.com".to_string());
     let model = std::env::var("ANTHROPIC_MODEL").context("ANTHROPIC_MODEL must be set")?;
-    let _token =
-        std::env::var("ANTHROPIC_AUTH_TOKEN").context("ANTHROPIC_AUTH_TOKEN must be set")?;
+    let provider_name = if base_url == praxis_core::ANTHROPIC_API_BASE_URL {
+        "Anthropic"
+    } else {
+        "Manual Claude Probe"
+    };
 
     let provider_toml = format!(
-        "name = \"Manual Claude Probe\"\nbase_url = {base_url:?}\nenv_key = \"ANTHROPIC_AUTH_TOKEN\"\nwire_api = \"claude\"\n"
+        "name = {provider_name:?}\nbase_url = {base_url:?}\nenv_key = \"ANTHROPIC_API_KEY\"\nwire_api = \"claude\"\n"
     );
     let provider: ModelProviderInfo =
         toml::from_str(&provider_toml).context("failed to build provider config")?;
 
+    let praxis_home = praxis_utils_home_dir::find_praxis_home()
+        .context("failed to resolve Praxis home for Claude OAuth")?;
+    if std::env::var("PRAXIS_ANTHROPIC_OAUTH_LOGIN").as_deref() == Ok("1") {
+        praxis_login::login_anthropic_oauth(&praxis_home)
+            .await
+            .context("Anthropic OAuth login failed")?;
+    }
+    let auth_manager = AuthManager::shared(praxis_home, false, AuthCredentialsStoreMode::Auto);
+
     let client = ModelClient::new(
-        None,
+        Some(auth_manager),
         ThreadId::new(),
+        praxis_core::ANTHROPIC_PROVIDER_ID.to_string(),
         provider,
         SessionSource::Cli,
         None,
@@ -115,7 +131,6 @@ async fn main() -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&json!({
-            "base_url": base_url,
             "model": model,
             "response_id": response_id,
             "text": text,

@@ -60,7 +60,7 @@ pub(in crate::praxis::thread_lifecycle) async fn build_session_configuration(
         mode: ModeKind::Default,
         settings: Settings {
             model: model.clone(),
-            reasoning_effort: config.model_reasoning_effort,
+            reasoning_effort: config.model_reasoning_effort.clone(),
             developer_instructions: None,
         },
     };

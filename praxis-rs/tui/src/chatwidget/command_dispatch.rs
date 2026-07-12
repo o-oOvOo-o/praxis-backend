@@ -43,28 +43,15 @@ impl ChatWidget {
     ) {
         let title = format!("/{}", command.name);
         let document = match result {
-            Ok(response) => {
-                if response.exit_code.is_some_and(|code| code != 0) {
-                    let message = if response.stderr.is_empty() {
-                        format!("Command exited with code {:?}", response.exit_code)
-                    } else {
-                        response.stderr
-                    };
-                    PluginStatusDocument::error(title, message)
-                } else {
-                    serde_json::from_str::<PluginStatusDocument>(&response.stdout).unwrap_or_else(
-                        |err| {
-                            let mut message =
-                                format!("Plugin output was not a status panel: {err}");
-                            if !response.stderr.is_empty() {
-                                message.push_str(" | stderr: ");
-                                message.push_str(&response.stderr);
-                            }
-                            PluginStatusDocument::error(title, message)
-                        },
+            Ok(response) => serde_json::from_str::<PluginStatusDocument>(&response.stdout)
+                .unwrap_or_else(|_| {
+                    PluginStatusDocument::process_output(
+                        title,
+                        response.stdout,
+                        response.stderr,
+                        response.exit_code,
                     )
-                }
-            }
+                }),
             Err(err) => PluginStatusDocument::error(title, err),
         };
         if !self

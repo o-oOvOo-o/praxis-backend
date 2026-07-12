@@ -14,6 +14,7 @@ pub use praxis_client::ReqwestTransport;
 pub use praxis_client::TransportError;
 
 pub use crate::auth::AuthProvider;
+pub use crate::auth::AuthScheme;
 pub use crate::common::CompactionInput;
 pub use crate::common::MemorySummarizeInput;
 pub use crate::common::MemorySummarizeOutput;

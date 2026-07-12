@@ -48,4 +48,5 @@ pub(super) async fn build(
     .with_agent_type_description(crate::agent::role::spawn_tool_spec::build(
         &config.agent_roles,
     ))
+    .with_collab_tools(false)
 }

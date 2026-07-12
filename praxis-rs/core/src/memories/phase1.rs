@@ -357,7 +357,7 @@ mod job {
                 &prompt,
                 &stage_one_context.model_info,
                 &stage_one_context.session_telemetry,
-                stage_one_context.reasoning_effort,
+                stage_one_context.reasoning_effort.clone(),
                 stage_one_context.reasoning_summary,
                 stage_one_context.service_tier,
                 stage_one_context.turn_metadata_header.as_deref(),

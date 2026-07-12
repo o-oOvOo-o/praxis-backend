@@ -330,7 +330,7 @@ impl AppCommand {
                 sandbox_policy,
                 model,
                 model_provider,
-                effort: *effort,
+                effort: effort.clone(),
                 summary,
                 service_tier,
                 final_output_json_schema,

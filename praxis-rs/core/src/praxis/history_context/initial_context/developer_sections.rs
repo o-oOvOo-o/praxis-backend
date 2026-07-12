@@ -17,6 +17,7 @@ use state_updates::push_realtime_update;
 use static_instructions::push_collaboration_mode;
 use static_instructions::push_developer_instructions;
 use static_instructions::push_memory_prompt;
+use static_instructions::push_multi_agent_mode;
 use static_instructions::push_personality_override;
 
 pub(super) async fn build_developer_sections(
@@ -35,6 +36,7 @@ pub(super) async fn build_developer_sections(
     );
     push_memory_prompt(&mut sections, turn_context).await;
     push_collaboration_mode(&mut sections, snapshot);
+    push_multi_agent_mode(&mut sections, turn_context);
     push_realtime_update(&mut sections, turn_context, snapshot);
     push_personality_override(session, &mut sections, turn_context, snapshot);
     push_apps_section(session, &mut sections, turn_context).await;

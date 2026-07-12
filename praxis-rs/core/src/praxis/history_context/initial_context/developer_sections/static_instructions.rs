@@ -40,6 +40,17 @@ pub(super) fn push_collaboration_mode(
     }
 }
 
+pub(super) fn push_multi_agent_mode(sections: &mut Vec<String>, turn_context: &TurnContext) {
+    if turn_context.tools_config.collab_tools {
+        sections.push(
+            turn_context
+                .tools_config
+                .multi_agent_mode
+                .developer_instructions(),
+        );
+    }
+}
+
 pub(super) fn push_personality_override(
     session: &Session,
     sections: &mut Vec<String>,

@@ -149,7 +149,7 @@ impl App {
     ) {
         self.config.model_provider_id = notification.model_provider.clone();
         self.config.model = Some(notification.model.clone());
-        self.config.model_reasoning_effort = notification.reasoning_effort;
+        self.config.model_reasoning_effort = notification.reasoning_effort.clone();
         if let Some(provider) = self
             .config
             .model_providers
@@ -165,7 +165,7 @@ impl App {
         {
             session.model_provider_id = notification.model_provider.clone();
             session.model = notification.model.clone();
-            session.reasoning_effort = notification.reasoning_effort;
+            session.reasoning_effort = notification.reasoning_effort.clone();
         }
     }
 

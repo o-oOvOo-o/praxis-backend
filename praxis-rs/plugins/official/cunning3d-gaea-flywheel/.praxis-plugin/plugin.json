@@ -1,17 +1,19 @@
 {
   "name": "cunning3d-gaea-flywheel",
-  "description": "Show Cunning3D Gaea flywheel node progress inside Praxis.",
+  "description": "Install and run the canonical Cunning3D Gaea flywheel inside Praxis.",
+  "skills": "./skills",
   "interface": {
     "displayName": "Cunning3D Gaea Flywheel",
-    "shortDescription": "Inspect Gaea flywheel node progress from the local ledger.",
-    "longDescription": "Cunning3D product plugin that renders Gaea flywheel node status, parity progress, blockers, and next commands in a Praxis chat TUI.",
+    "shortDescription": "Install the real Gaea flywheel CLI and inspect its canonical status.",
+    "longDescription": "Cunning3D product plugin that owns and distributes the canonical c3d_devflywheeltool runtime, ledgers, and execution contract, then renders CLI-owned node status in the chat TUI.",
     "developerName": "Cunning3D",
     "category": "dcc-tooling",
     "capabilities": [
       "Gaea flywheel progress",
       "node parity status",
       "acceptance matrix status",
-      "flywheel blocker triage"
+      "flywheel blocker triage",
+      "canonical flywheel execution"
     ],
     "commands": [
       {
@@ -25,9 +27,27 @@
             "-ExecutionPolicy",
             "Bypass",
             "-File",
-            "./scripts/gaeawheel-status.ps1"
+            "./scripts/c3d-flywheel.ps1",
+            "praxis-panel",
+            "--json"
           ],
           "timeoutMs": 60000
+        }
+      },
+      {
+        "name": "gaea",
+        "description": "Run any canonical c3d_devflywheeltool command.",
+        "action": {
+          "type": "process",
+          "command": "powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "./scripts/c3d-flywheel.ps1"
+          ],
+          "timeoutMs": 1800000
         }
       }
     ]

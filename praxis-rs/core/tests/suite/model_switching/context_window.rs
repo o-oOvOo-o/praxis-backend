@@ -22,6 +22,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         default_reasoning_level: Some(ReasoningEffort::Medium),
         supported_reasoning_levels: vec![ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: None,
             description: ReasoningEffort::Medium.to_string(),
         }],
         shell_type: ConfigShellToolType::ShellCommand,
@@ -30,6 +31,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         input_modalities: default_input_modalities(),
         used_fallback_model_metadata: false,
         supports_search_tool: false,
+        multi_agent_version: None,
         priority: 1,
         upgrade: None,
         base_instructions: "base instructions".to_string(),

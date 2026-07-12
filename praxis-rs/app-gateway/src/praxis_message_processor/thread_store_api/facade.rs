@@ -1,8 +1,11 @@
-use super::history::{self, ThreadHistorySource, ThreadTurnHydration};
+use super::history::{
+    self, ThreadHistoryPageReadError, ThreadHistorySource, ThreadTurnHydration, ThreadTurnPage,
+};
 use super::list::{self, ThreadStoreListPage, ThreadStoreListQuery};
 use super::paths;
 use super::summary::{self, ThreadStoreSummary};
 use praxis_app_gateway_protocol::Thread;
+use praxis_app_gateway_protocol::ThreadHistoryCursor;
 use praxis_app_gateway_protocol::Turn;
 use praxis_core::config::Config;
 use praxis_protocol::ThreadId;
@@ -138,6 +141,14 @@ impl ThreadStore<'_> {
         hydration: ThreadTurnHydration,
     ) -> std::io::Result<Vec<Turn>> {
         history::read_thread_turns_from_rollout(path, hydration).await
+    }
+
+    pub(in crate::praxis_message_processor) async fn read_turn_page_from_rollout(
+        path: &Path,
+        cursor: Option<ThreadHistoryCursor>,
+        limit: u32,
+    ) -> Result<ThreadTurnPage, ThreadHistoryPageReadError> {
+        history::read_thread_turn_page_from_rollout(path, cursor, limit).await
     }
 
     pub(in crate::praxis_message_processor) async fn hydrate_turns(

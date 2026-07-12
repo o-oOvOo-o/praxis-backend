@@ -109,6 +109,7 @@ unicode-width = { workspace = true }
 url = { workspace = true }
 webbrowser = { workspace = true }
 uuid = { workspace = true }
+zeroize = { workspace = true }
 
 praxis-windows-sandbox = { workspace = true }
 tokio-util = { workspace = true, features = ["time"] }
