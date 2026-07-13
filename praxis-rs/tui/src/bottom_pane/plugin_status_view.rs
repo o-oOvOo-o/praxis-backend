@@ -22,6 +22,7 @@ use serde::Deserialize;
 
 use super::CancellationEvent;
 use super::bottom_pane_view::BottomPaneView;
+use super::bottom_pane_view::BottomPaneViewHeight;
 use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;
 use super::selection_popup_common::ColumnWidthMode;
@@ -851,6 +852,10 @@ impl PluginStatusView {
 }
 
 impl BottomPaneView for PluginStatusView {
+    fn height_policy(&self) -> BottomPaneViewHeight {
+        BottomPaneViewHeight::FillWorkspace
+    }
+
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event {
             KeyEvent {
@@ -1041,15 +1046,21 @@ mod tests {
     }
 
     #[test]
-    fn overview_large_documents_stay_compact() {
+    fn overview_large_documents_keep_bounded_intrinsic_height() {
         let view = PluginStatusView::new(status_document(43));
         let expected_grid_height =
             PluginStatusView::visible_grid_height(OVERVIEW_MAX_VISIBLE_CARD_ROWS);
         assert_eq!(
             view.desired_height(96),
             2 + expected_grid_height + 3,
-            "large status documents should page instead of filling the terminal"
+            "workspace expansion must not change the view's intrinsic page height"
         );
+    }
+
+    #[test]
+    fn plugin_status_view_requests_full_workspace_height() {
+        let view = PluginStatusView::new(status_document(43));
+        assert_eq!(view.height_policy(), BottomPaneViewHeight::FillWorkspace);
     }
 
     #[test]

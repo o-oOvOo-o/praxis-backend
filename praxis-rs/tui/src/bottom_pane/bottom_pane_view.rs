@@ -7,8 +7,20 @@ use praxis_protocol::request_user_input::RequestUserInputEvent;
 
 use super::CancellationEvent;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum BottomPaneViewHeight {
+    #[default]
+    Content,
+    FillWorkspace,
+}
+
 /// Trait implemented by every view that can be shown in the bottom pane.
 pub(crate) trait BottomPaneView: Renderable {
+    /// Describe whether this view uses its intrinsic height or the full workspace body.
+    fn height_policy(&self) -> BottomPaneViewHeight {
+        BottomPaneViewHeight::Content
+    }
+
     /// Handle a key event while the view is active. A redraw is always
     /// scheduled after this call.
     fn handle_key_event(&mut self, _key_event: KeyEvent) {}

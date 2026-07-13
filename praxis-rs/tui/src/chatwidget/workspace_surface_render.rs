@@ -536,7 +536,7 @@ impl ChatWidget {
         let layout = layout_chat_surface(ChatSurfaceLayoutInput {
             area,
             agent_outer_height: area.height,
-            bottom_outer_height: self.bottom_pane_total_height(content_width),
+            bottom_outer_height: self.bottom_pane_layout_height(content_width, area.height),
             toast_height: visible_toasts,
             work_panel_outer_height,
             show_work_panel: self.work_panel.should_show(),
@@ -756,6 +756,14 @@ impl ChatWidget {
             .saturating_add(WORKSPACE_INPUT_BORDER_ROWS)
     }
 
+    fn bottom_pane_layout_height(&self, width: u16, available_height: u16) -> u16 {
+        if self.bottom_pane.active_view_fills_workspace() {
+            available_height
+        } else {
+            self.bottom_pane_total_height(width).min(available_height)
+        }
+    }
+
     fn desired_total_height(&self, width: u16) -> u16 {
         let split = chat_surface_split_for_width(width, self.work_panel.should_show());
         let content_width = Self::chat_surface_column_width(split.agent_width);
@@ -785,7 +793,7 @@ impl ChatWidget {
         let layout = layout_chat_surface(ChatSurfaceLayoutInput {
             area,
             agent_outer_height: self.active_cell_total_height(split.agent_width),
-            bottom_outer_height: self.bottom_pane_total_height(content_width),
+            bottom_outer_height: self.bottom_pane_layout_height(content_width, area.height),
             toast_height: visible_toasts,
             work_panel_outer_height,
             show_work_panel: self.work_panel.should_show(),

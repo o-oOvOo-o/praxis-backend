@@ -854,6 +854,12 @@ impl BottomPane {
         self.active_view().is_some()
     }
 
+    pub(crate) fn active_view_fills_workspace(&self) -> bool {
+        self.active_view().is_some_and(|view| {
+            view.height_policy() == bottom_pane_view::BottomPaneViewHeight::FillWorkspace
+        })
+    }
+
     /// Replace the active selection view when it matches `view_id`.
     pub(crate) fn replace_selection_view_if_active(
         &mut self,

@@ -192,4 +192,23 @@ mod tests {
         assert_eq!(layout.toast_area, Some(Rect::new(0, 12, 140, 1)));
         assert_eq!(layout.bottom_outer_area, Rect::new(0, 13, 140, 6));
     }
+
+    #[test]
+    fn full_workspace_height_bottom_pane_owns_the_body() {
+        let area = Rect::new(0, 0, 120, 36);
+        let layout = layout_chat_surface(ChatSurfaceLayoutInput {
+            area,
+            agent_outer_height: area.height,
+            bottom_outer_height: area.height,
+            toast_height: 1,
+            work_panel_outer_height: 12,
+            show_work_panel: true,
+            fill_available_top: true,
+        });
+
+        assert_eq!(layout.active_outer_area, None);
+        assert_eq!(layout.work_panel_area, None);
+        assert_eq!(layout.toast_area, None);
+        assert_eq!(layout.bottom_outer_area, area);
+    }
 }
