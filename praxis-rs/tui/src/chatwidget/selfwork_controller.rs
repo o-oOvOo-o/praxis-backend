@@ -3,7 +3,7 @@ use super::*;
 impl ChatWidget {
     fn selfwork_can_start_now(&self) -> bool {
         self.selfwork_plan_path.is_some()
-            && !self.selfwork_turn_in_flight
+            && !self.selfwork_runtime.turn_in_flight()
             && self.is_session_configured()
             && !self.bottom_pane.is_task_running()
             && !self.has_queued_follow_up_messages()
@@ -16,8 +16,8 @@ impl ChatWidget {
     pub(super) fn sync_work_panel_selfwork(&mut self) {
         self.work_panel.set_selfwork(
             self.selfwork_plan_path.clone(),
-            self.selfwork_turn_in_flight,
-            self.selfwork_stall_count,
+            self.selfwork_runtime.turn_in_flight(),
+            self.selfwork_runtime.stall_count(),
             SELFWORK_STALL_LIMIT,
         );
     }
@@ -154,9 +154,7 @@ impl ChatWidget {
         hint: Option<String>,
     ) {
         self.selfwork_plan_path = None;
-        self.selfwork_last_plan_digest = None;
-        self.selfwork_stall_count = 0;
-        self.selfwork_turn_in_flight = false;
+        self.selfwork_runtime.reset();
         self.sync_work_panel_selfwork();
         if persist {
             self.persist_selfwork_plan_path(None);
@@ -195,9 +193,7 @@ impl ChatWidget {
         }
 
         self.selfwork_plan_path = Some(inspection.path.clone());
-        self.selfwork_last_plan_digest = Some(inspection.digest);
-        self.selfwork_stall_count = 0;
-        self.selfwork_turn_in_flight = false;
+        self.selfwork_runtime.arm(&inspection);
         self.sync_work_panel_selfwork();
         self.persist_selfwork_plan_path(Some(inspection.path.clone()));
 
@@ -231,7 +227,7 @@ impl ChatWidget {
             return;
         };
 
-        let state = if self.selfwork_turn_in_flight {
+        let state = if self.selfwork_runtime.turn_in_flight() {
             "running"
         } else {
             "armed"
@@ -246,12 +242,12 @@ impl ChatWidget {
                 "Checklist progress: {}/{} unfinished item(s). Stall guard: {}/{} unchanged selfwork turn(s).",
                 inspection.checklist_unchecked,
                 inspection.checklist_total,
-                self.selfwork_stall_count,
+                self.selfwork_runtime.stall_count(),
                 SELFWORK_STALL_LIMIT
             )),
             _ => Some(format!(
                 "Stall guard: {}/{} unchanged selfwork turn(s).",
-                self.selfwork_stall_count, SELFWORK_STALL_LIMIT
+                self.selfwork_runtime.stall_count(), SELFWORK_STALL_LIMIT
             )),
         };
         self.add_info_message(format!("Selfwork is {state} for {}.", path.display()), hint);
@@ -293,8 +289,7 @@ impl ChatWidget {
             return false;
         }
 
-        self.selfwork_last_plan_digest = Some(inspection.digest);
-        self.selfwork_turn_in_flight = true;
+        self.selfwork_runtime.begin_turn(&inspection);
         self.sync_work_panel_selfwork();
         self.submit_user_message(selfwork_prompt(&inspection.path).into());
         true
@@ -333,15 +328,10 @@ impl ChatWidget {
                 return;
             }
 
-            if self.selfwork_last_plan_digest == Some(inspection.digest) {
-                self.selfwork_stall_count = self.selfwork_stall_count.saturating_add(1);
-            } else {
-                self.selfwork_stall_count = 0;
-            }
-            self.selfwork_last_plan_digest = Some(inspection.digest);
+            let advance = self.selfwork_runtime.observe_plan_after_turn(&inspection);
             self.sync_work_panel_selfwork();
 
-            if self.selfwork_stall_count >= SELFWORK_STALL_LIMIT {
+            if matches!(advance, SelfworkPlanAdvance::Stalled { .. }) {
                 self.clear_selfwork_state(
                     /*persist*/ true,
                     Some(format!(

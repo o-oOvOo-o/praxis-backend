@@ -52,9 +52,7 @@ pub(crate) struct ThreadInputState {
     pub(super) current_collaboration_mode: CollaborationMode,
     pub(super) active_collaboration_mask: Option<CollaborationModeMask>,
     pub(super) selfwork_plan_path: Option<PathBuf>,
-    pub(super) selfwork_last_plan_digest: Option<u64>,
-    pub(super) selfwork_stall_count: u8,
-    pub(super) selfwork_turn_in_flight: bool,
+    pub(super) selfwork_runtime: SelfworkRuntimeState,
     pub(super) task_running: bool,
     pub(super) agent_turn_running: bool,
 }

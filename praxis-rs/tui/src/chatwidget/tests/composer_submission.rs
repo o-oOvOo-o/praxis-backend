@@ -798,9 +798,7 @@ async fn restore_thread_input_state_syncs_sleep_inhibitor_state() {
         current_collaboration_mode: chat.current_collaboration_mode.clone(),
         active_collaboration_mask: chat.active_collaboration_mask.clone(),
         selfwork_plan_path: None,
-        selfwork_last_plan_digest: None,
-        selfwork_stall_count: 0,
-        selfwork_turn_in_flight: false,
+        selfwork_runtime: SelfworkRuntimeState::default(),
         task_running: true,
         agent_turn_running: true,
     }));

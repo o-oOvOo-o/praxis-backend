@@ -56,8 +56,8 @@ pub(crate) use self::rate_limit_state::{
 use self::realtime::PendingSteerCompareKey;
 use self::selfwork_plan::{
     SELFWORK_PICKER_VIEW_ID, SELFWORK_PLAN_SCAN_LIMIT, SELFWORK_STALL_LIMIT, SELFWORK_USAGE,
-    discover_selfwork_plan_candidates, inspect_selfwork_plan, resolve_selfwork_plan_path,
-    selfwork_prompt, selfwork_search_root,
+    SelfworkPlanAdvance, SelfworkRuntimeState, discover_selfwork_plan_candidates,
+    inspect_selfwork_plan, resolve_selfwork_plan_path, selfwork_prompt, selfwork_search_root,
 };
 use self::status_text::{
     DEFAULT_COMPOSER_PLACEHOLDER, app_gateway_goal_status_label, edited_goal_status,
@@ -771,12 +771,8 @@ pub(crate) struct ChatWidget {
     current_cwd: Option<PathBuf>,
     // Active markdown plan that selfwork should keep advancing when the thread is idle.
     selfwork_plan_path: Option<PathBuf>,
-    // Digest of the plan file before the current selfwork turn started.
-    selfwork_last_plan_digest: Option<u64>,
-    // Number of consecutive selfwork turns that left the plan file unchanged.
-    selfwork_stall_count: u8,
-    // True while the current in-flight turn was launched by selfwork.
-    selfwork_turn_in_flight: bool,
+    // Shared selfwork loop state; presentation-specific scheduling remains in the TUI.
+    selfwork_runtime: SelfworkRuntimeState,
     // Runtime network proxy bind addresses from SessionConfigured.
     session_network_proxy: Option<praxis_protocol::protocol::SessionNetworkProxyRuntime>,
     // Shared latch so we only warn once about invalid status-line item IDs.

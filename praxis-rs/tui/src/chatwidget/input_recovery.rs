@@ -128,9 +128,7 @@ impl ChatWidget {
             current_collaboration_mode: self.current_collaboration_mode.clone(),
             active_collaboration_mask: self.active_collaboration_mask.clone(),
             selfwork_plan_path: self.selfwork_plan_path.clone(),
-            selfwork_last_plan_digest: self.selfwork_last_plan_digest,
-            selfwork_stall_count: self.selfwork_stall_count,
-            selfwork_turn_in_flight: self.selfwork_turn_in_flight,
+            selfwork_runtime: self.selfwork_runtime,
             task_running: self.bottom_pane.is_task_running(),
             agent_turn_running: self.agent_turn_running,
         })
@@ -142,9 +140,7 @@ impl ChatWidget {
             self.current_collaboration_mode = input_state.current_collaboration_mode;
             self.active_collaboration_mask = input_state.active_collaboration_mask;
             self.selfwork_plan_path = input_state.selfwork_plan_path;
-            self.selfwork_last_plan_digest = input_state.selfwork_last_plan_digest;
-            self.selfwork_stall_count = input_state.selfwork_stall_count;
-            self.selfwork_turn_in_flight = input_state.selfwork_turn_in_flight;
+            self.selfwork_runtime = input_state.selfwork_runtime;
             self.sync_work_panel_selfwork();
             self.agent_turn_running = input_state.agent_turn_running;
             self.update_collaboration_mode_indicator();
@@ -193,9 +189,7 @@ impl ChatWidget {
             self.pending_steers.clear();
             self.rejected_steers_queue.clear();
             self.selfwork_plan_path = None;
-            self.selfwork_last_plan_digest = None;
-            self.selfwork_stall_count = 0;
-            self.selfwork_turn_in_flight = false;
+            self.selfwork_runtime.reset();
             self.sync_work_panel_selfwork();
             self.set_remote_image_urls(Vec::new());
             self.bottom_pane.set_composer_text_with_mention_bindings(

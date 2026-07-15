@@ -18,9 +18,7 @@ async fn restore_thread_input_state_restores_pending_steers_without_downgrading_
         current_collaboration_mode: chat.current_collaboration_mode.clone(),
         active_collaboration_mask: chat.active_collaboration_mask.clone(),
         selfwork_plan_path: None,
-        selfwork_last_plan_digest: None,
-        selfwork_stall_count: 0,
-        selfwork_turn_in_flight: false,
+        selfwork_runtime: SelfworkRuntimeState::default(),
         task_running: false,
         agent_turn_running: false,
     }));
