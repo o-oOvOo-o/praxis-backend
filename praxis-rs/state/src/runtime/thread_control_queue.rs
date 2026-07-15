@@ -133,9 +133,59 @@ WHERE target_thread_id = ?
         .execute(self.pool.as_ref())
         .await?;
         if result.rows_affected() == 0 {
-            return self.get_thread_control_queue_item(queue_id).await;
+            return Ok(None);
         }
         self.get_thread_control_queue_item(queue_id).await
+    }
+
+    pub async fn cancel_latest_thread_control_queue_item(
+        &self,
+        thread_id: &str,
+    ) -> anyhow::Result<Option<ThreadControlQueueItem>> {
+        let mut tx = self.pool.begin().await?;
+        let queue_id = sqlx::query_scalar::<_, String>(
+            r#"
+SELECT queue_id
+FROM thread_control_queue
+WHERE target_thread_id = ?
+  AND status = 'queued'
+ORDER BY created_at_ms DESC, updated_at_ms DESC
+LIMIT 1
+            "#,
+        )
+        .bind(thread_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(queue_id) = queue_id else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+
+        let now_ms = datetime_to_millis(Utc::now());
+        sqlx::query(
+            r#"
+UPDATE thread_control_queue
+SET status = ?, updated_at_ms = ?, error = NULL
+WHERE target_thread_id = ?
+  AND queue_id = ?
+  AND status = 'queued'
+            "#,
+        )
+        .bind(ThreadControlQueueStatus::Cancelled.as_str())
+        .bind(now_ms)
+        .bind(thread_id)
+        .bind(queue_id.as_str())
+        .execute(&mut *tx)
+        .await?;
+        let row = sqlx::query(thread_control_queue_select_sql("WHERE queue_id = ?").as_str())
+            .bind(queue_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        row.map(|row| {
+            ThreadControlQueueRow::try_from_row(&row).and_then(ThreadControlQueueItem::try_from)
+        })
+        .transpose()
     }
 
     pub async fn flush_thread_control_queue(

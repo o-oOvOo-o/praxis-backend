@@ -46,12 +46,17 @@ enum PendingInputRecord {
 }
 
 pub(crate) struct PendingInputRoundOutcome {
+    accepted_response_items: Vec<ResponseItem>,
     accepted_any: bool,
     blocked: bool,
     requeued_remaining: bool,
 }
 
 impl PendingInputRoundOutcome {
+    pub(crate) fn accepted_response_items(&self) -> &[ResponseItem] {
+        &self.accepted_response_items
+    }
+
     pub(crate) fn should_retry_without_model_request(&self) -> bool {
         self.blocked && !self.accepted_any && self.requeued_remaining
     }
@@ -243,7 +248,7 @@ async fn record_pending_input(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     pending_input: PendingInputRecord,
-) {
+) -> Vec<ResponseItem> {
     match pending_input {
         PendingInputRecord::UserMessage {
             content,
@@ -253,14 +258,20 @@ async fn record_pending_input(
             sess.record_user_prompt_and_emit_turn_item(
                 turn_context.as_ref(),
                 content.as_slice(),
-                response_item,
+                &response_item,
             )
             .await;
-            record_additional_contexts(sess, turn_context, additional_contexts).await;
+            let additional_context_items =
+                record_additional_contexts(sess, turn_context, additional_contexts).await;
+            let mut response_items = Vec::with_capacity(1 + additional_context_items.len());
+            response_items.push(response_item);
+            response_items.extend(additional_context_items);
+            response_items
         }
         PendingInputRecord::ConversationItem { response_item } => {
             sess.record_conversation_items(turn_context, std::slice::from_ref(&response_item))
                 .await;
+            vec![response_item]
         }
     }
 }
@@ -273,7 +284,7 @@ pub(crate) async fn record_pending_inputs(
     for pending_input_item in pending_input {
         match inspect_pending_input(sess, turn_context, pending_input_item).await {
             PendingInputHookDisposition::Accepted(pending_input) => {
-                record_pending_input(sess, turn_context, *pending_input).await;
+                let _ = record_pending_input(sess, turn_context, *pending_input).await;
             }
             PendingInputHookDisposition::Blocked {
                 additional_contexts,
@@ -316,12 +327,16 @@ pub(crate) async fn process_pending_input_for_model_round(
     }
 
     let accepted_any = !accepted_pending_input.is_empty();
+    let mut accepted_response_items = Vec::with_capacity(accepted_pending_input.len());
     for pending_input in accepted_pending_input {
-        record_pending_input(sess, turn_context, pending_input).await;
+        accepted_response_items
+            .extend(record_pending_input(sess, turn_context, pending_input).await);
     }
-    record_additional_contexts(sess, turn_context, blocked_contexts).await;
+    accepted_response_items
+        .extend(record_additional_contexts(sess, turn_context, blocked_contexts).await);
 
     PendingInputRoundOutcome {
+        accepted_response_items,
         accepted_any,
         blocked,
         requeued_remaining,
@@ -361,14 +376,15 @@ pub(crate) async fn record_additional_contexts(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     additional_contexts: Vec<String>,
-) {
+) -> Vec<ResponseItem> {
     let developer_messages = additional_context_messages(additional_contexts);
     if developer_messages.is_empty() {
-        return;
+        return Vec::new();
     }
 
     sess.record_conversation_items(turn_context, developer_messages.as_slice())
         .await;
+    developer_messages
 }
 
 fn additional_context_messages(additional_contexts: Vec<String>) -> Vec<ResponseItem> {

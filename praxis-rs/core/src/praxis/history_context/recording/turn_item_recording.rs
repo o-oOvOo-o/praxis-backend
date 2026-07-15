@@ -26,9 +26,9 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         input: &[UserInput],
-        response_item: ResponseItem,
+        response_item: &ResponseItem,
     ) {
-        self.record_conversation_items(turn_context, std::slice::from_ref(&response_item))
+        self.record_conversation_items(turn_context, std::slice::from_ref(response_item))
             .await;
         let turn_item = TurnItem::UserMessage(UserMessageItem::new(input));
         self.emit_turn_item_started(turn_context, &turn_item).await;

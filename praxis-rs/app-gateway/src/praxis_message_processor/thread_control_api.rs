@@ -238,18 +238,27 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ThreadControlQueueCancelParams,
     ) {
-        if params.queue_id.trim().is_empty() {
-            self.send_invalid_request_error(request_id, "queueId must not be empty".to_string())
-                .await;
-            return;
-        }
+        let queue_id = params
+            .queue_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|queue_id| !queue_id.is_empty());
         let Some(state_db) = self.thread_control_state_db(request_id.clone()).await else {
             return;
         };
-        match state_db
-            .cancel_thread_control_queue_item(&params.thread_id, &params.queue_id)
-            .await
-        {
+        let result = match queue_id {
+            Some(queue_id) => {
+                state_db
+                    .cancel_thread_control_queue_item(&params.thread_id, queue_id)
+                    .await
+            }
+            None => {
+                state_db
+                    .cancel_latest_thread_control_queue_item(&params.thread_id)
+                    .await
+            }
+        };
+        match result {
             Ok(item) => {
                 let item = match item
                     .map(api_thread_control_queue_item_from_state)

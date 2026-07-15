@@ -1,29 +1,19 @@
 use std::collections::VecDeque;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hash;
-use std::hash::Hasher;
 use std::path::Path;
 use std::path::PathBuf;
 
 use crate::diff_render::display_path_for;
 use crate::text_formatting::truncate_text;
+pub(super) use praxis_app_core::selfwork::{
+    SELFWORK_PLAN_SCAN_LIMIT, SELFWORK_STALL_LIMIT, SelfworkPlanInspection, inspect_selfwork_plan,
+    selfwork_prompt,
+};
 
 pub(super) const SELFWORK_PICKER_VIEW_ID: &str = "selfwork-plan-selection";
 pub(super) const SELFWORK_USAGE: &str =
     "Use /selfwork to choose a markdown plan, or /selfwork start <plan.md> (alias: /loop).";
-pub(super) const SELFWORK_STALL_LIMIT: u8 = 3;
-pub(super) const SELFWORK_PLAN_SCAN_LIMIT: usize = 200;
 const SELFWORK_PLAN_PREVIEW_LINE_LIMIT: usize = 6;
 const SELFWORK_PLAN_PREVIEW_WIDTH: usize = 88;
-
-#[derive(Debug, Clone)]
-pub(super) struct SelfworkPlanInspection {
-    pub(super) path: PathBuf,
-    pub(super) digest: u64,
-    pub(super) checklist_total: usize,
-    pub(super) checklist_unchecked: usize,
-    pub(super) complete: bool,
-}
 
 #[derive(Debug, Clone)]
 pub(super) struct SelfworkPlanCandidate {
@@ -97,55 +87,6 @@ pub(super) fn resolve_selfwork_plan_path(
     }
 
     Ok(resolved)
-}
-
-pub(super) fn inspect_selfwork_plan(path: &Path) -> Result<SelfworkPlanInspection, String> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|err| format!("Failed to read selfwork plan {}: {err}", path.display()))?;
-
-    let mut hasher = DefaultHasher::new();
-    contents.hash(&mut hasher);
-    let digest = hasher.finish();
-
-    let mut checklist_total = 0usize;
-    let mut checklist_unchecked = 0usize;
-    let mut complete = false;
-
-    for line in contents.lines() {
-        let trimmed = line.trim();
-        let lowered = trimmed.to_ascii_lowercase();
-        if let Some(status) = lowered.strip_prefix("status:")
-            && matches!(status.trim(), "done" | "complete" | "completed")
-        {
-            complete = true;
-        }
-
-        if let Some(checked) = selfwork_checklist_state(trimmed) {
-            checklist_total += 1;
-            if !checked {
-                checklist_unchecked += 1;
-            }
-        }
-    }
-
-    if checklist_total > 0 && checklist_unchecked == 0 {
-        complete = true;
-    }
-
-    Ok(SelfworkPlanInspection {
-        path: path.to_path_buf(),
-        digest,
-        checklist_total,
-        checklist_unchecked,
-        complete,
-    })
-}
-
-pub(super) fn selfwork_prompt(plan_path: &Path) -> String {
-    format!(
-        "Continue executing the markdown plan at `{}`. Work the next unfinished item, update the plan file so it matches reality, and stop once the plan is complete.",
-        plan_path.display()
-    )
 }
 
 fn collect_selfwork_plan_paths(root: &Path) -> Result<(Vec<PathBuf>, bool), String> {
@@ -287,34 +228,5 @@ fn selfwork_preview_from_contents(contents: &str) -> String {
         "(empty markdown file)".to_string()
     } else {
         preview_lines.join("\n")
-    }
-}
-
-fn selfwork_checklist_state(line: &str) -> Option<bool> {
-    let trimmed = line.trim_start();
-    let rest = if let Some(rest) = trimmed
-        .strip_prefix("- ")
-        .or_else(|| trimmed.strip_prefix("* "))
-        .or_else(|| trimmed.strip_prefix("+ "))
-    {
-        rest
-    } else {
-        let digits_len = trimmed
-            .bytes()
-            .take_while(|byte| byte.is_ascii_digit())
-            .count();
-        if digits_len == 0 {
-            return None;
-        }
-        let numbered = trimmed.get(digits_len..)?;
-        numbered.strip_prefix(". ")?
-    };
-
-    if rest.starts_with("[x]") || rest.starts_with("[X]") {
-        Some(true)
-    } else if rest.starts_with("[ ]") {
-        Some(false)
-    } else {
-        None
     }
 }

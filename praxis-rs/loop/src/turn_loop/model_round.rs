@@ -16,6 +16,7 @@ use crate::services::ModelRequest;
 use crate::services::RoundSettings;
 use crate::services::TurnServices;
 use crate::state::TurnState;
+use crate::stream::ModelStreamConsumption;
 use crate::stream::consume_model_stream;
 
 pub(super) enum RoundLoopAction {
@@ -65,15 +66,36 @@ where
         prompt,
     };
 
-    let stream = match services.stream_model(request, cancel.clone()).await {
-        Ok(stream) => stream,
-        Err(reason) => return RoundLoopAction::Abort(reason),
+    let model_cancel = cancel.child_token();
+    let stream = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            model_cancel.cancel();
+            return RoundLoopAction::Abort(TurnError::cancelled());
+        }
+        steering = services.wait_for_steering() => {
+            model_cancel.cancel();
+            return match steering {
+                Ok(()) => RoundLoopAction::RetryWithoutModelRequest,
+                Err(reason) => RoundLoopAction::Abort(reason),
+            };
+        }
+        stream = services.stream_model(request, model_cancel.clone()) => match stream {
+            Ok(stream) => stream,
+            Err(reason) => return RoundLoopAction::Abort(reason),
+        },
     };
 
-    let outcome = match consume_model_stream(stream, ctx, state, services, hooks, cancel).await {
-        Ok(outcome) => outcome,
-        Err(reason) => return RoundLoopAction::Abort(reason),
-    };
+    let outcome =
+        match consume_model_stream(stream, ctx, state, services, hooks, model_cancel.clone()).await
+        {
+            Ok(ModelStreamConsumption::Completed(outcome)) => outcome,
+            Ok(ModelStreamConsumption::SteeringPending) => {
+                model_cancel.cancel();
+                return RoundLoopAction::RetryWithoutModelRequest;
+            }
+            Err(reason) => return RoundLoopAction::Abort(reason),
+        };
 
     match hooks
         .after_model_round(RoundOutcomeView {

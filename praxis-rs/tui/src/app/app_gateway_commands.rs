@@ -313,5 +313,14 @@ fn active_turn_missing_steer_error(error: &TypedRequestError) -> bool {
     let TypedRequestError::Server { source, .. } = error else {
         return false;
     };
-    source.message == "no active turn to steer"
+    let Some(data) = source.data.clone() else {
+        return false;
+    };
+    let Ok(turn_error) = serde_json::from_value::<AppGatewayTurnError>(data) else {
+        return false;
+    };
+    matches!(
+        turn_error.praxis_error_info,
+        Some(AppGatewayPraxisErrorInfo::NoActiveTurnToSteer)
+    )
 }

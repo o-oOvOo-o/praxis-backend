@@ -159,6 +159,22 @@ fn praxis_error_info_serializes_active_turn_not_steerable_turn_kind_in_camel_cas
 }
 
 #[test]
+fn praxis_error_info_serializes_no_active_turn_to_steer_in_camel_case() {
+    assert_eq!(
+        serde_json::to_value(PraxisErrorInfo::NoActiveTurnToSteer).unwrap(),
+        json!("noActiveTurnToSteer")
+    );
+}
+
+#[test]
+fn praxis_error_info_serializes_thread_rollout_unavailable_in_camel_case() {
+    assert_eq!(
+        serde_json::to_value(PraxisErrorInfo::ThreadRolloutUnavailable).unwrap(),
+        json!("threadRolloutUnavailable")
+    );
+}
+
+#[test]
 fn dynamic_tool_response_serializes_content_items() {
     let value = serde_json::to_value(DynamicToolCallResponse {
         content_items: vec![DynamicToolCallOutputContentItem::InputText {

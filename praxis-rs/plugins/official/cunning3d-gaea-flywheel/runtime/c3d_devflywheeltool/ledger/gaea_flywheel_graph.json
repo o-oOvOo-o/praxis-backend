@@ -1937,7 +1937,7 @@
       "next_commands": [
         "/gaea reverse --node Erosion2 --json"
       ],
-      "notes": "Recommended modern erosion node. PE substrate is bright; inhibitor/rain-shadow mask contract remains the open edge."
+      "notes": "Recommended modern erosion node. PE substrate is bright; inhibitor/rain-shadow mask contract remains the open edge. Live Loom PeSimulationDispatch now treats prepared execution-contract failure or invalid preparation as terminal for the current plan/graph/parameter revision. The terminal error is cached, excluded from live pending-work detection, and cleared only by normal graph/runtime invalidation, preventing display-target Erosion2 from resubmitting the same failed preparation forever. Regression gates: failed_pe_preparation_is_terminal_for_the_current_plan_revision and failed_display_prepared_contract_does_not_keep_erosion2_pending_live."
     },
     {
       "id": "Erosion",

@@ -1,5 +1,7 @@
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::user_input::UserInput;
+use std::future;
+use std::sync::Arc;
 
 use crate::praxis::Session;
 use crate::praxis::SteerInputError;
@@ -39,9 +41,14 @@ impl Session {
             return Err(SteerInputError::ActiveTurnNotSteerable { turn_kind });
         }
 
+        let active_turn_id = active_turn_id.clone();
+        let pending_input_ready = Arc::clone(&active_turn.pending_input_ready);
         let mut turn_state = active_turn.turn_state.lock().await;
         turn_state.push_pending_input(input.into());
-        Ok(active_turn_id.clone())
+        drop(turn_state);
+        drop(active);
+        pending_input_ready.notify_one();
+        Ok(active_turn_id)
     }
 
     /// Returns the input if there was no task running to inject into.
@@ -52,10 +59,13 @@ impl Session {
         let mut active = self.active_turn.lock().await;
         match active.as_mut() {
             Some(at) => {
+                let pending_input_ready = Arc::clone(&at.pending_input_ready);
                 let mut ts = at.turn_state.lock().await;
                 for item in input {
                     ts.push_pending_input(item);
                 }
+                drop(ts);
+                pending_input_ready.notify_one();
                 Ok(())
             }
             None => Err(input),
@@ -66,11 +76,37 @@ impl Session {
         let mut active = self.active_turn.lock().await;
         match active.as_mut() {
             Some(at) => {
+                let pending_input_ready = Arc::clone(&at.pending_input_ready);
                 let mut ts = at.turn_state.lock().await;
                 ts.prepend_pending_input(input);
+                drop(ts);
+                pending_input_ready.notify_one();
                 Ok(())
             }
             None => Err(()),
+        }
+    }
+
+    pub(crate) async fn wait_for_pending_steer(&self) {
+        loop {
+            let Some((notified, has_pending_input)) = (async {
+                let active = self.active_turn.lock().await;
+                let active_turn = active.as_ref()?;
+                let pending_input_ready = Arc::clone(&active_turn.pending_input_ready);
+                let notified = pending_input_ready.notified_owned();
+                let has_pending_input = active_turn.turn_state.lock().await.has_pending_input();
+                Some((notified, has_pending_input))
+            })
+            .await
+            else {
+                future::pending::<()>().await;
+                return;
+            };
+
+            if has_pending_input {
+                return;
+            }
+            notified.await;
         }
     }
 }

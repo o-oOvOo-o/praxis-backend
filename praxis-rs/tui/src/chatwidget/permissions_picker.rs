@@ -266,33 +266,10 @@ impl ChatWidget {
         current_sandbox: &SandboxPolicy,
         preset: &ApprovalPreset,
     ) -> bool {
-        if current_approval != preset.approval {
-            return false;
-        }
-
-        match (current_sandbox, &preset.sandbox) {
-            (SandboxPolicy::DangerFullAccess, SandboxPolicy::DangerFullAccess) => true,
-            (
-                SandboxPolicy::ReadOnly {
-                    network_access: current_network_access,
-                    ..
-                },
-                SandboxPolicy::ReadOnly {
-                    network_access: preset_network_access,
-                    ..
-                },
-            ) => current_network_access == preset_network_access,
-            (
-                SandboxPolicy::WorkspaceWrite {
-                    network_access: current_network_access,
-                    ..
-                },
-                SandboxPolicy::WorkspaceWrite {
-                    network_access: preset_network_access,
-                    ..
-                },
-            ) => current_network_access == preset_network_access,
-            _ => false,
-        }
+        praxis_utils_approval_presets::approval_preset_matches(
+            current_approval,
+            current_sandbox,
+            preset,
+        )
     }
 }

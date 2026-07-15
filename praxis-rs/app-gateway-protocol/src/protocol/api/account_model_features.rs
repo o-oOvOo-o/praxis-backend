@@ -194,6 +194,14 @@ const fn default_model_supports_streaming() -> bool {
     true
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderWireApi {
+    Responses,
+    Claude,
+    OpenAiCompat,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct Model {
@@ -201,6 +209,8 @@ pub struct Model {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub model_provider: Option<String>,
+    pub model_provider_display_name: String,
+    pub model_provider_wire_api: ModelProviderWireApi,
     pub model: String,
     pub upgrade: Option<String>,
     pub upgrade_info: Option<ModelUpgradeInfo>,

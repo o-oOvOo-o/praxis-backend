@@ -7,6 +7,7 @@ use app_test_support::write_models_cache;
 use praxis_app_gateway_protocol::JSONRPCError;
 use praxis_app_gateway_protocol::JSONRPCResponse;
 use praxis_app_gateway_protocol::Model;
+use praxis_app_gateway_protocol::ModelProviderWireApi;
 use praxis_app_gateway_protocol::ModelListParams;
 use praxis_app_gateway_protocol::ModelListResponse;
 use praxis_app_gateway_protocol::ModelUpgradeInfo;
@@ -27,6 +28,8 @@ fn model_from_preset(preset: &ModelPreset) -> Model {
     Model {
         id: format!("openai::{}", preset.model),
         model_provider: Some("openai".to_string()),
+        model_provider_display_name: "OpenAI".to_string(),
+        model_provider_wire_api: ModelProviderWireApi::Responses,
         model: preset.model.clone(),
         upgrade: preset.upgrade.as_ref().map(|upgrade| upgrade.id.clone()),
         upgrade_info: preset.upgrade.as_ref().map(|upgrade| ModelUpgradeInfo {

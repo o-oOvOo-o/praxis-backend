@@ -26,6 +26,7 @@ use praxis_protocol::protocol::TokenUsage;
 pub(crate) struct ActiveTurn {
     pub(crate) tasks: IndexMap<String, RunningAgentTask>,
     pub(crate) turn_state: Arc<Mutex<TurnState>>,
+    pub(crate) pending_input_ready: Arc<Notify>,
 }
 
 impl Default for ActiveTurn {
@@ -33,6 +34,7 @@ impl Default for ActiveTurn {
         Self {
             tasks: IndexMap::new(),
             turn_state: Arc::new(Mutex::new(TurnState::default())),
+            pending_input_ready: Arc::new(Notify::new()),
         }
     }
 }

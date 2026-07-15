@@ -44,3 +44,38 @@ pub fn builtin_approval_presets() -> Vec<ApprovalPreset> {
         },
     ]
 }
+
+pub fn approval_preset_matches(
+    approval: AskForApproval,
+    sandbox: &SandboxPolicy,
+    preset: &ApprovalPreset,
+) -> bool {
+    if approval != preset.approval {
+        return false;
+    }
+
+    match (sandbox, &preset.sandbox) {
+        (SandboxPolicy::DangerFullAccess, SandboxPolicy::DangerFullAccess) => true,
+        (
+            SandboxPolicy::ReadOnly {
+                network_access: current,
+                ..
+            },
+            SandboxPolicy::ReadOnly {
+                network_access: expected,
+                ..
+            },
+        ) => current == expected,
+        (
+            SandboxPolicy::WorkspaceWrite {
+                network_access: current,
+                ..
+            },
+            SandboxPolicy::WorkspaceWrite {
+                network_access: expected,
+                ..
+            },
+        ) => current == expected,
+        _ => false,
+    }
+}

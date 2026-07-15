@@ -29,4 +29,6 @@ pub enum SteeringControl {
 #[async_trait]
 pub trait SteeringInbox: Send + Sync {
     async fn drain_steering(&self) -> LoopResult<SteeringDrain>;
+
+    async fn wait_for_steering(&self) -> LoopResult<()>;
 }

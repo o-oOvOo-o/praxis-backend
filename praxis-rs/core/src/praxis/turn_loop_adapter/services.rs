@@ -3,8 +3,8 @@ use super::super::TurnContext;
 use super::model_round_state::PraxisModelRoundState;
 use super::state::PraxisTurnBridgeState;
 use super::steering_decision;
-use super::steering_decision::PraxisSteeringOutcome;
 use super::tool_runtime_slot::ModelRoundToolsSlot;
+use praxis_loop::services::SteeringDrain;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -63,7 +63,7 @@ impl PraxisTurnServices {
         self.bridge_state.last_agent_message().await
     }
 
-    pub(super) async fn process_pending_input_for_round(&self) -> PraxisSteeringOutcome {
+    pub(super) async fn process_pending_input_for_round(&self) -> SteeringDrain {
         steering_decision::process_pending_input_for_round(&self.session, &self.turn_context).await
     }
 }

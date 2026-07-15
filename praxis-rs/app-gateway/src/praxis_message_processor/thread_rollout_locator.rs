@@ -1,5 +1,5 @@
 use super::thread_store_api::ThreadStore;
-use praxis_app_gateway_protocol::JSONRPCErrorError;
+use praxis_app_gateway_protocol::{JSONRPCErrorError, PraxisErrorInfo, TurnError};
 use praxis_core::config::Config;
 use praxis_protocol::ThreadId;
 use std::path::PathBuf;
@@ -55,7 +55,7 @@ impl ThreadRolloutLookupMode {
     }
 
     fn missing_error(self, thread_id: ThreadId) -> JSONRPCErrorError {
-        match self {
+        let error = match self {
             Self::Scoped(scope) => {
                 crate::json_rpc_error::invalid_request(scope.missing_message(thread_id))
             }
@@ -65,19 +65,31 @@ impl ThreadRolloutLookupMode {
             Self::NoRollout => crate::json_rpc_error::invalid_request(format!(
                 "no rollout found for thread id {thread_id}"
             )),
-        }
+        };
+        thread_rollout_unavailable(error)
     }
 
     fn locate_error(self, thread_id: ThreadId, err: impl std::fmt::Display) -> JSONRPCErrorError {
-        match self {
+        let error = match self {
             Self::Scoped(scope) => {
                 crate::json_rpc_error::invalid_request(scope.locate_failed_message(thread_id, err))
             }
             Self::NotFound | Self::NoRollout => crate::json_rpc_error::internal_error(format!(
                 "failed to locate thread id {thread_id}: {err}"
             )),
-        }
+        };
+        thread_rollout_unavailable(error)
     }
+}
+
+fn thread_rollout_unavailable(mut error: JSONRPCErrorError) -> JSONRPCErrorError {
+    error.data = serde_json::to_value(TurnError {
+        message: error.message.clone(),
+        praxis_error_info: Some(PraxisErrorInfo::ThreadRolloutUnavailable),
+        additional_details: None,
+    })
+    .ok();
+    error
 }
 
 pub(super) async fn find_thread_rollout_path(

@@ -1,6 +1,9 @@
 use super::*;
 use crate::bottom_pane::PluginCommandInvocation;
 use crate::bottom_pane::PluginStatusDocument;
+use praxis_app_core::thread_commands::{
+    ThreadGoalCommand, ThreadGoalCommandStatus, parse_thread_goal_command,
+};
 use praxis_app_gateway_protocol::PluginCommandExecuteResponse;
 use praxis_app_gateway_protocol::ThreadGoalStatus as AppGatewayThreadGoalStatus;
 
@@ -715,55 +718,40 @@ impl ChatWidget {
 
     fn dispatch_goal_command(&mut self, args: Option<String>) {
         let trimmed = args.as_deref().unwrap_or_default().trim();
-        let command = trimmed.to_ascii_lowercase();
         let Some(thread_id) = self.thread_id else {
             self.add_error_message("No active thread is available for /goal.".to_string());
             self.bottom_pane.drain_pending_submission_state();
             return;
         };
 
-        match command.as_str() {
-            "" | "status" => {
+        match parse_thread_goal_command(trimmed) {
+            ThreadGoalCommand::Show => {
                 self.app_event_tx
                     .send(AppEvent::OpenThreadGoalMenu { thread_id });
             }
-            "pause" => {
-                self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
-                    thread_id,
-                    status: AppGatewayThreadGoalStatus::Paused,
-                });
+            ThreadGoalCommand::SetStatus(status) => {
+                let status = match status {
+                    ThreadGoalCommandStatus::Active => AppGatewayThreadGoalStatus::Active,
+                    ThreadGoalCommandStatus::Paused => AppGatewayThreadGoalStatus::Paused,
+                    ThreadGoalCommandStatus::Complete => AppGatewayThreadGoalStatus::Complete,
+                    ThreadGoalCommandStatus::Blocked => AppGatewayThreadGoalStatus::Blocked,
+                };
+                self.app_event_tx
+                    .send(AppEvent::SetThreadGoalStatus { thread_id, status });
             }
-            "resume" => {
-                self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
-                    thread_id,
-                    status: AppGatewayThreadGoalStatus::Active,
-                });
-            }
-            "complete" => {
-                self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
-                    thread_id,
-                    status: AppGatewayThreadGoalStatus::Complete,
-                });
-            }
-            "block" | "blocked" => {
-                self.app_event_tx.send(AppEvent::SetThreadGoalStatus {
-                    thread_id,
-                    status: AppGatewayThreadGoalStatus::Blocked,
-                });
-            }
-            "clear" => {
+            ThreadGoalCommand::Clear => {
                 self.app_event_tx
                     .send(AppEvent::ClearThreadGoal { thread_id });
             }
-            "edit" => {
+            ThreadGoalCommand::Edit => {
                 self.app_event_tx.send(AppEvent::OpenThreadGoalEditor {
                     thread_id: Some(thread_id),
                 });
             }
-            _ => {
+            ThreadGoalCommand::SetObjective(objective) => {
                 self.app_event_tx.send(AppEvent::SetThreadGoalObjective {
                     thread_id,
-                    objective: trimmed.to_string(),
+                    objective: objective.to_owned(),
                     mode: ThreadGoalSetMode::ReplaceExisting,
                 });
             }

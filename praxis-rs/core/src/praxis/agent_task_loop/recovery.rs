@@ -8,14 +8,17 @@ pub(super) async fn recover_empty_model_completion_if_needed(
     session: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     last_agent_message: &Option<String>,
-) {
+) -> bool {
     if should_skip_empty_model_recovery(turn_context, last_agent_message) {
-        return;
+        return false;
     }
 
     if let Some(message) = turn_context.tool_loop_guard.record_empty_model_completion() {
         record_empty_model_recovery(session, turn_context, message).await;
+        return true;
     }
+
+    false
 }
 
 fn should_skip_empty_model_recovery(

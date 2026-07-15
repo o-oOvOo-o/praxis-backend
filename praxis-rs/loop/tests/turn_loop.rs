@@ -139,6 +139,10 @@ impl SteeringInbox for MockServices {
             .take()
             .unwrap_or_else(SteeringDrain::empty))
     }
+
+    async fn wait_for_steering(&self) -> LoopResult<()> {
+        std::future::pending().await
+    }
 }
 
 impl ToolAccess for MockServices {

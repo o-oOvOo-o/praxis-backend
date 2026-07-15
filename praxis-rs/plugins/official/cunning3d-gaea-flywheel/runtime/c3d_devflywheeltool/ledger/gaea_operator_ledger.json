@@ -18,6 +18,25 @@
       "open_risk": "Audited for the current Mountain case suite; new parameter families must enter audit before they are treated as covered."
     },
     {
+      "operator": "mountain.optional_input_precommit",
+      "node": "Mountain",
+      "layer": "L5",
+      "status": "focused_closed",
+      "native_evidence": [
+        "D:\\ghost1.0\\_gaea_decompiled\\Gaea.Nodes\\QuadSpinner\\Gaea\\Nodes\\Mountain.cs",
+        "D:\\ghost1.0\\_gaea_decompiled\\_summary\\dossiers\\nodes\\Mountain.md",
+        "D:\\ghost1.0\\_c3d_devflywheeltool\\probe-bin\\gaea_mountain_optional_input_contract\\1784028760101\\command_0_stdout.json"
+      ],
+      "rust_implementation": [
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\node_definitions\\mountain.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\mountain\\core.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\nodes\\runtime\\cook\\loom\\field_package.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_cda_runtime\\src\\registry\\impl_height_field_convert_op.rs"
+      ],
+      "evidence_summary": "Decompiled Mountain.Build applies optional In as map *= In.get() before Commit. Cunning3D now exposes optional In across the canonical node surface, ordinary cook, cached runtime, CDA, and Loom FieldPackage. The focused 8x8 substrate probe confirmed input_port_present=true, input_optional=true, exact=true for 64 bit-identical multiplied samples, rejected a resolution mismatch, and emitted a finite non-flat range [-0.0006412945, 0.2063366].",
+      "open_risk": "Focused substrate closure is complete. A fresh Bridge node-Build connected-input certificate is still required before upgrading this contract to audited_closed; the current flywheel has no first-class Mountain connected-input Bridge probe command. Exact next command after that probe is added: .\\crates\\praxis-backend\\praxis-rs\\plugins\\official\\cunning3d-gaea-flywheel\\scripts\\c3d-flywheel.ps1 probe-bin --bin gaea_mountain_connected_bridge_native_compare --run --json."
+    },
+    {
       "operator": "pe_trace.bilinear_anchor",
       "node": "Mountain",
       "layer": "L2",
@@ -513,9 +532,10 @@
       "rust_implementation": [
         "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_blur.rs",
         "D:\\ghost1.0\\Cunning3D_1.0\\src\\cunning_core\\core\\geometry\\heightfield\\gaea_profiles.rs",
+        "D:\\ghost1.0\\Cunning3D_1.0\\src\\nodes\\heightfield\\gaea_blur.rs",
         "D:\\ghost1.0\\Cunning3D_1.0\\crates\\cunning_core\\src\\bin\\gaea_blur_bridge_probe.rs"
       ],
-      "evidence_summary": "Blur node runtime maps directly to Gaea Blur.cs: single-channel input calls Adjustments.Blur(map, Radius * resolution), which dispatches Native.FastBlur4. The old focused matrix matrix_1780041371361775500_39404_0 passed 6/6 exact, then boundary probe case_1780041498363793300_63016_0 exposed radius=0 at 256 rampy as a non-identity Gaea branch: Native.FastBlur4 emits Q28 fixed-quantized samples, causing the previous native early return to mismatch 1280 samples at max_abs_delta=1.8626451e-9. The shared FastBlur substrate now sends radius=0 large maps through the Q28 fixed path while preserving observed 16x16-or-smaller identity. Fresh current-source cargo run case_1780043951095266500_41616_0 passes the 256 rampy radius=0 repro exact with mismatch_count=0, max_abs_delta=0, and matching SHA 09dfce9fbb2b07a0c7df9f1a8fa0897f5fd90607077a420a2ce27a6754df3a8f. The full focused matrix matrix_1780043961643859500_65872_0 passes 8/8 exact at epsilon 0 across flat, rampx, impulse, rampy radius=0, checker, cone, basin, and checker radius=2.0; every case has mismatch_count=0, worst_max_abs_delta=0, and SHA equality. DuneSea r64 later exposed a new Native.FastBlur4 reciprocal rounding quirk for effective-radius denom bits 0x40733334: the Gaea native output matches reciprocal +1 ULP. The fresh DuneSea strict artifact 1780489463645 passes 6/6 stages exact, final_precommit exact 4096/4096 with first_mismatch null, and the fresh Blur focused matrix artifact 1780489541975 still passes 8/8 exact with worst_max_abs_delta=0. Repeat-10 Bridge-process timing reports min/mean/max speedup 804.2220x/786362.3718x/3075296.92x against harness process elapsed.",
+      "evidence_summary": "Blur node runtime maps directly to Gaea Blur.cs: single-channel input calls Adjustments.Blur(map, Radius * resolution), which dispatches Native.FastBlur4. The old focused matrix matrix_1780041371361775500_39404_0 passed 6/6 exact, then boundary probe case_1780041498363793300_63016_0 exposed radius=0 at 256 rampy as a non-identity Gaea branch: Native.FastBlur4 emits Q28 fixed-quantized samples, causing the previous native early return to mismatch 1280 samples at max_abs_delta=1.8626451e-9. The shared FastBlur substrate now sends radius=0 large maps through the Q28 fixed path while preserving observed 16x16-or-smaller identity. Fresh current-source cargo run case_1780043951095266500_41616_0 passes the 256 rampy radius=0 repro exact with mismatch_count=0, max_abs_delta=0, and matching SHA 09dfce9fbb2b07a0c7df9f1a8fa0897f5fd90607077a420a2ce27a6754df3a8f. The full focused matrix matrix_1780043961643859500_65872_0 passes 8/8 exact at epsilon 0 across flat, rampx, impulse, rampy radius=0, checker, cone, basin, and checker radius=2.0; every case has mismatch_count=0, worst_max_abs_delta=0, and SHA equality. DuneSea r64 later exposed a new Native.FastBlur4 reciprocal rounding quirk for effective-radius denom bits 0x40733334: the Gaea native output matches reciprocal +1 ULP. The fresh DuneSea strict artifact 1780489463645 passes 6/6 stages exact, final_precommit exact 4096/4096 with first_mismatch null, and the fresh Blur focused matrix artifact 1780489541975 still passes 8/8 exact with worst_max_abs_delta=0. Repeat-10 Bridge-process timing reports min/mean/max speedup 804.2220x/786362.3718x/3075296.92x against harness process elapsed. Cunning3D now exposes this closed recipe as the distinct HeightField Art Blur node with the decompiled Radius 0.1 [0,2] surface, In-to-HeightField ports, normalized-map domain preservation, a resident-handle node path, and a fail-closed Loom field-package lowerer tagged heightfield-art/blur/field-package/focused-raw-buffer-parity-v1; the existing classic HeightField Blur node remains semantically separate.",
       "open_risk": "Audited for the focused Blur node runtime and shared Native.FastBlur4 path used here. The speed number is Bridge harness process elapsed only, not a Gaea desktop-app cook baseline or isolated Bridge method baseline. GPU-resident fused blur and wider randomized sweeps remain separate gates."
     },
     {

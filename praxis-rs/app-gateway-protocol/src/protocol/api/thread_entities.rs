@@ -229,7 +229,9 @@ pub struct ThreadControlQueueResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadControlQueueCancelParams {
     pub thread_id: String,
-    pub queue_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub queue_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

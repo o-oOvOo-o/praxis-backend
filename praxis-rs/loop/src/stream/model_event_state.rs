@@ -16,6 +16,7 @@ pub(super) struct ModelStreamState {
     new_items: Vec<TurnItem>,
     assistant_text: AssistantTextAccumulator,
     followup: FollowupSignal,
+    observed_model_output: bool,
 }
 
 pub(super) struct ModelStreamCompletion {
@@ -34,6 +35,9 @@ impl ModelStreamState {
     where
         S: EventSink + ?Sized,
     {
+        if !matches!(&event, ModelEvent::Completed(_)) {
+            self.observed_model_output = true;
+        }
         match event {
             ModelEvent::TextDelta { item_id, text } => {
                 self.assistant_text.push_delta(&item_id, &text);
@@ -76,6 +80,10 @@ impl ModelStreamState {
         }
 
         Ok(false)
+    }
+
+    pub(super) fn can_preempt_for_steering(&self) -> bool {
+        !self.observed_model_output
     }
 
     pub(super) fn complete(mut self, state: &mut TurnState) -> ModelStreamCompletion {

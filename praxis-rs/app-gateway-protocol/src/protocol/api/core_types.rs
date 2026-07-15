@@ -52,6 +52,10 @@ pub enum PraxisErrorInfo {
         #[ts(rename = "turnKind")]
         turn_kind: NonSteerableTurnKind,
     },
+    /// Returned when `turn/steer` races with completion of the expected active turn.
+    NoActiveTurnToSteer,
+    /// Returned when Gateway cannot resolve a thread rollout without an explicit path.
+    ThreadRolloutUnavailable,
     Other,
 }
 

@@ -8,12 +8,11 @@ use super::PraxisTurnServices;
 #[async_trait]
 impl SteeringInbox for PraxisTurnServices {
     async fn drain_steering(&self) -> LoopResult<SteeringDrain> {
-        Ok(SteeringDrain {
-            messages: Vec::new(),
-            control: self
-                .process_pending_input_for_round()
-                .await
-                .into_loop_control(),
-        })
+        Ok(self.process_pending_input_for_round().await)
+    }
+
+    async fn wait_for_steering(&self) -> LoopResult<()> {
+        self.session.wait_for_pending_steer().await;
+        Ok(())
     }
 }

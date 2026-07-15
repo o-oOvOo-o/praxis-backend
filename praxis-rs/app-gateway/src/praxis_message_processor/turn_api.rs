@@ -323,11 +323,19 @@ impl PraxisMessageProcessor {
             }
             Err(err) => {
                 let (code, message, data) = match err {
-                    SteerInputError::NoActiveTurn(_) => (
-                        INVALID_REQUEST_ERROR_CODE,
-                        "no active turn to steer".to_string(),
-                        None,
-                    ),
+                    SteerInputError::NoActiveTurn(_) => {
+                        let message = "no active turn to steer".to_string();
+                        let error = TurnError {
+                            message: message.clone(),
+                            praxis_error_info: Some(AppGatewayErrorInfo::NoActiveTurnToSteer),
+                            additional_details: None,
+                        };
+                        (
+                            INVALID_REQUEST_ERROR_CODE,
+                            message,
+                            serde_json::to_value(error).ok(),
+                        )
+                    }
                     SteerInputError::ExpectedTurnMismatch { expected, actual } => (
                         INVALID_REQUEST_ERROR_CODE,
                         format!("expected active turn id `{expected}` but found `{actual}`"),

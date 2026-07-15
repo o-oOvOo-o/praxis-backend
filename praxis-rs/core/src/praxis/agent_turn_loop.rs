@@ -14,6 +14,7 @@ use super::turn_loop_adapter::PraxisTurnLoopOutcome;
 pub(crate) struct AgentTurnLoopResult {
     pub(crate) last_agent_message: Option<String>,
     pub(crate) wants_followup: bool,
+    pub(crate) aborted: bool,
 }
 
 impl AgentTurnLoopResult {
@@ -21,6 +22,7 @@ impl AgentTurnLoopResult {
         Self {
             last_agent_message,
             wants_followup: false,
+            aborted: false,
         }
     }
 
@@ -28,6 +30,7 @@ impl AgentTurnLoopResult {
         Self {
             last_agent_message,
             wants_followup: true,
+            aborted: false,
         }
     }
 
@@ -35,6 +38,7 @@ impl AgentTurnLoopResult {
         Self {
             last_agent_message: None,
             wants_followup: false,
+            aborted: true,
         }
     }
 }

@@ -16,8 +16,8 @@ pub(crate) enum RoundPromptDecision {
 }
 
 pub(crate) async fn prepare_round_prompt<S, H>(
-    prompt_base: &[PromptItem],
-    state: &TurnState,
+    prompt_base: &mut Vec<PromptItem>,
+    state: &mut TurnState,
     services: &S,
     hooks: &H,
 ) -> LoopResult<RoundPromptDecision>
@@ -48,6 +48,8 @@ where
                 for message in drain.messages {
                     prompt.extend(message.prompt_items);
                 }
+                *prompt_base = prompt.clone();
+                state.mark_transcript_delta_absorbed_by_prompt_refresh();
             }
             SteeringDecision::DropAndContinue => {}
         }

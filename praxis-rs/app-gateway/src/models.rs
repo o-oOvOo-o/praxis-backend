@@ -3,9 +3,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use praxis_app_gateway_protocol::Model;
+use praxis_app_gateway_protocol::ModelProviderWireApi;
 use praxis_app_gateway_protocol::ModelUpgradeInfo;
 use praxis_app_gateway_protocol::ReasoningEffortOption;
 use praxis_core::ModelProviderInfo;
+use praxis_core::WireApi;
 use praxis_core::ThreadManager;
 use praxis_core::config::Config;
 use praxis_core::models_manager::manager::ModelsManager;
@@ -98,7 +100,8 @@ pub async fn supported_models(
         models.push(model_from_preset(
             preset,
             &model_info,
-            Some(config.model_provider_id.as_str()),
+            config.model_provider_id.as_str(),
+            &config.model_provider,
         ));
     }
 
@@ -129,7 +132,12 @@ async fn append_provider_models(
         let model_info = models_manager
             .get_model_info(preset.model.as_str(), &provider_config)
             .await;
-        models.push(model_from_preset(preset, &model_info, Some(provider_id)));
+        models.push(model_from_preset(
+            preset,
+            &model_info,
+            provider_id,
+            provider,
+        ));
     }
 }
 
@@ -140,14 +148,19 @@ fn provider_scoped_model_id(provider_id: &str, model: &str) -> String {
 fn model_from_preset(
     preset: ModelPreset,
     model_info: &ModelInfo,
-    provider_id: Option<&str>,
+    provider_id: &str,
+    provider: &ModelProviderInfo,
 ) -> Model {
-    let id = provider_id
-        .map(|provider_id| provider_scoped_model_id(provider_id, preset.model.as_str()))
-        .unwrap_or_else(|| preset.id.to_string());
+    let id = provider_scoped_model_id(provider_id, preset.model.as_str());
     Model {
         id,
-        model_provider: provider_id.map(str::to_string),
+        model_provider: Some(provider_id.to_owned()),
+        model_provider_display_name: provider.name.clone(),
+        model_provider_wire_api: match provider.wire_api {
+            WireApi::Responses => ModelProviderWireApi::Responses,
+            WireApi::Claude => ModelProviderWireApi::Claude,
+            WireApi::OpenAiCompat => ModelProviderWireApi::OpenAiCompat,
+        },
         model: preset.model.to_string(),
         upgrade: preset.upgrade.as_ref().map(|upgrade| upgrade.id.clone()),
         upgrade_info: preset.upgrade.as_ref().map(|upgrade| ModelUpgradeInfo {

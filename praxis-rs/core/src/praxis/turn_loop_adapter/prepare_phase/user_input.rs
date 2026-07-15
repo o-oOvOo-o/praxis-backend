@@ -35,7 +35,7 @@ pub(super) async fn record_user_input_and_collect_additional_contexts(
         return None;
     }
 
-    sess.record_user_prompt_and_emit_turn_item(turn_context.as_ref(), input, response_item)
+    sess.record_user_prompt_and_emit_turn_item(turn_context.as_ref(), input, &response_item)
         .await;
     Some(user_prompt_submit_outcome.additional_contexts)
 }

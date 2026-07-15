@@ -54,20 +54,26 @@ impl AgentTaskLoop {
         }
 
         let mut turn_result = self.run_turn(input, prewarmed_client_session).await;
-        recovery::recover_empty_model_completion_if_needed(
-            &self.session,
-            &self.turn_context,
-            &turn_result.last_agent_message,
-        )
-        .await;
+        loop {
+            if turn_result.aborted {
+                return None;
+            }
 
-        while turn_result.wants_followup
-            || self.has_pending_input("agent_task_loop_after_turn").await
-        {
+            let recovery_pending = recovery::recover_empty_model_completion_if_needed(
+                &self.session,
+                &self.turn_context,
+                &turn_result.last_agent_message,
+            )
+            .await;
+            if !recovery_pending
+                && !turn_result.wants_followup
+                && !self.has_pending_input("agent_task_loop_after_turn").await
+            {
+                return turn_result.last_agent_message;
+            }
+
             turn_result = self.run_turn(Vec::new(), None).await;
         }
-
-        turn_result.last_agent_message
     }
 
     async fn should_start(&self, input: &[UserInput]) -> bool {
