@@ -72,6 +72,32 @@ pub struct PluginManifestInterface {
     pub logo: Option<AbsolutePathBuf>,
     pub screenshots: Vec<AbsolutePathBuf>,
     pub commands: Vec<PluginManifestCommand>,
+    pub surfaces: Vec<PluginManifestSurfaceRegistration>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginManifestSurfaceRegistration {
+    pub slot: PluginManifestSurfaceSlot,
+    pub component: PluginManifestSurfaceComponentKind,
+    pub priority: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PluginManifestSurfaceSlot {
+    WorkerBelowStatus,
+    WorkerCard,
+    ComposerUpperRow,
+    ThreadHeader,
+    StatusLine,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PluginManifestSurfaceComponentKind {
+    TokenSavingSummary,
+    Notice,
+    MetricStrip,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,6 +153,17 @@ struct RawPluginManifestInterface {
     screenshots: Vec<String>,
     #[serde(default)]
     commands: Vec<RawPluginManifestCommand>,
+    #[serde(default)]
+    surfaces: Vec<RawPluginManifestSurfaceRegistration>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPluginManifestSurfaceRegistration {
+    slot: PluginManifestSurfaceSlot,
+    component: PluginManifestSurfaceComponentKind,
+    #[serde(default)]
+    priority: i32,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -297,6 +334,7 @@ pub fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest> {
                     logo,
                     screenshots,
                     commands,
+                    surfaces,
                 } = interface;
 
                 let interface = PluginManifestInterface {
@@ -332,6 +370,7 @@ pub fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest> {
                         })
                         .collect(),
                     commands: resolve_plugin_commands(plugin_root, commands),
+                    surfaces: resolve_plugin_surfaces(surfaces),
                 };
 
                 let has_fields = interface.display_name.is_some()
@@ -348,7 +387,8 @@ pub fn load_plugin_manifest(plugin_root: &Path) -> Option<PluginManifest> {
                     || interface.composer_icon.is_some()
                     || interface.logo.is_some()
                     || !interface.screenshots.is_empty()
-                    || !interface.commands.is_empty();
+                    || !interface.commands.is_empty()
+                    || !interface.surfaces.is_empty();
 
                 has_fields.then_some(interface)
             });
@@ -384,6 +424,19 @@ fn resolve_interface_asset_path(
     path: Option<&str>,
 ) -> Option<AbsolutePathBuf> {
     resolve_manifest_path(plugin_root, field, path)
+}
+
+fn resolve_plugin_surfaces(
+    surfaces: Vec<RawPluginManifestSurfaceRegistration>,
+) -> Vec<PluginManifestSurfaceRegistration> {
+    surfaces
+        .into_iter()
+        .map(|surface| PluginManifestSurfaceRegistration {
+            slot: surface.slot,
+            component: surface.component,
+            priority: surface.priority,
+        })
+        .collect()
 }
 
 fn resolve_plugin_commands(

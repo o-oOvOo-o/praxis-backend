@@ -53,4 +53,32 @@ impl Session {
                 .await;
         }
     }
+
+    pub(crate) async fn replace_compacted_history_if_unchanged(
+        &self,
+        expected_items: &[ResponseItem],
+        items: Vec<ResponseItem>,
+        reference_context_item: Option<TurnContextItem>,
+        compacted_item: CompactedItem,
+    ) -> bool {
+        let replaced = {
+            let mut state = self.state.lock().await;
+            state.replace_history_if_unchanged(
+                expected_items,
+                items,
+                reference_context_item.clone(),
+            )
+        };
+        if !replaced {
+            return false;
+        }
+
+        self.persist_rollout_items(&[RolloutItem::Compacted(compacted_item)])
+            .await;
+        if let Some(turn_context_item) = reference_context_item {
+            self.persist_rollout_items(&[RolloutItem::TurnContext(turn_context_item)])
+                .await;
+        }
+        true
+    }
 }

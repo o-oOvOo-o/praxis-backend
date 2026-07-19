@@ -23,6 +23,7 @@ pub(crate) async fn record_empty_model_recovery(
     // provider serving the summarization call) shreds the thread's history.
     let total_usage = sess.get_total_token_usage().await;
     let should_compact = effective_auto_compact_token_limit(sess.as_ref(), turn_context.as_ref())
+        .await
         .is_some_and(|limit| total_usage >= limit);
     if should_compact {
         if let Err(err) = run_auto_compact(

@@ -1,34 +1,34 @@
-use super::*;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use image::ImageBuffer;
-use image::ImageFormat;
-use image::Rgba;
-use praxis_git_utils::GhostCommit;
-use praxis_protocol::AgentPath;
-use praxis_protocol::config_types::ReasoningSummary;
-use praxis_protocol::models::BaseInstructions;
-use praxis_protocol::models::ContentItem;
-use praxis_protocol::models::FunctionCallOutputBody;
-use praxis_protocol::models::FunctionCallOutputContentItem;
-use praxis_protocol::models::FunctionCallOutputPayload;
-use praxis_protocol::models::ImageDetail;
-use praxis_protocol::models::LocalShellAction;
-use praxis_protocol::models::LocalShellExecAction;
-use praxis_protocol::models::LocalShellStatus;
-use praxis_protocol::models::ReasoningItemContent;
-use praxis_protocol::models::ReasoningItemReasoningSummary;
-use praxis_protocol::openai_models::InputModality;
-use praxis_protocol::openai_models::default_input_modalities;
-use praxis_protocol::protocol::AskForApproval;
-use praxis_protocol::protocol::InterAgentCommunication;
-use praxis_protocol::protocol::SandboxPolicy;
-use praxis_protocol::protocol::TurnContextItem;
-use praxis_utils_output_truncation::TruncationPolicy;
-use praxis_utils_output_truncation::truncate_text;
-use pretty_assertions::assert_eq;
-use regex_lite::Regex;
-use std::path::PathBuf;
+pub(super) use super::*;
+pub(super) use base64::Engine;
+pub(super) use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+pub(super) use image::ImageBuffer;
+pub(super) use image::ImageFormat;
+pub(super) use image::Rgba;
+pub(super) use praxis_protocol::workspace_history::WorkspaceCheckpointId;
+pub(super) use praxis_protocol::workspace_history::WorkspaceCheckpointRef;
+pub(super) use praxis_protocol::AgentPath;
+pub(super) use praxis_protocol::config_types::ReasoningSummary;
+pub(super) use praxis_protocol::models::BaseInstructions;
+pub(super) use praxis_protocol::models::ContentItem;
+pub(super) use praxis_protocol::models::FunctionCallOutputBody;
+pub(super) use praxis_protocol::models::FunctionCallOutputContentItem;
+pub(super) use praxis_protocol::models::FunctionCallOutputPayload;
+pub(super) use praxis_protocol::models::ImageDetail;
+pub(super) use praxis_protocol::models::LocalShellAction;
+pub(super) use praxis_protocol::models::LocalShellExecAction;
+pub(super) use praxis_protocol::models::LocalShellStatus;
+pub(super) use praxis_protocol::models::ReasoningItemContent;
+pub(super) use praxis_protocol::models::ReasoningItemReasoningSummary;
+pub(super) use praxis_protocol::openai_models::InputModality;
+pub(super) use praxis_protocol::openai_models::default_input_modalities;
+pub(super) use praxis_protocol::protocol::AskForApproval;
+pub(super) use praxis_protocol::protocol::InterAgentCommunication;
+pub(super) use praxis_protocol::protocol::SandboxPolicy;
+pub(super) use praxis_protocol::protocol::TurnContextItem;
+pub(super) use praxis_utils_output_truncation::TruncationPolicy;
+pub(super) use praxis_utils_output_truncation::truncate_text;
+pub(super) use regex_lite::Regex;
+pub(super) use std::path::PathBuf;
 
 const EXEC_FORMAT_MAX_BYTES: usize = 10_000;
 const EXEC_FORMAT_MAX_TOKENS: usize = 2_500;
@@ -186,11 +186,19 @@ fn approx_token_count_for_text(text: &str) -> i64 {
     i64::try_from(text.len().saturating_add(3) / 4).unwrap_or(i64::MAX)
 }
 
+#[path = "history_tests/api_messages.rs"]
 mod api_messages;
+#[path = "history_tests/exec_output_formatting.rs"]
 mod exec_output_formatting;
+#[path = "history_tests/image_estimates.rs"]
 mod image_estimates;
+#[path = "history_tests/normalization.rs"]
 mod normalization;
+#[path = "history_tests/normalization_debug.rs"]
 mod normalization_debug;
+#[path = "history_tests/prompt_images.rs"]
 mod prompt_images;
+#[path = "history_tests/tool_recording.rs"]
 mod tool_recording;
+#[path = "history_tests/turn_editing.rs"]
 mod turn_editing;

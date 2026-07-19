@@ -1,33 +1,32 @@
-use super::*;
-use crate::config::CONFIG_TOML_FILE;
-use crate::config::ConfigBuilder;
-use crate::config_loader::ConfigLayerEntry;
-use crate::config_loader::ConfigLayerStack;
-use crate::config_loader::ConfigRequirements;
-use crate::config_loader::ConfigRequirementsToml;
-use crate::plugins::LoadedPlugin;
-use crate::plugins::MarketplacePluginInstallPolicy;
-use crate::plugins::PluginLoadOutcome;
-use crate::plugins::curated::openai_curated_marketplace_display_name;
-use crate::plugins::test_support::TEST_CURATED_PLUGIN_SHA;
-use crate::plugins::test_support::write_curated_marketplace;
-use crate::plugins::test_support::write_curated_plugin_sha_with as write_curated_plugin_sha;
-use crate::plugins::test_support::write_file;
-use praxis_config::types::McpServerTransportConfig;
-use praxis_login::OpenAiAccountAuth;
-use praxis_protocol::config_layers::ConfigLayerSource;
-use praxis_protocol::protocol::Product;
-use pretty_assertions::assert_eq;
-use std::fs;
-use tempfile::TempDir;
-use toml::Value;
-use wiremock::Mock;
-use wiremock::MockServer;
-use wiremock::ResponseTemplate;
-use wiremock::matchers::header;
-use wiremock::matchers::method;
-use wiremock::matchers::path;
-use wiremock::matchers::query_param;
+pub(super) use super::*;
+pub(super) use crate::config::CONFIG_TOML_FILE;
+pub(super) use crate::config::ConfigBuilder;
+pub(super) use crate::config_loader::ConfigLayerEntry;
+pub(super) use crate::config_loader::ConfigLayerStack;
+pub(super) use crate::config_loader::ConfigRequirements;
+pub(super) use crate::config_loader::ConfigRequirementsToml;
+pub(super) use crate::plugins::LoadedPlugin;
+pub(super) use crate::plugins::MarketplacePluginInstallPolicy;
+pub(super) use crate::plugins::PluginLoadOutcome;
+pub(super) use crate::plugins::curated::openai_curated_marketplace_display_name;
+pub(super) use crate::plugins::test_support::TEST_CURATED_PLUGIN_SHA;
+pub(super) use crate::plugins::test_support::write_curated_marketplace;
+pub(super) use crate::plugins::test_support::write_curated_plugin_sha_with as write_curated_plugin_sha;
+pub(super) use crate::plugins::test_support::write_file;
+pub(super) use praxis_config::types::McpServerTransportConfig;
+pub(super) use praxis_login::OpenAiAccountAuth;
+pub(super) use praxis_protocol::config_layers::ConfigLayerSource;
+pub(super) use praxis_protocol::protocol::Product;
+pub(super) use std::fs;
+pub(super) use tempfile::TempDir;
+pub(super) use toml::Value;
+pub(super) use wiremock::Mock;
+pub(super) use wiremock::MockServer;
+pub(super) use wiremock::ResponseTemplate;
+pub(super) use wiremock::matchers::header;
+pub(super) use wiremock::matchers::method;
+pub(super) use wiremock::matchers::path;
+pub(super) use wiremock::matchers::query_param;
 
 const MAX_CAPABILITY_SUMMARY_DESCRIPTION_LEN: usize = 1024;
 
@@ -87,12 +86,21 @@ fn load_config_blocking(praxis_home: &Path, cwd: &Path) -> crate::config::Config
         .block_on(load_config(praxis_home, cwd))
 }
 
+#[path = "manager_tests/capability_index.rs"]
 mod capability_index;
+#[path = "manager_tests/component_paths.rs"]
 mod component_paths;
+#[path = "manager_tests/curated_cache.rs"]
 mod curated_cache;
+#[path = "manager_tests/install_uninstall.rs"]
 mod install_uninstall;
+#[path = "manager_tests/loading.rs"]
 mod loading;
+#[path = "manager_tests/marketplaces.rs"]
 mod marketplaces;
+#[path = "manager_tests/project_config.rs"]
 mod project_config;
+#[path = "manager_tests/remote_sources.rs"]
 mod remote_sources;
+#[path = "manager_tests/remote_sync.rs"]
 mod remote_sync;

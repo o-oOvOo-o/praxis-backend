@@ -1,5 +1,6 @@
 use crate::parsing::{cloud_bundle_error_to_requirements_error, requirements_from_bundle_option};
 use crate::provider::{ConfigBundleProvider, OpenAiHostedConfigBundleProvider};
+use praxis_core::config::ConfigToml;
 use praxis_core::config_loader::{
     CloudConfigBundleLoadError, CloudConfigBundleLoadErrorCode, CloudConfigBundleLoader,
     CloudRequirementsLoadError, CloudRequirementsLoader,
@@ -82,6 +83,22 @@ pub fn cloud_config_bundle_loader_for_storage(
         credentials_store_mode,
     );
     cloud_config_bundle_loader(auth_manager, chatgpt_base_url, praxis_home)
+}
+
+pub fn cloud_config_bundle_loader_for_config_toml(
+    praxis_home: PathBuf,
+    enable_praxis_api_key_env: bool,
+    config: &ConfigToml,
+) -> CloudConfigBundleLoader {
+    cloud_config_bundle_loader_for_storage(
+        praxis_home,
+        enable_praxis_api_key_env,
+        config.cli_auth_credentials_store.unwrap_or_default(),
+        config
+            .chatgpt_base_url
+            .clone()
+            .unwrap_or_else(|| crate::constants::DEFAULT_CHATGPT_BASE_URL.to_owned()),
+    )
 }
 
 pub fn cloud_config_bundle_loader_from_provider(

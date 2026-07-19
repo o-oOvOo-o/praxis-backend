@@ -7,7 +7,7 @@ use crate::memories::metrics;
 use crate::memories::phase_one;
 use crate::memories::phase_one::PRUNE_BATCH_SIZE;
 use crate::memories::prompts::build_stage_one_input_message;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::rollout::INTERACTIVE_SESSION_SOURCES;

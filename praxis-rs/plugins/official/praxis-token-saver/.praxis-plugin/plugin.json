@@ -1,0 +1,23 @@
+{
+  "name": "praxis-token-saver",
+  "description": "Expose token savings produced by Praxis internal output reduction for the current thread.",
+  "interface": {
+    "displayName": "Praxis Token Saver",
+    "shortDescription": "Shows tokens saved by Praxis in the current thread.",
+    "longDescription": "Declarative Praxis plugin surface for thread-local token savings measured from original tool output versus the reduced output sent to the model.",
+    "developerName": "Praxis",
+    "category": "agent-observability",
+    "capabilities": [
+      "thread-local token savings telemetry",
+      "tool output reduction telemetry",
+      "worker surface contribution"
+    ],
+    "surfaces": [
+      {
+        "slot": "workerBelowStatus",
+        "component": "tokenSavingSummary",
+        "priority": 60
+      }
+    ]
+  }
+}

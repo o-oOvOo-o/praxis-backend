@@ -399,7 +399,7 @@ fn build_arc_monitor_message_item(
         | ResponseItem::CustomToolCallOutput { .. }
         | ResponseItem::ToolSearchOutput { .. }
         | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::GhostSnapshot { .. }
+        | ResponseItem::WorkspaceCheckpoint { .. }
         | ResponseItem::Compaction { .. }
         | ResponseItem::Other => None,
     }

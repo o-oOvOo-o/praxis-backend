@@ -238,14 +238,16 @@ fn for_prompt_clears_image_generation_result_when_images_are_unsupported() {
 }
 
 #[test]
-fn get_history_for_prompt_drops_ghost_commits() {
-    let items = vec![ResponseItem::GhostSnapshot {
-        ghost_commit: GhostCommit::new(
-            "ghost-1".to_string(),
-            /*parent*/ None,
-            Vec::new(),
-            Vec::new(),
-        ),
+fn get_history_for_prompt_drops_workspace_checkpoints() {
+    let items = vec![ResponseItem::WorkspaceCheckpoint {
+        checkpoint: WorkspaceCheckpointRef {
+            id: WorkspaceCheckpointId::new(),
+            workspace_root: PathBuf::from("workspace"),
+            thread_id: None,
+            turn_id: None,
+            created_at_unix_ms: 0,
+            changed_file_count: 0,
+        },
     }];
     let history = create_history_with_items(items);
     let modalities = default_input_modalities();

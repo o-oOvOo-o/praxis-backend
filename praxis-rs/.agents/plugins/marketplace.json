@@ -27,6 +27,18 @@
       }
     },
     {
+      "name": "praxis-token-saver",
+      "source": {
+        "source": "local",
+        "path": "./plugins/official/praxis-token-saver"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "agent-observability"
+    },
+    {
       "name": "cunning3d-graph-control",
       "source": {
         "source": "local",

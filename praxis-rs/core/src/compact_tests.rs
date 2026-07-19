@@ -284,6 +284,34 @@ fn local_compaction_extracts_previous_summary_out_of_conversation() {
     assert!(prompt.contains("<previous-summary>\nold summary\n</previous-summary>"));
 }
 
+#[test]
+fn overflow_shrink_uses_staged_safe_conversation_boundaries() {
+    let mut history = Vec::new();
+    for index in 0..10 {
+        history.push(user_message(format!("user {index} {}", "x".repeat(4_000))));
+        history.push(assistant_message(format!(
+            "assistant {index} {}",
+            "y".repeat(4_000)
+        )));
+    }
+    let mut plan = prepare_local_compaction(history, LocalCompactMode::Manual);
+
+    assert!(plan.shrink_summary_for_overflow());
+    let after_70 = plan.summary_items.len();
+    assert!(after_70 < 20);
+    assert!(matches!(
+        plan.summary_items.first(),
+        Some(ResponseItem::Message { role, .. }) if role == "user"
+    ));
+
+    assert!(plan.shrink_summary_for_overflow());
+    assert!(plan.summary_items.len() < after_70);
+    assert!(matches!(
+        plan.summary_items.first(),
+        Some(ResponseItem::Message { role, .. }) if role == "user"
+    ));
+}
+
 #[tokio::test]
 async fn process_compacted_history_replaces_developer_messages() {
     let compacted_history = vec![

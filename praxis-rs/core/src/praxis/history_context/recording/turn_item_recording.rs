@@ -27,10 +27,14 @@ impl Session {
         turn_context: &TurnContext,
         input: &[UserInput],
         response_item: &ResponseItem,
+        user_message_id: Option<String>,
     ) {
         self.record_conversation_items(turn_context, std::slice::from_ref(response_item))
             .await;
-        let turn_item = TurnItem::UserMessage(UserMessageItem::new(input));
+        let turn_item = TurnItem::UserMessage(match user_message_id {
+            Some(id) => UserMessageItem::with_id(id, input),
+            None => UserMessageItem::new(input),
+        });
         self.emit_turn_item_started(turn_context, &turn_item).await;
         self.emit_turn_item_completed(turn_context, turn_item).await;
         self.ensure_rollout_materialized().await;

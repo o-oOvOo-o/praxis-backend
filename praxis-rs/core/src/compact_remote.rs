@@ -88,10 +88,10 @@ async fn run_remote_compact_task_inner_impl(
         );
     }
     // Required to keep `/undo` available after compaction
-    let ghost_snapshots: Vec<ResponseItem> = history
+    let workspace_checkpoints: Vec<ResponseItem> = history
         .raw_items()
         .iter()
-        .filter(|item| matches!(item, ResponseItem::GhostSnapshot { .. }))
+        .filter(|item| matches!(item, ResponseItem::WorkspaceCheckpoint { .. }))
         .cloned()
         .collect();
 
@@ -163,8 +163,8 @@ async fn run_remote_compact_task_inner_impl(
         ));
     }
 
-    if !ghost_snapshots.is_empty() {
-        new_history.extend(ghost_snapshots);
+    if !workspace_checkpoints.is_empty() {
+        new_history.extend(workspace_checkpoints);
     }
     let reference_context_item = match initial_context_injection {
         InitialContextInjection::DoNotInject => None,
@@ -242,7 +242,7 @@ fn should_keep_compacted_history_item(item: &ResponseItem) -> bool {
         | ResponseItem::CustomToolCallOutput { .. }
         | ResponseItem::WebSearchCall { .. }
         | ResponseItem::ImageGenerationCall { .. }
-        | ResponseItem::GhostSnapshot { .. }
+        | ResponseItem::WorkspaceCheckpoint { .. }
         | ResponseItem::Other => false,
     }
 }

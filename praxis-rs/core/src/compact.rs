@@ -250,18 +250,14 @@ async fn run_compact_task_inner(
                         sess.notify_stream_error(
                             turn_context.as_ref(),
                             format!("Reconnecting... {retries}/{max_retries}"),
-                            PraxisErr::Stream(
-                                "compaction model returned no summary".into(),
-                                None,
-                            ),
+                            PraxisErr::Stream("compaction model returned no summary".into(), None),
                         )
                         .await;
                         tokio::time::sleep(delay).await;
                         continue;
                     } else if !has_previous_summary {
                         let e = PraxisErr::Stream(
-                            "compaction model returned no summary; keeping existing history"
-                                .into(),
+                            "compaction model returned no summary; keeping existing history".into(),
                             None,
                         );
                         let event = EventMsg::Error(e.to_error_event(/*message_prefix*/ None));
@@ -289,12 +285,12 @@ async fn run_compact_task_inner(
             Err(PraxisErr::Interrupted) => {
                 return Err(PraxisErr::Interrupted);
             }
-            Err(e @ PraxisErr::ContextWindowExceeded) => {
-                if compact_plan.remove_oldest_summary_item() {
+            Err(e @ PraxisErr::ContextWindowExceeded(_)) => {
+                if compact_plan.shrink_summary_for_overflow() {
                     error!(
-                        "Context window exceeded while compacting; removing oldest summary item. Error: {e}"
+                        "Context window exceeded while compacting; shrinking the summary input at a safe conversation boundary. Error: {e}"
                     );
-                    truncated_count += 1;
+                    truncated_count = compact_plan.removed_summary_item_count();
                     retries = 0;
                     continue;
                 }
@@ -338,12 +334,12 @@ async fn run_compact_task_inner(
         new_history =
             insert_initial_context_before_last_real_user_or_summary(new_history, initial_context);
     }
-    let ghost_snapshots: Vec<ResponseItem> = raw_history_items
+    let workspace_checkpoints: Vec<ResponseItem> = raw_history_items
         .iter()
-        .filter(|item| matches!(item, ResponseItem::GhostSnapshot { .. }))
+        .filter(|item| matches!(item, ResponseItem::WorkspaceCheckpoint { .. }))
         .cloned()
         .collect();
-    new_history.extend(ghost_snapshots);
+    new_history.extend(workspace_checkpoints);
     let reference_context_item = match initial_context_injection {
         InitialContextInjection::DoNotInject => None,
         InitialContextInjection::BeforeLastUserMessage => Some(turn_context.to_turn_context_item()),
@@ -352,8 +348,26 @@ async fn run_compact_task_inner(
         message: summary_text.clone(),
         replacement_history: Some(new_history.clone()),
     };
-    sess.replace_compacted_history(new_history, reference_context_item, compacted_item)
+    if !sess
+        .replace_compacted_history_if_unchanged(
+            &raw_history_items,
+            new_history,
+            reference_context_item,
+            compacted_item,
+        )
+        .await
+    {
+        let error = PraxisErr::Stream(
+            "thread history changed while compaction was running; discarded stale summary".into(),
+            None,
+        );
+        sess.notify_background_event(
+            turn_context.as_ref(),
+            "Thread history changed during compaction. The stale summary was discarded and no messages were overwritten.".to_string(),
+        )
         .await;
+        return Err(error);
+    }
     sess.recompute_token_usage(&turn_context).await;
 
     sess.emit_turn_item_completed(&turn_context, compaction_item)
@@ -543,6 +557,9 @@ fn local_compact_instruction(turn_context: &TurnContext, has_previous_summary: b
 #[derive(Debug)]
 struct LocalCompactionPlan {
     summary_items: Vec<ResponseItem>,
+    initial_summary_item_count: usize,
+    initial_summary_tokens: i64,
+    overflow_shrink_stage: usize,
     retained_items: Vec<ResponseItem>,
     previous_summary: Option<String>,
     summary_output: Option<String>,
@@ -565,13 +582,25 @@ impl LocalCompactionPlan {
         prompt
     }
 
-    fn remove_oldest_summary_item(&mut self) -> bool {
-        if self.summary_items.is_empty() {
-            false
-        } else {
-            self.summary_items.remove(0);
-            true
+    fn shrink_summary_for_overflow(&mut self) -> bool {
+        const SHRINK_RATIOS: [i64; 3] = [70, 50, 35];
+        while let Some(ratio) = SHRINK_RATIOS.get(self.overflow_shrink_stage).copied() {
+            self.overflow_shrink_stage += 1;
+            let target_tokens = self.initial_summary_tokens.saturating_mul(ratio) / 100;
+            let Some(start) = safe_recent_suffix_start(&self.summary_items, target_tokens) else {
+                continue;
+            };
+            if start > 0 {
+                self.summary_items.drain(..start);
+                return true;
+            }
         }
+        false
+    }
+
+    fn removed_summary_item_count(&self) -> usize {
+        self.initial_summary_item_count
+            .saturating_sub(self.summary_items.len())
     }
 
     fn take_summary_fallback(&mut self) -> String {
@@ -603,12 +632,44 @@ fn prepare_local_compaction(
     let retained_items = compactable_items[cut_index..].to_vec();
     let summary_items = compactable_items[..cut_index].to_vec();
 
+    let initial_summary_tokens = summary_items
+        .iter()
+        .map(estimate_item_tokens_for_local_compaction)
+        .fold(0i64, i64::saturating_add);
+    let initial_summary_item_count = summary_items.len();
     LocalCompactionPlan {
         summary_items,
+        initial_summary_item_count,
+        initial_summary_tokens,
+        overflow_shrink_stage: 0,
         retained_items,
         previous_summary,
         summary_output: None,
     }
+}
+
+fn safe_recent_suffix_start(items: &[ResponseItem], target_tokens: i64) -> Option<usize> {
+    if items.is_empty() {
+        return None;
+    }
+    let mut tokens = 0i64;
+    let mut tentative = items.len();
+    for (index, item) in items.iter().enumerate().rev() {
+        tokens = tokens.saturating_add(estimate_item_tokens_for_local_compaction(item));
+        tentative = index;
+        if tokens >= target_tokens.max(1) {
+            break;
+        }
+    }
+    if tentative == 0 {
+        return None;
+    }
+    if let Some(user_boundary) = (tentative..items.len())
+        .find(|index| is_user_turn_boundary(&items[*index]) && !is_summary_item(&items[*index]))
+    {
+        return Some(user_boundary);
+    }
+    (tentative..items.len()).find(|index| is_valid_retained_suffix_start(&items[*index]))
 }
 
 fn choose_local_compaction_cut_index(items: &[ResponseItem], mode: LocalCompactMode) -> usize {
@@ -667,7 +728,7 @@ fn should_include_in_local_compaction(item: &ResponseItem) -> bool {
         ResponseItem::Message { role, content, .. } if role == "user" => {
             !is_contextual_user_message_content(content) && !is_summary_item(item)
         }
-        ResponseItem::GhostSnapshot { .. } | ResponseItem::Other => false,
+        ResponseItem::WorkspaceCheckpoint { .. } | ResponseItem::Other => false,
         ResponseItem::Compaction { .. } => false,
         ResponseItem::Message { .. }
         | ResponseItem::Reasoning { .. }
@@ -899,7 +960,7 @@ fn serialize_compaction_conversation(
             }
             ResponseItem::Message { .. }
             | ResponseItem::Compaction { .. }
-            | ResponseItem::GhostSnapshot { .. }
+            | ResponseItem::WorkspaceCheckpoint { .. }
             | ResponseItem::Other => {}
         }
     }

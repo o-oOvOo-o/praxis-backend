@@ -39,6 +39,9 @@ impl HistoryPreview {
             if role != "user" {
                 return None;
             }
+            if is_contextual_user_message_content(content) {
+                return None;
+            }
             content.iter().find_map(|content_item| {
                 let ContentItem::InputText { text } = content_item else {
                     return None;
@@ -77,6 +80,9 @@ impl HistoryPreview {
             if role != "user" {
                 return None;
             }
+            if is_contextual_user_message_content(content) {
+                return None;
+            }
             let text = content_text(content);
             PREFIXES.iter().find_map(|prefix| {
                 let haystack = if prefix.is_ascii() {
@@ -109,6 +115,9 @@ impl HistoryPreview {
                 "assistant" => "Assistant",
                 _ => continue,
             };
+            if role == "user" && is_contextual_user_message_content(content) {
+                continue;
+            }
             let Some(text) = content_items_to_text(content) else {
                 continue;
             };
@@ -138,6 +147,7 @@ impl HistoryPreview {
         let mut transcript = Vec::new();
         for item in &self.items {
             if let ResponseItem::Message { role, content, .. } = item
+                && !(role == "user" && is_contextual_user_message_content(content))
                 && let Some(text) = extract_text_content(content)
             {
                 transcript.push((role.as_str(), text));
@@ -290,6 +300,7 @@ pub(crate) fn is_bootstrap_context_message(text: &str) -> bool {
     trimmed.starts_with("<environment_context>")
         || trimmed.starts_with("<skills_instructions>")
         || trimmed.starts_with("# AGENTS.md instructions for ")
+        || crate::contextual_user_message::is_praxis_internal_context_text(trimmed)
 }
 
 fn content_text(content: &[ContentItem]) -> String {

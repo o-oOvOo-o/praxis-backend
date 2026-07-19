@@ -14,9 +14,9 @@ mod provider;
 mod service;
 
 pub use loader::{
-    cloud_config_bundle_loader, cloud_config_bundle_loader_for_storage,
-    cloud_config_bundle_loader_from_provider, cloud_requirements_loader,
-    cloud_requirements_loader_for_storage,
+    cloud_config_bundle_loader, cloud_config_bundle_loader_for_config_toml,
+    cloud_config_bundle_loader_for_storage, cloud_config_bundle_loader_from_provider,
+    cloud_requirements_loader, cloud_requirements_loader_for_storage,
 };
 pub use provider::{
     ConfigBundleProvider, LocalFileConfigBundleProvider, NoopConfigBundleProvider,

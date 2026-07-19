@@ -31,6 +31,8 @@ pub struct TokenUsage {
 pub struct TokenUsageInfo {
     pub total_token_usage: TokenUsage,
     pub last_token_usage: TokenUsage,
+    #[serde(default)]
+    pub internal_savings: TokenSavingsInfo,
     // TODO(aibrahim): make this not optional
     #[ts(type = "number | null")]
     pub model_context_window: Option<i64>,
@@ -55,6 +57,7 @@ impl TokenUsageInfo {
             None => Self {
                 total_token_usage: TokenUsage::default(),
                 last_token_usage: TokenUsage::default(),
+                internal_savings: TokenSavingsInfo::default(),
                 model_context_window,
                 model_auto_compact_token_limit,
             },
@@ -94,12 +97,130 @@ impl TokenUsageInfo {
         let mut info = Self {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
+            internal_savings: TokenSavingsInfo::default(),
             model_context_window: Some(context_window),
             model_auto_compact_token_limit: None,
         };
         info.fill_to_context_window(context_window);
         info
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq, Eq, JsonSchema, TS)]
+pub struct TokenSavingsInfo {
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub total_saved_tokens: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub last_saved_tokens: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<TokenSavingCategoryUsage>,
+}
+
+impl TokenSavingsInfo {
+    pub fn record(&mut self, saved_tokens: i64) {
+        self.record_event(TokenSavingEvent::reversible(
+            TokenSavingKind::ToolOutputProjection,
+            saved_tokens,
+            None,
+        ));
+    }
+
+    pub fn record_event(&mut self, event: TokenSavingEvent) {
+        let saved_tokens = event.saved_tokens();
+        if !event.reversible || saved_tokens == 0 {
+            return;
+        }
+        self.last_saved_tokens = saved_tokens;
+        self.total_saved_tokens = self.total_saved_tokens.saturating_add(saved_tokens);
+        if let Some(category) = self
+            .categories
+            .iter_mut()
+            .find(|usage| usage.kind == event.kind)
+        {
+            category.last_saved_tokens = saved_tokens;
+            category.total_saved_tokens = category.total_saved_tokens.saturating_add(saved_tokens);
+            category.occurrences = category.occurrences.saturating_add(1);
+        } else {
+            self.categories.push(TokenSavingCategoryUsage {
+                kind: event.kind,
+                total_saved_tokens: saved_tokens,
+                last_saved_tokens: saved_tokens,
+                occurrences: 1,
+            });
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum TokenSavingKind {
+    OutputRepetition,
+    OutputDelta,
+    ArtifactProjection,
+    UnchangedResource,
+    SearchDelta,
+    ToolSchemaElision,
+    WorkingStateProjection,
+    ToolOutputProjection,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct TokenSavingEvent {
+    pub kind: TokenSavingKind,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub original_tokens: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub sent_tokens: i64,
+    #[serde(default)]
+    pub reversible: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reference: Option<String>,
+}
+
+impl TokenSavingEvent {
+    pub fn new(
+        kind: TokenSavingKind,
+        original_tokens: i64,
+        sent_tokens: i64,
+        reversible: bool,
+        reference: Option<String>,
+    ) -> Self {
+        Self {
+            kind,
+            original_tokens: original_tokens.max(0),
+            sent_tokens: sent_tokens.max(0),
+            reversible,
+            reference,
+        }
+    }
+
+    pub fn reversible(kind: TokenSavingKind, saved_tokens: i64, reference: Option<String>) -> Self {
+        Self::new(kind, saved_tokens, 0, true, reference)
+    }
+
+    pub fn saved_tokens(&self) -> i64 {
+        self.original_tokens.saturating_sub(self.sent_tokens).max(0)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct TokenSavingCategoryUsage {
+    pub kind: TokenSavingKind,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub total_saved_tokens: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub last_saved_tokens: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub occurrences: i64,
 }
 
 // Includes prompts, tools and space to call compact.

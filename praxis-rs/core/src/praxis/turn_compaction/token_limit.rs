@@ -1,11 +1,15 @@
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 
-pub(in crate::praxis) fn effective_auto_compact_token_limit(
+pub(in crate::praxis) async fn effective_auto_compact_token_limit(
     sess: &Session,
     turn_context: &TurnContext,
 ) -> Option<i64> {
     let model_limit: Option<i64> = turn_context.model_info.auto_compact_token_limit();
+    let governance_limit = sess
+        .context_governance
+        .compact_threshold(turn_context)
+        .await;
     let product_profile = turn_context
         .session_source
         .restriction_product()
@@ -20,10 +24,9 @@ pub(in crate::praxis) fn effective_auto_compact_token_limit(
         )
         .filter(|cap| *cap > 0);
 
-    match (model_limit, profile_cap) {
-        (Some(model_limit), Some(profile_cap)) => Some(model_limit.min(profile_cap)),
-        (Some(model_limit), None) => Some(model_limit),
-        (None, Some(profile_cap)) => Some(profile_cap),
-        (None, None) => None,
-    }
+    [model_limit, governance_limit, profile_cap]
+        .into_iter()
+        .flatten()
+        .filter(|limit| *limit > 0)
+        .min()
 }

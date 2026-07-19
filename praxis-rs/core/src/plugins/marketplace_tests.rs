@@ -649,7 +649,11 @@ fn list_marketplaces_resolves_plugin_interface_paths_to_absolute() {
     );
     assert_eq!(
         marketplaces[0].plugins[0].policy.products,
-        Some(vec![Product::praxis(), Product::chatgpt(), Product::atlas()])
+        Some(vec![
+            Product::praxis(),
+            Product::chatgpt(),
+            Product::atlas()
+        ])
     );
     assert_eq!(
         marketplaces[0].plugins[0].interface,
@@ -672,6 +676,8 @@ fn list_marketplaces_resolves_plugin_interface_paths_to_absolute() {
             screenshots: vec![
                 AbsolutePathBuf::try_from(plugin_root.join("assets/shot1.png")).unwrap(),
             ],
+            commands: Vec::new(),
+            surfaces: Vec::new(),
         })
     );
 }
@@ -740,6 +746,8 @@ fn list_marketplaces_ignores_plugin_interface_assets_without_dot_slash() {
             composer_icon: None,
             logo: None,
             screenshots: Vec::new(),
+            commands: Vec::new(),
+            surfaces: Vec::new(),
         })
     );
     assert_eq!(

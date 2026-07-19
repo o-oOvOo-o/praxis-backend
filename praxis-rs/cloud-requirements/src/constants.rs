@@ -12,6 +12,7 @@ pub(crate) const CLOUD_REQUIREMENTS_FETCH_FINAL_METRIC: &str =
 pub(crate) const CLOUD_REQUIREMENTS_LOAD_METRIC: &str = "praxis.cloud_requirements.load";
 pub(crate) const CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE: &str =
     "failed to load your workspace-managed config";
+pub(crate) const DEFAULT_CHATGPT_BASE_URL: &str = "https://chatgpt.com/backend-api/";
 pub(crate) const CLOUD_REQUIREMENTS_AUTH_RECOVERY_FAILED_MESSAGE: &str = "Your authentication session could not be refreshed automatically. Please log out and sign in again.";
 pub(crate) const OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_ID: &str = "openai-praxis-cloud-requirements";
 pub(crate) const OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_NAME: &str =

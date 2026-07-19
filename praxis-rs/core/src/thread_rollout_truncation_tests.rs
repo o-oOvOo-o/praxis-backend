@@ -120,6 +120,7 @@ fn truncates_rollout_from_start_applies_thread_rollback_markers() {
         RolloutItem::ResponseItem(assistant_msg("a2")),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
             num_turns: 1,
+            workspace_restore: None,
         })),
         RolloutItem::ResponseItem(user_msg("u3")),
         RolloutItem::ResponseItem(assistant_msg("a3")),
@@ -212,6 +213,7 @@ fn truncates_rollout_to_last_n_fork_turns_applies_thread_rollback_markers() {
         RolloutItem::ResponseItem(assistant_msg("a2")),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
             num_turns: 1,
+            workspace_restore: None,
         })),
         RolloutItem::ResponseItem(user_msg("u2")),
         RolloutItem::ResponseItem(assistant_msg("a3")),
@@ -235,6 +237,7 @@ fn fork_turn_positions_ignore_zero_turn_rollback_markers() {
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
             num_turns: 0,
+            workspace_restore: None,
         })),
         RolloutItem::ResponseItem(user_msg("u2")),
     ];
@@ -254,6 +257,7 @@ fn truncates_rollout_to_last_n_fork_turns_discards_trigger_boundaries_in_rolled_
         RolloutItem::ResponseItem(assistant_msg("a1")),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
             num_turns: 1,
+            workspace_restore: None,
         })),
         RolloutItem::ResponseItem(user_msg("u3")),
         RolloutItem::ResponseItem(assistant_msg("a2")),
@@ -281,6 +285,7 @@ fn truncates_rollout_to_last_n_fork_turns_discards_rolled_back_assistant_instruc
         RolloutItem::ResponseItem(assistant_msg("a2")),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
             num_turns: 1,
+            workspace_restore: None,
         })),
         RolloutItem::ResponseItem(inter_agent_msg(
             "triggered task 2",

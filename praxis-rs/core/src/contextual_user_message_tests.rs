@@ -37,6 +37,21 @@ fn detects_runtime_recovery_fragment_and_excludes_memory() {
 }
 
 #[test]
+fn detects_internal_context_with_source_and_excludes_memory() {
+    let content = ContentItem::InputText {
+        text: concat!(
+            "<praxis_internal_context source=\"goal\">\n",
+            "Continue the persisted goal.\n",
+            "</praxis_internal_context>"
+        )
+        .to_string(),
+    };
+
+    assert!(is_contextual_user_fragment(&content));
+    assert!(is_memory_excluded_contextual_user_fragment(&content));
+}
+
+#[test]
 fn ignores_regular_user_text() {
     assert!(!is_contextual_user_fragment(&ContentItem::InputText {
         text: "hello".to_string(),
