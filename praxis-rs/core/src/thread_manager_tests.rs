@@ -395,7 +395,7 @@ async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_when_missing() {
 
     let forked = manager
         .fork_thread(
-            ThreadForkSnapshot::Interrupted,
+            ThreadForkSnapshot::CurrentPersistedWithClosedTurn,
             config,
             source_path,
             /*persist_extended_history*/ false,
@@ -506,7 +506,7 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
 
     let forked = manager
         .fork_thread(
-            ThreadForkSnapshot::Interrupted,
+            ThreadForkSnapshot::CurrentPersistedWithClosedTurn,
             config,
             source_path,
             /*persist_extended_history*/ false,
@@ -584,7 +584,7 @@ async fn interrupted_fork_snapshot_uses_persisted_mid_turn_history_without_live_
 
     let forked = manager
         .fork_thread(
-            ThreadForkSnapshot::Interrupted,
+            ThreadForkSnapshot::CurrentPersistedWithClosedTurn,
             config.clone(),
             source_path,
             /*persist_extended_history*/ false,
@@ -623,7 +623,7 @@ async fn interrupted_fork_snapshot_uses_persisted_mid_turn_history_without_live_
     manager.remove_thread(&forked.thread_id).await;
     let reforked = manager
         .fork_thread(
-            ThreadForkSnapshot::Interrupted,
+            ThreadForkSnapshot::CurrentPersistedWithClosedTurn,
             config,
             forked_path,
             /*persist_extended_history*/ false,

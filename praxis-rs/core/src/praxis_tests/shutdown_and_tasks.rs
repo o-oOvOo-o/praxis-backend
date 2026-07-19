@@ -226,6 +226,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         },
     };
     let session_configuration = SessionConfiguration {
+        requested_thread_id: None,
         provider: config.model_provider.clone(),
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
@@ -269,6 +270,10 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
     );
 
     let state = SessionState::new(session_configuration.clone());
+    let permission_ledger =
+        PermissionLedger::from_session_configuration(&conversation_id, &session_configuration);
+    let effective_permissions = permission_ledger.live_effective_permissions();
+    let token_ledger = SessionTokenLedger::from_state(&state);
     let plugins_manager = Arc::new(PluginsManager::new(config.praxis_home.clone()));
     let mcp_manager = Arc::new(McpManager::new(Arc::clone(&plugins_manager)));
     let skills_manager = Arc::new(SkillsManager::new(
@@ -327,18 +332,12 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
             config.model_verbosity,
             config.features.enabled(Feature::EnableRequestCompression),
             config.features.enabled(Feature::RuntimeMetrics),
-            Session::build_model_client_beta_features_header(config.as_ref()),
+            None,
             crate::llm::local_models::NativeLocalModelConfig::from_config(config.as_ref()),
         ),
-        code_mode_service: crate::tools::code_mode::CodeModeService::new(
-            config.js_repl_node_path.clone(),
-        ),
+        code_mode_service: crate::tools::code_mode::CodeModeService::new(),
         environment: Arc::clone(&environment),
     };
-    let js_repl = Arc::new(JsReplHandle::with_node_path(
-        config.js_repl_node_path.clone(),
-        config.js_repl_node_module_dirs.clone(),
-    ));
 
     let plugin_outcome = services
         .plugins_manager
@@ -364,7 +363,7 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         /*network*/ None,
         environment,
         "turn_id".to_string(),
-        Arc::clone(&js_repl),
+        effective_permissions,
         skills_outcome,
     ));
 
@@ -374,7 +373,9 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         tx_event,
         agent_status: agent_status_tx,
         out_of_band_elicitation_paused: watch::channel(false).0,
+        permission_ledger,
         state: Mutex::new(state),
+        token_ledger: RwLock::new(token_ledger),
         features: config.features.clone(),
         pending_mcp_server_refresh_config: Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
@@ -385,8 +386,8 @@ pub(crate) async fn make_session_and_context_with_dynamic_tools_and_rx(
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),
         services,
         goal_runtime: crate::goals::GoalRuntimeState::new(),
+        context_governance: Default::default(),
         llm_runtime_catalog,
-        js_repl,
         next_internal_sub_id: AtomicU64::new(0),
         auto_title_attempted: AtomicBool::new(false),
         auto_summary_in_flight: AtomicBool::new(false),
@@ -656,7 +657,9 @@ async fn steer_input_requires_active_turn() {
     }];
 
     let err = sess
-        .steer_input(input, /*expected_turn_id*/ None)
+        .steer_input(
+            input, /*expected_turn_id*/ None, /*input_id*/ None,
+        )
         .await
         .expect_err("steering without active turn should fail");
 
@@ -685,7 +688,7 @@ async fn steer_input_enforces_expected_turn_id() {
         text_elements: Vec::new(),
     }];
     let err = sess
-        .steer_input(steer_input, Some("different-turn-id"))
+        .steer_input(steer_input, Some("different-turn-id"), None)
         .await
         .expect_err("mismatched expected turn id should fail");
 
@@ -727,7 +730,11 @@ async fn steer_input_rejects_non_regular_turns() {
             text_elements: Vec::new(),
         }];
         let err = sess
-            .steer_input(steer_input, /*expected_turn_id*/ None)
+            .steer_input(
+                steer_input,
+                /*expected_turn_id*/ None,
+                /*input_id*/ None,
+            )
             .await
             .expect_err("steering a non-regular turn should fail");
 
@@ -759,7 +766,7 @@ async fn steer_input_returns_active_turn_id() {
         text_elements: Vec::new(),
     }];
     let turn_id = sess
-        .steer_input(steer_input, Some(&tc.sub_id))
+        .steer_input(steer_input, Some(&tc.sub_id), None)
         .await
         .expect("steering with matching expected turn id should succeed");
 

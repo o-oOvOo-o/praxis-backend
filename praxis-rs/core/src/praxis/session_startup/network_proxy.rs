@@ -37,3 +37,13 @@ pub(super) async fn start(
         policy_decider_session: approval.policy_decider_session,
     })
 }
+
+pub(super) fn without_managed_proxy(config: &Config) -> NetworkBootstrap {
+    let approval = approval_bridge::build(config);
+    NetworkBootstrap {
+        network_proxy: None,
+        session_network_proxy: None,
+        network_approval: approval.network_approval,
+        policy_decider_session: approval.policy_decider_session,
+    }
+}

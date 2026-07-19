@@ -17,7 +17,7 @@ impl AgentControl {
         Ok(self
             .spawn_agent_internal(
                 config,
-                initial_operation,
+                Some(initial_operation),
                 session_source,
                 SpawnAgentOptions::default(),
             )
@@ -33,17 +33,49 @@ impl AgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions, // TODO(jif) drop with new fork.
     ) -> PraxisResult<LiveAgent> {
-        self.spawn_agent_internal(config, initial_operation, session_source, options)
+        self.spawn_agent_internal(config, Some(initial_operation), session_source, options)
             .await
+    }
+
+    pub(crate) async fn spawn_agent_thread(
+        &self,
+        config: crate::config::Config,
+        session_source: SessionSource,
+        options: SpawnAgentOptions,
+    ) -> PraxisResult<crate::thread_manager::ThreadSpawnResult> {
+        self.spawn_agent_internal_parts(config, None, Some(session_source), options)
+            .await
+            .map(|(thread, _, _)| thread)
     }
 
     async fn spawn_agent_internal(
         &self,
         config: crate::config::Config,
-        initial_operation: Op,
+        initial_operation: Option<Op>,
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> PraxisResult<LiveAgent> {
+        let (new_thread, agent_metadata, status) = self
+            .spawn_agent_internal_parts(config, initial_operation, session_source, options)
+            .await?;
+        Ok(LiveAgent {
+            thread_id: new_thread.thread_id,
+            metadata: agent_metadata,
+            status,
+        })
+    }
+
+    async fn spawn_agent_internal_parts(
+        &self,
+        config: crate::config::Config,
+        initial_operation: Option<Op>,
+        session_source: Option<SessionSource>,
+        options: SpawnAgentOptions,
+    ) -> PraxisResult<(
+        crate::thread_manager::ThreadSpawnResult,
+        AgentMetadata,
+        AgentStatus,
+    )> {
         let state = self.upgrade()?;
         let mut reservation = self.state.reserve_spawn_slot(config.agent_max_threads)?;
         let inherited_runtime = self
@@ -72,10 +104,7 @@ impl AgentControl {
         )
         .await?;
 
-        Ok(LiveAgent {
-            thread_id: new_thread.thread_id,
-            metadata: agent_metadata,
-            status: self.get_status(new_thread.thread_id).await,
-        })
+        let status = self.get_status(new_thread.thread_id).await;
+        Ok((new_thread, agent_metadata, status))
     }
 }

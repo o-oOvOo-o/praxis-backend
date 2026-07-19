@@ -8,4 +8,5 @@ pub(crate) use session::SessionState;
 pub(crate) use token_ledger::SessionTokenLedger;
 pub(crate) use turn::ActiveTurn;
 pub(crate) use turn::AgentTaskKind;
+pub(crate) use turn::PendingInput;
 pub(crate) use turn::RunningAgentTask;

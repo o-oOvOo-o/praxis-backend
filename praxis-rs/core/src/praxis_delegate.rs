@@ -74,6 +74,7 @@ pub(crate) async fn run_praxis_thread_interactive(
     let (tx_ops, rx_ops) = async_channel::bounded(SUBMISSION_CHANNEL_CAPACITY);
 
     let PraxisSpawnOk { praxis, .. } = Praxis::spawn(PraxisSpawnArgs {
+        requested_thread_id: None,
         config,
         auth_manager,
         models_manager,

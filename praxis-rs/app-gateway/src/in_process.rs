@@ -103,28 +103,6 @@ pub const DEFAULT_NATIVE_GATEWAY_CHANNEL_CAPACITY: usize = CHANNEL_CAPACITY;
 
 type PendingClientRequestResponse = std::result::Result<Result, JSONRPCErrorError>;
 
-fn server_notification_requires_delivery(notification: &ServerNotification) -> bool {
-    matches!(
-        notification,
-        ServerNotification::TurnStarted(_)
-            | ServerNotification::TurnCompleted(_)
-            | ServerNotification::ItemStarted(_)
-            | ServerNotification::ItemCompleted(_)
-            | ServerNotification::ThreadControlChanged(_)
-            | ServerNotification::ThreadGoalUpdated(_)
-            | ServerNotification::ThreadGoalCleared(_)
-            | ServerNotification::ThreadHeartbeatUpdated(_)
-            | ServerNotification::WorkspaceChangeUpdated(_)
-            | ServerNotification::AutomationRunUpdated(_)
-            | ServerNotification::ThreadModelChanged(_)
-            | ServerNotification::AgentMessageDelta(_)
-            | ServerNotification::PlanDelta(_)
-            | ServerNotification::ReasoningSummaryTextDelta(_)
-            | ServerNotification::ReasoningSummaryPartAdded(_)
-            | ServerNotification::ReasoningTextDelta(_)
-    )
-}
-
 /// Input needed to start an in-process app-gateway runtime.
 ///
 /// These fields mirror the pieces of ambient process state that stdio and
@@ -870,8 +848,10 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                     let outgoing_message = queued_message.message;
                     match outgoing_message {
                         OutgoingMessage::Response(response) => {
+                            tracing::info!(request_id = ?response.id, "in-process response arrived at client router");
                             if let Some(response_tx) = pending_request_responses.remove(&response.id) {
                                 let _ = response_tx.send(Ok(response.result));
+                                tracing::info!(request_id = ?response.id, "in-process response delivered to request waiter");
                             } else {
                                 warn!(
                                     request_id = ?response.id,
@@ -925,7 +905,7 @@ async fn start_uninitialized(args: InProcessStartArgs) -> IoResult<InProcessClie
                             }
                         }
                         OutgoingMessage::AppGatewayNotification(notification) => {
-                            if server_notification_requires_delivery(&notification) {
+                            if notification.requires_lossless_delivery() {
                                 if event_tx
                                     .send(InProcessServerEvent::ServerNotification(notification))
                                     .await
@@ -1140,16 +1120,18 @@ mod tests {
 
     #[test]
     fn guaranteed_delivery_helpers_cover_terminal_server_notifications() {
-        assert!(server_notification_requires_delivery(
-            &ServerNotification::TurnCompleted(TurnCompletedNotification {
+        assert!(
+            ServerNotification::TurnCompleted(TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: Turn {
                     id: "turn-1".to_string(),
+                    collaboration_mode_kind: Default::default(),
                     items: Vec::new(),
                     status: TurnStatus::Completed,
                     error: None,
                 },
             })
-        ));
+            .requires_lossless_delivery()
+        );
     }
 }

@@ -179,6 +179,7 @@ async fn plugin_list_keeps_valid_marketplaces_when_another_marketplace_fails_to_
                 },
                 installed: false,
                 enabled: false,
+                has_llm_products: false,
                 install_policy: PluginInstallPolicy::Available,
                 auth_policy: PluginAuthPolicy::OnInstall,
                 interface: None,

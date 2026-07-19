@@ -5,10 +5,7 @@ use praxis_protocol::protocol::SubAgentSource;
 use crate::agent_os::policy::COORDINATOR_RANK;
 
 pub(crate) fn rank_for_session_source(source: &SessionSource) -> u8 {
-    match source {
-        SessionSource::SubAgent(_) => 2,
-        _ => COORDINATOR_RANK,
-    }
+    source.agent_rank()
 }
 
 pub(crate) fn profile_for_rank(rank: u8) -> &'static str {

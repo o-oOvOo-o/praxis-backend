@@ -1,8 +1,11 @@
+mod approval_resolution;
 mod experimental_api;
 mod export;
+mod permission_presets;
 mod protocol;
 mod schema_fixtures;
 
+pub use approval_resolution::*;
 pub use experimental_api::*;
 pub use export::GenerateTsOptions;
 pub use export::generate_internal_json_schema;
@@ -11,6 +14,7 @@ pub use export::generate_json_with_experimental;
 pub use export::generate_ts;
 pub use export::generate_ts_with_options;
 pub use export::generate_types;
+pub use permission_presets::*;
 pub use praxis_git_utils::GitSha;
 pub use praxis_protocol::jsonrpc_lite::*;
 pub use protocol::api::*;

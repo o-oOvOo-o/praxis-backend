@@ -19,6 +19,7 @@ use praxis_protocol::protocol::InitialHistory;
 pub(crate) const INITIAL_SUBMIT_ID: &str = "";
 
 mod agent_task_loop;
+mod context_governance;
 mod agent_turn_loop;
 mod event_delivery;
 mod event_text_projection;
@@ -61,6 +62,7 @@ pub(crate) use session_context_types::LiveEffectivePermissions;
 pub(crate) use session_context_types::TurnSkillsContext;
 pub(in crate::praxis) use session_context_types::thread_permissions_from_session_configuration;
 pub(crate) use session_handle::Session;
+pub(crate) use context_governance::ContextGovernanceState;
 pub use steer_input_error::SteerInputError;
 pub(crate) use thread_lifecycle::PraxisSpawnArgs;
 pub use thread_lifecycle::PraxisSpawnOk;

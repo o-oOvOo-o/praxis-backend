@@ -1,3 +1,8 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use tracing::warn;
+
 use super::super::super::network_proxy;
 use super::SessionRuntimePreparation;
 use super::SessionRuntimePreparationInput;
@@ -12,6 +17,7 @@ pub(in crate::praxis::session_startup::pipeline) async fn prepare(
     let control = input.control;
     let session_configuration = identity.session_configuration;
 
+    tracing::info!(conversation_id = %identity.conversation_id, phase = "identity", "Session runtime preparation entering phase");
     let session_identity::SessionIdentityRuntime {
         session_telemetry,
         network_proxy_audit_metadata,
@@ -30,23 +36,48 @@ pub(in crate::praxis::session_startup::pipeline) async fn prepare(
     })
     .await?;
 
+    tracing::info!(conversation_id = %identity.conversation_id, phase = "network", "Session runtime preparation entering phase");
+    const NETWORK_PROXY_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
+    let network_config = Arc::clone(identity.config);
+    let network_exec_policy = Arc::clone(control.exec_policy);
+    let network_runtime = tokio::runtime::Handle::current();
+    let mut network_start = tokio::task::spawn_blocking(move || {
+        network_runtime.block_on(network_proxy::start(
+            network_config.as_ref(),
+            network_exec_policy.as_ref(),
+            network_proxy_audit_metadata,
+        ))
+    });
+    let network_bootstrap = match tokio::time::timeout(
+        NETWORK_PROXY_STARTUP_TIMEOUT,
+        &mut network_start,
+    )
+    .await
+    {
+        Ok(result) => result??,
+        Err(_) => {
+            network_start.abort();
+            warn!(
+                timeout_ms = NETWORK_PROXY_STARTUP_TIMEOUT.as_millis(),
+                "Managed network proxy startup timed out; continuing with sandbox policy and approval enforcement"
+            );
+            network_proxy::without_managed_proxy(identity.config.as_ref())
+        }
+    };
     let network_proxy::NetworkBootstrap {
         network_proxy: started_network_proxy,
         session_network_proxy,
         network_approval,
         policy_decider_session: network_policy_decider_session,
-    } = network_proxy::start(
-        identity.config.as_ref(),
-        control.exec_policy.as_ref(),
-        network_proxy_audit_metadata,
-    )
-    .await?;
+    } = network_bootstrap;
 
+    tracing::info!(conversation_id = %identity.conversation_id, phase = "hooks", "Session runtime preparation entering phase");
     let hooks = hook_runtime::build(
         identity.config.as_ref(),
         &default_shell,
         control.post_session_configured_events,
     );
+    tracing::info!(conversation_id = %identity.conversation_id, phase = "agent_os", "Session runtime preparation entering phase");
     let unified_exec_manager = agent_os_runtime::register_and_attach(
         control.agent_os,
         identity.state_db_ctx,
@@ -55,6 +86,7 @@ pub(in crate::praxis::session_startup::pipeline) async fn prepare(
         identity.config.background_terminal_max_timeout,
     )
     .await?;
+    tracing::info!(conversation_id = %identity.conversation_id, phase = "complete", "Session runtime preparation completed");
 
     Ok(SessionRuntimePreparation {
         session_telemetry,

@@ -205,6 +205,7 @@ impl PraxisMessageProcessor {
         thread_id: ThreadId,
         thread: &PraxisThread,
         op: Op,
+        requested_turn_id: Option<String>,
     ) -> Result<String, String> {
         let reservation = match self
             .thread_state_manager
@@ -224,15 +225,18 @@ impl PraxisMessageProcessor {
                 );
             }
         };
-        let turn_id = match self.submit_core_op(request_id, thread, op).await {
-            Ok(turn_id) => turn_id,
-            Err(err) => {
-                self.thread_state_manager
-                    .cancel_turn_controller_reservation(reservation)
-                    .await;
-                return Err(err.to_string());
-            }
+        let turn_id = requested_turn_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+        let submission = praxis_protocol::protocol::Submission {
+            id: turn_id.clone(),
+            op,
+            trace: self.request_trace_context(request_id).await,
         };
+        if let Err(err) = thread.submit_with_id(submission).await {
+            self.thread_state_manager
+                .cancel_turn_controller_reservation(reservation)
+                .await;
+            return Err(err.to_string());
+        }
         if !self
             .thread_state_manager
             .commit_turn_controller(reservation, turn_id.as_str())

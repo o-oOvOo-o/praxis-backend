@@ -71,6 +71,8 @@ sandbox_mode = "workspace-write"
     .await??;
     let ConfigReadResponse {
         config,
+        effective_model: _,
+        effective_permissions: _,
         origins,
         layers,
     } = to_response(resp)?;
@@ -123,6 +125,8 @@ view_image = false
     .await??;
     let ConfigReadResponse {
         config,
+        effective_model: _,
+        effective_permissions: _,
         origins,
         layers,
     } = to_response(resp)?;
@@ -281,6 +285,8 @@ default_tools_approval_mode = "prompt"
     .await??;
     let ConfigReadResponse {
         config,
+        effective_model: _,
+        effective_permissions: _,
         origins,
         layers,
     } = to_response(resp)?;

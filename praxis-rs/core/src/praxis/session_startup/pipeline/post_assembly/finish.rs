@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use tracing::info;
 
 use super::super::super::post_configured;
 use super::super::session_configured_emit;
@@ -28,6 +29,7 @@ impl AssembledSession {
             mcp_manager,
         } = context;
 
+        info!(conversation_id = %conversation_id, phase = "configured_emit", "Post-assembly entering phase");
         session_configured_emit::emit(session_configured_emit::SessionConfiguredEmissionInput {
             session: &session,
             conversation_id: conversation_id.clone(),
@@ -43,6 +45,7 @@ impl AssembledSession {
         })
         .await;
 
+        info!(conversation_id = %conversation_id, phase = "post_configured", "Post-assembly entering phase");
         post_configured::run(post_configured::PostConfiguredInput {
             session: Arc::clone(&session),
             config,
@@ -56,6 +59,7 @@ impl AssembledSession {
         })
         .await?;
 
+        info!(conversation_id = %conversation_id, phase = "complete", "Post-assembly completed");
         Ok(session)
     }
 }

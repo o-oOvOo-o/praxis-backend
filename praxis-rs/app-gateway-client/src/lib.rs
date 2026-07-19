@@ -35,6 +35,8 @@ pub use praxis_app_gateway_native::NativeControlAuthSettings;
 pub use praxis_app_gateway_native::NativeGatewayEvent;
 use praxis_app_gateway_native::NativeRuntimeStartArgs;
 use praxis_app_gateway_native::start_native_runtime;
+use praxis_app_gateway_protocol::CHATGPT_AUTH_TOKENS_REFRESH_UNSUPPORTED_CODE;
+use praxis_app_gateway_protocol::CHATGPT_AUTH_TOKENS_REFRESH_UNSUPPORTED_MESSAGE;
 use praxis_app_gateway_protocol::ClientInfo;
 use praxis_app_gateway_protocol::ClientNotification;
 use praxis_app_gateway_protocol::ClientRequest;
@@ -591,8 +593,8 @@ impl NativeAppGatewayClient {
                             let send_result = request_sender.fail_server_request(
                                 request_id.clone(),
                                 JSONRPCErrorError {
-                                    code: -32000,
-                                    message: "chatgpt auth token refresh is not supported for in-process app-gateway clients".to_string(),
+                                    code: CHATGPT_AUTH_TOKENS_REFRESH_UNSUPPORTED_CODE,
+                                    message: CHATGPT_AUTH_TOKENS_REFRESH_UNSUPPORTED_MESSAGE.to_owned(),
                                     data: None,
                                 },
                             );

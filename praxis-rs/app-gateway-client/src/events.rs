@@ -25,48 +25,21 @@ fn event_requires_delivery(event: &NativeGatewayEvent) -> bool {
     // the TUI with permanently corrupted markdown, while dropping completion
     // notifications can leave surfaces waiting forever.
     match event {
-        NativeGatewayEvent::Notification(notification) => {
-            server_notification_requires_delivery(notification)
-        }
+        NativeGatewayEvent::Notification(notification) => notification.requires_lossless_delivery(),
         _ => false,
     }
 }
 
 /// Returns `true` for notifications that must survive backpressure.
 ///
-/// Turn boundaries, transcript events (`AgentMessageDelta`, `PlanDelta`,
-/// reasoning deltas), and authoritative item completions form the lossless tier
-/// of the event stream. Dropping any of these corrupts the visible assistant
-/// output or leaves surfaces waiting for a completion signal that already
-/// fired. Everything else (`CommandExecutionOutputDelta`, progress, etc.) is
-/// best-effort and may be dropped with only cosmetic impact.
+/// Turn boundaries, transcript events, authoritative item completions, and
+/// low-frequency control-plane transitions form the lossless tier. High-volume
+/// progress and reconstructable output deltas remain best-effort.
 ///
 /// Both the in-process and remote transports delegate to this function so the
 /// classification stays in sync.
 pub(crate) fn server_notification_requires_delivery(notification: &ServerNotification) -> bool {
-    matches!(
-        notification,
-        ServerNotification::TurnStarted(_)
-            | ServerNotification::TurnCompleted(_)
-            | ServerNotification::ItemStarted(_)
-            | ServerNotification::ItemCompleted(_)
-            | ServerNotification::ThreadGoalUpdated(_)
-            | ServerNotification::ThreadGoalCleared(_)
-            | ServerNotification::ThreadHeartbeatUpdated(_)
-            | ServerNotification::ThreadModelChanged(_)
-            | ServerNotification::AgentMessageDelta(_)
-            | ServerNotification::PlanDelta(_)
-            | ServerNotification::ReasoningSummaryTextDelta(_)
-            | ServerNotification::ReasoningSummaryPartAdded(_)
-            | ServerNotification::ReasoningTextDelta(_)
-            | ServerNotification::TerminalInteraction(_)
-            | ServerNotification::HookStarted(_)
-            | ServerNotification::HookCompleted(_)
-            | ServerNotification::ItemGuardianApprovalReviewStarted(_)
-            | ServerNotification::ItemGuardianApprovalReviewCompleted(_)
-            | ServerNotification::ServerRequestResolved(_)
-            | ServerNotification::ThreadClosed(_)
-    )
+    notification.requires_lossless_delivery()
 }
 
 #[cfg(test)]

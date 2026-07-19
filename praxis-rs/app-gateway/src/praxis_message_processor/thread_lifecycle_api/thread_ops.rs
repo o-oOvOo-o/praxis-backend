@@ -1,6 +1,121 @@
 use super::*;
+use praxis_workspace_history::CaptureCheckpointRequest;
+use praxis_workspace_history::WorkspaceHistoryService;
 
 impl PraxisMessageProcessor {
+    pub(in crate::praxis_message_processor) async fn thread_rewind_preview(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadRewindPreviewParams,
+    ) {
+        if params.num_turns == 0 {
+            self.send_invalid_request_error(request_id, "numTurns must be >= 1".to_string())
+                .await;
+            return;
+        }
+        let Some((thread_id, thread)) = self
+            .ensure_thread_for_request(&params.thread_id, &request_id)
+            .await
+        else {
+            return;
+        };
+        let turn_is_active = {
+            let state = self.thread_state_manager.thread_state(thread_id).await;
+            let state = state.lock().await;
+            state.active_turn_snapshot().is_some()
+        };
+        if turn_is_active {
+            self.send_invalid_request_error(
+                request_id,
+                "cannot edit a previous message while the thread is running".to_string(),
+            )
+            .await;
+            return;
+        }
+        let service = match WorkspaceHistoryService::open(
+            &self.config.praxis_home,
+            self.config.workspace_history.clone(),
+        )
+        .await
+        {
+            Ok(service) => service,
+            Err(error) => {
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to open workspace history: {error}"),
+                )
+                .await;
+                return;
+            }
+        };
+        let target = match service
+            .checkpoint_for_rewind(&thread_id.to_string(), params.num_turns)
+            .await
+        {
+            Ok(target) => target,
+            Err(error) => {
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to resolve rewind checkpoint: {error}"),
+                )
+                .await;
+                return;
+            }
+        };
+        let Some(target) = target else {
+            self.outgoing
+                .send_response(
+                    request_id,
+                    ThreadRewindPreviewResponse {
+                        checkpoint_id: None,
+                        changed_files: Vec::new(),
+                    },
+                )
+                .await;
+            return;
+        };
+        let config_snapshot = thread.config_snapshot().await;
+        let current = match service
+            .capture(CaptureCheckpointRequest {
+                workspace_root: config_snapshot.cwd,
+                thread_id: Some(thread_id.to_string()),
+                turn_id: None,
+                operation_id: Some("rewind-preview".to_string()),
+            })
+            .await
+        {
+            Ok(current) => current,
+            Err(error) => {
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to capture rewind preview: {error}"),
+                )
+                .await;
+                return;
+            }
+        };
+        match service.summarize_changes(target.id, current.id).await {
+            Ok(changed_files) => {
+                self.outgoing
+                    .send_response(
+                        request_id,
+                        ThreadRewindPreviewResponse {
+                            checkpoint_id: Some(target.id),
+                            changed_files,
+                        },
+                    )
+                    .await;
+            }
+            Err(error) => {
+                self.send_internal_error(
+                    request_id,
+                    format!("failed to summarize rewind workspace changes: {error}"),
+                )
+                .await;
+            }
+        }
+    }
+
     pub(in crate::praxis_message_processor) async fn thread_increment_elicitation(
         &self,
         request_id: ConnectionRequestId,
@@ -80,7 +195,12 @@ impl PraxisMessageProcessor {
         let ThreadRollbackParams {
             thread_id,
             num_turns,
+            workspace_action,
         } = params;
+        let restore_checkpoint = match workspace_action {
+            ThreadRewindWorkspaceAction::Keep => None,
+            ThreadRewindWorkspaceAction::Restore { checkpoint_id } => Some(checkpoint_id),
+        };
 
         if num_turns == 0 {
             self.send_invalid_request_error(request_id, "numTurns must be >= 1".to_string())
@@ -118,7 +238,10 @@ impl PraxisMessageProcessor {
             .submit_core_op(
                 &request_id,
                 thread.as_ref(),
-                Op::ThreadRollback { num_turns },
+                Op::ThreadRollback {
+                    num_turns,
+                    restore_checkpoint,
+                },
             )
             .await
         {

@@ -25,18 +25,20 @@ async fn notify_request_permissions_response_ignores_unmatched_call_id() {
 
 #[tokio::test]
 async fn request_permissions_emits_event_when_granular_policy_allows_requests() {
-    let (session, mut turn_context, rx) = make_session_and_context_with_rx().await;
+    let (session, turn_context, rx) = make_session_and_context_with_rx().await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
-    Arc::get_mut(&mut turn_context)
-        .expect("single turn context ref")
-        .approval_policy
-        .set(AskForApproval::Granular(GranularApprovalConfig {
-            sandbox_approval: true,
-            rules: true,
-            skill_approval: true,
-            request_permissions: true,
-            mcp_elicitations: true,
-        }))
+    session
+        .update_settings(SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::Granular(GranularApprovalConfig {
+                sandbox_approval: true,
+                rules: true,
+                skill_approval: true,
+                request_permissions: true,
+                mcp_elicitations: true,
+            })),
+            ..Default::default()
+        })
+        .await
         .expect("test setup should allow updating approval policy");
 
     let session = Arc::new(session);
@@ -98,18 +100,20 @@ async fn request_permissions_emits_event_when_granular_policy_allows_requests() 
 
 #[tokio::test]
 async fn request_permissions_is_auto_denied_when_granular_policy_blocks_tool_requests() {
-    let (session, mut turn_context, rx) = make_session_and_context_with_rx().await;
+    let (session, turn_context, rx) = make_session_and_context_with_rx().await;
     *session.active_turn.lock().await = Some(ActiveTurn::default());
-    Arc::get_mut(&mut turn_context)
-        .expect("single turn context ref")
-        .approval_policy
-        .set(AskForApproval::Granular(GranularApprovalConfig {
-            sandbox_approval: true,
-            rules: true,
-            skill_approval: true,
-            request_permissions: false,
-            mcp_elicitations: true,
-        }))
+    session
+        .update_settings(SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::Granular(GranularApprovalConfig {
+                sandbox_approval: true,
+                rules: true,
+                skill_approval: true,
+                request_permissions: false,
+                mcp_elicitations: true,
+            })),
+            ..Default::default()
+        })
+        .await
         .expect("test setup should allow updating approval policy");
 
     let session = Arc::new(session);

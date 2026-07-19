@@ -186,6 +186,8 @@ pub struct SkillMetadata {
     pub path: PathBuf,
     pub scope: SkillScope,
     pub enabled: bool,
+    #[serde(default)]
+    pub can_uninstall: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -293,9 +295,24 @@ pub struct PluginSummary {
     pub source: PluginSource,
     pub installed: bool,
     pub enabled: bool,
+    pub has_llm_products: bool,
     pub install_policy: PluginInstallPolicy,
     pub auth_policy: PluginAuthPolicy,
     pub interface: Option<PluginInterface>,
+}
+
+impl PluginSummary {
+    pub fn can_install(&self) -> bool {
+        !self.installed && self.install_policy == PluginInstallPolicy::Available
+    }
+
+    pub fn can_uninstall(&self) -> bool {
+        self.installed && self.install_policy != PluginInstallPolicy::InstalledByDefault
+    }
+
+    pub fn can_set_enabled(&self) -> bool {
+        self.installed
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -342,6 +359,8 @@ pub struct PluginInterface {
     pub screenshots: Vec<AbsolutePathBuf>,
     #[serde(default)]
     pub commands: Vec<PluginCommandSummary>,
+    #[serde(default)]
+    pub surfaces: Vec<PluginSurfaceRegistration>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -349,6 +368,34 @@ pub struct PluginInterface {
 pub struct PluginCommandSummary {
     pub name: String,
     pub description: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSurfaceRegistration {
+    pub slot: PluginSurfaceSlot,
+    pub component: PluginSurfaceComponentKind,
+    pub priority: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum PluginSurfaceSlot {
+    WorkerBelowStatus,
+    WorkerCard,
+    ComposerUpperRow,
+    ThreadHeader,
+    StatusLine,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum PluginSurfaceComponentKind {
+    TokenSavingSummary,
+    Notice,
+    MetricStrip,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -376,6 +423,32 @@ pub struct SkillsConfigWriteParams {
 #[serde(rename_all = "camelCase")]
 pub struct SkillsConfigWriteResponse {
     pub effective_enabled: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsInstallParams {
+    /// Absolute path to the source SKILL.md. The containing directory is installed as one unit.
+    pub source_skill_path: AbsolutePathBuf,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsInstallResponse {
+    pub installed_skill_path: AbsolutePathBuf,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsUninstallParams {
+    /// Absolute path to an installed user-scoped SKILL.md.
+    pub skill_path: AbsolutePathBuf,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsUninstallResponse {
+    pub removed_skill_path: AbsolutePathBuf,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -435,6 +508,7 @@ impl From<CoreSkillMetadata> for SkillMetadata {
             path: value.path,
             scope: value.scope.into(),
             enabled: true,
+            can_uninstall: false,
         }
     }
 }

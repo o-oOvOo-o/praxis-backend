@@ -7,9 +7,48 @@ impl PraxisMessageProcessor {
         params: ThreadStartParams,
         request_context: RequestContext,
     ) {
+        self.thread_start_with_parent(request_id, params, request_context, None)
+            .await;
+    }
+
+    pub(in crate::praxis_message_processor) async fn thread_child_start(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadChildStartParams,
+        request_context: RequestContext,
+    ) {
+        let ThreadChildStartParams {
+            parent_thread_id,
+            thread,
+            agent_role,
+            agent_title,
+        } = params;
+        let Ok(parent_thread_id) = ThreadId::from_string(&parent_thread_id) else {
+            self.send_invalid_request_error(request_id, "invalid parent thread id".to_owned())
+                .await;
+            return;
+        };
+        self.thread_start_with_parent(
+            request_id,
+            thread,
+            request_context,
+            Some((parent_thread_id, agent_role, agent_title)),
+        )
+        .await;
+    }
+
+    async fn thread_start_with_parent(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadStartParams,
+        request_context: RequestContext,
+        child: Option<(ThreadId, Option<String>, Option<String>)>,
+    ) {
         let ThreadStartParams {
+            thread_id,
             model,
             model_provider,
+            reasoning_effort,
             service_tier,
             cwd,
             approval_policy,
@@ -26,9 +65,24 @@ impl PraxisMessageProcessor {
             ephemeral,
             persist_extended_history,
         } = params;
+        let requested_thread_id = match thread_id {
+            Some(thread_id) => match ThreadId::from_string(&thread_id) {
+                Ok(thread_id) => Some(thread_id),
+                Err(_) => {
+                    self.send_invalid_request_error(
+                        request_id,
+                        "thread_id must be a valid UUID".to_owned(),
+                    )
+                    .await;
+                    return;
+                }
+            },
+            None => None,
+        };
         let mut typesafe_overrides = self.build_thread_config_overrides(
             model,
             model_provider,
+            reasoning_effort,
             service_tier,
             cwd,
             approval_policy,
@@ -69,6 +123,8 @@ impl PraxisMessageProcessor {
                 service_name,
                 experimental_raw_events,
                 request_trace,
+                child,
+                requested_thread_id,
             )
             .await;
         };
@@ -90,6 +146,8 @@ impl PraxisMessageProcessor {
         service_name: Option<String>,
         experimental_raw_events: bool,
         request_trace: Option<W3cTraceContext>,
+        child: Option<(ThreadId, Option<String>, Option<String>)>,
+        requested_thread_id: Option<ThreadId>,
     ) {
         let config = match derive_config_from_params(
             &cli_overrides,
@@ -129,81 +187,63 @@ impl PraxisMessageProcessor {
         };
         let core_dynamic_tool_count = core_dynamic_tools.len();
 
-        match listener_task_context
-            .thread_manager
-            .start_thread_with_tools_and_service_name(
-                config,
-                core_dynamic_tools,
-                persist_extended_history,
-                service_name,
-                request_trace,
-            )
-            .instrument(tracing::info_span!(
-                "app_gateway.thread_start.create_thread",
-                otel.name = "app_gateway.thread_start.create_thread",
-                thread_start.dynamic_tool_count = core_dynamic_tool_count,
-                thread_start.persist_extended_history = persist_extended_history,
-            ))
-            .await
-        {
+        let spawn_result = async {
+            match child {
+                Some((parent_thread_id, agent_role, agent_title)) => {
+                    listener_task_context
+                        .thread_manager
+                        .start_child_thread_with_tools_and_service_name(
+                            parent_thread_id,
+                            config,
+                            core_dynamic_tools,
+                            persist_extended_history,
+                            service_name,
+                            request_trace,
+                            agent_role,
+                            agent_title,
+                            requested_thread_id,
+                        )
+                        .await
+                }
+                None => {
+                    listener_task_context
+                        .thread_manager
+                        .start_thread_with_tools_service_name_and_id(
+                            config,
+                            core_dynamic_tools,
+                            persist_extended_history,
+                            service_name,
+                            request_trace,
+                            requested_thread_id,
+                        )
+                        .await
+                }
+            }
+        }
+        .instrument(tracing::info_span!(
+            "app_gateway.thread_start.create_thread",
+            otel.name = "app_gateway.thread_start.create_thread",
+            thread_start.dynamic_tool_count = core_dynamic_tool_count,
+            thread_start.persist_extended_history = persist_extended_history,
+        ))
+        .await;
+
+        match spawn_result {
             Ok(new_conv) => {
                 let ThreadSpawnResult {
                     thread_id,
-                    thread,
+                    thread: core_thread,
                     session_configured,
+                    initial_config_snapshot: config_snapshot,
                     ..
                 } = new_conv;
-                let config_snapshot = thread
-                    .config_snapshot()
-                    .instrument(tracing::info_span!(
-                        "app_gateway.thread_start.config_snapshot",
-                        otel.name = "app_gateway.thread_start.config_snapshot",
-                    ))
-                    .await;
                 let mut thread = build_thread_from_snapshot(
                     thread_id,
                     &config_snapshot,
                     session_configured.rollout_path.clone(),
                 );
-
-                // Auto-attach a thread listener when starting a thread.
-                Self::log_listener_attach_result(
-                    Self::ensure_conversation_listener_task(
-                        listener_task_context.clone(),
-                        thread_id,
-                        request_id.connection_id,
-                        experimental_raw_events,
-                    )
-                    .instrument(tracing::info_span!(
-                        "app_gateway.thread_start.attach_listener",
-                        otel.name = "app_gateway.thread_start.attach_listener",
-                        thread_start.experimental_raw_events = experimental_raw_events,
-                    ))
-                    .await,
-                    thread_id,
-                    request_id.connection_id,
-                    "thread",
-                );
-
-                listener_task_context
-                    .thread_watch_manager
-                    .upsert_thread_silently(thread.clone())
-                    .instrument(tracing::info_span!(
-                        "app_gateway.thread_start.upsert_thread",
-                        otel.name = "app_gateway.thread_start.upsert_thread",
-                    ))
-                    .await;
-
-                project_thread_runtime_state_from_watch(
-                    &listener_task_context.thread_watch_manager,
-                    &mut thread,
-                    /*has_live_in_progress_turn*/ false,
-                )
-                .instrument(tracing::info_span!(
-                    "app_gateway.thread_start.resolve_status",
-                    otel.name = "app_gateway.thread_start.resolve_status",
-                ))
-                .await;
+                tracing::info!(%thread_id, "thread start response snapshot built");
+                thread.status = praxis_app_gateway_protocol::ThreadStatus::Idle;
 
                 let response = ThreadStartResponse {
                     thread: thread.clone(),
@@ -231,7 +271,54 @@ impl PraxisMessageProcessor {
                             ),
                         );
                 }
+                tracing::info!(%thread_id, "thread start analytics recorded");
 
+                let continuation_context = listener_task_context.clone();
+                let continuation_thread = thread.clone();
+                let connection_id = request_id.connection_id;
+                tokio::spawn(async move {
+                    Self::log_listener_attach_result(
+                        Self::ensure_conversation_listener_for_thread_task(
+                            continuation_context.clone(),
+                            thread_id,
+                            core_thread,
+                            connection_id,
+                            experimental_raw_events,
+                        )
+                        .instrument(tracing::info_span!(
+                            "app_gateway.thread_start.attach_listener",
+                            otel.name = "app_gateway.thread_start.attach_listener",
+                            thread_start.experimental_raw_events = experimental_raw_events,
+                        ))
+                        .await,
+                        thread_id,
+                        connection_id,
+                        "thread",
+                    );
+
+                    continuation_context
+                        .thread_watch_manager
+                        .upsert_thread_silently(continuation_thread.clone())
+                        .instrument(tracing::info_span!(
+                            "app_gateway.thread_start.upsert_thread",
+                            otel.name = "app_gateway.thread_start.upsert_thread",
+                        ))
+                        .await;
+
+                    let notif = ThreadStartedNotification {
+                        thread: continuation_thread,
+                    };
+                    continuation_context
+                        .outgoing
+                        .send_server_notification(ServerNotification::ThreadStarted(notif))
+                        .instrument(tracing::info_span!(
+                            "app_gateway.thread_start.notify_started",
+                            otel.name = "app_gateway.thread_start.notify_started",
+                        ))
+                        .await;
+                });
+
+                tracing::info!(%thread_id, request_id = ?request_id.request_id, "thread start enqueueing response");
                 listener_task_context
                     .outgoing
                     .send_response(request_id, response)
@@ -240,16 +327,7 @@ impl PraxisMessageProcessor {
                         otel.name = "app_gateway.thread_start.send_response",
                     ))
                     .await;
-
-                let notif = ThreadStartedNotification { thread };
-                listener_task_context
-                    .outgoing
-                    .send_server_notification(ServerNotification::ThreadStarted(notif))
-                    .instrument(tracing::info_span!(
-                        "app_gateway.thread_start.notify_started",
-                        otel.name = "app_gateway.thread_start.notify_started",
-                    ))
-                    .await;
+                tracing::info!(%thread_id, "thread start response enqueued");
             }
             Err(err) => {
                 let error = JSONRPCErrorError {

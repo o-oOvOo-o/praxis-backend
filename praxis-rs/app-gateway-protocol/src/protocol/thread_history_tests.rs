@@ -243,6 +243,7 @@ fn replays_image_generation_end_events_into_turn_history() {
         turns[0],
         Turn {
             id: "turn-image".into(),
+            collaboration_mode_kind: Default::default(),
             status: TurnStatus::Completed,
             error: None,
             items: vec![
@@ -427,7 +428,10 @@ fn drops_last_turns_on_thread_rollback() {
             phase: None,
             memory_citation: None,
         }),
-        EventMsg::ThreadRolledBack(ThreadRolledBackEvent { num_turns: 1 }),
+        EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
+            num_turns: 1,
+            workspace_restore: None,
+        }),
         EventMsg::UserMessage(UserMessageEvent {
             message: "Third".into(),
             images: None,
@@ -515,7 +519,10 @@ fn thread_rollback_clears_all_turns_when_num_turns_exceeds_history() {
             phase: None,
             memory_citation: None,
         }),
-        EventMsg::ThreadRolledBack(ThreadRolledBackEvent { num_turns: 99 }),
+        EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
+            num_turns: 99,
+            workspace_restore: None,
+        }),
     ];
 
     let items = events
@@ -602,7 +609,10 @@ fn recent_turn_builder_preserves_rollback_semantics() {
         .flat_map(explicit_turn_items)
         .collect::<Vec<_>>();
     items.push(RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
-        ThreadRolledBackEvent { num_turns: 2 },
+        ThreadRolledBackEvent {
+            num_turns: 2,
+            workspace_restore: None,
+        },
     )));
     items.extend(explicit_turn_items("turn-d"));
 

@@ -84,6 +84,19 @@ impl SessionState {
             .set_reference_context_item(reference_context_item);
     }
 
+    pub(crate) fn replace_history_if_unchanged(
+        &mut self,
+        expected_items: &[ResponseItem],
+        items: Vec<ResponseItem>,
+        reference_context_item: Option<TurnContextItem>,
+    ) -> bool {
+        if self.history.raw_items() != expected_items {
+            return false;
+        }
+        self.replace_history(items, reference_context_item);
+        true
+    }
+
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
         self.history.set_token_info(info);
     }
@@ -109,6 +122,24 @@ impl SessionState {
 
     pub(crate) fn token_info(&self) -> Option<TokenUsageInfo> {
         self.history.token_info()
+    }
+
+    pub(crate) fn record_token_saving_event(
+        &mut self,
+        event: praxis_protocol::protocol::TokenSavingEvent,
+    ) {
+        if !event.reversible || event.saved_tokens() <= 0 {
+            return;
+        }
+        let mut info = self.token_info().unwrap_or(TokenUsageInfo {
+            total_token_usage: TokenUsage::default(),
+            last_token_usage: TokenUsage::default(),
+            internal_savings: Default::default(),
+            model_context_window: None,
+            model_auto_compact_token_limit: None,
+        });
+        info.internal_savings.record_event(event);
+        self.set_token_info(Some(info));
     }
 
     pub(crate) fn set_rate_limits(&mut self, snapshot: RateLimitSnapshot) {

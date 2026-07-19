@@ -9,14 +9,17 @@ async fn rejects_escalated_permissions_when_policy_not_on_request() {
     use praxis_protocol::protocol::SandboxPolicy;
     use std::collections::HashMap;
 
-    let (session, mut turn_context_raw) = make_session_and_context().await;
+    let (session, turn_context_raw) = make_session_and_context().await;
     // Ensure policy is NOT OnRequest so the early rejection path triggers
-    turn_context_raw
-        .approval_policy
-        .set(AskForApproval::OnFailure)
+    session
+        .update_settings(SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::OnFailure),
+            ..Default::default()
+        })
+        .await
         .expect("test setup should allow updating approval policy");
     let session = Arc::new(session);
-    let mut turn_context = Arc::new(turn_context_raw);
+    let turn_context = Arc::new(turn_context_raw);
 
     let timeout_ms = 1000;
     let sandbox_permissions = SandboxPermissions::RequireEscalated;
@@ -40,7 +43,7 @@ async fn rejects_escalated_permissions_when_policy_not_on_request() {
         env: HashMap::new(),
         network: None,
         sandbox_permissions,
-        windows_sandbox_level: turn_context.windows_sandbox_level,
+        windows_sandbox_level: turn_context.effective_permissions().windows_sandbox_level,
         windows_sandbox_private_desktop: turn_context
             .config
             .permissions
@@ -57,7 +60,7 @@ async fn rejects_escalated_permissions_when_policy_not_on_request() {
         capture_policy: ExecCapturePolicy::ShellTool,
         env: HashMap::new(),
         network: None,
-        windows_sandbox_level: turn_context.windows_sandbox_level,
+        windows_sandbox_level: turn_context.effective_permissions().windows_sandbox_level,
         windows_sandbox_private_desktop: turn_context
             .config
             .permissions
@@ -99,22 +102,20 @@ async fn rejects_escalated_permissions_when_policy_not_on_request() {
 
     let expected = format!(
         "approval policy is {policy:?}; reject command — you should not ask for escalated permissions if the approval policy is {policy:?}",
-        policy = turn_context.approval_policy.value()
+        policy = turn_context.effective_approval_policy()
     );
 
     pretty_assertions::assert_eq!(output, expected);
 
     // Now retry the same command WITHOUT escalated permissions; should succeed.
     // Force DangerFullAccess to avoid platform sandbox dependencies in tests.
-    let turn_context_mut = Arc::get_mut(&mut turn_context).expect("unique turn context Arc");
-    turn_context_mut
-        .sandbox_policy
-        .set(SandboxPolicy::DangerFullAccess)
+    session
+        .update_settings(SessionSettingsUpdate {
+            sandbox_policy: Some(SandboxPolicy::DangerFullAccess),
+            ..Default::default()
+        })
+        .await
         .expect("test setup should allow updating sandbox policy");
-    turn_context_mut.file_system_sandbox_policy =
-        FileSystemSandboxPolicy::from(turn_context_mut.sandbox_policy.get());
-    turn_context_mut.network_sandbox_policy =
-        NetworkSandboxPolicy::from(turn_context_mut.sandbox_policy.get());
 
     let resp2 = handler
         .handle(ToolInvocation {
@@ -162,10 +163,13 @@ async fn unified_exec_rejects_escalated_permissions_when_policy_not_on_request()
     use crate::turn_diff_tracker::TurnDiffTracker;
     use praxis_protocol::protocol::AskForApproval;
 
-    let (session, mut turn_context_raw) = make_session_and_context().await;
-    turn_context_raw
-        .approval_policy
-        .set(AskForApproval::OnFailure)
+    let (session, turn_context_raw) = make_session_and_context().await;
+    session
+        .update_settings(SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::OnFailure),
+            ..Default::default()
+        })
+        .await
         .expect("test setup should allow updating approval policy");
     let session = Arc::new(session);
     let turn_context = Arc::new(turn_context_raw);
@@ -197,7 +201,7 @@ async fn unified_exec_rejects_escalated_permissions_when_policy_not_on_request()
 
     let expected = format!(
         "approval policy is {policy:?}; reject command — you cannot ask for escalated permissions if the approval policy is {policy:?}",
-        policy = turn_context.approval_policy.value()
+        policy = turn_context.effective_approval_policy()
     );
 
     pretty_assertions::assert_eq!(output, expected);

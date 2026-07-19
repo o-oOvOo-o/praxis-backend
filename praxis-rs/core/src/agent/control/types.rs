@@ -1,6 +1,8 @@
 use crate::agent::AgentStatus;
 use crate::agent::registry::AgentMetadata;
 use praxis_protocol::ThreadId;
+use praxis_protocol::dynamic_tools::DynamicToolSpec;
+use praxis_protocol::protocol::W3cTraceContext;
 use serde::Serialize;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -11,9 +13,14 @@ pub(crate) enum SpawnAgentForkMode {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SpawnAgentOptions {
+    pub(crate) requested_thread_id: Option<ThreadId>,
     pub(crate) fork_parent_spawn_call_id: Option<String>,
     pub(crate) fork_mode: Option<SpawnAgentForkMode>,
     pub(crate) agent_title: Option<String>,
+    pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
+    pub(crate) persist_extended_history: bool,
+    pub(crate) metrics_service_name: Option<String>,
+    pub(crate) parent_trace: Option<W3cTraceContext>,
 }
 
 #[derive(Clone, Debug)]

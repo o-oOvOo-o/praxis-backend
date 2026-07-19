@@ -21,8 +21,11 @@ pub(super) async fn handle(sess: &Arc<Session>, config: &Arc<Config>, sub_id: St
         Op::UpdateMemories => {
             memory_commands::update_memories(sess, config, sub_id).await;
         }
-        Op::ThreadRollback { num_turns } => {
-            sess.rollback_thread(sub_id, num_turns).await;
+        Op::ThreadRollback {
+            num_turns,
+            restore_checkpoint,
+        } => {
+            sess.rollback_thread(sub_id, num_turns, restore_checkpoint).await;
         }
         Op::SetThreadName { name } => {
             sess.set_thread_name_from_user(sub_id, name).await;

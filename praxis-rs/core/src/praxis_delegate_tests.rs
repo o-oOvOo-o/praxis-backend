@@ -247,9 +247,12 @@ async fn handle_exec_approval_uses_call_id_for_guardian_review_and_approval_id_f
     let mut config = (*parent_ctx.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::GuardianSubagent;
     parent_ctx.config = Arc::new(config);
-    parent_ctx
-        .approval_policy
-        .set(AskForApproval::OnRequest)
+    parent_session
+        .update_settings(crate::praxis::SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::OnRequest),
+            ..Default::default()
+        })
+        .await
         .expect("set on-request policy");
     let parent_ctx = Arc::new(parent_ctx);
 
@@ -355,9 +358,12 @@ async fn delegated_mcp_guardian_abort_returns_synthetic_decline_answer() {
     let mut config = (*parent_ctx.config).clone();
     config.approvals_reviewer = ApprovalsReviewer::GuardianSubagent;
     parent_ctx.config = Arc::new(config);
-    parent_ctx
-        .approval_policy
-        .set(AskForApproval::OnRequest)
+    parent_session
+        .update_settings(crate::praxis::SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::OnRequest),
+            ..Default::default()
+        })
+        .await
         .expect("set on-request policy");
     let parent_ctx = Arc::new(parent_ctx);
 

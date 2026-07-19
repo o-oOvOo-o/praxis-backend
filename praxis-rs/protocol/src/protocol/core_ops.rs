@@ -381,11 +381,11 @@ pub enum Op {
     /// Request Praxis to undo a turn (turn are stacked so it is the same effect as CMD + Z).
     Undo,
 
-    /// Request Praxis to drop the last N user turns from in-memory context.
-    ///
-    /// This does not attempt to revert local filesystem changes. Clients are
-    /// responsible for undoing any edits on disk.
-    ThreadRollback { num_turns: u32 },
+    /// Request Praxis to rewind the last N user turns and optionally restore their workspace.
+    ThreadRollback {
+        num_turns: u32,
+        restore_checkpoint: Option<WorkspaceCheckpointId>,
+    },
 
     /// Request a code review from the agent.
     Review { review_request: ReviewRequest },

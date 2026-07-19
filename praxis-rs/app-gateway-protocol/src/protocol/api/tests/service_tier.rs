@@ -35,6 +35,7 @@ fn turn_start_params_preserve_explicit_null_service_tier() {
 
     let without_override = TurnStartParams {
         thread_id: "thread_123".to_string(),
+        turn_id: None,
         input: vec![],
         cwd: None,
         approval_policy: None,

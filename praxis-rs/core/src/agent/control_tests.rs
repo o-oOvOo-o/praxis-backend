@@ -1,39 +1,38 @@
-use super::*;
-use crate::PraxisThread;
-use crate::ThreadManager;
-use crate::agent::agent_status_from_event;
-use crate::config::AgentRoleConfig;
-use crate::config::Config;
-use crate::config::ConfigBuilder;
-use crate::config_loader::LoaderOverrides;
-use crate::contextual_user_message::SUBAGENT_NOTIFICATION_OPEN_TAG;
-use assert_matches::assert_matches;
-use chrono::Utc;
-use praxis_features::Feature;
-use praxis_login::OpenAiAccountAuth;
-use praxis_protocol::AgentPath;
-use praxis_protocol::config_types::ApprovalsReviewer;
-use praxis_protocol::config_types::ModeKind;
-use praxis_protocol::models::ContentItem;
-use praxis_protocol::models::ResponseItem;
-use praxis_protocol::protocol::AskForApproval;
-use praxis_protocol::protocol::ErrorEvent;
-use praxis_protocol::protocol::EventMsg;
-use praxis_protocol::protocol::InterAgentCommunication;
-use praxis_protocol::protocol::SandboxPolicy;
-use praxis_protocol::protocol::SessionSource;
-use praxis_protocol::protocol::SubAgentSource;
-use praxis_protocol::protocol::TurnAbortReason;
-use praxis_protocol::protocol::TurnAbortedEvent;
-use praxis_protocol::protocol::TurnCompleteEvent;
-use praxis_protocol::protocol::TurnStartedEvent;
-use pretty_assertions::assert_eq;
-use std::path::PathBuf;
-use tempfile::TempDir;
-use tokio::time::Duration;
-use tokio::time::sleep;
-use tokio::time::timeout;
-use toml::Value as TomlValue;
+pub(super) use super::*;
+pub(super) use crate::PraxisThread;
+pub(super) use crate::ThreadManager;
+pub(super) use crate::agent::agent_status_from_event;
+pub(super) use crate::config::AgentRoleConfig;
+pub(super) use crate::config::Config;
+pub(super) use crate::config::ConfigBuilder;
+pub(super) use crate::config_loader::LoaderOverrides;
+pub(super) use crate::contextual_user_message::SUBAGENT_NOTIFICATION_OPEN_TAG;
+pub(super) use assert_matches::assert_matches;
+pub(super) use chrono::Utc;
+pub(super) use praxis_features::Feature;
+pub(super) use praxis_login::OpenAiAccountAuth;
+pub(super) use praxis_protocol::AgentPath;
+pub(super) use praxis_protocol::config_types::ApprovalsReviewer;
+pub(super) use praxis_protocol::config_types::ModeKind;
+pub(super) use praxis_protocol::models::ContentItem;
+pub(super) use praxis_protocol::models::ResponseItem;
+pub(super) use praxis_protocol::protocol::AskForApproval;
+pub(super) use praxis_protocol::protocol::ErrorEvent;
+pub(super) use praxis_protocol::protocol::EventMsg;
+pub(super) use praxis_protocol::protocol::InterAgentCommunication;
+pub(super) use praxis_protocol::protocol::SandboxPolicy;
+pub(super) use praxis_protocol::protocol::SessionSource;
+pub(super) use praxis_protocol::protocol::SubAgentSource;
+pub(super) use praxis_protocol::protocol::TurnAbortReason;
+pub(super) use praxis_protocol::protocol::TurnAbortedEvent;
+pub(super) use praxis_protocol::protocol::TurnCompleteEvent;
+pub(super) use praxis_protocol::protocol::TurnStartedEvent;
+pub(super) use std::path::PathBuf;
+pub(super) use tempfile::TempDir;
+pub(super) use tokio::time::Duration;
+pub(super) use tokio::time::sleep;
+pub(super) use tokio::time::timeout;
+pub(super) use toml::Value as TomlValue;
 
 async fn test_config_with_cli_overrides(
     cli_overrides: Vec<(String, TomlValue)>,
@@ -77,13 +76,21 @@ fn text_input(text: &str) -> Op {
     }
 }
 
+#[path = "control_tests/completion_notifications.rs"]
 mod completion_notifications;
+#[path = "control_tests/display_names.rs"]
 mod display_names;
+#[path = "control_tests/messaging.rs"]
 mod messaging;
+#[path = "control_tests/spawn_fork.rs"]
 mod spawn_fork;
+#[path = "control_tests/status_and_lifecycle.rs"]
 mod status_and_lifecycle;
+#[path = "control_tests/subagent_identity_resume.rs"]
 mod subagent_identity_resume;
+#[path = "control_tests/thread_limits.rs"]
 mod thread_limits;
+#[path = "control_tests/tree_resume_shutdown.rs"]
 mod tree_resume_shutdown;
 
 struct AgentControlHarness {

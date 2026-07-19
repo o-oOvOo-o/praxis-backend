@@ -323,6 +323,7 @@ impl Session {
             self.total_token_usage().await.unwrap_or_default(),
         )
         .await;
+        self.resume_user_activated_goal().await;
         Ok(protocol_goal)
     }
 
@@ -390,7 +391,11 @@ impl Session {
         self: &Arc<Self>,
         request: SetGoalRequest,
     ) -> anyhow::Result<ThreadGoal> {
-        self.set_thread_goal_without_event(request, None).await
+        let goal = self.set_thread_goal_without_event(request, None).await?;
+        if goal.status == ThreadGoalStatus::Active {
+            self.resume_user_activated_goal().await;
+        }
+        Ok(goal)
     }
 
     pub(crate) async fn user_clear_thread_goal(self: &Arc<Self>) -> anyhow::Result<bool> {
@@ -528,6 +533,11 @@ impl Session {
             accounting.turn = Some(turn);
         }
         accounting.wall_clock.mark_active_goal(goal_id);
+    }
+
+    async fn resume_user_activated_goal(self: &Arc<Self>) {
+        self.goal_runtime.mark_continuation_suppressed(false).await;
+        self.schedule_pending_work_continuation();
     }
 
     async fn finish_thread_goal_turn(
@@ -767,6 +777,9 @@ fn should_ignore_goal_for_mode(mode: ModeKind) -> bool {
 }
 
 fn continuation_prompt(goal: &ThreadGoal) -> String {
+    use crate::contextual_user_message::PRAXIS_INTERNAL_CONTEXT_CLOSE_TAG;
+    use crate::contextual_user_message::PRAXIS_INTERNAL_CONTEXT_OPEN_TAG_PREFIX;
+
     let token_budget = goal
         .token_budget
         .map(|budget| budget.to_string())
@@ -777,7 +790,7 @@ fn continuation_prompt(goal: &ThreadGoal) -> String {
         .unwrap_or_else(|| "unbounded".to_string());
     let objective = escape_xml_text(&goal.objective);
     format!(
-        r#"<praxis_internal_context source="goal">
+        r#"{open_tag} source="goal">
 The thread has an active persisted goal. Continue working toward it without waiting for user input.
 
 <objective>
@@ -790,7 +803,9 @@ Tokens remaining: {remaining_tokens}
 
 Call update_goal with status "complete" only when the objective is achieved and no required work remains.
 Call update_goal with status "blocked" only after the same blocking condition has repeated for at least three consecutive goal turns and you are truly at an impasse.
-</praxis_internal_context>"#,
+{close_tag}"#,
+        open_tag = PRAXIS_INTERNAL_CONTEXT_OPEN_TAG_PREFIX,
+        close_tag = PRAXIS_INTERNAL_CONTEXT_CLOSE_TAG,
         tokens_used = goal.tokens_used,
     )
 }

@@ -56,6 +56,7 @@ impl PraxisMessageProcessor {
             path,
             model,
             model_provider,
+            reasoning_effort,
             service_tier,
             cwd,
             approval_policy,
@@ -92,6 +93,7 @@ impl PraxisMessageProcessor {
         let mut typesafe_overrides = self.build_thread_config_overrides(
             model,
             model_provider,
+            reasoning_effort,
             service_tier,
             cwd,
             approval_policy,
@@ -170,6 +172,7 @@ impl PraxisMessageProcessor {
                 thread_id,
                 thread,
                 session_configured,
+                ..
             }) => {
                 let SessionConfiguredEvent { rollout_path, .. } = session_configured;
                 let Some(rollout_path) = rollout_path else {

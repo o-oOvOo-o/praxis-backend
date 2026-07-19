@@ -33,6 +33,7 @@ pub struct PraxisSpawnOk {
 }
 
 pub(crate) struct PraxisSpawnArgs {
+    pub(crate) requested_thread_id: Option<ThreadId>,
     pub(crate) config: Config,
     pub(crate) auth_manager: Arc<AuthManager>,
     pub(crate) models_manager: Arc<ModelsManager>,

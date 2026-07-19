@@ -164,6 +164,7 @@ pub struct ThreadControlClaimParams {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadControlClaimResponse {
     pub control_state: ThreadControlState,
+    pub snapshot: ThreadControlSnapshotResponse,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
@@ -176,7 +177,7 @@ pub enum ThreadControlQueueStatus {
     Failed,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadControlQueueItem {
     pub queue_id: String,
@@ -202,7 +203,7 @@ pub struct ThreadControlSnapshotParams {
     pub thread_id: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadControlSnapshotResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -217,12 +218,16 @@ pub struct ThreadControlQueueParams {
     pub thread_id: String,
     pub controller: ThreadController,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub queue_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadControlQueueResponse {
     pub item: ThreadControlQueueItem,
+    pub snapshot: ThreadControlSnapshotResponse,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -240,6 +245,7 @@ pub struct ThreadControlQueueCancelResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub item: Option<ThreadControlQueueItem>,
+    pub snapshot: ThreadControlSnapshotResponse,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -252,6 +258,7 @@ pub struct ThreadControlQueueFlushParams {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadControlQueueFlushResponse {
     pub cancelled: Vec<ThreadControlQueueItem>,
+    pub snapshot: ThreadControlSnapshotResponse,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -269,6 +276,7 @@ pub struct ThreadControlReleaseResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub previous_control_state: Option<ThreadControlState>,
+    pub snapshot: ThreadControlSnapshotResponse,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -481,11 +489,77 @@ pub struct ThreadHeartbeatUpdatedNotification {
     pub heartbeat: Option<ThreadHeartbeat>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum ThreadSelfworkPhase {
+    Off,
+    Armed,
+    Running,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSelfworkStatus {
+    pub thread_id: String,
+    pub phase: ThreadSelfworkPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "string | null")]
+    pub plan_path: Option<PathBuf>,
+    pub stall_count: u8,
+    pub stall_limit: u8,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSelfworkGetParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSelfworkGetResponse {
+    pub status: ThreadSelfworkStatus,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSelfworkStartParams {
+    pub thread_id: String,
+    pub plan_path: PathBuf,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSelfworkStartResponse {
+    pub status: ThreadSelfworkStatus,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSelfworkStopParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSelfworkStopResponse {
+    pub status: ThreadSelfworkStatus,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadSelfworkUpdatedNotification {
+    pub status: ThreadSelfworkStatus,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadTokenUsage {
     pub total: TokenUsageBreakdown,
     pub last: TokenUsageBreakdown,
+    #[serde(default)]
+    pub internal_savings: TokenSavingsBreakdown,
     // TODO(aibrahim): make this not optional
     #[ts(type = "number | null")]
     pub model_context_window: Option<i64>,
@@ -499,10 +573,53 @@ impl From<CoreTokenUsageInfo> for ThreadTokenUsage {
         Self {
             total: value.total_token_usage.into(),
             last: value.last_token_usage.into(),
+            internal_savings: TokenSavingsBreakdown {
+                total_saved_tokens: value.internal_savings.total_saved_tokens,
+                last_saved_tokens: value.internal_savings.last_saved_tokens,
+                categories: value
+                    .internal_savings
+                    .categories
+                    .into_iter()
+                    .map(|category| TokenSavingCategoryBreakdown {
+                        kind: category.kind,
+                        total_saved_tokens: category.total_saved_tokens,
+                        last_saved_tokens: category.last_saved_tokens,
+                        occurrences: category.occurrences,
+                    })
+                    .collect(),
+            },
             model_context_window: value.model_context_window,
             model_auto_compact_token_limit: value.model_auto_compact_token_limit,
         }
     }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenSavingsBreakdown {
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub total_saved_tokens: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub last_saved_tokens: i64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<TokenSavingCategoryBreakdown>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenSavingCategoryBreakdown {
+    pub kind: CoreTokenSavingKind,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub total_saved_tokens: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub last_saved_tokens: i64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub occurrences: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -545,6 +662,8 @@ impl From<CoreTokenUsage> for TokenUsageBreakdown {
 #[serde(rename_all = "camelCase")]
 pub struct Turn {
     pub id: String,
+    #[serde(default)]
+    pub collaboration_mode_kind: ModeKind,
     /// Only populated on a `thread/resume` or `thread/fork` response.
     /// For all other responses and notifications returning a Turn,
     /// the items field will be an empty list.

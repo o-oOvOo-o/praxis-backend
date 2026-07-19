@@ -53,6 +53,7 @@ pub struct ThreadSpawnResult {
     pub thread_id: ThreadId,
     pub thread: Arc<PraxisThread>,
     pub session_configured: SessionConfiguredEvent,
+    pub initial_config_snapshot: crate::praxis_thread::ThreadConfigSnapshot,
 }
 
 /// [`ThreadManager`] is responsible for creating threads and maintaining

@@ -22,44 +22,13 @@ impl PraxisMessageProcessor {
         let Some(state_db) = self.thread_control_state_db(request_id.clone()).await else {
             return;
         };
-        let queue = match state_db
-            .list_thread_control_queue(params.thread_id.as_str(), false)
+        match self
+            .read_thread_control_snapshot(state_db.as_ref(), params.thread_id.as_str())
             .await
         {
-            Ok(queue) => match api_thread_control_queue_items_from_state(queue) {
-                Ok(queue) => queue,
-                Err(err) => {
-                    self.send_internal_error(
-                        request_id,
-                        format!("failed to decode thread control queue: {err}"),
-                    )
-                    .await;
-                    return;
-                }
-            },
-            Err(err) => {
-                self.send_internal_error(
-                    request_id,
-                    format!("failed to list thread control queue: {err}"),
-                )
-                .await;
-                return;
-            }
-        };
-        let control_state = self
-            .thread_watch_manager
-            .loaded_runtime_state_for_thread(&params.thread_id)
-            .await
-            .control_state;
-        self.outgoing
-            .send_response(
-                request_id,
-                ThreadControlSnapshotResponse {
-                    control_state,
-                    queue,
-                },
-            )
-            .await;
+            Ok(snapshot) => self.outgoing.send_response(request_id, snapshot).await,
+            Err(message) => self.send_internal_error(request_id, message).await,
+        }
     }
 
     pub(crate) async fn thread_control_claim(
@@ -88,13 +57,32 @@ impl PraxisMessageProcessor {
                 .await;
             return;
         }
+        let Some(state_db) = self.thread_control_state_db(request_id.clone()).await else {
+            return;
+        };
 
         let control_state = self
             .thread_watch_manager
             .acquire_thread_control(&thread_id, controller, reason)
             .await;
+        let snapshot = match self
+            .read_thread_control_snapshot(state_db.as_ref(), thread_id.as_str())
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(message) => {
+                self.send_internal_error(request_id, message).await;
+                return;
+            }
+        };
         self.outgoing
-            .send_response(request_id, ThreadControlClaimResponse { control_state })
+            .send_response(
+                request_id,
+                ThreadControlClaimResponse {
+                    control_state,
+                    snapshot,
+                },
+            )
             .await;
     }
 
@@ -111,6 +99,9 @@ impl PraxisMessageProcessor {
             .ensure_thread_id_for_request(&thread_id, &request_id)
             .await
         else {
+            return;
+        };
+        let Some(state_db) = self.thread_control_state_db(request_id.clone()).await else {
             return;
         };
         let current = self
@@ -133,11 +124,22 @@ impl PraxisMessageProcessor {
             .thread_watch_manager
             .release_thread_control(&thread_id)
             .await;
+        let snapshot = match self
+            .read_thread_control_snapshot(state_db.as_ref(), thread_id.as_str())
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(message) => {
+                self.send_internal_error(request_id, message).await;
+                return;
+            }
+        };
         self.outgoing
             .send_response(
                 request_id,
                 ThreadControlReleaseResponse {
                     previous_control_state,
+                    snapshot,
                 },
             )
             .await;
@@ -152,6 +154,7 @@ impl PraxisMessageProcessor {
             thread_id,
             controller,
             text,
+            queue_id,
         } = params;
         let text = text.trim().to_string();
         if text.is_empty() {
@@ -159,6 +162,21 @@ impl PraxisMessageProcessor {
                 .await;
             return;
         }
+        let queue_id = match queue_id {
+            Some(queue_id) => {
+                let queue_id = queue_id.trim().to_owned();
+                if queue_id.is_empty() || queue_id.len() > 256 {
+                    self.send_invalid_request_error(
+                        request_id,
+                        "queueId must contain 1 to 256 bytes".to_string(),
+                    )
+                    .await;
+                    return;
+                }
+                Some(queue_id)
+            }
+            None => None,
+        };
         let Some(thread_uuid) = self
             .ensure_thread_id_for_request(&thread_id, &request_id)
             .await
@@ -190,6 +208,7 @@ impl PraxisMessageProcessor {
         };
         let item = match state_db
             .enqueue_thread_control_item(&StateThreadControlQueueCreateParams {
+                queue_id,
                 target_thread_id: thread_id.clone(),
                 controller_json,
                 text,
@@ -228,8 +247,18 @@ impl PraxisMessageProcessor {
                 return;
             }
         };
+        let snapshot = match self
+            .read_thread_control_snapshot(state_db.as_ref(), thread_id.as_str())
+            .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(message) => {
+                self.send_internal_error(request_id, message).await;
+                return;
+            }
+        };
         self.outgoing
-            .send_response(request_id, ThreadControlQueueResponse { item })
+            .send_response(request_id, ThreadControlQueueResponse { item, snapshot })
             .await;
     }
 
@@ -274,8 +303,21 @@ impl PraxisMessageProcessor {
                         return;
                     }
                 };
+                let snapshot = match self
+                    .read_thread_control_snapshot(state_db.as_ref(), params.thread_id.as_str())
+                    .await
+                {
+                    Ok(snapshot) => snapshot,
+                    Err(message) => {
+                        self.send_internal_error(request_id, message).await;
+                        return;
+                    }
+                };
                 self.outgoing
-                    .send_response(request_id, ThreadControlQueueCancelResponse { item })
+                    .send_response(
+                        request_id,
+                        ThreadControlQueueCancelResponse { item, snapshot },
+                    )
                     .await;
             }
             Err(err) => {
@@ -299,8 +341,24 @@ impl PraxisMessageProcessor {
         match state_db.flush_thread_control_queue(&params.thread_id).await {
             Ok(cancelled) => match api_thread_control_queue_items_from_state(cancelled) {
                 Ok(cancelled) => {
+                    let snapshot = match self
+                        .read_thread_control_snapshot(state_db.as_ref(), params.thread_id.as_str())
+                        .await
+                    {
+                        Ok(snapshot) => snapshot,
+                        Err(message) => {
+                            self.send_internal_error(request_id, message).await;
+                            return;
+                        }
+                    };
                     self.outgoing
-                        .send_response(request_id, ThreadControlQueueFlushResponse { cancelled })
+                        .send_response(
+                            request_id,
+                            ThreadControlQueueFlushResponse {
+                                cancelled,
+                                snapshot,
+                            },
+                        )
                         .await;
                 }
                 Err(err) => {
@@ -327,6 +385,9 @@ impl PraxisMessageProcessor {
         state_db: &StateRuntime,
         item: StateThreadControlQueueItem,
     ) -> Result<StateThreadControlQueueItem, String> {
+        if item.status != StateThreadControlQueueStatus::Queued {
+            return Ok(item);
+        }
         let thread_id = self
             .parse_thread_id(item.target_thread_id.as_str())
             .map_err(|err| err.message)?;
@@ -346,6 +407,7 @@ impl PraxisMessageProcessor {
                     }],
                     None,
                 ),
+                None,
             )
             .await
             .map_err(|err| format!("failed to dispatch thread control input: {err}"))?;
@@ -362,6 +424,28 @@ impl PraxisMessageProcessor {
                     item.queue_id
                 )
             })
+    }
+
+    async fn read_thread_control_snapshot(
+        &self,
+        state_db: &StateRuntime,
+        thread_id: &str,
+    ) -> Result<ThreadControlSnapshotResponse, String> {
+        let queue = state_db
+            .list_thread_control_queue(thread_id, false)
+            .await
+            .map_err(|err| format!("failed to list thread control queue: {err}"))?;
+        let queue = api_thread_control_queue_items_from_state(queue)
+            .map_err(|err| format!("failed to decode thread control queue: {err}"))?;
+        let control_state = self
+            .thread_watch_manager
+            .loaded_runtime_state_for_thread(thread_id)
+            .await
+            .control_state;
+        Ok(ThreadControlSnapshotResponse {
+            control_state,
+            queue,
+        })
     }
 
     async fn require_active_controller(

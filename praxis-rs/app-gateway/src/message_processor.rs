@@ -54,6 +54,8 @@ use praxis_app_gateway_protocol::JSONRPCErrorError;
 use praxis_app_gateway_protocol::JSONRPCNotification;
 use praxis_app_gateway_protocol::JSONRPCRequest;
 use praxis_app_gateway_protocol::JSONRPCResponse;
+use praxis_app_gateway_protocol::ModelPreferencesWriteParams;
+use praxis_app_gateway_protocol::ModelProviderConfigWriteParams;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequestPayload;
 use praxis_app_gateway_protocol::experimental_required_message;
@@ -746,6 +748,16 @@ impl MessageProcessor {
                 )
                 .await;
             }
+            ClientRequest::ModelProviderConfigWrite { request_id, params } => {
+                self.handle_model_provider_config_write(
+                    ConnectionRequestId {
+                        connection_id,
+                        request_id,
+                    },
+                    params,
+                )
+                .await;
+            }
             ClientRequest::ExperimentalFeatureEnablementSet { request_id, params } => {
                 self.handle_experimental_feature_enablement_set(
                     ConnectionRequestId {
@@ -858,6 +870,16 @@ impl MessageProcessor {
                 )
                 .await;
             }
+            ClientRequest::ModelPreferencesWrite { request_id, params } => {
+                self.handle_model_preferences_write(
+                    ConnectionRequestId {
+                        connection_id,
+                        request_id,
+                    },
+                    params,
+                )
+                .await;
+            }
             other => {
                 // Box the delegated future so this wrapper's async state machine does not
                 // inline the full `PraxisMessageProcessor::process_request` future, which
@@ -896,6 +918,18 @@ impl MessageProcessor {
     ) {
         self.handle_config_mutation_result(request_id, self.config_api.batch_write(params).await)
             .await;
+    }
+
+    async fn handle_model_provider_config_write(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ModelProviderConfigWriteParams,
+    ) {
+        self.handle_config_mutation_result(
+            request_id,
+            self.config_api.write_model_provider(params).await,
+        )
+        .await;
     }
 
     async fn handle_experimental_feature_enablement_set(
@@ -1006,6 +1040,18 @@ impl MessageProcessor {
     async fn handle_config_requirements_read(&self, request_id: ConnectionRequestId) {
         self.send_result_response(request_id, self.config_api.config_requirements_read().await)
             .await;
+    }
+
+    async fn handle_model_preferences_write(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ModelPreferencesWriteParams,
+    ) {
+        self.handle_config_mutation_result(
+            request_id,
+            self.config_api.write_model_preferences(params).await,
+        )
+        .await;
     }
 
     async fn handle_external_agent_migration_detect(

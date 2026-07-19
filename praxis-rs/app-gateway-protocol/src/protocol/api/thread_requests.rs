@@ -1,15 +1,27 @@
 use super::*;
 
 // === Threads, Turns, and Items ===
+/// Most recent turns hydrated for latency-sensitive interactive clients.
+pub const INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT: u32 = 80;
+/// Most recent turn hydrated when a client only needs canonical runtime routing state.
+pub const RUNTIME_THREAD_TURN_HYDRATION_LIMIT: u32 = 1;
+/// Explicitly suppresses turn hydration for clients using paged history reads.
+pub const NO_THREAD_TURN_HYDRATION: u32 = 0;
+
 // Thread APIs
 #[derive(
     Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema, TS, ExperimentalApi,
 )]
 pub struct ThreadStartParams {
+    /// Optional caller-assigned UUID for exact start reconciliation across transport failures.
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
     #[ts(optional = nullable)]
     pub model: Option<String>,
     #[ts(optional = nullable)]
     pub model_provider: Option<String>,
+    #[ts(optional = nullable)]
+    pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(
         default,
         deserialize_with = "crate::protocol::serde_helpers::deserialize_double_option",
@@ -128,6 +140,8 @@ pub struct ThreadResumeParams {
     pub model: Option<String>,
     #[ts(optional = nullable)]
     pub model_provider: Option<String>,
+    #[ts(optional = nullable)]
+    pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(
         default,
         deserialize_with = "crate::protocol::serde_helpers::deserialize_double_option",
@@ -171,6 +185,18 @@ pub struct ThreadResumeParams {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadChildStartParams {
+    pub parent_thread_id: String,
+    #[experimental(nested)]
+    pub thread: ThreadStartParams,
+    #[ts(optional = nullable)]
+    pub agent_role: Option<String>,
+    #[ts(optional = nullable)]
+    pub agent_title: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadResumeResponse {
     pub thread: Thread,
     pub model: String,
@@ -201,6 +227,10 @@ pub struct ThreadResumeResponse {
 pub struct ThreadForkParams {
     pub thread_id: String,
 
+    /// Optional caller-assigned UUID for the forked thread.
+    #[ts(optional = nullable)]
+    pub forked_thread_id: Option<String>,
+
     /// [UNSTABLE] Specify the rollout path to fork from.
     /// If specified, the thread_id param will be ignored.
     #[experimental("thread/fork.path")]
@@ -212,6 +242,8 @@ pub struct ThreadForkParams {
     pub model: Option<String>,
     #[ts(optional = nullable)]
     pub model_provider: Option<String>,
+    #[ts(optional = nullable)]
+    pub reasoning_effort: Option<ReasoningEffort>,
     #[serde(
         default,
         deserialize_with = "crate::protocol::serde_helpers::deserialize_double_option",
@@ -361,7 +393,9 @@ pub struct ThreadUnarchiveParams {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadSetNameResponse {}
+pub struct ThreadSetNameResponse {
+    pub thread_name: String,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -416,6 +450,40 @@ pub struct ThreadModelChangedNotification {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional = nullable)]
     pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadPermissionsSetParams {
+    pub thread_id: String,
+    pub approval_policy: AskForApproval,
+    pub approvals_reviewer: ApprovalsReviewer,
+    pub sandbox_policy: SandboxPolicy,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadPermissionsSetResponse {
+    pub thread: Thread,
+    pub previous_approval_policy: AskForApproval,
+    pub previous_approvals_reviewer: ApprovalsReviewer,
+    pub previous_sandbox_policy: SandboxPolicy,
+    pub approval_policy: AskForApproval,
+    pub approvals_reviewer: ApprovalsReviewer,
+    pub sandbox_policy: SandboxPolicy,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadPermissionsChangedNotification {
+    pub thread_id: String,
+    pub thread: Thread,
+    pub previous_approval_policy: AskForApproval,
+    pub previous_approvals_reviewer: ApprovalsReviewer,
+    pub previous_sandbox_policy: SandboxPolicy,
+    pub approval_policy: AskForApproval,
+    pub approvals_reviewer: ApprovalsReviewer,
+    pub sandbox_policy: SandboxPolicy,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -549,10 +617,29 @@ pub struct ThreadBackgroundTerminalsCleanResponse {}
 pub struct ThreadRollbackParams {
     pub thread_id: String,
     /// The number of turns to drop from the end of the thread. Must be >= 1.
-    ///
-    /// This only modifies the thread's history and does not revert local file changes
-    /// that have been made by the agent. Clients are responsible for reverting these changes.
     pub num_turns: u32,
+    pub workspace_action: ThreadRewindWorkspaceAction,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ThreadRewindWorkspaceAction {
+    Keep,
+    Restore { checkpoint_id: WorkspaceCheckpointId },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRewindPreviewParams {
+    pub thread_id: String,
+    pub num_turns: u32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRewindPreviewResponse {
+    pub checkpoint_id: Option<WorkspaceCheckpointId>,
+    pub changed_files: Vec<WorkspaceCheckpointFileSummary>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -564,6 +651,7 @@ pub struct ThreadRollbackResponse {
     /// persist all agent interactions, such as command executions. This is the same
     /// behavior as `thread/resume`.
     pub thread: Thread,
+    pub workspace_restore: Option<ThreadWorkspaceRestoreResult>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -624,6 +712,21 @@ pub enum ThreadSourceKind {
     Unknown,
 }
 
+impl ThreadSourceKind {
+    pub const ALL: [Self; 10] = [
+        Self::Cli,
+        Self::VsCode,
+        Self::Exec,
+        Self::AppGateway,
+        Self::SubAgent,
+        Self::SubAgentReview,
+        Self::SubAgentCompact,
+        Self::SubAgentThreadSpawn,
+        Self::SubAgentOther,
+        Self::Unknown,
+    ];
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadSortKey {
@@ -638,6 +741,39 @@ pub struct ThreadListResponse {
     /// Opaque cursor to pass to the next call to continue after the last item.
     /// if None, there are no more items to return.
     pub next_cursor: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum ExternalAgentSessionSource {
+    Codex,
+    Cursor,
+}
+
+impl From<praxis_app_core::thread_commands::ExternalThreadCommandSource>
+    for ExternalAgentSessionSource
+{
+    fn from(source: praxis_app_core::thread_commands::ExternalThreadCommandSource) -> Self {
+        match source {
+            praxis_app_core::thread_commands::ExternalThreadCommandSource::Codex => Self::Codex,
+            praxis_app_core::thread_commands::ExternalThreadCommandSource::Cursor => Self::Cursor,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalAgentSessionListParams {
+    pub source: ExternalAgentSessionSource,
+    #[ts(optional = nullable)]
+    pub cursor: Option<String>,
+    #[ts(optional = nullable)]
+    pub limit: Option<u32>,
+    #[ts(optional = nullable)]
+    pub sort_key: Option<ThreadSortKey>,
+    #[ts(optional = nullable)]
+    pub search_term: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -716,6 +852,28 @@ pub enum ThreadStatus {
     },
 }
 
+impl ThreadStatus {
+    pub fn is_loaded(&self) -> bool {
+        !matches!(self, Self::NotLoaded)
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Active { .. })
+    }
+
+    pub fn has_active_flag(&self, flag: ThreadActiveFlag) -> bool {
+        matches!(self, Self::Active { active_flags } if active_flags.contains(&flag))
+    }
+
+    pub fn is_waiting_on_approval(&self) -> bool {
+        self.has_active_flag(ThreadActiveFlag::WaitingOnApproval)
+    }
+
+    pub fn is_waiting_on_user_input(&self) -> bool {
+        self.has_active_flag(ThreadActiveFlag::WaitingOnUserInput)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ThreadActiveFlag {
@@ -741,6 +899,15 @@ pub struct ThreadReadParams {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadReadResponse {
     pub thread: Thread,
+    pub workspace_restore: Option<ThreadWorkspaceRestoreResult>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadWorkspaceRestoreResult {
+    pub checkpoint_id: WorkspaceCheckpointId,
+    pub restored_files: u32,
+    pub removed_files: u32,
 }
 
 pub const THREAD_HISTORY_MAX_PAGE_SIZE: u32 = 200;
@@ -796,4 +963,73 @@ pub struct ThreadHistoryReadResponse {
     pub thread_id: String,
     pub turns: Vec<Turn>,
     pub page: ThreadHistoryPage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadHistoryResponseValidationError {
+    detail: String,
+}
+
+impl std::fmt::Display for ThreadHistoryResponseValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.detail.as_str())
+    }
+}
+
+impl std::error::Error for ThreadHistoryResponseValidationError {}
+
+impl ThreadHistoryReadResponse {
+    pub fn validate_for_request(
+        &self,
+        request: &ThreadHistoryReadParams,
+    ) -> Result<(), ThreadHistoryResponseValidationError> {
+        let invalid = |detail| Err(ThreadHistoryResponseValidationError { detail });
+        if self.thread_id != request.thread_id {
+            return invalid(format!(
+                "response thread {} does not match requested thread {}",
+                self.thread_id, request.thread_id
+            ));
+        }
+
+        let range = self.page.range;
+        if range.start_turn > range.end_turn || range.end_turn > range.total_turns {
+            return invalid(format!(
+                "invalid history range {}..{} of {} turns",
+                range.start_turn, range.end_turn, range.total_turns
+            ));
+        }
+        let returned_turns = u64::try_from(self.turns.len()).unwrap_or(u64::MAX);
+        let range_len = range.end_turn - range.start_turn;
+        if returned_turns != range_len {
+            return invalid(format!(
+                "history range contains {range_len} turns but response contains {returned_turns}"
+            ));
+        }
+        if range_len > u64::from(request.limit) {
+            return invalid(format!(
+                "history response contains {range_len} turns for requested limit {}",
+                request.limit
+            ));
+        }
+
+        let requested_end = request
+            .cursor
+            .map_or(range.total_turns, |cursor| cursor.before_turn);
+        if range.end_turn != requested_end {
+            return invalid(format!(
+                "history response ends at {} instead of requested boundary {requested_end}",
+                range.end_turn
+            ));
+        }
+        let expected_older_cursor = (range.start_turn > 0).then_some(ThreadHistoryCursor {
+            before_turn: range.start_turn,
+        });
+        if self.page.older_cursor != expected_older_cursor {
+            return invalid(format!(
+                "history older cursor {:?} does not match range start {}",
+                self.page.older_cursor, range.start_turn
+            ));
+        }
+        Ok(())
+    }
 }

@@ -1,123 +1,124 @@
-use super::model_request::collect_explicit_app_ids_from_skill_items;
-use super::model_request::filter_connectors_for_input;
-use super::model_request::filter_praxis_apps_mcp_tools;
-use super::*;
-use crate::config::ConfigBuilder;
-use crate::config::test_config;
-use crate::config_loader::ConfigLayerStack;
-use crate::config_loader::ConfigLayerStackOrdering;
-use crate::config_loader::NetworkConstraints;
-use crate::config_loader::NetworkDomainPermissionToml;
-use crate::config_loader::NetworkDomainPermissionsToml;
-use crate::config_loader::RequirementSource;
-use crate::config_loader::Sourced;
-use crate::exec::ExecCapturePolicy;
-use crate::exec::ExecToolCallOutput;
-use crate::function_tool::FunctionCallError;
-use crate::models_manager::model_info;
-use crate::shell::default_user_shell;
-use crate::tools::format_exec_output_str;
+pub(super) use super::model_request::collect_explicit_app_ids_from_skill_items;
+pub(super) use super::model_request::filter_connectors_for_input;
+pub(super) use super::model_request::filter_praxis_apps_mcp_tools;
+pub(super) use super::*;
+pub(super) use crate::config::ConfigBuilder;
+pub(super) use crate::config::test_config;
+pub(super) use crate::config_loader::ConfigLayerStack;
+pub(super) use crate::config_loader::ConfigLayerStackOrdering;
+pub(super) use crate::config_loader::NetworkConstraints;
+pub(super) use crate::config_loader::NetworkDomainPermissionToml;
+pub(super) use crate::config_loader::NetworkDomainPermissionsToml;
+pub(super) use crate::config_loader::RequirementSource;
+pub(super) use crate::config_loader::Sourced;
+pub(super) use crate::exec::ExecCapturePolicy;
+pub(super) use crate::exec::ExecToolCallOutput;
+pub(super) use crate::function_tool::FunctionCallError;
+pub(super) use crate::models_manager::model_info;
+pub(super) use crate::shell::default_user_shell;
+pub(super) use crate::tools::format_exec_output_str;
 
-use praxis_features::Features;
-use praxis_login::OpenAiAccountAuth;
-use praxis_mcp::mcp_connection_manager::ToolInfo;
-use praxis_protocol::ThreadId;
-use praxis_protocol::models::FunctionCallOutputBody;
-use praxis_protocol::models::FunctionCallOutputPayload;
-use praxis_protocol::permissions::FileSystemAccessMode;
-use praxis_protocol::permissions::FileSystemPath;
-use praxis_protocol::permissions::FileSystemSandboxEntry;
-use praxis_protocol::permissions::FileSystemSandboxPolicy;
-use praxis_protocol::permissions::FileSystemSpecialPath;
-use praxis_protocol::protocol::NonSteerableTurnKind;
-use praxis_protocol::protocol::ReadOnlyAccess;
-use praxis_protocol::protocol::SandboxPolicy;
-use praxis_protocol::request_permissions::PermissionGrantScope;
-use praxis_protocol::request_permissions::RequestPermissionProfile;
-use tracing::Span;
+pub(super) use praxis_features::Features;
+pub(super) use praxis_login::OpenAiAccountAuth;
+pub(super) use praxis_mcp::mcp_connection_manager::ToolInfo;
+pub(super) use praxis_protocol::ThreadId;
+pub(super) use praxis_protocol::models::FunctionCallOutputBody;
+pub(super) use praxis_protocol::models::FunctionCallOutputPayload;
+pub(super) use praxis_protocol::permissions::FileSystemAccessMode;
+pub(super) use praxis_protocol::permissions::FileSystemPath;
+pub(super) use praxis_protocol::permissions::FileSystemSandboxEntry;
+pub(super) use praxis_protocol::permissions::FileSystemSandboxPolicy;
+pub(super) use praxis_protocol::permissions::FileSystemSpecialPath;
+pub(super) use praxis_protocol::protocol::NonSteerableTurnKind;
+pub(super) use praxis_protocol::protocol::ReadOnlyAccess;
+pub(super) use praxis_protocol::protocol::SandboxPolicy;
+pub(super) use praxis_protocol::request_permissions::PermissionGrantScope;
+pub(super) use praxis_protocol::request_permissions::RequestPermissionProfile;
+pub(super) use tracing::Instrument;
+pub(super) use tracing::Span;
 
-use crate::rollout::policy::EventPersistenceMode;
-use crate::rollout::recorder::RolloutRecorder;
-use crate::rollout::recorder::RolloutRecorderParams;
-use crate::state::AgentTaskKind;
-use crate::tasks::AgentTask;
-use crate::tasks::AgentTaskContext;
-use crate::tools::ToolRouter;
-use crate::tools::context::FunctionToolOutput;
-use crate::tools::context::ToolInvocation;
-use crate::tools::context::ToolPayload;
-use crate::tools::handlers::ShellHandler;
-use crate::tools::handlers::UnifiedExecHandler;
-use crate::tools::registry::ToolHandler;
-use crate::tools::router::ToolCallSource;
-use crate::turn_completed_output::CompletedOutputCtx;
-use crate::turn_completed_output::handle_completed_output_item;
-use crate::turn_diff_tracker::TurnDiffTracker;
-use core_test_support::PathBufExt;
-use core_test_support::context_snapshot;
-use core_test_support::context_snapshot::ContextSnapshotOptions;
-use core_test_support::context_snapshot::ContextSnapshotRenderMode;
-use core_test_support::responses::ev_completed;
-use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_sse_once;
-use core_test_support::responses::sse;
-use core_test_support::responses::start_mock_server;
-use core_test_support::test_praxis::test_praxis;
-use core_test_support::tracing::install_test_tracing;
-use core_test_support::wait_for_event;
-use opentelemetry::trace::TraceContextExt;
-use opentelemetry::trace::TraceId;
-use praxis_execpolicy::Decision;
-use praxis_execpolicy::NetworkRuleProtocol;
-use praxis_execpolicy::Policy;
-use praxis_network_proxy::NetworkProxyConfig;
-use praxis_otel::TelemetryAuthMode;
-use praxis_protocol::apps::AppInfo;
-use praxis_protocol::config_types::CollaborationMode;
-use praxis_protocol::config_types::ModeKind;
-use praxis_protocol::config_types::Settings;
-use praxis_protocol::models::BaseInstructions;
-use praxis_protocol::models::ContentItem;
-use praxis_protocol::models::DeveloperInstructions;
-use praxis_protocol::models::ResponseInputItem;
-use praxis_protocol::models::ResponseItem;
-use praxis_protocol::openai_models::ModelsResponse;
-use praxis_protocol::protocol::AskForApproval;
-use praxis_protocol::protocol::CompactedItem;
-use praxis_protocol::protocol::ConversationAudioParams;
-use praxis_protocol::protocol::CreditsSnapshot;
-use praxis_protocol::protocol::GranularApprovalConfig;
-use praxis_protocol::protocol::InitialHistory;
-use praxis_protocol::protocol::NetworkApprovalProtocol;
-use praxis_protocol::protocol::RateLimitSnapshot;
-use praxis_protocol::protocol::RateLimitWindow;
-use praxis_protocol::protocol::RealtimeAudioFrame;
-use praxis_protocol::protocol::ResumedHistory;
-use praxis_protocol::protocol::RolloutItem;
-use praxis_protocol::protocol::Submission;
-use praxis_protocol::protocol::ThreadRolledBackEvent;
-use praxis_protocol::protocol::TokenCountEvent;
-use praxis_protocol::protocol::TokenUsage;
-use praxis_protocol::protocol::TokenUsageInfo;
-use praxis_protocol::protocol::TurnAbortedEvent;
-use praxis_protocol::protocol::TurnCompleteEvent;
-use praxis_protocol::protocol::TurnStartedEvent;
-use praxis_protocol::protocol::UserMessageEvent;
-use praxis_protocol::protocol::W3cTraceContext;
-use std::path::Path;
-use std::time::Duration;
-use tokio::time::sleep;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+pub(super) use crate::rollout::policy::EventPersistenceMode;
+pub(super) use crate::rollout::recorder::RolloutRecorder;
+pub(super) use crate::rollout::recorder::RolloutRecorderParams;
+pub(super) use crate::state::AgentTaskKind;
+pub(super) use crate::state::SessionTokenLedger;
+pub(super) use crate::tasks::AgentTask;
+pub(super) use crate::tasks::AgentTaskContext;
+pub(super) use crate::tools::ToolRouter;
+pub(super) use crate::tools::context::FunctionToolOutput;
+pub(super) use crate::tools::context::ToolInvocation;
+pub(super) use crate::tools::context::ToolPayload;
+pub(super) use crate::tools::handlers::ShellHandler;
+pub(super) use crate::tools::handlers::UnifiedExecHandler;
+pub(super) use crate::tools::registry::ToolHandler;
+pub(super) use crate::tools::router::ToolCallSource;
+pub(super) use crate::turn_completed_output::CompletedOutputCtx;
+pub(super) use crate::turn_completed_output::handle_completed_output_item;
+pub(super) use crate::turn_diff_tracker::TurnDiffTracker;
+pub(super) use core_test_support::PathBufExt;
+pub(super) use core_test_support::context_snapshot;
+pub(super) use core_test_support::context_snapshot::ContextSnapshotOptions;
+pub(super) use core_test_support::context_snapshot::ContextSnapshotRenderMode;
+pub(super) use core_test_support::responses::ev_completed;
+pub(super) use core_test_support::responses::ev_response_created;
+pub(super) use core_test_support::responses::mount_sse_once;
+pub(super) use core_test_support::responses::sse;
+pub(super) use core_test_support::responses::start_mock_server;
+pub(super) use core_test_support::test_praxis::test_praxis;
+pub(super) use core_test_support::tracing::install_test_tracing;
+pub(super) use core_test_support::wait_for_event;
+pub(super) use opentelemetry::trace::TraceContextExt;
+pub(super) use opentelemetry::trace::TraceId;
+pub(super) use praxis_execpolicy::Decision;
+pub(super) use praxis_execpolicy::NetworkRuleProtocol;
+pub(super) use praxis_execpolicy::Policy;
+pub(super) use praxis_network_proxy::NetworkProxyConfig;
+pub(super) use praxis_otel::TelemetryAuthMode;
+pub(super) use praxis_protocol::apps::AppInfo;
+pub(super) use praxis_protocol::config_types::CollaborationMode;
+pub(super) use praxis_protocol::config_types::ModeKind;
+pub(super) use praxis_protocol::config_types::Settings;
+pub(super) use praxis_protocol::models::BaseInstructions;
+pub(super) use praxis_protocol::models::ContentItem;
+pub(super) use praxis_protocol::models::DeveloperInstructions;
+pub(super) use praxis_protocol::models::ResponseInputItem;
+pub(super) use praxis_protocol::models::ResponseItem;
+pub(super) use praxis_protocol::openai_models::ModelsResponse;
+pub(super) use praxis_protocol::protocol::AskForApproval;
+pub(super) use praxis_protocol::protocol::CompactedItem;
+pub(super) use praxis_protocol::protocol::ConversationAudioParams;
+pub(super) use praxis_protocol::protocol::CreditsSnapshot;
+pub(super) use praxis_protocol::protocol::GranularApprovalConfig;
+pub(super) use praxis_protocol::protocol::InitialHistory;
+pub(super) use praxis_protocol::protocol::NetworkApprovalProtocol;
+pub(super) use praxis_protocol::protocol::RateLimitSnapshot;
+pub(super) use praxis_protocol::protocol::RateLimitWindow;
+pub(super) use praxis_protocol::protocol::RealtimeAudioFrame;
+pub(super) use praxis_protocol::protocol::ResumedHistory;
+pub(super) use praxis_protocol::protocol::RolloutItem;
+pub(super) use praxis_protocol::protocol::Submission;
+pub(super) use praxis_protocol::protocol::ThreadRolledBackEvent;
+pub(super) use praxis_protocol::protocol::TokenCountEvent;
+pub(super) use praxis_protocol::protocol::TokenUsage;
+pub(super) use praxis_protocol::protocol::TokenUsageInfo;
+pub(super) use praxis_protocol::protocol::TurnAbortedEvent;
+pub(super) use praxis_protocol::protocol::TurnCompleteEvent;
+pub(super) use praxis_protocol::protocol::TurnStartedEvent;
+pub(super) use praxis_protocol::protocol::UserMessageEvent;
+pub(super) use praxis_protocol::protocol::W3cTraceContext;
+pub(super) use std::path::Path;
+pub(super) use std::time::Duration;
+pub(super) use tokio::time::sleep;
+pub(super) use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use praxis_protocol::mcp::CallToolResult as McpCallToolResult;
-use pretty_assertions::assert_eq;
-use rmcp::model::JsonObject;
-use rmcp::model::Tool;
-use serde::Deserialize;
-use serde_json::json;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration as StdDuration;
+pub(super) use praxis_protocol::mcp::CallToolResult as McpCallToolResult;
+pub(super) use rmcp::model::JsonObject;
+pub(super) use rmcp::model::Tool;
+pub(super) use serde::Deserialize;
+pub(super) use serde_json::json;
+pub(super) use std::path::PathBuf;
+pub(super) use std::sync::Arc;
+pub(super) use std::time::Duration as StdDuration;
 
 #[path = "praxis_tests_guardian.rs"]
 mod guardian_tests;
@@ -132,8 +133,10 @@ mod session_config;
 mod session_history;
 #[path = "praxis_tests/shutdown_and_tasks.rs"]
 mod shutdown_and_tasks;
+pub(crate) use shutdown_and_tasks::make_session_and_context_with_dynamic_tools_and_rx;
+pub(crate) use shutdown_and_tasks::make_session_and_context_with_rx;
 
-use praxis_protocol::models::function_call_output_content_items_to_text;
+pub(super) use praxis_protocol::models::function_call_output_content_items_to_text;
 
 fn expect_text_tool_output(output: &FunctionToolOutput) -> String {
     function_call_output_content_items_to_text(&output.body).unwrap_or_default()
@@ -295,6 +298,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
     };
 
     SessionConfiguration {
+        requested_thread_id: None,
         provider: config.model_provider.clone(),
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
@@ -356,6 +360,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         },
     };
     let session_configuration = SessionConfiguration {
+        requested_thread_id: None,
         provider: config.model_provider.clone(),
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
@@ -399,6 +404,10 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     );
 
     let state = SessionState::new(session_configuration.clone());
+    let permission_ledger =
+        PermissionLedger::from_session_configuration(&conversation_id, &session_configuration);
+    let effective_permissions = permission_ledger.live_effective_permissions();
+    let token_ledger = SessionTokenLedger::from_state(&state);
     let plugins_manager = Arc::new(PluginsManager::new(config.praxis_home.clone()));
     let mcp_manager = Arc::new(McpManager::new(Arc::clone(&plugins_manager)));
     let skills_manager = Arc::new(SkillsManager::new(
@@ -457,18 +466,12 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             config.model_verbosity,
             config.features.enabled(Feature::EnableRequestCompression),
             config.features.enabled(Feature::RuntimeMetrics),
-            Session::build_model_client_beta_features_header(config.as_ref()),
+            None,
             crate::llm::local_models::NativeLocalModelConfig::from_config(config.as_ref()),
         ),
-        code_mode_service: crate::tools::code_mode::CodeModeService::new(
-            config.js_repl_node_path.clone(),
-        ),
+        code_mode_service: crate::tools::code_mode::CodeModeService::new(),
         environment: Arc::clone(&environment),
     };
-    let js_repl = Arc::new(JsReplHandle::with_node_path(
-        config.js_repl_node_path.clone(),
-        config.js_repl_node_module_dirs.clone(),
-    ));
 
     let plugin_outcome = services
         .plugins_manager
@@ -494,7 +497,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         /*network*/ None,
         environment,
         "turn_id".to_string(),
-        Arc::clone(&js_repl),
+        effective_permissions,
         skills_outcome,
     );
 
@@ -504,7 +507,9 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         tx_event,
         agent_status: agent_status_tx,
         out_of_band_elicitation_paused: watch::channel(false).0,
+        permission_ledger,
         state: Mutex::new(state),
+        token_ledger: RwLock::new(token_ledger),
         features: config.features.clone(),
         pending_mcp_server_refresh_config: Mutex::new(None),
         conversation: Arc::new(RealtimeConversationManager::new()),
@@ -515,8 +520,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         guardian_review_session: crate::guardian::GuardianReviewSessionManager::default(),
         services,
         goal_runtime: crate::goals::GoalRuntimeState::new(),
+        context_governance: Default::default(),
         llm_runtime_catalog,
-        js_repl,
         next_internal_sub_id: AtomicU64::new(0),
         auto_title_attempted: AtomicBool::new(false),
         auto_summary_in_flight: AtomicBool::new(false),

@@ -379,6 +379,7 @@ impl PraxisMessageProcessor {
                     }],
                     automation.config_json.get("outputSchema").cloned(),
                 ),
+                None,
             )
             .await;
 
@@ -433,6 +434,7 @@ impl PraxisMessageProcessor {
         self.emit_automation_run_updated(run.clone()).await;
         let turn = Turn {
             id: turn_id,
+            collaboration_mode_kind: Default::default(),
             items: Vec::new(),
             error: None,
             status: TurnStatus::InProgress,

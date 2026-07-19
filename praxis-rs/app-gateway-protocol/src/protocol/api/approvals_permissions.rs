@@ -69,6 +69,15 @@ impl From<CoreNetworkApprovalContext> for NetworkApprovalContext {
     }
 }
 
+impl NetworkApprovalContext {
+    pub fn into_core(self) -> CoreNetworkApprovalContext {
+        CoreNetworkApprovalContext {
+            host: self.host,
+            protocol: self.protocol.to_core(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AdditionalFileSystemPermissions {

@@ -73,6 +73,23 @@ impl PraxisMessageProcessor {
                 });
             }
         };
+        Self::ensure_conversation_listener_for_thread_task(
+            listener_task_context,
+            conversation_id,
+            conversation,
+            connection_id,
+            raw_events_enabled,
+        )
+        .await
+    }
+
+    pub(super) async fn ensure_conversation_listener_for_thread_task(
+        listener_task_context: ListenerTaskContext,
+        conversation_id: ThreadId,
+        conversation: Arc<PraxisThread>,
+        connection_id: ConnectionId,
+        raw_events_enabled: bool,
+    ) -> Result<EnsureConversationListenerResult, JSONRPCErrorError> {
         let Some(thread_state) = listener_task_context
             .thread_state_manager
             .try_ensure_connection_subscribed(conversation_id, connection_id, raw_events_enabled)

@@ -173,6 +173,7 @@ impl PraxisMessageProcessor {
         }
         let TurnStartParams {
             thread_id,
+            turn_id,
             input,
             cwd,
             approval_policy,
@@ -187,6 +188,18 @@ impl PraxisMessageProcessor {
             output_schema,
             collaboration_mode,
         } = params;
+        let requested_turn_id = match turn_id {
+            Some(turn_id) if uuid::Uuid::parse_str(&turn_id).is_ok() => Some(turn_id),
+            Some(_) => {
+                self.send_invalid_request_error(
+                    request_id,
+                    "turnId must be a valid UUID".to_owned(),
+                )
+                .await;
+                return;
+            }
+            None => None,
+        };
         let Some((thread_id, thread)) = self
             .ensure_thread_for_request(&thread_id, &request_id)
             .await
@@ -236,7 +249,13 @@ impl PraxisMessageProcessor {
 
         // Start the turn by submitting the user input. Return its submission id as turn_id.
         let turn_id = self
-            .submit_connection_owned_turn(&request_id, thread_id, thread.as_ref(), op)
+            .submit_connection_owned_turn(
+                &request_id,
+                thread_id,
+                thread.as_ref(),
+                op,
+                requested_turn_id,
+            )
             .await;
 
         match turn_id {
@@ -246,6 +265,7 @@ impl PraxisMessageProcessor {
                     .await;
                 let turn = Turn {
                     id: turn_id.clone(),
+                    collaboration_mode_kind: Default::default(),
                     items: vec![],
                     error: None,
                     status: TurnStatus::InProgress,
@@ -299,6 +319,18 @@ impl PraxisMessageProcessor {
             .await;
             return;
         }
+        let input_id = match params.input_id {
+            Some(input_id) if uuid::Uuid::parse_str(&input_id).is_ok() => input_id,
+            Some(_) => {
+                self.send_invalid_request_error(
+                    request_id,
+                    "inputId must be a valid UUID".to_string(),
+                )
+                .await;
+                return;
+            }
+            None => uuid::Uuid::now_v7().to_string(),
+        };
         self.outgoing
             .record_request_turn_id(&request_id, &params.expected_turn_id)
             .await;
@@ -314,11 +346,15 @@ impl PraxisMessageProcessor {
             .collect();
 
         match thread
-            .steer_input(mapped_items, Some(&params.expected_turn_id))
+            .steer_input(
+                mapped_items,
+                Some(&params.expected_turn_id),
+                Some(input_id.clone()),
+            )
             .await
         {
             Ok(turn_id) => {
-                let response = TurnSteerResponse { turn_id };
+                let response = TurnSteerResponse { turn_id, input_id };
                 self.outgoing.send_response(request_id, response).await;
             }
             Err(err) => {
@@ -585,6 +621,7 @@ impl PraxisMessageProcessor {
 
         Turn {
             id: turn_id,
+            collaboration_mode_kind: Default::default(),
             items,
             error: None,
             status: TurnStatus::InProgress,
@@ -664,7 +701,7 @@ impl PraxisMessageProcessor {
         } = self
             .thread_manager
             .fork_thread(
-                ThreadForkSnapshot::Interrupted,
+                ThreadForkSnapshot::CurrentPersistedWithClosedTurn,
                 config,
                 rollout_path,
                 /*persist_extended_history*/ false,

@@ -41,6 +41,24 @@ pub enum SessionSource {
     Unknown,
 }
 
+impl SessionSource {
+    pub fn agent_rank(&self) -> u8 {
+        match self {
+            Self::SubAgent(source) => source.agent_rank(),
+            _ => praxis_protocol::protocol::AgentRank::Rank0.rank(),
+        }
+    }
+
+    pub fn parent_thread_id(&self) -> Option<praxis_protocol::ThreadId> {
+        match self {
+            Self::SubAgent(CoreSubAgentSource::ThreadSpawn {
+                parent_thread_id, ..
+            }) => Some(*parent_thread_id),
+            _ => None,
+        }
+    }
+}
+
 impl From<CoreSessionSource> for SessionSource {
     fn from(value: CoreSessionSource) -> Self {
         match value {

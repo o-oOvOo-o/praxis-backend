@@ -24,6 +24,7 @@ impl From<PraxisSpawnArgs> for SpawnFlow {
 impl SpawnFlow {
     pub(super) async fn run(self) -> PraxisResult<PraxisSpawnOk> {
         let PraxisSpawnArgs {
+            requested_thread_id,
             config,
             auth_manager,
             models_manager,
@@ -62,6 +63,7 @@ impl SpawnFlow {
             session_configuration,
         } = session_setup::build_session_configuration(
             config,
+            requested_thread_id,
             &llm_runtime_catalog,
             models_manager.as_ref(),
             &conversation_history,

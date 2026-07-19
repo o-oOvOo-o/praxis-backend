@@ -2,6 +2,7 @@ use praxis_protocol::models::ResponseInputItem;
 use tracing::warn;
 
 use crate::praxis::Session;
+use crate::state::PendingInput;
 
 const PENDING_INPUT_CHECK_TIMEOUT_MS: u64 = 2_000;
 
@@ -20,9 +21,14 @@ impl Session {
         std::mem::take(&mut *self.idle_pending_input.lock().await)
     }
 
-    pub(crate) async fn drain_pending_input_for_started_turn(&self) -> Vec<ResponseInputItem> {
-        let mut queued_items = self.take_queued_response_items_for_next_turn().await;
-        queued_items.extend(self.get_pending_input().await);
+    pub(crate) async fn drain_pending_input_for_started_turn(&self) -> Vec<PendingInput> {
+        let mut queued_items = self
+            .take_queued_response_items_for_next_turn()
+            .await
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>();
+        queued_items.extend(self.get_pending_inputs().await);
         queued_items
     }
 
@@ -31,6 +37,14 @@ impl Session {
     }
 
     pub async fn get_pending_input(&self) -> Vec<ResponseInputItem> {
+        self.get_pending_inputs()
+            .await
+            .into_iter()
+            .map(PendingInput::into_response_item)
+            .collect()
+    }
+
+    pub(crate) async fn get_pending_inputs(&self) -> Vec<PendingInput> {
         let pending_input = {
             let mut active = self.active_turn.lock().await;
             match active.as_mut() {
@@ -56,8 +70,8 @@ impl Session {
         );
         // Priority order matters: explicit input, AgentOS commands, then mailbox notifications.
         combined.extend(pending_input);
-        combined.extend(runtime_command_items);
-        combined.extend(mailbox_items);
+        combined.extend(runtime_command_items.into_iter().map(Into::into));
+        combined.extend(mailbox_items.into_iter().map(Into::into));
         combined
     }
 

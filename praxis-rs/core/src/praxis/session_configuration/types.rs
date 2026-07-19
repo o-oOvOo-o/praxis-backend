@@ -7,6 +7,7 @@ use praxis_protocol::config_types::Personality;
 use praxis_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use praxis_protocol::config_types::ServiceTier;
 use praxis_protocol::config_types::WindowsSandboxLevel;
+use praxis_protocol::ThreadId;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::permissions::FileSystemSandboxPolicy;
 use praxis_protocol::permissions::NetworkSandboxPolicy;
@@ -36,6 +37,9 @@ pub(crate) struct PreviousTurnSettings {
 
 #[derive(Clone)]
 pub(crate) struct SessionConfiguration {
+    /// Caller-assigned identity for a new thread, if requested by the owning API.
+    pub(in crate::praxis) requested_thread_id: Option<ThreadId>,
+
     /// Provider identifier ("openai", "openrouter", ...).
     pub(in crate::praxis) provider: ModelProviderInfo,
 

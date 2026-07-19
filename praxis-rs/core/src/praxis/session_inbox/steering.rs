@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::praxis::Session;
 use crate::praxis::SteerInputError;
+use crate::state::PendingInput;
 
 impl Session {
     /// Inject additional user input into the currently active turn.
@@ -14,6 +15,7 @@ impl Session {
         &self,
         input: Vec<UserInput>,
         expected_turn_id: Option<&str>,
+        input_id: Option<String>,
     ) -> Result<String, SteerInputError> {
         if input.is_empty() {
             return Err(SteerInputError::EmptyInput);
@@ -44,7 +46,7 @@ impl Session {
         let active_turn_id = active_turn_id.clone();
         let pending_input_ready = Arc::clone(&active_turn.pending_input_ready);
         let mut turn_state = active_turn.turn_state.lock().await;
-        turn_state.push_pending_input(input.into());
+        turn_state.push_pending_input(PendingInput::user_message(input.into(), input_id));
         drop(turn_state);
         drop(active);
         pending_input_ready.notify_one();
@@ -62,7 +64,7 @@ impl Session {
                 let pending_input_ready = Arc::clone(&at.pending_input_ready);
                 let mut ts = at.turn_state.lock().await;
                 for item in input {
-                    ts.push_pending_input(item);
+                    ts.push_pending_input(item.into());
                 }
                 drop(ts);
                 pending_input_ready.notify_one();
@@ -73,6 +75,11 @@ impl Session {
     }
 
     pub async fn prepend_pending_input(&self, input: Vec<ResponseInputItem>) -> Result<(), ()> {
+        self.prepend_pending_inputs(input.into_iter().map(Into::into).collect())
+            .await
+    }
+
+    pub(crate) async fn prepend_pending_inputs(&self, input: Vec<PendingInput>) -> Result<(), ()> {
         let mut active = self.active_turn.lock().await;
         match active.as_mut() {
             Some(at) => {

@@ -54,6 +54,7 @@ pub struct ThreadControlQueueItem {
 
 #[derive(Debug, Clone)]
 pub struct ThreadControlQueueCreateParams {
+    pub queue_id: Option<String>,
     pub target_thread_id: String,
     pub controller_json: Value,
     pub text: String,

@@ -7,6 +7,7 @@ mod server_scope;
 use praxis_mcp::mcp_connection_manager::McpConnectionManager;
 use praxis_mcp::mcp_connection_manager::praxis_apps_tools_cache_key;
 use tracing::Instrument;
+use tracing::info;
 use tracing::info_span;
 
 use crate::praxis::INITIAL_SUBMIT_ID;
@@ -28,7 +29,9 @@ pub(super) async fn start(input: McpStartupInput<'_>) -> anyhow::Result<()> {
     let server_scope = server_scope::McpStartupServerScope::from_servers(&mcp_servers);
     let tool_plugin_provenance = mcp_manager.tool_plugin_provenance(config);
 
+    info!(conversation_id = %session.conversation_id, phase = "reset", "MCP startup entering phase");
     cancellation::reset_startup_token(session).await;
+    info!(conversation_id = %session.conversation_id, phase = "manager", "MCP startup entering phase");
     let (mcp_connection_manager, cancel_token) = McpConnectionManager::new(
         &mcp_servers,
         config.mcp_oauth_credentials_store_mode,
@@ -48,11 +51,15 @@ pub(super) async fn start(input: McpStartupInput<'_>) -> anyhow::Result<()> {
         session_init.required_mcp_server_count = server_scope.required_count,
     ))
     .await;
+    info!(conversation_id = %session.conversation_id, phase = "install", "MCP startup entering phase");
     cancellation::install_connection_manager(session, mcp_connection_manager, cancel_token).await;
+    info!(conversation_id = %session.conversation_id, phase = "required_wait", "MCP startup entering phase");
     required_wait::wait(
         session,
         &server_scope.required_servers,
         server_scope.required_count,
     )
-    .await
+    .await?;
+    info!(conversation_id = %session.conversation_id, phase = "complete", "MCP startup completed");
+    Ok(())
 }

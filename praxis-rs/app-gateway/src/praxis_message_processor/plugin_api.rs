@@ -27,6 +27,9 @@ use praxis_app_gateway_protocol::PluginSetEnabledParams;
 use praxis_app_gateway_protocol::PluginSetEnabledResponse;
 use praxis_app_gateway_protocol::PluginSource;
 use praxis_app_gateway_protocol::PluginSummary;
+use praxis_app_gateway_protocol::PluginSurfaceComponentKind;
+use praxis_app_gateway_protocol::PluginSurfaceRegistration;
+use praxis_app_gateway_protocol::PluginSurfaceSlot;
 use praxis_app_gateway_protocol::PluginSyncParams;
 use praxis_app_gateway_protocol::PluginSyncResponse;
 use praxis_app_gateway_protocol::PluginUninstallParams;
@@ -138,6 +141,10 @@ impl PraxisMessageProcessor {
                                 id: plugin.id,
                                 installed: plugin.installed,
                                 enabled: plugin.enabled,
+                                has_llm_products: plugin
+                                    .llm
+                                    .as_ref()
+                                    .is_some_and(|llm| !llm.products.is_empty()),
                                 name: plugin.name,
                                 source: marketplace_plugin_source_to_info(plugin.source),
                                 install_policy: plugin_install_policy_to_api(
@@ -283,6 +290,11 @@ impl PraxisMessageProcessor {
                 source: marketplace_plugin_source_to_info(outcome.plugin.source),
                 installed: outcome.plugin.installed,
                 enabled: outcome.plugin.enabled,
+                has_llm_products: outcome
+                    .plugin
+                    .llm
+                    .as_ref()
+                    .is_some_and(|llm| !llm.products.is_empty()),
                 install_policy: plugin_install_policy_to_api(outcome.plugin.policy.installation),
                 auth_policy: plugin_auth_policy_to_api(outcome.plugin.policy.authentication),
                 interface: outcome.plugin.interface.map(plugin_interface_to_info),
@@ -977,6 +989,59 @@ fn plugin_interface_to_info(
                 description: command.description,
             })
             .collect(),
+        surfaces: interface
+            .surfaces
+            .into_iter()
+            .map(plugin_surface_to_info)
+            .collect(),
+    }
+}
+
+fn plugin_surface_to_info(
+    surface: praxis_core::plugins::PluginManifestSurfaceRegistration,
+) -> PluginSurfaceRegistration {
+    PluginSurfaceRegistration {
+        slot: plugin_surface_slot_to_info(surface.slot),
+        component: plugin_surface_component_to_info(surface.component),
+        priority: surface.priority,
+    }
+}
+
+fn plugin_surface_slot_to_info(
+    slot: praxis_core::plugins::PluginManifestSurfaceSlot,
+) -> PluginSurfaceSlot {
+    match slot {
+        praxis_core::plugins::PluginManifestSurfaceSlot::WorkerBelowStatus => {
+            PluginSurfaceSlot::WorkerBelowStatus
+        }
+        praxis_core::plugins::PluginManifestSurfaceSlot::WorkerCard => {
+            PluginSurfaceSlot::WorkerCard
+        }
+        praxis_core::plugins::PluginManifestSurfaceSlot::ComposerUpperRow => {
+            PluginSurfaceSlot::ComposerUpperRow
+        }
+        praxis_core::plugins::PluginManifestSurfaceSlot::ThreadHeader => {
+            PluginSurfaceSlot::ThreadHeader
+        }
+        praxis_core::plugins::PluginManifestSurfaceSlot::StatusLine => {
+            PluginSurfaceSlot::StatusLine
+        }
+    }
+}
+
+fn plugin_surface_component_to_info(
+    component: praxis_core::plugins::PluginManifestSurfaceComponentKind,
+) -> PluginSurfaceComponentKind {
+    match component {
+        praxis_core::plugins::PluginManifestSurfaceComponentKind::TokenSavingSummary => {
+            PluginSurfaceComponentKind::TokenSavingSummary
+        }
+        praxis_core::plugins::PluginManifestSurfaceComponentKind::Notice => {
+            PluginSurfaceComponentKind::Notice
+        }
+        praxis_core::plugins::PluginManifestSurfaceComponentKind::MetricStrip => {
+            PluginSurfaceComponentKind::MetricStrip
+        }
     }
 }
 

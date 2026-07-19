@@ -7,6 +7,7 @@ use praxis_protocol::config_types::WindowsSandboxLevel;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::SessionSource;
+use praxis_protocol::ThreadId;
 
 use crate::config::Config;
 use crate::llm::runtime::LlmRuntimeCatalog;
@@ -30,6 +31,7 @@ pub(in crate::praxis::thread_lifecycle) struct ResolvedSessionConfiguration {
 #[allow(clippy::too_many_arguments)]
 pub(in crate::praxis::thread_lifecycle) async fn build_session_configuration(
     config: Config,
+    requested_thread_id: Option<ThreadId>,
     llm_runtime_catalog: &LlmRuntimeCatalog,
     models_manager: &ModelsManager,
     conversation_history: &InitialHistory,
@@ -65,6 +67,7 @@ pub(in crate::praxis::thread_lifecycle) async fn build_session_configuration(
         },
     };
     let session_configuration = SessionConfiguration {
+        requested_thread_id,
         provider: config.model_provider.clone(),
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,

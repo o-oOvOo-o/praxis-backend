@@ -17,6 +17,9 @@ use ts_rs::TS;
 
 pub use praxis_protocol::auth::AuthMode;
 
+/// JSON-RPC application error used when a client rejects a server-initiated request.
+pub const SERVER_REQUEST_REJECTED_ERROR_CODE: i64 = -32000;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayClientInfo {
@@ -382,6 +385,11 @@ client_request_definitions! {
         inspect_params: true,
         response: api::ThreadStartResponse,
     },
+    ThreadChildStart => "thread/child/start" {
+        params: api::ThreadChildStartParams,
+        inspect_params: true,
+        response: api::ThreadStartResponse,
+    },
     ThreadResume => "thread/resume" {
         params: api::ThreadResumeParams,
         inspect_params: true,
@@ -433,6 +441,10 @@ client_request_definitions! {
         params: api::ThreadModelSetParams,
         response: api::ThreadModelSetResponse,
     },
+    ThreadPermissionsSet => "thread/permissions/set" {
+        params: api::ThreadPermissionsSetParams,
+        response: api::ThreadPermissionsSetResponse,
+    },
     ThreadMetadataUpdate => "thread/metadata/update" {
         params: api::ThreadMetadataUpdateParams,
         response: api::ThreadMetadataUpdateResponse,
@@ -466,8 +478,16 @@ client_request_definitions! {
         params: api::ThreadRollbackParams,
         response: api::ThreadRollbackResponse,
     },
+    ThreadRewindPreview => "thread/rewind/preview" {
+        params: api::ThreadRewindPreviewParams,
+        response: api::ThreadRewindPreviewResponse,
+    },
     ThreadList => "thread/list" {
         params: api::ThreadListParams,
+        response: api::ThreadListResponse,
+    },
+    ExternalAgentSessionList => "externalAgentSession/list" {
+        params: api::ExternalAgentSessionListParams,
         response: api::ThreadListResponse,
     },
     ThreadLookup => "thread/lookup" {
@@ -513,6 +533,18 @@ client_request_definitions! {
     ThreadHeartbeatClear => "thread/heartbeat/clear" {
         params: api::ThreadHeartbeatClearParams,
         response: api::ThreadHeartbeatClearResponse,
+    },
+    ThreadSelfworkGet => "thread/selfwork/get" {
+        params: api::ThreadSelfworkGetParams,
+        response: api::ThreadSelfworkGetResponse,
+    },
+    ThreadSelfworkStart => "thread/selfwork/start" {
+        params: api::ThreadSelfworkStartParams,
+        response: api::ThreadSelfworkStartResponse,
+    },
+    ThreadSelfworkStop => "thread/selfwork/stop" {
+        params: api::ThreadSelfworkStopParams,
+        response: api::ThreadSelfworkStopResponse,
     },
     WorkspaceChangeGet => "workspace/change/get" {
         params: api::WorkspaceChangeGetParams,
@@ -643,6 +675,14 @@ client_request_definitions! {
     SkillsConfigWrite => "skills/config/write" {
         params: api::SkillsConfigWriteParams,
         response: api::SkillsConfigWriteResponse,
+    },
+    SkillsInstall => "skills/install" {
+        params: api::SkillsInstallParams,
+        response: api::SkillsInstallResponse,
+    },
+    SkillsUninstall => "skills/uninstall" {
+        params: api::SkillsUninstallParams,
+        response: api::SkillsUninstallResponse,
     },
     PluginInstall => "plugin/install" {
         params: api::PluginInstallParams,
@@ -811,6 +851,14 @@ client_request_definitions! {
         params: api::ConfigBatchWriteParams,
         response: api::ConfigWriteResponse,
     },
+    ModelProviderConfigWrite => "config/modelProvider/write" {
+        params: api::ModelProviderConfigWriteParams,
+        response: api::ModelProviderConfigWriteResponse,
+    },
+    ModelPreferencesWrite => "config/modelPreferences/write" {
+        params: api::ModelPreferencesWriteParams,
+        response: api::ModelPreferencesWriteResponse,
+    },
 
     ConfigRequirementsRead => "configRequirements/read" {
         params: #[ts(type = "undefined")] #[serde(skip_serializing_if = "Option::is_none")] Option<()>,
@@ -840,6 +888,34 @@ client_request_definitions! {
         params: FuzzyFileSearchSessionStopParams,
         response: FuzzyFileSearchSessionStopResponse,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientRequestLifecycleClass {
+    Connect,
+    Standard,
+    TurnSubmission,
+    LongRunning,
+}
+
+impl ClientRequest {
+    pub const fn lifecycle_class(&self) -> ClientRequestLifecycleClass {
+        match self {
+            Self::Initialize { .. } => ClientRequestLifecycleClass::Connect,
+            Self::TurnStart { .. } | Self::TurnSteer { .. } => {
+                ClientRequestLifecycleClass::TurnSubmission
+            }
+            Self::ThreadStart { .. }
+            | Self::ThreadChildStart { .. }
+            | Self::ThreadResume { .. }
+            | Self::ThreadFork { .. }
+            | Self::ExternalAgentSessionList { .. }
+            | Self::SkillsInstall { .. }
+            | Self::PluginInstall { .. }
+            | Self::AudioTranscribe { .. } => ClientRequestLifecycleClass::LongRunning,
+            _ => ClientRequestLifecycleClass::Standard,
+        }
+    }
 }
 
 /// Generates an `enum ServerRequest` where each variant is a request that the
@@ -974,6 +1050,52 @@ macro_rules! server_notification_definitions {
                 match self {
                     $(Self::$variant(params) => serde_json::to_value(params),)*
                 }
+            }
+
+            /// Returns whether transport backpressure must never discard this notification.
+            pub fn requires_lossless_delivery(&self) -> bool {
+                matches!(
+                    self,
+                    Self::Error(_)
+                        | Self::ThreadStarted(_)
+                        | Self::ThreadStatusChanged(_)
+                        | Self::ThreadArchived(_)
+                        | Self::ThreadUnarchived(_)
+                        | Self::ThreadClosed(_)
+                        | Self::ThreadNameUpdated(_)
+                        | Self::ThreadControlChanged(_)
+                        | Self::ThreadGoalUpdated(_)
+                        | Self::ThreadGoalCleared(_)
+                        | Self::ThreadHeartbeatUpdated(_)
+                        | Self::ThreadSelfworkUpdated(_)
+                        | Self::WorkspaceChangeUpdated(_)
+                        | Self::AutomationRunUpdated(_)
+                        | Self::ThreadModelChanged(_)
+                        | Self::ThreadPermissionsChanged(_)
+                        | Self::TurnStarted(_)
+                        | Self::TurnCompleted(_)
+                        | Self::ItemStarted(_)
+                        | Self::ItemCompleted(_)
+                        | Self::AgentMessageDelta(_)
+                        | Self::PlanDelta(_)
+                        | Self::ReasoningSummaryTextDelta(_)
+                        | Self::ReasoningSummaryPartAdded(_)
+                        | Self::ReasoningTextDelta(_)
+                        | Self::TerminalInteraction(_)
+                        | Self::HookStarted(_)
+                        | Self::HookCompleted(_)
+                        | Self::ItemGuardianApprovalReviewStarted(_)
+                        | Self::ItemGuardianApprovalReviewCompleted(_)
+                        | Self::ServerRequestResolved(_)
+                        | Self::SkillsChanged(_)
+                        | Self::ModelRerouted(_)
+                        | Self::AccountUpdated(_)
+                        | Self::AccountLoginCompleted(_)
+                        | Self::McpServerOauthLoginCompleted(_)
+                        | Self::ThreadRealtimeStarted(_)
+                        | Self::ThreadRealtimeError(_)
+                        | Self::ThreadRealtimeClosed(_)
+                )
             }
         }
 
@@ -1175,9 +1297,11 @@ server_notification_definitions! {
     ThreadGoalUpdated => "thread/goal/updated" (api::ThreadGoalUpdatedNotification),
     ThreadGoalCleared => "thread/goal/cleared" (api::ThreadGoalClearedNotification),
     ThreadHeartbeatUpdated => "thread/heartbeat/updated" (api::ThreadHeartbeatUpdatedNotification),
+    ThreadSelfworkUpdated => "thread/selfwork/updated" (api::ThreadSelfworkUpdatedNotification),
     WorkspaceChangeUpdated => "workspace/change/updated" (api::WorkspaceChangeUpdatedNotification),
     AutomationRunUpdated => "automation/run/updated" (api::AutomationRunUpdatedNotification),
     ThreadModelChanged => "thread/model/changed" (api::ThreadModelChangedNotification),
+    ThreadPermissionsChanged => "thread/permissions/changed" (api::ThreadPermissionsChangedNotification),
     TurnStarted => "turn/started" (api::TurnStartedNotification),
     HookStarted => "hook/started" (api::HookStartedNotification),
     TurnCompleted => "turn/completed" (api::TurnCompletedNotification),

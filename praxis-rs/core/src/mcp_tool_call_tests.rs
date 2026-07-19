@@ -1,32 +1,32 @@
-use super::*;
-use crate::config::ConfigBuilder;
-use crate::config::ConfigToml;
-use crate::praxis::make_session_and_context;
-use crate::praxis::make_session_and_context_with_rx;
-use crate::state::ActiveTurn;
-use core_test_support::responses::ev_assistant_message;
-use core_test_support::responses::ev_completed;
-use core_test_support::responses::ev_response_created;
-use core_test_support::responses::mount_sse_once;
-use core_test_support::responses::sse;
-use core_test_support::responses::start_mock_server;
-use praxis_config::CONFIG_TOML_FILE;
-use praxis_config::types::AppConfig;
-use praxis_config::types::AppToolConfig;
-use praxis_config::types::AppToolsConfig;
-use praxis_config::types::ApprovalsReviewer;
-use praxis_config::types::AppsConfigToml;
-use praxis_config::types::McpServerConfig;
-use praxis_config::types::McpServerToolConfig;
-use pretty_assertions::assert_eq;
-use serde::Deserialize;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tempfile::tempdir;
-use tracing::Instrument;
-use tracing::Level;
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_test::internal::MockWriter;
+pub(super) use super::*;
+pub(super) use crate::config::ConfigBuilder;
+pub(super) use crate::config::ConfigToml;
+pub(super) use crate::praxis::make_session_and_context;
+pub(super) use crate::praxis::make_session_and_context_with_rx;
+pub(super) use crate::praxis::SessionSettingsUpdate;
+pub(super) use crate::state::ActiveTurn;
+pub(super) use core_test_support::responses::ev_assistant_message;
+pub(super) use core_test_support::responses::ev_completed;
+pub(super) use core_test_support::responses::ev_response_created;
+pub(super) use core_test_support::responses::mount_sse_once;
+pub(super) use core_test_support::responses::sse;
+pub(super) use core_test_support::responses::start_mock_server;
+pub(super) use praxis_config::CONFIG_TOML_FILE;
+pub(super) use praxis_config::types::AppConfig;
+pub(super) use praxis_config::types::AppToolConfig;
+pub(super) use praxis_config::types::AppToolsConfig;
+pub(super) use praxis_config::types::ApprovalsReviewer;
+pub(super) use praxis_config::types::AppsConfigToml;
+pub(super) use praxis_config::types::McpServerConfig;
+pub(super) use praxis_config::types::McpServerToolConfig;
+pub(super) use serde::Deserialize;
+pub(super) use std::collections::HashMap;
+pub(super) use std::sync::Arc;
+pub(super) use tempfile::tempdir;
+pub(super) use tracing::Instrument;
+pub(super) use tracing::Level;
+pub(super) use tracing_subscriber::fmt::format::FmtSpan;
+pub(super) use tracing_test::internal::MockWriter;
 
 fn annotations(
     read_only: Option<bool>,
@@ -70,13 +70,23 @@ fn prompt_options(
     }
 }
 
+#[path = "mcp_tool_call_tests/approval_modes.rs"]
 mod approval_modes;
+#[path = "mcp_tool_call_tests/approval_persistence.rs"]
 mod approval_persistence;
+#[path = "mcp_tool_call_tests/approval_prompts.rs"]
 mod approval_prompts;
+#[path = "mcp_tool_call_tests/approval_rules.rs"]
 mod approval_rules;
+#[path = "mcp_tool_call_tests/elicitation_mapping.rs"]
 mod elicitation_mapping;
+#[path = "mcp_tool_call_tests/guardian_review.rs"]
 mod guardian_review;
+#[path = "mcp_tool_call_tests/guardian_routing.rs"]
 mod guardian_routing;
+#[path = "mcp_tool_call_tests/request_meta.rs"]
 mod request_meta;
+#[path = "mcp_tool_call_tests/result_sanitization.rs"]
 mod result_sanitization;
+#[path = "mcp_tool_call_tests/span.rs"]
 mod span;

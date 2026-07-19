@@ -1,5 +1,91 @@
+use praxis_protocol::config_types::ApprovalsReviewer;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
+
+/// Stable permission modes shared by every Praxis client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PermissionPreset {
+    ReadOnly,
+    #[default]
+    Default,
+    GuardianApprovals,
+    FullAccess,
+}
+
+impl PermissionPreset {
+    pub const ALL: [Self; 4] = [
+        Self::ReadOnly,
+        Self::Default,
+        Self::GuardianApprovals,
+        Self::FullAccess,
+    ];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::Default => "default",
+            Self::GuardianApprovals => "guardian-approvals",
+            Self::FullAccess => "full-access",
+        }
+    }
+
+    pub const fn approval_preset_id(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::Default | Self::GuardianApprovals => "auto",
+            Self::FullAccess => "full-access",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "Read Only",
+            Self::Default => "Default",
+            Self::GuardianApprovals => "Guardian Approvals",
+            Self::FullAccess => "Full Access",
+        }
+    }
+
+    pub const fn short_label(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "Read Only",
+            Self::Default => "Default",
+            Self::GuardianApprovals => "Guardian",
+            Self::FullAccess => "Full Access",
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "Read workspace files; edits and network require approval.",
+            Self::Default => {
+                "Edit workspace files and run commands; external access requires approval."
+            }
+            Self::GuardianApprovals => {
+                "Default permissions with eligible approvals reviewed by Guardian."
+            }
+            Self::FullAccess => "Edit external files and use network without approval.",
+        }
+    }
+
+    pub const fn approvals_reviewer(self) -> ApprovalsReviewer {
+        match self {
+            Self::GuardianApprovals => ApprovalsReviewer::GuardianSubagent,
+            Self::ReadOnly | Self::Default | Self::FullAccess => ApprovalsReviewer::User,
+        }
+    }
+
+    pub fn approval_preset(self) -> ApprovalPreset {
+        builtin_approval_presets()
+            .into_iter()
+            .find(|candidate| candidate.id == self.approval_preset_id())
+            .expect("builtin permission preset must reference an approval preset")
+    }
+
+    pub fn from_id(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|preset| preset.id() == value)
+    }
+}
 
 /// A simple preset pairing an approval policy with a sandbox policy.
 #[derive(Debug, Clone)]

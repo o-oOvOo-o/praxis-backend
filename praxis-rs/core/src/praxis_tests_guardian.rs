@@ -30,8 +30,6 @@ use praxis_protocol::models::NetworkPermissions;
 use praxis_protocol::models::PermissionProfile;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::models::function_call_output_content_items_to_text;
-use praxis_protocol::permissions::FileSystemSandboxPolicy;
-use praxis_protocol::permissions::NetworkSandboxPolicy;
 use praxis_protocol::protocol::AskForApproval;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;
@@ -71,10 +69,14 @@ async fn guardian_allows_shell_additional_permissions_requests_past_policy_valid
 
     let (mut session, mut turn_context_raw) = make_session_and_context().await;
     turn_context_raw.praxis_linux_sandbox_exe = praxis_linux_sandbox_exe_or_skip!();
-    turn_context_raw
-        .approval_policy
-        .set(AskForApproval::OnRequest)
-        .expect("test setup should allow updating approval policy");
+    session
+        .update_settings(SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::OnRequest),
+            sandbox_policy: Some(SandboxPolicy::DangerFullAccess),
+            ..Default::default()
+        })
+        .await
+        .expect("test setup should allow updating permissions");
     turn_context_raw
         .features
         .enable(Feature::GuardianApproval)
@@ -83,17 +85,6 @@ async fn guardian_allows_shell_additional_permissions_requests_past_policy_valid
         .features
         .enable(Feature::ExecPermissionApprovals)
         .expect("test setup should allow enabling request permissions");
-    turn_context_raw
-        .sandbox_policy
-        .set(SandboxPolicy::DangerFullAccess)
-        .expect("test setup should allow updating sandbox policy");
-    // This test is about request-permissions validation, not managed sandbox
-    // policy enforcement. Widen the derived sandbox policies directly so the
-    // command runs without depending on a platform sandbox binary.
-    turn_context_raw.file_system_sandbox_policy =
-        FileSystemSandboxPolicy::from(turn_context_raw.sandbox_policy.get());
-    turn_context_raw.network_sandbox_policy =
-        NetworkSandboxPolicy::from(turn_context_raw.sandbox_policy.get());
     let mut config = (*turn_context_raw.config).clone();
     config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
     let config = Arc::new(config);
@@ -131,7 +122,7 @@ async fn guardian_allows_shell_additional_permissions_requests_past_policy_valid
         env: HashMap::new(),
         network: None,
         sandbox_permissions: SandboxPermissions::WithAdditionalPermissions,
-        windows_sandbox_level: turn_context.windows_sandbox_level,
+        windows_sandbox_level: turn_context.effective_permissions().windows_sandbox_level,
         windows_sandbox_private_desktop: turn_context
             .config
             .permissions
@@ -191,9 +182,12 @@ async fn guardian_allows_shell_additional_permissions_requests_past_policy_valid
 #[tokio::test]
 async fn guardian_allows_unified_exec_additional_permissions_requests_past_policy_validation() {
     let (mut session, mut turn_context_raw) = make_session_and_context().await;
-    turn_context_raw
-        .approval_policy
-        .set(AskForApproval::OnRequest)
+    session
+        .update_settings(SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::OnRequest),
+            ..Default::default()
+        })
+        .await
         .expect("test setup should allow updating approval policy");
     turn_context_raw
         .features
@@ -433,6 +427,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
     let skills_watcher = Arc::new(SkillsWatcher::noop());
 
     let PraxisSpawnOk { praxis, .. } = Praxis::spawn(PraxisSpawnArgs {
+        requested_thread_id: None,
         config,
         auth_manager,
         models_manager,

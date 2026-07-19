@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::error::Result as PraxisResult;
+use crate::error::PraxisErr;
 use crate::praxis::Praxis;
 use crate::praxis::PraxisSpawnArgs;
 use crate::praxis::PraxisSpawnOk;
@@ -14,6 +15,43 @@ impl ThreadManagerInner {
         &self,
         request: ThreadSpawnRequest,
     ) -> PraxisResult<ThreadSpawnResult> {
+        let requested_thread_id = request.requested_thread_id;
+        let reservation = if let Some(thread_id) = requested_thread_id {
+            let Some(reservation) = self.threads.reserve(thread_id).await else {
+                return Err(PraxisErr::InvalidRequest(format!(
+                    "thread `{thread_id}` already exists or is being created"
+                )));
+            };
+
+            let directory = praxis_rollout::ThreadDirectory::open(&request.config).await;
+            match directory.thread_exists(thread_id, None).await {
+                Ok(false) => {}
+                Ok(true) => {
+                    return Err(PraxisErr::InvalidRequest(format!(
+                        "thread `{thread_id}` already exists"
+                    )));
+                }
+                Err(err) => {
+                    return Err(err.into());
+                }
+            }
+            Some(reservation)
+        } else {
+            None
+        };
+
+        self.spawn_reserved_request(request, reservation.is_some())
+            .await
+    }
+
+    async fn spawn_reserved_request(
+        &self,
+        request: ThreadSpawnRequest,
+        has_reserved_thread_id: bool,
+    ) -> PraxisResult<ThreadSpawnResult> {
+        let initial_ephemeral = request.config.ephemeral;
+        let initial_personality = request.config.personality.clone();
+        let initial_session_source = request.session_source.clone();
         let watch_registration = self.skills_watcher.register_config(
             &request.config,
             self.skills_manager.as_ref(),
@@ -22,6 +60,7 @@ impl ThreadManagerInner {
         let PraxisSpawnOk {
             praxis, thread_id, ..
         } = Praxis::spawn(PraxisSpawnArgs {
+            requested_thread_id: request.requested_thread_id,
             config: request.config,
             auth_manager: request.auth_manager,
             models_manager: Arc::clone(&self.models_manager),
@@ -43,7 +82,16 @@ impl ThreadManagerInner {
             parent_trace: request.parent_trace,
         })
         .await?;
-        self.finalize_thread_spawn(praxis, thread_id, watch_registration)
-            .await
+        tracing::info!(%thread_id, "thread spawn runtime initialized");
+        self.finalize_thread_spawn(
+            praxis,
+            thread_id,
+            watch_registration,
+            has_reserved_thread_id,
+            initial_ephemeral,
+            initial_personality,
+            initial_session_source,
+        )
+        .await
     }
 }

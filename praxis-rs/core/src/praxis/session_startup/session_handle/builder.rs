@@ -56,6 +56,7 @@ pub(in crate::praxis::session_startup) fn build(input: SessionHandleInput<'_>) -
         guardian_review_session,
         services: input.services,
         goal_runtime,
+        context_governance: Default::default(),
         llm_runtime_catalog: input.llm_runtime_catalog,
         next_internal_sub_id,
         auto_title_attempted,

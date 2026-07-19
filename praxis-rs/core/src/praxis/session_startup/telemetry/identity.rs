@@ -9,7 +9,7 @@ use praxis_protocol::ThreadId;
 
 use crate::config::Config;
 use crate::praxis::SessionConfiguration;
-use crate::provider_decision_center::ProviderDecisionCenter;
+use crate::llm::runtime::provider_setup::ProviderDecisionCenter;
 
 pub(super) struct StartupTelemetryIdentity {
     pub(super) auth_mode: Option<TelemetryAuthMode>,

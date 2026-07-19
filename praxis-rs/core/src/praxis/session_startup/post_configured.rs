@@ -11,6 +11,7 @@ use praxis_login::OpenAiAccountAuth;
 use praxis_mcp::mcp::auth::McpAuthStatusEntry;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::InitialHistory;
+use tracing::info;
 
 use crate::config::Config;
 use crate::mcp::McpManager;
@@ -42,6 +43,7 @@ pub(super) async fn run(input: PostConfiguredInput<'_>) -> anyhow::Result<()> {
         initial_history,
     } = input;
 
+    info!(conversation_id = %session.conversation_id, phase = "plugin_services", "Post-configured startup entering phase");
     plugin_services::start(plugin_services::PluginServicesInput {
         session: &session,
         config: config.as_ref(),
@@ -53,9 +55,13 @@ pub(super) async fn run(input: PostConfiguredInput<'_>) -> anyhow::Result<()> {
         auth_statuses,
     })
     .await?;
+    info!(conversation_id = %session.conversation_id, phase = "startup_prewarm", "Post-configured startup entering phase");
     background_tasks::schedule_startup_prewarm(&session, session_configuration).await;
+    info!(conversation_id = %session.conversation_id, phase = "initial_history", "Post-configured startup entering phase");
     initial_history::record(&session, initial_history).await;
+    info!(conversation_id = %session.conversation_id, phase = "memory_bootstrap", "Post-configured startup entering phase");
     background_tasks::start_memory_bootstrap(&session, config, session_configuration);
+    info!(conversation_id = %session.conversation_id, phase = "complete", "Post-configured startup completed");
 
     Ok(())
 }

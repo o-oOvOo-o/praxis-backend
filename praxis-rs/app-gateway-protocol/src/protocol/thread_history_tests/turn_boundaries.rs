@@ -130,6 +130,7 @@ fn preserves_compaction_only_turn() {
         turns,
         vec![Turn {
             id: "turn-compact".into(),
+            collaboration_mode_kind: Default::default(),
             status: TurnStatus::Completed,
             error: None,
             items: Vec::new(),

@@ -155,6 +155,85 @@ pub enum SubAgentSource {
     Other(String),
 }
 
+#[derive(
+    Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash, JsonSchema, TS,
+)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum AgentRank {
+    #[default]
+    Rank0,
+    Rank1,
+    Rank2,
+}
+
+impl AgentRank {
+    pub const ALL: [Self; 3] = [Self::Rank0, Self::Rank1, Self::Rank2];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Rank0 => "r0",
+            Self::Rank1 => "r1",
+            Self::Rank2 => "r2",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Rank0 => "R0 Coordinator",
+            Self::Rank1 => "R1 Supervisor",
+            Self::Rank2 => "R2 Worker",
+        }
+    }
+
+    pub const fn short_label(self) -> &'static str {
+        match self {
+            Self::Rank0 => "R0",
+            Self::Rank1 => "R1",
+            Self::Rank2 => "R2",
+        }
+    }
+
+    pub const fn rank(self) -> u8 {
+        match self {
+            Self::Rank0 => 0,
+            Self::Rank1 => 1,
+            Self::Rank2 => 2,
+        }
+    }
+
+    pub const fn requires_parent(self) -> bool {
+        !matches!(self, Self::Rank0)
+    }
+
+    pub const fn agent_role(self) -> &'static str {
+        match self {
+            Self::Rank0 => "coordinator",
+            Self::Rank1 => "supervisor",
+            Self::Rank2 => "worker",
+        }
+    }
+
+    pub const fn managed_child_rank(self) -> Option<Self> {
+        match self {
+            Self::Rank0 => Some(Self::Rank1),
+            Self::Rank1 => Some(Self::Rank2),
+            Self::Rank2 => None,
+        }
+    }
+
+    pub fn from_id(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|rank| rank.id() == value)
+    }
+
+    pub fn from_agent_role(role: Option<&str>) -> Self {
+        match role {
+            Some("supervisor") => Self::Rank1,
+            _ => Self::Rank2,
+        }
+    }
+}
+
 impl fmt::Display for SessionSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -171,6 +250,26 @@ impl fmt::Display for SessionSource {
 }
 
 impl SessionSource {
+    pub fn agent_rank(&self) -> u8 {
+        self.agent_rank_kind().rank()
+    }
+
+    pub fn agent_rank_kind(&self) -> AgentRank {
+        match self {
+            Self::SubAgent(source) => source.agent_rank_kind(),
+            _ => AgentRank::Rank0,
+        }
+    }
+
+    pub fn parent_thread_id(&self) -> Option<ThreadId> {
+        match self {
+            Self::SubAgent(SubAgentSource::ThreadSpawn {
+                parent_thread_id, ..
+            }) => Some(*parent_thread_id),
+            _ => None,
+        }
+    }
+
     pub fn from_startup_arg(value: &str) -> Result<Self, &'static str> {
         let trimmed = value.trim();
         if trimmed.is_empty() {
@@ -261,6 +360,21 @@ impl SessionSource {
             || self
                 .restriction_product()
                 .is_some_and(|product| product.matches_product_restriction(products))
+    }
+}
+
+impl SubAgentSource {
+    pub fn agent_rank(&self) -> u8 {
+        self.agent_rank_kind().rank()
+    }
+
+    pub fn agent_rank_kind(&self) -> AgentRank {
+        match self {
+            Self::ThreadSpawn { agent_role, .. } => {
+                AgentRank::from_agent_role(agent_role.as_deref())
+            }
+            _ => AgentRank::Rank2,
+        }
     }
 }
 

@@ -53,9 +53,13 @@ async fn guardian_mode_skips_auto_when_annotations_do_not_require_approval() {
         .await;
 
     let (mut session, mut turn_context) = make_session_and_context().await;
-    turn_context
-        .approval_policy
-        .set(AskForApproval::OnRequest)
+    session
+        .update_settings(SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::OnRequest),
+            approvals_reviewer: Some(ApprovalsReviewer::GuardianSubagent),
+            ..Default::default()
+        })
+        .await
         .expect("test setup should allow updating approval policy");
     let mut config = (*turn_context.config).clone();
     config.model_provider.base_url = Some(format!("{}/v1", server.uri()));
@@ -392,14 +396,14 @@ async fn full_access_mode_skips_arc_monitor_for_all_approval_modes() {
     turn_context.auth_manager = Some(crate::test_support::auth_manager_from_auth(
         praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
     ));
-    turn_context
-        .approval_policy
-        .set(AskForApproval::Never)
-        .expect("test setup should allow updating approval policy");
-    turn_context
-        .sandbox_policy
-        .set(SandboxPolicy::DangerFullAccess)
-        .expect("test setup should allow updating sandbox policy");
+    session
+        .update_settings(SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::Never),
+            sandbox_policy: Some(SandboxPolicy::DangerFullAccess),
+            ..Default::default()
+        })
+        .await
+        .expect("test setup should allow updating permissions");
     let mut config = (*turn_context.config).clone();
     config.chatgpt_base_url = server.uri();
     turn_context.config = Arc::new(config);

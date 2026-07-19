@@ -8,9 +8,11 @@ impl PraxisMessageProcessor {
     ) {
         let ThreadForkParams {
             thread_id,
+            forked_thread_id,
             path,
             model,
             model_provider,
+            reasoning_effort,
             service_tier,
             cwd,
             approval_policy,
@@ -22,6 +24,20 @@ impl PraxisMessageProcessor {
             ephemeral,
             persist_extended_history,
         } = params;
+        let requested_forked_thread_id = match forked_thread_id {
+            Some(thread_id) => match ThreadId::from_string(&thread_id) {
+                Ok(thread_id) => Some(thread_id),
+                Err(_) => {
+                    self.send_invalid_request_error(
+                        request_id,
+                        "forkedThreadId must be a valid UUID".to_owned(),
+                    )
+                    .await;
+                    return;
+                }
+            },
+            None => None,
+        };
 
         let (rollout_path, source_thread_id) = if let Some(path) = path {
             (path, None)
@@ -64,6 +80,7 @@ impl PraxisMessageProcessor {
         let mut typesafe_overrides = self.build_thread_config_overrides(
             model,
             model_provider,
+            reasoning_effort,
             service_tier,
             cwd,
             approval_policy,
@@ -107,12 +124,13 @@ impl PraxisMessageProcessor {
             ..
         } = match self
             .thread_manager
-            .fork_thread(
-                ThreadForkSnapshot::Interrupted,
+            .fork_thread_with_requested_id(
+                ThreadForkSnapshot::CurrentPersistedWithClosedTurn,
                 config,
                 rollout_path.clone(),
                 persist_extended_history,
                 self.request_trace_context(&request_id).await,
+                requested_forked_thread_id,
             )
             .await
         {

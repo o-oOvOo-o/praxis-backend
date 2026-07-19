@@ -18,6 +18,7 @@ use crate::config::ManagedFeatures;
 use crate::guardian::GuardianReviewSessionManager;
 use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::praxis::PermissionLedger;
+use crate::praxis::ContextGovernanceState;
 use crate::realtime_conversation::RealtimeConversationManager;
 use crate::state::ActiveTurn;
 use crate::state::SessionServices;
@@ -44,6 +45,7 @@ pub(crate) struct Session {
     pub(crate) guardian_review_session: GuardianReviewSessionManager,
     pub(crate) services: SessionServices,
     pub(crate) goal_runtime: crate::goals::GoalRuntimeState,
+    pub(crate) context_governance: ContextGovernanceState,
     pub(super) llm_runtime_catalog: LlmRuntimeCatalog,
     pub(super) next_internal_sub_id: AtomicU64,
     /// Guards one-shot auto-title generation so it runs at most once per session.

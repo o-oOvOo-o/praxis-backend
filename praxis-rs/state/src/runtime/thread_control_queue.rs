@@ -8,7 +8,10 @@ impl StateRuntime {
         &self,
         params: &ThreadControlQueueCreateParams,
     ) -> anyhow::Result<ThreadControlQueueItem> {
-        let queue_id = Uuid::new_v4().to_string();
+        let queue_id = params
+            .queue_id
+            .clone()
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let now_ms = datetime_to_millis(Utc::now());
         let controller_json = serde_json::to_string(&params.controller_json)?;
         sqlx::query(
@@ -24,6 +27,7 @@ INSERT INTO thread_control_queue (
     dispatched_turn_id,
     error
 ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+ON CONFLICT(queue_id) DO NOTHING
             "#,
         )
         .bind(queue_id.as_str())
@@ -36,9 +40,17 @@ INSERT INTO thread_control_queue (
         .execute(self.pool.as_ref())
         .await?;
 
-        self.get_thread_control_queue_item(queue_id.as_str())
+        let item = self
+            .get_thread_control_queue_item(queue_id.as_str())
             .await?
-            .ok_or_else(|| anyhow::anyhow!("failed to load created queue item {queue_id}"))
+            .ok_or_else(|| anyhow::anyhow!("failed to load created queue item {queue_id}"))?;
+        if item.target_thread_id != params.target_thread_id
+            || item.controller_json != params.controller_json
+            || item.text != params.text
+        {
+            anyhow::bail!("queue id {queue_id} already belongs to a different control input");
+        }
+        Ok(item)
     }
 
     pub async fn get_thread_control_queue_item(

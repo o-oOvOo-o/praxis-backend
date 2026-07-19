@@ -111,6 +111,7 @@ fn collect_resume_override_mismatches_includes_service_tier() {
         path: None,
         model: None,
         model_provider: None,
+        reasoning_effort: None,
         service_tier: Some(Some(praxis_protocol::config_types::ServiceTier::Fast)),
         cwd: None,
         approval_policy: None,

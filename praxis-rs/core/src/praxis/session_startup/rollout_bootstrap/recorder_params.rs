@@ -34,7 +34,10 @@ pub(super) fn build(input: RecorderParamsInput<'_>) -> RecorderParamsBootstrap {
 }
 
 fn new_thread_params(input: RecorderParamsInput<'_>) -> RecorderParamsBootstrap {
-    let conversation_id = ThreadId::default();
+    let conversation_id = input
+        .session_configuration
+        .requested_thread_id
+        .unwrap_or_default();
     RecorderParamsBootstrap {
         conversation_id,
         params: RolloutRecorderParams::new(

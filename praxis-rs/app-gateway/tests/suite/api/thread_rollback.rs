@@ -101,6 +101,7 @@ async fn thread_rollback_drops_last_turns_and_persists_to_rollout() -> Result<()
         .send_thread_rollback_request(ThreadRollbackParams {
             thread_id: thread.id.clone(),
             num_turns: 1,
+            workspace_action: praxis_app_gateway_protocol::ThreadRewindWorkspaceAction::Keep,
         })
         .await?;
     let rollback_resp: JSONRPCResponse = timeout(
@@ -111,7 +112,9 @@ async fn thread_rollback_drops_last_turns_and_persists_to_rollout() -> Result<()
     let rollback_result = rollback_resp.result.clone();
     let ThreadRollbackResponse {
         thread: rolled_back_thread,
+        workspace_restore,
     } = to_response::<ThreadRollbackResponse>(rollback_resp)?;
+    assert!(workspace_restore.is_none());
 
     // Wire contract: thread title field is `name`, serialized as null when unset.
     let thread_json = rollback_result

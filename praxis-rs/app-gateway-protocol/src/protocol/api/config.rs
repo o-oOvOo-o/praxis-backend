@@ -240,6 +240,11 @@ pub struct ConfigReadParams {
 pub struct ConfigReadResponse {
     #[experimental(nested)]
     pub config: Config,
+    /// Effective model configuration after profiles, overrides, and provider resolution.
+    pub effective_model: EffectiveModelConfig,
+    /// Effective permission configuration after profiles, overrides, and requirements.
+    #[experimental(nested)]
+    pub effective_permissions: EffectivePermissionConfig,
     pub origins: HashMap<String, ConfigLayerMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layers: Option<Vec<ConfigLayer>>,
@@ -379,6 +384,281 @@ pub struct ConfigBatchWriteParams {
     /// When true, hot-reload the updated user config into all loaded threads after writing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reload_user_config: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectiveModelConfig {
+    #[ts(optional = nullable)]
+    pub model: Option<String>,
+    pub model_provider: String,
+    pub model_provider_display_name: String,
+    pub model_provider_wire_api: ModelProviderWireApi,
+    #[ts(optional = nullable)]
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+pub fn resolve_model_id(
+    configured_model: Option<&str>,
+    model_provider: Option<&str>,
+    models: &[Model],
+) -> Option<String> {
+    configured_model.map(str::to_owned).or_else(|| {
+        let mut candidates = models.iter().filter(|model| {
+            model_provider.is_none_or(|provider| model.model_provider.as_deref() == Some(provider))
+        });
+        candidates
+            .clone()
+            .find(|model| model.is_default)
+            .or_else(|| candidates.next())
+            .map(|model| model.model.clone())
+    })
+}
+
+impl EffectiveModelConfig {
+    pub fn resolve_model_id(&self, models: &[Model]) -> Option<String> {
+        resolve_model_id(
+            self.model.as_deref(),
+            Some(self.model_provider.as_str()),
+            models,
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectivePermissionConfig {
+    /// Stable built-in permission preset id when the effective policy exactly matches one.
+    #[ts(optional = nullable)]
+    pub permission_preset: Option<String>,
+    #[experimental(nested)]
+    pub approval_policy: AskForApproval,
+    pub approvals_reviewer: ApprovalsReviewer,
+    /// External sandboxes cannot be represented by the built-in permission presets.
+    #[ts(optional = nullable)]
+    pub sandbox_mode: Option<SandboxMode>,
+}
+
+/// Atomically registers a model provider and optionally makes it the active selection.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderConfigWriteParams {
+    /// Stable provider id. Omit when creating a provider to let the gateway allocate one.
+    #[ts(optional = nullable)]
+    pub provider_id: Option<String>,
+    /// Complete provider document. Omit when only changing the active selection.
+    #[ts(optional = nullable)]
+    pub provider: Option<ModelProviderConfigDocument>,
+    /// When present, selects this provider and optionally its model.
+    #[ts(optional = nullable)]
+    pub selection: Option<ModelProviderConfigSelection>,
+    /// Path to the config file to write; defaults to the user's `config.toml` when omitted.
+    #[ts(optional = nullable)]
+    pub file_path: Option<String>,
+    #[ts(optional = nullable)]
+    pub expected_version: Option<String>,
+    /// When true, hot-reload the updated user config into all loaded threads after writing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reload_user_config: bool,
+}
+
+/// Typed public configuration for a Praxis model provider.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ModelProviderConfigDocument {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub env_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub env_key_instructions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub experimental_bearer_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub auth: Option<JsonValue>,
+    pub wire_api: ModelProviderWireApi,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub compat: Option<ModelProviderCompatConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub query_params: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub http_headers: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub env_http_headers: Option<HashMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub request_max_retries: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub stream_max_retries: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub stream_idle_timeout_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub websocket_connect_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub requires_openai_auth: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub supports_websockets: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema, TS)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ModelProviderCompatConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub supports_developer_role: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub supports_reasoning_effort: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub reasoning_effort_map: Option<ModelProviderReasoningEffortMapConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub supports_parallel_tool_calls: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub max_tokens_field: Option<ModelProviderMaxTokensFieldConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub max_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub requires_tool_result_name: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub requires_assistant_after_tool_result: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub thinking_format: Option<ModelProviderThinkingFormatConfig>,
+}
+
+impl ModelProviderCompatConfig {
+    pub fn is_empty(&self) -> bool {
+        self.supports_developer_role.is_none()
+            && self.supports_reasoning_effort.is_none()
+            && self.reasoning_effort_map.is_none()
+            && self.supports_parallel_tool_calls.is_none()
+            && self.max_tokens_field.is_none()
+            && self.max_tokens.is_none()
+            && self.requires_tool_result_name.is_none()
+            && self.requires_assistant_after_tool_result.is_none()
+            && self.thinking_format.is_none()
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default, JsonSchema, TS)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub struct ModelProviderReasoningEffortMapConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub minimal: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub low: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub medium: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub high: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub xhigh: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub max: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderMaxTokensFieldConfig {
+    MaxCompletionTokens,
+    MaxTokens,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelProviderThinkingFormatConfig {
+    Openai,
+    Openrouter,
+    Deepseek,
+    Gemini,
+    Zai,
+    Qwen,
+    QwenChatTemplate,
+    ChatTemplateKwargs,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderConfigWriteResponse {
+    pub provider_id: String,
+    pub write: ConfigWriteResponse,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelProviderConfigSelection {
+    #[ts(optional = nullable)]
+    pub model: Option<String>,
+}
+
+/// Atomically updates persistent model defaults shared by Praxis clients.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPreferencesWriteParams {
+    /// Explicit profile override; omitted uses the Gateway's active profile.
+    #[ts(optional = nullable)]
+    pub profile: Option<String>,
+    #[ts(optional = nullable)]
+    pub selection: Option<ModelPreferenceSelection>,
+    #[ts(optional = nullable)]
+    pub plan_reasoning_effort: Option<ReasoningEffortPreference>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPreferenceSelection {
+    pub model_provider: String,
+    pub model: String,
+    #[ts(optional = nullable)]
+    pub reasoning_effort: Option<ReasoningEffort>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", tag = "action")]
+pub enum ReasoningEffortPreference {
+    Set { effort: ReasoningEffort },
+    Clear,
+}
+
+impl ReasoningEffortPreference {
+    pub fn into_effort(self) -> Option<ReasoningEffort> {
+        match self {
+            Self::Set { effort } => Some(effort),
+            Self::Clear => None,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPreferencesWriteResponse {
+    #[ts(optional = nullable)]
+    pub profile: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

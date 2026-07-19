@@ -64,6 +64,7 @@ fn out_of_turn_error_does_not_create_or_fail_a_turn() {
         turns[0],
         Turn {
             id: "turn-a".into(),
+            collaboration_mode_kind: Default::default(),
             status: TurnStatus::Completed,
             error: None,
             items: vec![ThreadItem::UserMessage {

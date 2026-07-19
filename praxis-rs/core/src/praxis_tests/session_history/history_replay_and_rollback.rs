@@ -133,6 +133,7 @@ async fn record_initial_history_seeds_token_info_from_rollout() {
             reasoning_output_tokens: 0,
             total_tokens: 7,
         },
+        internal_savings: Default::default(),
         model_context_window: Some(1_000),
         model_auto_compact_token_limit: Some(900),
     };
@@ -153,6 +154,7 @@ async fn record_initial_history_seeds_token_info_from_rollout() {
             reasoning_output_tokens: 5,
             total_tokens: 35,
         },
+        internal_savings: Default::default(),
         model_context_window: Some(2_000),
         model_auto_compact_token_limit: Some(1_800),
     };
@@ -248,6 +250,7 @@ async fn recompute_token_usage_updates_model_context_window() {
         state.set_token_info(Some(TokenUsageInfo {
             total_token_usage: TokenUsage::default(),
             last_token_usage: TokenUsage::default(),
+            internal_savings: Default::default(),
             model_context_window: Some(258_400),
             model_auto_compact_token_limit: Some(240_000),
         }));
@@ -405,8 +408,12 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
         cwd: turn_context.cwd.to_path_buf(),
         current_date: turn_context.current_date.clone(),
         timezone: turn_context.timezone.clone(),
-        approval_policy: turn_context.approval_policy.value(),
-        sandbox_policy: turn_context.sandbox_policy.get().clone(),
+        approval_policy: turn_context.effective_approval_policy(),
+        sandbox_policy: turn_context
+            .effective_permissions()
+            .sandbox_policy
+            .get()
+            .clone(),
         network: None,
         model: previous_model.to_string(),
         personality: turn_context.personality,
@@ -936,6 +943,7 @@ async fn set_rate_limits_retains_previous_credits() {
         },
     };
     let session_configuration = SessionConfiguration {
+        requested_thread_id: None,
         provider: config.model_provider.clone(),
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,
@@ -1034,6 +1042,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         },
     };
     let session_configuration = SessionConfiguration {
+        requested_thread_id: None,
         provider: config.model_provider.clone(),
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,

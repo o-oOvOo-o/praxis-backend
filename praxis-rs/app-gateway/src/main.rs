@@ -10,6 +10,9 @@ use praxis_utils_cli::CliConfigOverrides;
 
 #[derive(Debug, Parser)]
 struct AppGatewayArgs {
+    #[command(flatten)]
+    config_overrides: CliConfigOverrides,
+
     /// Transport endpoint URL. Supported values: `stdio://` (default),
     /// `ws://IP:PORT`.
     #[arg(
@@ -42,7 +45,7 @@ fn main() -> anyhow::Result<()> {
 
         run_main_with_transport(
             arg0_paths,
-            CliConfigOverrides::default(),
+            args.config_overrides,
             loader_overrides,
             /*default_analytics_enabled*/ false,
             transport,

@@ -6,6 +6,8 @@ use crate::praxis_message_processor::thread_projection_api::summary_to_thread;
 use crate::praxis_message_processor::thread_store_api::ThreadStore;
 use crate::praxis_message_processor::thread_store_api::ThreadStoreListQuery;
 use crate::praxis_message_processor::thread_store_api::ThreadStoreSummary;
+use praxis_app_gateway_protocol::ExternalAgentSessionListParams;
+use praxis_app_gateway_protocol::ExternalAgentSessionSource;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
 use praxis_app_gateway_protocol::THREAD_LIST_DEFAULT_LIMIT;
 use praxis_app_gateway_protocol::THREAD_LIST_MAX_LIMIT;
@@ -18,6 +20,7 @@ use praxis_app_gateway_protocol::ThreadSortKey;
 use praxis_app_gateway_protocol::ThreadSourceKind as ApiThreadSourceKind;
 use praxis_core::Cursor as RolloutCursor;
 use praxis_core::ThreadSortKey as CoreThreadSortKey;
+use praxis_core::external_agent_migration::ExternalAgentSource;
 use praxis_core::parse_cursor;
 use praxis_protocol::ThreadId;
 use std::path::Path;
@@ -83,6 +86,90 @@ impl PraxisMessageProcessor {
         let data = self.project_thread_runtime_states(threads).await;
         let response = ThreadListResponse { data, next_cursor };
         self.outgoing.send_response(request_id, response).await;
+    }
+
+    pub(in crate::praxis_message_processor) async fn external_agent_session_list(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ExternalAgentSessionListParams,
+    ) {
+        let should_sync = params.cursor.is_none();
+        let source = match params.source {
+            ExternalAgentSessionSource::Codex => ExternalAgentSource::Codex,
+            ExternalAgentSessionSource::Cursor => ExternalAgentSource::Cursor,
+        };
+        let bridge_config = source.bridge_config(&self.config);
+
+        if should_sync {
+            if let Err(error) =
+                praxis_core::external_agent_migration::sync_external_agent_sessions_to_praxis_home(
+                    source,
+                    &bridge_config,
+                )
+                .await
+            {
+                self.outgoing
+                    .send_error(
+                        request_id,
+                        JSONRPCErrorError {
+                            code: INTERNAL_ERROR_CODE,
+                            message: format!("failed to synchronize external sessions: {error}"),
+                            data: None,
+                        },
+                    )
+                    .await;
+                return;
+            }
+        }
+
+        let sort_key = match params.sort_key.unwrap_or(ThreadSortKey::UpdatedAt) {
+            ThreadSortKey::CreatedAt => CoreThreadSortKey::CreatedAt,
+            ThreadSortKey::UpdatedAt => CoreThreadSortKey::UpdatedAt,
+        };
+        let page = ThreadStore::new(&bridge_config)
+            .list_summaries(ThreadStoreListQuery {
+                page_size: list_page_size(params.limit),
+                cursor: match parse_thread_list_cursor(params.cursor) {
+                    Ok(cursor) => cursor,
+                    Err(error) => {
+                        self.outgoing.send_error(request_id, error).await;
+                        return;
+                    }
+                },
+                sort_key,
+                model_providers: None,
+                source_kinds: None,
+                archived: false,
+                cwd: None,
+                search_term: params.search_term,
+                fallback_provider: source.import_model_provider_id().to_owned(),
+            })
+            .await;
+        let page = match page {
+            Ok(page) => page,
+            Err(error) => {
+                self.outgoing
+                    .send_error(
+                        request_id,
+                        JSONRPCErrorError {
+                            code: INTERNAL_ERROR_CODE,
+                            message: format!("failed to list external sessions: {error}"),
+                            data: None,
+                        },
+                    )
+                    .await;
+                return;
+            }
+        };
+        self.outgoing
+            .send_response(
+                request_id,
+                ThreadListResponse {
+                    data: page.items.into_iter().map(summary_to_thread).collect(),
+                    next_cursor: next_cursor_string(page.next_cursor.as_ref()),
+                },
+            )
+            .await;
     }
 
     pub(in crate::praxis_message_processor) async fn thread_loaded_list(

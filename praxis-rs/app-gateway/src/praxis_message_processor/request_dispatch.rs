@@ -28,6 +28,14 @@ impl PraxisMessageProcessor {
                 )
                 .await;
             }
+            ClientRequest::ThreadChildStart { request_id, params } => {
+                self.thread_child_start(
+                    to_connection_request_id(request_id),
+                    params,
+                    request_context,
+                )
+                .await;
+            }
             ClientRequest::ThreadUnsubscribe { request_id, params } => {
                 self.thread_unsubscribe(to_connection_request_id(request_id), params)
                     .await;
@@ -68,6 +76,10 @@ impl PraxisMessageProcessor {
                 self.thread_model_set(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::ThreadPermissionsSet { request_id, params } => {
+                self.thread_permissions_set(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::ThreadMetadataUpdate { request_id, params } => {
                 self.thread_metadata_update(to_connection_request_id(request_id), params)
                     .await;
@@ -91,8 +103,16 @@ impl PraxisMessageProcessor {
                 self.thread_rollback(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::ThreadRewindPreview { request_id, params } => {
+                self.thread_rewind_preview(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::ThreadList { request_id, params } => {
                 self.thread_list(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ExternalAgentSessionList { request_id, params } => {
+                self.external_agent_session_list(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::ThreadLookup { request_id, params } => {
@@ -137,6 +157,18 @@ impl PraxisMessageProcessor {
             }
             ClientRequest::ThreadHeartbeatClear { request_id, params } => {
                 self.thread_heartbeat_clear(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadSelfworkGet { request_id, params } => {
+                self.thread_selfwork_get(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadSelfworkStart { request_id, params } => {
+                self.thread_selfwork_start(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadSelfworkStop { request_id, params } => {
+                self.thread_selfwork_stop(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::WorkspaceChangeGet { request_id, params } => {
@@ -237,6 +269,14 @@ impl PraxisMessageProcessor {
             }
             ClientRequest::SkillsConfigWrite { request_id, params } => {
                 self.skills_config_write(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::SkillsInstall { request_id, params } => {
+                self.skills_install(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::SkillsUninstall { request_id, params } => {
+                self.skills_uninstall(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::PluginInstall { request_id, params } => {
@@ -377,6 +417,8 @@ impl PraxisMessageProcessor {
             ClientRequest::ConfigRead { .. }
             | ClientRequest::ConfigValueWrite { .. }
             | ClientRequest::ConfigBatchWrite { .. }
+            | ClientRequest::ModelProviderConfigWrite { .. }
+            | ClientRequest::ModelPreferencesWrite { .. }
             | ClientRequest::ExperimentalFeatureEnablementSet { .. } => {
                 Self::warn_unexpected_forwarded_request("Config request");
             }

@@ -63,7 +63,7 @@ impl Session {
         };
         self.maybe_emit_unknown_model_warning_for_turn(current_context.as_ref())
             .await;
-        match self.steer_input(items.clone(), None).await {
+        match self.steer_input(items.clone(), None, None).await {
             Ok(_) => {
                 crate::auto_title::maybe_apply_provisional_title(self, &items).await;
                 current_context.session_telemetry.user_prompt(&items);

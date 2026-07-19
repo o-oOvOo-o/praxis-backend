@@ -599,6 +599,7 @@ async fn turn_start_jsonrpc_span_parents_core_turn_spans() -> Result<()> {
                 request_id: RequestId::Integer(3),
                 params: TurnStartParams {
                     thread_id,
+                    turn_id: None,
                     input: vec![UserInput::Text {
                         text: "hello".to_string(),
                         text_elements: Vec::new(),

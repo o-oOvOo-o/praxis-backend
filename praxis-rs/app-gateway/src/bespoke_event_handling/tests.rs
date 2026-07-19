@@ -610,6 +610,7 @@ async fn test_handle_token_count_event_emits_usage_and_rate_limits() -> Result<(
             reasoning_output_tokens: 1,
             total_tokens: 23,
         },
+        internal_savings: Default::default(),
         model_context_window: Some(4096),
         model_auto_compact_token_limit: Some(3600),
     };

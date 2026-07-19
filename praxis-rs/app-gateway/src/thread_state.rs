@@ -1,5 +1,6 @@
 use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::ConnectionRequestId;
+use praxis_app_core::selfwork::SelfworkRuntimeState;
 use praxis_app_gateway_protocol::RequestId;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::ThreadHistoryBuilder;
@@ -59,10 +60,17 @@ pub(crate) struct ThreadState {
     pub(crate) cancel_tx: Option<oneshot::Sender<()>>,
     pub(crate) experimental_raw_events: bool,
     pub(crate) listener_generation: u64,
+    pub(crate) selfwork: Option<ThreadSelfworkState>,
     pending_server_requests: BTreeMap<RequestId, ServerRequest>,
     listener_command_tx: Option<mpsc::Sender<ThreadListenerCommand>>,
     current_turn_history: ThreadHistoryBuilder,
     listener_thread: Option<Weak<PraxisThread>>,
+}
+
+pub(crate) struct ThreadSelfworkState {
+    pub(crate) plan_path: PathBuf,
+    pub(crate) runtime: SelfworkRuntimeState,
+    pub(crate) active_turn_id: Option<String>,
 }
 
 impl ThreadState {

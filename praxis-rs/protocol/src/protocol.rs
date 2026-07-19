@@ -47,6 +47,7 @@ use crate::request_permissions::RequestPermissionsEvent;
 use crate::request_permissions::RequestPermissionsResponse;
 use crate::request_user_input::RequestUserInputResponse;
 use crate::user_input::UserInput;
+use crate::workspace_history::WorkspaceCheckpointId;
 use praxis_git_utils::GitSha;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;

@@ -10,7 +10,7 @@ impl AgentOs {
         match requirement.mode() {
             LeaseMode::Advisory | LeaseMode::Shared => None,
             LeaseMode::Capacity => capacity_conflict_owner(state, requirement, key),
-            LeaseMode::Exclusive => exclusive_conflict_owner(state, key),
+            LeaseMode::Exclusive => exclusive_conflict_owner(state, requirement, key),
         }
     }
 }
@@ -39,15 +39,22 @@ fn capacity_conflict_owner(
     })
 }
 
-fn exclusive_conflict_owner(state: &AgentOsState, key: String) -> Option<String> {
+fn exclusive_conflict_owner(
+    state: &AgentOsState,
+    requirement: &ResourceRequirement,
+    key: String,
+) -> Option<String> {
     state
         .leases
         .values()
         .find(|lease| {
-            lease.scope == key
-                && lease
-                    .expires_at
-                    .is_none_or(|expires_at| expires_at > Utc::now())
+            let active = lease
+                .expires_at
+                .is_none_or(|expires_at| expires_at > Utc::now());
+            active
+                && ResourceRequirement::parse_spec(&lease.scope)
+                    .map(|held| requirement.conflicts_with(&held))
+                    .unwrap_or_else(|_| lease.scope == key)
         })
         .map(|lease| lease.owner_thread_id.to_string())
 }

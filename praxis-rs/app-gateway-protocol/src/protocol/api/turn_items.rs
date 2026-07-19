@@ -9,6 +9,20 @@ pub enum TurnStatus {
     InProgress,
 }
 
+impl TurnStatus {
+    pub fn is_terminal(&self) -> bool {
+        !matches!(self, Self::InProgress)
+    }
+
+    pub fn is_interrupted(&self) -> bool {
+        matches!(self, Self::Interrupted)
+    }
+
+    pub fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed)
+    }
+}
+
 // Turn APIs
 #[derive(
     Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS, ExperimentalApi,
@@ -16,6 +30,9 @@ pub enum TurnStatus {
 #[serde(rename_all = "camelCase")]
 pub struct TurnStartParams {
     pub thread_id: String,
+    /// Optional caller-assigned UUID used as the canonical turn id.
+    #[ts(optional = nullable)]
+    pub turn_id: Option<String>,
     pub input: Vec<UserInput>,
     /// Override the working directory for this turn and subsequent turns.
     #[ts(optional = nullable)]
@@ -132,6 +149,8 @@ pub struct TurnStartResponse {
 pub struct TurnSteerParams {
     pub thread_id: String,
     pub input: Vec<UserInput>,
+    /// Optional caller-assigned UUID for the persisted user-message item.
+    pub input_id: Option<String>,
     /// Required active turn id precondition. The request fails when it does not
     /// match the currently active turn.
     pub expected_turn_id: String,
@@ -141,6 +160,7 @@ pub struct TurnSteerParams {
 #[serde(rename_all = "camelCase")]
 pub struct TurnSteerResponse {
     pub turn_id: String,
+    pub input_id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

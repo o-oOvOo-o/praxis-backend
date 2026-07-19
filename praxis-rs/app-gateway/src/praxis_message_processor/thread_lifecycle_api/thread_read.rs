@@ -110,7 +110,10 @@ impl PraxisMessageProcessor {
                 return;
             }
         };
-        let response = ThreadReadResponse { thread };
+        let response = ThreadReadResponse {
+            thread,
+            workspace_restore: None,
+        };
         self.outgoing.send_response(request_id, response).await;
     }
 

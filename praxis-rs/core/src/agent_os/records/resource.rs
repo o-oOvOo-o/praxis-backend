@@ -1,3 +1,6 @@
+use praxis_loop::tool::EffectKey;
+use praxis_loop::tool::ToolEffect;
+use praxis_loop::tool::ToolEffects;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -55,6 +58,43 @@ impl ResourceRequirement {
             _ => LeaseMode::Exclusive,
         }
     }
+
+    pub(in crate::agent_os) fn conflicts_with(&self, other: &Self) -> bool {
+        match (self.mode(), other.mode()) {
+            (LeaseMode::Capacity, _) | (_, LeaseMode::Capacity) => self.key() == other.key(),
+            (LeaseMode::Advisory | LeaseMode::Shared, _)
+            | (_, LeaseMode::Advisory | LeaseMode::Shared) => false,
+            (LeaseMode::Exclusive, LeaseMode::Exclusive) => {
+                self.effects().conflicts(&other.effects())
+            }
+        }
+    }
+
+    fn effects(&self) -> ToolEffects {
+        let (domain, scope) = match self {
+            Self::CpuHeavy => ("agent_os.cpu", "global".to_string()),
+            Self::BuildCache { scope } => ("agent_os.build_cache", scope.clone()),
+            Self::AppRuntime { scope } => ("agent_os.app_runtime", scope.clone()),
+            Self::Port { port } => ("agent_os.port", port.to_string()),
+            Self::RepoWrite { scope } => ("agent_os.repo", scope.clone()),
+            Self::LlmBudget { scope } => ("agent_os.llm_budget", scope.clone()),
+            Self::Gpu { scope } => ("agent_os.gpu", scope.clone()),
+            Self::Network { scope } => ("agent_os.network", scope.clone()),
+            Self::GitIndex { scope } => ("agent_os.git_index", scope.clone()),
+        };
+        let key = if matches!(scope.as_str(), "*" | "**")
+            || (matches!(self, Self::Gpu { .. } | Self::Network { .. }) && scope == "default")
+        {
+            EffectKey::root(domain)
+        } else {
+            EffectKey::hierarchical(domain, [normalize_effect_scope(&scope)])
+        };
+        ToolEffects::new([ToolEffect::exclusive(key)])
+    }
+}
+
+fn normalize_effect_scope(scope: &str) -> String {
+    scope.trim().replace('\\', "/").to_ascii_lowercase()
 }
 
 impl fmt::Display for ResourceRequirement {
@@ -141,6 +181,33 @@ pub(crate) enum LeaseMode {
     Shared,
     Capacity,
     Advisory,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ResourceRequirement;
+
+    #[test]
+    fn default_network_scope_conflicts_with_named_network_scope() {
+        let default = ResourceRequirement::Network {
+            scope: "default".to_string(),
+        };
+        let named = ResourceRequirement::Network {
+            scope: "external_tool".to_string(),
+        };
+        assert!(default.conflicts_with(&named));
+    }
+
+    #[test]
+    fn distinct_repo_scopes_do_not_conflict() {
+        let left = ResourceRequirement::RepoWrite {
+            scope: "repo:a".to_string(),
+        };
+        let right = ResourceRequirement::RepoWrite {
+            scope: "repo:b".to_string(),
+        };
+        assert!(!left.conflicts_with(&right));
+    }
 }
 
 impl LeaseMode {

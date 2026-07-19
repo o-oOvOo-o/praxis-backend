@@ -11,6 +11,7 @@ pub(super) use runtime::SessionIdentityRuntime;
 pub(super) async fn prepare(
     input: SessionIdentityRuntimeInput<'_>,
 ) -> anyhow::Result<SessionIdentityRuntime> {
+    tracing::info!(conversation_id = %input.conversation_id, phase = "telemetry", "Session identity preparation entering phase");
     let telemetry_phase::SessionTelemetryRuntime {
         session_telemetry,
         network_proxy_audit_metadata,
@@ -23,6 +24,7 @@ pub(super) async fn prepare(
         mcp_servers: input.mcp_servers,
     });
 
+    tracing::info!(conversation_id = %input.conversation_id, phase = "shell", "Session identity preparation entering phase");
     let shell_phase::SessionShellRuntime {
         shell: default_shell,
         snapshot_tx: shell_snapshot_tx,
@@ -33,6 +35,7 @@ pub(super) async fn prepare(
         session_telemetry: &session_telemetry,
     })?;
 
+    tracing::info!(conversation_id = %input.conversation_id, phase = "thread_name", "Session identity preparation entering phase");
     thread_name::resolve_and_assign(thread_name::ThreadNameInput {
         conversation_id: input.conversation_id,
         forked_from_id: input.forked_from_id,
@@ -42,6 +45,7 @@ pub(super) async fn prepare(
         session_configuration: input.session_configuration,
     })
     .await;
+    tracing::info!(conversation_id = %input.conversation_id, phase = "complete", "Session identity preparation completed");
 
     Ok(SessionIdentityRuntime {
         session_telemetry,

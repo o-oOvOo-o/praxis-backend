@@ -28,10 +28,13 @@ impl AgentControl {
                         config,
                         self.clone(),
                         session_source,
-                        /*persist_extended_history*/ false,
-                        /*metrics_service_name*/ None,
+                        options.dynamic_tools.clone(),
+                        options.persist_extended_history,
+                        options.metrics_service_name.clone(),
+                        options.parent_trace.clone(),
                         inherited_runtime.inherited_shell_snapshot,
                         inherited_runtime.inherited_exec_policy,
+                        options.requested_thread_id,
                     )
                     .await
             }

@@ -231,6 +231,7 @@ mod tests {
     fn typed_turn(id: &str) -> Turn {
         Turn {
             id: id.to_string(),
+            collaboration_mode_kind: Default::default(),
             status: TurnStatus::Completed,
             error: None,
             items: vec![

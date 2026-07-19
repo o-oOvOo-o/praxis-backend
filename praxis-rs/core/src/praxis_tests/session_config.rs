@@ -227,6 +227,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         },
     };
     let session_configuration = SessionConfiguration {
+        requested_thread_id: None,
         provider: config.model_provider.clone(),
         collaboration_mode,
         model_reasoning_summary: config.model_reasoning_summary,

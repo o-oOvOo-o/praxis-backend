@@ -63,6 +63,7 @@ async fn turn_start_exec_approval_toggle() -> Result<()> {
     let first_turn_id = mcp
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id.clone(),
+            turn_id: None,
             input: vec![ApiUserInput::Text {
                 text: "run python".to_string(),
                 text_elements: Vec::new(),
@@ -127,6 +128,7 @@ async fn turn_start_exec_approval_toggle() -> Result<()> {
     let second_turn_id = mcp
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id.clone(),
+            turn_id: None,
             input: vec![ApiUserInput::Text {
                 text: "run python again".to_string(),
                 text_elements: Vec::new(),
@@ -358,6 +360,7 @@ async fn turn_start_updates_sandbox_and_cwd_between_turns() -> Result<()> {
     let first_turn = mcp
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id.clone(),
+            turn_id: None,
             input: vec![ApiUserInput::Text {
                 text: "first turn".to_string(),
                 text_elements: Vec::new(),
@@ -398,6 +401,7 @@ async fn turn_start_updates_sandbox_and_cwd_between_turns() -> Result<()> {
     let second_turn = mcp
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id.clone(),
+            turn_id: None,
             input: vec![ApiUserInput::Text {
                 text: "second turn".to_string(),
                 text_elements: Vec::new(),

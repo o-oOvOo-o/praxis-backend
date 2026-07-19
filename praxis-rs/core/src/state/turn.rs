@@ -29,6 +29,41 @@ pub(crate) struct ActiveTurn {
     pub(crate) pending_input_ready: Arc<Notify>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PendingInput {
+    response_item: ResponseInputItem,
+    user_message_id: Option<String>,
+}
+
+impl PendingInput {
+    pub(crate) fn user_message(
+        response_item: ResponseInputItem,
+        user_message_id: Option<String>,
+    ) -> Self {
+        Self {
+            response_item,
+            user_message_id,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (ResponseInputItem, Option<String>) {
+        (self.response_item, self.user_message_id)
+    }
+
+    pub(crate) fn into_response_item(self) -> ResponseInputItem {
+        self.response_item
+    }
+}
+
+impl From<ResponseInputItem> for PendingInput {
+    fn from(response_item: ResponseInputItem) -> Self {
+        Self {
+            response_item,
+            user_message_id: None,
+        }
+    }
+}
+
 impl Default for ActiveTurn {
     fn default() -> Self {
         Self {
@@ -46,7 +81,7 @@ pub(crate) enum AgentTaskKind {
     Compact,
     Undo,
     UserShell,
-    GhostSnapshot,
+    WorkspaceCheckpoint,
 }
 
 impl AgentTaskKind {
@@ -54,7 +89,7 @@ impl AgentTaskKind {
         match self {
             Self::Review => Some(NonSteerableTurnKind::Review),
             Self::Compact => Some(NonSteerableTurnKind::Compact),
-            Self::Regular | Self::Undo | Self::UserShell | Self::GhostSnapshot => None,
+            Self::Regular | Self::Undo | Self::UserShell | Self::WorkspaceCheckpoint => None,
         }
     }
 }
@@ -132,7 +167,7 @@ pub(crate) struct TurnState {
     pending_user_input: HashMap<String, oneshot::Sender<RequestUserInputResponse>>,
     pending_elicitations: HashMap<(String, RequestId), oneshot::Sender<ElicitationResponse>>,
     pending_dynamic_tools: HashMap<String, oneshot::Sender<DynamicToolResponse>>,
-    pending_input: Vec<ResponseInputItem>,
+    pending_input: Vec<PendingInput>,
     pub(crate) tool_calls: u64,
     pub(crate) token_usage_at_turn_start: TokenUsage,
 }
@@ -226,11 +261,11 @@ impl TurnState {
         self.pending_dynamic_tools.remove(key)
     }
 
-    pub(crate) fn push_pending_input(&mut self, input: ResponseInputItem) {
+    pub(crate) fn push_pending_input(&mut self, input: PendingInput) {
         self.pending_input.push(input);
     }
 
-    pub(crate) fn prepend_pending_input(&mut self, mut input: Vec<ResponseInputItem>) {
+    pub(crate) fn prepend_pending_input(&mut self, mut input: Vec<PendingInput>) {
         if input.is_empty() {
             return;
         }
@@ -239,7 +274,7 @@ impl TurnState {
         self.pending_input = input;
     }
 
-    pub(crate) fn take_pending_input(&mut self) -> Vec<ResponseInputItem> {
+    pub(crate) fn take_pending_input(&mut self) -> Vec<PendingInput> {
         if self.pending_input.is_empty() {
             Vec::with_capacity(0)
         } else {

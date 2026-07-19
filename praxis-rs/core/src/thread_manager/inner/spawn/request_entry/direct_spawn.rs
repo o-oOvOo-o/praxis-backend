@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use praxis_login::AuthManager;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
+use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::W3cTraceContext;
@@ -32,6 +33,36 @@ impl ThreadManagerInner {
         parent_trace: Option<W3cTraceContext>,
         user_shell_override: Option<Shell>,
     ) -> PraxisResult<ThreadSpawnResult> {
+        Box::pin(self.spawn_thread_with_requested_id(
+            config,
+            initial_history,
+            auth_manager,
+            agent_control,
+            dynamic_tools,
+            persist_extended_history,
+            metrics_service_name,
+            parent_trace,
+            user_shell_override,
+            None,
+        ))
+        .await
+    }
+
+    /// Spawn a thread with an optional identity assigned by the owning API.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn spawn_thread_with_requested_id(
+        &self,
+        config: Config,
+        initial_history: InitialHistory,
+        auth_manager: Arc<AuthManager>,
+        agent_control: AgentControl,
+        dynamic_tools: Vec<DynamicToolSpec>,
+        persist_extended_history: bool,
+        metrics_service_name: Option<String>,
+        parent_trace: Option<W3cTraceContext>,
+        user_shell_override: Option<Shell>,
+        requested_thread_id: Option<ThreadId>,
+    ) -> PraxisResult<ThreadSpawnResult> {
         let request = ThreadSpawnRequest::new(
             config,
             initial_history,
@@ -39,6 +70,7 @@ impl ThreadManagerInner {
             agent_control,
             self.session_source.clone(),
         )
+        .with_requested_thread_id(requested_thread_id)
         .with_dynamic_tools(dynamic_tools)
         .with_persist_extended_history(persist_extended_history)
         .with_metrics_service_name(metrics_service_name)

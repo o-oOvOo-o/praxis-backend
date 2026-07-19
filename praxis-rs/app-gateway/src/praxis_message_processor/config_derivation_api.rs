@@ -6,6 +6,7 @@ impl PraxisMessageProcessor {
         &self,
         model: Option<String>,
         model_provider: Option<String>,
+        model_reasoning_effort: Option<praxis_protocol::openai_models::ReasoningEffort>,
         service_tier: Option<Option<praxis_protocol::config_types::ServiceTier>>,
         cwd: Option<String>,
         approval_policy: Option<praxis_app_gateway_protocol::AskForApproval>,
@@ -18,6 +19,7 @@ impl PraxisMessageProcessor {
         ConfigOverrides {
             model,
             model_provider,
+            model_reasoning_effort,
             service_tier,
             cwd: cwd.map(PathBuf::from),
             approval_policy: approval_policy
@@ -55,6 +57,14 @@ pub(crate) fn collect_resume_override_mismatches(
         mismatch_details.push(format!(
             "model_provider requested={requested_provider} active={}",
             config_snapshot.model_provider_id
+        ));
+    }
+    if let Some(requested_effort) = request.reasoning_effort.as_ref()
+        && Some(requested_effort) != config_snapshot.reasoning_effort.as_ref()
+    {
+        mismatch_details.push(format!(
+            "reasoning_effort requested={requested_effort:?} active={:?}",
+            config_snapshot.reasoning_effort
         ));
     }
     if let Some(requested_service_tier) = request.service_tier.as_ref()
@@ -139,12 +149,7 @@ pub(crate) fn merge_persisted_resume_metadata(
 
     typesafe_overrides.model = persisted_metadata.model.clone();
 
-    if let Some(reasoning_effort) = &persisted_metadata.reasoning_effort {
-        request_overrides.get_or_insert_with(HashMap::new).insert(
-            "model_reasoning_effort".to_string(),
-            serde_json::Value::String(reasoning_effort.to_string()),
-        );
-    }
+    typesafe_overrides.model_reasoning_effort = persisted_metadata.reasoning_effort.clone();
 }
 
 fn has_model_resume_override(
@@ -153,6 +158,7 @@ fn has_model_resume_override(
 ) -> bool {
     typesafe_overrides.model.is_some()
         || typesafe_overrides.model_provider.is_some()
+        || typesafe_overrides.model_reasoning_effort.is_some()
         || request_overrides.is_some_and(|overrides| overrides.contains_key("model"))
         || request_overrides
             .is_some_and(|overrides| overrides.contains_key("model_reasoning_effort"))

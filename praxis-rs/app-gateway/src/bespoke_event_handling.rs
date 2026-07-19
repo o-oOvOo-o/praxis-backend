@@ -23,6 +23,7 @@ use crate::mcp_tool_event_bridge::construct_mcp_tool_call_end_item;
 use crate::mcp_tool_event_bridge::construct_mcp_tool_call_item;
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
 use crate::praxis_message_processor::project_rollback_thread_from_rollout;
+use crate::praxis_message_processor::thread_selfwork_api::advance_selfwork_after_turn;
 use crate::realtime_event_bridge::send_realtime_closed;
 use crate::realtime_event_bridge::send_realtime_event;
 use crate::realtime_event_bridge::send_realtime_started;
@@ -92,6 +93,7 @@ use praxis_app_gateway_protocol::ThreadNameUpdatedNotification;
 use praxis_app_gateway_protocol::ThreadRollbackResponse;
 use praxis_app_gateway_protocol::ThreadTokenUsage;
 use praxis_app_gateway_protocol::ThreadTokenUsageUpdatedNotification;
+use praxis_app_gateway_protocol::ThreadWorkspaceRestoreResult;
 use praxis_app_gateway_protocol::ToolRequestUserInputOption;
 use praxis_app_gateway_protocol::ToolRequestUserInputParams;
 use praxis_app_gateway_protocol::ToolRequestUserInputQuestion;
@@ -262,6 +264,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     let state = thread_state.lock().await;
                     state.active_turn_snapshot().unwrap_or_else(|| Turn {
                         id: payload.turn_id.clone(),
+                        collaboration_mode_kind: payload.collaboration_mode_kind,
                         items: Vec::new(),
                         error: None,
                         status: TurnStatus::InProgress,
@@ -295,6 +298,16 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &status,
                 error.as_ref(),
                 &outgoing,
+            )
+            .await;
+            advance_selfwork_after_turn(
+                conversation_id,
+                turn_id.as_str(),
+                &status,
+                &conversation,
+                &thread_state,
+                &outgoing,
+                state_db.as_ref(),
             )
             .await;
         }
@@ -1138,8 +1151,18 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &outgoing,
             )
             .await;
+            advance_selfwork_after_turn(
+                conversation_id,
+                turn_id.as_str(),
+                &status,
+                &conversation,
+                &thread_state,
+                &outgoing,
+                state_db.as_ref(),
+            )
+            .await;
         }
-        EventMsg::ThreadRolledBack(_rollback_event) => {
+        EventMsg::ThreadRolledBack(rollback_event) => {
             let pending = {
                 let mut state = thread_state.lock().await;
                 state.pending_rollbacks.take()
@@ -1169,7 +1192,16 @@ pub(crate) async fn apply_bespoke_event_handling(
                             .await;
                         thread.status = runtime_state.status;
                         thread.control_state = runtime_state.control_state;
-                        ThreadRollbackResponse { thread }
+                        ThreadRollbackResponse {
+                            thread,
+                            workspace_restore: rollback_event.workspace_restore.as_ref().map(
+                                |outcome| ThreadWorkspaceRestoreResult {
+                                    checkpoint_id: outcome.checkpoint_id,
+                                    restored_files: outcome.restored_files,
+                                    removed_files: outcome.removed_files,
+                                },
+                            ),
+                        }
                     }
                     Err(message) => {
                         let error = JSONRPCErrorError {

@@ -6,6 +6,7 @@ pub(crate) mod role;
 pub(crate) mod status;
 
 pub(crate) use control::AgentControl;
+pub(crate) use control::SpawnAgentOptions;
 pub(crate) use mailbox::Mailbox;
 pub(crate) use mailbox::MailboxReceiver;
 pub(crate) use praxis_protocol::protocol::AgentStatus;

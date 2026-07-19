@@ -137,8 +137,11 @@ impl PraxisThread {
         &self,
         input: Vec<UserInput>,
         expected_turn_id: Option<&str>,
+        input_id: Option<String>,
     ) -> Result<String, SteerInputError> {
-        self.praxis.steer_input(input, expected_turn_id).await
+        self.praxis
+            .steer_input(input, expected_turn_id, input_id)
+            .await
     }
 
     pub async fn set_app_gateway_client_name(

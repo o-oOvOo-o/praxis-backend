@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use praxis_login::AuthManager;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
+use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::W3cTraceContext;
@@ -13,6 +14,7 @@ use crate::shell::Shell;
 use crate::shell_snapshot::ShellSnapshot;
 
 pub(super) struct ThreadSpawnRequest {
+    pub(super) requested_thread_id: Option<ThreadId>,
     pub(super) config: Config,
     pub(super) initial_history: InitialHistory,
     pub(super) auth_manager: Arc<AuthManager>,
@@ -36,6 +38,7 @@ impl ThreadSpawnRequest {
         session_source: SessionSource,
     ) -> Self {
         Self {
+            requested_thread_id: None,
             config,
             initial_history,
             auth_manager,
@@ -49,6 +52,14 @@ impl ThreadSpawnRequest {
             parent_trace: None,
             user_shell_override: None,
         }
+    }
+
+    pub(super) fn with_requested_thread_id(
+        mut self,
+        requested_thread_id: Option<ThreadId>,
+    ) -> Self {
+        self.requested_thread_id = requested_thread_id;
+        self
     }
 
     pub(super) fn with_dynamic_tools(mut self, dynamic_tools: Vec<DynamicToolSpec>) -> Self {

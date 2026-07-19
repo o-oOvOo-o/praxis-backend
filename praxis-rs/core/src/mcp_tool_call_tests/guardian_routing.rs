@@ -50,10 +50,14 @@ async fn approve_mode_routes_arc_ask_user_to_guardian_when_guardian_reviewer_is_
     turn_context.auth_manager = Some(crate::test_support::auth_manager_from_auth(
         praxis_login::OpenAiAccountAuth::create_dummy_chatgpt_auth_for_testing(),
     ));
-    turn_context
-        .approval_policy
-        .set(AskForApproval::OnRequest)
-        .expect("test setup should allow updating approval policy");
+    session
+        .update_settings(SessionSettingsUpdate {
+            approval_policy: Some(AskForApproval::OnRequest),
+            approvals_reviewer: Some(ApprovalsReviewer::GuardianSubagent),
+            ..Default::default()
+        })
+        .await
+        .expect("test setup should allow updating permissions");
     let mut config = (*turn_context.config).clone();
     config.chatgpt_base_url = server.uri();
     config.model_provider.base_url = Some(format!("{}/v1", server.uri()));

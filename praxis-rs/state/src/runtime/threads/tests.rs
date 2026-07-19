@@ -520,6 +520,7 @@ async fn apply_rollout_items_uses_override_updated_at_when_provided() {
                     total_tokens: 321,
                 },
                 last_token_usage: praxis_protocol::protocol::TokenUsage::default(),
+                internal_savings: Default::default(),
                 model_context_window: None,
                 model_auto_compact_token_limit: None,
             }),

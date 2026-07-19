@@ -10,6 +10,8 @@
 // and lives in the parent config module.
 use praxis_protocol::protocol::SessionMeta;
 
+use crate::config::Config;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExternalAgentSource {
     Codex,
@@ -17,7 +19,18 @@ pub enum ExternalAgentSource {
 }
 
 impl ExternalAgentSource {
-    pub(super) const fn import_model_provider_id(self) -> &'static str {
+    pub fn bridge_config(self, primary_config: &Config) -> Config {
+        let mut bridge_config = primary_config.clone();
+        let bridge_home = primary_config
+            .praxis_home
+            .join(self.bridge_state_dir_name());
+        bridge_config.praxis_home = bridge_home.clone();
+        bridge_config.sqlite_home = bridge_home;
+        bridge_config.log_dir = primary_config.log_dir.join(self.bridge_log_dir_name());
+        bridge_config
+    }
+
+    pub const fn import_model_provider_id(self) -> &'static str {
         match self {
             Self::Codex => "codex",
             Self::Cursor => "cursor",

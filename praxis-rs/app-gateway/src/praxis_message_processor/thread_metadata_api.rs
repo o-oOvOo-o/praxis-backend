@@ -41,7 +41,7 @@ impl PraxisMessageProcessor {
             }
 
             self.outgoing
-                .send_response(request_id, ThreadSetNameResponse {})
+                .send_response(request_id, ThreadSetNameResponse { thread_name: name })
                 .await;
             return;
         }
@@ -72,7 +72,12 @@ impl PraxisMessageProcessor {
         }
 
         self.outgoing
-            .send_response(request_id, ThreadSetNameResponse {})
+            .send_response(
+                request_id,
+                ThreadSetNameResponse {
+                    thread_name: name.clone(),
+                },
+            )
             .await;
         let notification = ThreadNameUpdatedNotification {
             thread_id: thread_id.to_string(),
@@ -331,7 +336,7 @@ impl PraxisMessageProcessor {
             .await;
     }
 
-    async fn ensure_thread_metadata_row_exists(
+    pub(super) async fn ensure_thread_metadata_row_exists(
         &self,
         thread_uuid: ThreadId,
         state_db_ctx: &Arc<StateRuntime>,

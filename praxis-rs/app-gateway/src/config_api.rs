@@ -20,10 +20,17 @@ use praxis_app_gateway_protocol::ConfigRequirementsReadResponse;
 use praxis_app_gateway_protocol::ConfigValueWriteParams;
 use praxis_app_gateway_protocol::ConfigWriteErrorCode as ApiConfigWriteErrorCode;
 use praxis_app_gateway_protocol::ConfigWriteResponse;
+use praxis_app_gateway_protocol::EffectiveModelConfig;
+use praxis_app_gateway_protocol::EffectivePermissionConfig;
 use praxis_app_gateway_protocol::ExperimentalFeatureEnablementSetParams;
 use praxis_app_gateway_protocol::ExperimentalFeatureEnablementSetResponse;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
 use praxis_app_gateway_protocol::MergeStrategy;
+use praxis_app_gateway_protocol::ModelPreferencesWriteParams;
+use praxis_app_gateway_protocol::ModelPreferencesWriteResponse;
+use praxis_app_gateway_protocol::ModelProviderConfigWriteParams;
+use praxis_app_gateway_protocol::ModelProviderConfigWriteResponse;
+use praxis_app_gateway_protocol::ModelProviderWireApi;
 use praxis_app_gateway_protocol::NetworkDomainPermission;
 use praxis_app_gateway_protocol::NetworkRequirements;
 use praxis_app_gateway_protocol::NetworkUnixSocketPermission;
@@ -40,7 +47,9 @@ use praxis_config::types::AppToolsConfig as CoreAppToolsConfig;
 use praxis_config::types::AppsConfigToml as CoreAppsConfig;
 use praxis_config::types::AppsDefaultConfig as CoreAppsDefaultConfig;
 use praxis_config::types::SandboxWorkspaceWrite as CoreSandboxWorkspaceWrite;
+use praxis_core::ModelProviderInfo;
 use praxis_core::ThreadManager;
+use praxis_core::WireApi;
 use praxis_core::config::Config as CoreRuntimeConfig;
 use praxis_core::config::ConfigBatchWriteParams as CoreConfigBatchWriteParams;
 use praxis_core::config::ConfigReadParams as CoreConfigReadParams;
@@ -57,6 +66,7 @@ use praxis_core::config::OverriddenMetadata as CoreOverriddenMetadata;
 use praxis_core::config::ServiceProfile as CoreProfile;
 use praxis_core::config::Tools as CoreTools;
 use praxis_core::config::WriteStatus as CoreWriteStatus;
+use praxis_core::config::edit::ConfigEditsBuilder;
 use praxis_core::config_loader::CloudConfigBundleLoader;
 use praxis_core::config_loader::ConfigRequirementsToml;
 use praxis_core::config_loader::LoaderOverrides;
@@ -69,6 +79,9 @@ use praxis_features::canonical_feature_for_key;
 use praxis_features::feature_for_key;
 use praxis_protocol::config_types::WebSearchMode;
 use praxis_protocol::protocol::Op;
+use praxis_protocol::protocol::SandboxPolicy;
+use praxis_utils_approval_presets::PermissionPreset;
+use praxis_utils_approval_presets::approval_preset_matches;
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -199,8 +212,8 @@ impl ConfigApi {
             .read(core_config_read_params(params))
             .await
             .map_err(map_error)?;
-        let mut response = api_config_read_response(response);
         let config = self.load_latest_config(fallback_cwd).await?;
+        let mut response = api_config_read_response(response, &config);
         for feature_key in SUPPORTED_EXPERIMENTAL_FEATURE_ENABLEMENT {
             let Some(feature) = feature_for_key(feature_key) else {
                 continue;
@@ -272,6 +285,210 @@ impl ConfigApi {
             self.user_config_reloader.reload_user_config().await;
         }
         Ok(api_config_write_response(response))
+    }
+
+    pub(crate) async fn write_model_provider(
+        &self,
+        params: ModelProviderConfigWriteParams,
+    ) -> Result<ModelProviderConfigWriteResponse, JSONRPCErrorError> {
+        let ModelProviderConfigWriteParams {
+            provider_id,
+            provider,
+            selection,
+            file_path,
+            expected_version,
+            reload_user_config,
+        } = params;
+        let provider_value = provider
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(|err| JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: format!("failed to serialize model provider document: {err}"),
+                data: None,
+            })?;
+        let parsed_provider = provider_value
+            .as_ref()
+            .map(|provider| {
+                serde_json::from_value::<ModelProviderInfo>(provider.clone()).map_err(|err| {
+                    JSONRPCErrorError {
+                        code: INVALID_REQUEST_ERROR_CODE,
+                        message: format!("invalid model provider document: {err}"),
+                        data: None,
+                    }
+                })
+            })
+            .transpose()?;
+        let provider_id = match provider_id {
+            Some(provider_id) => {
+                validate_model_provider_id(&provider_id)?;
+                provider_id
+            }
+            None => {
+                let provider = parsed_provider.as_ref().ok_or_else(|| JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "providerId may be omitted only when creating a provider".to_string(),
+                    data: None,
+                })?;
+                self.allocate_model_provider_id(provider.name.as_str())
+                    .await?
+            }
+        };
+        if provider_value.is_none() && selection.is_some() {
+            self.ensure_model_provider_exists(provider_id.as_str())
+                .await?;
+        }
+
+        let mut edits = Vec::with_capacity(3);
+        if let Some(provider) = provider_value {
+            // Parsing above validates the complete document before any edit is prepared.
+            edits.push(praxis_app_gateway_protocol::ConfigEdit {
+                key_path: format!("model_providers.{provider_id}"),
+                value: provider,
+                merge_strategy: MergeStrategy::Replace,
+            });
+        }
+        if let Some(selection) = selection {
+            edits.push(praxis_app_gateway_protocol::ConfigEdit {
+                key_path: "model_provider".to_string(),
+                value: serde_json::Value::String(provider_id.clone()),
+                merge_strategy: MergeStrategy::Replace,
+            });
+            if let Some(model) = selection.model {
+                if model.trim().is_empty() {
+                    return Err(JSONRPCErrorError {
+                        code: INVALID_REQUEST_ERROR_CODE,
+                        message: "selected model must not be empty".to_string(),
+                        data: None,
+                    });
+                }
+                edits.push(praxis_app_gateway_protocol::ConfigEdit {
+                    key_path: "model".to_string(),
+                    value: serde_json::Value::String(model),
+                    merge_strategy: MergeStrategy::Replace,
+                });
+            }
+        }
+        if edits.is_empty() {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: "model provider write requires a provider document or selection"
+                    .to_string(),
+                data: None,
+            });
+        }
+
+        let write = self
+            .batch_write(ConfigBatchWriteParams {
+                edits,
+                file_path,
+                expected_version,
+                reload_user_config,
+            })
+            .await?;
+        Ok(ModelProviderConfigWriteResponse { provider_id, write })
+    }
+
+    pub(crate) async fn write_model_preferences(
+        &self,
+        params: ModelPreferencesWriteParams,
+    ) -> Result<ModelPreferencesWriteResponse, JSONRPCErrorError> {
+        let ModelPreferencesWriteParams {
+            profile,
+            selection,
+            plan_reasoning_effort,
+        } = params;
+        if selection.is_none() && plan_reasoning_effort.is_none() {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: "model preferences write requires a selection or Plan reasoning update"
+                    .to_owned(),
+                data: None,
+            });
+        }
+        if profile
+            .as_deref()
+            .is_some_and(|profile| profile.trim().is_empty())
+        {
+            return Err(JSONRPCErrorError {
+                code: INVALID_REQUEST_ERROR_CODE,
+                message: "profile must not be empty".to_owned(),
+                data: None,
+            });
+        }
+
+        let active_profile = match profile {
+            Some(profile) => Some(profile),
+            None => self.load_latest_config(None).await?.active_profile,
+        };
+        let mut edits = ConfigEditsBuilder::new(self.praxis_home.as_path())
+            .with_profile(active_profile.as_deref());
+        if let Some(selection) = selection {
+            if selection.model.trim().is_empty() {
+                return Err(JSONRPCErrorError {
+                    code: INVALID_REQUEST_ERROR_CODE,
+                    message: "selected model must not be empty".to_owned(),
+                    data: None,
+                });
+            }
+            validate_model_provider_id(selection.model_provider.as_str())?;
+            self.ensure_model_provider_exists(selection.model_provider.as_str())
+                .await?;
+            edits = edits
+                .set_model_provider(Some(selection.model_provider.as_str()))
+                .set_model(Some(selection.model.as_str()), selection.reasoning_effort);
+        }
+        if let Some(plan_reasoning_effort) = plan_reasoning_effort {
+            edits = edits.set_plan_mode_reasoning_effort(plan_reasoning_effort.into_effort());
+        }
+        edits.apply().await.map_err(|error| JSONRPCErrorError {
+            code: INTERNAL_ERROR_CODE,
+            message: format!("failed to persist model preferences: {error}"),
+            data: None,
+        })?;
+        self.user_config_reloader.reload_user_config().await;
+        Ok(ModelPreferencesWriteResponse {
+            profile: active_profile,
+        })
+    }
+
+    async fn allocate_model_provider_id(
+        &self,
+        provider_name: &str,
+    ) -> Result<String, JSONRPCErrorError> {
+        let config = self.load_latest_config(None).await?;
+        let providers = &config.model_providers;
+        let sanitized = sanitize_model_provider_id(&format!("custom_{provider_name}"));
+        let base_id = if sanitized.is_empty() {
+            "custom_provider".to_owned()
+        } else {
+            sanitized
+        };
+        if !providers.contains_key(&base_id) {
+            return Ok(base_id);
+        }
+        for suffix in 2.. {
+            let candidate = format!("{base_id}_{suffix}");
+            if !providers.contains_key(&candidate) {
+                return Ok(candidate);
+            }
+        }
+        unreachable!("unbounded provider id allocation must return")
+    }
+
+    async fn ensure_model_provider_exists(
+        &self,
+        provider_id: &str,
+    ) -> Result<(), JSONRPCErrorError> {
+        let config = self.load_latest_config(None).await?;
+        if config.model_providers.contains_key(provider_id) {
+            return Ok(());
+        }
+        Err(JSONRPCErrorError {
+            code: INVALID_REQUEST_ERROR_CODE,
+            message: format!("model provider `{provider_id}` is not configured"),
+            data: None,
+        })
     }
 
     pub(crate) async fn set_experimental_feature_enablement(
@@ -350,6 +567,38 @@ impl ConfigApi {
             }
         }
     }
+}
+
+fn validate_model_provider_id(provider_id: &str) -> Result<(), JSONRPCErrorError> {
+    let valid = !provider_id.is_empty()
+        && provider_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
+    if valid {
+        return Ok(());
+    }
+    Err(JSONRPCErrorError {
+        code: INVALID_REQUEST_ERROR_CODE,
+        message: format!(
+            "invalid model provider id `{provider_id}`: use ASCII letters, digits, `_`, or `-`"
+        ),
+        data: None,
+    })
+}
+
+fn sanitize_model_provider_id(raw: &str) -> String {
+    let mut output = String::with_capacity(raw.len());
+    let mut previous_separator = false;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+            previous_separator = false;
+        } else if !previous_separator {
+            output.push('_');
+            previous_separator = true;
+        }
+    }
+    output.trim_matches('_').to_owned()
 }
 
 fn protected_feature_keys(
@@ -546,11 +795,58 @@ fn core_merge_strategy(strategy: MergeStrategy) -> CoreMergeStrategy {
     }
 }
 
-fn api_config_read_response(response: CoreConfigReadResponse) -> ConfigReadResponse {
+fn api_config_read_response(
+    response: CoreConfigReadResponse,
+    runtime_config: &CoreRuntimeConfig,
+) -> ConfigReadResponse {
     ConfigReadResponse {
         config: api_config_view(response.config),
+        effective_model: api_effective_model_config(runtime_config),
+        effective_permissions: api_effective_permission_config(runtime_config),
         origins: response.origins,
         layers: response.layers,
+    }
+}
+
+fn api_effective_permission_config(config: &CoreRuntimeConfig) -> EffectivePermissionConfig {
+    let approval_policy = config.permissions.approval_policy.value();
+    let sandbox_policy = config.permissions.sandbox_policy.get();
+    let permission_preset = PermissionPreset::ALL
+        .into_iter()
+        .find(|preset| {
+            preset.approvals_reviewer() == config.approvals_reviewer
+                && approval_preset_matches(
+                    approval_policy,
+                    sandbox_policy,
+                    &preset.approval_preset(),
+                )
+        })
+        .map(|preset| preset.id().to_owned());
+    let sandbox_mode = match sandbox_policy {
+        SandboxPolicy::ReadOnly { .. } => Some(SandboxMode::ReadOnly),
+        SandboxPolicy::WorkspaceWrite { .. } => Some(SandboxMode::WorkspaceWrite),
+        SandboxPolicy::DangerFullAccess => Some(SandboxMode::DangerFullAccess),
+        SandboxPolicy::ExternalSandbox { .. } => None,
+    };
+    EffectivePermissionConfig {
+        permission_preset,
+        approval_policy: approval_policy.into(),
+        approvals_reviewer: config.approvals_reviewer.into(),
+        sandbox_mode,
+    }
+}
+
+fn api_effective_model_config(config: &CoreRuntimeConfig) -> EffectiveModelConfig {
+    EffectiveModelConfig {
+        model: config.model.clone(),
+        model_provider: config.model_provider_id.clone(),
+        model_provider_display_name: config.model_provider.name.clone(),
+        model_provider_wire_api: match config.model_provider.wire_api {
+            WireApi::Responses => ModelProviderWireApi::Responses,
+            WireApi::Claude => ModelProviderWireApi::Claude,
+            WireApi::OpenAiCompat => ModelProviderWireApi::OpenAiCompat,
+        },
+        reasoning_effort: config.model_reasoning_effort.clone(),
     }
 }
 

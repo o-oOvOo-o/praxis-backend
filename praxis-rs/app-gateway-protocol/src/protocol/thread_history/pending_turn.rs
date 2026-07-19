@@ -1,4 +1,5 @@
 use super::*;
+use praxis_protocol::config_types::ModeKind;
 
 pub(super) fn upsert_turn_item(items: &mut Vec<ThreadItem>, item: ThreadItem) {
     if let Some(existing_item) = items
@@ -13,6 +14,7 @@ pub(super) fn upsert_turn_item(items: &mut Vec<ThreadItem>, item: ThreadItem) {
 
 pub(super) struct PendingTurn {
     pub(super) id: String,
+    pub(super) collaboration_mode_kind: ModeKind,
     pub(super) items: Vec<ThreadItem>,
     pub(super) error: Option<TurnError>,
     pub(super) status: TurnStatus,
@@ -42,6 +44,7 @@ impl From<PendingTurn> for Turn {
     fn from(value: PendingTurn) -> Self {
         Self {
             id: value.id,
+            collaboration_mode_kind: value.collaboration_mode_kind,
             items: value.items,
             error: value.error,
             status: value.status,
@@ -53,6 +56,7 @@ impl From<&PendingTurn> for Turn {
     fn from(value: &PendingTurn) -> Self {
         Self {
             id: value.id.clone(),
+            collaboration_mode_kind: value.collaboration_mode_kind,
             items: value.items.clone(),
             error: value.error.clone(),
             status: value.status.clone(),

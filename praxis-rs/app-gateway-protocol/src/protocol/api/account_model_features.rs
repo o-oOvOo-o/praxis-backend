@@ -136,6 +136,10 @@ pub struct ChatgptAuthTokensRefreshResponse {
     pub chatgpt_plan_type: Option<String>,
 }
 
+pub const CHATGPT_AUTH_TOKENS_REFRESH_UNSUPPORTED_CODE: i64 = -32000;
+pub const CHATGPT_AUTH_TOKENS_REFRESH_UNSUPPORTED_MESSAGE: &str =
+    "external ChatGPT auth token refresh is not supported by this client";
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct GetAccountRateLimitsResponse {
@@ -199,7 +203,12 @@ const fn default_model_supports_streaming() -> bool {
 pub enum ModelProviderWireApi {
     Responses,
     Claude,
+    #[serde(rename = "openai_compat")]
     OpenAiCompat,
+}
+
+impl ModelProviderWireApi {
+    pub const ALL: [Self; 3] = [Self::Responses, Self::Claude, Self::OpenAiCompat];
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -279,6 +288,7 @@ pub struct CollaborationModeMask {
     #[serde(rename = "reasoning_effort")]
     #[ts(rename = "reasoning_effort")]
     pub reasoning_effort: Option<Option<ReasoningEffort>>,
+    pub developer_instructions: Option<Option<String>>,
 }
 
 impl From<CoreCollaborationModeMask> for CollaborationModeMask {
@@ -288,6 +298,19 @@ impl From<CoreCollaborationModeMask> for CollaborationModeMask {
             mode: value.mode,
             model: value.model,
             reasoning_effort: value.reasoning_effort,
+            developer_instructions: value.developer_instructions,
+        }
+    }
+}
+
+impl From<&CollaborationModeMask> for CoreCollaborationModeMask {
+    fn from(value: &CollaborationModeMask) -> Self {
+        Self {
+            name: value.name.clone(),
+            mode: value.mode,
+            model: value.model.clone(),
+            reasoning_effort: value.reasoning_effort.clone(),
+            developer_instructions: value.developer_instructions.clone(),
         }
     }
 }

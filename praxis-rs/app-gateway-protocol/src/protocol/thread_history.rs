@@ -253,28 +253,45 @@ impl ThreadHistoryBuilder {
 
     fn handle_response_item(&mut self, item: &praxis_protocol::models::ResponseItem) {
         let praxis_protocol::models::ResponseItem::Message {
-            role, content, id, ..
+            role,
+            content,
+            id,
+            phase,
+            ..
         } = item
         else {
             return;
         };
 
-        if role != "user" {
-            return;
+        match role.as_str() {
+            "user" => {
+                let Some(hook_prompt) = parse_hook_prompt_message(id.as_ref(), content) else {
+                    return;
+                };
+
+                self.ensure_turn().items.push(ThreadItem::HookPrompt {
+                    id: hook_prompt.id,
+                    fragments: hook_prompt
+                        .fragments
+                        .into_iter()
+                        .map(crate::protocol::api::HookPromptFragment::from)
+                        .collect(),
+                });
+            }
+            "assistant" => {
+                let text = content
+                    .iter()
+                    .filter_map(|item| match item {
+                        praxis_protocol::models::ContentItem::InputText { text }
+                        | praxis_protocol::models::ContentItem::OutputText { text } => Some(text),
+                        praxis_protocol::models::ContentItem::InputImage { .. } => None,
+                    })
+                    .cloned()
+                    .collect::<String>();
+                self.handle_agent_message(text, phase.clone(), None);
+            }
+            _ => {}
         }
-
-        let Some(hook_prompt) = parse_hook_prompt_message(id.as_ref(), content) else {
-            return;
-        };
-
-        self.ensure_turn().items.push(ThreadItem::HookPrompt {
-            id: hook_prompt.id,
-            fragments: hook_prompt
-                .fragments
-                .into_iter()
-                .map(crate::protocol::api::HookPromptFragment::from)
-                .collect(),
-        });
     }
 
     fn handle_user_message(&mut self, payload: &UserMessageEvent) {
@@ -304,6 +321,20 @@ impl ThreadHistoryBuilder {
         memory_citation: Option<crate::protocol::api::MemoryCitation>,
     ) {
         if text.is_empty() {
+            return;
+        }
+
+        if matches!(
+            self.ensure_turn().items.last(),
+            Some(ThreadItem::AgentMessage {
+                text: existing_text,
+                phase: existing_phase,
+                memory_citation: existing_citation,
+                ..
+            }) if existing_text == &text
+                && existing_phase == &phase
+                && existing_citation == &memory_citation
+        ) {
             return;
         }
 
@@ -379,6 +410,12 @@ impl ThreadHistoryBuilder {
 
     fn handle_item_completed(&mut self, payload: &ItemCompletedEvent) {
         match &payload.item {
+            praxis_protocol::items::TurnItem::UserMessage(_) => {
+                self.record_canonical_user_message(
+                    payload.turn_id.as_str(),
+                    ThreadItem::from(payload.item.clone()),
+                );
+            }
             praxis_protocol::items::TurnItem::Plan(plan) => {
                 if plan.text.is_empty() {
                     return;
@@ -388,8 +425,7 @@ impl ThreadHistoryBuilder {
                     ThreadItem::from(payload.item.clone()),
                 );
             }
-            praxis_protocol::items::TurnItem::UserMessage(_)
-            | praxis_protocol::items::TurnItem::HookPrompt(_)
+            praxis_protocol::items::TurnItem::HookPrompt(_)
             | praxis_protocol::items::TurnItem::AgentMessage(_)
             | praxis_protocol::items::TurnItem::Reasoning(_)
             | praxis_protocol::items::TurnItem::WebSearch(_)
@@ -957,11 +993,12 @@ impl ThreadHistoryBuilder {
 
     fn handle_turn_started(&mut self, payload: &TurnStartedEvent) {
         self.finish_current_turn();
-        self.current_turn = Some(
-            self.new_turn(Some(payload.turn_id.clone()))
-                .with_status(TurnStatus::InProgress)
-                .opened_explicitly(),
-        );
+        let mut turn = self
+            .new_turn(Some(payload.turn_id.clone()))
+            .with_status(TurnStatus::InProgress)
+            .opened_explicitly();
+        turn.collaboration_mode_kind = payload.collaboration_mode_kind;
+        self.current_turn = Some(turn);
     }
 
     fn handle_turn_complete(&mut self, payload: &TurnCompleteEvent) {
@@ -1069,6 +1106,7 @@ impl ThreadHistoryBuilder {
     fn new_turn(&mut self, id: Option<String>) -> PendingTurn {
         PendingTurn {
             id: id.unwrap_or_else(|| Uuid::now_v7().to_string()),
+            collaboration_mode_kind: Default::default(),
             items: Vec::new(),
             error: None,
             status: TurnStatus::Completed,
@@ -1108,6 +1146,36 @@ impl ThreadHistoryBuilder {
             item_id = item.id(),
             "dropping turn-scoped item for unknown turn id `{turn_id}`"
         );
+    }
+
+    fn record_canonical_user_message(&mut self, turn_id: &str, item: ThreadItem) {
+        let replace_in = |items: &mut Vec<ThreadItem>| {
+            if let Some(last) = items.last_mut()
+                && matches!(
+                    (&*last, &item),
+                    (
+                        ThreadItem::UserMessage { content: existing, .. },
+                        ThreadItem::UserMessage { content: canonical, .. }
+                    ) if existing == canonical
+                )
+            {
+                *last = item;
+            } else {
+                upsert_turn_item(items, item);
+            }
+        };
+
+        if let Some(turn) = self.current_turn.as_mut()
+            && turn.id == turn_id
+        {
+            replace_in(&mut turn.items);
+            return;
+        }
+        if let Some(turn) = self.turns.iter_mut().find(|turn| turn.id == turn_id) {
+            replace_in(&mut turn.items);
+            return;
+        }
+        warn!("dropping canonical user message for unknown turn id `{turn_id}`");
     }
 
     fn upsert_item_in_current_turn(&mut self, item: ThreadItem) {

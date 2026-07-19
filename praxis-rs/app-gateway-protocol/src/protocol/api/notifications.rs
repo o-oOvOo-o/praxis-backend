@@ -438,6 +438,44 @@ pub struct CommandExecutionRequestApprovalParams {
 }
 
 impl CommandExecutionRequestApprovalParams {
+    pub fn effective_available_decisions(&self) -> Vec<CommandExecutionApprovalDecision> {
+        if let Some(decisions) = &self.available_decisions {
+            return decisions.clone();
+        }
+
+        let network_approval_context = self
+            .network_approval_context
+            .clone()
+            .map(NetworkApprovalContext::into_core);
+        let proposed_execpolicy_amendment = self
+            .proposed_execpolicy_amendment
+            .clone()
+            .map(ExecPolicyAmendment::into_core);
+        let proposed_network_policy_amendments = self
+            .proposed_network_policy_amendments
+            .clone()
+            .map(|amendments| {
+                amendments
+                    .into_iter()
+                    .map(NetworkPolicyAmendment::into_core)
+                    .collect::<Vec<_>>()
+            });
+        let additional_permissions = self
+            .additional_permissions
+            .clone()
+            .map(CorePermissionProfile::from);
+
+        CoreExecApprovalRequestEvent::default_available_decisions(
+            network_approval_context.as_ref(),
+            proposed_execpolicy_amendment.as_ref(),
+            proposed_network_policy_amendments.as_deref(),
+            additional_permissions.as_ref(),
+        )
+        .into_iter()
+        .map(CommandExecutionApprovalDecision::from)
+        .collect()
+    }
+
     pub fn strip_experimental_fields(&mut self) {
         // TODO: Avoid hardcoding individual experimental fields here.
         // We need a generic outbound compatibility design for stripping or
@@ -766,4 +804,20 @@ pub struct ConfigWarningNotification {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub range: Option<TextRange>,
+}
+
+pub fn config_warning_notifications<I, S>(warnings: I) -> Vec<ConfigWarningNotification>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    warnings
+        .into_iter()
+        .map(|warning| ConfigWarningNotification {
+            summary: warning.as_ref().to_owned(),
+            details: None,
+            path: None,
+            range: None,
+        })
+        .collect()
 }
