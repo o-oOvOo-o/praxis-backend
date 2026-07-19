@@ -256,6 +256,15 @@ pub struct UndoCompletedEvent {
 pub struct ThreadRolledBackEvent {
     /// Number of user turns that were removed from context.
     pub num_turns: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_restore: Option<WorkspaceRestoreEvent>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
+pub struct WorkspaceRestoreEvent {
+    pub checkpoint_id: WorkspaceCheckpointId,
+    pub restored_files: u32,
+    pub removed_files: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]

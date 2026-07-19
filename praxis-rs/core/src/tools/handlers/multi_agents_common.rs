@@ -3,8 +3,8 @@ use crate::config::Config;
 use crate::error::PraxisErr;
 use crate::function_tool::FunctionCallError;
 use crate::llm::registry::LlmProfileRegistry;
-use crate::model_provider_info::ModelProviderInfo;
-use crate::model_provider_info::OPENAI_PROVIDER_ID;
+use crate::llm::provider::ModelProviderInfo;
+use crate::llm::provider::OPENAI_PROVIDER_ID;
 use crate::models_manager::manager::RefreshStrategy;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
@@ -646,7 +646,7 @@ fn push_spawn_agent_model_candidate(candidates: &mut Vec<String>, candidate: Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_provider_info::WireApi;
+    use crate::llm::wire::WireApi;
 
     #[test]
     fn spawn_agent_model_candidates_accept_openai_aliases() {

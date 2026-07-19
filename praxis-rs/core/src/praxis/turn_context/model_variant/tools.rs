@@ -22,7 +22,7 @@ pub(super) async fn rebuild_for_model(
     ToolsConfig::new(&ToolsConfigParams {
         model_info,
         available_models: &models_manager
-            .list_models_for_config(config, RefreshStrategy::OnlineIfUncached)
+            .list_spawn_agent_models_for_config(config, RefreshStrategy::OnlineIfUncached)
             .await,
         features,
         web_search_mode: turn_context.tools_config.web_search_mode,

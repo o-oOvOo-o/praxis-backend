@@ -8,6 +8,7 @@ use crate::tools::context::ToolPayload;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use async_trait::async_trait;
+use praxis_loop::tool::ToolEffects;
 use praxis_protocol::protocol::ThreadGoal;
 use praxis_protocol::protocol::ThreadGoalStatus;
 use serde::Deserialize;
@@ -61,6 +62,10 @@ impl ToolHandler for CreateGoalHandler {
         ToolKind::Function
     }
 
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects {
+        ToolEffects::write(goal_effect_key(invocation))
+    }
+
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
         let ToolInvocation {
             session,
@@ -104,6 +109,10 @@ impl ToolHandler for GetGoalHandler {
         ToolKind::Function
     }
 
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects {
+        ToolEffects::read(goal_effect_key(invocation))
+    }
+
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
         let ToolInvocation {
             session, payload, ..
@@ -123,6 +132,10 @@ impl ToolHandler for UpdateGoalHandler {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Function
+    }
+
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects {
+        ToolEffects::write(goal_effect_key(invocation))
     }
 
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
@@ -162,6 +175,10 @@ impl ToolHandler for UpdateGoalHandler {
             .map_err(|err| FunctionCallError::RespondToModel(format_goal_error(err)))?;
         goal_response(Some(goal))
     }
+}
+
+fn goal_effect_key(invocation: &ToolInvocation) -> praxis_loop::tool::EffectKey {
+    crate::tools::effects::conversation_effect_key(invocation.session.conversation_id, ["goal"])
 }
 
 fn function_arguments(

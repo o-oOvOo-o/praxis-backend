@@ -3,6 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use praxis_loop::tool::ToolEffects;
 use serde::Deserialize;
 
 use crate::function_tool::FunctionCallError;
@@ -15,6 +16,7 @@ use crate::tools::fs_navigation::list_directory;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
+use crate::tools::registry::ToolPreparation;
 
 pub struct ListDirectoryHandler;
 
@@ -59,6 +61,11 @@ struct ListDirectoryArgs {
     kind: DirectoryEntryFilter,
 }
 
+struct PreparedListDirectory {
+    args: ListDirectoryArgs,
+    path: PathBuf,
+}
+
 #[async_trait]
 impl ToolHandler for ListDirectoryHandler {
     type Output = FunctionToolOutput;
@@ -67,44 +74,77 @@ impl ToolHandler for ListDirectoryHandler {
         ToolKind::Function
     }
 
-    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
-        let ToolInvocation { payload, turn, .. } = invocation;
-
-        let arguments = match payload {
-            ToolPayload::Function { arguments } => arguments,
-            _ => {
-                return Err(FunctionCallError::RespondToModel(
-                    "list_directory handler received unsupported payload".to_string(),
-                ));
-            }
-        };
-
-        let args: ListDirectoryArgs = parse_arguments(&arguments)?;
-        if args.path.trim().is_empty() {
-            return Err(FunctionCallError::RespondToModel(
-                "path must not be empty".to_string(),
-            ));
-        }
-
-        let path = crate::util::resolve_path(turn.cwd.as_path(), &PathBuf::from(args.path));
-        let output = list_directory(ListDirectoryRequest {
-            path: path.clone(),
-            offset: args.offset,
-            limit: args.limit,
-            depth: args.depth,
-            max_entries: args.max_entries,
-            respect_ignore: args.respect_ignore,
-            include_hidden: args.include_hidden,
-            kind: args.kind,
-        })
-        .await?;
-
-        let mut lines = Vec::with_capacity(output.entries.len() + 2);
-        lines.push(format!("Absolute path: {}", path.display()));
-        lines.push(output.summary);
-        lines.extend(output.entries);
-        Ok(FunctionToolOutput::from_text(lines.join("\n"), Some(true)))
+    async fn prepare(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<ToolPreparation, FunctionCallError> {
+        let prepared = prepare_list_directory(invocation)?;
+        Ok(ToolPreparation::new(ToolEffects::read(
+            crate::tools::effects::filesystem_effect_key(&prepared.path),
+        ))
+        .with_payload(prepared))
     }
+
+    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
+        execute_list_directory(prepare_list_directory(&invocation)?).await
+    }
+
+    async fn handle_prepared(
+        &self,
+        _invocation: ToolInvocation,
+        mut preparation: ToolPreparation,
+    ) -> Result<Self::Output, FunctionCallError> {
+        let prepared = preparation
+            .take_payload::<PreparedListDirectory>()
+            .ok_or_else(|| prepared_state_error("list_directory"))?;
+        execute_list_directory(prepared).await
+    }
+}
+
+fn prepared_state_error(tool: &str) -> FunctionCallError {
+    FunctionCallError::Fatal(format!("{tool} prepared state type mismatch"))
+}
+
+fn prepare_list_directory(
+    invocation: &ToolInvocation,
+) -> Result<PreparedListDirectory, FunctionCallError> {
+    let ToolPayload::Function { arguments } = &invocation.payload else {
+        return Err(FunctionCallError::RespondToModel(
+            "list_directory handler received unsupported payload".to_string(),
+        ));
+    };
+    let args: ListDirectoryArgs = parse_arguments(arguments)?;
+    if args.path.trim().is_empty() {
+        return Err(FunctionCallError::RespondToModel(
+            "path must not be empty".to_string(),
+        ));
+    }
+    let path = crate::util::resolve_path(invocation.turn.cwd.as_path(), &PathBuf::from(&args.path));
+    Ok(PreparedListDirectory { args, path })
+}
+
+async fn execute_list_directory(
+    prepared: PreparedListDirectory,
+) -> Result<FunctionToolOutput, FunctionCallError> {
+    let PreparedListDirectory { args, path } = prepared;
+    crate::tools::effects::record_filesystem_read(&path);
+    let output = list_directory(ListDirectoryRequest {
+        path: path.clone(),
+        offset: args.offset,
+        limit: args.limit,
+        depth: args.depth,
+        max_entries: args.max_entries,
+        respect_ignore: args.respect_ignore,
+        include_hidden: args.include_hidden,
+        kind: args.kind,
+    })
+    .await?;
+
+    let mut lines = Vec::with_capacity(output.entries.len() + 2);
+    lines.push(format!("Absolute path: {}", path.display()));
+    lines.push(output.summary);
+    lines.extend(output.entries);
+    Ok(FunctionToolOutput::from_text(lines.join("\n"), Some(true)))
 }
 
 #[cfg(test)]

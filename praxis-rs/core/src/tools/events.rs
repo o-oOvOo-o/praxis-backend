@@ -21,10 +21,13 @@ use praxis_protocol::protocol::McpToolCallEndEvent;
 use praxis_protocol::protocol::PatchApplyBeginEvent;
 use praxis_protocol::protocol::PatchApplyEndEvent;
 use praxis_protocol::protocol::PatchApplyStatus;
+use praxis_protocol::protocol::TokenSavingEvent;
+use praxis_protocol::protocol::TokenSavingKind;
 use praxis_protocol::protocol::TurnDiffEvent;
 use praxis_protocol::protocol::WebSearchBeginEvent;
 use praxis_protocol::protocol::WebSearchEndEvent;
 use praxis_shell_command::parse_command::parse_command;
+use praxis_utils_output_truncation::approx_token_count;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
@@ -499,13 +502,36 @@ async fn emit_exec_stage(
         }
         ToolEventStage::Success(output)
         | ToolEventStage::Failure(ToolEventFailure::Output(output)) => {
+            let aggregated_output = output.aggregated_output.text.clone();
+            let formatted_output = format_exec_output_str(&output, ctx.turn.truncation_policy);
+            let saved_tokens = approx_token_count(&aggregated_output)
+                .saturating_sub(approx_token_count(&formatted_output));
+            if saved_tokens > 0 {
+                ctx.session
+                    .record_token_saving_event(
+                        ctx.turn,
+                        TokenSavingEvent::new(
+                            TokenSavingKind::ToolOutputProjection,
+                            i64::try_from(approx_token_count(&aggregated_output))
+                                .unwrap_or(i64::MAX),
+                            i64::try_from(approx_token_count(&formatted_output))
+                                .unwrap_or(i64::MAX),
+                            output.agent_os_artifact_id.is_some(),
+                            output
+                                .agent_os_artifact_id
+                                .as_ref()
+                                .map(|id| format!("artifact://command-log/{id}")),
+                        ),
+                    )
+                    .await;
+            }
             let exec_result = ExecCommandResult {
                 stdout: output.stdout.text.clone(),
                 stderr: output.stderr.text.clone(),
-                aggregated_output: output.aggregated_output.text.clone(),
+                aggregated_output,
                 exit_code: output.exit_code,
                 duration: output.duration,
-                formatted_output: format_exec_output_str(&output, ctx.turn.truncation_policy),
+                formatted_output,
                 status: if output.exit_code == 0 {
                     ExecCommandStatus::Completed
                 } else {

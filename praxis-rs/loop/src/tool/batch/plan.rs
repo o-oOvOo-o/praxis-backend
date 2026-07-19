@@ -1,60 +1,68 @@
 use std::sync::Arc;
 
-use crate::model::TurnItem;
-use crate::services::ToolAccess;
-use crate::tool::ConcurrencyMode;
+use crate::tool::PreparedToolCall;
 use crate::tool::Tool;
 use crate::tool::ToolCall;
-use crate::tool::errors::missing_tool_result;
+use crate::tool::ToolEffects;
 
-pub(crate) struct ToolBatchPlan {
-    pub(crate) missing_items: Vec<TurnItem>,
-    pub(crate) batches: Vec<ToolBatch>,
+#[cfg(test)]
+pub(crate) struct ToolExecutionPlan {
+    pub(crate) nodes: Vec<PlannedTool>,
 }
 
-pub(crate) enum ToolBatch {
-    Parallel(Vec<PendingTool>),
-    Singleton(PendingTool),
-}
-
-pub(crate) struct PendingTool {
+pub(crate) struct PlannedTool {
     pub(crate) call: ToolCall,
     pub(crate) tool: Arc<dyn Tool>,
+    #[cfg(test)]
+    pub(crate) dependencies: Vec<usize>,
+    pub(crate) effects: ToolEffects,
+    pub(crate) prepared: PreparedToolCall,
 }
 
-pub(crate) fn partition_tool_batches<A>(calls: Vec<ToolCall>, access: &A) -> ToolBatchPlan
-where
-    A: ToolAccess + ?Sized,
-{
-    let mut missing_items = Vec::new();
-    let mut batches = Vec::new();
-    let mut parallel = Vec::new();
-
-    for call in calls {
-        let Some(tool) = access.resolve_tool(&call.name) else {
-            missing_items.push(TurnItem::ToolResult(missing_tool_result(&call)));
-            continue;
-        };
-
-        let pending = PendingTool { call, tool };
-        match pending.tool.concurrency() {
-            ConcurrencyMode::Parallel => parallel.push(pending),
-            ConcurrencyMode::Exclusive | ConcurrencyMode::Blocking => {
-                flush_parallel(&mut batches, &mut parallel);
-                batches.push(ToolBatch::Singleton(pending));
-            }
-        }
-    }
-
-    flush_parallel(&mut batches, &mut parallel);
-    ToolBatchPlan {
-        missing_items,
-        batches,
-    }
+#[cfg(test)]
+pub(crate) fn dependency_graph(effects: &[ToolEffects]) -> Vec<Vec<usize>> {
+    effects
+        .iter()
+        .enumerate()
+        .map(|(index, effect)| {
+            effects[..index]
+                .iter()
+                .enumerate()
+                .filter_map(|(prior_index, prior)| effect.conflicts(prior).then_some(prior_index))
+                .collect()
+        })
+        .collect()
 }
 
-fn flush_parallel(batches: &mut Vec<ToolBatch>, parallel: &mut Vec<PendingTool>) {
-    if !parallel.is_empty() {
-        batches.push(ToolBatch::Parallel(std::mem::take(parallel)));
+#[cfg(test)]
+mod tests {
+    use crate::tool::EffectKey;
+    use crate::tool::ToolEffects;
+
+    use super::dependency_graph;
+
+    fn file(path: &str) -> EffectKey {
+        EffectKey::hierarchical("filesystem", path.split('/'))
+    }
+
+    #[test]
+    fn graph_preserves_only_real_conflict_edges() {
+        let graph = dependency_graph(&[
+            ToolEffects::write(file("repo/a.rs")),
+            ToolEffects::write(file("repo/b.rs")),
+            ToolEffects::read(file("repo/a.rs")),
+            ToolEffects::read(file("repo/b.rs")),
+        ]);
+        assert_eq!(graph, vec![vec![], vec![], vec![0], vec![1]]);
+    }
+
+    #[test]
+    fn graph_keeps_provider_order_for_conflicts() {
+        let graph = dependency_graph(&[
+            ToolEffects::write(file("repo/a.rs")),
+            ToolEffects::read(file("repo/a.rs")),
+            ToolEffects::write(file("repo/a.rs")),
+        ]);
+        assert_eq!(graph, vec![vec![], vec![0], vec![0, 1]]);
     }
 }

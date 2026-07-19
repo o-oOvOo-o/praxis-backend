@@ -7,8 +7,8 @@ use crate::services::ToolAccess;
 use crate::tool::ToolCall;
 use crate::tool::ToolLifecycleSink;
 
-use super::batch::partition_tool_batches;
-use super::batch::run_tool_batch;
+use super::batch::ToolBatchEntry;
+use super::batch::prepare_and_run_tool_calls;
 
 mod outcome;
 
@@ -27,28 +27,34 @@ where
     H: TurnHooks + ?Sized,
 {
     let mut outcome = ToolDispatchOutcome::default();
-    let plan = partition_tool_batches(calls, access);
-    outcome.record_missing_items(plan.missing_items);
-
-    'batches: for batch in plan.batches {
-        if cancel.is_cancelled() {
-            break;
-        }
-
-        let runs = run_tool_batch(batch, cancel.clone(), access).await;
-        for run in runs {
-            outcome.record_lifecycle_items(run.lifecycle_items);
-            let result = run.result?;
-            let decision = hooks
-                .after_tool_call(ToolResultView {
-                    call: &run.call,
-                    result: &result,
-                })
-                .await;
-            match outcome.record_result_decision(result, decision) {
-                ToolDispatchControl::Continue => {}
-                ToolDispatchControl::Terminate => break 'batches,
+    let batch = prepare_and_run_tool_calls(calls, access, cancel).await?;
+    for entry in batch.entries {
+        let ToolBatchEntry::Run(run) = entry else {
+            if let ToolBatchEntry::Immediate(item) = entry {
+                outcome.record_missing_items(vec![item]);
             }
+            continue;
+        };
+        if !run.effect_validation.is_valid() {
+            tracing::error!(
+                tool = %run.call.name,
+                call_id = %run.call.id,
+                unexpected_effects = ?run.effect_validation.unexpected,
+                observed_effects = ?run.effect_validation.observed,
+                "tool runtime effects exceeded its execution plan"
+            );
+        }
+        outcome.record_lifecycle_items(run.lifecycle_items);
+        let result = run.result?;
+        let decision = hooks
+            .after_tool_call(ToolResultView {
+                call: &run.call,
+                result: &result,
+            })
+            .await;
+        match outcome.record_result_decision(result, decision) {
+            ToolDispatchControl::Continue => {}
+            ToolDispatchControl::Terminate => break,
         }
     }
 

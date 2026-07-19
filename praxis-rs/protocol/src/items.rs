@@ -139,8 +139,12 @@ impl Default for ContextCompactionItem {
 
 impl UserMessageItem {
     pub fn new(content: &[UserInput]) -> Self {
+        Self::with_id(uuid::Uuid::new_v4().to_string(), content)
+    }
+
+    pub fn with_id(id: String, content: &[UserInput]) -> Self {
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
+            id,
             content: content.to_vec(),
         }
     }

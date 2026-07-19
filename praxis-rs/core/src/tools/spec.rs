@@ -66,6 +66,7 @@ pub(crate) fn build_specs_with_discoverable_tools(
     use crate::tools::handlers::multi_agents::ReadAgentArtifactHandler;
     use crate::tools::handlers::multi_agents::SendMessageHandler;
     use crate::tools::handlers::multi_agents::SpawnAgentHandler;
+    use crate::tools::handlers::multi_agents::SpawnThreadHandler;
     use crate::tools::handlers::multi_agents::SubmitWorkerRequestHandler;
     use crate::tools::handlers::multi_agents::UpdateRuntimeCommandHandler;
     use crate::tools::handlers::multi_agents::UpdateWorkerRequestHandler;
@@ -212,6 +213,9 @@ pub(crate) fn build_specs_with_discoverable_tools(
             }
             ToolHandlerKind::SpawnAgent => {
                 builder.register_handler(handler.name, Arc::new(SpawnAgentHandler));
+            }
+            ToolHandlerKind::SpawnThread => {
+                builder.register_handler(handler.name, Arc::new(SpawnThreadHandler));
             }
             ToolHandlerKind::SubmitWorkerRequest => {
                 builder.register_handler(handler.name, Arc::new(SubmitWorkerRequestHandler));

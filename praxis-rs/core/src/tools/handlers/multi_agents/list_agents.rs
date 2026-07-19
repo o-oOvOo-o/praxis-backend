@@ -18,6 +18,13 @@ impl ToolHandler for Handler {
         matches!(payload, ToolPayload::Function { .. })
     }
 
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects {
+        ToolEffects::read(crate::tools::effects::conversation_effect_key(
+            invocation.session.conversation_id,
+            ["agents"],
+        ))
+    }
+
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
         let ToolInvocation {
             session,

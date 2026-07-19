@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +22,8 @@ use praxis_hooks::HookResult;
 use praxis_hooks::HookToolInput;
 use praxis_hooks::HookToolInputLocalShell;
 use praxis_hooks::HookToolKind;
+use praxis_loop::tool::EffectAccess;
+use praxis_loop::tool::ToolEffects;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_tools::ConfiguredToolSpec;
@@ -58,6 +61,17 @@ pub trait ToolHandler: Send + Sync {
         false
     }
 
+    async fn effects(&self, _invocation: &ToolInvocation) -> ToolEffects {
+        ToolEffects::unknown_write()
+    }
+
+    async fn prepare(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<ToolPreparation, FunctionCallError> {
+        Ok(ToolPreparation::new(self.effects(invocation).await))
+    }
+
     fn pre_tool_use_payload(&self, _invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
         None
     }
@@ -74,6 +88,65 @@ pub trait ToolHandler: Send + Sync {
     /// Perform the actual [ToolInvocation] and returns a [ToolOutput] containing
     /// the final output to return to the model.
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError>;
+
+    async fn handle_prepared(
+        &self,
+        invocation: ToolInvocation,
+        _preparation: ToolPreparation,
+    ) -> Result<Self::Output, FunctionCallError> {
+        self.handle(invocation).await
+    }
+}
+
+pub(crate) struct ToolPreparation {
+    effects: ToolEffects,
+    payload: Option<Box<dyn Any + Send>>,
+    rejection: Option<FunctionCallError>,
+}
+
+impl ToolPreparation {
+    pub(crate) fn new(effects: ToolEffects) -> Self {
+        Self {
+            effects,
+            payload: None,
+            rejection: None,
+        }
+    }
+
+    pub(crate) fn rejected(error: FunctionCallError) -> Self {
+        Self {
+            effects: ToolEffects::unknown_write(),
+            payload: None,
+            rejection: Some(error),
+        }
+    }
+
+    pub(crate) fn with_payload<T>(mut self, payload: T) -> Self
+    where
+        T: Any + Send,
+    {
+        self.payload = Some(Box::new(payload));
+        self
+    }
+
+    pub(crate) fn effects(&self) -> &ToolEffects {
+        &self.effects
+    }
+
+    pub(crate) fn take_payload<T>(&mut self) -> Option<T>
+    where
+        T: Any + Send,
+    {
+        self.payload
+            .take()?
+            .downcast::<T>()
+            .ok()
+            .map(|payload| *payload)
+    }
+
+    pub(crate) fn take_rejection(&mut self) -> Option<FunctionCallError> {
+        self.rejection.take()
+    }
 }
 
 pub(crate) struct AnyToolResult {
@@ -118,6 +191,13 @@ trait AnyToolHandler: Send + Sync {
 
     async fn is_mutating(&self, invocation: &ToolInvocation) -> bool;
 
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects;
+
+    async fn prepare(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<ToolPreparation, FunctionCallError>;
+
     fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload>;
 
     fn post_tool_use_payload(
@@ -130,6 +210,12 @@ trait AnyToolHandler: Send + Sync {
     async fn handle_any(
         &self,
         invocation: ToolInvocation,
+    ) -> Result<AnyToolResult, FunctionCallError>;
+
+    async fn handle_prepared_any(
+        &self,
+        invocation: ToolInvocation,
+        preparation: ToolPreparation,
     ) -> Result<AnyToolResult, FunctionCallError>;
 }
 
@@ -144,6 +230,17 @@ where
 
     async fn is_mutating(&self, invocation: &ToolInvocation) -> bool {
         ToolHandler::is_mutating(self, invocation).await
+    }
+
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects {
+        ToolHandler::effects(self, invocation).await
+    }
+
+    async fn prepare(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<ToolPreparation, FunctionCallError> {
+        ToolHandler::prepare(self, invocation).await
     }
 
     fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
@@ -166,6 +263,21 @@ where
         let call_id = invocation.call_id.clone();
         let payload = invocation.payload.clone();
         let output = self.handle(invocation).await?;
+        Ok(AnyToolResult {
+            call_id,
+            payload,
+            result: Box::new(output),
+        })
+    }
+
+    async fn handle_prepared_any(
+        &self,
+        invocation: ToolInvocation,
+        preparation: ToolPreparation,
+    ) -> Result<AnyToolResult, FunctionCallError> {
+        let call_id = invocation.call_id.clone();
+        let payload = invocation.payload.clone();
+        let output = self.handle_prepared(invocation, preparation).await?;
         Ok(AnyToolResult {
             call_id,
             payload,
@@ -213,6 +325,23 @@ impl ToolRegistry {
     pub(crate) async fn dispatch_any(
         &self,
         invocation: ToolInvocation,
+    ) -> Result<AnyToolResult, FunctionCallError> {
+        self.dispatch_any_with_preparation(invocation, None).await
+    }
+
+    pub(crate) async fn dispatch_prepared_any(
+        &self,
+        invocation: ToolInvocation,
+        preparation: ToolPreparation,
+    ) -> Result<AnyToolResult, FunctionCallError> {
+        self.dispatch_any_with_preparation(invocation, Some(preparation))
+            .await
+    }
+
+    async fn dispatch_any_with_preparation(
+        &self,
+        invocation: ToolInvocation,
+        preparation: Option<ToolPreparation>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         let tool_name = invocation.tool_name.clone();
         let tool_namespace = invocation.tool_namespace.clone();
@@ -313,6 +442,12 @@ impl ToolRegistry {
         }
 
         let is_mutating = handler.is_mutating(&invocation).await;
+        let effects = handler.effects(&invocation).await;
+        let may_mutate_workspace = is_mutating
+            && effects.iter().any(|effect| {
+                effect.access != EffectAccess::Read
+                    && matches!(effect.key.domain(), "filesystem" | "*")
+            });
         let response_cell = tokio::sync::Mutex::new(None);
         let invocation_for_tool = invocation.clone();
 
@@ -334,7 +469,19 @@ impl ToolRegistry {
                             invocation_for_tool.turn.tool_call_gate.wait_ready().await;
                             tracing::trace!("tool gate released");
                         }
-                        match handler.handle_any(invocation_for_tool).await {
+                        let handled = match preparation {
+                            Some(mut preparation) => {
+                                if let Some(error) = preparation.take_rejection() {
+                                    Err(error)
+                                } else {
+                                    handler
+                                        .handle_prepared_any(invocation_for_tool, preparation)
+                                        .await
+                                }
+                            }
+                            None => handler.handle_any(invocation_for_tool).await,
+                        };
+                        match handled {
                             Ok(result) => {
                                 let preview = result.result.log_preview();
                                 let success = result.result.success_for_logging();
@@ -391,6 +538,22 @@ impl ToolRegistry {
         })
         .await;
 
+        if may_mutate_workspace
+            && let Err(error) = crate::tasks::workspace_history::capture_workspace_checkpoint(
+                Arc::clone(&invocation.session),
+                Arc::clone(&invocation.turn),
+                format!("tool:{}:{}", invocation.tool_name, invocation.call_id),
+                false,
+            )
+            .await
+        {
+            warn!(
+                tool = invocation.tool_name.as_str(),
+                call_id = invocation.call_id.as_str(),
+                "failed to capture post-tool workspace checkpoint: {error}"
+            );
+        }
+
         if let Some(err) = hook_abort_error {
             return Err(err);
         }
@@ -435,6 +598,25 @@ impl ToolRegistry {
             }
             Err(err) => Err(err),
         }
+    }
+
+    pub(crate) async fn prepare_for(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<ToolPreparation, FunctionCallError> {
+        let Some(handler) = self.handler(
+            invocation.tool_name.as_ref(),
+            invocation.tool_namespace.as_deref(),
+        ) else {
+            return Ok(ToolPreparation::new(ToolEffects::unknown_write()));
+        };
+        if !handler.matches_kind(&invocation.payload) {
+            return Ok(ToolPreparation::new(ToolEffects::unknown_write()));
+        }
+        Ok(match handler.prepare(invocation).await {
+            Ok(preparation) => preparation,
+            Err(error) => ToolPreparation::rejected(error),
+        })
     }
 }
 

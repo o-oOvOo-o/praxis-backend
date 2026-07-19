@@ -10,6 +10,8 @@ use praxis_apply_patch::AffectedPaths;
 use praxis_apply_patch::ApplyPatchAction;
 use praxis_apply_patch::ApplyPatchFileChange;
 use praxis_apply_patch::Hunk;
+use praxis_loop::tool::ToolEffect;
+use praxis_loop::tool::ToolEffects;
 use praxis_protocol::models::FileSystemPermissions;
 use praxis_protocol::models::PermissionProfile;
 use praxis_sandboxing::policy_transforms::effective_file_system_sandbox_policy;
@@ -37,6 +39,7 @@ use crate::tools::handlers::parse_arguments;
 use crate::tools::orchestrator::ToolOrchestrator;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
+use crate::tools::registry::ToolPreparation;
 use crate::tools::runtimes::apply_patch::ApplyPatchRequest;
 use crate::tools::runtimes::apply_patch::ApplyPatchRuntime;
 use crate::tools::runtimes::apply_patch::apply_patch_agent_os_command;
@@ -49,6 +52,11 @@ use crate::tools::sandboxing::ToolCtx;
 use crate::tools::sandboxing::ToolError;
 
 pub struct ApplyPatchHandler;
+
+struct PreparedApplyPatch {
+    command: Vec<String>,
+    changes: ApplyPatchAction,
+}
 
 fn file_paths_for_action(action: &ApplyPatchAction) -> Vec<AbsolutePathBuf> {
     let mut keys = Vec::new();
@@ -211,67 +219,114 @@ impl ToolHandler for ApplyPatchHandler {
         true
     }
 
-    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
-        let ToolInvocation {
-            session,
-            turn,
-            tracker,
-            call_id,
-            tool_name,
-            payload,
-            ..
-        } = invocation;
-
-        let patch_input = match payload {
-            ToolPayload::Function { arguments } => {
-                let args: ApplyPatchToolArgs = parse_arguments(&arguments)?;
-                args.input
-            }
-            ToolPayload::Custom { input } => input,
-            _ => {
-                return Err(FunctionCallError::RespondToModel(
-                    "apply_patch handler received unsupported payload".to_string(),
-                ));
-            }
+    async fn prepare(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<ToolPreparation, FunctionCallError> {
+        let prepared = prepare_apply_patch(invocation)?;
+        let effects = file_paths_for_action(&prepared.changes)
+            .into_iter()
+            .map(|path| {
+                ToolEffect::write(crate::tools::effects::filesystem_effect_key(path.as_path()))
+            })
+            .collect::<Vec<_>>();
+        let effects = if effects.is_empty() {
+            ToolEffects::unknown_write()
+        } else {
+            ToolEffects::new(effects)
         };
+        Ok(ToolPreparation::new(effects).with_payload(prepared))
+    }
 
-        let cwd = turn.cwd.clone();
-        let command = vec!["apply_patch".to_string(), patch_input.clone()];
-        match praxis_apply_patch::maybe_parse_apply_patch_verified(&command, &cwd) {
-            praxis_apply_patch::MaybeApplyPatchVerified::Body(changes) => {
-                let content = run_verified_apply_patch(
-                    &command,
-                    &cwd,
-                    changes,
-                    None,
-                    session,
-                    turn,
-                    Some(&tracker),
-                    &call_id,
-                    tool_name.as_str(),
-                    false,
-                )
-                .await?;
-                Ok(ApplyPatchToolOutput::from_text(content))
-            }
-            praxis_apply_patch::MaybeApplyPatchVerified::CorrectnessError(parse_error) => {
-                Err(FunctionCallError::RespondToModel(format!(
-                    "apply_patch verification failed: {parse_error}"
-                )))
-            }
-            praxis_apply_patch::MaybeApplyPatchVerified::ShellParseError(error) => {
-                tracing::trace!("Failed to parse apply_patch input, {error:?}");
-                Err(FunctionCallError::RespondToModel(
-                    "apply_patch handler received invalid patch input".to_string(),
-                ))
-            }
-            praxis_apply_patch::MaybeApplyPatchVerified::NotApplyPatch => {
-                Err(FunctionCallError::RespondToModel(
-                    "apply_patch handler received non-apply_patch input".to_string(),
-                ))
-            }
+    async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
+        let prepared = prepare_apply_patch(&invocation)?;
+        execute_prepared_apply_patch(invocation, prepared).await
+    }
+
+    async fn handle_prepared(
+        &self,
+        invocation: ToolInvocation,
+        mut preparation: ToolPreparation,
+    ) -> Result<Self::Output, FunctionCallError> {
+        let prepared = preparation
+            .take_payload::<PreparedApplyPatch>()
+            .ok_or_else(|| {
+                FunctionCallError::Fatal("apply_patch prepared state type mismatch".to_string())
+            })?;
+        execute_prepared_apply_patch(invocation, prepared).await
+    }
+}
+
+fn prepare_apply_patch(
+    invocation: &ToolInvocation,
+) -> Result<PreparedApplyPatch, FunctionCallError> {
+    let patch_input = match &invocation.payload {
+        ToolPayload::Function { arguments } => {
+            let args: ApplyPatchToolArgs = parse_arguments(arguments)?;
+            args.input
+        }
+        ToolPayload::Custom { input } => input.clone(),
+        _ => {
+            return Err(FunctionCallError::RespondToModel(
+                "apply_patch handler received unsupported payload".to_string(),
+            ));
+        }
+    };
+    let command = vec!["apply_patch".to_string(), patch_input];
+    match praxis_apply_patch::maybe_parse_apply_patch_verified(
+        &command,
+        invocation.turn.cwd.as_path(),
+    ) {
+        praxis_apply_patch::MaybeApplyPatchVerified::Body(changes) => Ok(PreparedApplyPatch {
+            command,
+            changes: retarget_absolute_patch_cwd(changes),
+        }),
+        praxis_apply_patch::MaybeApplyPatchVerified::CorrectnessError(parse_error) => {
+            Err(FunctionCallError::RespondToModel(format!(
+                "apply_patch verification failed: {parse_error}"
+            )))
+        }
+        praxis_apply_patch::MaybeApplyPatchVerified::ShellParseError(error) => {
+            tracing::trace!("Failed to parse apply_patch input, {error:?}");
+            Err(FunctionCallError::RespondToModel(
+                "apply_patch handler received invalid patch input".to_string(),
+            ))
+        }
+        praxis_apply_patch::MaybeApplyPatchVerified::NotApplyPatch => {
+            Err(FunctionCallError::RespondToModel(
+                "apply_patch handler received non-apply_patch input".to_string(),
+            ))
         }
     }
+}
+
+async fn execute_prepared_apply_patch(
+    invocation: ToolInvocation,
+    prepared: PreparedApplyPatch,
+) -> Result<ApplyPatchToolOutput, FunctionCallError> {
+    let ToolInvocation {
+        session,
+        turn,
+        tracker,
+        call_id,
+        tool_name,
+        ..
+    } = invocation;
+    let cwd = turn.cwd.clone();
+    let content = run_verified_apply_patch(
+        &prepared.command,
+        &cwd,
+        prepared.changes,
+        None,
+        session,
+        turn,
+        Some(&tracker),
+        &call_id,
+        tool_name.as_str(),
+        false,
+    )
+    .await?;
+    Ok(ApplyPatchToolOutput::from_text(content))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -299,6 +354,9 @@ async fn run_verified_apply_patch(
     }
 
     let changes = retarget_absolute_patch_cwd(changes);
+    for path in file_paths_for_action(&changes) {
+        crate::tools::effects::record_filesystem_write(path.as_path());
+    }
     let (file_paths, effective_additional_permissions, file_system_sandbox_policy) =
         effective_patch_permissions(session.as_ref(), turn.as_ref(), &changes).await;
     let dirty_files: Vec<std::path::PathBuf> = file_paths

@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use bm25::Document;
 use bm25::Language;
 use bm25::SearchEngineBuilder;
+use praxis_loop::tool::ToolEffects;
 use praxis_mcp::mcp_connection_manager::ToolInfo;
 use praxis_tools::TOOL_SEARCH_DEFAULT_LIMIT;
 use praxis_tools::TOOL_SEARCH_TOOL_NAME;
@@ -31,6 +32,10 @@ impl ToolHandler for ToolSearchHandler {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Function
+    }
+
+    async fn effects(&self, _invocation: &ToolInvocation) -> ToolEffects {
+        ToolEffects::pure()
     }
 
     async fn handle(

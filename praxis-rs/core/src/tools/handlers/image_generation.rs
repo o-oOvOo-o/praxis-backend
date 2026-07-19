@@ -18,10 +18,10 @@ use praxis_tools::create_tools_json_for_responses_api;
 use serde::Deserialize;
 
 use crate::function_tool::FunctionCallError;
-use crate::model_provider_info::ModelProviderInfo;
-use crate::model_provider_info::OPENAI_PROVIDER_ID;
-use crate::provider_decision_center::AuthRequestPurpose;
-use crate::provider_decision_center::ProviderDecisionCenter;
+use crate::llm::provider::ModelProviderInfo;
+use crate::llm::provider::OPENAI_PROVIDER_ID;
+use crate::llm::runtime::provider_setup::AuthRequestPurpose;
+use crate::llm::runtime::provider_setup::ProviderDecisionCenter;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
@@ -174,7 +174,7 @@ async fn run_routed_image_generation(
     );
     let setup = ProviderDecisionCenter::new(auth_manager)
         .setup_provider(
-            crate::model_provider_info::OPENAI_PROVIDER_ID,
+            crate::llm::provider::OPENAI_PROVIDER_ID,
             &provider,
             AuthRequestPurpose::ModelTurn,
         )

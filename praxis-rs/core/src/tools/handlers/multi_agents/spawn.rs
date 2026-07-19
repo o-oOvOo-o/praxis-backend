@@ -21,6 +21,13 @@ impl ToolHandler for Handler {
         matches!(payload, ToolPayload::Function { .. })
     }
 
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects {
+        ToolEffects::write(crate::tools::effects::conversation_effect_key(
+            invocation.session.conversation_id,
+            ["agents", "spawn", invocation.call_id.as_str()],
+        ))
+    }
+
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
         let ToolInvocation {
             session,
@@ -97,6 +104,8 @@ impl ToolHandler for Handler {
                     fork_parent_spawn_call_id: fork_mode.as_ref().map(|_| call_id.clone()),
                     fork_mode,
                     agent_title: Some(display_title),
+                    dynamic_tools: turn.dynamic_tools.clone(),
+                    ..Default::default()
                 },
             )
             .await

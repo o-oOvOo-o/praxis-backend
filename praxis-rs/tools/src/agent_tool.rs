@@ -470,7 +470,7 @@ fn spawn_agent_common_properties(agent_type_description: &str) -> BTreeMap<Strin
             "model_provider".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Optional model provider override for the new agent. Use provider ids such as `openai`, `deepseek`, `qwen`, `glm`, or `common`. `responses` is accepted as a compatibility alias for OpenAI-backed Praxis workers. When omitted, the provider is inferred from a known first-party model when possible, otherwise inherited."
+                    "Optional model provider override for the new agent. Approved coding-worker providers include `openai`, `deepseek`, `anthropic`, `kimi`, and `glm`. `responses` is accepted as a compatibility alias for OpenAI-backed Praxis workers. When omitted, Praxis infers the provider from a registered first-party model when possible, otherwise it inherits the current provider."
                         .to_string(),
                 ),
             },
@@ -518,7 +518,10 @@ fn spawn_agent_tool_description(
 
 {available_models_description}
 ### Cross-provider coding workers
-- Picker-visible models above may only reflect the current provider. When an OpenAI-backed Praxis worker is needed and the OpenAI provider is configured, you may explicitly choose `gpt-5.6-luna` for economical bounded work, `gpt-5.6-terra` for balanced implementation, or `gpt-5.6-sol` for the hardest work. Explicit `model_provider`, `model`, and `reasoning_effort` fields are the most reliable.
+- The models above are Praxis' canonical, credential-ready cross-provider spawn catalog, not merely the current chat provider's picker. A main DeepSeek thread is not pinned to DeepSeek workers.
+- Use `k3[1m]` or `k3` for Kimi K3 workers, Claude model ids for Anthropic workers, and `gpt-5.6-luna`, `gpt-5.6-terra`, or `gpt-5.6-sol` for OpenAI-backed workers. Praxis owns provider inference, keyring credentials, and endpoint routing.
+- If a listed model is requested, select it directly with `model` and optionally `model_provider`; do not speculate that it is unavailable before calling the tool. Report only an actual backend error returned by `spawn_agent`.
+- Praxis configuration is `config.toml` plus its OS credential store. Never invent or ask the user to inspect `.praxis/providers.yaml`.
 
 ### When to delegate vs. do the subtask yourself
 - First, quickly analyze the overall user task and form a succinct high-level plan. Identify which tasks are immediate blockers on the critical path, and which tasks are sidecar tasks that are needed but can run in parallel without blocking the next local step. As part of that plan, explicitly decide what immediate task you should do locally right now. Do this planning step before delegating to agents so you do not hand off the immediate blocking task to a submodel and then waste time waiting on it.

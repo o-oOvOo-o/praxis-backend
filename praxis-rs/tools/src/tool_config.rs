@@ -10,6 +10,7 @@ use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::WebSearchToolType;
+use praxis_protocol::protocol::AgentRank;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
@@ -139,6 +140,7 @@ pub struct ToolsConfig {
     pub agent_jobs_tools: bool,
     pub agent_jobs_worker_tools: bool,
     pub agent_type_description: String,
+    pub thread_spawn_target_rank: Option<AgentRank>,
 }
 
 pub struct ToolsConfigParams<'a> {
@@ -229,6 +231,7 @@ impl ToolsConfig {
                 SessionSource::SubAgent(SubAgentSource::Other(label))
                     if label.starts_with("agent_job:")
             );
+        let thread_spawn_target_rank = session_source.agent_rank_kind().managed_child_rank();
 
         Self {
             available_models: available_models.to_vec(),
@@ -261,6 +264,7 @@ impl ToolsConfig {
             agent_jobs_tools: include_agent_jobs,
             agent_jobs_worker_tools,
             agent_type_description: String::new(),
+            thread_spawn_target_rank,
         }
     }
 

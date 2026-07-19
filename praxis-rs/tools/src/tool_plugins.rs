@@ -6,6 +6,7 @@ use crate::CommandToolOptions;
 use crate::ImageGenerationToolBackend;
 use crate::LIST_DIRECTORY_TOOL_NAME;
 use crate::REQUEST_USER_INPUT_TOOL_NAME;
+use crate::SPAWN_THREAD_TOOL_NAME;
 use crate::ShellToolOptions;
 use crate::SpawnAgentToolOptions;
 use crate::TOOL_SEARCH_DEFAULT_LIMIT;
@@ -50,6 +51,7 @@ use crate::create_shell_command_tool;
 use crate::create_shell_tool;
 use crate::create_spawn_agent_tool;
 use crate::create_spawn_agents_on_csv_tool;
+use crate::create_spawn_thread_tool;
 use crate::create_submit_worker_request_tool;
 use crate::create_test_sync_tool;
 use crate::create_tool_search_tool;
@@ -516,6 +518,14 @@ fn register_multi_agent(
         /*supports_parallel_tool_calls*/ false,
         config.code_mode_enabled,
     );
+    if let Some(target_rank) = config.thread_spawn_target_rank {
+        plan.push_spec(
+            create_spawn_thread_tool(target_rank),
+            /*supports_parallel_tool_calls*/ false,
+            config.code_mode_enabled,
+        );
+        plan.register_handler(SPAWN_THREAD_TOOL_NAME, ToolHandlerKind::SpawnThread);
+    }
     plan.push_spec(
         create_send_message_tool(),
         /*supports_parallel_tool_calls*/ false,

@@ -1,15 +1,23 @@
 pub(crate) mod batch;
 pub(crate) mod dispatch;
+mod effects;
 mod errors;
 pub(crate) mod lifecycle;
 pub(crate) mod prepare;
 mod traits;
 mod types;
 
+pub use effects::EffectAccess;
+pub use effects::EffectJournal;
+pub use effects::EffectKey;
+pub use effects::EffectValidation;
+pub use effects::ToolEffect;
+pub use effects::ToolEffects;
+pub use traits::PreparedToolCall;
 pub use traits::Tool;
+pub use traits::ToolExecutionContext;
 pub use traits::ToolLifecycleSink;
 pub use traits::ToolRegistry;
-pub use types::ConcurrencyMode;
 pub use types::ToolCall;
 pub use types::ToolProgress;
 pub use types::ToolResult;

@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use praxis_loop::tool::ToolEffects;
 use praxis_protocol::models::WebSearchAction;
 
 use crate::function_tool::FunctionCallError;
@@ -21,6 +22,10 @@ impl ToolHandler for WebSearchHandler {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Function
+    }
+
+    async fn effects(&self, _invocation: &ToolInvocation) -> ToolEffects {
+        ToolEffects::read(crate::tools::effects::service_effect_key("web"))
     }
 
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {

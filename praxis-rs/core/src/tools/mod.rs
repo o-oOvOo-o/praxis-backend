@@ -1,6 +1,7 @@
 pub(crate) mod arguments;
 pub mod code_mode;
 pub mod context;
+pub(crate) mod effects;
 pub mod events;
 pub(crate) mod fs_navigation;
 pub(crate) mod handlers;

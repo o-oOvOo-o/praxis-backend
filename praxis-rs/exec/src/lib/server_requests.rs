@@ -145,7 +145,7 @@ pub(super) async fn handle_server_request(
                 client,
                 request_id,
                 &method,
-                "chatgpt auth token refresh is not supported in exec mode".to_string(),
+                CHATGPT_AUTH_TOKENS_REFRESH_UNSUPPORTED_MESSAGE.to_owned(),
             )
             .await
         }

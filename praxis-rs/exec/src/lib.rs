@@ -23,6 +23,7 @@ use praxis_app_gateway_client::NativeAppGatewayClientStartArgs;
 use praxis_app_gateway_client::NativeControlAuthSettings;
 use praxis_app_gateway_client::RemoteAppGatewayClient;
 use praxis_app_gateway_client::RemoteAppGatewayConnectArgs;
+use praxis_app_gateway_protocol::CHATGPT_AUTH_TOKENS_REFRESH_UNSUPPORTED_MESSAGE;
 use praxis_app_gateway_protocol::ClientRequest;
 use praxis_app_gateway_protocol::ConfigWarningNotification;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
@@ -404,6 +405,7 @@ pub async fn run_main(
     let overrides = ConfigOverrides {
         model,
         review_model: None,
+        model_reasoning_effort: None,
         config_profile,
         // Default to never ask for approvals in headless mode. Feature flags can override.
         approval_policy: Some(AskForApproval::Never),
@@ -748,6 +750,7 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
                     request_id: request_ids.next(),
                     params: TurnStartParams {
                         thread_id: primary_thread_id_for_span.clone(),
+                        turn_id: None,
                         input: items.into_iter().map(Into::into).collect(),
                         cwd: Some(default_cwd),
                         approval_policy: Some(default_approval_policy.into()),

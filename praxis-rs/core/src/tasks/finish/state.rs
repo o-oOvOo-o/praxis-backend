@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
-use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::protocol::TokenUsage;
 
 use crate::hook_runtime::record_pending_inputs;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
+use crate::state::PendingInput;
 
 pub(super) struct FinishedTaskState {
-    pub(super) pending_input: Vec<ResponseInputItem>,
+    pub(super) pending_input: Vec<PendingInput>,
     pub(super) should_schedule_pending_work: bool,
     pub(super) token_usage_at_turn_start: Option<TokenUsage>,
     pub(super) turn_tool_calls: u64,
@@ -51,7 +51,7 @@ impl Session {
     pub(super) async fn record_finished_task_pending_input(
         self: &Arc<Self>,
         turn_context: &Arc<TurnContext>,
-        pending_input: Vec<ResponseInputItem>,
+        pending_input: Vec<PendingInput>,
     ) {
         record_pending_inputs(self, turn_context, pending_input).await;
     }

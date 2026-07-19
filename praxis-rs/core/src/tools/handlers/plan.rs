@@ -8,6 +8,7 @@ use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
 use async_trait::async_trait;
+use praxis_loop::tool::ToolEffects;
 use praxis_protocol::config_types::ModeKind;
 use praxis_protocol::models::FunctionCallOutputPayload;
 use praxis_protocol::models::ResponseInputItem;
@@ -51,6 +52,13 @@ impl ToolHandler for PlanHandler {
 
     fn kind(&self) -> ToolKind {
         ToolKind::Function
+    }
+
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects {
+        ToolEffects::write(crate::tools::effects::conversation_effect_key(
+            invocation.session.conversation_id,
+            ["plan"],
+        ))
     }
 
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {

@@ -7,9 +7,9 @@ use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::AnyToolResult;
+use crate::tools::registry::ToolPreparation;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::spec::build_specs_with_discoverable_tools;
-use praxis_loop::tool::ConcurrencyMode;
 use praxis_mcp::mcp_connection_manager::ToolInfo;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::models::LocalShellAction;
@@ -102,21 +102,6 @@ impl ToolRouter {
             .iter()
             .find(|config| config.name() == tool_name)
             .map(|config| config.spec.clone())
-    }
-
-    pub fn tool_supports_parallel(&self, tool_name: &str) -> bool {
-        self.specs
-            .iter()
-            .filter(|config| config.supports_parallel_tool_calls)
-            .any(|config| config.name() == tool_name)
-    }
-
-    pub fn tool_concurrency_mode(&self, tool_name: &str) -> ConcurrencyMode {
-        if self.tool_supports_parallel(tool_name) {
-            ConcurrencyMode::Parallel
-        } else {
-            ConcurrencyMode::Exclusive
-        }
     }
 
     #[instrument(level = "trace", skip_all, err)]
@@ -226,6 +211,31 @@ impl ToolRouter {
         call: ToolCall,
         _source: ToolCallSource,
     ) -> Result<AnyToolResult, FunctionCallError> {
+        self.dispatch_tool_call_with_preparation(session, turn, tracker, call, None)
+            .await
+    }
+
+    pub(crate) async fn dispatch_prepared_tool_call_with_code_mode_result(
+        &self,
+        session: Arc<Session>,
+        turn: Arc<TurnContext>,
+        tracker: SharedTurnDiffTracker,
+        call: ToolCall,
+        preparation: ToolPreparation,
+        _source: ToolCallSource,
+    ) -> Result<AnyToolResult, FunctionCallError> {
+        self.dispatch_tool_call_with_preparation(session, turn, tracker, call, Some(preparation))
+            .await
+    }
+
+    async fn dispatch_tool_call_with_preparation(
+        &self,
+        session: Arc<Session>,
+        turn: Arc<TurnContext>,
+        tracker: SharedTurnDiffTracker,
+        call: ToolCall,
+        preparation: Option<ToolPreparation>,
+    ) -> Result<AnyToolResult, FunctionCallError> {
         let ToolCall {
             tool_name,
             tool_namespace,
@@ -245,9 +255,42 @@ impl ToolRouter {
             payload,
         };
 
-        let mut result = self.registry.dispatch_any(invocation).await?;
+        let mut result = match preparation {
+            Some(preparation) => {
+                self.registry
+                    .dispatch_prepared_any(invocation, preparation)
+                    .await?
+            }
+            None => self.registry.dispatch_any(invocation).await?,
+        };
         result.payload = response_payload;
         Ok(result)
+    }
+
+    pub(crate) async fn tool_preparation(
+        &self,
+        session: Arc<Session>,
+        turn: Arc<TurnContext>,
+        tracker: SharedTurnDiffTracker,
+        call: ToolCall,
+    ) -> Result<ToolPreparation, FunctionCallError> {
+        let ToolCall {
+            tool_name,
+            tool_namespace,
+            call_id,
+            payload,
+        } = call;
+        let payload = self.normalize_freeform_payload(&tool_name, payload)?;
+        let invocation = ToolInvocation {
+            session,
+            turn,
+            tracker,
+            call_id,
+            tool_name,
+            tool_namespace,
+            payload,
+        };
+        self.registry.prepare_for(&invocation).await
     }
 
     fn normalize_freeform_payload(

@@ -7,19 +7,8 @@ const REPEATED_LOG_MIN_COUNT: usize = 3;
 const REPEATED_LOG_MIN_SAVED_LINES: usize = 12;
 const REPEATED_LOG_MIN_GENERIC_COUNT: usize = 8;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CommandOutputProfile {
-    Generic,
-    CargoBuild,
-    CargoTest,
-    GitDiff,
-    Search,
-    LogStream,
-}
-
-pub(crate) fn apply_command_output_reduction(raw_command: &str, output: &mut ExecToolCallOutput) {
-    let profile = classify_command_output(raw_command);
-    let Some(reduced) = reduce_output(profile, output) else {
+pub(crate) fn apply_command_output_reduction(output: &mut ExecToolCallOutput) {
+    let Some(reduced) = reduce_output(output) else {
         return;
     };
     output.model_output = Some(StreamOutput {
@@ -28,171 +17,7 @@ pub(crate) fn apply_command_output_reduction(raw_command: &str, output: &mut Exe
     });
 }
 
-fn classify_command_output(raw_command: &str) -> CommandOutputProfile {
-    let normalized = raw_command.to_ascii_lowercase();
-    if looks_like_engine_log_command(&normalized) {
-        return CommandOutputProfile::LogStream;
-    }
-    if contains_command_word(&normalized, "git") && contains_command_word(&normalized, "diff") {
-        return CommandOutputProfile::GitDiff;
-    }
-    if contains_command_word(&normalized, "rg") || contains_command_word(&normalized, "grep") {
-        return CommandOutputProfile::Search;
-    }
-    if !contains_command_word(&normalized, "cargo") {
-        return CommandOutputProfile::Generic;
-    }
-    if contains_command_word(&normalized, "test") || contains_command_word(&normalized, "nextest") {
-        return CommandOutputProfile::CargoTest;
-    }
-    if ["build", "check", "clippy", "run"]
-        .iter()
-        .any(|word| contains_command_word(&normalized, word))
-    {
-        return CommandOutputProfile::CargoBuild;
-    }
-    CommandOutputProfile::Generic
-}
-
-fn contains_command_word(command: &str, word: &str) -> bool {
-    command
-        .split(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-')
-        .any(|part| part == word)
-}
-
-fn looks_like_engine_log_command(command: &str) -> bool {
-    [
-        "unity",
-        "unityeditor",
-        "unreal",
-        "unrealeditor",
-        "ue4editor",
-        "ue5editor",
-        "runuat",
-        "automationtool",
-        "unrealbuildtool",
-        "ubt",
-    ]
-    .iter()
-    .any(|needle| command.contains(needle))
-}
-
-fn reduce_output(profile: CommandOutputProfile, output: &ExecToolCallOutput) -> Option<String> {
-    match profile {
-        CommandOutputProfile::CargoBuild | CommandOutputProfile::CargoTest => {
-            reduce_cargo_output(profile, output)
-        }
-        CommandOutputProfile::GitDiff | CommandOutputProfile::Search => {
-            reduce_head_tail_profile(profile, output)
-        }
-        CommandOutputProfile::LogStream => reduce_repeated_log_profile(profile, output),
-        CommandOutputProfile::Generic => reduce_repeated_log_profile(profile, output),
-    }
-}
-
-fn reduce_cargo_output(
-    profile: CommandOutputProfile,
-    output: &ExecToolCallOutput,
-) -> Option<String> {
-    let content = output.aggregated_output.text.as_str();
-    if content.trim().is_empty() {
-        return None;
-    }
-
-    let mut kept = Vec::new();
-    let mut omitted_noise = 0usize;
-    for line in content.lines() {
-        if is_cargo_noise(profile, line) {
-            omitted_noise += 1;
-            continue;
-        }
-        kept.push(line.to_string());
-    }
-
-    if kept.is_empty() {
-        kept.push(if output.exit_code == 0 {
-            "cargo completed successfully with no significant diagnostics".to_string()
-        } else {
-            "cargo failed without retained diagnostics; inspect the raw artifact".to_string()
-        });
-    }
-
-    let folded = fold_repeated_log_lines(&kept, profile);
-    let (preview, omitted_preview) =
-        head_tail_lines(&folded.lines, REDUCED_HEAD_LINES, REDUCED_TAIL_LINES);
-    let artifact = output
-        .agent_os_artifact_id
-        .as_deref()
-        .map(|artifact_id| {
-            format!(
-                "Full raw output: artifact://command-log/{artifact_id} (read_agent_artifact artifact_id=\"{artifact_id}\")\n"
-            )
-        })
-        .unwrap_or_default();
-    let profile_name = match profile {
-        CommandOutputProfile::CargoBuild => "cargo-build",
-        CommandOutputProfile::CargoTest => "cargo-test",
-        CommandOutputProfile::GitDiff => "git-diff",
-        CommandOutputProfile::Search => "search",
-        CommandOutputProfile::LogStream => "log-stream",
-        CommandOutputProfile::Generic => "generic",
-    };
-    Some(format!(
-        "Praxis output profile: {profile_name}\n\
-{artifact}\
-Filtered cargo noise lines: {omitted_noise}\n\
-Folded repeated log lines: {folded_lines} in {folded_groups} groups\n\
-Filtered preview omitted lines: {omitted_preview}\n\n\
-{preview}",
-        folded_lines = folded.folded_lines,
-        folded_groups = folded.folded_groups,
-    ))
-}
-
-fn reduce_head_tail_profile(
-    profile: CommandOutputProfile,
-    output: &ExecToolCallOutput,
-) -> Option<String> {
-    let lines = output
-        .aggregated_output
-        .text
-        .lines()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    if lines.len() <= REDUCED_HEAD_LINES + REDUCED_TAIL_LINES {
-        return None;
-    }
-    let (preview, omitted_preview) =
-        head_tail_lines(&lines, REDUCED_HEAD_LINES, REDUCED_TAIL_LINES);
-    let artifact = output
-        .agent_os_artifact_id
-        .as_deref()
-        .map(|artifact_id| {
-            format!(
-                "Full raw output: artifact://command-log/{artifact_id} (read_agent_artifact artifact_id=\"{artifact_id}\")\n"
-            )
-        })
-        .unwrap_or_default();
-    let profile_name = match profile {
-        CommandOutputProfile::GitDiff => "git-diff",
-        CommandOutputProfile::Search => "search",
-        CommandOutputProfile::CargoBuild => "cargo-build",
-        CommandOutputProfile::CargoTest => "cargo-test",
-        CommandOutputProfile::LogStream => "log-stream",
-        CommandOutputProfile::Generic => "generic",
-    };
-    Some(format!(
-        "Praxis output profile: {profile_name}\n\
-{artifact}\
-Filtered preview omitted lines: {omitted_preview}\n\n\
-{preview}"
-    ))
-}
-
-fn reduce_repeated_log_profile(
-    profile: CommandOutputProfile,
-    output: &ExecToolCallOutput,
-) -> Option<String> {
+fn reduce_output(output: &ExecToolCallOutput) -> Option<String> {
     let lines = output
         .aggregated_output
         .text
@@ -203,11 +28,11 @@ fn reduce_repeated_log_profile(
         return None;
     }
 
-    let folded = fold_repeated_log_lines(&lines, profile);
+    let folded = fold_repeated_log_lines(&lines);
     let saved_lines = folded.folded_lines.saturating_sub(folded.folded_groups);
-    let large_log_stream = profile == CommandOutputProfile::LogStream
+    let artifact_backed_projection = output.agent_os_artifact_id.is_some()
         && lines.len() > REDUCED_HEAD_LINES + REDUCED_TAIL_LINES;
-    if saved_lines < REPEATED_LOG_MIN_SAVED_LINES && !large_log_stream {
+    if saved_lines < REPEATED_LOG_MIN_SAVED_LINES && !artifact_backed_projection {
         return None;
     }
 
@@ -222,55 +47,15 @@ fn reduce_repeated_log_profile(
             )
         })
         .unwrap_or_default();
-    let profile_name = match profile {
-        CommandOutputProfile::LogStream => "log-stream",
-        CommandOutputProfile::Generic => "repeated-log",
-        CommandOutputProfile::CargoBuild => "cargo-build",
-        CommandOutputProfile::CargoTest => "cargo-test",
-        CommandOutputProfile::GitDiff => "git-diff",
-        CommandOutputProfile::Search => "search",
-    };
     Some(format!(
-        "Praxis output profile: {profile_name}\n\
+        "Praxis reversible output reduction\n\
 {artifact}\
 Folded repeated log lines: {folded_lines} in {folded_groups} groups\n\
-Filtered preview omitted lines: {omitted_preview}\n\n\
+Artifact-backed preview omitted lines: {omitted_preview}\n\n\
 {preview}",
         folded_lines = folded.folded_lines,
         folded_groups = folded.folded_groups,
     ))
-}
-
-fn is_cargo_noise(profile: CommandOutputProfile, line: &str) -> bool {
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        return true;
-    }
-    if [
-        "Blocking waiting for file lock",
-        "Compiling ",
-        "Checking ",
-        "Fresh ",
-        "Finished ",
-        "Downloaded ",
-        "Downloading ",
-    ]
-    .iter()
-    .any(|prefix| trimmed.starts_with(prefix))
-    {
-        return true;
-    }
-    if profile == CommandOutputProfile::CargoTest {
-        if trimmed.starts_with("running ") {
-            return true;
-        }
-        if trimmed.starts_with("test ")
-            && (trimmed.ends_with(" ... ok") || trimmed.ends_with(" ... ignored"))
-        {
-            return true;
-        }
-    }
-    false
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -384,21 +169,16 @@ impl LogRun {
         }
     }
 
-    fn should_fold(&self, profile: CommandOutputProfile) -> bool {
+    fn should_fold(&self) -> bool {
         let min_count = match self.key.severity {
             LogSeverity::Error | LogSeverity::Warning => REPEATED_LOG_MIN_COUNT,
-            LogSeverity::Info | LogSeverity::Debug
-                if profile == CommandOutputProfile::LogStream =>
-            {
-                REPEATED_LOG_MIN_COUNT
-            }
             _ => REPEATED_LOG_MIN_GENERIC_COUNT,
         };
         self.originals.len() >= min_count
     }
 
-    fn flush(self, profile: CommandOutputProfile, folded: &mut RepeatedLogFold) {
-        if self.should_fold(profile) {
+    fn flush(self, folded: &mut RepeatedLogFold) {
+        if self.should_fold() {
             folded.folded_lines = folded.folded_lines.saturating_add(self.originals.len());
             folded.folded_groups = folded.folded_groups.saturating_add(1);
             folded.lines.push(self.summary_line());
@@ -422,7 +202,7 @@ impl LogRun {
     }
 }
 
-fn fold_repeated_log_lines(lines: &[String], profile: CommandOutputProfile) -> RepeatedLogFold {
+fn fold_repeated_log_lines(lines: &[String]) -> RepeatedLogFold {
     let mut folded = RepeatedLogFold {
         lines: Vec::with_capacity(lines.len()),
         folded_lines: 0,
@@ -434,7 +214,7 @@ fn fold_repeated_log_lines(lines: &[String], profile: CommandOutputProfile) -> R
         let line_number = index + 1;
         let Some(signature) = log_line_signature(line) else {
             if let Some(run) = current.take() {
-                run.flush(profile, &mut folded);
+                run.flush(&mut folded);
             }
             folded.lines.push(line.clone());
             continue;
@@ -448,13 +228,13 @@ fn fold_repeated_log_lines(lines: &[String], profile: CommandOutputProfile) -> R
         }
 
         if let Some(run) = current.take() {
-            run.flush(profile, &mut folded);
+            run.flush(&mut folded);
         }
         current = Some(LogRun::new(line.clone(), line_number, signature));
     }
 
     if let Some(run) = current {
-        run.flush(profile, &mut folded);
+        run.flush(&mut folded);
     }
     folded
 }
@@ -680,29 +460,7 @@ mod tests {
     }
 
     #[test]
-    fn classifies_cargo_test() {
-        assert_eq!(
-            classify_command_output("cargo test -p praxis-core"),
-            CommandOutputProfile::CargoTest
-        );
-    }
-
-    #[test]
-    fn cargo_test_reducer_keeps_failures_and_drops_pass_noise() {
-        let mut output = output(
-            "Compiling praxis-core\nrunning 2 tests\ntest ok_path ... ok\ntest bad_path ... FAILED\nfailures:\n---- bad_path stdout ----\nthread panicked\n",
-            101,
-        );
-        apply_command_output_reduction("cargo test", &mut output);
-        let reduced = output.model_output.expect("reduced").text;
-        assert!(reduced.contains("test bad_path ... FAILED"));
-        assert!(reduced.contains("thread panicked"));
-        assert!(!reduced.contains("test ok_path ... ok"));
-        assert!(reduced.contains("artifact://command-log/artifact-test"));
-    }
-
-    #[test]
-    fn folds_repeated_unreal_warning_with_duration() {
+    fn folds_timestamped_repetition_without_command_classification() {
         let mut output = output(
             "[2026.05.21-02.00.00:000][0]LogTemp: Warning: Missing texture Assets/Foo.png\n\
 [2026.05.21-02.00.30:250][0]LogTemp: Warning: Missing texture Assets/Foo.png\n\
@@ -720,7 +478,7 @@ mod tests {
 [2026.05.21-02.01.03:600][0]LogTemp: Warning: Missing texture Assets/Foo.png\n",
             0,
         );
-        apply_command_output_reduction("UnrealEditor-Cmd.exe -run=Cook", &mut output);
+        apply_command_output_reduction(&mut output);
         let reduced = output.model_output.expect("reduced").text;
         assert!(reduced.contains("[warning x14 over 63.6s, lines 1-14]"));
         assert!(reduced.contains("LogTemp: Warning: Missing texture Assets/Foo.png"));
@@ -734,9 +492,9 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let mut output = output(&repeated, 0);
-        apply_command_output_reduction("python run_tool.py", &mut output);
+        apply_command_output_reduction(&mut output);
         let reduced = output.model_output.expect("reduced").text;
-        assert!(reduced.contains("Praxis output profile: repeated-log"));
+        assert!(reduced.contains("Praxis reversible output reduction"));
         assert!(reduced.contains("[warning x16, lines 1-16]"));
     }
 
@@ -746,7 +504,7 @@ mod tests {
             "Warning: shader variant missing\nWarning: shader variant missing\n",
             0,
         );
-        apply_command_output_reduction("Unity.exe -batchmode", &mut output);
+        apply_command_output_reduction(&mut output);
         assert!(output.model_output.is_none());
     }
 
@@ -771,7 +529,7 @@ mod tests {
 惺惺妳好 Warning: shader variant missing\n",
             0,
         );
-        apply_command_output_reduction("python run_tool.py", &mut output);
+        apply_command_output_reduction(&mut output);
         let reduced = output.model_output.expect("reduced").text;
         assert!(reduced.contains("[warning x16, lines 1-16]"));
     }

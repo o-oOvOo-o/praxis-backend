@@ -41,11 +41,13 @@ use praxis_loop::services::SteeringControl;
 use praxis_loop::services::SteeringDrain;
 use praxis_loop::services::SteeringInbox;
 use praxis_loop::services::ToolAccess;
-use praxis_loop::tool::ConcurrencyMode;
 use praxis_loop::tool::Tool;
 use praxis_loop::tool::ToolCall;
+use praxis_loop::tool::ToolEffects;
+use praxis_loop::tool::ToolExecutionContext;
 use praxis_loop::tool::ToolResult;
 use praxis_loop::tool::ToolSpec;
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
@@ -153,9 +155,45 @@ impl ToolAccess for MockServices {
 
 struct RecordingTool {
     name: String,
-    mode: ConcurrencyMode,
+    effects: ToolEffects,
     log: Arc<Mutex<Vec<String>>>,
     delay_ms: u64,
+}
+
+struct CancellationGateTool {
+    name: String,
+    started: Arc<Notify>,
+    starts: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl Tool for CancellationGateTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: self.name.clone(),
+            description: String::new(),
+        }
+    }
+
+    async fn prepare(&self, _call: &ToolCall) -> LoopResult<praxis_loop::tool::PreparedToolCall> {
+        Ok(praxis_loop::tool::PreparedToolCall::new(
+            ToolEffects::unknown_write(),
+        ))
+    }
+
+    async fn execute(
+        &self,
+        call: ToolCall,
+        context: ToolExecutionContext,
+    ) -> LoopResult<ToolResult> {
+        self.starts
+            .lock()
+            .expect("starts lock")
+            .push(call.id.clone());
+        self.started.notify_one();
+        context.cancel.cancelled().await;
+        Ok(ToolResult::error(call.id, "active tool cancelled"))
+    }
 }
 
 #[async_trait]
@@ -164,11 +202,20 @@ impl Tool for RecordingTool {
         ToolSpec {
             name: self.name.clone(),
             description: String::new(),
-            concurrency: self.mode,
         }
     }
 
-    async fn execute(&self, call: ToolCall, _cancel: CancellationToken) -> LoopResult<ToolResult> {
+    async fn prepare(&self, _call: &ToolCall) -> LoopResult<praxis_loop::tool::PreparedToolCall> {
+        Ok(praxis_loop::tool::PreparedToolCall::new(
+            self.effects.clone(),
+        ))
+    }
+
+    async fn execute(
+        &self,
+        call: ToolCall,
+        _context: ToolExecutionContext,
+    ) -> LoopResult<ToolResult> {
         self.log
             .lock()
             .expect("log lock")
@@ -360,13 +407,13 @@ async fn tool_batches_keep_exclusive_calls_between_parallel_groups() {
     ]);
     services.insert_tool(Arc::new(RecordingTool {
         name: "parallel".to_string(),
-        mode: ConcurrencyMode::Parallel,
+        effects: ToolEffects::unknown_read(),
         log: log.clone(),
         delay_ms: 1,
     }));
     services.insert_tool(Arc::new(RecordingTool {
         name: "exclusive".to_string(),
-        mode: ConcurrencyMode::Exclusive,
+        effects: ToolEffects::unknown_write(),
         log: log.clone(),
         delay_ms: 0,
     }));
@@ -443,7 +490,7 @@ async fn hooks_can_block_rewrite_and_terminate_tools() {
     for name in ["rewrite", "terminate"] {
         services.insert_tool(Arc::new(RecordingTool {
             name: name.to_string(),
-            mode: ConcurrencyMode::Exclusive,
+            effects: ToolEffects::unknown_write(),
             log: Arc::new(Mutex::new(Vec::new())),
             delay_ms: 0,
         }));
@@ -493,7 +540,7 @@ async fn tool_guard_stops_before_tool_execution() {
     ]]);
     services.insert_tool(Arc::new(RecordingTool {
         name: "guarded_tool".to_string(),
-        mode: ConcurrencyMode::Exclusive,
+        effects: ToolEffects::unknown_write(),
         log: log.clone(),
         delay_ms: 0,
     }));
@@ -540,4 +587,63 @@ async fn cancelled_turn_aborts_before_sampling() {
         }
         other => panic!("unexpected result: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn cancelled_turn_settles_every_provider_tool_call_in_order() {
+    let started = Arc::new(Notify::new());
+    let starts = Arc::new(Mutex::new(Vec::new()));
+    let services = Arc::new(MockServices::with_streams(vec![vec![
+        ModelEvent::ToolCall(ToolCall::new("active", "active_tool")),
+        ModelEvent::ToolCall(ToolCall::new("queued", "queued_tool")),
+        ModelEvent::Completed(TokenUsage::default()),
+    ]]));
+    services.insert_tool(Arc::new(CancellationGateTool {
+        name: "active_tool".to_string(),
+        started: Arc::clone(&started),
+        starts: Arc::clone(&starts),
+    }));
+    services.insert_tool(Arc::new(RecordingTool {
+        name: "queued_tool".to_string(),
+        effects: ToolEffects::unknown_write(),
+        log: Arc::new(Mutex::new(Vec::new())),
+        delay_ms: 0,
+    }));
+    let cancel = CancellationToken::new();
+    let turn_cancel = cancel.clone();
+    let turn_services = Arc::clone(&services);
+    let turn = tokio::spawn(async move {
+        run_turn(
+            test_context(),
+            TurnState::default(),
+            turn_services.as_ref(),
+            &praxis_loop::NoopHooks,
+            TurnInput::default(),
+            turn_cancel,
+        )
+        .await
+    });
+
+    started.notified().await;
+    cancel.cancel();
+    let result = turn.await.expect("turn task");
+
+    assert!(matches!(result, TurnResult::Aborted { .. }));
+    assert_eq!(starts.lock().expect("starts lock").as_slice(), ["active"]);
+    let results = services
+        .persisted()
+        .into_iter()
+        .filter_map(|item| match item {
+            TurnItem::ToolResult(result) => Some(result),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        results
+            .iter()
+            .map(|result| result.call_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["active", "queued"]
+    );
+    assert!(results[1].is_error());
 }

@@ -54,7 +54,7 @@ pub(super) fn build(input: TurnToolsConfigInput<'_>) -> ToolsConfig {
     ToolsConfig::new(&ToolsConfigParams {
         model_info,
         available_models: &models_manager
-            .try_list_models_for_config(per_turn_config)
+            .try_list_spawn_agent_models_for_config(per_turn_config)
             .unwrap_or_default(),
         features: &per_turn_config.features,
         web_search_mode: Some(per_turn_config.web_search_mode.value()),

@@ -1,13 +1,10 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-use super::ConcurrencyMode;
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ToolSpec {
     pub name: String,
     pub description: String,
-    pub concurrency: ConcurrencyMode,
 }
 
 impl ToolSpec {
@@ -15,7 +12,6 @@ impl ToolSpec {
         Self {
             name: name.into(),
             description: description.into(),
-            concurrency: ConcurrencyMode::Parallel,
         }
     }
 }

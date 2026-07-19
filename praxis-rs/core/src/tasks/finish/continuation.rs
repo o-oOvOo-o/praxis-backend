@@ -6,7 +6,7 @@ use crate::goals::GoalRuntimeEvent;
 use crate::praxis::Session;
 
 impl Session {
-    pub(super) fn schedule_pending_work_continuation(self: &Arc<Self>) {
+    pub(crate) fn schedule_pending_work_continuation(self: &Arc<Self>) {
         let session = Arc::clone(self);
         tokio::spawn(async move {
             session.maybe_start_turn_for_pending_work().await;

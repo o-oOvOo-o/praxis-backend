@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 use std::sync::Arc;
 
 use praxis_loop::outcome::LoopResult;
@@ -9,34 +11,43 @@ use tokio_util::sync::CancellationToken;
 use super::super::Session;
 use super::super::TurnContext;
 use super::model_round_state::PraxisModelRoundState;
+use super::round_input;
 use super::state::PraxisTurnBridgeState;
+use super::tool_call_bridge;
 use super::tool_runtime_slot::ModelRoundToolsSlot;
 
-mod assistant_text_stream;
-mod code_mode_worker;
-mod completed_tool_call;
-mod completed_tool_call_conversion;
-mod error_bridge;
-mod function_call_error_projection;
-mod item_completion;
-mod model_round;
-mod non_tool_item;
-mod plan_mode_stream;
-mod provider_projection;
-mod provider_stream;
-mod reasoning_delta_stream;
-mod request_context;
-mod request_context_update;
-mod request_settings;
-mod request_telemetry;
-mod response_item_identity;
-mod stream_item_completion;
-mod stream_item_delta;
-mod stream_item_start;
-mod stream_item_state;
-mod stream_run_state;
-mod token_usage_bridge;
-mod tool_error_response;
+mod assistant_stream;
+mod provider_events;
+mod provider_transport;
+mod request_runtime;
+mod round_runtime;
+mod stream_items;
+
+use assistant_stream::assistant_text_stream;
+use assistant_stream::plan_mode_stream;
+use assistant_stream::reasoning_delta_stream;
+use provider_events::completed_tool_call;
+use provider_events::completed_tool_call_conversion;
+use provider_events::function_call_error_projection;
+use provider_events::item_completion;
+use provider_events::provider_projection;
+use provider_events::token_usage_bridge;
+use provider_transport::error_bridge;
+use provider_transport::provider_stream;
+use provider_transport::request_telemetry;
+use provider_transport::stream_run_state;
+use request_runtime::request_context;
+use request_runtime::request_context_update;
+use request_runtime::request_settings;
+use round_runtime::code_mode_worker;
+use round_runtime::model_round;
+use round_runtime::tool_error_response;
+use stream_items::non_tool_item;
+use stream_items::response_item_identity;
+use stream_items::stream_item_completion;
+use stream_items::stream_item_delta;
+use stream_items::stream_item_start;
+use stream_items::stream_item_state;
 
 pub(super) struct PraxisModelStreamInput {
     pub(super) session: Arc<Session>,

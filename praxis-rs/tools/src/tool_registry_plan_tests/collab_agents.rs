@@ -1,4 +1,45 @@
 use super::*;
+use praxis_protocol::ThreadId;
+
+fn collab_tools_for_source(session_source: SessionSource) -> Vec<ConfiguredToolSpec> {
+    let model_info = model_info();
+    let mut features = Features::with_defaults();
+    features.enable(Feature::Collab);
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &[],
+        features: &features,
+        web_search_mode: Some(WebSearchMode::Cached),
+        session_source,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    });
+    build_specs(&tools_config, None, None, &[]).0
+}
+
+#[test]
+fn managed_thread_spawn_is_rank_scoped_without_restricting_subagents() {
+    let rank0_tools = collab_tools_for_source(SessionSource::Cli);
+    assert_contains_tool_names(&rank0_tools, &["spawn_agent", "spawn_thread"]);
+
+    let rank1_tools =
+        collab_tools_for_source(SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
+            parent_thread_id: ThreadId::new(),
+            depth: 1,
+            agent_path: None,
+            agent_base_name: None,
+            agent_title: Some("Supervisor".to_string()),
+            agent_display_name: None,
+            agent_role: Some("supervisor".to_string()),
+        }));
+    assert_contains_tool_names(&rank1_tools, &["spawn_agent", "spawn_thread"]);
+
+    let rank2_tools = collab_tools_for_source(SessionSource::SubAgent(SubAgentSource::Other(
+        "worker".to_string(),
+    )));
+    assert_contains_tool_names(&rank2_tools, &["spawn_agent"]);
+    assert_lacks_tool_name(&rank2_tools, "spawn_thread");
+}
 
 #[test]
 fn test_build_specs_collab_tools_enabled() {
@@ -26,6 +67,7 @@ fn test_build_specs_collab_tools_enabled() {
         &tools,
         &[
             "spawn_agent",
+            "spawn_thread",
             "send_message",
             "assign_task",
             "wait_agent",

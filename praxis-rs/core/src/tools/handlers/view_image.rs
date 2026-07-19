@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use praxis_loop::tool::ToolEffects;
 use praxis_protocol::models::FunctionCallOutputBody;
 use praxis_protocol::models::FunctionCallOutputContentItem;
 use praxis_protocol::models::FunctionCallOutputPayload;
@@ -18,6 +19,7 @@ use crate::tools::context::ToolPayload;
 use crate::tools::handlers::parse_arguments;
 use crate::tools::registry::ToolHandler;
 use crate::tools::registry::ToolKind;
+use crate::tools::registry::ToolPreparation;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::ViewImageToolCallEvent;
 
@@ -37,6 +39,11 @@ enum ViewImageDetail {
     Original,
 }
 
+struct PreparedViewImage {
+    abs_path: AbsolutePathBuf,
+    detail: Option<ViewImageDetail>,
+}
+
 #[async_trait]
 impl ToolHandler for ViewImageHandler {
     type Output = ViewImageOutput;
@@ -45,121 +52,147 @@ impl ToolHandler for ViewImageHandler {
         ToolKind::Function
     }
 
+    async fn prepare(
+        &self,
+        invocation: &ToolInvocation,
+    ) -> Result<ToolPreparation, FunctionCallError> {
+        let prepared = prepare_view_image(invocation)?;
+        Ok(ToolPreparation::new(ToolEffects::read(
+            crate::tools::effects::filesystem_effect_key(prepared.abs_path.as_path()),
+        ))
+        .with_payload(prepared))
+    }
+
     async fn handle(&self, invocation: ToolInvocation) -> Result<Self::Output, FunctionCallError> {
-        if !invocation
-            .turn
-            .model_info
-            .input_modalities
-            .contains(&InputModality::Image)
-        {
-            return Err(FunctionCallError::RespondToModel(
-                VIEW_IMAGE_UNSUPPORTED_MESSAGE.to_string(),
-            ));
-        }
+        let prepared = prepare_view_image(&invocation)?;
+        execute_view_image(invocation, prepared).await
+    }
 
-        let ToolInvocation {
-            session,
-            turn,
-            payload,
-            call_id,
-            ..
-        } = invocation;
-
-        let arguments = match payload {
-            ToolPayload::Function { arguments } => arguments,
-            _ => {
-                return Err(FunctionCallError::RespondToModel(
-                    "view_image handler received unsupported payload".to_string(),
-                ));
-            }
-        };
-
-        let args: ViewImageArgs = parse_arguments(&arguments)?;
-        // `view_image` accepts only its documented detail values: omit
-        // `detail` for the default path or set it to `original`.
-        // Other string values remain invalid rather than being silently
-        // reinterpreted.
-        let detail = match args.detail.as_deref() {
-            None => None,
-            Some("original") => Some(ViewImageDetail::Original),
-            Some(detail) => {
-                return Err(FunctionCallError::RespondToModel(format!(
-                    "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `{detail}`"
-                )));
-            }
-        };
-
-        let abs_path =
-            AbsolutePathBuf::try_from(turn.resolve_path(Some(args.path))).map_err(|error| {
-                FunctionCallError::RespondToModel(format!("unable to resolve image path: {error}"))
+    async fn handle_prepared(
+        &self,
+        invocation: ToolInvocation,
+        mut preparation: ToolPreparation,
+    ) -> Result<Self::Output, FunctionCallError> {
+        let prepared = preparation
+            .take_payload::<PreparedViewImage>()
+            .ok_or_else(|| {
+                FunctionCallError::Fatal("view_image prepared state type mismatch".to_string())
             })?;
+        execute_view_image(invocation, prepared).await
+    }
+}
 
-        let metadata = turn
-            .environment
-            .get_filesystem()
-            .get_metadata(&abs_path)
-            .await
-            .map_err(|error| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to locate image at `{}`: {error}",
-                    abs_path.display()
-                ))
-            })?;
-
-        if !metadata.is_file {
+fn prepare_view_image(invocation: &ToolInvocation) -> Result<PreparedViewImage, FunctionCallError> {
+    if !invocation
+        .turn
+        .model_info
+        .input_modalities
+        .contains(&InputModality::Image)
+    {
+        return Err(FunctionCallError::RespondToModel(
+            VIEW_IMAGE_UNSUPPORTED_MESSAGE.to_string(),
+        ));
+    }
+    let ToolPayload::Function { arguments } = &invocation.payload else {
+        return Err(FunctionCallError::RespondToModel(
+            "view_image handler received unsupported payload".to_string(),
+        ));
+    };
+    let args: ViewImageArgs = parse_arguments(arguments)?;
+    let detail = match args.detail.as_deref() {
+        None => None,
+        Some("original") => Some(ViewImageDetail::Original),
+        Some(detail) => {
             return Err(FunctionCallError::RespondToModel(format!(
-                "image path `{}` is not a file",
-                abs_path.display()
+                "view_image.detail only supports `original`; omit `detail` for default resized behavior, got `{detail}`"
             )));
         }
-        let file_bytes = turn
-            .environment
-            .get_filesystem()
-            .read_file(&abs_path)
-            .await
-            .map_err(|error| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to read image at `{}`: {error}",
-                    abs_path.display()
-                ))
-            })?;
-        let event_path = abs_path.to_path_buf();
+    };
+    let abs_path = AbsolutePathBuf::try_from(invocation.turn.resolve_path(Some(args.path)))
+        .map_err(|error| {
+            FunctionCallError::RespondToModel(format!("unable to resolve image path: {error}"))
+        })?;
+    Ok(PreparedViewImage { abs_path, detail })
+}
 
-        let can_request_original_detail =
-            can_request_original_image_detail(turn.features.get(), &turn.model_info);
-        let use_original_detail =
-            can_request_original_detail && matches!(detail, Some(ViewImageDetail::Original));
-        let image_mode = if use_original_detail {
-            PromptImageMode::Original
-        } else {
-            PromptImageMode::ResizeToFit
-        };
-        let image_detail = use_original_detail.then_some(ImageDetail::Original);
+async fn execute_view_image(
+    invocation: ToolInvocation,
+    prepared: PreparedViewImage,
+) -> Result<ViewImageOutput, FunctionCallError> {
+    let ToolInvocation {
+        session,
+        turn,
+        call_id,
+        ..
+    } = invocation;
+    let PreparedViewImage { abs_path, detail } = prepared;
+    crate::tools::effects::record_filesystem_read(abs_path.as_path());
 
-        let image =
-            load_for_prompt_bytes(abs_path.as_path(), file_bytes, image_mode).map_err(|error| {
-                FunctionCallError::RespondToModel(format!(
-                    "unable to process image at `{}`: {error}",
-                    abs_path.display()
-                ))
-            })?;
-        let image_url = image.into_data_url();
+    let metadata = turn
+        .environment
+        .get_filesystem()
+        .get_metadata(&abs_path)
+        .await
+        .map_err(|error| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to locate image at `{}`: {error}",
+                abs_path.display()
+            ))
+        })?;
 
-        session
-            .send_event(
-                turn.as_ref(),
-                EventMsg::ViewImageToolCall(ViewImageToolCallEvent {
-                    call_id,
-                    path: event_path,
-                }),
-            )
-            .await;
-
-        Ok(ViewImageOutput {
-            image_url,
-            image_detail,
-        })
+    if !metadata.is_file {
+        return Err(FunctionCallError::RespondToModel(format!(
+            "image path `{}` is not a file",
+            abs_path.display()
+        )));
     }
+    let file_bytes = turn
+        .environment
+        .get_filesystem()
+        .read_file(&abs_path)
+        .await
+        .map_err(|error| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to read image at `{}`: {error}",
+                abs_path.display()
+            ))
+        })?;
+    let event_path = abs_path.to_path_buf();
+
+    let can_request_original_detail =
+        can_request_original_image_detail(turn.features.get(), &turn.model_info);
+    let use_original_detail =
+        can_request_original_detail && matches!(detail, Some(ViewImageDetail::Original));
+    let image_mode = if use_original_detail {
+        PromptImageMode::Original
+    } else {
+        PromptImageMode::ResizeToFit
+    };
+    let image_detail = use_original_detail.then_some(ImageDetail::Original);
+
+    let image =
+        load_for_prompt_bytes(abs_path.as_path(), file_bytes, image_mode).map_err(|error| {
+            FunctionCallError::RespondToModel(format!(
+                "unable to process image at `{}`: {error}",
+                abs_path.display()
+            ))
+        })?;
+    let image_url = image.into_data_url();
+
+    session
+        .send_event(
+            turn.as_ref(),
+            EventMsg::ViewImageToolCall(ViewImageToolCallEvent {
+                call_id,
+                path: event_path,
+            }),
+        )
+        .await;
+
+    Ok(ViewImageOutput {
+        image_url,
+        image_detail,
+    })
 }
 
 pub struct ViewImageOutput {

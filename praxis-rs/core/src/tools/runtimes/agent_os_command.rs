@@ -57,16 +57,10 @@ pub(crate) async fn finish_agent_os_span_with_output(
             tracing::warn!("failed to finish AgentOS {runtime_label} command span: {err}");
         }
     }
-    if let Some(raw_command) = span.raw_command().await {
-        if catch_unwind(AssertUnwindSafe(|| {
-            apply_command_output_reduction(raw_command.as_str(), output);
-        }))
-        .is_err()
-        {
-            tracing::warn!(
-                "AgentOS {runtime_label} command output reducer panicked; preserving raw output"
-            );
-        }
+    if catch_unwind(AssertUnwindSafe(|| apply_command_output_reduction(output))).is_err() {
+        tracing::warn!(
+            "AgentOS {runtime_label} command output reducer panicked; preserving raw output"
+        );
     }
 }
 

@@ -1,8 +1,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use tokio::sync::RwLock;
-use tokio_util::either::Either;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 use tracing::Instrument;
@@ -17,10 +15,11 @@ use crate::tools::context::AbortedToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
 use crate::tools::registry::AnyToolResult;
+use crate::tools::registry::ToolPreparation;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
 use crate::tools::router::ToolRouter;
-use praxis_loop::tool::ConcurrencyMode;
+use praxis_loop::tool::EffectJournal;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_tools::ToolSpec;
 
@@ -30,7 +29,6 @@ pub(crate) struct ToolCallRuntime {
     session: Arc<Session>,
     turn_context: Arc<TurnContext>,
     tracker: SharedTurnDiffTracker,
-    parallel_execution: Arc<RwLock<()>>,
 }
 
 impl ToolCallRuntime {
@@ -45,7 +43,6 @@ impl ToolCallRuntime {
             session,
             turn_context,
             tracker,
-            parallel_execution: Arc::new(RwLock::new(())),
         }
     }
 
@@ -53,8 +50,18 @@ impl ToolCallRuntime {
         self.router.find_spec(tool_name)
     }
 
-    pub(crate) fn tool_concurrency_mode(&self, tool_name: &str) -> ConcurrencyMode {
-        self.router.tool_concurrency_mode(tool_name)
+    pub(crate) async fn prepare_tool_call(
+        &self,
+        call: ToolCall,
+    ) -> Result<ToolPreparation, FunctionCallError> {
+        self.router
+            .tool_preparation(
+                Arc::clone(&self.session),
+                Arc::clone(&self.turn_context),
+                Arc::clone(&self.tracker),
+                call,
+            )
+            .await
     }
 
     #[instrument(level = "trace", skip_all)]
@@ -63,9 +70,49 @@ impl ToolCallRuntime {
         call: ToolCall,
         cancellation_token: CancellationToken,
     ) -> impl std::future::Future<Output = Result<ResponseInputItem, PraxisErr>> {
+        self.handle_tool_call_observed(call, cancellation_token, EffectJournal::default())
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub(crate) fn handle_tool_call_observed(
+        self,
+        call: ToolCall,
+        cancellation_token: CancellationToken,
+        effect_journal: EffectJournal,
+    ) -> impl std::future::Future<Output = Result<ResponseInputItem, PraxisErr>> {
         let error_call = call.clone();
-        let future =
-            self.handle_tool_call_with_source(call, ToolCallSource::Direct, cancellation_token);
+        let future = self.handle_tool_call_with_source_and_effects(
+            call,
+            None,
+            ToolCallSource::Direct,
+            cancellation_token,
+            effect_journal,
+        );
+        async move {
+            match future.await {
+                Ok(response) => Ok(response.into_response()),
+                Err(FunctionCallError::Fatal(message)) => Err(PraxisErr::Fatal(message)),
+                Err(other) => Ok(Self::failure_response(error_call, other)),
+            }
+        }
+        .in_current_span()
+    }
+
+    pub(crate) fn handle_prepared_tool_call_observed(
+        self,
+        call: ToolCall,
+        preparation: ToolPreparation,
+        cancellation_token: CancellationToken,
+        effect_journal: EffectJournal,
+    ) -> impl std::future::Future<Output = Result<ResponseInputItem, PraxisErr>> {
+        let error_call = call.clone();
+        let future = self.handle_tool_call_with_source_and_effects(
+            call,
+            Some(preparation),
+            ToolCallSource::Direct,
+            cancellation_token,
+            effect_journal,
+        );
         async move {
             match future.await {
                 Ok(response) => Ok(response.into_response()),
@@ -83,15 +130,30 @@ impl ToolCallRuntime {
         source: ToolCallSource,
         cancellation_token: CancellationToken,
     ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
+        self.handle_tool_call_with_source_and_effects(
+            call,
+            None,
+            source,
+            cancellation_token,
+            EffectJournal::default(),
+        )
+    }
+
+    fn handle_tool_call_with_source_and_effects(
+        self,
+        call: ToolCall,
+        preparation: Option<ToolPreparation>,
+        source: ToolCallSource,
+        cancellation_token: CancellationToken,
+        effect_journal: EffectJournal,
+    ) -> impl std::future::Future<Output = Result<AnyToolResult, FunctionCallError>> {
         self.turn_context
             .tool_loop_guard
             .record_tool_call(call.tool_name.as_str());
-        let concurrency_mode = self.router.tool_concurrency_mode(&call.tool_name);
         let router = Arc::clone(&self.router);
         let session = Arc::clone(&self.session);
         let turn = Arc::clone(&self.turn_context);
         let tracker = Arc::clone(&self.tracker);
-        let lock = Arc::clone(&self.parallel_execution);
         let started = Instant::now();
 
         let dispatch_span = trace_span!(
@@ -110,25 +172,31 @@ impl ToolCallRuntime {
                         dispatch_span.record("aborted", true);
                         Ok(Self::aborted_response(&call, secs))
                     },
-                    res = async {
-                        let _guard = match concurrency_mode {
-                            ConcurrencyMode::Parallel => Either::Left(lock.read().await),
-                            ConcurrencyMode::Exclusive | ConcurrencyMode::Blocking => {
-                                Either::Right(lock.write().await)
-                            }
-                        };
-
-                        router
-                            .dispatch_tool_call_with_code_mode_result(
-                                session,
-                                turn,
-                                tracker,
-                                call.clone(),
-                                source,
-                            )
-                            .instrument(dispatch_span.clone())
-                            .await
-                    } => res,
+                    res = crate::tools::effects::scope_effect_journal(effect_journal, async {
+                        match preparation {
+                            Some(preparation) => router
+                                .dispatch_prepared_tool_call_with_code_mode_result(
+                                    session,
+                                    turn,
+                                    tracker,
+                                    call.clone(),
+                                    preparation,
+                                    source,
+                                )
+                                .instrument(dispatch_span.clone())
+                                .await,
+                            None => router
+                                .dispatch_tool_call_with_code_mode_result(
+                                    session,
+                                    turn,
+                                    tracker,
+                                    call.clone(),
+                                    source,
+                                )
+                                .instrument(dispatch_span.clone())
+                                .await,
+                        }
+                    }) => res,
                 }
             }));
 

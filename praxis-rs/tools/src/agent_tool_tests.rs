@@ -14,6 +14,7 @@ fn model_preset(id: &str, show_in_picker: bool) -> ModelPreset {
         default_reasoning_effort: ReasoningEffort::Medium,
         supported_reasoning_efforts: vec![ReasoningEffortPreset {
             effort: ReasoningEffort::Medium,
+            display_name: "Medium".to_string(),
             description: "Balanced".to_string(),
         }],
         supports_personality: false,
@@ -66,9 +67,11 @@ fn spawn_agent_tool_requires_task_name_and_lists_visible_models() {
     assert!(description.contains("visible display (`visible-model`)"));
     assert!(!description.contains("hidden display (`hidden-model`)"));
     assert!(description.contains("Cross-provider coding workers"));
-    assert!(description.contains("`model_provider` to `openai`"));
-    assert!(description.contains("`model` to `gpt-5.5`"));
-    assert!(description.contains("`reasoning_effort` to `xhigh`"));
+    assert!(description.contains("canonical, credential-ready cross-provider spawn catalog"));
+    assert!(description.contains("`k3[1m]`"));
+    assert!(
+        description.contains("Never invent or ask the user to inspect `.praxis/providers.yaml`")
+    );
     assert!(properties.contains_key("task_name"));
     assert!(properties.contains_key("title"));
     assert!(properties.contains_key("message"));

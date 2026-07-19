@@ -35,6 +35,7 @@ pub enum ToolHandlerKind {
     Shell,
     ShellCommand,
     SpawnAgent,
+    SpawnThread,
     SubmitWorkerRequest,
     TestSync,
     ToolSearch,
