@@ -108,15 +108,10 @@ pub async fn run_main(
         tracing::warn!(error = %err, "failed to run personality migration");
     }
 
-    let chatgpt_base_url = config_toml
-        .chatgpt_base_url
-        .clone()
-        .unwrap_or_else(|| "https://chatgpt.com/backend-api/".to_string());
-    let cloud_requirements = cloud_config_bundle_loader_for_storage(
+    let cloud_requirements = cloud_config_bundle_loader_for_config_toml(
         praxis_home.to_path_buf(),
         /*enable_praxis_api_key_env*/ false,
-        config_toml.cli_auth_credentials_store.unwrap_or_default(),
-        chatgpt_base_url,
+        &config_toml,
     );
 
     let model_provider_override = if cli.oss {

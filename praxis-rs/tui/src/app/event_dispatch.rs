@@ -1,6 +1,16 @@
 use super::*;
 
 impl App {
+    fn insert_history_cell_now(&mut self, tui: &mut tui::Tui, cell: Box<dyn HistoryCell>) {
+        let cell: Arc<dyn HistoryCell> = cell.into();
+        if let Some(Overlay::Transcript(t)) = &mut self.overlay {
+            t.insert_cell(cell.clone());
+            tui.frame_requester().schedule_frame();
+        }
+        self.transcript_cells.push(cell);
+        tui.frame_requester().schedule_frame();
+    }
+
     pub(super) async fn handle_event(
         &mut self,
         tui: &mut tui::Tui,
@@ -13,15 +23,13 @@ impl App {
 
         match event {
             AppEvent::NewSession => {
-                self.start_fresh_session_with_summary_hint(tui, app_gateway)
-                    .await;
+                self.start_fresh_session(tui, app_gateway).await;
             }
             AppEvent::ClearUi => {
                 self.clear_terminal_ui(tui, /*redraw_header*/ false)?;
                 self.reset_app_ui_state_after_clear();
 
-                self.start_fresh_session_with_summary_hint(tui, app_gateway)
-                    .await;
+                self.start_fresh_session(tui, app_gateway).await;
             }
             AppEvent::OpenResumePicker => {
                 if let Some(control) = self
@@ -65,9 +73,8 @@ impl App {
                         .await
                     {
                         Ok(forked) => {
-                            self.shutdown_current_thread(app_gateway).await;
                             match self
-                                .replace_chat_widget_with_app_gateway_thread(
+                                .switch_to_app_gateway_thread_preserving_background(
                                     tui,
                                     app_gateway,
                                     forked,
@@ -90,7 +97,7 @@ impl App {
                                 }
                                 Err(err) => {
                                     self.chat_widget.add_error_message(format!(
-                                        "Failed to attach to forked app-gateway thread: {err}"
+                                        "Failed to switch to forked app-gateway thread: {err}"
                                     ));
                                 }
                             }
@@ -166,19 +173,55 @@ impl App {
                 self.clear_thread_goal(app_gateway, thread_id).await;
                 tui.frame_requester().schedule_frame();
             }
-            AppEvent::InsertHistoryCell(cell) => {
-                let cell: Arc<dyn HistoryCell> = cell.into();
-                if let Some(Overlay::Transcript(t)) = &mut self.overlay {
-                    t.insert_cell(cell.clone());
-                    tui.frame_requester().schedule_frame();
+            AppEvent::InsertHistoryCell(cell) => self.insert_history_cell_now(tui, cell),
+            AppEvent::InsertHistoryCellForView { generation, cell } => {
+                if generation == self.history_view_generation {
+                    self.insert_history_cell_now(tui, cell);
                 }
-                self.transcript_cells.push(cell);
-                tui.frame_requester().schedule_frame();
             }
             AppEvent::ApplyThreadRollback { num_turns } => {
                 if self.apply_non_pending_thread_rollback(num_turns) {
                     tui.frame_requester().schedule_frame();
                 }
+            }
+            AppEvent::PreviewBacktrackRewind {
+                selection,
+                num_turns,
+            } => {
+                if let Some(thread_id) = self.active_thread_id.or(self.chat_widget.thread_id()) {
+                    match app_gateway.thread_rewind_preview(thread_id, num_turns).await {
+                        Ok(preview)
+                            if preview.checkpoint_id.is_some()
+                                && !preview.changed_files.is_empty() =>
+                        {
+                            self.chat_widget.open_workspace_rewind_confirmation(
+                                selection,
+                                num_turns,
+                                preview,
+                            );
+                        }
+                        Ok(_) => self.commit_backtrack_rewind(
+                            selection,
+                            num_turns,
+                            praxis_app_gateway_protocol::ThreadRewindWorkspaceAction::Keep,
+                        ),
+                        Err(error) => self.chat_widget.add_error_message(format!(
+                            "Failed to preview workspace rewind: {error}"
+                        )),
+                    }
+                } else {
+                    self.chat_widget
+                        .add_error_message("No active thread is available.".to_string());
+                }
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::CommitBacktrackRewind {
+                selection,
+                num_turns,
+                workspace_action,
+            } => {
+                self.commit_backtrack_rewind(selection, num_turns, workspace_action);
+                tui.frame_requester().schedule_frame();
             }
             AppEvent::StartCommitAnimation => {
                 if self
@@ -964,22 +1007,26 @@ impl App {
                 self.chat_widget
                     .submit_user_message_with_mode(text, collaboration_mode);
             }
-            AppEvent::PersistSelfworkPlanPath {
+            AppEvent::StartThreadSelfwork {
                 thread_id,
                 plan_path,
             } => match app_gateway
-                .thread_set_selfwork_plan_path(thread_id, plan_path.clone())
+                .thread_selfwork_start(thread_id, plan_path)
                 .await
             {
-                Ok(()) => {
-                    self.update_thread_session_selfwork_plan_path(thread_id, plan_path)
-                        .await;
-                }
-                Err(err) => {
-                    self.chat_widget
-                        .add_error_message(format!("Failed to persist selfwork plan state: {err}"));
-                }
+                Ok(status) => self.chat_widget.apply_selfwork_status(status),
+                Err(err) => self
+                    .chat_widget
+                    .add_error_message(format!("Failed to start selfwork: {err}")),
             },
+            AppEvent::StopThreadSelfwork { thread_id } => {
+                match app_gateway.thread_selfwork_stop(thread_id).await {
+                    Ok(status) => self.chat_widget.apply_selfwork_status(status),
+                    Err(err) => self
+                        .chat_widget
+                        .add_error_message(format!("Failed to stop selfwork: {err}")),
+                }
+            }
             AppEvent::ActivateSelfworkPlan { plan_path } => {
                 self.chat_widget.activate_selfwork(plan_path);
             }

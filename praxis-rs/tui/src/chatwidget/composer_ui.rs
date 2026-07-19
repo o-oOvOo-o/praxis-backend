@@ -70,16 +70,8 @@ impl ChatWidget {
             } if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 && c.eq_ignore_ascii_case(&'v') =>
             {
-                match paste_image_to_temp_png() {
-                    Ok((path, info)) => {
-                        tracing::debug!(
-                            "pasted image size={}x{} format={}",
-                            info.width,
-                            info.height,
-                            info.encoded_format.label()
-                        );
-                        self.attach_image(path);
-                    }
+                match self.paste_image_from_clipboard() {
+                    Ok(()) => {}
                     Err(err) => {
                         tracing::warn!("failed to paste image: {err}");
                         self.add_to_history(history_cell::new_error_event(format!(
@@ -222,6 +214,18 @@ impl ChatWidget {
         }
     }
 
+    pub(crate) fn paste_image_from_clipboard(&mut self) -> Result<(), PasteImageError> {
+        let (path, info) = paste_image_to_temp_png()?;
+        tracing::debug!(
+            "pasted image size={}x{} format={}",
+            info.width,
+            info.height,
+            info.encoded_format.label()
+        );
+        self.attach_image(path);
+        Ok(())
+    }
+
     /// Attach a local image to the composer when the active model supports image inputs.
     ///
     /// When the model does not advertise image support, we keep the draft unchanged and surface a
@@ -271,19 +275,6 @@ impl ChatWidget {
 
     pub(crate) fn can_launch_external_editor(&self) -> bool {
         self.bottom_pane.can_launch_external_editor()
-    }
-
-    pub(crate) fn can_run_ctrl_l_clear_now(&mut self) -> bool {
-        // Ctrl+L is not a slash command, but it follows /clear's current rule:
-        // block while a task is running.
-        if !self.bottom_pane.is_task_running() {
-            return true;
-        }
-
-        let message = "Ctrl+L is disabled while a task is in progress.".to_string();
-        self.add_to_history(history_cell::new_error_event(message));
-        self.request_redraw();
-        false
     }
 
     pub(super) fn show_rename_prompt(&mut self) {

@@ -73,18 +73,7 @@ pub(crate) struct StatusIndicatorWidget {
 // Format elapsed seconds into a compact human-friendly form used by the status line.
 // Examples: 0s, 59s, 1m 00s, 59m 59s, 1h 00m 00s, 2h 03m 09s
 pub fn fmt_elapsed_compact(elapsed_secs: u64) -> String {
-    if elapsed_secs < 60 {
-        return format!("{elapsed_secs}s");
-    }
-    if elapsed_secs < 3600 {
-        let minutes = elapsed_secs / 60;
-        let seconds = elapsed_secs % 60;
-        return format!("{minutes}m {seconds:02}s");
-    }
-    let hours = elapsed_secs / 3600;
-    let minutes = (elapsed_secs % 3600) / 60;
-    let seconds = elapsed_secs % 60;
-    format!("{hours}h {minutes:02}m {seconds:02}s")
+    praxis_app_core::praxis_format_elapsed_compact(elapsed_secs)
 }
 
 impl StatusIndicatorWidget {

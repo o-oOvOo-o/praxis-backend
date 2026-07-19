@@ -41,6 +41,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
+use praxis_app_gateway_protocol::{ThreadSelfworkPhase, ThreadSelfworkStatus};
 use url::Url;
 
 use self::exec_state::{
@@ -56,8 +57,9 @@ pub(crate) use self::rate_limit_state::{
 use self::realtime::PendingSteerCompareKey;
 use self::selfwork_plan::{
     SELFWORK_PICKER_VIEW_ID, SELFWORK_PLAN_SCAN_LIMIT, SELFWORK_STALL_LIMIT, SELFWORK_USAGE,
-    SelfworkPlanAdvance, SelfworkRuntimeState, discover_selfwork_plan_candidates,
-    inspect_selfwork_plan, resolve_selfwork_plan_path, selfwork_prompt, selfwork_search_root,
+    SelfworkCommand, SelfworkRuntimeState, discover_selfwork_plan_candidates,
+    inspect_selfwork_plan, parse_selfwork_command, resolve_selfwork_plan_path,
+    selfwork_search_root,
 };
 use self::status_text::{
     DEFAULT_COMPOSER_PLACEHOLDER, app_gateway_goal_status_label, edited_goal_status,
@@ -104,6 +106,10 @@ use praxis_app_core::thread_commands::ExternalThreadCommandAction;
 use praxis_app_core::thread_commands::ExternalThreadCommandIntent;
 use praxis_app_core::thread_commands::ExternalThreadCommandSource;
 use praxis_app_core::thread_commands::parse_external_thread_command;
+use praxis_app_core::{
+    PLAN_IMPLEMENTATION_ACCEPT_LABEL, PLAN_IMPLEMENTATION_DECLINE_LABEL,
+    PLAN_IMPLEMENTATION_PROMPT, PLAN_IMPLEMENTATION_TITLE,
+};
 use praxis_app_gateway_protocol::AppSummary;
 use praxis_app_gateway_protocol::CollabAgentState as AppGatewayCollabAgentState;
 use praxis_app_gateway_protocol::CollabAgentTool;
@@ -262,10 +268,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::warn;
 
 const DEFAULT_MODEL_DISPLAY_NAME: &str = "loading";
-const PLAN_IMPLEMENTATION_TITLE: &str = "Implement this plan?";
-const PLAN_IMPLEMENTATION_YES: &str = "Yes, implement this plan";
-const PLAN_IMPLEMENTATION_NO: &str = "No, stay in Plan mode";
-const PLAN_IMPLEMENTATION_CODING_MESSAGE: &str = "Implement the plan.";
 const PLAN_MODE_REASONING_SCOPE_TITLE: &str = "Apply reasoning change";
 const PLAN_MODE_REASONING_SCOPE_PLAN_ONLY: &str = "Apply to Plan mode override";
 const PLAN_MODE_REASONING_SCOPE_ALL_MODES: &str = "Apply to global default and Plan mode override";
@@ -352,6 +354,7 @@ use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
 use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use crate::bottom_pane::popup_consts::standard_popup_hint_line;
+use crate::clipboard_paste::PasteImageError;
 use crate::clipboard_paste::paste_image_to_temp_png;
 use crate::clipboard_text;
 use crate::collaboration_modes;
@@ -771,7 +774,7 @@ pub(crate) struct ChatWidget {
     current_cwd: Option<PathBuf>,
     // Active markdown plan that selfwork should keep advancing when the thread is idle.
     selfwork_plan_path: Option<PathBuf>,
-    // Shared selfwork loop state; presentation-specific scheduling remains in the TUI.
+    // Read-only projection of Gateway-owned selfwork runtime state.
     selfwork_runtime: SelfworkRuntimeState,
     // Runtime network proxy bind addresses from SessionConfigured.
     session_network_proxy: Option<praxis_protocol::protocol::SessionNetworkProxyRuntime>,

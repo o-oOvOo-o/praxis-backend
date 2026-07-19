@@ -1,11 +1,15 @@
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
+use praxis_protocol::ThreadId;
 use ratatui::layout::Rect;
 
 #[derive(Debug)]
 pub(crate) struct LaunchStripState {
     pub(crate) rank: u8,
+    active_thread_id: Option<ThreadId>,
+    rank_by_thread: HashMap<ThreadId, u8>,
     pub(crate) dropdown: Option<LaunchStripDropdown>,
     pub(crate) model_area: Cell<Option<Rect>>,
     pub(crate) reasoning_area: Cell<Option<Rect>>,
@@ -53,6 +57,8 @@ impl Default for LaunchStripState {
     fn default() -> Self {
         Self {
             rank: 0,
+            active_thread_id: None,
+            rank_by_thread: HashMap::new(),
             dropdown: None,
             model_area: Cell::new(None),
             reasoning_area: Cell::new(None),
@@ -130,10 +136,46 @@ impl LaunchStripState {
 
     pub(crate) fn set_rank(&mut self, rank: u8, max_rank: u8) -> u8 {
         self.rank = rank.min(max_rank);
+        if let Some(thread_id) = self.active_thread_id {
+            self.rank_by_thread.insert(thread_id, self.rank);
+        }
+        self.rank
+    }
+
+    pub(crate) fn activate_thread(&mut self, thread_id: ThreadId, default_rank: u8) -> u8 {
+        self.active_thread_id = Some(thread_id);
+        self.rank = *self.rank_by_thread.entry(thread_id).or_insert(default_rank);
+        self.clear_dropdown();
         self.rank
     }
 }
 
 fn rect_contains_point(area: Rect, column: u16, row: u16) -> bool {
     column >= area.x && column < area.right() && row >= area.y && row < area.bottom()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rank_selection_is_isolated_per_thread() {
+        let thread_a = ThreadId::new();
+        let thread_b = ThreadId::new();
+        let mut state = LaunchStripState::default();
+
+        assert_eq!(state.activate_thread(thread_a, 0), 0);
+        assert_eq!(state.set_rank(1, 2), 1);
+        assert_eq!(state.activate_thread(thread_b, 0), 0);
+        assert_eq!(state.set_rank(2, 2), 2);
+        assert_eq!(state.activate_thread(thread_a, 0), 1);
+        assert_eq!(state.activate_thread(thread_b, 0), 2);
+    }
+
+    #[test]
+    fn first_activation_uses_the_threads_canonical_rank() {
+        let mut state = LaunchStripState::default();
+
+        assert_eq!(state.activate_thread(ThreadId::new(), 1), 1);
+    }
 }

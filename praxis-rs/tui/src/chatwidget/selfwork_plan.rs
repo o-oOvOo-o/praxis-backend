@@ -1,12 +1,12 @@
-use std::collections::VecDeque;
 use std::path::Path;
 use std::path::PathBuf;
 
 use crate::diff_render::display_path_for;
 use crate::text_formatting::truncate_text;
 pub(super) use praxis_app_core::selfwork::{
-    SELFWORK_PLAN_SCAN_LIMIT, SELFWORK_STALL_LIMIT, SelfworkPlanAdvance, SelfworkPlanInspection,
-    SelfworkRuntimeState, inspect_selfwork_plan, selfwork_prompt,
+    SELFWORK_PLAN_SCAN_LIMIT, SELFWORK_STALL_LIMIT, SelfworkCommand, SelfworkPlanInspection,
+    SelfworkRuntimeState, collect_selfwork_plan_paths, inspect_selfwork_plan,
+    parse_selfwork_command,
 };
 
 pub(super) const SELFWORK_PICKER_VIEW_ID: &str = "selfwork-plan-selection";
@@ -89,50 +89,6 @@ pub(super) fn resolve_selfwork_plan_path(
     Ok(resolved)
 }
 
-fn collect_selfwork_plan_paths(root: &Path) -> Result<(Vec<PathBuf>, bool), String> {
-    let mut pending = VecDeque::from([root.to_path_buf()]);
-    let mut paths = Vec::new();
-    let mut truncated = false;
-
-    while let Some(dir) = pending.pop_front() {
-        let entries = std::fs::read_dir(&dir)
-            .map_err(|err| format!("Failed to scan markdown plans in {}: {err}", dir.display()))?;
-        let mut children = entries
-            .filter_map(Result::ok)
-            .collect::<Vec<std::fs::DirEntry>>();
-        children.sort_by_key(|entry| entry.file_name().to_string_lossy().to_ascii_lowercase());
-
-        for entry in children {
-            let path = entry.path();
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            let name = entry.file_name().to_string_lossy().to_string();
-            if file_type.is_dir() {
-                if should_descend_selfwork_dir(&name) {
-                    pending.push_back(path);
-                }
-                continue;
-            }
-            if !file_type.is_file() || !is_markdown_plan_file(&name) {
-                continue;
-            }
-            paths.push(path);
-            if paths.len() >= SELFWORK_PLAN_SCAN_LIMIT {
-                truncated = true;
-                break;
-            }
-        }
-
-        if truncated {
-            break;
-        }
-    }
-
-    paths.sort_by_key(|path| selfwork_candidate_sort_key(root, path));
-    Ok((paths, truncated))
-}
-
 fn build_selfwork_plan_candidate(
     root: &Path,
     path: PathBuf,
@@ -150,57 +106,6 @@ fn build_selfwork_plan_candidate(
         selected_description: format!("Path: {display_path}\nStatus: {status}\n\n{preview}"),
         search_value: format!("{display_path}\n{status}\n{preview}"),
     })
-}
-
-fn should_descend_selfwork_dir(name: &str) -> bool {
-    !matches!(
-        name,
-        ".git"
-            | ".hg"
-            | ".svn"
-            | ".praxis"
-            | ".codex"
-            | "node_modules"
-            | "target"
-            | "dist"
-            | "build"
-            | "coverage"
-            | ".next"
-            | ".nuxt"
-    )
-}
-
-fn is_markdown_plan_file(name: &str) -> bool {
-    Path::new(name)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
-}
-
-fn selfwork_candidate_sort_key(root: &Path, path: &Path) -> (u8, usize, String) {
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let name_rank = if file_name == "plan.md" {
-        0
-    } else if matches!(file_name.as_str(), "selfwork.md" | "loop.md") {
-        1
-    } else if file_name.contains("plan") {
-        2
-    } else if file_name.contains("todo") || file_name.contains("task") {
-        3
-    } else {
-        4
-    };
-    let depth = path
-        .strip_prefix(root)
-        .ok()
-        .map(|relative| relative.components().count())
-        .unwrap_or(usize::MAX);
-    let display = display_path_for(path, root).to_ascii_lowercase();
-    (name_rank, depth, display)
 }
 
 fn selfwork_status_summary(inspection: &SelfworkPlanInspection) -> String {

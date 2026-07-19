@@ -26,22 +26,17 @@ impl AppGatewaySession {
             })
             .await
             .wrap_err("model/list failed during TUI bootstrap")?;
+        let default_model = resolve_model_id(
+            config.model.as_deref(),
+            Some(config.model_provider_id.as_str()),
+            &models.data,
+        )
+        .wrap_err("model/list returned no models for TUI bootstrap")?;
         let available_models = models
             .data
             .into_iter()
             .map(model_preset_from_api_model)
             .collect::<Vec<_>>();
-        let default_model = config
-            .model
-            .clone()
-            .or_else(|| {
-                available_models
-                    .iter()
-                    .find(|model| model.is_default)
-                    .map(|model| model.model.clone())
-            })
-            .or_else(|| available_models.first().map(|model| model.model.clone()))
-            .wrap_err("model/list returned no models for TUI bootstrap")?;
 
         let (
             account_auth_mode,

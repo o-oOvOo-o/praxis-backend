@@ -1,6 +1,17 @@
 use super::*;
 
 impl App {
+    pub fn chatwidget_init_for_fresh_thread(
+        &self,
+        tui: &mut tui::Tui,
+        cfg: praxis_core::config::Config,
+        tui_config: TuiRuntimeConfig,
+    ) -> crate::chatwidget::ChatWidgetInit {
+        let mut init = self.chatwidget_init_for_forked_or_resumed_thread(tui, cfg, tui_config);
+        init.is_first_run = true;
+        init
+    }
+
     pub fn chatwidget_init_for_forked_or_resumed_thread(
         &self,
         tui: &mut tui::Tui,
@@ -11,7 +22,9 @@ impl App {
             config: cfg,
             tui_config,
             frame_requester: tui.frame_requester(),
-            app_event_tx: self.app_event_tx.clone(),
+            app_event_tx: self
+                .app_event_tx
+                .scoped_to_history_view(self.history_view_generation),
             // Fork/resume bootstraps here don't carry any prefilled message content.
             initial_user_message: None,
             enhanced_keys_supported: self.enhanced_keys_supported,

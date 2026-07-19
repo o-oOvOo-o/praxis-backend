@@ -125,6 +125,7 @@ impl From<UserMessage> for PraxisChatUserMessage {
     fn from(message: UserMessage) -> Self {
         Self {
             text: message.text,
+            client_input_ids: Vec::new(),
             local_images: message
                 .local_images
                 .into_iter()
@@ -210,6 +211,7 @@ impl ChatWidget {
                         message: steer.compare_key.message.clone(),
                         image_count: steer.compare_key.image_count,
                     },
+                    correlation_id: None,
                 })
                 .collect(),
             rejected_steers_queue: self

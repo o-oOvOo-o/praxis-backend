@@ -34,7 +34,7 @@ async fn plan_implementation_popup_yes_emits_submit_message_event() {
     else {
         panic!("expected SubmitUserMessageWithMode, got {event:?}");
     };
-    assert_eq!(text, PLAN_IMPLEMENTATION_CODING_MESSAGE);
+    assert_eq!(text, PLAN_IMPLEMENTATION_PROMPT);
     assert_eq!(collaboration_mode.mode, Some(ModeKind::Default));
 }
 

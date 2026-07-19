@@ -22,6 +22,15 @@ impl std::fmt::Display for PasteImageError {
 }
 impl std::error::Error for PasteImageError {}
 
+impl PasteImageError {
+    pub fn allows_text_fallback(&self) -> bool {
+        matches!(
+            self,
+            PasteImageError::ClipboardUnavailable(_) | PasteImageError::NoImage(_)
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EncodedImageFormat {
     Png,
@@ -371,6 +380,18 @@ pub fn pasted_image_format(path: &Path) -> EncodedImageFormat {
 #[cfg(test)]
 mod pasted_paths_tests {
     use super::*;
+
+    #[test]
+    fn absent_clipboard_image_allows_text_fallback() {
+        assert!(PasteImageError::NoImage("none".to_string()).allows_text_fallback());
+        assert!(PasteImageError::ClipboardUnavailable("busy".to_string()).allows_text_fallback());
+    }
+
+    #[test]
+    fn image_processing_failure_does_not_fallback_to_text() {
+        assert!(!PasteImageError::EncodeFailed("bad image".to_string()).allows_text_fallback());
+        assert!(!PasteImageError::IoError("disk full".to_string()).allows_text_fallback());
+    }
 
     #[cfg(not(windows))]
     #[test]

@@ -329,14 +329,17 @@ impl App {
                             }
                         }
 
-                        self.shutdown_current_thread(app_gateway).await;
                         self.config = fork_config;
                         self.tui_config = fork_tui_config;
                         tui.set_notification_method(self.tui_config.notification_method);
                         self.file_search
                             .update_search_dir(self.config.cwd.to_path_buf());
                         match self
-                            .replace_chat_widget_with_app_gateway_thread(tui, app_gateway, forked)
+                            .switch_to_app_gateway_thread_preserving_background(
+                                tui,
+                                app_gateway,
+                                forked,
+                            )
                             .await
                         {
                             Ok(()) => {
@@ -355,7 +358,7 @@ impl App {
                             }
                             Err(err) => {
                                 self.chat_widget.add_error_message(format!(
-                                    "Failed to attach to forked app-gateway thread: {err}"
+                                    "Failed to switch to forked app-gateway thread: {err}"
                                 ));
                             }
                         }

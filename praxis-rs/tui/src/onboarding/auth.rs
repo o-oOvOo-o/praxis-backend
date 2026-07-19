@@ -85,6 +85,7 @@ pub(crate) enum SignInOption {
     ChatGpt,
     DeviceCode,
     DeepSeekApiKey,
+    KimiApiKey,
     CommonApiKey,
     Anthropic,
 }
@@ -282,6 +283,7 @@ impl AuthModeWidget {
         }
         if self.is_api_login_allowed() {
             options.push(SignInOption::DeepSeekApiKey);
+            options.push(SignInOption::KimiApiKey);
             options.push(SignInOption::CommonApiKey);
         }
         options.push(SignInOption::Anthropic);
@@ -296,6 +298,7 @@ impl AuthModeWidget {
         }
         if self.is_api_login_allowed() {
             options.push(SignInOption::DeepSeekApiKey);
+            options.push(SignInOption::KimiApiKey);
             options.push(SignInOption::CommonApiKey);
         }
         options.push(SignInOption::Anthropic);
@@ -339,6 +342,13 @@ impl AuthModeWidget {
             SignInOption::DeepSeekApiKey => {
                 if self.is_api_login_allowed() {
                     self.start_provider_key_entry(ProviderSetupKind::DeepSeek);
+                } else {
+                    self.disallow_api_login();
+                }
+            }
+            SignInOption::KimiApiKey => {
+                if self.is_api_login_allowed() {
+                    self.start_provider_key_entry(ProviderSetupKind::Kimi);
                 } else {
                     self.disallow_api_login();
                 }
@@ -440,6 +450,14 @@ impl AuthModeWidget {
                         option,
                         "Sign in with DeepSeek API key",
                         "Use Praxis DeepSeek profile with deepseek-v4-pro",
+                    ));
+                }
+                SignInOption::KimiApiKey => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Sign in with Kimi Code API key",
+                        "Use Praxis Kimi profile with K3 or K2.7 Code",
                     ));
                 }
                 SignInOption::CommonApiKey => {

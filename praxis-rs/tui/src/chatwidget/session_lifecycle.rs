@@ -128,17 +128,11 @@ impl ChatWidget {
 
     pub(crate) fn handle_thread_session(&mut self, session: ThreadSessionState) {
         if self.selfwork_plan_path != session.selfwork_plan_path {
-            self.selfwork_last_plan_digest = None;
-            self.selfwork_stall_count = 0;
-            self.selfwork_turn_in_flight = false;
+            self.selfwork_runtime.reset();
         }
         self.selfwork_plan_path = session.selfwork_plan_path.clone();
         self.sync_work_panel_selfwork();
         self.on_session_configured(session_state_to_configured_event(session));
-    }
-
-    pub(crate) fn maybe_resume_selfwork_if_idle(&mut self) {
-        self.maybe_start_selfwork_turn_now();
     }
 
     pub(super) fn emit_forked_thread_event(
@@ -215,9 +209,6 @@ impl ChatWidget {
         last_agent_message: Option<String>,
         from_replay: bool,
     ) {
-        let completed_selfwork_turn = self.selfwork_turn_in_flight;
-        self.selfwork_turn_in_flight = false;
-        self.sync_work_panel_selfwork();
         self.submit_pending_steers_after_interrupt = false;
         let copyable_turn_output = last_agent_message
             .filter(|message| !message.trim().is_empty())
@@ -283,12 +274,6 @@ impl ChatWidget {
         }
         // If there is a queued user message, send exactly one now to begin the next turn.
         self.maybe_send_next_queued_input();
-        if !from_replay
-            && !self.bottom_pane.is_task_running()
-            && !self.has_queued_follow_up_messages()
-        {
-            self.maybe_continue_selfwork_after_turn(completed_selfwork_turn);
-        }
         // Emit a notification when the turn completes (suppressed if focused).
         self.notify(Notification::AgentTurnComplete {
             response: copyable_turn_output.unwrap_or_default(),
@@ -503,7 +488,7 @@ impl ChatWidget {
         let default_mask = collaboration_modes::default_mode_mask(self.model_catalog.as_ref());
         let (implement_actions, implement_disabled_reason) = match default_mask {
             Some(mask) => {
-                let user_text = PLAN_IMPLEMENTATION_CODING_MESSAGE.to_string();
+                let user_text = PLAN_IMPLEMENTATION_PROMPT.to_string();
                 let actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
                     tx.send(AppEvent::SubmitUserMessageWithMode {
                         text: user_text.clone(),
@@ -516,7 +501,7 @@ impl ChatWidget {
         };
         let items = vec![
             SelectionItem {
-                name: PLAN_IMPLEMENTATION_YES.to_string(),
+                name: PLAN_IMPLEMENTATION_ACCEPT_LABEL.to_string(),
                 description: Some("Switch to Default and start coding.".to_string()),
                 selected_description: None,
                 is_current: false,
@@ -526,7 +511,7 @@ impl ChatWidget {
                 ..Default::default()
             },
             SelectionItem {
-                name: PLAN_IMPLEMENTATION_NO.to_string(),
+                name: PLAN_IMPLEMENTATION_DECLINE_LABEL.to_string(),
                 description: Some("Continue planning with the model.".to_string()),
                 selected_description: None,
                 is_current: false,

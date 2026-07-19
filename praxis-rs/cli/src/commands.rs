@@ -341,6 +341,15 @@ pub(crate) struct AppGatewayCommand {
     )]
     pub(crate) listen: praxis_app_gateway::AppGatewayTransport,
 
+    /// Session source used to derive product restrictions and metadata.
+    #[arg(
+        long = "session-source",
+        value_name = "SOURCE",
+        default_value = "app-gateway",
+        value_parser = praxis_protocol::protocol::SessionSource::from_startup_arg
+    )]
+    pub(crate) session_source: praxis_protocol::protocol::SessionSource,
+
     /// Controls whether analytics are enabled by default.
     ///
     /// Analytics are disabled by default for app-gateway. Users have to explicitly opt in

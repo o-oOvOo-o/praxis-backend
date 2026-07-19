@@ -218,6 +218,32 @@ fn auth_with_prefix(prefix: &str) -> AuthDotJson {
 }
 
 #[test]
+fn persistent_auth_prefers_praxis_without_reading_codex() -> anyhow::Result<()> {
+    let praxis_auth = auth_with_prefix("praxis");
+
+    let loaded = resolve_persistent_auth(Some(praxis_auth.clone()), || {
+        panic!("Codex auth must not be read when Praxis auth exists")
+    })?
+    .context("Praxis auth should resolve")?;
+
+    assert!(matches!(loaded.origin, LoadedAuthOrigin::Praxis));
+    assert_eq!(loaded.auth, praxis_auth);
+    Ok(())
+}
+
+#[test]
+fn persistent_auth_uses_codex_only_when_praxis_is_absent() -> anyhow::Result<()> {
+    let codex_auth = auth_with_prefix("codex");
+
+    let loaded = resolve_persistent_auth(None, || Ok(Some(codex_auth.clone())))?
+        .context("Codex fallback auth should resolve")?;
+
+    assert!(matches!(loaded.origin, LoadedAuthOrigin::InheritedCodex));
+    assert_eq!(loaded.auth, codex_auth);
+    Ok(())
+}
+
+#[test]
 fn keyring_auth_storage_load_returns_deserialized_auth() -> anyhow::Result<()> {
     let praxis_home = tempdir()?;
     let mock_keyring = MockKeyringStore::default();

@@ -75,9 +75,6 @@ impl App {
                 kind: KeyEventKind::Press,
                 ..
             } => {
-                if !self.chat_widget.can_run_ctrl_l_clear_now() {
-                    return;
-                }
                 if let Err(err) = self.clear_terminal_ui(tui, /*redraw_header*/ false) {
                     tracing::warn!(error = %err, "failed to clear terminal UI");
                     self.chat_widget
@@ -216,8 +213,7 @@ impl App {
         {
             self.workspace.clear_overlay();
             self.workspace.clear_search_focus();
-            self.start_fresh_session_with_summary_hint(tui, app_gateway)
-                .await;
+            self.start_fresh_session(tui, app_gateway).await;
             self.refresh_workspace_threads(app_gateway, true);
             tui.frame_requester().schedule_frame();
             return true;

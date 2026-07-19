@@ -97,6 +97,18 @@ impl ChatWidget {
             ServerNotification::ThreadModelChanged(notification) => {
                 self.handle_thread_model_changed_notification(notification);
             }
+            ServerNotification::ThreadPermissionsChanged(notification) => {
+                if self.thread_id().is_none_or(|thread_id| {
+                    thread_id.to_string() == notification.thread_id.as_str()
+                }) {
+                    self.set_approval_policy(notification.approval_policy.to_core());
+                    self.set_approvals_reviewer(notification.approvals_reviewer.to_core());
+                    if let Err(err) = self.set_sandbox_policy(notification.sandbox_policy.to_core())
+                    {
+                        tracing::warn!(%err, "failed to sync sandbox policy from app-gateway");
+                    }
+                }
+            }
             ServerNotification::TurnStarted(notification) => {
                 self.last_non_retry_error = None;
                 if !matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
@@ -281,6 +293,9 @@ impl ChatWidget {
                         },
                     );
                 }
+            }
+            ServerNotification::ThreadSelfworkUpdated(notification) => {
+                self.apply_selfwork_status(notification.status);
             }
             ServerNotification::ServerRequestResolved(_)
             | ServerNotification::AccountUpdated(_)

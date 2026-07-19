@@ -216,7 +216,7 @@ impl App {
                     config: config.clone(),
                     tui_config: tui_config.clone(),
                     frame_requester: tui.frame_requester(),
-                    app_event_tx: app_event_tx.clone(),
+                    app_event_tx: app_event_tx.scoped_to_history_view(0),
                     initial_user_message: crate::chatwidget::create_initial_user_message(
                         initial_prompt.clone(),
                         initial_images.clone(),
@@ -241,7 +241,7 @@ impl App {
             }
             SessionSelection::Resume(target_session) => {
                 let resumed = app_gateway
-                    .resume_thread(config.clone(), target_session.thread_id)
+                    .resume_thread_with_startup_overrides(config.clone(), target_session.thread_id)
                     .await
                     .wrap_err_with(|| {
                         let target_label = target_session.display_label();
@@ -251,7 +251,7 @@ impl App {
                     config: config.clone(),
                     tui_config: tui_config.clone(),
                     frame_requester: tui.frame_requester(),
-                    app_event_tx: app_event_tx.clone(),
+                    app_event_tx: app_event_tx.scoped_to_history_view(0),
                     initial_user_message: crate::chatwidget::create_initial_user_message(
                         initial_prompt.clone(),
                         initial_images.clone(),
@@ -314,7 +314,7 @@ impl App {
                     config: config.clone(),
                     tui_config: tui_config.clone(),
                     frame_requester: tui.frame_requester(),
-                    app_event_tx: app_event_tx.clone(),
+                    app_event_tx: app_event_tx.scoped_to_history_view(0),
                     initial_user_message: crate::chatwidget::create_initial_user_message(
                         initial_prompt.clone(),
                         initial_images.clone(),
@@ -364,6 +364,7 @@ impl App {
             file_search,
             enhanced_keys_supported,
             transcript_cells: Vec::new(),
+            history_view_generation: 0,
             overlay: None,
             deferred_history_lines: Vec::new(),
             has_emitted_history_lines: false,

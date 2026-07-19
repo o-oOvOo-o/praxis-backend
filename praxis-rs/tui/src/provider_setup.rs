@@ -1,6 +1,9 @@
 use praxis_core::ANTHROPIC_API_BASE_URL;
 use praxis_core::ANTHROPIC_API_KEY_ENV_VAR;
 use praxis_core::ANTHROPIC_PROVIDER_ID;
+use praxis_core::KIMI_API_BASE_URL;
+use praxis_core::KIMI_API_KEY_ENV_VAR;
+use praxis_core::KIMI_PROVIDER_ID;
 use praxis_core::ModelProviderCompatInfo;
 use praxis_core::ModelProviderInfo;
 use praxis_core::ModelProviderThinkingFormat;
@@ -17,11 +20,13 @@ pub(crate) const COMMON_API_KEY_CREDENTIAL_ID: &str = "PRAXIS_COMMON_API_KEY";
 pub(crate) const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
 pub(crate) const DEFAULT_DEEPSEEK_MODEL: &str = "deepseek-v4-pro";
 pub(crate) const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-5";
+pub(crate) const DEFAULT_KIMI_MODEL: &str = "k3[1m]";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProviderSetupKind {
     Anthropic,
     DeepSeek,
+    Kimi,
     Common,
 }
 
@@ -54,6 +59,7 @@ impl ProviderSetupKind {
         match self {
             Self::Anthropic => "Anthropic",
             Self::DeepSeek => "DeepSeek",
+            Self::Kimi => "Kimi Code",
             Self::Common => "Common OpenAI Compatible",
         }
     }
@@ -62,6 +68,7 @@ impl ProviderSetupKind {
         match self {
             Self::Anthropic => ANTHROPIC_PROVIDER_ID,
             Self::DeepSeek => DEEPSEEK_PROVIDER_ID,
+            Self::Kimi => KIMI_PROVIDER_ID,
             Self::Common => COMMON_PROVIDER_ID,
         }
     }
@@ -70,6 +77,7 @@ impl ProviderSetupKind {
         match self {
             Self::Anthropic => ANTHROPIC_API_BASE_URL,
             Self::DeepSeek => DEFAULT_DEEPSEEK_BASE_URL,
+            Self::Kimi => KIMI_API_BASE_URL,
             Self::Common => "",
         }
     }
@@ -78,6 +86,7 @@ impl ProviderSetupKind {
         match self {
             Self::Anthropic => DEFAULT_ANTHROPIC_MODEL,
             Self::DeepSeek => DEFAULT_DEEPSEEK_MODEL,
+            Self::Kimi => DEFAULT_KIMI_MODEL,
             Self::Common => "",
         }
     }
@@ -86,12 +95,13 @@ impl ProviderSetupKind {
         match self {
             Self::Anthropic => ANTHROPIC_API_KEY_ENV_VAR,
             Self::DeepSeek => "DEEPSEEK_API_KEY",
+            Self::Kimi => KIMI_API_KEY_ENV_VAR,
             Self::Common => COMMON_API_KEY_CREDENTIAL_ID,
         }
     }
 
     pub(crate) fn is_builtin(self) -> bool {
-        matches!(self, Self::Anthropic)
+        matches!(self, Self::Anthropic | Self::Kimi)
     }
 
     pub(crate) fn normalize_base_url(self, raw: &str) -> Result<String, String> {
@@ -101,6 +111,11 @@ impl ProviderSetupKind {
                 "Anthropic login uses the official endpoint {ANTHROPIC_API_BASE_URL}. Configure a separate custom provider for proxies."
             ));
         }
+        if matches!(self, Self::Kimi) && base_url != KIMI_API_BASE_URL {
+            return Err(format!(
+                "Kimi Code login uses the official endpoint {KIMI_API_BASE_URL}. Configure a separate custom provider for proxies."
+            ));
+        }
         Ok(base_url)
     }
 
@@ -108,6 +123,7 @@ impl ProviderSetupKind {
         match self {
             Self::Anthropic => Some(ReasoningEffort::High),
             Self::DeepSeek => Some(ReasoningEffort::Medium),
+            Self::Kimi => Some(ReasoningEffort::Max),
             Self::Common => None,
         }
     }
@@ -131,6 +147,7 @@ impl ProviderSetupKind {
                 "Paste API key. Optional lines: base_url=https://api.deepseek.com, model=deepseek-v4-pro"
                     .to_string()
             }
+            Self::Kimi => "Paste a Kimi Code API key. Optional: model=k3[1m]".to_string(),
             Self::Common => {
                 "api_key=...\nbase_url=https://provider.example/v1\nmodel=model-name"
                     .to_string()
@@ -148,6 +165,10 @@ impl ProviderSetupKind {
                 "Default: {} with {}",
                 DEFAULT_DEEPSEEK_BASE_URL, DEFAULT_DEEPSEEK_MODEL
             )),
+            Self::Kimi => Some(
+                "Uses Kimi's Claude-compatible Coding endpoint. K3 1M requires Allegretto or higher."
+                    .to_string(),
+            ),
             Self::Common => Some("Required: api_key, base_url, model".to_string()),
         }
     }
@@ -156,8 +177,12 @@ impl ProviderSetupKind {
         if matches!(self, Self::Anthropic) {
             return ModelProviderInfo::create_anthropic_provider();
         }
+        if matches!(self, Self::Kimi) {
+            return ModelProviderInfo::create_kimi_provider();
+        }
         let compat = match self {
             Self::Anthropic => unreachable!("Anthropic provider returned above"),
+            Self::Kimi => unreachable!("Kimi provider returned above"),
             Self::DeepSeek => Some(ModelProviderCompatInfo {
                 supports_developer_role: Some(false),
                 supports_reasoning_effort: Some(true),
@@ -411,6 +436,24 @@ mod tests {
         assert_eq!(
             selection.provider.env_key.as_deref(),
             Some("DEEPSEEK_API_KEY")
+        );
+        assert!(selection.provider.experimental_bearer_token.is_none());
+    }
+
+    #[test]
+    fn kimi_setup_uses_builtin_specialized_provider_and_keyring_reference() {
+        let selection = ProviderSetupKind::Kimi
+            .parse_selection("kimi-test-key")
+            .expect("Kimi provider setup");
+
+        assert_eq!(selection.provider_id, KIMI_PROVIDER_ID);
+        assert_eq!(selection.model, DEFAULT_KIMI_MODEL);
+        assert_eq!(selection.effort, Some(ReasoningEffort::Max));
+        assert!(selection.provider.is_kimi());
+        assert_eq!(selection.provider.wire_api, WireApi::Claude);
+        assert_eq!(
+            selection.provider.env_key.as_deref(),
+            Some(KIMI_API_KEY_ENV_VAR)
         );
         assert!(selection.provider.experimental_bearer_token.is_none());
     }

@@ -10,6 +10,7 @@ impl ChatWidget {
                 self.token_info = None;
                 self.sync_status_budget_message();
                 self.sync_work_panel_context();
+                self.sync_work_panel_token_saver();
             }
         }
     }
@@ -29,6 +30,7 @@ impl ChatWidget {
                 TokenUsageInfo {
                     total_token_usage: TokenUsage::default(),
                     last_token_usage: TokenUsage::default(),
+                    internal_savings: Default::default(),
                     model_context_window: Some(model_context_window),
                     model_auto_compact_token_limit: None,
                 }
@@ -45,6 +47,7 @@ impl ChatWidget {
         self.token_info = Some(info);
         self.sync_status_budget_message();
         self.sync_work_panel_context();
+        self.sync_work_panel_token_saver();
     }
 
     pub(super) fn context_remaining_percent(&self, info: &TokenUsageInfo) -> Option<i64> {
@@ -66,75 +69,70 @@ impl ChatWidget {
         Some(info.last_token_usage.tokens_in_context_window())
     }
 
-    pub(super) fn status_budget_limit(&self, info: &TokenUsageInfo) -> Option<i64> {
-        let auto_compact_limit = self
-            .token_info
-            .as_ref()
-            .and_then(|info| info.model_auto_compact_token_limit)
-            .or(self.config.model_auto_compact_token_limit)
-            .filter(|limit| *limit > 0);
-        let context_window = info
-            .model_context_window
-            .or(self.config.model_context_window)
-            .filter(|limit| *limit > 0);
-
-        match (auto_compact_limit, context_window) {
-            (Some(auto_compact_limit), Some(context_window)) => {
-                Some(auto_compact_limit.min(context_window))
-            }
-            (Some(auto_compact_limit), None) => Some(auto_compact_limit),
-            (None, Some(context_window)) => Some(context_window),
-            (None, None) => None,
-        }
-    }
-
-    pub(super) fn status_context_used_tokens(info: &TokenUsageInfo) -> i64 {
-        info.last_token_usage.tokens_in_context_window().max(0)
-    }
-
     pub(super) fn status_budget_message(&self) -> Option<String> {
         let info = self.token_info.as_ref()?;
-        let used_tokens = Self::status_context_used_tokens(info);
-        let cache_message = self.status_cache_message();
-        if used_tokens == 0 {
-            return cache_message;
-        }
-        let Some(limit) = self.status_budget_limit(info) else {
-            return Some(Self::append_status_cache_message(
-                format!("Context: {} used", format_tokens_compact(used_tokens)),
-                cache_message,
-            ));
-        };
-
-        let used_fmt = format_tokens_compact(used_tokens);
-        let limit_fmt = format_tokens_compact(limit);
-        let context_message = if used_tokens >= limit {
-            format!("Context: {used_fmt} used ({limit_fmt} compact)")
-        } else {
-            let used_percent = ((used_tokens as f64 / limit as f64) * 100.0)
-                .round()
-                .clamp(0.0, 100.0) as i64;
-            format!("Context: {used_fmt} / {limit_fmt} ({used_percent}%)")
-        };
-        Some(Self::append_status_cache_message(
-            context_message,
-            cache_message,
-        ))
+        praxis_app_core::praxis_status_budget_message(&self.shared_token_usage_snapshot(info))
     }
 
-    pub(super) fn status_cache_message(&self) -> Option<String> {
-        let info = self.token_info.as_ref()?;
-        let mut parts = Vec::new();
-        if let Some(segment) = Self::cache_hit_segment("last", &info.last_token_usage) {
-            parts.push(segment);
+    fn shared_token_usage_snapshot(
+        &self,
+        info: &TokenUsageInfo,
+    ) -> praxis_app_core::PraxisTokenUsageSnapshot {
+        praxis_app_core::PraxisTokenUsageSnapshot {
+            total: Self::shared_token_usage_breakdown(&info.total_token_usage),
+            last: Self::shared_token_usage_breakdown(&info.last_token_usage),
+            model_context_window: info
+                .model_context_window
+                .or(self.config.model_context_window),
+            model_auto_compact_token_limit: info
+                .model_auto_compact_token_limit
+                .or(self.config.model_auto_compact_token_limit),
         }
-        if let Some(segment) = Self::cache_hit_segment("total", &info.total_token_usage) {
-            parts.push(segment);
-        }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(format!("Cache: {}", parts.join(", ")))
+    }
+
+    pub(super) fn sync_work_panel_token_saver(&mut self) {
+        let surfaces = self
+            .token_info
+            .as_ref()
+            .and_then(|info| {
+                praxis_app_core::praxis_token_saver_worker_surface(
+                    &praxis_app_core::PraxisTokenSaverSnapshot {
+                        total_saved_tokens: info.internal_savings.total_saved_tokens,
+                        last_saved_tokens: info.internal_savings.last_saved_tokens,
+                        categories: info
+                            .internal_savings
+                            .categories
+                            .iter()
+                            .map(
+                                |category| praxis_app_core::PraxisTokenSavingCategorySnapshot {
+                                    label: Self::token_saving_category_label(category.kind)
+                                        .to_owned(),
+                                    total_saved_tokens: category.total_saved_tokens,
+                                    occurrences: category.occurrences,
+                                },
+                            )
+                            .collect(),
+                    },
+                )
+            })
+            .into_iter()
+            .collect();
+        self.work_panel.set_plugin_surfaces(surfaces);
+    }
+
+    fn token_saving_category_label(
+        kind: praxis_protocol::protocol::TokenSavingKind,
+    ) -> &'static str {
+        use praxis_protocol::protocol::TokenSavingKind;
+        match kind {
+            TokenSavingKind::OutputRepetition => "repetition",
+            TokenSavingKind::OutputDelta => "output delta",
+            TokenSavingKind::ArtifactProjection => "artifact",
+            TokenSavingKind::UnchangedResource => "unchanged",
+            TokenSavingKind::SearchDelta => "search delta",
+            TokenSavingKind::ToolSchemaElision => "tool schemas",
+            TokenSavingKind::WorkingStateProjection => "working state",
+            TokenSavingKind::ToolOutputProjection => "tool output",
         }
     }
 
@@ -154,31 +152,23 @@ impl ChatWidget {
         }
     }
 
-    pub(super) fn cache_hit_segment(label: &str, usage: &TokenUsage) -> Option<String> {
-        let input_tokens = usage.cache_reported_input();
-        let percent = usage.cache_hit_percent()?;
-        let cached_input = usage.cached_input().min(input_tokens);
-        Some(format!(
-            "{label} {percent}% ({}/{})",
-            format_tokens_compact(cached_input),
-            format_tokens_compact(input_tokens),
-        ))
+    fn shared_token_usage_breakdown(
+        usage: &TokenUsage,
+    ) -> praxis_app_core::PraxisTokenUsageBreakdown {
+        praxis_app_core::PraxisTokenUsageBreakdown {
+            total_tokens: usage.total_tokens,
+            input_tokens: usage.input_tokens,
+            cached_input_tokens: usage.cached_input_tokens,
+            cache_reported_input_tokens: usage.cache_reported_input_tokens,
+            output_tokens: usage.output_tokens,
+            reasoning_output_tokens: usage.reasoning_output_tokens,
+        }
     }
 
     pub(super) fn cache_hit_segment_short(label: &str, usage: &TokenUsage) -> Option<String> {
         usage
             .cache_hit_percent()
             .map(|percent| format!("{label}{percent}%"))
-    }
-
-    pub(super) fn append_status_cache_message(
-        context_message: String,
-        cache_message: Option<String>,
-    ) -> String {
-        match cache_message {
-            Some(cache_message) => format!("{context_message} · {cache_message}"),
-            None => context_message,
-        }
     }
 
     pub(super) fn sync_status_budget_message(&mut self) {
@@ -196,6 +186,7 @@ impl ChatWidget {
                         .set_context_window(/*percent*/ None, /*used_tokens*/ None);
                     self.token_info = None;
                     self.sync_work_panel_context();
+                    self.sync_work_panel_token_saver();
                 }
             }
         }

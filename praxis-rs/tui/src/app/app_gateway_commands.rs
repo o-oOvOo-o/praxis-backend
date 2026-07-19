@@ -36,8 +36,7 @@ impl App {
             && self.active_thread_id.is_none()
             && self.chat_widget.thread_id().is_none()
         {
-            self.start_fresh_session_with_summary_hint(tui, app_gateway)
-                .await;
+            self.start_fresh_session(tui, app_gateway).await;
         }
         self.submit_active_thread_op(app_gateway, op).await
     }
@@ -201,8 +200,14 @@ impl App {
                     .await?;
                 Ok(true)
             }
-            AppCommandView::ThreadRollback { num_turns } => {
-                let response = match app_gateway.thread_rollback(thread_id, num_turns).await {
+            AppCommandView::ThreadRollback {
+                num_turns,
+                restore_checkpoint,
+            } => {
+                let response = match app_gateway
+                    .thread_rollback(thread_id, num_turns, restore_checkpoint)
+                    .await
+                {
                     Ok(response) => response,
                     Err(err) => {
                         self.handle_backtrack_rollback_failed();

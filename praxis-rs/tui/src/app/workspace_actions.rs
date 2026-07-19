@@ -33,22 +33,32 @@ impl App {
             WorkspaceChromeAction::NewChat => {
                 self.workspace.clear_overlay();
                 self.workspace.clear_search_focus();
-                self.start_fresh_session_with_summary_hint(tui, app_gateway)
-                    .await;
+                self.start_fresh_session(tui, app_gateway).await;
                 self.refresh_workspace_threads(app_gateway, true);
                 Ok(None)
             }
             WorkspaceChromeAction::OpenFolder => {
                 self.workspace.clear_search_focus();
-                let value = self.config.cwd.display().to_string();
-                let cursor = value.len();
-                self.workspace.overlay = WorkspaceOverlay::OpenFolder(WorkspaceOpenFolderState {
-                    value,
-                    cursor,
-                    message: None,
-                    area: None,
-                });
-                Ok(None)
+                #[cfg(target_os = "windows")]
+                {
+                    self.workspace.clear_overlay();
+                    let Some(folder) = rfd::AsyncFileDialog::new()
+                        .set_title("Open Praxis workspace")
+                        .set_directory(self.config.cwd.as_path())
+                        .pick_folder()
+                        .await
+                    else {
+                        return Ok(None);
+                    };
+                    self.set_workspace_open_folder_prompt(folder.path().display().to_string());
+                    return self.commit_workspace_open_folder(tui, app_gateway).await;
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let value = self.config.cwd.display().to_string();
+                    self.set_workspace_open_folder_prompt(value);
+                    Ok(None)
+                }
             }
             WorkspaceChromeAction::AboutPraxis => {
                 self.workspace.clear_overlay();
@@ -117,8 +127,7 @@ impl App {
         self.file_search
             .update_search_dir(self.config.cwd.to_path_buf());
         self.workspace.clear_overlay();
-        self.start_fresh_session_with_summary_hint(tui, app_gateway)
-            .await;
+        self.start_fresh_session(tui, app_gateway).await;
         self.refresh_workspace_threads(app_gateway, true);
         Ok(None)
     }
@@ -127,6 +136,16 @@ impl App {
         if let WorkspaceOverlay::OpenFolder(prompt) = &mut self.workspace.overlay {
             prompt.message = Some(message);
         }
+    }
+
+    fn set_workspace_open_folder_prompt(&mut self, value: String) {
+        let cursor = value.len();
+        self.workspace.overlay = WorkspaceOverlay::OpenFolder(WorkspaceOpenFolderState {
+            value,
+            cursor,
+            message: None,
+            area: None,
+        });
     }
 
     pub(super) async fn execute_workspace_menu_action(
@@ -333,8 +352,7 @@ impl App {
                 self.workspace.pinned_thread_ids.remove(&thread_id);
                 self.remove_workspace_thread_row(thread_id);
                 if self.workspace_active_thread_id() == Some(thread_id) {
-                    self.start_fresh_session_with_summary_hint(tui, app_gateway)
-                        .await;
+                    self.start_fresh_session(tui, app_gateway).await;
                 }
             }
             Err(err) => {
@@ -362,8 +380,7 @@ impl App {
                 self.workspace_observed_thread_ids.remove(&thread_id);
                 self.remove_workspace_thread_row(thread_id);
                 if self.workspace_active_thread_id() == Some(thread_id) {
-                    self.start_fresh_session_with_summary_hint(tui, app_gateway)
-                        .await;
+                    self.start_fresh_session(tui, app_gateway).await;
                 }
             }
             Err(err) => {
@@ -416,9 +433,8 @@ impl App {
                         }
                     }
                 }
-                self.shutdown_current_thread(app_gateway).await;
                 match self
-                    .replace_chat_widget_with_app_gateway_thread(tui, app_gateway, forked)
+                    .switch_to_app_gateway_thread_preserving_background(tui, app_gateway, forked)
                     .await
                 {
                     Ok(()) => {
@@ -436,7 +452,7 @@ impl App {
                     }
                     Err(err) => {
                         self.chat_widget.add_error_message(format!(
-                            "Failed to attach to forked app-gateway thread: {err}"
+                            "Failed to switch to forked app-gateway thread: {err}"
                         ));
                     }
                 }

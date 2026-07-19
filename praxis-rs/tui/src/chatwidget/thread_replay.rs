@@ -13,6 +13,7 @@ impl ChatWidget {
                 items,
                 status,
                 error,
+                collaboration_mode_kind,
             } = turn;
             if matches!(status, TurnStatus::InProgress)
                 && replay_kind.preserves_live_running_state()
@@ -23,28 +24,42 @@ impl ChatWidget {
             for item in items {
                 self.replay_thread_item(item, turn_id.clone(), replay_kind);
             }
-            self.handle_replayed_turn_status(turn_id, status, error, replay_kind);
+            self.handle_replayed_turn_status(
+                turn_id,
+                status,
+                error,
+                collaboration_mode_kind,
+                replay_kind,
+            );
         }
     }
 
     fn replay_initial_thread_turns_compact(&mut self, turns: Vec<Turn>) {
         let mut projector = ResumeReplayProjector::default();
+        let mut has_in_progress_turn = false;
         for turn in turns {
             let Turn {
                 id: turn_id,
                 items,
                 status,
                 error,
+                collaboration_mode_kind,
             } = turn;
+            has_in_progress_turn |= matches!(status, TurnStatus::InProgress);
             projector.project_items(items, |cell| self.add_to_history(cell));
             self.handle_replayed_turn_status(
                 turn_id,
                 status,
                 error,
+                collaboration_mode_kind,
                 ReplayKind::ResumeInitialMessages,
             );
         }
         projector.finish(|cell| self.add_to_history(cell));
+        if has_in_progress_turn {
+            self.last_non_retry_error = None;
+            self.on_task_started();
+        }
     }
 
     fn handle_replayed_turn_status(
@@ -52,6 +67,7 @@ impl ChatWidget {
         turn_id: String,
         status: TurnStatus,
         error: Option<TurnError>,
+        collaboration_mode_kind: ModeKind,
         replay_kind: ReplayKind,
     ) {
         if !matches!(
@@ -69,6 +85,7 @@ impl ChatWidget {
                     items: Vec::new(),
                     status,
                     error,
+                    collaboration_mode_kind,
                 },
             },
             Some(replay_kind),

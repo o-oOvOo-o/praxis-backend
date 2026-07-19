@@ -253,28 +253,6 @@ impl App {
         session
     }
 
-    pub(super) async fn update_thread_session_selfwork_plan_path(
-        &mut self,
-        thread_id: ThreadId,
-        plan_path: Option<PathBuf>,
-    ) {
-        if self
-            .primary_session_configured
-            .as_ref()
-            .is_some_and(|session| session.thread_id == thread_id)
-            && let Some(session) = self.primary_session_configured.as_mut()
-        {
-            session.selfwork_plan_path = plan_path.clone();
-        }
-
-        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-            let mut store = channel.store.lock().await;
-            if let Some(session) = store.session.as_mut() {
-                session.selfwork_plan_path = plan_path;
-            }
-        }
-    }
-
     /// Materializes a live thread into local replay state when the picker knows about it but the
     /// TUI has not cached a local event channel yet.
     ///
@@ -291,7 +269,7 @@ impl App {
         }
 
         let (mut session, turns, live_attached) = match app_gateway
-            .resume_thread(self.config.clone(), thread_id)
+            .attach_thread(&self.config, thread_id)
             .await
         {
             Ok(started) => (started.session, started.turns, true),
@@ -439,6 +417,7 @@ impl App {
         self.active_thread_id = Some(thread_id);
         self.active_thread_rx = Some(receiver);
 
+        self.advance_history_view_generation();
         let init = self.chatwidget_init_for_forked_or_resumed_thread(
             tui,
             self.config.clone(),

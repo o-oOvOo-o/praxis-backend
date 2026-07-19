@@ -6,7 +6,7 @@ async fn experimental_features_popup_snapshot() {
 
     let features = vec![
         ExperimentalFeatureItem {
-            feature: Feature::GhostCommit,
+            feature: Feature::WorkspaceHistory,
             name: "Ghost snapshots".to_string(),
             description: "Capture undo snapshots each turn.".to_string(),
             enabled: false,
@@ -29,7 +29,7 @@ async fn experimental_features_popup_snapshot() {
 async fn experimental_features_toggle_saves_on_exit() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
-    let expected_feature = Feature::GhostCommit;
+    let expected_feature = Feature::WorkspaceHistory;
     let view = ExperimentalFeaturesView::new(
         vec![ExperimentalFeatureItem {
             feature: expected_feature,

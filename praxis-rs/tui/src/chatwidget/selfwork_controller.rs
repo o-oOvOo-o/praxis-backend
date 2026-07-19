@@ -1,18 +1,6 @@
 use super::*;
 
 impl ChatWidget {
-    fn selfwork_can_start_now(&self) -> bool {
-        self.selfwork_plan_path.is_some()
-            && !self.selfwork_runtime.turn_in_flight()
-            && self.is_session_configured()
-            && !self.bottom_pane.is_task_running()
-            && !self.has_queued_follow_up_messages()
-            && self.pending_steers.is_empty()
-            && self.bottom_pane.no_modal_or_popup_active()
-            && self.bottom_pane.composer_is_empty()
-            && self.initial_user_message.is_none()
-    }
-
     pub(super) fn sync_work_panel_selfwork(&mut self) {
         self.work_panel.set_selfwork(
             self.selfwork_plan_path.clone(),
@@ -20,15 +8,6 @@ impl ChatWidget {
             self.selfwork_runtime.stall_count(),
             SELFWORK_STALL_LIMIT,
         );
-    }
-
-    fn persist_selfwork_plan_path(&self, plan_path: Option<PathBuf>) {
-        if let Some(thread_id) = self.thread_id {
-            self.app_event_tx.send(AppEvent::PersistSelfworkPlanPath {
-                thread_id,
-                plan_path,
-            });
-        }
     }
 
     pub(super) fn handle_selfwork_default_invocation(&mut self) {
@@ -153,11 +132,13 @@ impl ChatWidget {
         message: Option<String>,
         hint: Option<String>,
     ) {
-        self.selfwork_plan_path = None;
-        self.selfwork_runtime.reset();
-        self.sync_work_panel_selfwork();
-        if persist {
-            self.persist_selfwork_plan_path(None);
+        if persist && let Some(thread_id) = self.thread_id {
+            self.app_event_tx
+                .send(AppEvent::StopThreadSelfwork { thread_id });
+        } else {
+            self.selfwork_plan_path = None;
+            self.selfwork_runtime.reset();
+            self.sync_work_panel_selfwork();
         }
         if let Some(message) = message {
             self.add_info_message(message, hint);
@@ -192,16 +173,16 @@ impl ChatWidget {
             return;
         }
 
-        self.selfwork_plan_path = Some(inspection.path.clone());
-        self.selfwork_runtime.arm(&inspection);
-        self.sync_work_panel_selfwork();
-        self.persist_selfwork_plan_path(Some(inspection.path.clone()));
-
-        let waiting_reason = if self.selfwork_can_start_now() {
-            "Starting immediately while the thread is idle.".to_string()
-        } else {
-            "Armed. It will continue once the thread is idle, the composer is empty, and no popup is open.".to_string()
+        let Some(thread_id) = self.thread_id else {
+            self.add_error_message(
+                "Selfwork is unavailable until the thread is ready.".to_string(),
+            );
+            return;
         };
+        self.app_event_tx.send(AppEvent::StartThreadSelfwork {
+            thread_id,
+            plan_path: inspection.path.clone(),
+        });
         let checklist_hint = (inspection.checklist_total > 0).then(|| {
             format!(
                 "Checklist progress: {}/{} unfinished item(s).",
@@ -209,13 +190,31 @@ impl ChatWidget {
             )
         });
         self.add_info_message(
-            format!("Selfwork armed for {}.", inspection.path.display()),
-            Some(match checklist_hint {
-                Some(checklist_hint) => format!("{waiting_reason} {checklist_hint}"),
-                None => waiting_reason,
-            }),
+            format!("Starting selfwork for {}.", inspection.path.display()),
+            checklist_hint,
         );
-        self.maybe_start_selfwork_turn_now();
+    }
+
+    pub(crate) fn apply_selfwork_status(&mut self, status: ThreadSelfworkStatus) {
+        if !self
+            .thread_id
+            .is_some_and(|thread_id| thread_id.to_string() == status.thread_id)
+        {
+            return;
+        }
+        self.selfwork_plan_path = status.plan_path;
+        self.selfwork_runtime.reset();
+        if let Some(path) = self.selfwork_plan_path.as_deref()
+            && let Ok(inspection) = inspect_selfwork_plan(path)
+        {
+            self.selfwork_runtime.arm(&inspection);
+        }
+        self.selfwork_runtime.synchronize_projection(
+            status.stall_count,
+            matches!(status.phase, ThreadSelfworkPhase::Running),
+        );
+        self.sync_work_panel_selfwork();
+        self.request_redraw();
     }
 
     pub(super) fn show_selfwork_status(&mut self) {
@@ -247,107 +246,10 @@ impl ChatWidget {
             )),
             _ => Some(format!(
                 "Stall guard: {}/{} unchanged selfwork turn(s).",
-                self.selfwork_runtime.stall_count(), SELFWORK_STALL_LIMIT
+                self.selfwork_runtime.stall_count(),
+                SELFWORK_STALL_LIMIT
             )),
         };
         self.add_info_message(format!("Selfwork is {state} for {}.", path.display()), hint);
-    }
-
-    pub(super) fn maybe_start_selfwork_turn_now(&mut self) -> bool {
-        if !self.selfwork_can_start_now() {
-            return false;
-        }
-
-        let Some(plan_path) = self.selfwork_plan_path.clone() else {
-            return false;
-        };
-
-        let inspection = match inspect_selfwork_plan(&plan_path) {
-            Ok(inspection) => inspection,
-            Err(err) => {
-                self.clear_selfwork_state(
-                    /*persist*/ true,
-                    Some(err),
-                    Some(
-                        "Selfwork stopped because the plan file is no longer available."
-                            .to_string(),
-                    ),
-                );
-                return false;
-            }
-        };
-
-        if inspection.complete {
-            self.clear_selfwork_state(
-                /*persist*/ true,
-                Some(format!(
-                    "Selfwork stopped because the plan is complete: {}",
-                    inspection.path.display()
-                )),
-                None,
-            );
-            return false;
-        }
-
-        self.selfwork_runtime.begin_turn(&inspection);
-        self.sync_work_panel_selfwork();
-        self.submit_user_message(selfwork_prompt(&inspection.path).into());
-        true
-    }
-
-    pub(super) fn maybe_continue_selfwork_after_turn(&mut self, was_selfwork_turn: bool) {
-        let Some(plan_path) = self.selfwork_plan_path.clone() else {
-            return;
-        };
-
-        if was_selfwork_turn {
-            let inspection = match inspect_selfwork_plan(&plan_path) {
-                Ok(inspection) => inspection,
-                Err(err) => {
-                    self.clear_selfwork_state(
-                        /*persist*/ true,
-                        Some(err),
-                        Some(
-                            "Selfwork stopped because the plan file is no longer available."
-                                .to_string(),
-                        ),
-                    );
-                    return;
-                }
-            };
-
-            if inspection.complete {
-                self.clear_selfwork_state(
-                    /*persist*/ true,
-                    Some(format!(
-                        "Selfwork finished: {} now looks complete.",
-                        inspection.path.display()
-                    )),
-                    None,
-                );
-                return;
-            }
-
-            let advance = self.selfwork_runtime.observe_plan_after_turn(&inspection);
-            self.sync_work_panel_selfwork();
-
-            if matches!(advance, SelfworkPlanAdvance::Stalled { .. }) {
-                self.clear_selfwork_state(
-                    /*persist*/ true,
-                    Some(format!(
-                        "Selfwork stopped after {} unchanged turns for {}.",
-                        SELFWORK_STALL_LIMIT,
-                        inspection.path.display()
-                    )),
-                    Some(
-                        "Edit the plan or restart /selfwork once there is a new next step."
-                            .to_string(),
-                    ),
-                );
-                return;
-            }
-        }
-
-        self.maybe_start_selfwork_turn_now();
     }
 }

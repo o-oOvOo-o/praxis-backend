@@ -6,6 +6,8 @@ use praxis_protocol::config_types::WindowsSandboxLevel;
 #[cfg(target_os = "windows")]
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_utils_approval_presets::ApprovalPreset;
+use praxis_app_gateway_protocol::ThreadRewindPreviewResponse;
+use praxis_app_gateway_protocol::ThreadRewindWorkspaceAction;
 #[cfg(target_os = "windows")]
 use praxis_utils_approval_presets::builtin_approval_presets;
 use ratatui::style::Color;
@@ -16,6 +18,7 @@ use ratatui::widgets::Wrap;
 
 use super::ChatWidget;
 use crate::app_event::AppEvent;
+use crate::app_backtrack::BacktrackSelection;
 #[cfg(target_os = "windows")]
 use crate::app_event::ExitMode;
 #[cfg(target_os = "windows")]
@@ -32,6 +35,97 @@ use crate::status_indicator_widget::STATUS_DETAILS_DEFAULT_MAX_LINES;
 use crate::status_indicator_widget::StatusDetailsCapitalization;
 
 impl ChatWidget {
+    pub(crate) fn open_workspace_rewind_confirmation(
+        &mut self,
+        selection: BacktrackSelection,
+        num_turns: u32,
+        preview: ThreadRewindPreviewResponse,
+    ) {
+        let Some(checkpoint_id) = preview.checkpoint_id else {
+            return;
+        };
+        let mut header_children: Vec<Box<dyn Renderable>> = Vec::new();
+        header_children.push(Box::new(Line::from("Restore code changes?").bold()));
+        header_children.push(Box::new(
+            Paragraph::new(format!(
+                "Editing this message rewinds {num_turns} turn(s). {} workspace file(s) changed after this point.",
+                preview.changed_files.len()
+            ))
+            .wrap(Wrap { trim: false }),
+        ));
+        for change in preview.changed_files.iter().take(6) {
+            let verb = match change.kind {
+                praxis_protocol::workspace_history::WorkspaceMutationKind::Add => "added",
+                praxis_protocol::workspace_history::WorkspaceMutationKind::Update => "modified",
+                praxis_protocol::workspace_history::WorkspaceMutationKind::Delete => "deleted",
+                praxis_protocol::workspace_history::WorkspaceMutationKind::Rename => "renamed",
+            };
+            let path = match change.previous_path.as_ref() {
+                Some(previous) => format!(
+                    "  {verb}: {} -> {}",
+                    previous.display(),
+                    change.path.display()
+                ),
+                None => format!("  {verb}: {}", change.path.display()),
+            };
+            header_children.push(Box::new(Line::from(path)));
+        }
+        if preview.changed_files.len() > 6 {
+            header_children.push(Box::new(Line::from(format!(
+                "  and {} more",
+                preview.changed_files.len() - 6
+            ))));
+        }
+        header_children.push(Box::new(
+            Line::from("Restore directly overwrites the workspace with the selected checkpoint.")
+                .fg(Color::Yellow),
+        ));
+        let header = ColumnRenderable::with(header_children);
+
+        let restore_selection = selection.clone();
+        let restore_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+            tx.send(AppEvent::CommitBacktrackRewind {
+                selection: restore_selection.clone(),
+                num_turns,
+                workspace_action: ThreadRewindWorkspaceAction::Restore { checkpoint_id },
+            });
+        })];
+        let keep_actions: Vec<SelectionAction> = vec![Box::new(move |tx| {
+            tx.send(AppEvent::CommitBacktrackRewind {
+                selection: selection.clone(),
+                num_turns,
+                workspace_action: ThreadRewindWorkspaceAction::Keep,
+            });
+        })];
+        self.bottom_pane.show_selection_view(SelectionViewParams {
+            footer_hint: Some(standard_popup_hint_line()),
+            header: Box::new(header),
+            items: vec![
+                SelectionItem {
+                    name: "Restore code and edit message".to_string(),
+                    description: Some("Rewind conversation and workspace together".to_string()),
+                    actions: restore_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Keep code and edit message".to_string(),
+                    description: Some("Rewind only the conversation".to_string()),
+                    actions: keep_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Cancel".to_string(),
+                    description: Some("Leave conversation and workspace unchanged".to_string()),
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+    }
+
     pub(crate) fn open_full_access_confirmation(
         &mut self,
         preset: ApprovalPreset,

@@ -422,20 +422,17 @@ impl ChatWidget {
         selected_provider_id: &str,
         selected_effort: Option<ReasoningEffortConfig>,
     ) -> bool {
-        if !self.collaboration_modes_enabled()
-            || self.active_mode_kind() != ModeKind::Plan
-            || selected_model != self.current_model()
-            || selected_provider_id != self.current_model_provider_id()
-        {
-            return false;
-        }
-
-        // Prompt whenever the selection is not a true no-op for both:
-        // 1) the active Plan-mode effective reasoning, and
-        // 2) the stored global defaults that would be updated by the fallback path.
-        selected_effort != self.effective_reasoning_effort()
-            || selected_model != self.current_collaboration_mode.model()
-            || selected_effort != self.current_collaboration_mode.reasoning_effort()
+        praxis_app_core::plan_reasoning_selection_disposition(
+            self.collaboration_modes_enabled() && self.active_mode_kind() == ModeKind::Plan,
+            selected_model,
+            selected_provider_id,
+            selected_effort.as_ref(),
+            self.current_model(),
+            self.current_model_provider_id(),
+            self.effective_reasoning_effort().as_ref(),
+            self.current_collaboration_mode.model(),
+            self.current_collaboration_mode.reasoning_effort().as_ref(),
+        ) == praxis_app_core::PlanReasoningSelectionDisposition::ChooseScope
     }
 
     pub(crate) fn open_plan_reasoning_scope_prompt(

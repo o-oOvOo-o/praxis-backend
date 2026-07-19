@@ -217,7 +217,10 @@ async fn slash_copy_state_clears_on_thread_rollback() {
     });
     chat.handle_praxis_event(Event {
         id: "rollback-1".into(),
-        msg: EventMsg::ThreadRolledBack(ThreadRolledBackEvent { num_turns: 1 }),
+        msg: EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
+            num_turns: 1,
+            workspace_restore: None,
+        }),
     });
 
     assert_eq!(chat.last_copyable_output, None);
@@ -333,7 +336,10 @@ async fn slash_copy_does_not_return_stale_output_after_thread_rollback() {
 
     chat.handle_praxis_event(Event {
         id: "rollback-1".into(),
-        msg: EventMsg::ThreadRolledBack(ThreadRolledBackEvent { num_turns: 1 }),
+        msg: EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
+            num_turns: 1,
+            workspace_restore: None,
+        }),
     });
     let _ = drain_insert_history(&mut rx);
 
@@ -385,24 +391,13 @@ async fn slash_clear_requests_ui_clear_when_idle() {
 }
 
 #[tokio::test]
-async fn slash_clear_is_disabled_while_task_running() {
+async fn slash_clear_starts_a_new_thread_while_current_task_keeps_running() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.bottom_pane.set_task_running(/*running*/ true);
 
     chat.dispatch_command(SlashCommand::Clear);
 
-    let event = rx.try_recv().expect("expected disabled command error");
-    match event {
-        AppEvent::InsertHistoryCell(cell) => {
-            let rendered = lines_to_single_string(&cell.display_lines(/*width*/ 80));
-            assert!(
-                rendered.contains("'/clear' is disabled while a task is in progress."),
-                "expected /clear task-running error, got {rendered:?}"
-            );
-        }
-        other => panic!("expected InsertHistoryCell error, got {other:?}"),
-    }
-    assert!(rx.try_recv().is_err(), "expected no follow-up events");
+    assert_matches!(rx.try_recv(), Ok(AppEvent::ClearUi));
 }
 
 #[tokio::test]
@@ -459,6 +454,7 @@ async fn slash_memory_update_reports_stubbed_feature() {
 #[tokio::test]
 async fn slash_resume_opens_picker() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.bottom_pane.set_task_running(/*running*/ true);
 
     chat.dispatch_command(SlashCommand::Resume);
 
@@ -468,6 +464,7 @@ async fn slash_resume_opens_picker() {
 #[tokio::test]
 async fn slash_fork_requests_current_fork() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.bottom_pane.set_task_running(/*running*/ true);
 
     chat.dispatch_command(SlashCommand::Fork);
 

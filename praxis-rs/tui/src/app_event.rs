@@ -19,6 +19,7 @@ use praxis_app_gateway_protocol::PluginReadResponse;
 use praxis_app_gateway_protocol::PluginUninstallResponse;
 use praxis_app_gateway_protocol::ThreadGoalStatus;
 use praxis_app_gateway_protocol::ThreadListResponse;
+use praxis_app_gateway_protocol::ThreadRewindWorkspaceAction;
 use praxis_chatgpt::connectors::AppInfo;
 use praxis_core::ModelProviderInfo;
 use praxis_file_search::FileMatch;
@@ -32,6 +33,7 @@ use praxis_utils_absolute_path::AbsolutePathBuf;
 use praxis_utils_approval_presets::ApprovalPreset;
 
 use crate::SessionLookupSource;
+use crate::app_backtrack::BacktrackSelection;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::PluginCommandInvocation;
 use crate::bottom_pane::StatusLineItem;
@@ -360,6 +362,10 @@ pub(crate) enum AppEvent {
     },
 
     InsertHistoryCell(Box<dyn HistoryCell>),
+    InsertHistoryCellForView {
+        generation: u64,
+        cell: Box<dyn HistoryCell>,
+    },
 
     /// Apply rollback semantics to local transcript cells.
     ///
@@ -368,6 +374,15 @@ pub(crate) enum AppEvent {
     /// inserted history cells.
     ApplyThreadRollback {
         num_turns: u32,
+    },
+    PreviewBacktrackRewind {
+        selection: BacktrackSelection,
+        num_turns: u32,
+    },
+    CommitBacktrackRewind {
+        selection: BacktrackSelection,
+        num_turns: u32,
+        workspace_action: ThreadRewindWorkspaceAction,
     },
 
     StartCommitAnimation,
@@ -634,10 +649,15 @@ pub(crate) enum AppEvent {
         collaboration_mode: CollaborationModeMask,
     },
 
-    /// Persist the active thread's selfwork markdown plan path in thread metadata.
-    PersistSelfworkPlanPath {
+    /// Start Gateway-owned selfwork for the active thread.
+    StartThreadSelfwork {
         thread_id: ThreadId,
-        plan_path: Option<PathBuf>,
+        plan_path: PathBuf,
+    },
+
+    /// Stop Gateway-owned selfwork for the active thread.
+    StopThreadSelfwork {
+        thread_id: ThreadId,
     },
 
     /// Activate selfwork for a resolved markdown plan path.

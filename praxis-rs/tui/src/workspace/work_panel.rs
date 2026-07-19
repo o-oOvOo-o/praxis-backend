@@ -1,6 +1,9 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use praxis_app_core::{
+    PraxisPluginSurfaceContribution, PraxisPluginSurfaceSlot, PraxisPluginSurfaceTone,
+};
 use praxis_protocol::plan_tool::PlanItemArg;
 use praxis_protocol::plan_tool::StepStatus;
 use praxis_protocol::plan_tool::UpdatePlanArgs;
@@ -21,6 +24,8 @@ use crate::text_formatting::truncate_text;
 const PANEL_MIN_HEIGHT: u16 = 7;
 const PANEL_MAX_HEIGHT: u16 = 18;
 const PANEL_HORIZONTAL_PADDING: usize = 2;
+const NESTED_SURFACE_INDENT: u16 = 2;
+const NESTED_SURFACE_SHADOW_ROWS: u16 = 1;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct WorkPanelState {
@@ -31,6 +36,7 @@ pub(crate) struct WorkPanelState {
     queue: WorkPanelQueueState,
     plan: WorkPanelPlanState,
     selfwork: WorkPanelSelfworkState,
+    plugin_surfaces: Vec<PraxisPluginSurfaceContribution>,
 }
 
 #[derive(Clone, Debug)]
@@ -140,6 +146,7 @@ impl WorkPanelState {
         self.control = None;
         self.context = None;
         self.queue = WorkPanelQueueState::default();
+        self.plugin_surfaces.clear();
         self.clear_plan();
     }
 
@@ -172,6 +179,12 @@ impl WorkPanelState {
 
     pub(crate) fn set_queue(&mut self, queue: WorkPanelQueueState) {
         self.queue = queue;
+    }
+
+    pub(crate) fn set_plugin_surfaces(&mut self, surfaces: Vec<PraxisPluginSurfaceContribution>) {
+        self.plugin_surfaces = surfaces;
+        self.plugin_surfaces
+            .sort_by(|left, right| right.priority.cmp(&left.priority));
     }
 
     pub(crate) fn clear_plan(&mut self) {
@@ -211,6 +224,7 @@ impl WorkPanelState {
             || self.context.is_some()
             || self.queue.has_content()
             || self.selfwork.plan_path.is_some()
+            || !self.plugin_surfaces.is_empty()
             || self.plan.explanation.is_some()
             || !self.plan.items.is_empty()
     }
@@ -266,9 +280,17 @@ impl WorkPanelState {
         let max_rows = usize::from(inner.height);
         let content_width = usize::from(inner.width);
         let lines = self.lines(content_width, max_rows);
+        let nested_y = inner.y.saturating_add(
+            u16::try_from(
+                self.lines_before_nested_surfaces(content_width, max_rows)
+                    .len(),
+            )
+            .unwrap_or(u16::MAX),
+        );
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
             .render(inner, buf);
+        self.render_nested_surfaces(inner, nested_y, buf, theme);
     }
 
     fn lines(&self, content_width: usize, max_rows: usize) -> Vec<Line<'static>> {
@@ -281,10 +303,109 @@ impl WorkPanelState {
         self.push_live_lines(content_width, max_rows, &mut lines);
         self.push_control_lines(content_width, max_rows, &mut lines);
         self.push_context_lines(content_width, max_rows, &mut lines);
+        self.push_plugin_surface_lines(content_width, max_rows, &mut lines);
+        self.push_nested_surface_placeholders(max_rows, &mut lines);
         self.push_queue_lines(max_rows, &mut lines);
         self.push_selfwork_lines(content_width, max_rows, &mut lines);
         self.push_plan_lines(content_width, max_rows, &mut lines);
         lines
+    }
+
+    fn lines_before_nested_surfaces(
+        &self,
+        content_width: usize,
+        max_rows: usize,
+    ) -> Vec<Line<'static>> {
+        let mut lines = Vec::with_capacity(max_rows.min(12).max(1));
+        self.push_goal_lines(content_width, max_rows, &mut lines);
+        self.push_live_lines(content_width, max_rows, &mut lines);
+        self.push_control_lines(content_width, max_rows, &mut lines);
+        self.push_context_lines(content_width, max_rows, &mut lines);
+        lines
+    }
+
+    fn nested_surfaces(&self) -> impl Iterator<Item = &PraxisPluginSurfaceContribution> {
+        self.plugin_surfaces
+            .iter()
+            .filter(|surface| surface.slot == PraxisPluginSurfaceSlot::WorkerBelowStatus)
+    }
+
+    fn nested_surface_rows(&self) -> u16 {
+        self.nested_surfaces().fold(0, |rows, surface| {
+            rows.saturating_add(nested_surface_footprint(surface))
+        })
+    }
+
+    fn push_nested_surface_placeholders(&self, max_rows: usize, lines: &mut Vec<Line<'static>>) {
+        let available = max_rows.saturating_sub(lines.len());
+        let reserved = usize::from(self.nested_surface_rows()).min(available);
+        lines.extend((0..reserved).map(|_| Line::from("")));
+    }
+
+    fn render_nested_surfaces(
+        &self,
+        inner: Rect,
+        mut y: u16,
+        buf: &mut Buffer,
+        theme: SurfaceTheme,
+    ) {
+        if inner.width <= NESTED_SURFACE_INDENT.saturating_mul(2).saturating_add(2) {
+            return;
+        }
+
+        for surface in self.nested_surfaces() {
+            let card_height = nested_surface_card_height(surface);
+            if y.saturating_add(card_height) > inner.bottom() {
+                break;
+            }
+            let area = Rect::new(
+                inner.x.saturating_add(NESTED_SURFACE_INDENT),
+                y,
+                inner
+                    .width
+                    .saturating_sub(NESTED_SURFACE_INDENT.saturating_mul(2))
+                    .saturating_sub(1),
+                card_height,
+            );
+            let title = Line::from(Span::styled(
+                format!(" {} ", surface.title.trim()),
+                plugin_surface_label_style(surface.tone).bg(theme.dropdown_bg),
+            ));
+            crate::surface::render_popup_surface(area, buf, theme, Some(title));
+
+            let summary_area = Rect::new(
+                area.x.saturating_add(1),
+                area.y.saturating_add(1),
+                area.width.saturating_sub(2),
+                1,
+            );
+            Paragraph::new(Line::from(Span::styled(
+                truncate_text(surface.summary.trim(), usize::from(summary_area.width)),
+                strong_style().bg(theme.dropdown_bg),
+            )))
+            .render(summary_area, buf);
+
+            if let Some(details) = surface
+                .details
+                .as_deref()
+                .map(str::trim)
+                .filter(|details| !details.is_empty())
+            {
+                let details_area = Rect::new(
+                    area.x.saturating_add(1),
+                    area.y.saturating_add(2),
+                    area.width.saturating_sub(2),
+                    1,
+                );
+                Paragraph::new(Line::from(Span::styled(
+                    truncate_text(details, usize::from(details_area.width)),
+                    muted_style().bg(theme.dropdown_bg),
+                )))
+                .render(details_area, buf);
+            }
+
+            y = y.saturating_add(nested_surface_footprint(surface));
+        }
     }
 
     fn push_idle_lines(&self, max_rows: usize, lines: &mut Vec<Line<'static>>) {
@@ -505,6 +626,60 @@ impl WorkPanelState {
         push_blank_if_room(lines, max_rows);
     }
 
+    fn push_plugin_surface_lines(
+        &self,
+        content_width: usize,
+        max_rows: usize,
+        lines: &mut Vec<Line<'static>>,
+    ) {
+        if self.plugin_surfaces.is_empty() || lines.len() >= max_rows {
+            return;
+        }
+
+        for surface in self
+            .plugin_surfaces
+            .iter()
+            .filter(|surface| surface.slot == PraxisPluginSurfaceSlot::WorkerCard)
+        {
+            if lines.len() >= max_rows {
+                break;
+            }
+            lines.push(Line::from(vec![
+                Span::styled(
+                    truncate_text(surface.title.trim(), 12),
+                    plugin_surface_label_style(surface.tone),
+                ),
+                Span::styled(
+                    format!(
+                        " {}",
+                        truncate_text(
+                            surface.summary.trim(),
+                            content_width.saturating_sub(surface.title.len().saturating_add(1)),
+                        )
+                    ),
+                    strong_style(),
+                ),
+            ]));
+            if let Some(details) = surface
+                .details
+                .as_deref()
+                .map(str::trim)
+                .filter(|details| !details.is_empty())
+                && lines.len() < max_rows
+            {
+                lines.push(Line::from(vec![
+                    Span::styled("Info ", label_style()),
+                    Span::styled(
+                        truncate_text(details, content_width.saturating_sub(5)),
+                        muted_style(),
+                    ),
+                ]));
+            }
+        }
+
+        push_blank_if_room(lines, max_rows);
+    }
+
     fn push_selfwork_lines(
         &self,
         content_width: usize,
@@ -622,6 +797,19 @@ impl WorkPanelState {
     }
 }
 
+fn nested_surface_card_height(surface: &PraxisPluginSurfaceContribution) -> u16 {
+    let has_details = surface
+        .details
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|details| !details.is_empty());
+    if has_details { 4 } else { 3 }
+}
+
+fn nested_surface_footprint(surface: &PraxisPluginSurfaceContribution) -> u16 {
+    nested_surface_card_height(surface).saturating_add(NESTED_SURFACE_SHADOW_ROWS)
+}
+
 fn plan_item_line(item: &PlanItemArg, content_width: usize) -> Line<'static> {
     let (marker, style) = match &item.status {
         StepStatus::Completed => (
@@ -671,6 +859,17 @@ fn label_style() -> Style {
     muted_style().add_modifier(Modifier::BOLD)
 }
 
+fn plugin_surface_label_style(tone: PraxisPluginSurfaceTone) -> Style {
+    let color = match tone {
+        PraxisPluginSurfaceTone::Neutral => Color::Cyan,
+        PraxisPluginSurfaceTone::Success => Color::Green,
+        PraxisPluginSurfaceTone::Attention => Color::Yellow,
+        PraxisPluginSurfaceTone::Warning => Color::LightYellow,
+        PraxisPluginSurfaceTone::Error => Color::Red,
+    };
+    Style::default().fg(color).add_modifier(Modifier::BOLD)
+}
+
 fn strong_style() -> Style {
     Style::default().add_modifier(Modifier::BOLD)
 }
@@ -705,6 +904,40 @@ mod tests {
         assert!(texts.iter().any(|line| line == "Goal none"));
         assert!(texts.iter().any(|line| line == "Now  Ready"));
         assert!(texts.iter().any(|line| line == "Queue clear"));
+    }
+
+    #[test]
+    fn worker_below_status_surface_renders_as_nested_shadowed_card() {
+        let mut panel = WorkPanelState::default();
+        panel.set_plugin_surfaces(vec![PraxisPluginSurfaceContribution {
+            plugin_id: "praxis-token-saver".to_string(),
+            slot: PraxisPluginSurfaceSlot::WorkerBelowStatus,
+            component: praxis_app_core::PraxisPluginSurfaceComponentKind::TokenSavingSummary,
+            priority: 60,
+            title: "Token saver".to_string(),
+            summary: "saved 76K last / 11.7M total".to_string(),
+            details: None,
+            tone: PraxisPluginSurfaceTone::Success,
+        }]);
+
+        let area = Rect::new(0, 0, 40, panel.desired_height(40));
+        let mut buffer = Buffer::empty(area);
+        let theme = crate::surface::runtime_theme();
+        panel.render(area, &mut buffer, theme);
+        let rendered = buffer
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Token saver"));
+        assert!(rendered.contains("saved 76K last / 11.7M total"));
+        assert_eq!(buffer[(4, 4)].style().bg, Some(theme.shadow_bg));
+        assert!(
+            line_texts(&panel.lines(40, 10))
+                .iter()
+                .all(|line| !line.contains("Token saver"))
+        );
     }
 
     #[test]

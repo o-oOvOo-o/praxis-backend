@@ -267,16 +267,8 @@ where
     F: FnOnce(NativeAppGatewayClientStartArgs) -> Fut,
     Fut: Future<Output = std::io::Result<NativeAppGatewayClient>>,
 {
-    let config_warnings = config
-        .startup_warnings
-        .iter()
-        .map(|warning| ConfigWarningNotification {
-            summary: warning.clone(),
-            details: None,
-            path: None,
-            range: None,
-        })
-        .collect();
+    let config_warnings =
+        praxis_app_gateway_protocol::config_warning_notifications(&config.startup_warnings);
     let client = start_client(NativeAppGatewayClientStartArgs {
         arg0_paths,
         config: Arc::new(config),

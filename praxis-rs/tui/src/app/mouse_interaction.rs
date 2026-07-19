@@ -752,8 +752,7 @@ impl App {
             (Some(WorkspaceMouseTarget::StartThread), Some(WorkspaceMouseTarget::StartThread)) => {
                 self.workspace.clear_overlay();
                 self.workspace.clear_search_focus();
-                self.start_fresh_session_with_summary_hint(tui, app_gateway)
-                    .await;
+                self.start_fresh_session(tui, app_gateway).await;
                 self.refresh_workspace_threads(app_gateway, true);
                 Ok(None)
             }
@@ -1271,6 +1270,15 @@ impl App {
     }
 
     pub(super) fn paste_clipboard_into_chat(&mut self) {
+        match self.chat_widget.paste_image_from_clipboard() {
+            Ok(()) => return,
+            Err(err) if err.allows_text_fallback() => {}
+            Err(err) => {
+                self.chat_widget
+                    .add_error_message(format!("Failed to paste image: {err}"));
+                return;
+            }
+        }
         match crate::clipboard_text::read_text_from_clipboard() {
             Ok(text) if !text.is_empty() => {
                 let pasted = text.replace("\r", "\n");

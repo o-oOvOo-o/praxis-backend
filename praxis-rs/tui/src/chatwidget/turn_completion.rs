@@ -9,7 +9,6 @@ impl ChatWidget {
         // Ensure any spinner is replaced by a red x and flushed into history.
         self.finalize_active_cell_as_failed();
         // Reset running state and clear streaming buffers.
-        self.selfwork_turn_in_flight = false;
         self.agent_turn_running = false;
         self.turn_sleep_inhibitor
             .set_turn_running(/*turn_running*/ false);

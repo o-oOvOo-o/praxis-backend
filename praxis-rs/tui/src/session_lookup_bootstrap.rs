@@ -82,39 +82,11 @@ pub(super) struct SessionLookupContext {
     pub(super) app_gateway: AppGatewaySession,
 }
 
-pub(crate) async fn build_codex_bridge_lookup_config(
+async fn build_external_bridge_lookup_config(
+    source: praxis_core::external_agent_migration::ExternalAgentSource,
     primary_config: &Config,
 ) -> std::io::Result<Config> {
-    let mut bridge_config = primary_config.clone();
-
-    // Codex remains an external compatibility source. Import it into a Praxis
-    // bridge home first so the picker never reads Codex state directly.
-    let source = praxis_core::external_agent_migration::ExternalAgentSource::Codex;
-    let bridge_state_home = primary_config
-        .praxis_home
-        .join(source.bridge_state_dir_name());
-    bridge_config.praxis_home = bridge_state_home.clone();
-    bridge_config.sqlite_home = bridge_state_home;
-    bridge_config.log_dir = primary_config.log_dir.join(source.bridge_log_dir_name());
-    praxis_core::external_agent_migration::sync_external_agent_sessions_to_praxis_home(
-        source,
-        &bridge_config,
-    )
-    .await?;
-    Ok(bridge_config)
-}
-
-pub(crate) async fn build_cursor_bridge_lookup_config(
-    primary_config: &Config,
-) -> std::io::Result<Config> {
-    let mut bridge_config = primary_config.clone();
-    let source = praxis_core::external_agent_migration::ExternalAgentSource::Cursor;
-    let bridge_state_home = primary_config
-        .praxis_home
-        .join(source.bridge_state_dir_name());
-    bridge_config.praxis_home = bridge_state_home.clone();
-    bridge_config.sqlite_home = bridge_state_home;
-    bridge_config.log_dir = primary_config.log_dir.join(source.bridge_log_dir_name());
+    let bridge_config = source.bridge_config(primary_config);
     praxis_core::external_agent_migration::sync_external_agent_sessions_to_praxis_home(
         source,
         &bridge_config,
@@ -129,8 +101,20 @@ pub(crate) async fn build_session_lookup_config(
 ) -> std::io::Result<Config> {
     match source {
         SessionLookupSource::Praxis => Ok(primary_config.clone()),
-        SessionLookupSource::Codex => build_codex_bridge_lookup_config(primary_config).await,
-        SessionLookupSource::Cursor => build_cursor_bridge_lookup_config(primary_config).await,
+        SessionLookupSource::Codex => {
+            build_external_bridge_lookup_config(
+                praxis_core::external_agent_migration::ExternalAgentSource::Codex,
+                primary_config,
+            )
+            .await
+        }
+        SessionLookupSource::Cursor => {
+            build_external_bridge_lookup_config(
+                praxis_core::external_agent_migration::ExternalAgentSource::Cursor,
+                primary_config,
+            )
+            .await
+        }
     }
 }
 

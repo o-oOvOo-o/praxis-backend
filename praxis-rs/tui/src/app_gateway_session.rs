@@ -18,6 +18,7 @@ use praxis_app_gateway_protocol::ConfigWriteResponse;
 use praxis_app_gateway_protocol::GetAccountParams;
 use praxis_app_gateway_protocol::GetAccountRateLimitsResponse;
 use praxis_app_gateway_protocol::GetAccountResponse;
+use praxis_app_gateway_protocol::INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
 use praxis_app_gateway_protocol::Model as ApiModel;
 use praxis_app_gateway_protocol::ModelListParams;
@@ -62,8 +63,6 @@ use praxis_app_gateway_protocol::ThreadLoadedListParams;
 use praxis_app_gateway_protocol::ThreadLoadedListResponse;
 use praxis_app_gateway_protocol::ThreadLookupParams;
 use praxis_app_gateway_protocol::ThreadLookupResponse;
-use praxis_app_gateway_protocol::ThreadMetadataUpdateParams;
-use praxis_app_gateway_protocol::ThreadMetadataUpdateResponse;
 use praxis_app_gateway_protocol::ThreadReadParams;
 use praxis_app_gateway_protocol::ThreadReadResponse;
 use praxis_app_gateway_protocol::ThreadRealtimeAppendAudioParams;
@@ -80,6 +79,15 @@ use praxis_app_gateway_protocol::ThreadResumeParams;
 use praxis_app_gateway_protocol::ThreadResumeResponse;
 use praxis_app_gateway_protocol::ThreadRollbackParams;
 use praxis_app_gateway_protocol::ThreadRollbackResponse;
+use praxis_app_gateway_protocol::ThreadRewindPreviewParams;
+use praxis_app_gateway_protocol::ThreadRewindPreviewResponse;
+use praxis_app_gateway_protocol::ThreadRewindWorkspaceAction;
+use praxis_app_gateway_protocol::WorkspaceCheckpointId;
+use praxis_app_gateway_protocol::ThreadSelfworkStartParams;
+use praxis_app_gateway_protocol::ThreadSelfworkStartResponse;
+use praxis_app_gateway_protocol::ThreadSelfworkStatus;
+use praxis_app_gateway_protocol::ThreadSelfworkStopParams;
+use praxis_app_gateway_protocol::ThreadSelfworkStopResponse;
 use praxis_app_gateway_protocol::ThreadSetNameParams;
 use praxis_app_gateway_protocol::ThreadSetNameResponse;
 use praxis_app_gateway_protocol::ThreadShellCommandParams;
@@ -97,6 +105,7 @@ use praxis_app_gateway_protocol::TurnStartParams;
 use praxis_app_gateway_protocol::TurnStartResponse;
 use praxis_app_gateway_protocol::TurnSteerParams;
 use praxis_app_gateway_protocol::TurnSteerResponse;
+use praxis_app_gateway_protocol::resolve_model_id;
 use praxis_core::config::Config;
 use praxis_otel::TelemetryAuthMode;
 use praxis_protocol::ThreadId;
@@ -119,8 +128,6 @@ use praxis_protocol::protocol::TokenUsage;
 use praxis_protocol::protocol::TokenUsageInfo;
 use std::collections::HashMap;
 use std::path::PathBuf;
-
-const THREAD_TURN_HYDRATION_LIMIT: u32 = 80;
 
 mod bootstrap;
 mod runtime_calls;
@@ -149,6 +156,23 @@ pub(crate) fn token_usage_info_from_app_gateway(token_usage: ThreadTokenUsage) -
     TokenUsageInfo {
         total_token_usage: token_usage_from_app_gateway(token_usage.total),
         last_token_usage: token_usage_from_app_gateway(token_usage.last),
+        internal_savings: praxis_protocol::protocol::TokenSavingsInfo {
+            total_saved_tokens: token_usage.internal_savings.total_saved_tokens,
+            last_saved_tokens: token_usage.internal_savings.last_saved_tokens,
+            categories: token_usage
+                .internal_savings
+                .categories
+                .into_iter()
+                .map(
+                    |category| praxis_protocol::protocol::TokenSavingCategoryUsage {
+                        kind: category.kind,
+                        total_saved_tokens: category.total_saved_tokens,
+                        last_saved_tokens: category.last_saved_tokens,
+                        occurrences: category.occurrences,
+                    },
+                )
+                .collect(),
+        },
         model_context_window: token_usage.model_context_window,
         model_auto_compact_token_limit: token_usage.model_auto_compact_token_limit,
     }
@@ -402,7 +426,7 @@ fn thread_resume_params_from_config(
         sandbox: sandbox_mode_from_policy(config.permissions.sandbox_policy.get().clone()),
         config: config_request_overrides_from_config(&config),
         persist_extended_history: true,
-        turn_limit: Some(THREAD_TURN_HYDRATION_LIMIT),
+        turn_limit: Some(INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT),
         ..ThreadResumeParams::default()
     }
 }
@@ -415,6 +439,7 @@ fn thread_fork_params_from_config(
 ) -> ThreadForkParams {
     ThreadForkParams {
         thread_id: thread_id.to_string(),
+        forked_thread_id: None,
         path,
         model: config.model.clone(),
         model_provider: thread_params_mode.model_provider_from_config(&config),
@@ -426,6 +451,15 @@ fn thread_fork_params_from_config(
         ephemeral: config.ephemeral,
         persist_extended_history: true,
         ..ThreadForkParams::default()
+    }
+}
+
+fn thread_attach_params(thread_id: ThreadId) -> ThreadResumeParams {
+    ThreadResumeParams {
+        thread_id: thread_id.to_string(),
+        persist_extended_history: true,
+        turn_limit: Some(INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT),
+        ..ThreadResumeParams::default()
     }
 }
 
@@ -705,6 +739,35 @@ mod tests {
         assert_eq!(start.model_provider, None);
         assert_eq!(resume.model_provider, None);
         assert_eq!(fork.model_provider, None);
+    }
+
+    #[test]
+    fn thread_attach_params_are_view_only() {
+        let thread_id = ThreadId::new();
+
+        let params = thread_attach_params(thread_id);
+
+        assert_eq!(params.thread_id, thread_id.to_string());
+        assert_eq!(params.history, None);
+        assert_eq!(params.path, None);
+        assert_eq!(params.model, None);
+        assert_eq!(params.model_provider, None);
+        assert_eq!(params.reasoning_effort, None);
+        assert_eq!(params.service_tier, None);
+        assert_eq!(params.cwd, None);
+        assert_eq!(params.approval_policy, None);
+        assert_eq!(params.approvals_reviewer, None);
+        assert_eq!(params.sandbox, None);
+        assert_eq!(params.config, None);
+        assert_eq!(params.base_instructions, None);
+        assert_eq!(params.developer_instructions, None);
+        assert_eq!(params.personality, None);
+        assert_eq!(params.dynamic_tools, None);
+        assert!(params.persist_extended_history);
+        assert_eq!(
+            params.turn_limit,
+            Some(INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT)
+        );
     }
 
     #[tokio::test]

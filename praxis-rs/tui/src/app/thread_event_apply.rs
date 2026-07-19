@@ -77,8 +77,14 @@ impl App {
         self.remember_workspace_token_usage_from_event(&event);
         match event {
             ThreadBufferedEvent::Notification(notification) => {
-                if let ServerNotification::ThreadModelChanged(notification) = &notification {
-                    self.apply_thread_model_changed_to_runtime_config(notification);
+                match &notification {
+                    ServerNotification::ThreadModelChanged(notification) => {
+                        self.apply_thread_model_changed_to_runtime_config(notification);
+                    }
+                    ServerNotification::ThreadPermissionsChanged(notification) => {
+                        self.apply_thread_permissions_changed_to_runtime_config(notification);
+                    }
+                    _ => {}
                 }
                 self.chat_widget
                     .handle_server_notification(notification, /*replay_kind*/ None);
@@ -103,8 +109,14 @@ impl App {
         self.remember_workspace_token_usage_from_event(&event);
         match event {
             ThreadBufferedEvent::Notification(notification) => {
-                if let ServerNotification::ThreadModelChanged(notification) = &notification {
-                    self.apply_thread_model_changed_to_runtime_config(notification);
+                match &notification {
+                    ServerNotification::ThreadModelChanged(notification) => {
+                        self.apply_thread_model_changed_to_runtime_config(notification);
+                    }
+                    ServerNotification::ThreadPermissionsChanged(notification) => {
+                        self.apply_thread_permissions_changed_to_runtime_config(notification);
+                    }
+                    _ => {}
                 }
                 self.chat_widget
                     .handle_server_notification(notification, Some(ReplayKind::ThreadSnapshot));
@@ -166,6 +178,36 @@ impl App {
             session.model_provider_id = notification.model_provider.clone();
             session.model = notification.model.clone();
             session.reasoning_effort = notification.reasoning_effort.clone();
+        }
+    }
+
+    fn apply_thread_permissions_changed_to_runtime_config(
+        &mut self,
+        notification: &ThreadPermissionsChangedNotification,
+    ) {
+        let approval_policy = notification.approval_policy.to_core();
+        let approvals_reviewer = notification.approvals_reviewer.to_core();
+        let sandbox_policy = notification.sandbox_policy.to_core();
+        if let Err(err) = self.config.permissions.approval_policy.set(approval_policy) {
+            tracing::warn!(%err, "failed to sync approval policy from app-gateway");
+        }
+        self.config.approvals_reviewer = approvals_reviewer.clone();
+        if let Err(err) = self
+            .config
+            .permissions
+            .sandbox_policy
+            .set(sandbox_policy.clone())
+        {
+            tracing::warn!(%err, "failed to sync sandbox policy from app-gateway");
+        }
+        if self
+            .primary_thread_id
+            .is_some_and(|thread_id| thread_id.to_string() == notification.thread_id.as_str())
+            && let Some(session) = self.primary_session_configured.as_mut()
+        {
+            session.approval_policy = approval_policy;
+            session.approvals_reviewer = approvals_reviewer;
+            session.sandbox_policy = sandbox_policy;
         }
     }
 

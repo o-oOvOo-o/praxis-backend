@@ -78,6 +78,10 @@ impl App {
         self.transcript_scrollback_backfill = None;
     }
 
+    pub(super) fn advance_history_view_generation(&mut self) {
+        self.history_view_generation = self.history_view_generation.wrapping_add(1);
+    }
+
     pub(super) fn reset_app_ui_state_after_clear(&mut self) {
         self.reset_thread_view_state();
     }

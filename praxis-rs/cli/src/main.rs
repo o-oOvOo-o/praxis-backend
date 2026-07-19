@@ -142,6 +142,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             let AppGatewayCommand {
                 subcommand,
                 listen,
+                session_source,
                 analytics_default_enabled,
                 auth,
             } = app_gateway_cli;
@@ -162,7 +163,7 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                             ),
                             default_analytics_enabled: analytics_default_enabled,
                             listen: transport,
-                            session_source: praxis_protocol::protocol::SessionSource::AppGateway,
+                            session_source,
                             auth,
                         },
                     )

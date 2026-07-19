@@ -472,6 +472,7 @@ async fn replayed_thread_rollback_emits_ordered_app_event() {
 
     chat.replay_initial_messages(vec![EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
         num_turns: 2,
+        workspace_restore: None,
     })]);
 
     let mut saw = false;
@@ -752,7 +753,7 @@ async fn thread_snapshot_replayed_turn_started_marks_task_running() {
 }
 
 #[tokio::test]
-async fn resume_replayed_in_progress_turn_does_not_mark_task_running() {
+async fn resume_replayed_in_progress_turn_restores_task_running() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.replay_thread_turns(
@@ -766,8 +767,12 @@ async fn resume_replayed_in_progress_turn_does_not_mark_task_running() {
     );
 
     assert!(drain_insert_history(&mut rx).is_empty());
-    assert!(!chat.bottom_pane.is_task_running());
-    assert!(chat.bottom_pane.status_widget().is_none());
+    assert!(chat.bottom_pane.is_task_running());
+    let status = chat
+        .bottom_pane
+        .status_widget()
+        .expect("status indicator should be restored from the backend timeline");
+    assert_eq!(status.header(), "Turn running");
 }
 
 #[tokio::test]

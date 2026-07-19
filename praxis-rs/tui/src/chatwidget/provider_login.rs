@@ -30,6 +30,11 @@ impl ChatWidget {
                 provider: ProviderSetupKind::DeepSeek,
             });
         })];
+        let kimi_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::OpenProviderLoginPrompt {
+                provider: ProviderSetupKind::Kimi,
+            });
+        })];
         let common_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
             tx.send(AppEvent::OpenProviderLoginPrompt {
                 provider: ProviderSetupKind::Common,
@@ -68,6 +73,15 @@ impl ChatWidget {
                         "Configure DeepSeek with the Praxis DeepSeek profile.".to_string(),
                     ),
                     actions: deepseek_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Kimi Code API key".to_string(),
+                    description: Some(
+                        "Configure K3 and K2.7 Code with the Praxis Kimi profile.".to_string(),
+                    ),
+                    actions: kimi_actions,
                     dismiss_on_select: true,
                     ..Default::default()
                 },
@@ -157,13 +171,14 @@ impl ChatWidget {
                 self.add_info_message(
                     "Praxis uses your ChatGPT/OpenAI login when available.".to_string(),
                     Some(
-                        "Use /login deepseek or /login common to configure API providers."
+                        "Use /login kimi, /login deepseek, or /login common to configure API providers."
                             .to_string(),
                     ),
                 );
             }
-            None => self
-                .add_error_message("Usage: /login [anthropic|deepseek|common|chatgpt]".to_string()),
+            None => self.add_error_message(
+                "Usage: /login [anthropic|kimi|deepseek|common|chatgpt]".to_string(),
+            ),
         }
         self.bottom_pane.drain_pending_submission_state();
     }
@@ -172,6 +187,7 @@ impl ChatWidget {
         match target.to_ascii_lowercase().as_str() {
             "anthropic" | "claude" => Some(ProviderSetupKind::Anthropic),
             "deepseek" | "ds" => Some(ProviderSetupKind::DeepSeek),
+            "kimi" | "moonshot" => Some(ProviderSetupKind::Kimi),
             "common" | "openai-compatible" | "compatible" => Some(ProviderSetupKind::Common),
             _ => None,
         }

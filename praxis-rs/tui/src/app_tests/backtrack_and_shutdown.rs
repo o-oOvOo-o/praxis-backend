@@ -132,7 +132,7 @@ async fn backtrack_selection_with_duplicate_history_targets_unique_turn() {
 
     let mut rollback_turns = None;
     while let Ok(op) = op_rx.try_recv() {
-        if let Op::ThreadRollback { num_turns } = op {
+        if let Op::ThreadRollback { num_turns, .. } = op {
             rollback_turns = Some(num_turns);
         }
     }
@@ -167,7 +167,7 @@ async fn backtrack_remote_image_only_selection_clears_existing_composer_draft() 
 
     let mut rollback_turns = None;
     while let Ok(op) = op_rx.try_recv() {
-        if let Op::ThreadRollback { num_turns } = op {
+        if let Op::ThreadRollback { num_turns, .. } = op {
             rollback_turns = Some(num_turns);
         }
     }
@@ -555,6 +555,7 @@ async fn thread_rollback_response_discards_queued_active_thread_events() {
                 selfwork_plan_path: None,
                 turns: Vec::new(),
             },
+            workspace_restore: None,
         },
     )
     .await;

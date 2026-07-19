@@ -19,12 +19,13 @@ use praxis_app_gateway_client::NativeControlAuthSettings;
 use praxis_app_gateway_client::RemoteAppGatewayClient;
 use praxis_app_gateway_client::RemoteAppGatewayConnectArgs;
 use praxis_app_gateway_protocol::AuthMode as AppGatewayAuthMode;
-use praxis_app_gateway_protocol::ConfigWarningNotification;
 use praxis_app_gateway_protocol::Thread as AppGatewayThread;
 use praxis_app_gateway_protocol::ThreadLookupParams;
 use praxis_app_gateway_protocol::ThreadLookupSelector;
 use praxis_app_gateway_protocol::ThreadSourceKind;
-use praxis_cloud_requirements::cloud_config_bundle_loader_for_storage;
+use praxis_cloud_requirements::{
+    cloud_config_bundle_loader_for_config_toml, cloud_config_bundle_loader_for_storage,
+};
 use praxis_core::LMSTUDIO_OSS_PROVIDER_ID;
 use praxis_core::ModelProviderInfo;
 use praxis_core::OLLAMA_OSS_PROVIDER_ID;

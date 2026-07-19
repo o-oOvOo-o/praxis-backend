@@ -46,6 +46,7 @@ use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
 use praxis_protocol::ThreadId;
+use praxis_app_gateway_protocol::ThreadRewindWorkspaceAction;
 use praxis_protocol::user_input::TextElement;
 
 /// Aggregates all backtrack-related state used by the App.
@@ -323,13 +324,7 @@ impl App {
         }
     }
 
-    /// Stage a backtrack and request thread history from the agent.
-    ///
-    /// We send the rollback request immediately, but we only mutate the transcript after core
-    /// confirms success so the UI cannot get ahead of the actual thread state.
-    ///
-    /// The composer prefill is applied immediately as a UX convenience; it does not imply that
-    /// core has accepted the rollback.
+    /// Request the canonical workspace preview before committing a backtrack.
     pub(crate) fn apply_backtrack_rollback(&mut self, selection: BacktrackSelection) {
         let user_total = user_count(&self.transcript_cells);
         if user_total == 0 {
@@ -348,6 +343,18 @@ impl App {
             return;
         }
 
+        self.app_event_tx.send(AppEvent::PreviewBacktrackRewind {
+            selection,
+            num_turns,
+        });
+    }
+
+    pub(crate) fn commit_backtrack_rewind(
+        &mut self,
+        selection: BacktrackSelection,
+        num_turns: u32,
+        workspace_action: ThreadRewindWorkspaceAction,
+    ) {
         let prefill = selection.prefill.clone();
         let text_elements = selection.text_elements.clone();
         let local_image_paths = selection.local_image_paths.clone();
@@ -357,8 +364,14 @@ impl App {
             selection,
             thread_id: self.chat_widget.thread_id(),
         });
-        self.chat_widget
-            .submit_op(AppCommand::thread_rollback(num_turns));
+        let restore_checkpoint = match workspace_action {
+            ThreadRewindWorkspaceAction::Keep => None,
+            ThreadRewindWorkspaceAction::Restore { checkpoint_id } => Some(checkpoint_id),
+        };
+        self.chat_widget.submit_op(AppCommand::thread_rollback(
+            num_turns,
+            restore_checkpoint,
+        ));
         self.chat_widget.set_remote_image_urls(remote_image_urls);
         if !prefill.is_empty()
             || !text_elements.is_empty()

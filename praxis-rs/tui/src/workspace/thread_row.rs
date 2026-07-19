@@ -259,9 +259,9 @@ pub(crate) fn sort_workspace_thread_rows(
         let b_active = Some(b.thread_id) == active_thread_id;
         let a_pinned = pinned_thread_ids.contains(&a.thread_id);
         let b_pinned = pinned_thread_ids.contains(&b.thread_id);
-        b_active
-            .cmp(&a_active)
-            .then_with(|| b_pinned.cmp(&a_pinned))
+        b_pinned
+            .cmp(&a_pinned)
+            .then_with(|| b_active.cmp(&a_active))
             .then_with(|| workspace_row_priority(b).cmp(&workspace_row_priority(a)))
             .then_with(|| b.updated_at.cmp(&a.updated_at))
     });
@@ -334,4 +334,50 @@ pub(crate) fn workspace_row_should_auto_observe(row: &ThreadListRow) -> bool {
 
 pub(crate) fn workspace_single_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn thread_row(thread_id: ThreadId, updated_at: i64) -> ThreadListRow {
+        ThreadListRow {
+            thread_id,
+            path: None,
+            name: thread_id.to_string(),
+            preview: String::new(),
+            cwd: PathBuf::from("."),
+            status: ThreadStatus::Idle,
+            control_state: None,
+            source: "cli".to_string(),
+            source_kind: AppGatewaySessionSource::Cli,
+            agent_base_name: None,
+            agent_title: None,
+            agent_display_name: None,
+            subagent_parent_thread_id: None,
+            subagent_depth: None,
+            subagents: WorkspaceSubagentSummary::default(),
+            updated_at,
+            token_usage: None,
+        }
+    }
+
+    #[test]
+    fn pinned_thread_stays_above_later_active_thread() {
+        let pinned_id = ThreadId::new();
+        let active_id = ThreadId::new();
+        let recent_id = ThreadId::new();
+        let mut rows = vec![
+            thread_row(active_id, 30),
+            thread_row(recent_id, 20),
+            thread_row(pinned_id, 10),
+        ];
+        let pinned = HashSet::from([pinned_id]);
+
+        sort_workspace_thread_rows(&mut rows, Some(active_id), &pinned);
+
+        assert_eq!(rows[0].thread_id, pinned_id);
+        assert_eq!(rows[1].thread_id, active_id);
+        assert_eq!(rows[2].thread_id, recent_id);
+    }
 }

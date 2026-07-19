@@ -17,7 +17,7 @@ impl AppGatewaySession {
         started_thread_from_start_response(response, config).await
     }
 
-    pub(crate) async fn resume_thread(
+    pub(crate) async fn resume_thread_with_startup_overrides(
         &mut self,
         config: Config,
         thread_id: ThreadId,
@@ -34,8 +34,25 @@ impl AppGatewaySession {
                 ),
             })
             .await
-            .wrap_err("thread/resume failed during TUI bootstrap")?;
+            .wrap_err("thread/resume with startup overrides failed during TUI bootstrap")?;
         started_thread_from_resume_response(response, &config).await
+    }
+
+    pub(crate) async fn attach_thread(
+        &mut self,
+        config: &Config,
+        thread_id: ThreadId,
+    ) -> Result<AppGatewayStartedThread> {
+        let request_id = self.next_request_id();
+        let response: ThreadResumeResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadResume {
+                request_id,
+                params: thread_attach_params(thread_id),
+            })
+            .await
+            .wrap_err("thread/resume attach failed in TUI")?;
+        started_thread_from_resume_response(response, config).await
     }
 
     pub(crate) async fn watch_thread(
@@ -48,11 +65,7 @@ impl AppGatewaySession {
             .client
             .request_typed(ClientRequest::ThreadResume {
                 request_id,
-                params: thread_resume_params_from_config(
-                    config.clone(),
-                    thread_id,
-                    self.thread_params_mode(),
-                ),
+                params: thread_attach_params(thread_id),
             })
             .await
             .wrap_err("thread/resume watch failed in TUI")?;
@@ -142,7 +155,7 @@ impl AppGatewaySession {
                 params: ThreadReadParams {
                     thread_id: thread_id.to_string(),
                     include_turns,
-                    turn_limit: include_turns.then_some(THREAD_TURN_HYDRATION_LIMIT),
+                    turn_limit: include_turns.then_some(INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT),
                 },
             })
             .await

@@ -343,22 +343,24 @@ pub(super) fn load_persistent_auth_with_origin(
         mode,
         Arc::clone(&keyring_store),
     );
-    if let Some(auth) = primary.load()? {
-        if let Some(inherited) = load_inherited_codex_auth(&praxis_home)?
-            && auth_has_credentials(&inherited)
-        {
-            return Ok(Some(LoadedAuthDotJson {
-                auth: inherited,
-                origin: LoadedAuthOrigin::InheritedCodex,
-            }));
-        }
+    resolve_persistent_auth(primary.load()?, || load_inherited_codex_auth(&praxis_home))
+}
+
+fn resolve_persistent_auth<F>(
+    praxis_auth: Option<AuthDotJson>,
+    load_inherited_codex_auth: F,
+) -> std::io::Result<Option<LoadedAuthDotJson>>
+where
+    F: FnOnce() -> std::io::Result<Option<AuthDotJson>>,
+{
+    if let Some(auth) = praxis_auth {
         return Ok(Some(LoadedAuthDotJson {
             auth,
             origin: LoadedAuthOrigin::Praxis,
         }));
     }
 
-    load_inherited_codex_auth(&praxis_home).map(|auth| {
+    load_inherited_codex_auth().map(|auth| {
         auth.map(|auth| LoadedAuthDotJson {
             auth,
             origin: LoadedAuthOrigin::InheritedCodex,
@@ -371,13 +373,6 @@ fn load_inherited_codex_auth(praxis_home: &Path) -> std::io::Result<Option<AuthD
         return Ok(None);
     };
     FileAuthStorage::new(shared_home).load()
-}
-
-fn auth_has_credentials(auth: &AuthDotJson) -> bool {
-    auth.openai_api_key
-        .as_deref()
-        .is_some_and(|key| !key.trim().is_empty())
-        || auth.tokens.is_some()
 }
 
 fn create_auth_storage_with_keyring_store(

@@ -17,19 +17,36 @@ use crate::session_log;
 #[derive(Clone, Debug)]
 pub(crate) struct AppEventSender {
     pub app_event_tx: UnboundedSender<AppEvent>,
+    history_view_generation: Option<u64>,
 }
 
 impl AppEventSender {
     pub(crate) fn new(app_event_tx: UnboundedSender<AppEvent>) -> Self {
-        Self { app_event_tx }
+        Self {
+            app_event_tx,
+            history_view_generation: None,
+        }
+    }
+
+    pub(crate) fn scoped_to_history_view(&self, generation: u64) -> Self {
+        Self {
+            app_event_tx: self.app_event_tx.clone(),
+            history_view_generation: Some(generation),
+        }
     }
 
     /// Send an event to the app event channel. If it fails, we swallow the
     /// error and log it.
     pub(crate) fn send(&self, event: AppEvent) {
+        let event = match (self.history_view_generation, event) {
+            (Some(generation), AppEvent::InsertHistoryCell(cell)) => {
+                AppEvent::InsertHistoryCellForView { generation, cell }
+            }
+            (_, event) => event,
+        };
         // Record inbound events for high-fidelity session replay.
         // Avoid double-logging Ops; those are logged at the point of submission.
-        if !matches!(event, AppEvent::AgentOp(_)) {
+        if !matches!(&event, AppEvent::AgentOp(_)) {
             session_log::log_inbound_app_event(&event);
         }
         if let Err(e) = self.app_event_tx.send(event) {

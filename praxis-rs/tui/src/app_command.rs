@@ -103,6 +103,7 @@ pub(crate) enum AppCommandView<'a> {
     Shutdown,
     ThreadRollback {
         num_turns: u32,
+        restore_checkpoint: Option<praxis_protocol::workspace_history::WorkspaceCheckpointId>,
     },
     Review {
         review_request: &'a ReviewRequest,
@@ -263,8 +264,14 @@ impl AppCommand {
         Self(Op::SetThreadName { name })
     }
 
-    pub(crate) fn thread_rollback(num_turns: u32) -> Self {
-        Self(Op::ThreadRollback { num_turns })
+    pub(crate) fn thread_rollback(
+        num_turns: u32,
+        restore_checkpoint: Option<praxis_protocol::workspace_history::WorkspaceCheckpointId>,
+    ) -> Self {
+        Self(Op::ThreadRollback {
+            num_turns,
+            restore_checkpoint,
+        })
     }
 
     pub(crate) fn review(review_request: ReviewRequest) -> Self {
@@ -401,8 +408,12 @@ impl AppCommand {
             Op::Compact => AppCommandView::Compact,
             Op::SetThreadName { name } => AppCommandView::SetThreadName { name },
             Op::Shutdown => AppCommandView::Shutdown,
-            Op::ThreadRollback { num_turns } => AppCommandView::ThreadRollback {
+            Op::ThreadRollback {
+                num_turns,
+                restore_checkpoint,
+            } => AppCommandView::ThreadRollback {
                 num_turns: *num_turns,
+                restore_checkpoint: *restore_checkpoint,
             },
             Op::Review { review_request } => AppCommandView::Review { review_request },
             op => AppCommandView::Other(op),

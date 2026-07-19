@@ -115,6 +115,13 @@ impl ThreadEventStore {
             session.model = notification.model.clone();
             session.reasoning_effort = notification.reasoning_effort.clone();
         }
+        if let Some(session) = self.session.as_mut()
+            && let ServerNotification::ThreadPermissionsChanged(notification) = &notification
+        {
+            session.approval_policy = notification.approval_policy.to_core();
+            session.approvals_reviewer = notification.approvals_reviewer.to_core();
+            session.sandbox_policy = notification.sandbox_policy.to_core();
+        }
         match &notification {
             ServerNotification::TurnStarted(turn) => {
                 self.active_turn_id = Some(turn.turn.id.clone());

@@ -25,6 +25,7 @@ impl AppGatewaySession {
                 request_id,
                 params: TurnStartParams {
                     thread_id: thread_id.to_string(),
+                    turn_id: None,
                     input: items.into_iter().map(Into::into).collect(),
                     cwd: Some(cwd),
                     approval_policy: Some(approval_policy.into()),
@@ -77,6 +78,7 @@ impl AppGatewaySession {
                 params: TurnSteerParams {
                     thread_id: thread_id.to_string(),
                     input: items.into_iter().map(Into::into).collect(),
+                    input_id: None,
                     expected_turn_id: turn_id,
                 },
             })
@@ -167,25 +169,42 @@ impl AppGatewaySession {
         Ok(response.previous_control_state)
     }
 
-    pub(crate) async fn thread_set_selfwork_plan_path(
+    pub(crate) async fn thread_selfwork_start(
         &mut self,
         thread_id: ThreadId,
-        selfwork_plan_path: Option<PathBuf>,
-    ) -> Result<()> {
+        plan_path: PathBuf,
+    ) -> Result<ThreadSelfworkStatus> {
         let request_id = self.next_request_id();
-        let _: ThreadMetadataUpdateResponse = self
+        let response: ThreadSelfworkStartResponse = self
             .client
-            .request_typed(ClientRequest::ThreadMetadataUpdate {
+            .request_typed(ClientRequest::ThreadSelfworkStart {
                 request_id,
-                params: ThreadMetadataUpdateParams {
+                params: ThreadSelfworkStartParams {
                     thread_id: thread_id.to_string(),
-                    git_info: None,
-                    selfwork_plan_path: Some(selfwork_plan_path),
+                    plan_path,
                 },
             })
             .await
-            .wrap_err("thread/metadata/update failed in TUI")?;
-        Ok(())
+            .wrap_err("thread/selfwork/start failed in TUI")?;
+        Ok(response.status)
+    }
+
+    pub(crate) async fn thread_selfwork_stop(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> Result<ThreadSelfworkStatus> {
+        let request_id = self.next_request_id();
+        let response: ThreadSelfworkStopResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadSelfworkStop {
+                request_id,
+                params: ThreadSelfworkStopParams {
+                    thread_id: thread_id.to_string(),
+                },
+            })
+            .await
+            .wrap_err("thread/selfwork/stop failed in TUI")?;
+        Ok(response.status)
     }
 
     pub(crate) async fn thread_unsubscribe(&mut self, thread_id: ThreadId) -> Result<()> {
@@ -302,6 +321,7 @@ impl AppGatewaySession {
         &mut self,
         thread_id: ThreadId,
         num_turns: u32,
+        restore_checkpoint: Option<WorkspaceCheckpointId>,
     ) -> Result<ThreadRollbackResponse> {
         let request_id = self.next_request_id();
         self.client
@@ -310,9 +330,33 @@ impl AppGatewaySession {
                 params: ThreadRollbackParams {
                     thread_id: thread_id.to_string(),
                     num_turns,
+                    workspace_action: match restore_checkpoint {
+                        Some(checkpoint_id) => {
+                            ThreadRewindWorkspaceAction::Restore { checkpoint_id }
+                        }
+                        None => ThreadRewindWorkspaceAction::Keep,
+                    },
                 },
             })
             .await
             .wrap_err("thread/rollback failed in TUI")
+    }
+
+    pub(crate) async fn thread_rewind_preview(
+        &mut self,
+        thread_id: ThreadId,
+        num_turns: u32,
+    ) -> Result<ThreadRewindPreviewResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::ThreadRewindPreview {
+                request_id,
+                params: ThreadRewindPreviewParams {
+                    thread_id: thread_id.to_string(),
+                    num_turns,
+                },
+            })
+            .await
+            .wrap_err("thread/rewind/preview failed in TUI")
     }
 }

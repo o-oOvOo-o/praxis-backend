@@ -40,6 +40,7 @@ use crate::resume_picker::SessionTarget;
 #[cfg(test)]
 use crate::test_support::PathBufExt;
 use crate::thread_pagination::loaded_thread_list_params;
+use crate::thread_replay_policy::compact_conversation_replay_turns;
 use crate::thread_replay_policy::compact_visible_replay_turns;
 use crate::tui;
 use crate::tui::TuiEvent;
@@ -73,6 +74,7 @@ use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::SkillsListResponse;
 use praxis_app_gateway_protocol::ThreadItem;
 use praxis_app_gateway_protocol::ThreadModelChangedNotification;
+use praxis_app_gateway_protocol::ThreadPermissionsChangedNotification;
 use praxis_app_gateway_protocol::ThreadRollbackResponse;
 use praxis_app_gateway_protocol::Turn;
 use praxis_core::ModelProviderInfo;
@@ -317,6 +319,7 @@ pub(crate) struct App {
     pub(crate) file_search: FileSearchManager,
 
     pub(crate) transcript_cells: Vec<Arc<dyn HistoryCell>>,
+    history_view_generation: u64,
 
     // Pager overlay state (Transcript or Static like Diff)
     pub(crate) overlay: Option<Overlay>,

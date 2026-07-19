@@ -478,25 +478,9 @@ impl App {
             }
             AppEvent::PersistPlanModeReasoningEffort(effort) => {
                 let profile = self.active_profile.as_deref();
-                let segments = if let Some(profile) = profile {
-                    vec![
-                        "profiles".to_string(),
-                        profile.to_string(),
-                        "plan_mode_reasoning_effort".to_string(),
-                    ]
-                } else {
-                    vec!["plan_mode_reasoning_effort".to_string()]
-                };
-                let edit = if let Some(effort) = effort {
-                    ConfigEdit::SetPath {
-                        segments,
-                        value: effort.to_string().into(),
-                    }
-                } else {
-                    ConfigEdit::ClearPath { segments }
-                };
                 if let Err(err) = ConfigEditsBuilder::new(&self.config.praxis_home)
-                    .with_edits([edit])
+                    .with_profile(profile)
+                    .set_plan_mode_reasoning_effort(effort)
                     .apply()
                     .await
                 {

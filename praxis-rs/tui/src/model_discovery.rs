@@ -583,6 +583,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
 mod tests {
     use super::*;
     use praxis_core::ANTHROPIC_PROVIDER_ID;
+    use praxis_core::KIMI_PROVIDER_ID;
     use praxis_core::config::ConfigBuilder;
 
     fn test_preset(model: &str) -> ModelPreset {
@@ -671,6 +672,39 @@ mod tests {
                 .unwrap_or_else(|| panic!("{model} should carry Anthropic provider metadata"));
             assert_eq!(metadata.provider_id, ANTHROPIC_PROVIDER_ID);
             assert!(metadata.provider.is_anthropic());
+        }
+    }
+
+    #[tokio::test]
+    async fn model_catalog_backfills_kimi_models_when_current_provider_is_openai() {
+        let praxis_home = tempfile::tempdir().expect("temp praxis home");
+        let config = ConfigBuilder::default()
+            .praxis_home(praxis_home.path().to_path_buf())
+            .build()
+            .await
+            .expect("config");
+        assert!(config.model_providers.contains_key(KIMI_PROVIDER_ID));
+
+        let catalog = build_model_catalog(&config, Vec::new());
+        for model in [
+            "k3[1m]",
+            "k3",
+            "kimi-for-coding",
+            "kimi-for-coding-highspeed",
+        ] {
+            let preset_id = provider_scoped_preset_id(KIMI_PROVIDER_ID, model);
+            let preset = catalog
+                .models
+                .iter()
+                .find(|preset| preset.id == preset_id)
+                .unwrap_or_else(|| panic!("{model} should be present in the TUI model picker"));
+            assert!(preset.show_in_picker);
+            let metadata = catalog
+                .metadata_by_preset_id
+                .get(&preset_id)
+                .unwrap_or_else(|| panic!("{model} should carry Kimi provider metadata"));
+            assert_eq!(metadata.provider_id, KIMI_PROVIDER_ID);
+            assert!(metadata.provider.is_kimi());
         }
     }
 

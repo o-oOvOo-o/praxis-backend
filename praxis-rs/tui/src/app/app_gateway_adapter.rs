@@ -18,6 +18,7 @@ use crate::app_gateway_session::status_account_display_from_auth_mode;
 use praxis_app_gateway_client::AppGatewayEvent;
 use praxis_app_gateway_protocol::AuthMode;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
+use praxis_app_gateway_protocol::SERVER_REQUEST_REJECTED_ERROR_CODE;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_protocol::ThreadId;
@@ -196,7 +197,7 @@ impl App {
             .reject_server_request(
                 request_id,
                 JSONRPCErrorError {
-                    code: -32000,
+                    code: SERVER_REQUEST_REJECTED_ERROR_CODE,
                     message: reason,
                     data: None,
                 },
@@ -292,6 +293,9 @@ fn server_notification_thread_id(notification: &ServerNotification) -> Option<&s
         ServerNotification::ThreadHeartbeatUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
+        ServerNotification::ThreadSelfworkUpdated(notification) => {
+            Some(notification.status.thread_id.as_str())
+        }
         ServerNotification::WorkspaceChangeUpdated(notification) => {
             Some(notification.thread_id.as_str())
         }
@@ -299,6 +303,9 @@ fn server_notification_thread_id(notification: &ServerNotification) -> Option<&s
             notification.run.thread_id.as_deref()
         }
         ServerNotification::ThreadModelChanged(notification) => {
+            Some(notification.thread_id.as_str())
+        }
+        ServerNotification::ThreadPermissionsChanged(notification) => {
             Some(notification.thread_id.as_str())
         }
         ServerNotification::TurnStarted(notification) => Some(notification.thread_id.as_str()),

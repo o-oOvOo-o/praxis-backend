@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+enum ThreadViewPresentation {
+    Fresh,
+    Existing,
+}
+
 impl App {
     pub(super) async fn refresh_snapshot_session_if_needed(
         &mut self,
@@ -18,10 +24,7 @@ impl App {
             return;
         }
 
-        match app_gateway
-            .resume_thread(self.config.clone(), thread_id)
-            .await
-        {
+        match app_gateway.attach_thread(&self.config, thread_id).await {
             Ok(started) => {
                 self.apply_refreshed_snapshot_thread(thread_id, started, snapshot)
                     .await
@@ -94,60 +97,41 @@ impl App {
         self.sync_active_agent_label();
     }
 
-    pub(super) async fn start_fresh_session_with_summary_hint(
+    pub(super) async fn start_fresh_session(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
     ) {
-        // Start a fresh in-memory session while preserving resumability via persisted rollout
-        // history.
+        // Start and select a new thread without interrupting the previously viewed thread.
         self.refresh_in_memory_config_from_disk_best_effort("starting a new thread")
             .await;
         let model = self.chat_widget.current_model().to_string();
         let config = self.fresh_session_config();
-        let summary = session_summary(
-            self.chat_widget.token_usage(),
-            self.chat_widget.thread_id(),
-            self.chat_widget.thread_name(),
-        );
         let queued_input_for_lazy_thread = self
             .chat_widget
             .thread_id()
             .is_none()
             .then(|| self.chat_widget.capture_thread_input_state())
             .flatten();
-        self.shutdown_current_thread(app_gateway).await;
-        let tracked_thread_ids: Vec<ThreadId> =
-            self.thread_event_channels.keys().copied().collect();
-        for thread_id in tracked_thread_ids {
-            if let Err(err) = app_gateway.thread_unsubscribe(thread_id).await {
-                tracing::warn!("failed to unsubscribe tracked thread {thread_id}: {err}");
-            }
-        }
         self.config = config.clone();
         match app_gateway.start_thread(&config).await {
             Ok(started) => {
                 if let Err(err) = self
-                    .replace_chat_widget_with_app_gateway_thread(tui, app_gateway, started)
+                    .switch_to_fresh_app_gateway_thread_preserving_background(
+                        tui,
+                        app_gateway,
+                        started,
+                    )
                     .await
                 {
                     self.chat_widget.add_error_message(format!(
-                        "Failed to attach to fresh app-gateway thread: {err}"
+                        "Failed to switch to fresh app-gateway thread: {err}"
                     ));
                 } else {
                     if let Some(input_state) = queued_input_for_lazy_thread {
                         self.chat_widget
                             .restore_thread_input_state(Some(input_state));
                         self.chat_widget.maybe_send_next_queued_input();
-                    }
-                    if let Some(summary) = summary {
-                        let mut lines: Vec<Line<'static>> = vec![summary.usage_line.clone().into()];
-                        if let Some(command) = summary.resume_command {
-                            let spans =
-                                vec!["To continue this session, run ".into(), command.cyan()];
-                            lines.push(spans.into());
-                        }
-                        self.chat_widget.add_plain_history_lines(lines);
                     }
                 }
             }
@@ -161,37 +145,122 @@ impl App {
         tui.frame_requester().schedule_frame();
     }
 
-    pub(super) async fn replace_chat_widget_with_app_gateway_thread(
+    pub(super) async fn switch_to_app_gateway_thread_preserving_background(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
         started: AppGatewayStartedThread,
     ) -> Result<()> {
+        self.switch_to_app_gateway_thread_preserving_background_kind(
+            tui,
+            app_gateway,
+            started,
+            ThreadViewPresentation::Existing,
+        )
+        .await
+    }
+
+    async fn switch_to_fresh_app_gateway_thread_preserving_background(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        started: AppGatewayStartedThread,
+    ) -> Result<()> {
+        self.switch_to_app_gateway_thread_preserving_background_kind(
+            tui,
+            app_gateway,
+            started,
+            ThreadViewPresentation::Fresh,
+        )
+        .await
+    }
+
+    async fn switch_to_app_gateway_thread_preserving_background_kind(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_gateway: &mut AppGatewaySession,
+        started: AppGatewayStartedThread,
+        presentation: ThreadViewPresentation,
+    ) -> Result<()> {
         let AppGatewayStartedThread {
-            session,
+            mut session,
             turns,
             status: _,
             control_state,
         } = started;
-        self.reset_thread_event_state();
-        let init = self.chatwidget_init_for_forked_or_resumed_thread(
-            tui,
-            self.config.clone(),
-            self.tui_config.clone(),
+        let previous_thread_id = self.active_thread_id;
+        self.store_active_thread_receiver().await;
+
+        self.apply_current_permissions_to_thread_session(&mut session);
+        let thread_id = session.thread_id;
+        let default_launch_rank = self
+            .workspace
+            .rows
+            .iter()
+            .find(|row| row.thread_id == thread_id)
+            .map(|row| row.source_kind.agent_rank())
+            .unwrap_or(0);
+        self.primary_thread_id = Some(thread_id);
+        self.primary_session_configured = Some(session.clone());
+        self.upsert_agent_picker_thread(
+            thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
+            /*agent_display_name*/ None, /*agent_role*/ None, /*is_closed*/ false,
         );
+
+        let store = {
+            let channel = self.ensure_thread_channel(thread_id);
+            Arc::clone(&channel.store)
+        };
+        {
+            let mut store = store.lock().await;
+            store.set_session(session, turns);
+            store.rebase_buffer_after_session_refresh();
+        }
+
+        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id).await else {
+            if let Some(previous_thread_id) = previous_thread_id {
+                self.active_thread_id = None;
+                self.activate_thread_channel(previous_thread_id).await;
+            }
+            return Err(color_eyre::eyre::eyre!(
+                "Praxis thread {thread_id} is already attached but has no replay receiver."
+            ));
+        };
+        self.active_thread_id = Some(thread_id);
+        self.active_thread_rx = Some(receiver);
+        self.workspace
+            .launch
+            .activate_thread(thread_id, default_launch_rank);
+
+        self.advance_history_view_generation();
+        let init = match presentation {
+            ThreadViewPresentation::Fresh => self.chatwidget_init_for_fresh_thread(
+                tui,
+                self.config.clone(),
+                self.tui_config.clone(),
+            ),
+            ThreadViewPresentation::Existing => self.chatwidget_init_for_forked_or_resumed_thread(
+                tui,
+                self.config.clone(),
+                self.tui_config.clone(),
+            ),
+        };
         self.replace_chat_widget(ChatWidget::new_with_app_event(init));
-        self.enqueue_primary_thread_session(session, turns).await?;
+        self.reset_for_thread_switch(tui)?;
+        self.workspace.reset_chat_scroll();
+        self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
         self.chat_widget
             .set_thread_control_state(control_state.as_ref());
         self.backfill_loaded_subagent_threads(app_gateway).await;
+        self.drain_active_thread_events(tui).await?;
+        self.refresh_pending_thread_approvals().await;
         Ok(())
     }
 
     /// Fetches all loaded threads from the app gateway and registers descendants of the primary
     /// thread in the navigation cache and chat widget metadata.
     ///
-    /// Called after `replace_chat_widget_with_app_gateway_thread` during resume, fork, and new
-    /// thread creation so that the `/agent` picker and keyboard navigation are pre-populated even
+    /// Called after replacing the chat widget so `/agent` navigation is pre-populated even
     /// if the TUI did not witness the original spawn events.
     ///
     /// The loaded-thread list is fetched page-by-page and the spawn tree is walked by
@@ -371,7 +440,7 @@ impl App {
         self.chat_widget
             .restore_thread_input_state(snapshot.input_state);
         if !snapshot.turns.is_empty() {
-            let turns = compact_visible_replay_turns(snapshot.turns);
+            let turns = compact_conversation_replay_turns(snapshot.turns);
             self.chat_widget
                 .replay_thread_turns(turns, ReplayKind::ThreadSnapshot);
         }
@@ -386,7 +455,6 @@ impl App {
         if resume_restored_queue {
             self.chat_widget.maybe_send_next_queued_input();
         }
-        self.chat_widget.maybe_resume_selfwork_if_idle();
         self.refresh_status_line();
     }
 

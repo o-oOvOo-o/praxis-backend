@@ -679,30 +679,23 @@ impl ChatWidget {
                 else {
                     return;
                 };
-                let prepared_trimmed = prepared_args.trim();
-                if prepared_trimmed.is_empty() {
-                    self.handle_selfwork_default_invocation();
-                    self.bottom_pane.drain_pending_submission_state();
-                    return;
-                }
-
-                let mut parts = prepared_trimmed.splitn(2, char::is_whitespace);
-                let command = parts.next().unwrap_or_default();
-                let rest = parts.next().unwrap_or_default().trim();
-                match command.to_ascii_lowercase().as_str() {
-                    "status" => self.show_selfwork_status(),
-                    "stop" => {
-                        let message = if self.selfwork_turn_in_flight {
+                match parse_selfwork_command(&prepared_args) {
+                    SelfworkCommand::Default => self.handle_selfwork_default_invocation(),
+                    SelfworkCommand::Status => self.show_selfwork_status(),
+                    SelfworkCommand::Stop => {
+                        let message = if self.selfwork_runtime.turn_in_flight() {
                             "Selfwork stopped. The in-flight selfwork turn will finish, but it will not auto-continue.".to_string()
                         } else {
                             "Selfwork stopped.".to_string()
                         };
                         self.clear_selfwork_state(/*persist*/ true, Some(message), None);
                     }
-                    "start" if rest.is_empty() => self.open_selfwork_plan_picker_or_prompt(),
-                    "start" => self.start_selfwork_from_input(rest.to_string()),
-                    _ => match resolve_selfwork_plan_path(
-                        prepared_trimmed,
+                    SelfworkCommand::Start(None) => self.open_selfwork_plan_picker_or_prompt(),
+                    SelfworkCommand::Start(Some(path)) => {
+                        self.start_selfwork_from_input(path.to_owned())
+                    }
+                    SelfworkCommand::UsePlan(path) => match resolve_selfwork_plan_path(
+                        path,
                         self.current_cwd.as_deref(),
                         self.config.cwd.as_path(),
                     ) {
