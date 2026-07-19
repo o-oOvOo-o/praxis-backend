@@ -70,7 +70,10 @@ async fn reconstruct_history_rollback_keeps_history_and_metadata_in_sync_for_com
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
-            praxis_protocol::protocol::ThreadRolledBackEvent { num_turns: 1 },
+            praxis_protocol::protocol::ThreadRolledBackEvent {
+                num_turns: 1,
+                workspace_restore: None,
+            },
         )),
     ];
 
@@ -152,7 +155,10 @@ async fn reconstruct_history_rollback_keeps_history_and_metadata_in_sync_for_inc
         )),
         RolloutItem::ResponseItem(turn_two_user),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
-            praxis_protocol::protocol::ThreadRolledBackEvent { num_turns: 1 },
+            praxis_protocol::protocol::ThreadRolledBackEvent {
+                num_turns: 1,
+                workspace_restore: None,
+            },
         )),
     ];
 
@@ -258,7 +264,10 @@ async fn reconstruct_history_rollback_skips_non_user_turns_for_history_and_metad
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
-            praxis_protocol::protocol::ThreadRolledBackEvent { num_turns: 1 },
+            praxis_protocol::protocol::ThreadRolledBackEvent {
+                num_turns: 1,
+                workspace_restore: None,
+            },
         )),
     ];
 
@@ -343,7 +352,10 @@ async fn reconstruct_history_rollback_counts_inter_agent_assistant_turns() {
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
-            praxis_protocol::protocol::ThreadRolledBackEvent { num_turns: 1 },
+            praxis_protocol::protocol::ThreadRolledBackEvent {
+                num_turns: 1,
+                workspace_restore: None,
+            },
         )),
     ];
 
@@ -407,7 +419,10 @@ async fn reconstruct_history_rollback_clears_history_and_metadata_when_exceeding
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
-            praxis_protocol::protocol::ThreadRolledBackEvent { num_turns: 99 },
+            praxis_protocol::protocol::ThreadRolledBackEvent {
+                num_turns: 99,
+                workspace_restore: None,
+            },
         )),
     ];
 

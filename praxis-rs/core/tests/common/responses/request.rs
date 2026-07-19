@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug, Clone)]
 pub struct ResponseMock {
     requests: Arc<Mutex<Vec<ResponsesRequest>>>,
 }
@@ -344,8 +345,6 @@ mod tests {
         );
     }
 }
-
-#[derive(Debug, Clone)]
 
 impl Match for ResponseMock {
     fn matches(&self, request: &wiremock::Request) -> bool {

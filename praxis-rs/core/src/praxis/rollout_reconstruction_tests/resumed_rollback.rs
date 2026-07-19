@@ -47,7 +47,10 @@ async fn record_initial_history_resumed_rollback_skips_only_user_turns() {
             },
         )),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
-            praxis_protocol::protocol::ThreadRolledBackEvent { num_turns: 1 },
+            praxis_protocol::protocol::ThreadRolledBackEvent {
+                num_turns: 1,
+                workspace_restore: None,
+            },
         )),
     ];
 
@@ -116,7 +119,10 @@ async fn record_initial_history_resumed_rollback_drops_incomplete_user_turn_comp
             replacement_history: Some(Vec::new()),
         }),
         RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
-            praxis_protocol::protocol::ThreadRolledBackEvent { num_turns: 1 },
+            praxis_protocol::protocol::ThreadRolledBackEvent {
+                num_turns: 1,
+                workspace_restore: None,
+            },
         )),
     ];
 

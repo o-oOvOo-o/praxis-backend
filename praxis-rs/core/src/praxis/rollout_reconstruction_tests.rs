@@ -1,15 +1,14 @@
-use super::*;
+pub(super) use super::*;
 
-use praxis_protocol::AgentPath;
-use praxis_protocol::ThreadId;
-use praxis_protocol::models::ContentItem;
-use praxis_protocol::models::ResponseItem;
-use praxis_protocol::protocol::CompactedItem;
-use praxis_protocol::protocol::InitialHistory;
-use praxis_protocol::protocol::InterAgentCommunication;
-use praxis_protocol::protocol::ResumedHistory;
-use pretty_assertions::assert_eq;
-use std::path::PathBuf;
+pub(super) use praxis_protocol::AgentPath;
+pub(super) use praxis_protocol::ThreadId;
+pub(super) use praxis_protocol::models::ContentItem;
+pub(super) use praxis_protocol::models::ResponseItem;
+pub(super) use praxis_protocol::protocol::CompactedItem;
+pub(super) use praxis_protocol::protocol::InitialHistory;
+pub(super) use praxis_protocol::protocol::InterAgentCommunication;
+pub(super) use praxis_protocol::protocol::ResumedHistory;
+pub(super) use std::path::PathBuf;
 
 fn user_message(text: &str) -> ResponseItem {
     ResponseItem::Message {
@@ -54,8 +53,13 @@ fn inter_agent_assistant_message(text: &str) -> ResponseItem {
     }
 }
 
+#[path = "rollout_reconstruction_tests/active_turn_compaction.rs"]
 mod active_turn_compaction;
+#[path = "rollout_reconstruction_tests/previous_turn_settings.rs"]
 mod previous_turn_settings;
+#[path = "rollout_reconstruction_tests/reference_context.rs"]
 mod reference_context;
+#[path = "rollout_reconstruction_tests/resumed_rollback.rs"]
 mod resumed_rollback;
+#[path = "rollout_reconstruction_tests/rollback_history.rs"]
 mod rollback_history;

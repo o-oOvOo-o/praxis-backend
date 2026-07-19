@@ -80,10 +80,8 @@ pub enum PraxisErr {
     #[error("stream disconnected before completion: {0}")]
     Stream(String, Option<Duration>),
 
-    #[error(
-        "Praxis ran out of room in the model's context window. Start a new thread or clear earlier history before retrying."
-    )]
-    ContextWindowExceeded,
+    #[error("{0}")]
+    ContextWindowExceeded(ContextOverflowError),
 
     #[error("no thread with id: {0}")]
     ThreadNotFound(ThreadId),
@@ -146,6 +144,9 @@ pub enum PraxisErr {
     /// Retry limit exceeded.
     #[error("{0}")]
     RetryLimit(RetryLimitReachedError),
+
+    #[error("{0}")]
+    ProviderRateLimited(ProviderRateLimitError),
 
     /// Agent loop died unexpectedly
     #[error("internal error; agent loop died unexpectedly")]
@@ -213,7 +214,7 @@ impl PraxisErr {
             | PraxisErr::Sandbox(_)
             | PraxisErr::LandlockSandboxExecutableNotProvided
             | PraxisErr::RetryLimit(_)
-            | PraxisErr::ContextWindowExceeded
+            | PraxisErr::ContextWindowExceeded(_)
             | PraxisErr::ThreadNotFound(_)
             | PraxisErr::AgentLimitReached { .. }
             | PraxisErr::Spawn
@@ -221,6 +222,7 @@ impl PraxisErr {
             | PraxisErr::UsageLimitReached(_)
             | PraxisErr::ServerOverloaded => false,
             PraxisErr::Stream(..)
+            | PraxisErr::ProviderRateLimited(_)
             | PraxisErr::Timeout
             | PraxisErr::UnexpectedStatus(_)
             | PraxisErr::ResponseStreamFailed(_)
@@ -375,6 +377,66 @@ impl std::error::Error for UnexpectedResponseError {}
 pub struct RetryLimitReachedError {
     pub status: StatusCode,
     pub request_id: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct ProviderRateLimitError {
+    pub status: StatusCode,
+    pub message: String,
+    pub request_id: Option<String>,
+    pub trace_id: Option<String>,
+    pub retry_after: Option<Duration>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ContextOverflowError {
+    pub status: Option<StatusCode>,
+    pub message: String,
+    pub provider_code: Option<String>,
+    pub context_limit: Option<i64>,
+    pub requested_tokens: Option<i64>,
+}
+
+impl ContextOverflowError {
+    pub fn unknown() -> Self {
+        Self {
+            status: None,
+            message: "Praxis ran out of room in the model's context window.".to_string(),
+            provider_code: None,
+            context_limit: None,
+            requested_tokens: None,
+        }
+    }
+}
+
+impl std::fmt::Display for ContextOverflowError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)?;
+        if let Some(limit) = self.context_limit {
+            write!(f, " (provider context limit: {limit}")?;
+            if let Some(requested) = self.requested_tokens {
+                write!(f, ", requested: {requested}")?;
+            }
+            write!(f, ")")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for ProviderRateLimitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "provider rate limited the request: {}", self.message)?;
+        if let Some(delay) = self.retry_after {
+            write!(f, ", retry after {:.1}s", delay.as_secs_f64())?;
+        }
+        if let Some(id) = &self.request_id {
+            write!(f, ", request id: {id}")?;
+        }
+        if let Some(id) = &self.trace_id {
+            write!(f, ", trace id: {id}")?;
+        }
+        Ok(())
+    }
 }
 
 impl std::fmt::Display for RetryLimitReachedError {
@@ -555,7 +617,7 @@ impl PraxisErr {
     /// Translate core error to client-facing protocol error.
     pub fn to_praxis_protocol_error(&self) -> PraxisProtocolErrorInfo {
         match self {
-            PraxisErr::ContextWindowExceeded => PraxisProtocolErrorInfo::ContextWindowExceeded,
+            PraxisErr::ContextWindowExceeded(_) => PraxisProtocolErrorInfo::ContextWindowExceeded,
             PraxisErr::UsageLimitReached(_)
             | PraxisErr::QuotaExceeded
             | PraxisErr::UsageNotIncluded => PraxisProtocolErrorInfo::UsageLimitExceeded,
@@ -563,6 +625,11 @@ impl PraxisErr {
             PraxisErr::RetryLimit(_) => PraxisProtocolErrorInfo::ResponseTooManyFailedAttempts {
                 http_status_code: self.http_status_code_value(),
             },
+            PraxisErr::ProviderRateLimited(_) => {
+                PraxisProtocolErrorInfo::ResponseTooManyFailedAttempts {
+                    http_status_code: self.http_status_code_value(),
+                }
+            }
             PraxisErr::ConnectionFailed(_) => PraxisProtocolErrorInfo::HttpConnectionFailed {
                 http_status_code: self.http_status_code_value(),
             },
@@ -598,6 +665,7 @@ impl PraxisErr {
     pub fn http_status_code_value(&self) -> Option<u16> {
         let http_status_code = match self {
             PraxisErr::RetryLimit(err) => Some(err.status),
+            PraxisErr::ProviderRateLimited(err) => Some(err.status),
             PraxisErr::UnexpectedStatus(err) => Some(err.status),
             PraxisErr::ConnectionFailed(err) => err.source.status(),
             PraxisErr::ResponseStreamFailed(err) => err.source.status(),

@@ -61,6 +61,7 @@ members = [
     "tui",
     "tools",
     "v8-poc",
+    "workspace-history",
     "utils/absolute-path",
     "utils/cargo-bin",
     "git-utils",
@@ -172,6 +173,7 @@ praxis-stdio-to-uds = { path = "stdio-to-uds" }
 praxis-terminal-detection = { path = "terminal-detection" }
 praxis-tools = { path = "tools", default-features = false }
 praxis-tui = { path = "tui" }
+praxis-workspace-history = { path = "workspace-history" }
 praxis-utils-absolute-path = { path = "utils/absolute-path" }
 praxis-utils-approval-presets = { path = "utils/approval-presets" }
 praxis-utils-cache = { path = "utils/cache" }
@@ -237,6 +239,7 @@ encoding_rs = "0.8.35"
 env-flags = "0.1.1"
 env_logger = "0.11.9"
 eventsource-stream = "0.2.3"
+fs2 = "0.4.3"
 futures = { version = "0.3", default-features = false }
 gethostname = "1.1.0"
 globset = "0.4"
@@ -294,6 +297,7 @@ ratatui-macros = "0.7.1"
 regex = "1.12.3"
 regex-lite = "0.1.8"
 reqwest = "0.12"
+rfd = "0.14.1"
 rmcp = { version = "0.15.0", default-features = false }
 runfiles = { git = "https://github.com/dzbarsky/rules_rust", rev = "b56cbaa8465e74127f1ea216f813cd377295ad81" }
 rustls = { version = "0.23", default-features = false, features = [

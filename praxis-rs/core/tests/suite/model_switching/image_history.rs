@@ -468,7 +468,10 @@ async fn thread_rollback_after_generated_image_drops_entire_image_turn_history()
     wait_for_event(&test.thread, |ev| matches!(ev, EventMsg::TurnComplete(_))).await;
 
     test.thread
-        .submit(Op::ThreadRollback { num_turns: 1 })
+        .submit(Op::ThreadRollback {
+            num_turns: 1,
+            restore_checkpoint: None,
+        })
         .await?;
     wait_for_event(&test.thread, |ev| {
         matches!(ev, EventMsg::ThreadRolledBack(_))

@@ -10,7 +10,6 @@ use praxis_hooks::UserPromptSubmitOutcome;
 use praxis_hooks::UserPromptSubmitRequest;
 use praxis_protocol::items::TurnItem;
 use praxis_protocol::models::DeveloperInstructions;
-use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::EventMsg;
@@ -23,6 +22,7 @@ use serde_json::Value;
 use crate::event_mapping::parse_turn_item;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
+use crate::state::PendingInput;
 
 pub(crate) struct HookRuntimeOutcome {
     pub should_stop: bool,
@@ -36,6 +36,7 @@ enum PendingInputHookDisposition {
 
 enum PendingInputRecord {
     UserMessage {
+        id: Option<String>,
         content: Vec<UserInput>,
         response_item: ResponseItem,
         additional_contexts: Vec<String>,
@@ -220,8 +221,9 @@ pub(crate) async fn run_user_prompt_submit_hooks(
 async fn inspect_pending_input(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
-    pending_input_item: ResponseInputItem,
+    pending_input_item: PendingInput,
 ) -> PendingInputHookDisposition {
+    let (pending_input_item, user_message_id) = pending_input_item.into_parts();
     let response_item = ResponseItem::from(pending_input_item);
     if let Some(TurnItem::UserMessage(user_message)) = parse_turn_item(&response_item) {
         let user_prompt_submit_outcome =
@@ -232,6 +234,7 @@ async fn inspect_pending_input(
             }
         } else {
             PendingInputHookDisposition::Accepted(Box::new(PendingInputRecord::UserMessage {
+                id: user_message_id,
                 content: user_message.content,
                 response_item,
                 additional_contexts: user_prompt_submit_outcome.additional_contexts,
@@ -251,6 +254,7 @@ async fn record_pending_input(
 ) -> Vec<ResponseItem> {
     match pending_input {
         PendingInputRecord::UserMessage {
+            id,
             content,
             response_item,
             additional_contexts,
@@ -259,6 +263,7 @@ async fn record_pending_input(
                 turn_context.as_ref(),
                 content.as_slice(),
                 &response_item,
+                id,
             )
             .await;
             let additional_context_items =
@@ -279,7 +284,7 @@ async fn record_pending_input(
 pub(crate) async fn record_pending_inputs(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
-    pending_input: Vec<ResponseInputItem>,
+    pending_input: Vec<PendingInput>,
 ) {
     for pending_input_item in pending_input {
         match inspect_pending_input(sess, turn_context, pending_input_item).await {
@@ -298,7 +303,7 @@ pub(crate) async fn record_pending_inputs(
 pub(crate) async fn process_pending_input_for_model_round(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
-    pending_input: Vec<ResponseInputItem>,
+    pending_input: Vec<PendingInput>,
 ) -> PendingInputRoundOutcome {
     let mut blocked = false;
     let mut requeued_remaining = false;
@@ -316,7 +321,7 @@ pub(crate) async fn process_pending_input_for_model_round(
             } => {
                 let remaining_pending_input = pending_input_iter.collect::<Vec<_>>();
                 if !remaining_pending_input.is_empty() {
-                    let _ = sess.prepend_pending_input(remaining_pending_input).await;
+                    let _ = sess.prepend_pending_inputs(remaining_pending_input).await;
                     requeued_remaining = true;
                 }
                 blocked_contexts = additional_contexts;

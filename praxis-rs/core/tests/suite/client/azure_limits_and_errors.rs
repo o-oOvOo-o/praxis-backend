@@ -603,7 +603,8 @@ async fn context_window_error_sets_total_tokens_to_model_window() -> anyhow::Res
     );
 
     let error_event = wait_for_event(&praxis, |ev| matches!(ev, EventMsg::Error(_))).await;
-    let expected_context_window_message = PraxisErr::ContextWindowExceeded.to_string();
+    let expected_context_window_message =
+        PraxisErr::ContextWindowExceeded(crate::error::ContextOverflowError::unknown()).to_string();
     assert!(
         matches!(
             error_event,

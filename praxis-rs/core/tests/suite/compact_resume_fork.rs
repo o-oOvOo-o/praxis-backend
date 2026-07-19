@@ -61,29 +61,6 @@ fn json_fragment(text: &str) -> String {
         .to_string()
 }
 
-fn filter_out_ghost_snapshot_entries(items: &[Value]) -> Vec<Value> {
-    items
-        .iter()
-        .filter(|item| !is_ghost_snapshot_message(item))
-        .cloned()
-        .collect()
-}
-
-fn is_ghost_snapshot_message(item: &Value) -> bool {
-    if item.get("type").and_then(Value::as_str) != Some("message") {
-        return false;
-    }
-    if item.get("role").and_then(Value::as_str) != Some("user") {
-        return false;
-    }
-    item.get("content")
-        .and_then(Value::as_array)
-        .and_then(|content| content.first())
-        .and_then(|entry| entry.get("text"))
-        .and_then(Value::as_str)
-        .is_some_and(|text| text.trim_start().starts_with("<ghost_snapshot>"))
-}
-
 fn normalize_line_endings_str(text: &str) -> String {
     if text.contains('\r') {
         text.replace("\r\n", "\n").replace('\r', "\n")
@@ -367,15 +344,13 @@ async fn compact_resume_after_second_compaction_preserves_history() -> Result<()
     let resume_input_array = input_after_resume
         .as_array()
         .expect("input after resume should be an array");
-    let compact_filtered = filter_out_ghost_snapshot_entries(compact_input_array);
-    let resume_filtered = filter_out_ghost_snapshot_entries(resume_input_array);
     assert!(
-        compact_filtered.len() <= resume_filtered.len(),
+        compact_input_array.len() <= resume_input_array.len(),
         "after-resume input should have at least as many items as after-compact"
     );
     assert_eq!(
-        compact_filtered.as_slice(),
-        &resume_filtered[..compact_filtered.len()]
+        compact_input_array,
+        &resume_input_array[..compact_input_array.len()]
     );
     let first_request_user_texts = json_message_input_texts(&requests[0], "user");
     let first_turn_user_index = first_request_user_texts
@@ -475,7 +450,10 @@ async fn snapshot_rollback_past_compaction_replays_append_only_history() -> Resu
     compact_conversation(&base).await;
     user_turn(&base, EDITED_AFTER_COMPACT).await;
 
-    base.submit(Op::ThreadRollback { num_turns: 1 })
+    base.submit(Op::ThreadRollback {
+        num_turns: 1,
+        restore_checkpoint: None,
+    })
         .await
         .expect("submit thread rollback");
     let rollback_event =
@@ -597,7 +575,10 @@ async fn snapshot_rollback_followup_turn_trims_context_updates() -> Result<()> {
     user_turn(&conversation, TURN_TWO_USER).await;
 
     conversation
-        .submit(Op::ThreadRollback { num_turns: 1 })
+        .submit(Op::ThreadRollback {
+            num_turns: 1,
+            restore_checkpoint: None,
+        })
         .await?;
     let rollback_event = wait_for_event(&conversation, |ev| {
         matches!(ev, EventMsg::ThreadRolledBack(_))

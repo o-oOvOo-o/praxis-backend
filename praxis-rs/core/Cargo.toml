@@ -61,6 +61,7 @@ praxis-rmcp-client = { workspace = true }
 praxis-sandboxing = { workspace = true }
 praxis-state = { workspace = true }
 praxis-tools = { workspace = true, default-features = false }
+praxis-workspace-history = { workspace = true }
 praxis-utils-absolute-path = { workspace = true }
 praxis-utils-cache = { workspace = true }
 praxis-utils-image = { workspace = true }

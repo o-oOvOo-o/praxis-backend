@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug, Clone)]
 pub struct WebSocketRequest {
     body: Value,
 }
@@ -131,8 +132,6 @@ impl WebSocketTestServer {
         let _ = self.task.await;
     }
 }
-
-#[derive(Debug, Clone)]
 
 pub async fn start_websocket_server(connections: Vec<Vec<Vec<Value>>>) -> WebSocketTestServer {
     let connections = connections

@@ -248,6 +248,22 @@ fn skips_user_instructions_and_env() {
 }
 
 #[test]
+fn skips_internal_context_user_message() {
+    let item = ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: vec![ContentItem::InputText {
+            text: "<praxis_internal_context source=\"goal\">continue</praxis_internal_context>"
+                .to_string(),
+        }],
+        end_turn: None,
+        phase: None,
+    };
+
+    assert!(parse_turn_item(&item).is_none());
+}
+
+#[test]
 fn parses_hook_prompt_message_as_distinct_turn_item() {
     let item = build_hook_prompt_message(&[HookPromptFragment::from_single_hook(
         "Retry with exactly the phrase meow meow meow.",

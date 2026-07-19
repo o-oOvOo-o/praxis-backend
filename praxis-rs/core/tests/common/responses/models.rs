@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug, Clone)]
 pub struct ModelsMock {
     requests: Arc<Mutex<Vec<wiremock::Request>>>,
 }

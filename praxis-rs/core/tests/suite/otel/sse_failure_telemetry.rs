@@ -11,7 +11,7 @@ async fn process_sse_emits_failed_event_on_parse_error() {
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -55,7 +55,7 @@ async fn process_sse_records_failed_event_when_stream_closes_without_completed()
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -119,7 +119,7 @@ async fn process_sse_failed_event_records_response_error_message() {
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -181,7 +181,7 @@ async fn process_sse_failed_event_logs_parse_error() {
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -230,7 +230,7 @@ async fn process_sse_failed_event_logs_missing_error() {
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -288,7 +288,7 @@ async fn process_sse_failed_event_logs_response_completed_parse_error() {
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)

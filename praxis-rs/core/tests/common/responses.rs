@@ -37,7 +37,6 @@ use wiremock::matchers::path_regex;
 
 use crate::test_praxis::ApplyPatchModelOutput;
 
-#[derive(Debug, Clone)]
 mod events;
 mod models;
 mod mounting;
@@ -47,7 +46,9 @@ mod websocket;
 pub use events::*;
 pub use models::*;
 pub use mounting::*;
-pub use request::{ResponseMock, ResponsesRequest};
+pub use request::ResponseMock;
+pub use request::ResponsesRequest;
+pub(crate) use request::output_value_to_text;
 pub use websocket::*;
 
 use request::decode_body_bytes;

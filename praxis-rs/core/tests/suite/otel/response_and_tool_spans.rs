@@ -35,7 +35,7 @@ async fn handle_responses_span_records_response_kind_and_tool_name() {
         .with_config(|config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -119,7 +119,7 @@ async fn record_responses_sets_span_fields_for_response_events() {
         .with_config(|config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -203,7 +203,7 @@ async fn handle_response_item_records_tool_result_for_custom_tool_call() {
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -276,7 +276,7 @@ async fn handle_response_item_records_tool_result_for_function_call() {
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -359,7 +359,7 @@ async fn handle_response_item_records_tool_result_for_local_shell_missing_ids() 
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
         })
         .build(&server)
@@ -426,7 +426,7 @@ async fn handle_response_item_records_tool_result_for_local_shell_call() {
         .with_config(move |config| {
             config
                 .features
-                .disable(Feature::GhostCommit)
+                .disable(Feature::WorkspaceHistory)
                 .expect("test config should allow feature update");
             config.permissions.approval_policy = Constrained::allow_any(AskForApproval::Never);
         })
