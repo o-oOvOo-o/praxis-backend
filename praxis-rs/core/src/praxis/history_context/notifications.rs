@@ -1,3 +1,3 @@
 mod background;
-mod ghost_snapshot;
+mod workspace_history;
 mod stream_error;

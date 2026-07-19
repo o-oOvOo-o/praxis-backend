@@ -1,42 +1,41 @@
-use crate::config::edit::ConfigEdit;
-use crate::config::edit::ConfigEditsBuilder;
-use crate::config::edit::apply_blocking;
-use crate::config_loader::RequirementSource;
-use crate::plugins::PluginsManager;
-use praxis_config::CONFIG_TOML_FILE;
-use praxis_config::types::AppToolApproval;
-use praxis_config::types::ApprovalsReviewer;
-use praxis_config::types::BundledSkillsConfig;
-use praxis_config::types::FeedbackConfigToml;
-use praxis_config::types::HistoryPersistence;
-use praxis_config::types::McpServerToolConfig;
-use praxis_config::types::McpServerTransportConfig;
-use praxis_config::types::MemoriesConfig;
-use praxis_config::types::MemoriesToml;
-use praxis_config::types::ToolSuggestDiscoverableType;
-use praxis_features::Feature;
-use praxis_features::FeaturesToml;
-use praxis_protocol::permissions::FileSystemAccessMode;
-use praxis_protocol::permissions::FileSystemPath;
-use praxis_protocol::permissions::FileSystemSandboxEntry;
-use praxis_protocol::permissions::FileSystemSandboxPolicy;
-use praxis_protocol::permissions::FileSystemSpecialPath;
-use praxis_protocol::permissions::NetworkSandboxPolicy;
-use tempfile::tempdir;
+pub(super) use crate::config::edit::ConfigEdit;
+pub(super) use crate::config::edit::ConfigEditsBuilder;
+pub(super) use crate::config::edit::apply_blocking;
+pub(super) use crate::config_loader::RequirementSource;
+pub(super) use crate::plugins::PluginsManager;
+pub(super) use praxis_config::CONFIG_TOML_FILE;
+pub(super) use praxis_config::types::AppToolApproval;
+pub(super) use praxis_config::types::ApprovalsReviewer;
+pub(super) use praxis_config::types::BundledSkillsConfig;
+pub(super) use praxis_config::types::FeedbackConfigToml;
+pub(super) use praxis_config::types::HistoryPersistence;
+pub(super) use praxis_config::types::McpServerToolConfig;
+pub(super) use praxis_config::types::McpServerTransportConfig;
+pub(super) use praxis_config::types::MemoriesConfig;
+pub(super) use praxis_config::types::MemoriesToml;
+pub(super) use praxis_config::types::ToolSuggestDiscoverableType;
+pub(super) use praxis_features::Feature;
+pub(super) use praxis_features::FeaturesToml;
+pub(super) use praxis_protocol::permissions::FileSystemAccessMode;
+pub(super) use praxis_protocol::permissions::FileSystemPath;
+pub(super) use praxis_protocol::permissions::FileSystemSandboxEntry;
+pub(super) use praxis_protocol::permissions::FileSystemSandboxPolicy;
+pub(super) use praxis_protocol::permissions::FileSystemSpecialPath;
+pub(super) use praxis_protocol::permissions::NetworkSandboxPolicy;
+pub(super) use tempfile::tempdir;
 
-use super::*;
-use core_test_support::PathBufExt;
-use core_test_support::PathExt;
-use core_test_support::TempDirExt;
-use core_test_support::test_absolute_path;
-use pretty_assertions::assert_eq;
+pub(super) use super::*;
+pub(super) use core_test_support::PathBufExt;
+pub(super) use core_test_support::PathExt;
+pub(super) use core_test_support::TempDirExt;
+pub(super) use core_test_support::test_absolute_path;
 
-use std::collections::BTreeMap;
-use std::collections::HashMap;
+pub(super) use std::collections::BTreeMap;
+pub(super) use std::collections::HashMap;
 
-use std::path::Path;
-use std::time::Duration;
-use tempfile::TempDir;
+pub(super) use std::path::Path;
+pub(super) use std::time::Duration;
+pub(super) use tempfile::TempDir;
 
 fn stdio_mcp(command: &str) -> McpServerConfig {
     McpServerConfig {
@@ -207,12 +206,21 @@ model_verbosity = "high"
     })
 }
 
+#[path = "config_tests/base_toml.rs"]
 mod base_toml;
+#[path = "config_tests/compact_roles_catalog.rs"]
 mod compact_roles_catalog;
+#[path = "config_tests/mcp_runtime.rs"]
 mod mcp_runtime;
+#[path = "config_tests/permissions.rs"]
 mod permissions;
+#[path = "config_tests/precedence.rs"]
 mod precedence;
+#[path = "config_tests/realtime.rs"]
 mod realtime;
+#[path = "config_tests/requirements_async.rs"]
 mod requirements_async;
+#[path = "config_tests/sandbox_workspace_features.rs"]
 mod sandbox_workspace_features;
+#[path = "config_tests/trust_provider_project.rs"]
 mod trust_provider_project;

@@ -112,7 +112,7 @@ impl Session {
             shell_environment_policy: per_turn_config.permissions.shell_environment_policy.clone(),
             tools_config,
             features: per_turn_config.features.clone(),
-            ghost_snapshot: per_turn_config.ghost_snapshot.clone(),
+            workspace_history: per_turn_config.workspace_history.clone(),
             final_output_json_schema: None,
             praxis_self_exe: per_turn_config.praxis_self_exe.clone(),
             praxis_linux_sandbox_exe: per_turn_config.praxis_linux_sandbox_exe.clone(),

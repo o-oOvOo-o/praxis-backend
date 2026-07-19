@@ -67,8 +67,8 @@ impl Stage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Feature {
     // Stable.
-    /// Create a ghost commit at each turn.
-    GhostCommit,
+    /// Capture a local workspace checkpoint at each turn.
+    WorkspaceHistory,
     /// Enable the default shell tool.
     ShellTool,
     /// Enable structured read-only workspace navigation tools.
@@ -375,10 +375,10 @@ pub struct FeatureSpec {
 pub const FEATURES: &[FeatureSpec] = &[
     // Stable features.
     FeatureSpec {
-        id: Feature::GhostCommit,
+        id: Feature::WorkspaceHistory,
         key: "undo",
         stage: Stage::Stable,
-        default_enabled: false,
+        default_enabled: true,
     },
     FeatureSpec {
         id: Feature::ShellTool,

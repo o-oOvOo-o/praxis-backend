@@ -1,5 +1,5 @@
 use super::AgentRoleConfig;
-use super::GhostSnapshotConfig;
+use praxis_workspace_history::WorkspaceHistoryConfig;
 use super::LocalModelHostConfig;
 use super::LocalModelsConfig;
 use super::ManagedFeatures;
@@ -10,7 +10,7 @@ use super::RealtimeConfig;
 use super::TranscriptionConfig;
 use crate::config_loader::ConfigLayerStack;
 use crate::config_loader::ResidencyRequirement;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 use praxis_config::Constrained;
 use praxis_config::types::ApprovalsReviewer;
 use praxis_config::types::History;
@@ -364,8 +364,8 @@ pub struct Config {
     /// Default: `300000` (5 minutes).
     pub background_terminal_max_timeout: u64,
 
-    /// Settings for ghost snapshots (used for undo).
-    pub ghost_snapshot: GhostSnapshotConfig,
+    /// Settings for local workspace history used by undo and message rewind.
+    pub workspace_history: WorkspaceHistoryConfig,
 
     /// Centralized feature flags; source of truth for feature gating.
     pub features: ManagedFeatures,

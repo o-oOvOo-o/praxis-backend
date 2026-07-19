@@ -22,7 +22,7 @@ use serde_json::Value;
 use crate::ModelProviderInfo;
 use crate::compact;
 use crate::config::Config;
-use crate::config::GhostSnapshotConfig;
+use crate::config::WorkspaceHistoryConfig;
 use crate::config::ManagedFeatures;
 use crate::tools::loop_guard::ToolLoopGuardState;
 use crate::turn_metadata::TurnMetadataState;
@@ -77,7 +77,7 @@ pub(crate) struct TurnContext {
     pub(crate) shell_environment_policy: praxis_config::types::ShellEnvironmentPolicy,
     pub(crate) tools_config: ToolsConfig,
     pub(crate) features: ManagedFeatures,
-    pub(crate) ghost_snapshot: GhostSnapshotConfig,
+    pub(crate) workspace_history: WorkspaceHistoryConfig,
     pub(crate) final_output_json_schema: Option<Value>,
     pub(crate) praxis_self_exe: Option<PathBuf>,
     pub(crate) praxis_linux_sandbox_exe: Option<PathBuf>,

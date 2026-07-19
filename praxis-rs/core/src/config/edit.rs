@@ -31,6 +31,8 @@ pub enum ConfigEdit {
         model: Option<String>,
         effort: Option<ReasoningEffort>,
     },
+    /// Update the Plan-mode-specific reasoning preference.
+    SetPlanModeReasoningEffort { effort: Option<ReasoningEffort> },
     /// Update the active (or default) model provider selection.
     SetModelProvider { provider_id: Option<String> },
     /// Add or replace a user-defined model provider.
@@ -332,6 +334,12 @@ impl ConfigDocument {
                 );
                 mutated
             }),
+            ConfigEdit::SetPlanModeReasoningEffort { effort } => {
+                Ok(self.write_profile_value(
+                    &["plan_mode_reasoning_effort"],
+                    effort.as_ref().map(|effort| value(effort.to_string())),
+                ))
+            }
             ConfigEdit::SetModelProvider { provider_id } => Ok(self.write_profile_value(
                 &["model_provider"],
                 provider_id
@@ -839,6 +847,15 @@ impl ConfigEditsBuilder {
             model: model.map(ToOwned::to_owned),
             effort,
         });
+        self
+    }
+
+    pub fn set_plan_mode_reasoning_effort(
+        mut self,
+        effort: Option<ReasoningEffort>,
+    ) -> Self {
+        self.edits
+            .push(ConfigEdit::SetPlanModeReasoningEffort { effort });
         self
     }
 

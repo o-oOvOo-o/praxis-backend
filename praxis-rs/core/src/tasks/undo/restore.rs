@@ -1,46 +1,48 @@
-use praxis_git_utils::GhostCommit;
-use praxis_git_utils::RestoreGhostCommitOptions;
-use praxis_git_utils::restore_ghost_commit_with_options;
+use praxis_protocol::workspace_history::WorkspaceCheckpointRef;
+use praxis_workspace_history::WorkspaceHistoryService;
 use tracing::error;
-use tracing::warn;
 
 use crate::praxis::TurnContext;
 
-pub(super) enum RestoreGhostSnapshotResult {
-    Restored { commit_id: String, short_id: String },
+pub(super) enum RestoreWorkspaceCheckpointResult {
+    Restored { checkpoint_id: String, short_id: String },
     Failed { message: String },
 }
 
-pub(super) async fn restore_ghost_snapshot(
+pub(super) async fn restore_workspace_checkpoint(
     ctx: &TurnContext,
-    ghost_commit: GhostCommit,
-) -> RestoreGhostSnapshotResult {
-    let commit_id = ghost_commit.id().to_string();
-    let repo_path = ctx.cwd.clone();
-    let ghost_snapshot = ctx.ghost_snapshot.clone();
-    let restore_result = tokio::task::spawn_blocking(move || {
-        let options = RestoreGhostCommitOptions::new(&repo_path).ghost_snapshot(ghost_snapshot);
-        restore_ghost_commit_with_options(&options, &ghost_commit)
-    })
-    .await;
+    checkpoint: WorkspaceCheckpointRef,
+) -> RestoreWorkspaceCheckpointResult {
+    let checkpoint_id = checkpoint.id;
+    let result = match WorkspaceHistoryService::open(
+        &ctx.config.praxis_home,
+        ctx.workspace_history.clone(),
+    )
+    .await
+    {
+        Ok(service) => service
+            .restore(
+                checkpoint_id,
+                checkpoint.thread_id.clone(),
+                checkpoint.turn_id.clone(),
+            )
+            .await,
+        Err(error) => Err(error),
+    };
 
-    match restore_result {
-        Ok(Ok(())) => {
-            let short_id: String = commit_id.chars().take(7).collect();
-            RestoreGhostSnapshotResult::Restored {
-                commit_id,
+    match result {
+        Ok(_) => {
+            let checkpoint_id = checkpoint_id.to_string();
+            let short_id = checkpoint_id.chars().take(7).collect();
+            RestoreWorkspaceCheckpointResult::Restored {
+                checkpoint_id,
                 short_id,
             }
         }
-        Ok(Err(err)) => {
-            let message = format!("Failed to restore snapshot {commit_id}: {err}");
-            warn!("{message}");
-            RestoreGhostSnapshotResult::Failed { message }
-        }
-        Err(err) => {
-            let message = format!("Failed to restore snapshot {commit_id}: {err}");
+        Err(error) => {
+            let message = format!("Failed to restore checkpoint {checkpoint_id}: {error}");
             error!("{message}");
-            RestoreGhostSnapshotResult::Failed { message }
+            RestoreWorkspaceCheckpointResult::Failed { message }
         }
     }
 }

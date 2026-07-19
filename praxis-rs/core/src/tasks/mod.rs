@@ -2,7 +2,7 @@ mod abort;
 mod cleanup;
 mod compact;
 mod finish;
-mod ghost_snapshot;
+pub(crate) mod workspace_history;
 mod metrics;
 mod pending_work;
 mod regular;

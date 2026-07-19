@@ -29,3 +29,4 @@ pub mod request_user_input;
 mod token;
 pub mod turn_lifecycle;
 pub mod user_input;
+pub mod workspace_history;

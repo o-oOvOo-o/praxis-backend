@@ -6,9 +6,9 @@ use crate::config_loader::McpServerIdentity;
 use crate::config_loader::McpServerRequirement;
 use crate::config_loader::Sourced;
 use crate::memories::memory_root;
-use crate::model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
-use crate::model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
-use crate::model_provider_info::built_in_model_providers;
+use crate::llm::provider::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
+use crate::llm::provider::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
+use crate::llm::provider::built_in_model_providers;
 use crate::path_utils::normalize_for_native_workdir;
 use crate::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use crate::project_doc::LOCAL_PROJECT_DOC_FILENAME;
@@ -123,7 +123,7 @@ pub use runtime_config::Permissions;
 pub use runtime_types::AgentRoleConfig;
 pub use runtime_types::AgentRoleToml;
 pub use runtime_types::AgentsToml;
-pub use runtime_types::GhostSnapshotToml;
+pub use runtime_types::WorkspaceHistoryToml;
 pub use runtime_types::LocalModelHostConfig;
 pub use runtime_types::LocalModelHostKind;
 pub use runtime_types::LocalModelsConfig;
@@ -167,7 +167,7 @@ pub(crate) use web_search::resolve_web_search_mode_for_turn;
 
 pub use builder::ConfigBuilder;
 pub use config_toml::ConfigToml;
-pub use praxis_git_utils::GhostSnapshotConfig;
+pub use praxis_workspace_history::WorkspaceHistoryConfig;
 
 /// Maximum number of bytes of the documentation that will be embedded. Larger
 /// files are *silently truncated* to this size so we do not take up too much of
@@ -361,6 +361,7 @@ impl Config {
             approvals_reviewer: approvals_reviewer_override,
             sandbox_mode,
             model_provider,
+            model_reasoning_effort: model_reasoning_effort_override,
             service_tier: service_tier_override,
             config_profile: config_profile_key,
             praxis_self_exe,
@@ -672,27 +673,21 @@ impl Config {
             .unwrap_or(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS)
             .max(MIN_EMPTY_YIELD_TIME_MS);
 
-        let ghost_snapshot = {
-            let mut config = GhostSnapshotConfig::default();
-            if let Some(ghost_snapshot) = cfg.ghost_snapshot.as_ref()
-                && let Some(ignore_over_bytes) = ghost_snapshot.ignore_large_untracked_files
-            {
-                config.ignore_large_untracked_files = if ignore_over_bytes > 0 {
-                    Some(ignore_over_bytes)
-                } else {
-                    None
-                };
-            }
-            if let Some(ghost_snapshot) = cfg.ghost_snapshot.as_ref()
-                && let Some(threshold) = ghost_snapshot.ignore_large_untracked_dirs
-            {
-                config.ignore_large_untracked_dirs =
-                    if threshold > 0 { Some(threshold) } else { None };
-            }
-            if let Some(ghost_snapshot) = cfg.ghost_snapshot.as_ref()
-                && let Some(disable_warnings) = ghost_snapshot.disable_warnings
-            {
-                config.disable_warnings = disable_warnings;
+        let workspace_history = {
+            let mut config = WorkspaceHistoryConfig::default();
+            if let Some(settings) = cfg.workspace_history.as_ref() {
+                if let Some(value) = settings.max_store_bytes {
+                    config.max_store_bytes = value;
+                }
+                if let Some(value) = settings.retention_days {
+                    config.retention_days = value;
+                }
+                if let Some(value) = settings.max_file_bytes {
+                    config.max_file_bytes = value;
+                }
+                if let Some(names) = settings.ignored_directory_names.as_ref() {
+                    config.ignored_directory_names = names.iter().cloned().collect();
+                }
             }
             config
         };
@@ -957,8 +952,8 @@ impl Config {
                 .or(show_raw_agent_reasoning)
                 .unwrap_or(false),
             guardian_developer_instructions,
-            model_reasoning_effort: config_profile
-                .model_reasoning_effort
+            model_reasoning_effort: model_reasoning_effort_override
+                .or(config_profile.model_reasoning_effort)
                 .or(cfg.model_reasoning_effort),
             plan_mode_reasoning_effort: config_profile
                 .plan_mode_reasoning_effort
@@ -997,7 +992,7 @@ impl Config {
             web_search_config,
             use_experimental_unified_exec_tool,
             background_terminal_max_timeout,
-            ghost_snapshot,
+            workspace_history,
             features,
             suppress_unstable_features_warning: cfg
                 .suppress_unstable_features_warning

@@ -67,7 +67,7 @@ pub(super) fn build(input: ReviewTurnContextAssemblyInput<'_>) -> Arc<TurnContex
         environment: Arc::clone(&parent_turn_context.environment),
         tools_config,
         features: parent_turn_context.features.clone(),
-        ghost_snapshot: parent_turn_context.ghost_snapshot.clone(),
+        workspace_history: parent_turn_context.workspace_history.clone(),
         current_date: parent_turn_context.current_date.clone(),
         timezone: parent_turn_context.timezone.clone(),
         app_gateway_client_name: parent_turn_context.app_gateway_client_name.clone(),

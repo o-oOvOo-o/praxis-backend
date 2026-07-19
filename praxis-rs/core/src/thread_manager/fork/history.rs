@@ -14,7 +14,7 @@ pub(super) fn fork_initial_history(
         ThreadForkSnapshot::TruncateBeforeNthUserMessage(nth_user_message) => {
             truncate_before_nth_user_message(history, nth_user_message, &snapshot_state)
         }
-        ThreadForkSnapshot::Interrupted => {
+        ThreadForkSnapshot::CurrentPersistedWithClosedTurn => {
             let history = committed_fork_history(history);
             if snapshot_state.ends_mid_turn {
                 append_interrupted_boundary(history, snapshot_state.active_turn_id)

@@ -24,7 +24,7 @@ pub(super) fn spawn_snapshot_timeout_warning(
                     .send_event(
                         &ctx,
                         EventMsg::Warning(WarningEvent {
-                            message: "Repository snapshot is taking longer than expected. Large untracked or ignored files can slow snapshots; consider adding large files or directories to .gitignore or disabling `undo` in your config.".to_string()
+                            message: "Workspace checkpoint capture is taking longer than expected. Large generated directories can be excluded through `workspace_history.ignored_directory_names`.".to_string()
                         }),
                     )
                     .await;

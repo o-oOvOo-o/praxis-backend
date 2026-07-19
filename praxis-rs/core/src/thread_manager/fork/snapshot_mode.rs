@@ -1,6 +1,5 @@
-// TODO(ccunningham): Add an explicit non-interrupting live-turn snapshot once
-// core can represent sampling boundaries directly instead of relying on
-// whichever items happened to be persisted mid-turn.
+// TODO(ccunningham): Add a coherent live-turn sampling snapshot once core can
+// represent sampling boundaries instead of relying on persisted mid-turn items.
 //
 // Two likely future variants:
 // - `TruncateToLastSamplingBoundary` for callers that want a coherent fork from
@@ -19,12 +18,11 @@ pub enum ThreadForkSnapshot {
     /// full committed history unchanged.
     TruncateBeforeNthUserMessage(usize),
 
-    /// Fork the current persisted history as if the source thread had been
-    /// interrupted now.
+    /// Fork the current persisted history and close an incomplete copied turn.
     ///
     /// If the persisted snapshot ends mid-turn, this appends the same
-    /// `<turn_aborted>` marker produced by a real interrupt. If the snapshot is
-    /// already at a turn boundary, this returns the current persisted history
-    /// unchanged.
-    Interrupted,
+    /// `<turn_aborted>` boundary used for interrupted history. The source
+    /// thread remains loaded and continues running. If the snapshot is already
+    /// at a turn boundary, this returns the persisted history unchanged.
+    CurrentPersistedWithClosedTurn,
 }

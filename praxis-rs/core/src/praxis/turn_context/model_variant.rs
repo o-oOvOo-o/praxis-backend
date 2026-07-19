@@ -56,7 +56,7 @@ impl TurnContext {
             shell_environment_policy: self.shell_environment_policy.clone(),
             tools_config,
             features,
-            ghost_snapshot: self.ghost_snapshot.clone(),
+            workspace_history: self.workspace_history.clone(),
             final_output_json_schema: self.final_output_json_schema.clone(),
             praxis_self_exe: self.praxis_self_exe.clone(),
             praxis_linux_sandbox_exe: self.praxis_linux_sandbox_exe.clone(),

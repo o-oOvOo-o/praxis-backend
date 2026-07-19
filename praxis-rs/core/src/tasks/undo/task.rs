@@ -8,9 +8,10 @@ use tracing::info;
 use super::events::send_undo_completed;
 use super::events::send_undo_started;
 use super::events::undo_completed;
-use super::history::find_latest_ghost_snapshot;
-use super::restore::RestoreGhostSnapshotResult;
-use super::restore::restore_ghost_snapshot;
+use super::history::find_latest_workspace_checkpoint;
+use super::history::find_previous_workspace_checkpoint;
+use super::restore::RestoreWorkspaceCheckpointResult;
+use super::restore::restore_workspace_checkpoint;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::state::AgentTaskKind;
@@ -67,28 +68,71 @@ impl AgentTask for UndoTask {
 
         let history = session.clone_history().await;
         let mut items = history.raw_items().to_vec();
-        let Some((idx, ghost_commit)) = find_latest_ghost_snapshot(&items) else {
+        let Some((idx, latest_checkpoint)) = find_latest_workspace_checkpoint(&items) else {
             send_undo_completed(
                 &session,
                 ctx.as_ref(),
                 undo_completed(
                     false,
-                    Some("No ghost snapshot available to undo.".to_string()),
+                    Some("No workspace checkpoint available to undo.".to_string()),
                 ),
             )
             .await;
             return None;
         };
+        let checkpoint = match praxis_workspace_history::WorkspaceHistoryService::open(
+            &ctx.config.praxis_home,
+            ctx.workspace_history.clone(),
+        )
+        .await
+        {
+            Ok(service) => match service.manifest(latest_checkpoint.id).await {
+                Ok(manifest)
+                    if manifest
+                        .operation_id
+                        .as_deref()
+                        .is_some_and(|operation| operation.starts_with("tool:")) =>
+                {
+                    find_previous_workspace_checkpoint(&items, idx)
+                        .unwrap_or_else(|| latest_checkpoint.clone())
+                }
+                Ok(_) => latest_checkpoint.clone(),
+                Err(error) => {
+                    send_undo_completed(
+                        &session,
+                        ctx.as_ref(),
+                        undo_completed(
+                            false,
+                            Some(format!("Failed to inspect workspace checkpoint: {error}")),
+                        ),
+                    )
+                    .await;
+                    return None;
+                }
+            },
+            Err(error) => {
+                send_undo_completed(
+                    &session,
+                    ctx.as_ref(),
+                    undo_completed(
+                        false,
+                        Some(format!("Failed to open workspace history: {error}")),
+                    ),
+                )
+                .await;
+                return None;
+            }
+        };
 
-        match restore_ghost_snapshot(ctx.as_ref(), ghost_commit).await {
-            RestoreGhostSnapshotResult::Restored {
-                commit_id,
+        match restore_workspace_checkpoint(ctx.as_ref(), checkpoint).await {
+            RestoreWorkspaceCheckpointResult::Restored {
+                checkpoint_id,
                 short_id,
             } => {
                 items.remove(idx);
                 let reference_context_item = session.reference_context_item().await;
                 session.replace_history(items, reference_context_item).await;
-                info!(commit_id = commit_id, "Undo restored ghost snapshot");
+                info!(checkpoint_id = checkpoint_id, "Undo restored workspace checkpoint");
                 send_undo_completed(
                     &session,
                     ctx.as_ref(),
@@ -96,7 +140,7 @@ impl AgentTask for UndoTask {
                 )
                 .await;
             }
-            RestoreGhostSnapshotResult::Failed { message } => {
+            RestoreWorkspaceCheckpointResult::Failed { message } => {
                 send_undo_completed(&session, ctx.as_ref(), undo_completed(false, Some(message)))
                     .await;
             }

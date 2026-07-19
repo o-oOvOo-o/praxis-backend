@@ -31,7 +31,7 @@ async fn undo_harness() -> Result<TestPraxisHarness> {
         config.include_apply_patch_tool = true;
         config
             .features
-            .enable(Feature::GhostCommit)
+            .enable(Feature::WorkspaceHistory)
             .expect("test config should allow feature update");
     });
     TestPraxisHarness::with_builder(builder).await
@@ -140,7 +140,7 @@ async fn expect_failed_undo(praxis: &Arc<PraxisThread>) -> Result<UndoCompletedE
     );
     assert_eq!(
         event.message.as_deref(),
-        Some("No ghost snapshot available to undo.")
+        Some("No workspace checkpoint available to undo.")
     );
     Ok(event)
 }
@@ -503,7 +503,7 @@ async fn undo_preserves_unrelated_staged_changes() -> Result<()> {
     git(harness.cwd(), &["add", "user_file.txt"])?;
     git(harness.cwd(), &["commit", "-m", "add user file"])?;
 
-    // AI turn: modifies a DIFFERENT file (creating ghost commit of baseline)
+    // AI turn: modifies a different file after the baseline checkpoint.
     let ai_file = harness.path("ai_file.txt");
     fs::write(&ai_file, "ai content v1\n")?;
     git(harness.cwd(), &["add", "ai_file.txt"])?;

@@ -1,6 +1,6 @@
 use super::AgentsToml;
 use super::ConfigProfile;
-use super::GhostSnapshotToml;
+use super::WorkspaceHistoryToml;
 use super::LocalModelHostConfig;
 use super::LocalModelsConfig;
 use super::PermissionsToml;
@@ -13,7 +13,7 @@ use super::UserSavedConfig;
 use super::model_provider_config::deserialize_model_providers;
 use super::runtime_types::sandbox_settings_from_workspace_write;
 use super::sandbox_projection;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 use praxis_config::Constrained;
 use praxis_config::types::ApprovalsReviewer;
 use praxis_config::types::AppsConfigToml;
@@ -321,9 +321,9 @@ pub struct ConfigToml {
     /// Suppress warnings about unstable (under development) features.
     pub suppress_unstable_features_warning: Option<bool>,
 
-    /// Settings for ghost snapshots (used for undo).
+    /// Settings for local workspace history used by undo and message rewind.
     #[serde(default)]
-    pub ghost_snapshot: Option<GhostSnapshotToml>,
+    pub workspace_history: Option<WorkspaceHistoryToml>,
 
     /// Markers used to detect the project root when searching parent
     /// directories for `.praxis` folders. Defaults to [".git"] when unset.

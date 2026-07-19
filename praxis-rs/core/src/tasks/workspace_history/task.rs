@@ -5,30 +5,30 @@ use praxis_protocol::user_input::UserInput;
 use praxis_utils_readiness::Token;
 use tokio_util::sync::CancellationToken;
 
-use super::capture::run_ghost_snapshot_capture;
+use super::capture::run_workspace_checkpoint_capture;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::state::AgentTaskKind;
 use crate::tasks::AgentTask;
 
-struct GhostSnapshotTask {
+struct WorkspaceCheckpointTask {
     token: Token,
 }
 
-impl GhostSnapshotTask {
+impl WorkspaceCheckpointTask {
     fn new(token: Token) -> Self {
         Self { token }
     }
 }
 
 impl Session {
-    pub(crate) async fn run_ghost_snapshot_task(
+    pub(crate) async fn run_workspace_checkpoint_task(
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         token: Token,
         cancellation_token: CancellationToken,
     ) {
-        Arc::new(GhostSnapshotTask::new(token))
+        Arc::new(WorkspaceCheckpointTask::new(token))
             .run(
                 Arc::clone(self),
                 turn_context,
@@ -40,13 +40,13 @@ impl Session {
 }
 
 #[async_trait]
-impl AgentTask for GhostSnapshotTask {
+impl AgentTask for WorkspaceCheckpointTask {
     fn kind(&self) -> AgentTaskKind {
-        AgentTaskKind::GhostSnapshot
+        AgentTaskKind::WorkspaceCheckpoint
     }
 
     fn span_name(&self) -> &'static str {
-        "agent_task.ghost_snapshot"
+        "agent_task.workspace_checkpoint"
     }
 
     async fn run(
@@ -56,7 +56,7 @@ impl AgentTask for GhostSnapshotTask {
         _input: Vec<UserInput>,
         cancellation_token: CancellationToken,
     ) -> Option<String> {
-        tokio::task::spawn(run_ghost_snapshot_capture(
+        tokio::task::spawn(run_workspace_checkpoint_capture(
             session,
             ctx,
             self.token,

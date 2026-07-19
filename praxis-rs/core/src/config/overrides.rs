@@ -2,6 +2,7 @@ use praxis_config::types::ApprovalsReviewer;
 use praxis_protocol::config_types::Personality;
 use praxis_protocol::config_types::SandboxMode;
 use praxis_protocol::config_types::ServiceTier;
+use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_protocol::protocol::AskForApproval;
 use std::path::PathBuf;
 
@@ -14,6 +15,7 @@ pub struct ConfigOverrides {
     pub approvals_reviewer: Option<ApprovalsReviewer>,
     pub sandbox_mode: Option<SandboxMode>,
     pub model_provider: Option<String>,
+    pub model_reasoning_effort: Option<ReasoningEffort>,
     pub service_tier: Option<Option<ServiceTier>>,
     pub config_profile: Option<String>,
     pub praxis_self_exe: Option<PathBuf>,

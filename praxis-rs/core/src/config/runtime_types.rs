@@ -242,12 +242,11 @@ impl From<ToolsToml> for Tools {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct GhostSnapshotToml {
-    #[serde(alias = "ignore_untracked_files_over_bytes")]
-    pub ignore_large_untracked_files: Option<i64>,
-    #[serde(alias = "large_untracked_dir_warning_threshold")]
-    pub ignore_large_untracked_dirs: Option<i64>,
-    pub disable_warnings: Option<bool>,
+pub struct WorkspaceHistoryToml {
+    pub max_store_bytes: Option<u64>,
+    pub retention_days: Option<u32>,
+    pub max_file_bytes: Option<u64>,
+    pub ignored_directory_names: Option<Vec<String>>,
 }
 
 pub(super) fn sandbox_settings_from_workspace_write(

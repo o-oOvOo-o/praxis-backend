@@ -774,7 +774,7 @@ fn responses_websocket_features_do_not_change_wire_api() -> std::io::Result<()> 
 
         assert_eq!(
             config.model_provider.wire_api,
-            crate::model_provider_info::WireApi::Responses
+            crate::llm::wire::WireApi::Responses
         );
     }
 
