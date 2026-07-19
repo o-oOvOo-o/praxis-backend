@@ -3,6 +3,7 @@ pub(super) mod common;
 pub(super) mod deepseek;
 pub(super) mod gemini;
 pub(super) mod glm;
+pub(super) mod kimi;
 pub(super) mod openai_responses;
 pub(super) mod openrouter;
 pub(crate) mod plugin;

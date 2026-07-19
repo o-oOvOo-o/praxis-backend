@@ -227,8 +227,9 @@ pub(super) fn build_common_request(
     apply_common_reasoning_config(
         &mut request,
         &compat,
+        model_info.slug.as_str(),
         effort.or_else(|| model_info.default_reasoning_level.clone()),
-    );
+    )?;
 
     if let Some(max_tokens_field) = compat.max_tokens_field {
         request.insert(
@@ -273,6 +274,7 @@ pub(super) struct CommonRequestCompat {
 pub(super) enum CommonThinkingRequestStyle {
     ReasoningEffortField,
     OpenRouterReasoningObject,
+    KimiThinkingObject,
     EnableThinkingBool,
     ZaiThinkingObject,
     ChatTemplateKwargs,
@@ -310,6 +312,13 @@ impl CommonThinkingPolicy {
                 response_fields: &["reasoning_content", "reasoning"],
                 complete_on_message_idle: true,
                 complete_on_finish_reason: true,
+            },
+            ModelProviderThinkingFormat::Kimi => Self {
+                request_style: CommonThinkingRequestStyle::KimiThinkingObject,
+                replay_field: Some("reasoning_content"),
+                response_fields: &["reasoning_content", "reasoning"],
+                complete_on_message_idle: false,
+                complete_on_finish_reason: false,
             },
             ModelProviderThinkingFormat::Gemini => Self {
                 request_style: CommonThinkingRequestStyle::ReasoningEffortField,
@@ -415,8 +424,8 @@ impl CommonRequestCompat {
 pub(super) fn infer_common_request_compat(
     base_url: Option<&str>,
     model_slug: &str,
-) -> crate::model_provider_info::ModelProviderCompatInfo {
-    let mut compat = crate::model_provider_info::ModelProviderCompatInfo::default();
+) -> crate::llm::wire::ModelProviderCompatInfo {
+    let mut compat = crate::llm::wire::ModelProviderCompatInfo::default();
     if let Some(base_url) = base_url {
         let lower = base_url.to_ascii_lowercase();
         let is_non_openai = !lower.contains("api.openai.com");
@@ -429,6 +438,9 @@ pub(super) fn infer_common_request_compat(
         }
         if lower.contains("deepseek.com") {
             compat.thinking_format = Some(ModelProviderThinkingFormat::Deepseek);
+        }
+        if lower.contains("api.kimi.com") {
+            compat.thinking_format = Some(ModelProviderThinkingFormat::Kimi);
         }
         if lower.contains("generativelanguage.googleapis.com")
             || lower.contains("aiplatform.googleapis.com")
@@ -456,9 +468,9 @@ pub(super) fn infer_common_request_compat(
 }
 
 pub(super) fn merge_common_request_compat(
-    mut inferred: crate::model_provider_info::ModelProviderCompatInfo,
-    explicit: Option<crate::model_provider_info::ModelProviderCompatInfo>,
-) -> crate::model_provider_info::ModelProviderCompatInfo {
+    mut inferred: crate::llm::wire::ModelProviderCompatInfo,
+    explicit: Option<crate::llm::wire::ModelProviderCompatInfo>,
+) -> crate::llm::wire::ModelProviderCompatInfo {
     let Some(explicit) = explicit else {
         return inferred;
     };
@@ -741,9 +753,37 @@ pub(super) fn flush_common_assistant_message(
     messages: &mut Vec<Value>,
     pending_assistant_message: &mut Option<Value>,
 ) {
-    if let Some(message) = pending_assistant_message.take() {
+    if let Some(message) = pending_assistant_message.take()
+        && !common_assistant_message_is_effectively_empty(&message)
+    {
         messages.push(message);
     }
+}
+
+fn common_assistant_message_is_effectively_empty(message: &Value) -> bool {
+    let has_tool_calls = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .is_some_and(|calls| !calls.is_empty());
+    let has_reasoning = message
+        .get("reasoning_content")
+        .and_then(Value::as_str)
+        .is_some_and(|content| !content.trim().is_empty());
+    let has_content = match message.get("content") {
+        Some(Value::String(content)) => !content.trim().is_empty(),
+        Some(Value::Array(parts)) => parts.iter().any(|part| match part {
+            Value::String(content) => !content.trim().is_empty(),
+            Value::Object(part) if part.get("type").and_then(Value::as_str) == Some("text") => part
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|content| !content.trim().is_empty()),
+            Value::Null => false,
+            _ => true,
+        }),
+        Some(Value::Null) | None => false,
+        Some(_) => true,
+    };
+    !has_tool_calls && !has_reasoning && !has_content
 }
 
 pub(super) fn collect_system_prompt(prompt: &Prompt, items: &[ResponseItem]) -> String {

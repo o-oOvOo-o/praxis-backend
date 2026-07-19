@@ -20,9 +20,9 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 
 fn test_model_client(session_source: SessionSource) -> ModelClient {
-    let provider = crate::model_provider_info::create_oss_provider_with_base_url(
+    let provider = crate::llm::provider::create_oss_provider_with_base_url(
         "https://example.com/v1",
-        crate::model_provider_info::WireApi::Responses,
+        crate::llm::wire::WireApi::Responses,
     );
     ModelClient::new(
         /*auth_manager*/ None,

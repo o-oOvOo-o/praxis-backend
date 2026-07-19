@@ -3,6 +3,7 @@
 pub(crate) mod ids;
 pub(crate) mod internal_plugins;
 pub(crate) mod local_models;
+pub(crate) mod provider;
 pub(crate) mod profiles;
 pub(crate) mod prompts;
 pub(crate) mod registry;

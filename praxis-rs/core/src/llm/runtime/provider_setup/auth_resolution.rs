@@ -12,7 +12,7 @@ use crate::api_bridge::CoreAuthProvider;
 use crate::error::EnvVarError;
 use crate::error::PraxisErr;
 use crate::error::Result;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 
 impl ProviderDecisionCenter {
     pub(crate) async fn resolve(

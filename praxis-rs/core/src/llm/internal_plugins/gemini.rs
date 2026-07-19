@@ -21,7 +21,7 @@ impl LlmPlugin for GeminiLlmPlugin {
         #[cfg(test)]
         registry.add_openai_compat_wire();
         #[cfg(test)]
-        registry.add_profile_provider_extension(profile, "Gemini");
+        registry.add_profile_provider_extension(&profile, "Gemini");
         registry.add_model_catalog(provider_model_catalog(
             "gemini-models",
             "Gemini models",
@@ -30,7 +30,7 @@ impl LlmPlugin for GeminiLlmPlugin {
         ));
         #[cfg(test)]
         registry.add_profile_extension_bundle(
-            profile,
+            &profile,
             ("gemini/prompts", "Gemini prompt layer"),
             ("gemini/tasks", "Gemini task policy"),
             ("gemini/tools", "Gemini tool dialect"),

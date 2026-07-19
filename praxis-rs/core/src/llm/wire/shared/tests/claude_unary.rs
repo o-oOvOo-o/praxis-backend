@@ -73,6 +73,49 @@ async fn claude_unary_sends_expected_headers_and_maps_tool_calls() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn claude_wire_preserves_provider_rate_limit_metadata() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/messages"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("retry-after", "7")
+                .insert_header("x-request-id", "req-kimi")
+                .insert_header("x-trace-id", "trace-kimi")
+                .set_body_json(json!({
+                    "error": {
+                        "type": "rate_limit_error",
+                        "message": "Concurrent request limit reached"
+                    }
+                })),
+        )
+        .mount(&server)
+        .await;
+
+    let err = stream_claude_unary(
+        provider(server.uri()),
+        CoreAuthProvider::for_test_claude_api_key(Some("claude-key")),
+        &claude_provider_info(None),
+        &Prompt::default(),
+        &model_info(),
+        None,
+    )
+    .await
+    .expect_err("429 must surface as a provider rate-limit error");
+
+    let PraxisErr::ProviderRateLimited(rate_limit) = err else {
+        panic!("expected provider rate-limit error, got {err:?}");
+    };
+    assert_eq!(rate_limit.message, "Concurrent request limit reached");
+    assert_eq!(rate_limit.request_id.as_deref(), Some("req-kimi"));
+    assert_eq!(rate_limit.trace_id.as_deref(), Some("trace-kimi"));
+    assert_eq!(
+        rate_limit.retry_after,
+        Some(std::time::Duration::from_secs(7))
+    );
+}
+
 #[test]
 fn claude_function_wrapper_preserves_apply_patch_contract() {
     let tool = tool_spec_to_claude_tool(&praxis_tools::create_apply_patch_freeform_tool())
@@ -152,11 +195,10 @@ fn claude_request_uses_provider_limits_adaptive_effort_and_valid_message_order()
         ],
         ..Prompt::default()
     };
-    let provider_info =
-        claude_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
-            max_tokens: Some(32_768),
-            ..Default::default()
-        }));
+    let provider_info = claude_provider_info(Some(crate::llm::wire::ModelProviderCompatInfo {
+        max_tokens: Some(32_768),
+        ..Default::default()
+    }));
     let mut adaptive_model = model_info_with_slug("claude-sonnet-5");
     adaptive_model.supports_reasoning_summaries = true;
 
@@ -333,7 +375,7 @@ fn claude_api_key_coexists_with_an_explicit_authorization_header() {
         HeaderValue::from_static("Bearer gateway-token"),
     );
 
-    attach_token_if_missing(
+    super::super::transport::attach_token_if_missing(
         &mut headers,
         &CoreAuthProvider::for_test_claude_api_key(Some("claude-key")),
     )

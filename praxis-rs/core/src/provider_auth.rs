@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 use praxis_login::AuthManager;
 
 /// Returns the provider-scoped auth manager when this provider uses command-backed auth.

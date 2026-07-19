@@ -1,13 +1,12 @@
-use super::*;
-use futures::StreamExt;
-use pretty_assertions::assert_eq;
-use wiremock::Mock;
-use wiremock::MockServer;
-use wiremock::ResponseTemplate;
-use wiremock::matchers::body_partial_json;
-use wiremock::matchers::header;
-use wiremock::matchers::method;
-use wiremock::matchers::path;
+pub(super) use super::*;
+pub(super) use futures::StreamExt;
+pub(super) use wiremock::Mock;
+pub(super) use wiremock::MockServer;
+pub(super) use wiremock::ResponseTemplate;
+pub(super) use wiremock::matchers::body_partial_json;
+pub(super) use wiremock::matchers::header;
+pub(super) use wiremock::matchers::method;
+pub(super) use wiremock::matchers::path;
 
 fn model_info() -> ModelInfo {
     serde_json::from_value(json!({
@@ -78,7 +77,7 @@ fn provider(base_url: String) -> Provider {
 }
 
 fn common_provider_info(
-    compat: Option<crate::model_provider_info::ModelProviderCompatInfo>,
+    compat: Option<crate::llm::wire::ModelProviderCompatInfo>,
 ) -> ModelProviderInfo {
     ModelProviderInfo {
         name: "Common Test Provider".to_string(),
@@ -87,7 +86,7 @@ fn common_provider_info(
         env_key_instructions: None,
         experimental_bearer_token: None,
         auth: None,
-        wire_api: crate::model_provider_info::WireApi::OpenAiCompat,
+        wire_api: crate::llm::wire::WireApi::OpenAiCompat,
         compat,
         query_params: None,
         http_headers: None,
@@ -102,11 +101,11 @@ fn common_provider_info(
 }
 
 fn claude_provider_info(
-    compat: Option<crate::model_provider_info::ModelProviderCompatInfo>,
+    compat: Option<crate::llm::wire::ModelProviderCompatInfo>,
 ) -> ModelProviderInfo {
     let mut provider = common_provider_info(compat);
     provider.name = "Claude Test Provider".to_string();
-    provider.wire_api = crate::model_provider_info::WireApi::Claude;
+    provider.wire_api = crate::llm::wire::WireApi::Claude;
     provider
 }
 
@@ -119,12 +118,19 @@ fn gemini_provider_info() -> ModelProviderInfo {
     provider
 }
 
+#[path = "tests/claude_sse.rs"]
 mod claude_sse;
+#[path = "tests/claude_unary.rs"]
 mod claude_unary;
+#[path = "tests/common_request_messages.rs"]
 mod common_request_messages;
+#[path = "tests/common_request_reasoning.rs"]
 mod common_request_reasoning;
+#[path = "tests/common_sse.rs"]
 mod common_sse;
+#[path = "tests/common_unary.rs"]
 mod common_unary;
+#[path = "tests/manual_smoke.rs"]
 mod manual_smoke;
 
 fn sse_data(value: Value) -> String {

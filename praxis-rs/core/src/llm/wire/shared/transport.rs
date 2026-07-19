@@ -159,26 +159,17 @@ pub(super) async fn send_request(
 
     let status = response.status();
     if !status.is_success() {
-        let (response_url, response_headers, body) = match family {
-            RequestFamily::Claude => (
-                None,
-                None,
-                Some(format!(
-                    "Anthropic API request failed with HTTP status {status}"
-                )),
-            ),
-            RequestFamily::Common => {
-                let response_url = response.url().to_string();
-                let response_headers = response.headers().clone();
-                let body = response.text().await.map_err(map_reqwest_error)?;
-                (Some(response_url), Some(response_headers), Some(body))
-            }
+        let response_url = response.url().to_string();
+        let response_headers = response.headers().clone();
+        let body = match family {
+            RequestFamily::Claude => response.text().await.map_err(map_claude_reqwest_error)?,
+            RequestFamily::Common => response.text().await.map_err(map_reqwest_error)?,
         };
         let transport = TransportError::Http {
             status,
-            url: response_url,
-            headers: response_headers,
-            body,
+            url: Some(response_url),
+            headers: Some(response_headers),
+            body: Some(body),
         };
         return Err(map_api_error(ApiError::Transport(transport)));
     }
@@ -321,9 +312,15 @@ pub(super) fn build_common_endpoint_path(api_provider: &Provider) -> &'static st
         .to_ascii_lowercase();
     if base.ends_with("/chat/completions") {
         ""
-    } else if base.ends_with("/v1") {
+    } else if base.rsplit('/').next().is_some_and(is_version_path_segment) {
         "chat/completions"
     } else {
         "v1/chat/completions"
     }
+}
+
+fn is_version_path_segment(segment: &str) -> bool {
+    segment
+        .strip_prefix('v')
+        .is_some_and(|version| !version.is_empty() && version.chars().all(|ch| ch.is_ascii_digit()))
 }

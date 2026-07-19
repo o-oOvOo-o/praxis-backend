@@ -1,10 +1,10 @@
 use super::ConfigToml;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
-use crate::model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
-use crate::model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
-use crate::model_provider_info::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
-use crate::model_provider_info::OLLAMA_OSS_PROVIDER_ID;
+use crate::llm::provider::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
+use crate::llm::provider::LMSTUDIO_OSS_PROVIDER_ID;
+use crate::llm::provider::OLLAMA_CHAT_PROVIDER_REMOVED_ERROR;
+use crate::llm::provider::OLLAMA_OSS_PROVIDER_ID;
 use std::path::Path;
 
 pub fn set_default_oss_provider(praxis_home: &Path, provider: &str) -> std::io::Result<()> {

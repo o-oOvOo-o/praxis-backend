@@ -551,8 +551,9 @@ pub(super) fn common_tool_result_message_from_string(
 pub(super) fn apply_common_reasoning_config(
     request: &mut serde_json::Map<String, Value>,
     compat: &CommonRequestCompat,
+    model: &str,
     effort: Option<ReasoningEffortConfig>,
-) {
+) -> Result<()> {
     let policy = CommonThinkingPolicy::from_format(compat.thinking_format);
     match policy.request_style {
         CommonThinkingRequestStyle::ReasoningEffortField => {
@@ -581,6 +582,9 @@ pub(super) fn apply_common_reasoning_config(
                 );
             }
         }
+        CommonThinkingRequestStyle::KimiThinkingObject => {
+            apply_kimi_common_thinking_config(request, model, effort)?;
+        }
         CommonThinkingRequestStyle::EnableThinkingBool => {
             request.insert(
                 "enable_thinking".to_string(),
@@ -604,6 +608,71 @@ pub(super) fn apply_common_reasoning_config(
             );
         }
     }
+    Ok(())
+}
+
+fn apply_kimi_common_thinking_config(
+    request: &mut serde_json::Map<String, Value>,
+    model: &str,
+    effort: Option<ReasoningEffortConfig>,
+) -> Result<()> {
+    let normalized_model = model.trim().to_ascii_lowercase();
+    if matches!(
+        normalized_model.as_str(),
+        "kimi-for-coding" | "kimi-for-coding-highspeed"
+    ) {
+        if kimi_effort_disables_thinking(effort.as_ref()) {
+            return Err(PraxisErr::InvalidRequest(format!(
+                "Kimi K2.7 model `{model}` requires Thinking ON; disabling thinking would route away from K2.7"
+            )));
+        }
+        request.insert("thinking".to_string(), json!({ "type": "enabled" }));
+        return Ok(());
+    }
+    if !matches!(normalized_model.as_str(), "k3" | "k3[1m]") {
+        return Err(PraxisErr::InvalidRequest(format!(
+            "Kimi provider does not declare thinking semantics for model `{model}`"
+        )));
+    }
+    if kimi_effort_disables_thinking(effort.as_ref()) {
+        request.insert("thinking".to_string(), json!({ "type": "disabled" }));
+        return Ok(());
+    }
+    request.insert(
+        "thinking".to_string(),
+        json!({ "type": "enabled", "effort": kimi_k3_effort_value(effort.as_ref())? }),
+    );
+    Ok(())
+}
+
+fn kimi_k3_effort_value(effort: Option<&ReasoningEffortConfig>) -> Result<&'static str> {
+    match effort {
+        None => Ok("max"),
+        Some(ReasoningEffortConfig::None) => unreachable!("none is handled before mapping"),
+        Some(ReasoningEffortConfig::Minimal | ReasoningEffortConfig::Low) => Ok("low"),
+        Some(ReasoningEffortConfig::Medium | ReasoningEffortConfig::High) => Ok("high"),
+        Some(
+            ReasoningEffortConfig::XHigh
+            | ReasoningEffortConfig::Max
+            | ReasoningEffortConfig::Ultra,
+        ) => Ok("max"),
+        Some(ReasoningEffortConfig::Custom(value)) => {
+            match value.trim().to_ascii_lowercase().as_str() {
+                "minimum" | "minimal" | "light" | "low" => Ok("low"),
+                "medium" | "high" => Ok("high"),
+                "xhigh" | "max" | "ultra" => Ok("max"),
+                "none" => unreachable!("none is handled before K3 effort mapping"),
+                unsupported => Err(PraxisErr::InvalidRequest(format!(
+                    "Kimi K3 effort `{unsupported}` is unsupported; expected low/minimum/light, medium/high, xhigh/max/ultra, or none"
+                ))),
+            }
+        }
+    }
+}
+
+fn kimi_effort_disables_thinking(effort: Option<&ReasoningEffortConfig>) -> bool {
+    matches!(effort, Some(ReasoningEffortConfig::None))
+        || matches!(effort, Some(ReasoningEffortConfig::Custom(value)) if value.trim().eq_ignore_ascii_case("none"))
 }
 
 pub(super) fn map_common_reasoning_effort(

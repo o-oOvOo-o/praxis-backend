@@ -3,6 +3,7 @@ mod common_branches;
 mod deepseek;
 mod gemini;
 mod glm;
+mod kimi;
 mod openai_responses;
 mod qwen;
 #[cfg(test)]
@@ -15,7 +16,7 @@ use crate::llm::ids::WireId;
 use crate::llm::profiles::plugin::FirstPartyModelMatcher;
 use crate::llm::profiles::plugin::FirstPartyProviderMatcher;
 use crate::llm::profiles::plugin::ProfileDescriptor;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 
 #[cfg(test)]
 const OPENAI_COMPAT_WIRE_LABEL: &str = "OpenAI-compatible Chat Completions";
@@ -137,7 +138,7 @@ impl LlmPluginRegistryBuilder {
     }
 
     #[cfg(test)]
-    fn add_profile_provider_extension(&mut self, profile: ProfileDescriptor, label: &'static str) {
+    fn add_profile_provider_extension(&mut self, profile: &ProfileDescriptor, label: &'static str) {
         let id = profile
             .provider_policy
             .and_then(|policy| policy.canonical_provider_id())
@@ -198,7 +199,7 @@ impl LlmPluginRegistryBuilder {
     #[cfg(test)]
     fn add_profile_extension_bundle(
         &mut self,
-        profile: ProfileDescriptor,
+        profile: &ProfileDescriptor,
         prompt: (&'static str, &'static str),
         task: (&'static str, &'static str),
         tool: (&'static str, &'static str),
@@ -368,6 +369,7 @@ pub(crate) fn builtin_registry() -> LlmPluginRegistry {
     builder.add_plugin(deepseek::DeepSeekLlmPlugin);
     builder.add_plugin(gemini::GeminiLlmPlugin);
     builder.add_plugin(glm::GlmLlmPlugin);
+    builder.add_plugin(kimi::KimiLlmPlugin);
     builder.add_plugin(qwen::QwenLlmPlugin);
     builder.build()
 }
@@ -393,6 +395,7 @@ mod tests {
                 "deepseek",
                 "gemini",
                 "glm",
+                "kimi",
                 "qwen"
             ]
         );
@@ -407,6 +410,12 @@ mod tests {
                 .profiles()
                 .iter()
                 .any(|profile| profile.id == BehaviorProfileId::DeepSeek)
+        );
+        assert!(
+            registry
+                .profiles()
+                .iter()
+                .any(|profile| profile.id == BehaviorProfileId::Kimi)
         );
         assert!(
             registry
@@ -496,6 +505,8 @@ mod tests {
         assert!(extension_ids.contains("common/claude/tools"));
         assert!(extension_ids.contains("anthropic-claude-models"));
         assert!(extension_ids.contains("deepseek/smarter"));
+        assert!(extension_ids.contains("kimi-models"));
+        assert!(extension_ids.contains("kimi/prompts"));
         assert!(!extension_ids.contains("praxis/web_search"));
         assert!(!extension_ids.contains("praxis/web_search/obscura"));
         assert!(!extension_ids.contains("deepseek/web_search"));
@@ -509,6 +520,7 @@ mod tests {
         let registry = builtin_registry();
         let openai = ModelProviderInfo::create_openai_provider(None);
         let anthropic = ModelProviderInfo::create_anthropic_provider();
+        let kimi = ModelProviderInfo::create_kimi_provider();
         let deepseek = ModelProviderInfo {
             name: "deepseek".to_string(),
             base_url: Some("https://api.deepseek.com".to_string()),
@@ -516,7 +528,7 @@ mod tests {
             env_key_instructions: None,
             experimental_bearer_token: None,
             auth: None,
-            wire_api: crate::model_provider_info::WireApi::OpenAiCompat,
+            wire_api: crate::llm::wire::WireApi::OpenAiCompat,
             compat: None,
             query_params: None,
             http_headers: None,
@@ -537,7 +549,7 @@ mod tests {
             env_key_instructions: None,
             experimental_bearer_token: None,
             auth: None,
-            wire_api: crate::model_provider_info::WireApi::OpenAiCompat,
+            wire_api: crate::llm::wire::WireApi::OpenAiCompat,
             compat: None,
             query_params: None,
             http_headers: None,
@@ -556,7 +568,7 @@ mod tests {
             env_key_instructions: None,
             experimental_bearer_token: None,
             auth: None,
-            wire_api: crate::model_provider_info::WireApi::OpenAiCompat,
+            wire_api: crate::llm::wire::WireApi::OpenAiCompat,
             compat: None,
             query_params: None,
             http_headers: None,
@@ -575,7 +587,7 @@ mod tests {
             env_key_instructions: None,
             experimental_bearer_token: None,
             auth: None,
-            wire_api: crate::model_provider_info::WireApi::OpenAiCompat,
+            wire_api: crate::llm::wire::WireApi::OpenAiCompat,
             compat: None,
             query_params: None,
             http_headers: None,
@@ -611,6 +623,18 @@ mod tests {
             "anthropic",
             &anthropic,
             "gpt-5.2-codex"
+        ));
+        assert!(crate::llm::registry::provider_accepts_model_from_catalogs(
+            registry.model_catalogs(),
+            "kimi",
+            &kimi,
+            "k3[1m]"
+        ));
+        assert!(!crate::llm::registry::provider_accepts_model_from_catalogs(
+            registry.model_catalogs(),
+            "kimi",
+            &kimi,
+            "claude-sonnet-5"
         ));
         assert!(crate::llm::registry::provider_accepts_model_from_catalogs(
             registry.model_catalogs(),
@@ -677,6 +701,12 @@ mod tests {
             "custom",
             &custom,
             "claude-sonnet-4-6"
+        ));
+        assert!(!crate::llm::registry::provider_accepts_model_from_catalogs(
+            registry.model_catalogs(),
+            "custom",
+            &custom,
+            "k3[1m]"
         ));
     }
 

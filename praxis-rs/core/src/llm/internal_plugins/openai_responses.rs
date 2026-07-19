@@ -26,7 +26,7 @@ impl LlmPlugin for OpenAiResponsesLlmPlugin {
         #[cfg(test)]
         registry.add_wire_descriptor(WireId::Responses, "OpenAI Responses");
         #[cfg(test)]
-        registry.add_profile_provider_extension(profile, "OpenAI");
+        registry.add_profile_provider_extension(&profile, "OpenAI");
         registry.add_model_catalog(exclusive_model_catalog(
             "openai-gpt",
             "OpenAI GPT models",
@@ -35,7 +35,7 @@ impl LlmPlugin for OpenAiResponsesLlmPlugin {
         ));
         #[cfg(test)]
         registry.add_profile_extension_bundle(
-            profile,
+            &profile,
             ("openai_responses/prompts", "OpenAI Responses prompt layer"),
             ("openai_responses/tasks", "OpenAI Responses task policy"),
             ("openai_responses/tools", "OpenAI Responses tool dialect"),

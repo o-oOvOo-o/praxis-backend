@@ -11,7 +11,7 @@ use crate::llm::ids::BehaviorProfileId;
 use crate::llm::ids::ProductProfileId;
 use crate::llm::profiles::plugin::ProfileDescriptor;
 use crate::llm::prompts::LlmPromptPurpose;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 
 pub(super) fn resolve_profile_prompt(
     plugin_manifests: &[PluginLlmManifest],

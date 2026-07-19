@@ -15,14 +15,18 @@ use std::fmt;
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
+use crate::error::ContextOverflowError;
 use crate::error::PraxisErr;
+use crate::error::ProviderRateLimitError;
 use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
 use crate::error::UsageLimitReachedError;
 
 pub(crate) fn map_api_error(err: ApiError) -> PraxisErr {
     match err {
-        ApiError::ContextWindowExceeded => PraxisErr::ContextWindowExceeded,
+        ApiError::ContextWindowExceeded => {
+            PraxisErr::ContextWindowExceeded(ContextOverflowError::unknown())
+        }
         ApiError::QuotaExceeded => PraxisErr::QuotaExceeded,
         ApiError::UsageNotIncluded => PraxisErr::UsageNotIncluded,
         ApiError::Retryable { message, delay } => PraxisErr::Stream(message, delay),
@@ -60,8 +64,21 @@ pub(crate) fn map_api_error(err: ApiError) -> PraxisErr {
                     return PraxisErr::ServerOverloaded;
                 }
 
-                if status == http::StatusCode::BAD_REQUEST {
-                    if body_text
+                if matches!(
+                    status,
+                    http::StatusCode::BAD_REQUEST | http::StatusCode::PAYLOAD_TOO_LARGE
+                ) {
+                    if let Some(failure) =
+                        crate::provider_failure::classify_http_failure(status, &body_text)
+                    {
+                        PraxisErr::ContextWindowExceeded(ContextOverflowError {
+                            status: failure.status,
+                            message: failure.message,
+                            provider_code: failure.provider_code,
+                            context_limit: failure.context_limit,
+                            requested_tokens: failure.requested_tokens,
+                        })
+                    } else if body_text
                         .contains("The image data you provided does not represent a valid image")
                     {
                         PraxisErr::InvalidImageRequest()
@@ -93,9 +110,12 @@ pub(crate) fn map_api_error(err: ApiError) -> PraxisErr {
                         }
                     }
 
-                    PraxisErr::RetryLimit(RetryLimitReachedError {
+                    PraxisErr::ProviderRateLimited(ProviderRateLimitError {
                         status,
+                        message: extract_provider_error_message(&body_text),
                         request_id: extract_request_tracking_id(headers.as_ref()),
+                        trace_id: extract_header(headers.as_ref(), X_TRACE_ID_HEADER),
+                        retry_after: parse_retry_after(headers.as_ref()),
                     })
                 } else {
                     PraxisErr::UnexpectedStatus(UnexpectedResponseError {
@@ -131,6 +151,8 @@ const OAI_REQUEST_ID_HEADER: &str = "x-oai-request-id";
 const CF_RAY_HEADER: &str = "cf-ray";
 const X_OPENAI_AUTHORIZATION_ERROR_HEADER: &str = "x-openai-authorization-error";
 const X_ERROR_JSON_HEADER: &str = "x-error-json";
+const X_TRACE_ID_HEADER: &str = "x-trace-id";
+const RETRY_AFTER_HEADER: &str = "retry-after";
 
 #[cfg(test)]
 #[path = "api_bridge_tests.rs"]
@@ -151,6 +173,42 @@ fn extract_header(headers: Option<&HeaderMap>, name: &str) -> Option<String> {
             .and_then(|value| value.to_str().ok())
             .map(str::to_string)
     })
+}
+
+fn parse_retry_after(headers: Option<&HeaderMap>) -> Option<std::time::Duration> {
+    let raw = extract_header(headers, RETRY_AFTER_HEADER)?;
+    if let Ok(seconds) = raw.trim().parse::<u64>() {
+        return Some(std::time::Duration::from_secs(seconds));
+    }
+
+    let deadline = DateTime::parse_from_rfc2822(raw.trim())
+        .ok()?
+        .with_timezone(&Utc);
+    let delay = deadline.signed_duration_since(Utc::now()).to_std().ok()?;
+    (!delay.is_zero()).then_some(delay)
+}
+
+fn extract_provider_error_message(body: &str) -> String {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .or_else(|| value.get("message"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|message| !message.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| {
+            let trimmed = body.trim();
+            if trimmed.is_empty() {
+                "Too many requests".to_string()
+            } else {
+                trimmed.to_string()
+            }
+        })
 }
 
 fn extract_x_error_json_code(headers: Option<&HeaderMap>) -> Option<String> {
@@ -228,7 +286,7 @@ impl CoreAuthProvider {
 
     pub(crate) fn from_provider_api_key(
         api_key: praxis_login::ProviderApiKey,
-        wire_api: crate::model_provider_info::WireApi,
+        wire_api: crate::llm::wire::WireApi,
     ) -> Self {
         Self {
             token: Some(Arc::new(CoreAuthSecret::ProviderApiKey(api_key))),
@@ -278,16 +336,16 @@ impl CoreAuthProvider {
         token.map_or_else(Self::default, |token| {
             let api_key = praxis_login::ProviderApiKey::new(token.to_string())
                 .expect("test Claude API key must be valid");
-            Self::from_provider_api_key(api_key, crate::model_provider_info::WireApi::Claude)
+            Self::from_provider_api_key(api_key, crate::llm::wire::WireApi::Claude)
         })
     }
 }
 
-fn auth_scheme_for_wire(wire_api: crate::model_provider_info::WireApi) -> ApiAuthScheme {
+fn auth_scheme_for_wire(wire_api: crate::llm::wire::WireApi) -> ApiAuthScheme {
     match wire_api {
-        crate::model_provider_info::WireApi::Claude => ApiAuthScheme::XApiKey,
-        crate::model_provider_info::WireApi::Responses
-        | crate::model_provider_info::WireApi::OpenAiCompat => ApiAuthScheme::Bearer,
+        crate::llm::wire::WireApi::Claude => ApiAuthScheme::XApiKey,
+        crate::llm::wire::WireApi::Responses
+        | crate::llm::wire::WireApi::OpenAiCompat => ApiAuthScheme::Bearer,
     }
 }
 

@@ -161,6 +161,31 @@ fn anthropic_catalog_uses_current_messages_api_capabilities() {
 }
 
 #[test]
+fn kimi_catalog_declares_tier_windows_and_safe_effort_choices() {
+    let models = kimi_model_infos();
+    let k3_1m = models
+        .iter()
+        .find(|model| model.slug == "k3[1m]")
+        .expect("K3 1M catalog entry");
+    assert_eq!(k3_1m.context_window, Some(1_048_576));
+    assert_eq!(k3_1m.auto_compact_token_limit(), Some(943_718));
+    assert_eq!(k3_1m.default_reasoning_level, Some(ReasoningEffort::Max));
+    assert_eq!(k3_1m.supported_reasoning_levels.len(), 1);
+    assert!(k3_1m.supports_reasoning_effort(&ReasoningEffort::Max));
+
+    let k2 = models
+        .iter()
+        .find(|model| model.slug == "kimi-for-coding")
+        .expect("K2.7 Code catalog entry");
+    assert_eq!(k2.context_window, Some(262_144));
+    assert_eq!(k2.auto_compact_token_limit(), Some(235_929));
+    assert_eq!(
+        k2.supported_reasoning_levels[0].effective_display_name(),
+        "Thinking ON"
+    );
+}
+
+#[test]
 fn known_gpt56_capability_overlay_restores_ultra_reasoning() {
     let mut remote_model = model_info_from_slug("gpt-5.6-sol");
     remote_model.supported_reasoning_levels = vec![ReasoningEffortPreset {

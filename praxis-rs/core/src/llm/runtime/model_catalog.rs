@@ -19,7 +19,7 @@ use praxis_protocol::openai_models::provider_neutral_reasoning_levels;
 use super::matching::plugin_model_catalog_matches;
 use super::normalization::normalize_non_empty_string;
 use crate::config::Config;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 
 pub(super) fn model_infos_for_provider(
     plugin_manifests: &[PluginLlmManifest],

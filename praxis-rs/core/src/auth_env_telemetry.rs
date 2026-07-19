@@ -1,6 +1,6 @@
 use praxis_otel::AuthEnvTelemetryMetadata;
 
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 use praxis_login::OPENAI_API_KEY_ENV_VAR;
 use praxis_login::REFRESH_TOKEN_URL_OVERRIDE_ENV_VAR;
 use praxis_login::read_praxis_api_key_from_env;
@@ -65,7 +65,7 @@ mod tests {
             env_key_instructions: None,
             experimental_bearer_token: None,
             auth: None,
-            wire_api: crate::model_provider_info::WireApi::Responses,
+            wire_api: crate::llm::wire::WireApi::Responses,
             compat: None,
             query_params: None,
             http_headers: None,

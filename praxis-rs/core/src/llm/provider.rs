@@ -13,6 +13,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::time::Duration;
 
+use crate::llm::wire::ModelProviderCompatInfo;
+use crate::llm::wire::ModelProviderMaxTokensField;
+use crate::llm::wire::ModelProviderThinkingFormat;
+use crate::llm::wire::WireApi;
+
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = 300_000;
 const DEFAULT_STREAM_MAX_RETRIES: u64 = 5;
 const DEFAULT_REQUEST_MAX_RETRIES: u64 = 4;
@@ -29,7 +34,10 @@ pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
 pub const ANTHROPIC_API_KEY_ENV_VAR: &str = "ANTHROPIC_API_KEY";
 pub const ANTHROPIC_API_BASE_URL: &str = "https://api.anthropic.com";
 pub const ANTHROPIC_API_VERSION: &str = "2023-06-01";
-const CHAT_WIRE_API_REMOVED_ERROR: &str = "`wire_api = \"chat\"` is no longer supported.\nHow to fix: set `wire_api = \"responses\"` in your provider config.";
+const KIMI_PROVIDER_NAME: &str = "Kimi Code";
+pub const KIMI_PROVIDER_ID: &str = "kimi";
+pub const KIMI_API_KEY_ENV_VAR: &str = "KIMI_API_KEY";
+pub const KIMI_API_BASE_URL: &str = "https://api.kimi.com/coding/v1";
 pub(crate) const LEGACY_OLLAMA_CHAT_PROVIDER_ID: &str = "ollama-chat";
 pub(crate) const OLLAMA_CHAT_PROVIDER_REMOVED_ERROR: &str = "`ollama-chat` is no longer supported.\nHow to fix: replace `ollama-chat` with `ollama` in `model_provider`, `oss_provider`, or `--local-provider`.";
 
@@ -66,117 +74,6 @@ pub fn provider_accepts_known_first_party_model(
     model: &str,
 ) -> bool {
     provider_accepts_registered_model_catalog(provider_id, provider, model)
-}
-
-/// Wire protocol that the provider speaks.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum WireApi {
-    /// The Responses API exposed by OpenAI at `/v1/responses`.
-    #[default]
-    Responses,
-    /// Anthropic/Claude-style messages API.
-    Claude,
-    /// Generic OpenAI-compatible chat/completions-style API.
-    #[serde(rename = "openai_compat", alias = "common")]
-    OpenAiCompat,
-}
-
-impl fmt::Display for WireApi {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let value = match self {
-            Self::Responses => "responses",
-            Self::Claude => "claude",
-            Self::OpenAiCompat => "openai_compat",
-        };
-        f.write_str(value)
-    }
-}
-
-impl<'de> Deserialize<'de> for WireApi {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        match value.as_str() {
-            "responses" => Ok(Self::Responses),
-            "claude" => Ok(Self::Claude),
-            "openai_compat" | "common" => Ok(Self::OpenAiCompat),
-            "chat" => Err(serde::de::Error::custom(CHAT_WIRE_API_REMOVED_ERROR)),
-            _ => Err(serde::de::Error::unknown_variant(
-                &value,
-                &["responses", "claude", "openai_compat"],
-            )),
-        }
-    }
-}
-
-/// Provider-specific compatibility shims for non-standard implementations that
-/// share a broader wire API family.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct ModelProviderCompatInfo {
-    /// Whether developer-role messages can be sent distinctly instead of being
-    /// folded into a system prompt.
-    pub supports_developer_role: Option<bool>,
-
-    /// Whether the provider accepts explicit reasoning effort controls.
-    pub supports_reasoning_effort: Option<bool>,
-
-    /// Optional mapping from Praxis effort labels to provider-specific values.
-    pub reasoning_effort_map: Option<ModelProviderReasoningEffortMap>,
-
-    /// Whether the provider accepts the `parallel_tool_calls` request field.
-    pub supports_parallel_tool_calls: Option<bool>,
-
-    /// Which field name the provider expects for output token limits.
-    pub max_tokens_field: Option<ModelProviderMaxTokensField>,
-
-    /// Optional output token cap to use with `max_tokens_field`.
-    pub max_tokens: Option<i64>,
-
-    /// Whether tool-result messages must include the tool name.
-    pub requires_tool_result_name: Option<bool>,
-
-    /// Whether an assistant bridge message is required before a user message
-    /// immediately following tool results.
-    pub requires_assistant_after_tool_result: Option<bool>,
-
-    /// Optional provider-specific reasoning/thinking payload style.
-    pub thinking_format: Option<ModelProviderThinkingFormat>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-pub struct ModelProviderReasoningEffortMap {
-    pub minimal: Option<String>,
-    pub low: Option<String>,
-    pub medium: Option<String>,
-    pub high: Option<String>,
-    pub xhigh: Option<String>,
-    pub max: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelProviderMaxTokensField {
-    MaxCompletionTokens,
-    MaxTokens,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelProviderThinkingFormat {
-    Openai,
-    Openrouter,
-    Deepseek,
-    Gemini,
-    Zai,
-    Qwen,
-    QwenChatTemplate,
-    #[serde(alias = "llama_cpp_chat_template")]
-    ChatTemplateKwargs,
 }
 
 /// Serializable representation of a provider definition.
@@ -451,6 +348,38 @@ impl ModelProviderInfo {
         }
     }
 
+    pub fn create_kimi_provider() -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: KIMI_PROVIDER_NAME.into(),
+            base_url: Some(KIMI_API_BASE_URL.into()),
+            env_key: Some(KIMI_API_KEY_ENV_VAR.into()),
+            env_key_instructions: Some(
+                "Enter the Kimi Code API key when Praxis prompts for provider authentication, or set KIMI_API_KEY."
+                    .into(),
+            ),
+            experimental_bearer_token: None,
+            auth: None,
+            wire_api: WireApi::OpenAiCompat,
+            compat: Some(ModelProviderCompatInfo {
+                supports_reasoning_effort: Some(true),
+                supports_parallel_tool_calls: Some(true),
+                max_tokens_field: Some(ModelProviderMaxTokensField::MaxCompletionTokens),
+                max_tokens: Some(64 * 1024),
+                thinking_format: Some(ModelProviderThinkingFormat::Kimi),
+                ..Default::default()
+            }),
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: Some(9),
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        }
+    }
+
     pub fn is_openai(&self) -> bool {
         self.name == OPENAI_PROVIDER_NAME
     }
@@ -459,6 +388,12 @@ impl ModelProviderInfo {
         self.name == ANTHROPIC_PROVIDER_NAME
             && self.wire_api == WireApi::Claude
             && self.base_url.as_deref() == Some(ANTHROPIC_API_BASE_URL)
+    }
+
+    pub fn is_kimi(&self) -> bool {
+        self.name == KIMI_PROVIDER_NAME
+            && self.wire_api == WireApi::OpenAiCompat
+            && self.base_url.as_deref() == Some(KIMI_API_BASE_URL)
     }
 
     pub(crate) fn uses_managed_openai_auth(&self) -> bool {
@@ -491,10 +426,12 @@ pub fn built_in_model_providers(
     use ModelProviderInfo as P;
     let openai_provider = P::create_openai_provider(openai_base_url);
     let anthropic_provider = P::create_anthropic_provider();
+    let kimi_provider = P::create_kimi_provider();
 
     [
         (OPENAI_PROVIDER_ID, openai_provider),
         (ANTHROPIC_PROVIDER_ID, anthropic_provider),
+        (KIMI_PROVIDER_ID, kimi_provider),
         (
             OLLAMA_OSS_PROVIDER_ID,
             create_oss_provider(DEFAULT_OLLAMA_PORT, WireApi::Responses),
@@ -579,5 +516,5 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
 }
 
 #[cfg(test)]
-#[path = "model_provider_info_tests.rs"]
+#[path = "provider_tests.rs"]
 mod tests;

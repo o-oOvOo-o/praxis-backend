@@ -2,7 +2,7 @@ use crate::llm::ids::OPENAI_RESPONSES_PROFILE_ID;
 use crate::llm::profiles::plugin::ProfileAutoTitleModel;
 use crate::llm::profiles::plugin::ProfileMatchContext;
 use crate::llm::registry::LlmProfileRegistry;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ReasoningEffort;
 
@@ -68,7 +68,7 @@ pub(crate) fn select_auto_title_model(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_provider_info::WireApi;
+    use crate::llm::wire::WireApi;
 
     fn provider(id: &str, base_url: &str, wire_api: WireApi) -> (String, ModelProviderInfo) {
         (

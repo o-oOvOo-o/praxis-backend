@@ -156,6 +156,93 @@ pub(crate) fn anthropic_model_infos() -> Vec<ModelInfo> {
     ]
 }
 
+pub(crate) fn kimi_model_infos() -> Vec<ModelInfo> {
+    vec![
+        kimi_model_info(
+            "k3[1m]",
+            "Kimi K3 1M",
+            "Kimi's flagship coding, 3D, game-development, and knowledge model. Requires Allegretto or higher; switching models starts a new prompt-cache boundary.",
+            1_048_576,
+            true,
+            0,
+        ),
+        kimi_model_info(
+            "k3",
+            "Kimi K3 256K",
+            "Kimi K3 for Moderato and higher tiers with a 256K context window; switching models starts a new prompt-cache boundary.",
+            262_144,
+            true,
+            1,
+        ),
+        kimi_model_info(
+            "kimi-for-coding",
+            "Kimi K2.7 Code",
+            "Stable long-context coding model available to all Kimi Code members. Praxis keeps Thinking ON so requests stay on K2.7.",
+            262_144,
+            false,
+            2,
+        ),
+        kimi_model_info(
+            "kimi-for-coding-highspeed",
+            "Kimi K2.7 Code Highspeed",
+            "Six-times-speed K2.7 Code route with three-times quota consumption. Requires Allegretto or higher; Praxis keeps Thinking ON.",
+            262_144,
+            false,
+            3,
+        ),
+    ]
+}
+
+fn kimi_model_info(
+    slug: &str,
+    display_name: &str,
+    description: &str,
+    context_window: i64,
+    exposes_effort: bool,
+    priority: i32,
+) -> ModelInfo {
+    let effort_description = if exposes_effort {
+        "Use Kimi K3's maximum supported reasoning effort."
+    } else {
+        "Keep Thinking ON to use Kimi K2.7 Code."
+    };
+    ModelInfo {
+        slug: slug.into(),
+        display_name: display_name.into(),
+        description: Some(description.into()),
+        default_reasoning_level: Some(ReasoningEffort::Max),
+        supported_reasoning_levels: vec![
+            ReasoningEffortPreset::new(ReasoningEffort::Max, effort_description)
+                .with_display_name(if exposes_effort { "max" } else { "Thinking ON" }),
+        ],
+        shell_type: ConfigShellToolType::Default,
+        visibility: ModelVisibility::List,
+        supported_in_api: true,
+        priority,
+        availability_nux: None,
+        upgrade: None,
+        base_instructions: BASE_INSTRUCTIONS.into(),
+        model_messages: None,
+        supports_reasoning_summaries: true,
+        default_reasoning_summary: ReasoningSummary::Auto,
+        support_verbosity: false,
+        default_verbosity: None,
+        apply_patch_tool_type: None,
+        web_search_tool_type: WebSearchToolType::Text,
+        truncation_policy: TruncationPolicyConfig::bytes(10_000),
+        supports_parallel_tool_calls: true,
+        supports_image_detail_original: false,
+        context_window: Some(context_window),
+        auto_compact_token_limit: Some(context_window * 9 / 10),
+        effective_context_window_percent: 95,
+        experimental_supported_tools: Vec::new(),
+        input_modalities: default_input_modalities(),
+        used_fallback_model_metadata: false,
+        supports_search_tool: false,
+        multi_agent_version: None,
+    }
+}
+
 fn anthropic_model_info(
     slug: &str,
     display_name: &str,

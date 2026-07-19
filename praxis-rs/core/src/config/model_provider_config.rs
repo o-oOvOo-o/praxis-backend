@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
-use crate::model_provider_info::ANTHROPIC_PROVIDER_ID;
-use crate::model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
-use crate::model_provider_info::ModelProviderInfo;
-use crate::model_provider_info::OLLAMA_OSS_PROVIDER_ID;
-use crate::model_provider_info::OPENAI_PROVIDER_ID;
+use crate::llm::provider::ANTHROPIC_PROVIDER_ID;
+use crate::llm::provider::LMSTUDIO_OSS_PROVIDER_ID;
+use crate::llm::provider::KIMI_PROVIDER_ID;
+use crate::llm::provider::ModelProviderInfo;
+use crate::llm::provider::OLLAMA_OSS_PROVIDER_ID;
+use crate::llm::provider::OPENAI_PROVIDER_ID;
 use serde::Deserialize;
 
-const RESERVED_MODEL_PROVIDER_IDS: [&str; 4] = [
+const RESERVED_MODEL_PROVIDER_IDS: [&str; 5] = [
     OPENAI_PROVIDER_ID,
     ANTHROPIC_PROVIDER_ID,
+    KIMI_PROVIDER_ID,
     OLLAMA_OSS_PROVIDER_ID,
     LMSTUDIO_OSS_PROVIDER_ID,
 ];

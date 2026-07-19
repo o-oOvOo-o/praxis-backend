@@ -21,7 +21,7 @@ impl LlmPlugin for QwenLlmPlugin {
         #[cfg(test)]
         registry.add_openai_compat_wire();
         #[cfg(test)]
-        registry.add_profile_provider_extension(profile, "Qwen");
+        registry.add_profile_provider_extension(&profile, "Qwen");
         registry.add_model_catalog(provider_model_catalog(
             "qwen-models",
             "Qwen models",
@@ -30,7 +30,7 @@ impl LlmPlugin for QwenLlmPlugin {
         ));
         #[cfg(test)]
         registry.add_profile_extension_bundle(
-            profile,
+            &profile,
             ("qwen/prompts", "Qwen prompt layer"),
             ("qwen/tasks", "Qwen task policy"),
             ("qwen/tools", "Qwen tool dialect"),

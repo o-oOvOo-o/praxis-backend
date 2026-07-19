@@ -1,6 +1,109 @@
 use super::*;
 
 #[test]
+fn kimi_k3_uses_native_thinking_object_and_max_completion_tokens() {
+    let provider = crate::llm::provider::ModelProviderInfo::create_kimi_provider();
+    let model = model_info_with_slug("k3[1m]");
+
+    let default_request = build_common_request(&Prompt::default(), &model, &provider, None, false)
+        .expect("Kimi K3 default request");
+    assert_eq!(
+        default_request["thinking"],
+        json!({ "type": "enabled", "effort": "max" })
+    );
+    assert_eq!(default_request["max_completion_tokens"], 64 * 1024);
+    assert!(default_request.get("output_config").is_none());
+
+    let medium_request = build_common_request(
+        &Prompt::default(),
+        &model,
+        &provider,
+        Some(ReasoningEffortConfig::Medium),
+        false,
+    )
+    .expect("Kimi K3 medium request");
+    assert_eq!(
+        medium_request["thinking"],
+        json!({ "type": "enabled", "effort": "high" })
+    );
+}
+
+#[test]
+fn kimi_k27_forces_native_thinking_without_effort() {
+    let provider = crate::llm::provider::ModelProviderInfo::create_kimi_provider();
+    let model = model_info_with_slug("kimi-for-coding");
+
+    let request = build_common_request(&Prompt::default(), &model, &provider, None, false)
+        .expect("Kimi K2.7 request");
+    assert_eq!(request["thinking"], json!({ "type": "enabled" }));
+
+    let error = build_common_request(
+        &Prompt::default(),
+        &model,
+        &provider,
+        Some(ReasoningEffortConfig::None),
+        false,
+    )
+    .expect_err("Kimi K2.7 must keep Thinking ON");
+    assert!(error.to_string().contains("requires Thinking ON"));
+}
+
+#[test]
+fn kimi_common_projection_drops_legacy_empty_claude_thinking_and_empty_assistant() {
+    let provider = crate::llm::provider::ModelProviderInfo::create_kimi_provider();
+    let prompt = Prompt {
+        input: vec![
+            ResponseItem::Reasoning {
+                id: "legacy-thinking".to_string(),
+                summary: Vec::new(),
+                content: None,
+                encrypted_content: Some(
+                    "praxis:claude-thinking:v1:{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"opaque\"}"
+                        .to_string(),
+                ),
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "assistant".to_string(),
+                content: vec![ContentItem::OutputText {
+                    text: "   ".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+            ResponseItem::Message {
+                id: None,
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "continue".to_string(),
+                }],
+                end_turn: None,
+                phase: None,
+            },
+        ],
+        ..Prompt::default()
+    };
+
+    let request = build_common_request(
+        &prompt,
+        &model_info_with_slug("k3[1m]"),
+        &provider,
+        None,
+        false,
+    )
+    .expect("legacy Kimi history should project cleanly");
+    let messages = request["messages"].as_array().expect("messages array");
+    assert!(!messages.iter().any(|message| {
+        message["role"] == "assistant"
+            && message
+                .get("content")
+                .and_then(Value::as_str)
+                .is_some_and(|content| content.trim().is_empty())
+            && message.get("tool_calls").is_none()
+    }));
+}
+
+#[test]
 fn common_request_does_not_replay_deepseek_reasoning_content() {
     let prompt = Prompt {
         input: vec![
@@ -137,11 +240,10 @@ fn common_request_can_omit_parallel_tool_calls_via_provider_compat() {
         parallel_tool_calls: true,
         ..Prompt::default()
     };
-    let provider =
-        common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
-            supports_parallel_tool_calls: Some(false),
-            ..Default::default()
-        }));
+    let provider = common_provider_info(Some(crate::llm::wire::ModelProviderCompatInfo {
+        supports_parallel_tool_calls: Some(false),
+        ..Default::default()
+    }));
 
     let request = build_common_request(&prompt, &model_info(), &provider, None, true)
         .expect("common request should build");
@@ -187,11 +289,10 @@ fn common_request_can_preserve_developer_role_messages_when_supported() {
         ],
         ..Prompt::default()
     };
-    let provider =
-        common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
-            supports_developer_role: Some(true),
-            ..Default::default()
-        }));
+    let provider = common_provider_info(Some(crate::llm::wire::ModelProviderCompatInfo {
+        supports_developer_role: Some(true),
+        ..Default::default()
+    }));
 
     let request = build_common_request(&prompt, &model_info(), &provider, None, true)
         .expect("common request should build");
@@ -213,20 +314,15 @@ fn common_request_can_preserve_developer_role_messages_when_supported() {
 
 #[test]
 fn common_request_can_emit_openai_reasoning_and_selected_max_tokens_field() {
-    let provider =
-        common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
-            supports_reasoning_effort: Some(true),
-            reasoning_effort_map: Some(
-                crate::model_provider_info::ModelProviderReasoningEffortMap {
-                    high: Some("max".to_string()),
-                    ..Default::default()
-                },
-            ),
-            max_tokens_field: Some(
-                crate::model_provider_info::ModelProviderMaxTokensField::MaxCompletionTokens,
-            ),
+    let provider = common_provider_info(Some(crate::llm::wire::ModelProviderCompatInfo {
+        supports_reasoning_effort: Some(true),
+        reasoning_effort_map: Some(crate::llm::wire::ModelProviderReasoningEffortMap {
+            high: Some("max".to_string()),
             ..Default::default()
-        }));
+        }),
+        max_tokens_field: Some(crate::llm::wire::ModelProviderMaxTokensField::MaxCompletionTokens),
+        ..Default::default()
+    }));
 
     let request = build_common_request(
         &Prompt::default(),
@@ -244,17 +340,14 @@ fn common_request_can_emit_openai_reasoning_and_selected_max_tokens_field() {
 
 #[test]
 fn common_request_does_not_emit_provider_specific_thinking_object() {
-    let provider =
-        common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
-            supports_reasoning_effort: Some(true),
-            reasoning_effort_map: Some(
-                crate::model_provider_info::ModelProviderReasoningEffortMap {
-                    xhigh: Some("max".to_string()),
-                    ..Default::default()
-                },
-            ),
+    let provider = common_provider_info(Some(crate::llm::wire::ModelProviderCompatInfo {
+        supports_reasoning_effort: Some(true),
+        reasoning_effort_map: Some(crate::llm::wire::ModelProviderReasoningEffortMap {
+            xhigh: Some("max".to_string()),
             ..Default::default()
-        }));
+        }),
+        ..Default::default()
+    }));
 
     let request = build_common_request(
         &Prompt::default(),
@@ -306,11 +399,10 @@ fn common_request_maps_ultra_to_max_on_the_provider_wire() {
 
 #[test]
 fn common_request_can_disable_generic_reasoning_effort() {
-    let provider =
-        common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
-            supports_reasoning_effort: Some(true),
-            ..Default::default()
-        }));
+    let provider = common_provider_info(Some(crate::llm::wire::ModelProviderCompatInfo {
+        supports_reasoning_effort: Some(true),
+        ..Default::default()
+    }));
 
     let request = build_common_request(
         &Prompt::default(),
@@ -327,11 +419,10 @@ fn common_request_can_disable_generic_reasoning_effort() {
 
 #[test]
 fn common_request_can_use_model_default_reasoning_for_zai_thinking_object() {
-    let provider =
-        common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
-            thinking_format: Some(crate::model_provider_info::ModelProviderThinkingFormat::Zai),
-            ..Default::default()
-        }));
+    let provider = common_provider_info(Some(crate::llm::wire::ModelProviderCompatInfo {
+        thinking_format: Some(crate::llm::wire::ModelProviderThinkingFormat::Zai),
+        ..Default::default()
+    }));
 
     let request = build_common_request(
         &Prompt::default(),
@@ -366,11 +457,10 @@ fn common_request_uses_glm_model_slug_for_zai_thinking_object() {
 
 #[test]
 fn common_request_can_disable_zai_thinking_object_with_explicit_none_effort() {
-    let provider =
-        common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
-            thinking_format: Some(crate::model_provider_info::ModelProviderThinkingFormat::Zai),
-            ..Default::default()
-        }));
+    let provider = common_provider_info(Some(crate::llm::wire::ModelProviderCompatInfo {
+        thinking_format: Some(crate::llm::wire::ModelProviderThinkingFormat::Zai),
+        ..Default::default()
+    }));
 
     let request = build_common_request(
         &Prompt::default(),

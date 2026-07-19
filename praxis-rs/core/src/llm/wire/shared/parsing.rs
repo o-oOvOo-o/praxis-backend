@@ -179,7 +179,7 @@ pub(super) fn parse_common_response(
 
     Ok(ParsedProviderResponse {
         response_id,
-        token_usage: parse_common_usage(response_json.get("usage")),
+        token_usage: parse_common_usage(common_usage_value(&response_json)),
         items,
     })
 }
@@ -409,6 +409,20 @@ pub(super) fn parse_common_usage(usage: Option<&Value>) -> Option<TokenUsage> {
         reasoning_output_tokens,
         total_tokens,
     })
+}
+
+pub(super) fn common_usage_value(response: &Value) -> Option<&Value> {
+    response
+        .get("usage")
+        .filter(|usage| !usage.is_null())
+        .or_else(|| {
+            response
+                .get("choices")
+                .and_then(Value::as_array)
+                .and_then(|choices| choices.first())
+                .and_then(|choice| choice.get("usage"))
+                .filter(|usage| !usage.is_null())
+        })
 }
 
 pub(super) fn value_to_json_string(value: &Value) -> String {

@@ -1,7 +1,7 @@
 use super::super::plugin::ProfileMatchContext;
 use crate::llm::ids::WireId;
-use crate::model_provider_info::ANTHROPIC_PROVIDER_ID;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ANTHROPIC_PROVIDER_ID;
+use crate::llm::provider::ModelProviderInfo;
 
 pub(super) fn matches(ctx: &ProfileMatchContext<'_>) -> bool {
     ctx.wire_id_is(WireId::ClaudeMessages)

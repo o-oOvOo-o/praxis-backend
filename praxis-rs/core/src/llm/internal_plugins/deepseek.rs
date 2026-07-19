@@ -21,7 +21,7 @@ impl LlmPlugin for DeepSeekLlmPlugin {
         #[cfg(test)]
         registry.add_openai_compat_wire();
         #[cfg(test)]
-        registry.add_profile_provider_extension(profile, "DeepSeek");
+        registry.add_profile_provider_extension(&profile, "DeepSeek");
         registry.add_model_catalog(exclusive_model_catalog(
             "deepseek-models",
             "DeepSeek models",
@@ -30,7 +30,7 @@ impl LlmPlugin for DeepSeekLlmPlugin {
         ));
         #[cfg(test)]
         registry.add_profile_extension_bundle(
-            profile,
+            &profile,
             ("deepseek/prompts", "DeepSeek prompt layer"),
             ("deepseek/tasks", "DeepSeek task policy"),
             ("deepseek/tools", "DeepSeek tool dialect"),

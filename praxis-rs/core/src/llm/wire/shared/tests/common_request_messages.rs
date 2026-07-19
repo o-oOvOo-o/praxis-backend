@@ -28,12 +28,11 @@ fn common_request_can_add_tool_result_name_and_bridge_assistant_message() {
         ],
         ..Prompt::default()
     };
-    let provider =
-        common_provider_info(Some(crate::model_provider_info::ModelProviderCompatInfo {
-            requires_tool_result_name: Some(true),
-            requires_assistant_after_tool_result: Some(true),
-            ..Default::default()
-        }));
+    let provider = common_provider_info(Some(crate::llm::wire::ModelProviderCompatInfo {
+        requires_tool_result_name: Some(true),
+        requires_assistant_after_tool_result: Some(true),
+        ..Default::default()
+    }));
 
     let request = build_common_request(&prompt, &model_info(), &provider, None, true)
         .expect("common request should build");

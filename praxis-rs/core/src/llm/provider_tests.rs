@@ -116,7 +116,9 @@ wire_api = "chat"
         "#;
 
     let err = toml::from_str::<ModelProviderInfo>(provider_toml).unwrap_err();
-    assert!(err.to_string().contains(CHAT_WIRE_API_REMOVED_ERROR));
+    let message = err.to_string();
+    assert!(message.contains("wire_api = \"chat\""));
+    assert!(message.contains("wire_api = \"responses\""));
 }
 
 #[test]
@@ -152,6 +154,34 @@ fn built_in_anthropic_provider_uses_official_messages_api_auth() {
     );
     assert!(provider.experimental_bearer_token.is_none());
     assert!(provider.auth.is_none());
+}
+
+#[test]
+fn built_in_kimi_provider_uses_native_coding_chat_completions_api() {
+    let providers = built_in_model_providers(None);
+    let provider = providers
+        .get(KIMI_PROVIDER_ID)
+        .expect("Kimi should be a built-in provider");
+
+    assert!(provider.is_kimi());
+    assert!(!provider.is_anthropic());
+    assert_eq!(provider.base_url.as_deref(), Some(KIMI_API_BASE_URL));
+    assert_eq!(provider.env_key.as_deref(), Some(KIMI_API_KEY_ENV_VAR));
+    assert_eq!(provider.wire_api, WireApi::OpenAiCompat);
+    assert!(provider.http_headers.is_none());
+    let compat = provider
+        .compat
+        .as_ref()
+        .expect("Kimi compatibility profile");
+    assert_eq!(
+        compat.thinking_format,
+        Some(ModelProviderThinkingFormat::Kimi)
+    );
+    assert_eq!(
+        compat.max_tokens_field,
+        Some(ModelProviderMaxTokensField::MaxCompletionTokens)
+    );
+    assert!(provider.experimental_bearer_token.is_none());
 }
 
 #[test]

@@ -6,8 +6,8 @@ use crate::llm::profiles::plugin::ProfileMatchContext;
 use crate::llm::prompts::LlmPromptPurpose;
 use crate::llm::registry::LlmProfileRegistry;
 use crate::llm::runtime::LlmRuntimeCatalog;
-use crate::model_provider_info::ModelProviderInfo;
-use crate::model_provider_info::is_native_local_provider;
+use crate::llm::provider::ModelProviderInfo;
+use crate::llm::provider::is_native_local_provider;
 use praxis_protocol::config_types::Personality;
 use praxis_protocol::openai_models::ModelInfo;
 
@@ -17,6 +17,7 @@ pub(crate) enum PromptProfileId {
     CommonBase,
     Claude,
     DeepSeek,
+    Kimi,
     Gemini,
     Glm,
     Qwen,
@@ -29,6 +30,7 @@ impl PromptProfileId {
             Self::CommonBase => "common/base",
             Self::Claude => "claude/base",
             Self::DeepSeek => "deepseek/base",
+            Self::Kimi => "kimi/base",
             Self::Gemini => "gemini/base",
             Self::Glm => "glm/base",
             Self::Qwen => "qwen/base",
@@ -41,6 +43,7 @@ impl PromptProfileId {
             BehaviorProfileId::Common => Some(Self::CommonBase),
             BehaviorProfileId::Claude => Some(Self::Claude),
             BehaviorProfileId::DeepSeek => Some(Self::DeepSeek),
+            BehaviorProfileId::Kimi => Some(Self::Kimi),
             BehaviorProfileId::Gemini => Some(Self::Gemini),
             BehaviorProfileId::Glm => Some(Self::Glm),
             BehaviorProfileId::Qwen => Some(Self::Qwen),
@@ -201,9 +204,9 @@ fn resolve_prompt_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_provider_info::ModelProviderInfo;
-    use crate::model_provider_info::OPENAI_PROVIDER_ID;
-    use crate::model_provider_info::WireApi;
+    use crate::llm::provider::ModelProviderInfo;
+    use crate::llm::provider::OPENAI_PROVIDER_ID;
+    use crate::llm::wire::WireApi;
 
     fn provider(id: &str, base_url: &str, wire_api: WireApi) -> (String, ModelProviderInfo) {
         (
@@ -346,6 +349,43 @@ mod tests {
                     .find("# DeepSeek Smarter Orchestration")
                     .unwrap()
         );
+    }
+
+    #[test]
+    fn kimi_profile_reuses_deepseek_base_and_smarter_layers() {
+        let kimi_provider = ModelProviderInfo::create_kimi_provider();
+        let kimi_instructions = resolve_model_instructions(
+            &model("k3[1m]"),
+            crate::llm::provider::KIMI_PROVIDER_ID,
+            &kimi_provider,
+            None,
+            None,
+            &LlmRuntimeCatalog::default(),
+        );
+        let (deepseek_provider_id, deepseek_provider) = provider(
+            "deepseek",
+            "https://api.deepseek.com",
+            WireApi::OpenAiCompat,
+        );
+        let deepseek_instructions = resolve_model_instructions(
+            &model("deepseek-v4-pro"),
+            &deepseek_provider_id,
+            &deepseek_provider,
+            None,
+            None,
+            &LlmRuntimeCatalog::default(),
+        );
+
+        assert_eq!(
+            infer_prompt_profile_id(
+                &model("k3[1m]"),
+                crate::llm::provider::KIMI_PROVIDER_ID,
+                &kimi_provider,
+            ),
+            Some(PromptProfileId::Kimi)
+        );
+        assert_eq!(kimi_instructions, deepseek_instructions);
+        assert!(kimi_instructions.contains("# DeepSeek Smarter Orchestration"));
     }
 
     #[test]

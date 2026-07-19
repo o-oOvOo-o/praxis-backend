@@ -44,7 +44,7 @@ fn register_common_branch(
 ) {
     registry.add_provider_extension(common_branch_id(namespace), profile.label);
     registry.add_profile_extension_bundle(
-        profile,
+        &profile,
         (common_branch_prompt_layer_id(namespace), prompt_label),
         (
             common_branch_task_policy_id(namespace),

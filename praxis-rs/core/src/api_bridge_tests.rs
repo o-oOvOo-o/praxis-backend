@@ -140,6 +140,69 @@ fn core_auth_provider_reports_when_auth_header_will_attach() {
 }
 
 #[test]
+fn map_api_error_maps_provider_429_with_retry_metadata() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        REQUEST_ID_HEADER,
+        http::HeaderValue::from_static("req-kimi"),
+    );
+    headers.insert(
+        X_TRACE_ID_HEADER,
+        http::HeaderValue::from_static("trace-kimi"),
+    );
+    headers.insert(RETRY_AFTER_HEADER, http::HeaderValue::from_static("12"));
+    let body = serde_json::json!({
+        "error": {
+            "type": "rate_limit_error",
+            "message": "Concurrent request limit reached"
+        }
+    })
+    .to_string();
+
+    let err = map_api_error(ApiError::Transport(TransportError::Http {
+        status: http::StatusCode::TOO_MANY_REQUESTS,
+        url: Some("https://api.kimi.com/coding/v1/messages".to_string()),
+        headers: Some(headers),
+        body: Some(body),
+    }));
+
+    let PraxisErr::ProviderRateLimited(rate_limit) = err else {
+        panic!("expected PraxisErr::ProviderRateLimited, got {err:?}");
+    };
+    assert_eq!(rate_limit.message, "Concurrent request limit reached");
+    assert_eq!(rate_limit.request_id.as_deref(), Some("req-kimi"));
+    assert_eq!(rate_limit.trace_id.as_deref(), Some("trace-kimi"));
+    assert_eq!(
+        rate_limit.retry_after,
+        Some(std::time::Duration::from_secs(12))
+    );
+}
+
+#[test]
+fn map_api_error_recognizes_structured_context_overflow_from_http_400() {
+    let body = serde_json::json!({
+        "error": {
+            "type": "invalid_request_error",
+            "message": "Invalid request: Your request exceeded model token limit: 262144 (requested: 262851)"
+        },
+        "type": "error"
+    })
+    .to_string();
+    let err = map_api_error(ApiError::Transport(TransportError::Http {
+        status: http::StatusCode::BAD_REQUEST,
+        url: Some("https://provider.example/v1/messages".to_string()),
+        headers: None,
+        body: Some(body),
+    }));
+
+    let PraxisErr::ContextWindowExceeded(overflow) = err else {
+        panic!("expected context overflow, got {err:?}");
+    };
+    assert_eq!(overflow.context_limit, Some(262_144));
+    assert_eq!(overflow.requested_tokens, Some(262_851));
+}
+
+#[test]
 fn core_auth_provider_reports_claude_api_key_header() {
     let auth = CoreAuthProvider::for_test_claude_api_key(Some("claude-key"));
 

@@ -1,6 +1,6 @@
 use praxis_protocol::protocol::Product;
 
-use crate::model_provider_info::WireApi;
+use crate::llm::wire::WireApi;
 
 pub(crate) const OPENAI_RESPONSES_PROFILE_ID: &str = "openai/responses";
 pub(crate) const OPENAI_RESPONSES_BASE_PROFILE_ID: &str = "openai/responses/base";
@@ -40,6 +40,7 @@ pub(crate) enum BehaviorProfileId {
     OpenAiResponses,
     Common,
     DeepSeek,
+    Kimi,
     Gemini,
     Glm,
     Qwen,
@@ -53,6 +54,7 @@ impl BehaviorProfileId {
             Self::OpenAiResponses => OPENAI_RESPONSES_PROFILE_ID,
             Self::Common => "common",
             Self::DeepSeek => "deepseek",
+            Self::Kimi => "kimi",
             Self::Gemini => "gemini",
             Self::Glm => "glm",
             Self::Qwen => "qwen",

@@ -1,6 +1,6 @@
 use super::*;
 use crate::config::ConfigBuilder;
-use crate::model_provider_info::WireApi;
+use crate::llm::wire::WireApi;
 use base64::Engine as _;
 use chrono::Utc;
 use core_test_support::responses::mount_models_once;
@@ -329,11 +329,11 @@ async fn list_models_includes_known_openai_picker_models() {
     assert!(gpt56_luna.show_in_picker);
     assert_eq!(
         gpt56_sol.default_reasoning_effort,
-        Some(praxis_protocol::openai_models::ReasoningEffort::Low)
+        praxis_protocol::openai_models::ReasoningEffort::Low
     );
     assert_eq!(
         gpt56_terra.default_reasoning_effort,
-        Some(praxis_protocol::openai_models::ReasoningEffort::Medium)
+        praxis_protocol::openai_models::ReasoningEffort::Medium
     );
     assert!(
         gpt56_sol

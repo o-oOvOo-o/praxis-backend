@@ -19,7 +19,7 @@ use crate::llm::profiles::plugin::ProfileMatchContext;
 use crate::llm::prompts::LlmPromptPurpose;
 use crate::llm::registry::LlmProfileRegistry;
 use crate::llm::tasks::compact::CompactExecutionPolicy;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 use praxis_protocol::openai_models::ModelInfo;
 #[cfg(test)]
 use praxis_protocol::openai_models::ReasoningEffort;
@@ -28,8 +28,10 @@ use praxis_tools::ToolCapabilityConfig;
 mod manifest_lookup;
 mod matching;
 mod model_catalog;
+pub(crate) mod provider_setup;
 mod normalization;
 mod policies;
+pub(crate) mod provider_coordination;
 mod prompts;
 
 pub(crate) use policies::LlmAutoTitleTaskPolicy;
@@ -331,8 +333,8 @@ impl LlmRuntimeCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_provider_info::ModelProviderInfo;
-    use crate::model_provider_info::WireApi;
+    use crate::llm::provider::ModelProviderInfo;
+    use crate::llm::wire::WireApi;
 
     fn provider(id: &str, base_url: &str, wire_api: WireApi) -> (String, ModelProviderInfo) {
         (

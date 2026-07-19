@@ -21,7 +21,7 @@ impl LlmPlugin for GlmLlmPlugin {
         #[cfg(test)]
         registry.add_openai_compat_wire();
         #[cfg(test)]
-        registry.add_profile_provider_extension(profile, "GLM");
+        registry.add_profile_provider_extension(&profile, "GLM");
         registry.add_model_catalog(provider_model_catalog(
             "glm-models",
             "GLM models",
@@ -30,7 +30,7 @@ impl LlmPlugin for GlmLlmPlugin {
         ));
         #[cfg(test)]
         registry.add_profile_extension_bundle(
-            profile,
+            &profile,
             ("glm/prompts", "GLM prompt layer"),
             ("glm/tasks", "GLM task policy"),
             ("glm/tools", "GLM tool dialect"),

@@ -1,5 +1,5 @@
 use crate::llm::ids::WireId;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ReasoningEffort;
 use praxis_tools::ToolWebSearchBackend;

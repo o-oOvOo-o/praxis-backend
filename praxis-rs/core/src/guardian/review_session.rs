@@ -30,7 +30,7 @@ use crate::config::Constrained;
 use crate::config::ManagedFeatures;
 use crate::config::NetworkProxySpec;
 use crate::config::Permissions;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 use crate::praxis::Praxis;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;

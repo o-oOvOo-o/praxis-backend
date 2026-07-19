@@ -663,7 +663,7 @@ pub(super) async fn process_common_stream_event(
     if let Some(response_id) = chunk.get("id").and_then(Value::as_str) {
         state.response_id = Some(response_id.to_string());
     }
-    if let Some(usage) = parse_common_usage(chunk.get("usage")) {
+    if let Some(usage) = parse_common_usage(common_usage_value(&chunk)) {
         state.token_usage = Some(usage);
     }
 

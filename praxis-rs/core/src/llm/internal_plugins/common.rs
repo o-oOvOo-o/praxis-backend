@@ -28,7 +28,7 @@ impl LlmPlugin for CommonOpenAiCompatLlmPlugin {
         ));
         #[cfg(test)]
         registry.add_profile_extension_bundle(
-            profile,
+            &profile,
             ("openai_compat/prompts", "OpenAI-compatible prompt layer"),
             ("openai_compat/tasks", "OpenAI-compatible task policy"),
             ("openai_compat/tools", "OpenAI-compatible tool dialect"),

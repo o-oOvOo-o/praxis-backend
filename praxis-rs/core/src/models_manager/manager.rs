@@ -5,16 +5,17 @@ use crate::config::Config;
 use crate::error::PraxisErr;
 use crate::error::Result as CoreResult;
 use crate::llm::runtime::LlmRuntimeCatalog;
-use crate::model_provider_info::ANTHROPIC_PROVIDER_ID;
-use crate::model_provider_info::ModelProviderInfo;
-use crate::model_provider_info::OPENAI_PROVIDER_ID;
+use crate::llm::provider::ANTHROPIC_PROVIDER_ID;
+use crate::llm::provider::KIMI_PROVIDER_ID;
+use crate::llm::provider::ModelProviderInfo;
+use crate::llm::provider::OPENAI_PROVIDER_ID;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::collaboration_mode_presets::builtin_collaboration_mode_presets;
 use crate::models_manager::model_info;
 use crate::models_manager::model_presets::bundled_api_model_presets;
 use crate::plugins::PluginsManager;
-use crate::provider_decision_center::AuthRequestPurpose;
-use crate::provider_decision_center::ProviderDecisionCenter;
+use crate::llm::runtime::provider_setup::AuthRequestPurpose;
+use crate::llm::runtime::provider_setup::ProviderDecisionCenter;
 use crate::response_debug_context::extract_response_debug_context;
 use crate::response_debug_context::telemetry_transport_error_message;
 use crate::util::FeedbackRequestTags;
@@ -36,6 +37,7 @@ use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::ModelsResponse;
 use praxis_protocol::openai_models::known_openai_compatible_picker_model_infos;
+use std::collections::HashSet;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -69,6 +71,13 @@ pub fn first_party_model_presets_for_config(config: &Config) -> Vec<ProviderMode
                 .map(ModelPreset::from)
                 .collect(),
         ),
+        (
+            KIMI_PROVIDER_ID,
+            model_info::kimi_model_infos()
+                .into_iter()
+                .map(ModelPreset::from)
+                .collect(),
+        ),
     ];
     let mut presets = Vec::new();
     for (provider_id, provider_presets) in catalogs {
@@ -76,7 +85,7 @@ pub fn first_party_model_presets_for_config(config: &Config) -> Vec<ProviderMode
             continue;
         };
         presets.extend(provider_presets.into_iter().filter_map(|preset| {
-            crate::model_provider_info::provider_accepts_registered_model_catalog(
+            crate::llm::provider::provider_accepts_registered_model_catalog(
                 provider_id,
                 provider,
                 preset.model.as_str(),
@@ -248,7 +257,7 @@ fn merge_known_picker_models(
     provider: &ModelProviderInfo,
 ) {
     for model in known_openai_compatible_picker_model_infos() {
-        if !crate::model_provider_info::provider_accepts_registered_model_catalog(
+        if !crate::llm::provider::provider_accepts_registered_model_catalog(
             provider_id,
             provider,
             model.slug.as_str(),
@@ -289,6 +298,107 @@ pub struct ModelsManager {
 }
 
 impl ModelsManager {
+    /// List the credential-ready, approved models exposed to cross-provider sub-agent routing.
+    pub async fn list_spawn_agent_models_for_config(
+        &self,
+        config: &Config,
+        refresh_strategy: RefreshStrategy,
+    ) -> Vec<ModelPreset> {
+        let current = self.list_models_for_config(config, refresh_strategy).await;
+        self.build_spawn_agent_models_for_config(config, current)
+    }
+
+    /// Build the cross-provider sub-agent catalog without blocking on model refresh.
+    pub fn try_list_spawn_agent_models_for_config(
+        &self,
+        config: &Config,
+    ) -> Result<Vec<ModelPreset>, TryLockError> {
+        let current = self.try_list_models_for_config(config)?;
+        Ok(self.build_spawn_agent_models_for_config(config, current))
+    }
+
+    fn build_spawn_agent_models_for_config(
+        &self,
+        config: &Config,
+        current: Vec<ModelPreset>,
+    ) -> Vec<ModelPreset> {
+        let mut models = Vec::new();
+        let mut seen = HashSet::new();
+
+        if spawn_agent_provider_is_approved(
+            config.model_provider_id.as_str(),
+            &config.model_provider,
+        ) {
+            append_spawn_agent_models(
+                &mut models,
+                &mut seen,
+                config.model_provider_id.as_str(),
+                &config.model_provider,
+                current,
+            );
+        }
+
+        for provider_model in first_party_model_presets_for_config(config) {
+            if !spawn_agent_provider_is_approved(
+                provider_model.provider_id.as_str(),
+                &provider_model.provider,
+            ) || !self.provider_has_spawn_credentials(
+                config,
+                provider_model.provider_id.as_str(),
+                &provider_model.provider,
+            ) {
+                continue;
+            }
+            append_spawn_agent_models(
+                &mut models,
+                &mut seen,
+                provider_model.provider_id.as_str(),
+                &provider_model.provider,
+                vec![provider_model.preset],
+            );
+        }
+
+        models
+    }
+
+    fn provider_has_spawn_credentials(
+        &self,
+        config: &Config,
+        provider_id: &str,
+        provider: &ModelProviderInfo,
+    ) -> bool {
+        if provider_id == config.model_provider_id {
+            return true;
+        }
+        let auth_manager = self.auth_manager_for_provider(provider);
+        if provider.requires_openai_auth {
+            return auth_manager.auth_mode().is_some();
+        }
+        if provider.auth.is_some()
+            || provider
+                .experimental_bearer_token
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            || provider.is_anthropic()
+                && praxis_login::has_anthropic_oauth(config.praxis_home.as_path())
+        {
+            return true;
+        }
+        if let Some(env_key) = provider.env_key.as_deref()
+            && std::env::var(env_key)
+                .ok()
+                .is_some_and(|value| !value.trim().is_empty())
+        {
+            return true;
+        }
+        provider
+            .env_key
+            .as_ref()
+            .and_then(|_| praxis_login::provider_api_key_credential_id(provider_id).ok())
+            .and_then(|credential_id| auth_manager.provider_api_key(&credential_id).ok().flatten())
+            .is_some()
+    }
+
     /// Construct a manager scoped to the provided `AuthManager`.
     ///
     /// Uses `praxis_home` to store cached model metadata and initializes with bundled catalog
@@ -334,6 +444,8 @@ impl ModelsManager {
                         .unwrap_or_else(|err| panic!("failed to load bundled models.json: {err}"))
                 } else if provider.is_anthropic() {
                     model_info::anthropic_model_infos()
+                } else if provider.is_kimi() {
+                    model_info::kimi_model_infos()
                 } else {
                     Vec::new()
                 }
@@ -687,7 +799,7 @@ impl ModelsManager {
     }
 
     fn build_models_reqwest_client(&self) -> CoreResult<reqwest::Client> {
-        if self.provider.wire_api == crate::model_provider_info::WireApi::Claude {
+        if self.provider.wire_api == crate::llm::wire::WireApi::Claude {
             if self.provider.is_openai() || self.provider.has_command_auth() {
                 try_build_reqwest_client_without_redirects()
             } else {
@@ -732,6 +844,8 @@ impl ModelsManager {
             Self::load_remote_models_from_file().unwrap_or_default()
         } else if provider.is_anthropic() {
             model_info::anthropic_model_infos()
+        } else if provider.is_kimi() {
+            model_info::kimi_model_infos()
         } else {
             Vec::new()
         }
@@ -793,7 +907,7 @@ impl ModelsManager {
                 if matches!(self.catalog_mode, CatalogMode::Custom) {
                     return true;
                 }
-                crate::model_provider_info::provider_accepts_registered_model_catalog(
+                crate::llm::provider::provider_accepts_registered_model_catalog(
                     provider_id,
                     provider,
                     model.slug.as_str(),
@@ -872,11 +986,48 @@ impl ModelsManager {
     }
 }
 
+fn spawn_agent_provider_is_approved(provider_id: &str, provider: &ModelProviderInfo) -> bool {
+    if provider.is_openai() || provider.is_anthropic() || provider.is_kimi() {
+        return true;
+    }
+    let identity = format!(
+        "{} {} {}",
+        provider_id,
+        provider.name,
+        provider.base_url.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+    ["deepseek", "glm", "bigmodel", "z.ai", "zai"]
+        .iter()
+        .any(|needle| identity.contains(needle))
+}
+
+fn append_spawn_agent_models(
+    models: &mut Vec<ModelPreset>,
+    seen: &mut HashSet<String>,
+    provider_id: &str,
+    provider: &ModelProviderInfo,
+    presets: Vec<ModelPreset>,
+) {
+    for mut preset in presets {
+        if !seen.insert(preset.model.clone()) {
+            continue;
+        }
+        preset.description = format!(
+            "Praxis provider `{provider_id}` ({}). {}",
+            provider.name, preset.description
+        );
+        models.push(preset);
+    }
+}
+
 fn model_catalog_provider_id_for_provider(provider: &ModelProviderInfo) -> &str {
     if provider.is_openai() {
         OPENAI_PROVIDER_ID
     } else if provider.is_anthropic() {
-        crate::model_provider_info::ANTHROPIC_PROVIDER_ID
+        crate::llm::provider::ANTHROPIC_PROVIDER_ID
+    } else if provider.is_kimi() {
+        crate::llm::provider::KIMI_PROVIDER_ID
     } else {
         provider.name.as_str()
     }

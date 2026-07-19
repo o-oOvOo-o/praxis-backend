@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 
 use super::internal_plugins;
 use super::internal_plugins::LlmModelCatalogDescriptor;

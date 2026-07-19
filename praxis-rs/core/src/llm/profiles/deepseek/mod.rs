@@ -16,6 +16,9 @@ const PROMPT_LAYERS: &[ProfilePromptLayerDescriptor] =
         prompts::SMARTER,
     )];
 
+pub(crate) const BASE_INSTRUCTIONS: &str = prompts::BASE;
+pub(crate) const SMARTER_INSTRUCTIONS: &str = prompts::SMARTER;
+
 pub(crate) fn profile() -> ProfileDescriptor {
     ProfileDescriptor {
         id: BehaviorProfileId::DeepSeek,

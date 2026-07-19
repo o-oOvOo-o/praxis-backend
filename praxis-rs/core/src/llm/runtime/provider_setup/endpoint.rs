@@ -11,7 +11,7 @@ use super::ProviderHeaderSource;
 use super::is_chatgpt_auth_mode;
 use crate::error::PraxisErr;
 use crate::error::Result;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 
 const OPENAI_API_BASE_URL: &str = "https://api.openai.com/v1";
 const CHATGPT_HOSTED_RESPONSES_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";

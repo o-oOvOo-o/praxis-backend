@@ -33,8 +33,8 @@ use std::sync::atomic::Ordering;
 use crate::api_bridge::CoreAuthProvider;
 use crate::api_bridge::map_api_error;
 use crate::auth_env_telemetry::AuthEnvTelemetry;
-use crate::provider_decision_center::AuthRequestPurpose;
-use crate::provider_decision_center::ProviderDecisionCenter;
+use crate::llm::runtime::provider_setup::AuthRequestPurpose;
+use crate::llm::runtime::provider_setup::ProviderDecisionCenter;
 use praxis_api::CompactClient as ApiCompactClient;
 use praxis_api::CompactionInput as ApiCompactionInput;
 use praxis_api::MemoriesClient as ApiMemoriesClient;
@@ -105,8 +105,8 @@ use crate::error::Result;
 use crate::error::UnexpectedResponseError;
 use crate::flags::PRAXIS_RS_SSE_FIXTURE;
 use crate::llm::local_models::NativeLocalModelConfig;
-use crate::model_provider_info::ModelProviderInfo;
-use crate::model_provider_info::WireApi;
+use crate::llm::provider::ModelProviderInfo;
+use crate::llm::wire::WireApi;
 use crate::response_debug_context::ResponseDebugContext;
 use crate::response_debug_context::extract_response_debug_context;
 use crate::response_debug_context::extract_response_debug_context_from_api_error;
@@ -123,6 +123,8 @@ mod telemetry;
 
 use auth_recovery::AuthRequestTelemetryContext;
 use auth_recovery::PendingUnauthorizedRetry;
+#[cfg(test)]
+use auth_recovery::UnauthorizedRecoveryExecution;
 use auth_recovery::handle_unauthorized;
 use auth_recovery::handle_unauthorized_unexpected_status;
 pub(crate) use runtime_registry::ModelRuntimeRegistry;
@@ -140,7 +142,7 @@ const RESPONSES_COMPACT_ENDPOINT: &str = "/responses/compact";
 const MEMORIES_SUMMARIZE_ENDPOINT: &str = "/memories/trace_summarize";
 #[cfg(test)]
 pub(crate) const WEBSOCKET_CONNECT_TIMEOUT: Duration =
-    Duration::from_millis(crate::model_provider_info::DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
+    Duration::from_millis(crate::llm::provider::DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS);
 
 fn reasoning_effort_for_request(effort: ReasoningEffortConfig) -> ReasoningEffortConfig {
     match effort {
@@ -760,7 +762,7 @@ fn sanitize_input_for_responses_api(input: Vec<ResponseItem>) -> Vec<ResponseIte
                 encrypted_content: Some(encrypted_content),
                 ..
             } if !encrypted_content.is_empty()
-                && !crate::non_responses_transport::is_claude_reasoning_content(
+                && !crate::llm::wire::shared::is_claude_reasoning_content(
                     &encrypted_content,
                 ) =>
             {

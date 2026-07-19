@@ -12,7 +12,7 @@ use crate::llm::ids::OPENAI_RESPONSES_BASE_PROFILE_ID;
 use crate::llm::ids::OPENAI_RESPONSES_PROFILE_ID;
 use crate::llm::ids::ProductProfileId;
 use crate::llm::profiles::plugin::ProfileDescriptor;
-use crate::model_provider_info::ModelProviderInfo;
+use crate::llm::provider::ModelProviderInfo;
 
 pub(super) fn plugin_profile_matches(
     plugin_profile: &PluginLlmProfile,
@@ -63,6 +63,7 @@ fn behavior_profile_aliases(behavior_id: BehaviorProfileId) -> &'static [&'stati
         ],
         BehaviorProfileId::Common => &["common", "common/base"],
         BehaviorProfileId::DeepSeek => &["deepseek", "deepseek/base"],
+        BehaviorProfileId::Kimi => &["kimi", "kimi/base"],
         BehaviorProfileId::Gemini => &["gemini", "gemini/base"],
         BehaviorProfileId::Glm => &["glm", "glm/base"],
         BehaviorProfileId::Qwen => &["qwen", "qwen/base"],

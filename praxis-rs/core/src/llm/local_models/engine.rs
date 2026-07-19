@@ -14,13 +14,13 @@ use crate::client_common::ResponseStream;
 use crate::config::LocalModelHostConfig;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
-use crate::model_provider_info::ModelProviderCompatInfo;
-use crate::model_provider_info::ModelProviderMaxTokensField;
-use crate::model_provider_info::ModelProviderThinkingFormat;
-use crate::model_provider_info::NATIVE_LOCAL_PROVIDER_ID;
-use crate::model_provider_info::create_native_local_provider;
-use crate::provider_decision_center::AuthRequestPurpose;
-use crate::provider_decision_center::ProviderDecisionCenter;
+use crate::llm::wire::ModelProviderCompatInfo;
+use crate::llm::wire::ModelProviderMaxTokensField;
+use crate::llm::wire::ModelProviderThinkingFormat;
+use crate::llm::provider::NATIVE_LOCAL_PROVIDER_ID;
+use crate::llm::provider::create_native_local_provider;
+use crate::llm::runtime::provider_setup::AuthRequestPurpose;
+use crate::llm::runtime::provider_setup::ProviderDecisionCenter;
 use praxis_protocol::openai_models::ModelInfo;
 use serde_json::Value;
 
@@ -56,7 +56,7 @@ pub(crate) async fn stream_native_local_model(
             AuthRequestPurpose::ModelTurn,
         )
         .await?;
-    let stream = crate::non_responses_transport::stream_common_unary(
+    let stream = crate::llm::wire::shared::stream_common_unary(
         setup.api_provider,
         setup.api_auth,
         &provider_info,
@@ -107,7 +107,7 @@ fn local_gpu_provider_info(
     base_url: String,
     entry: &LocalModelEntry,
     host: Option<&LocalModelHostConfig>,
-) -> crate::model_provider_info::ModelProviderInfo {
+) -> crate::llm::provider::ModelProviderInfo {
     let mut provider = create_native_local_provider();
     provider.name = "Praxis Local GPU".to_string();
     provider.base_url = Some(ensure_v1_base_url(&base_url));
@@ -166,6 +166,7 @@ fn parse_thinking_format(value: &str) -> Option<ModelProviderThinkingFormat> {
         "openai" => Some(ModelProviderThinkingFormat::Openai),
         "openrouter" => Some(ModelProviderThinkingFormat::Openrouter),
         "deepseek" => Some(ModelProviderThinkingFormat::Deepseek),
+        "kimi" => Some(ModelProviderThinkingFormat::Kimi),
         "gemini" => Some(ModelProviderThinkingFormat::Gemini),
         "zai" => Some(ModelProviderThinkingFormat::Zai),
         "qwen" => Some(ModelProviderThinkingFormat::Qwen),

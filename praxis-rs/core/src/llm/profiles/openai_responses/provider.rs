@@ -1,7 +1,7 @@
 use super::super::plugin::ProfileMatchContext;
 use super::super::plugin::ProfileProviderIdentityRule;
 use crate::llm::ids::WireId;
-use crate::model_provider_info::OPENAI_PROVIDER_ID;
+use crate::llm::provider::OPENAI_PROVIDER_ID;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const OPENAI_PROVIDER_RULE: ProfileProviderIdentityRule = ProfileProviderIdentityRule::new(

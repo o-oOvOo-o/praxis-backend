@@ -1,5 +1,24 @@
 use super::*;
 
+#[test]
+fn common_usage_accepts_kimi_choice_scoped_cache_metrics() {
+    let response = json!({
+        "choices": [{
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 8,
+                "total_tokens": 108,
+                "prompt_tokens_details": { "cached_tokens": 72 }
+            }
+        }]
+    });
+
+    let usage = parse_common_usage(common_usage_value(&response)).expect("nested Kimi usage");
+    assert_eq!(usage.input_tokens, 100);
+    assert_eq!(usage.cached_input_tokens, 72);
+    assert_eq!(usage.cache_reported_input_tokens, 100);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn common_unary_uses_chat_completions_and_maps_usage() {
     let server = MockServer::start().await;

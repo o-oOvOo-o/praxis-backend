@@ -17,7 +17,7 @@ pub(crate) fn profile() -> ProfileDescriptor {
         prompt_layers: &[],
         matcher: provider::matches,
         provider_policy: Some(ProfileProviderPolicy::first_party(
-            crate::model_provider_info::OPENAI_PROVIDER_ID,
+            crate::llm::provider::OPENAI_PROVIDER_ID,
             "OpenAI Responses",
             is_first_party_provider,
             is_first_party_model,
