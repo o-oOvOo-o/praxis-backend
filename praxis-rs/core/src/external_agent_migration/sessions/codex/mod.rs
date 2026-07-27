@@ -12,6 +12,7 @@ const SOURCE: ExternalAgentSource = ExternalAgentSource::Codex;
 
 pub(super) async fn sync_sessions_to_store(
     config: &Config,
+    max_imports: Option<usize>,
 ) -> io::Result<ExternalSessionSyncStats> {
     let source_home = match crate::config::default_external_codex_home() {
         Ok(path) => path,
@@ -28,18 +29,27 @@ pub(super) async fn sync_sessions_to_store(
         .await
         .ok();
     let mut stats = ExternalSessionSyncStats::default();
-    for (subdir, archived) in [
-        (praxis_rollout::SESSIONS_SUBDIR, false),
-        (praxis_rollout::ARCHIVED_SESSIONS_SUBDIR, true),
-    ] {
+    let rollout_trees = if max_imports.is_some() {
+        vec![(praxis_rollout::SESSIONS_SUBDIR, false)]
+    } else {
+        vec![
+            (praxis_rollout::SESSIONS_SUBDIR, false),
+            (praxis_rollout::ARCHIVED_SESSIONS_SUBDIR, true),
+        ]
+    };
+    for (subdir, archived) in rollout_trees {
         sync_rollout_tree(
             &source_home.join(subdir),
             &config.praxis_home.join(subdir),
             archived,
             state_db.as_deref(),
+            max_imports,
             &mut stats,
         )
         .await?;
+        if max_imports.is_some_and(|limit| stats.imported >= limit) {
+            break;
+        }
     }
     Ok(stats)
 }
@@ -49,12 +59,14 @@ async fn sync_rollout_tree(
     dest_root: &Path,
     archived: bool,
     state_db: Option<&praxis_state::StateRuntime>,
+    max_imports: Option<usize>,
     stats: &mut ExternalSessionSyncStats,
 ) -> io::Result<()> {
     if !source_root.exists() {
         return Ok(());
     }
 
+    let mut rollout_paths = Vec::new();
     for entry in WalkDir::new(source_root) {
         let entry = match entry {
             Ok(entry) => entry,
@@ -70,20 +82,33 @@ async fn sync_rollout_tree(
         if !entry.file_type().is_file() || !is_rollout_file(entry.path()) {
             continue;
         }
+        let modified = entry
+            .metadata()
+            .ok()
+            .and_then(|metadata| metadata.modified().ok());
+        rollout_paths.push((modified, entry.into_path()));
+    }
+    rollout_paths
+        .sort_unstable_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+
+    for (_, source_path) in rollout_paths {
+        if max_imports.is_some_and(|limit| stats.imported >= limit) {
+            break;
+        }
         stats.discovered += 1;
-        let relative_path = match entry.path().strip_prefix(source_root) {
+        let relative_path = match source_path.strip_prefix(source_root) {
             Ok(relative_path) => relative_path,
             Err(err) => {
                 warn!(
                     "failed to resolve Codex rollout relative path {}: {err}",
-                    entry.path().display()
+                    source_path.display()
                 );
                 stats.skip_one();
                 continue;
             }
         };
         let dest_path = dest_root.join(relative_path);
-        if copy_if_changed(entry.path(), &dest_path).await? {
+        if copy_if_changed(&source_path, &dest_path).await? {
             reconcile_rollout(&dest_path, archived, state_db).await;
             stats.import_one();
         } else {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::ThreadId;
+use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::W3cTraceContext;

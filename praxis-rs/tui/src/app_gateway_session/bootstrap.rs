@@ -1,16 +1,22 @@
 use super::*;
 
 impl AppGatewaySession {
-    pub(crate) async fn bootstrap(&mut self, config: &Config) -> Result<AppGatewayBootstrap> {
+    pub(crate) async fn read_account(&mut self) -> Result<GetAccountResponse> {
         let account_request_id = self.next_request_id();
-        let account: GetAccountResponse = self
-            .client
+        self.client
             .request_typed(ClientRequest::GetAccount {
                 request_id: account_request_id,
                 params: GetAccountParams {
                     refresh_token: false,
                 },
             })
+            .await
+            .wrap_err("account/read failed")
+    }
+
+    pub(crate) async fn bootstrap(&mut self, config: &Config) -> Result<AppGatewayBootstrap> {
+        let account = self
+            .read_account()
             .await
             .wrap_err("account/read failed during TUI bootstrap")?;
         let model_request_id = self.next_request_id();
@@ -81,26 +87,6 @@ impl AppGatewaySession {
                 false,
             ),
         };
-        let rate_limit_snapshots = if account.requires_openai_auth && has_chatgpt_account {
-            let rate_limit_request_id = self.next_request_id();
-            match self
-                .client
-                .request_typed(ClientRequest::GetAccountRateLimits {
-                    request_id: rate_limit_request_id,
-                    params: None,
-                })
-                .await
-            {
-                Ok(rate_limits) => app_gateway_rate_limit_snapshots_to_core(rate_limits),
-                Err(err) => {
-                    tracing::warn!("account/rateLimits/read failed during TUI bootstrap: {err}");
-                    Vec::new()
-                }
-            }
-        } else {
-            Vec::new()
-        };
-
         Ok(AppGatewayBootstrap {
             account_auth_mode,
             account_email,
@@ -111,7 +97,6 @@ impl AppGatewaySession {
             feedback_audience,
             has_chatgpt_account,
             available_models,
-            rate_limit_snapshots,
         })
     }
 }

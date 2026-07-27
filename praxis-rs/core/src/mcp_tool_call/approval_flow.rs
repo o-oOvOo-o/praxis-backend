@@ -34,6 +34,11 @@ use crate::mcp_tool_approval_templates::render_mcp_tool_approval_template;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 
+enum LiveApprovalWait<T> {
+    Response(T),
+    FullAccess,
+}
+
 pub(super) async fn maybe_request_mcp_tool_approval(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
@@ -81,7 +86,7 @@ pub(super) async fn maybe_request_mcp_tool_approval(
     let persistent_approval_key =
         persistent_mcp_tool_approval_key(invocation, metadata, approval_mode);
     if let Some(key) = session_approval_key.as_ref()
-        && mcp_tool_approval_is_remembered(sess, key).await
+        && mcp_tool_approval_is_remembered(sess, turn_context, key).await
     {
         return Some(McpToolApprovalDecision::Accept);
     }
@@ -143,6 +148,7 @@ pub(super) async fn maybe_request_mcp_tool_approval(
         let request_id = rmcp::model::RequestId::String(
             format!("{MCP_TOOL_APPROVAL_QUESTION_ID_PREFIX}_{call_id}").into(),
         );
+        let cleanup_request_id = request_id.clone();
         let params = build_mcp_tool_approval_elicitation_request(
             sess.as_ref(),
             turn_context.as_ref(),
@@ -163,11 +169,24 @@ pub(super) async fn maybe_request_mcp_tool_approval(
                 prompt_options,
             },
         );
-        let decision = parse_mcp_tool_approval_elicitation_response(
-            sess.request_mcp_server_elicitation(turn_context.as_ref(), request_id, params)
-                .await,
-            &question_id,
-        );
+        let cleanup_server_name = params.server_name.clone();
+        let response = {
+            let response =
+                sess.request_mcp_server_elicitation(turn_context.as_ref(), request_id, params);
+            tokio::pin!(response);
+            tokio::select! {
+                response = &mut response => LiveApprovalWait::Response(response),
+                () = wait_for_promptless_full_access(turn_context) => {
+                    LiveApprovalWait::FullAccess
+                }
+            }
+        };
+        let LiveApprovalWait::Response(response) = response else {
+            sess.discard_pending_elicitation(&cleanup_server_name, &cleanup_request_id)
+                .await;
+            return None;
+        };
+        let decision = parse_mcp_tool_approval_elicitation_response(response, &question_id);
         let decision = normalize_approval_decision_for_mode(decision, approval_mode);
         apply_mcp_tool_approval_decision(
             sess,
@@ -183,9 +202,20 @@ pub(super) async fn maybe_request_mcp_tool_approval(
     let args = RequestUserInputArgs {
         questions: vec![question],
     };
-    let response = sess
-        .request_user_input(turn_context.as_ref(), call_id.to_string(), args)
-        .await;
+    let response = {
+        let response = sess.request_user_input(turn_context.as_ref(), call_id.to_string(), args);
+        tokio::pin!(response);
+        tokio::select! {
+            response = &mut response => LiveApprovalWait::Response(response),
+            () = wait_for_promptless_full_access(turn_context) => {
+                LiveApprovalWait::FullAccess
+            }
+        }
+    };
+    let LiveApprovalWait::Response(response) = response else {
+        sess.discard_pending_user_input(&turn_context.sub_id).await;
+        return None;
+    };
     let decision = normalize_approval_decision_for_mode(
         parse_mcp_tool_approval_response(response, &question_id),
         approval_mode,
@@ -199,4 +229,17 @@ pub(super) async fn maybe_request_mcp_tool_approval(
     )
     .await;
     Some(decision)
+}
+
+async fn wait_for_promptless_full_access(turn_context: &TurnContext) {
+    let mut permission_updates = turn_context.subscribe_effective_permissions();
+    loop {
+        let current = permission_updates.borrow().clone().normalized();
+        if current.is_promptless_full_access() {
+            return;
+        }
+        if permission_updates.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
 }

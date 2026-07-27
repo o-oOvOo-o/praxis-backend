@@ -1,4 +1,3 @@
-use super::AdditionalProperties;
 use super::JsonSchema;
 use super::parse_tool_input_schema;
 use pretty_assertions::assert_eq;
@@ -66,7 +65,7 @@ fn parse_tool_input_schema_normalizes_integer_and_missing_array_items() {
 }
 
 #[test]
-fn parse_tool_input_schema_sanitizes_additional_properties_schema() {
+fn parse_tool_input_schema_preserves_composed_additional_properties_schema() {
     let schema = parse_tool_input_schema(&serde_json::json!({
         "type": "object",
         "additionalProperties": {
@@ -77,22 +76,31 @@ fn parse_tool_input_schema_sanitizes_additional_properties_schema() {
         }
     }))
     .expect("parse schema");
+    let expected = serde_json::json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {
+            "type": "object",
+            "required": ["value"],
+            "properties": {
+                "value": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "number"}
+                    ]
+                }
+            }
+        }
+    });
 
     assert_eq!(
         schema,
-        JsonSchema::Object {
-            properties: BTreeMap::new(),
-            required: None,
-            additional_properties: Some(AdditionalProperties::Schema(Box::new(
-                JsonSchema::Object {
-                    properties: BTreeMap::from([(
-                        "value".to_string(),
-                        JsonSchema::String { description: None },
-                    )]),
-                    required: Some(vec!["value".to_string()]),
-                    additional_properties: None,
-                },
-            ))),
+        JsonSchema::Raw {
+            schema: expected.clone(),
         }
+    );
+    assert_eq!(
+        serde_json::to_value(&schema).expect("serialize schema"),
+        expected
     );
 }

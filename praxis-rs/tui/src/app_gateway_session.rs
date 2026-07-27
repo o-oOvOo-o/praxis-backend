@@ -15,6 +15,8 @@ use praxis_app_gateway_protocol::AuthMode;
 use praxis_app_gateway_protocol::ClientRequest;
 use praxis_app_gateway_protocol::ConfigBatchWriteParams;
 use praxis_app_gateway_protocol::ConfigWriteResponse;
+use praxis_app_gateway_protocol::ExternalAgentSessionListParams;
+use praxis_app_gateway_protocol::ExternalAgentSessionSource;
 use praxis_app_gateway_protocol::GetAccountParams;
 use praxis_app_gateway_protocol::GetAccountRateLimitsResponse;
 use praxis_app_gateway_protocol::GetAccountResponse;
@@ -77,12 +79,11 @@ use praxis_app_gateway_protocol::ThreadRegenerateNameParams;
 use praxis_app_gateway_protocol::ThreadRegenerateNameResponse;
 use praxis_app_gateway_protocol::ThreadResumeParams;
 use praxis_app_gateway_protocol::ThreadResumeResponse;
-use praxis_app_gateway_protocol::ThreadRollbackParams;
-use praxis_app_gateway_protocol::ThreadRollbackResponse;
 use praxis_app_gateway_protocol::ThreadRewindPreviewParams;
 use praxis_app_gateway_protocol::ThreadRewindPreviewResponse;
 use praxis_app_gateway_protocol::ThreadRewindWorkspaceAction;
-use praxis_app_gateway_protocol::WorkspaceCheckpointId;
+use praxis_app_gateway_protocol::ThreadRollbackParams;
+use praxis_app_gateway_protocol::ThreadRollbackResponse;
 use praxis_app_gateway_protocol::ThreadSelfworkStartParams;
 use praxis_app_gateway_protocol::ThreadSelfworkStartResponse;
 use praxis_app_gateway_protocol::ThreadSelfworkStatus;
@@ -105,6 +106,7 @@ use praxis_app_gateway_protocol::TurnStartParams;
 use praxis_app_gateway_protocol::TurnStartResponse;
 use praxis_app_gateway_protocol::TurnSteerParams;
 use praxis_app_gateway_protocol::TurnSteerResponse;
+use praxis_app_gateway_protocol::WorkspaceCheckpointId;
 use praxis_app_gateway_protocol::resolve_model_id;
 use praxis_core::config::Config;
 use praxis_otel::TelemetryAuthMode;
@@ -144,7 +146,6 @@ pub(crate) struct AppGatewayBootstrap {
     pub(crate) feedback_audience: FeedbackAudience,
     pub(crate) has_chatgpt_account: bool,
     pub(crate) available_models: Vec<ModelPreset>,
-    pub(crate) rate_limit_snapshots: Vec<RateLimitSnapshot>,
 }
 
 pub(crate) struct AppGatewaySession {

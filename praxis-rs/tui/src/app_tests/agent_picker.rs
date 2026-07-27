@@ -95,8 +95,26 @@ async fn open_agent_picker_marks_terminal_read_errors_closed() -> Result<()> {
             .await
             .expect("embedded app gateway");
     let thread_id = ThreadId::new();
-    app.thread_event_channels
-        .insert(thread_id, ThreadEventChannel::new(/*capacity*/ 1));
+    let channel = ThreadEventChannel::new(/*capacity*/ 1);
+    {
+        let mut store = channel.store.lock().await;
+        store.status = Some(praxis_app_gateway_protocol::ThreadStatus::Active {
+            active_flags: vec![praxis_app_gateway_protocol::ThreadActiveFlag::Running],
+        });
+        store.control_state = Some(praxis_app_gateway_protocol::ThreadControlState {
+            controller: praxis_app_gateway_protocol::ThreadController {
+                kind: praxis_app_gateway_protocol::ThreadControllerKind::External,
+                id: "stale-controller".to_string(),
+                label: Some("Stale controller".to_string()),
+                rank: None,
+            },
+            reason: Some("stale state".to_string()),
+            read_only: true,
+            acquired_at: 1,
+            updated_at: 1,
+        });
+    }
+    app.thread_event_channels.insert(thread_id, channel);
     app.agent_navigation.upsert(
         thread_id,
         Some("墨子".to_string()),
@@ -118,6 +136,18 @@ async fn open_agent_picker_marks_terminal_read_errors_closed() -> Result<()> {
             is_closed: true,
         })
     );
+    let store = app
+        .thread_event_channels
+        .get(&thread_id)
+        .expect("replay channel should remain available")
+        .store
+        .lock()
+        .await;
+    assert_eq!(
+        store.status,
+        Some(praxis_app_gateway_protocol::ThreadStatus::NotLoaded)
+    );
+    assert_eq!(store.control_state, None);
     Ok(())
 }
 

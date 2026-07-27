@@ -46,6 +46,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use image::DynamicImage;
 use image::ImageReader;
+use praxis_app_core::PraxisTimelineAnchor;
 use praxis_app_gateway_protocol::McpServerStatus;
 use praxis_config::types::McpServerTransportConfig;
 use praxis_core::config::Config;
@@ -119,6 +120,10 @@ pub(crate) enum ChatLane {
 pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     fn chat_lane(&self) -> ChatLane {
         ChatLane::Assistant
+    }
+
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        None
     }
 
     /// Returns the logical lines for the main chat viewport.

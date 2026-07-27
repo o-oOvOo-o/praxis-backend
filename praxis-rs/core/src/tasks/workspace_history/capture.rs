@@ -58,11 +58,9 @@ pub(crate) async fn capture_workspace_checkpoint(
     operation_id: String,
     record_unchanged: bool,
 ) -> anyhow::Result<WorkspaceCheckpointRef> {
-    let service = WorkspaceHistoryService::open(
-        &ctx.config.praxis_home,
-        ctx.workspace_history.clone(),
-    )
-    .await?;
+    let service =
+        WorkspaceHistoryService::open(&ctx.config.praxis_home, ctx.workspace_history.clone())
+            .await?;
     let checkpoint = service
         .capture(CaptureCheckpointRequest {
             workspace_root: ctx.cwd.to_path_buf(),

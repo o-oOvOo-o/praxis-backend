@@ -45,8 +45,8 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
-use praxis_protocol::ThreadId;
 use praxis_app_gateway_protocol::ThreadRewindWorkspaceAction;
+use praxis_protocol::ThreadId;
 use praxis_protocol::user_input::TextElement;
 
 /// Aggregates all backtrack-related state used by the App.
@@ -368,10 +368,8 @@ impl App {
             ThreadRewindWorkspaceAction::Keep => None,
             ThreadRewindWorkspaceAction::Restore { checkpoint_id } => Some(checkpoint_id),
         };
-        self.chat_widget.submit_op(AppCommand::thread_rollback(
-            num_turns,
-            restore_checkpoint,
-        ));
+        self.chat_widget
+            .submit_op(AppCommand::thread_rollback(num_turns, restore_checkpoint));
         self.chat_widget.set_remote_image_urls(remote_image_urls);
         if !prefill.is_empty()
             || !text_elements.is_empty()
@@ -588,10 +586,13 @@ impl App {
             let active_key = self.chat_widget.active_cell_transcript_key();
             let chat_widget = &self.chat_widget;
             tui.draw(u16::MAX, |frame| {
-                let width = frame.area().width.max(1);
-                t.sync_live_tail(width, active_key, |w| {
-                    chat_widget.active_cell_transcript_lines(w)
-                });
+                let width = t.transcript_content_width(frame.area().width);
+                t.sync_live_tail_with_timeline(
+                    width,
+                    active_key,
+                    |w| chat_widget.active_cell_transcript_lines(w),
+                    || chat_widget.active_cell_timeline_entry(),
+                );
                 t.render(frame.area(), frame.buffer);
             })?;
             let close_overlay = t.is_done();

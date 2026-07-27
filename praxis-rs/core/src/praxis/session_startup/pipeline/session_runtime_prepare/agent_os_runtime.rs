@@ -32,12 +32,7 @@ pub(super) async fn register_and_attach(
             &registration_session_configuration,
         ))
     });
-    match tokio::time::timeout(
-        AGENT_OS_STARTUP_TIMEOUT,
-        &mut registration,
-    )
-    .await
-    {
+    match tokio::time::timeout(AGENT_OS_STARTUP_TIMEOUT, &mut registration).await {
         Ok(result) => result??,
         Err(_) => {
             registration.abort();

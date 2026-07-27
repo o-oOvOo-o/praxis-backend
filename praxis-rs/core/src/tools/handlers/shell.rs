@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use praxis_loop::tool::ToolEffects;
 use praxis_protocol::ThreadId;
 use praxis_protocol::models::ShellCommandToolCallParams;
 use praxis_protocol::models::ShellToolCallParams;
@@ -365,6 +366,10 @@ impl ToolHandler for ShellHandler {
         }
     }
 
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects {
+        shell_effects(self.is_mutating(invocation).await)
+    }
+
     fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
         shell_payload_command(&invocation.payload).map(|command| PreToolUsePayload { command })
     }
@@ -472,6 +477,10 @@ impl ToolHandler for ShellCommandHandler {
             .unwrap_or(true)
     }
 
+    async fn effects(&self, invocation: &ToolInvocation) -> ToolEffects {
+        shell_effects(self.is_mutating(invocation).await)
+    }
+
     fn pre_tool_use_payload(&self, invocation: &ToolInvocation) -> Option<PreToolUsePayload> {
         shell_command_payload_command(&invocation.payload)
             .map(|command| PreToolUsePayload { command })
@@ -539,6 +548,14 @@ impl ToolHandler for ShellCommandHandler {
             shell_runtime_backend: self.shell_runtime_backend(),
         })
         .await
+    }
+}
+
+fn shell_effects(is_mutating: bool) -> ToolEffects {
+    if is_mutating {
+        ToolEffects::unknown_write()
+    } else {
+        ToolEffects::unknown_read()
     }
 }
 

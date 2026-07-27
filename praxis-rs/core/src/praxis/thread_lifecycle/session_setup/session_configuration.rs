@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use praxis_protocol::ThreadId;
 use praxis_protocol::config_types::CollaborationMode;
 use praxis_protocol::config_types::ModeKind;
 use praxis_protocol::config_types::Settings;
@@ -7,7 +8,6 @@ use praxis_protocol::config_types::WindowsSandboxLevel;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::SessionSource;
-use praxis_protocol::ThreadId;
 
 use crate::config::Config;
 use crate::llm::runtime::LlmRuntimeCatalog;

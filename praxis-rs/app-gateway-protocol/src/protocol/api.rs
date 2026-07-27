@@ -65,8 +65,6 @@ use praxis_protocol::protocol::HookScope as CoreHookScope;
 use praxis_protocol::protocol::ModelRerouteReason as CoreModelRerouteReason;
 use praxis_protocol::protocol::NonSteerableTurnKind as CoreNonSteerableTurnKind;
 use praxis_protocol::protocol::PatchApplyStatus as CorePatchApplyStatus;
-pub use praxis_protocol::workspace_history::WorkspaceCheckpointFileSummary;
-pub use praxis_protocol::workspace_history::WorkspaceCheckpointId;
 use praxis_protocol::protocol::PraxisErrorInfo as CorePraxisErrorInfo;
 use praxis_protocol::protocol::RateLimitSnapshot as CoreRateLimitSnapshot;
 use praxis_protocol::protocol::RateLimitWindow as CoreRateLimitWindow;
@@ -93,6 +91,8 @@ use praxis_protocol::request_permissions::RequestPermissionProfile as CoreReques
 use praxis_protocol::user_input::ByteRange as CoreByteRange;
 use praxis_protocol::user_input::TextElement as CoreTextElement;
 use praxis_protocol::user_input::UserInput as CoreUserInput;
+pub use praxis_protocol::workspace_history::WorkspaceCheckpointFileSummary;
+pub use praxis_protocol::workspace_history::WorkspaceCheckpointId;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;
 use serde::Deserialize;

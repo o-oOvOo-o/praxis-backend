@@ -53,12 +53,10 @@ async fn maybe_run_previous_model_inline_compact(
     let Some(new_context_window) = turn_context.model_context_window() else {
         return Ok(false);
     };
-    let new_auto_compact_limit = effective_auto_compact_token_limit(
-        sess.as_ref(),
-        turn_context.as_ref(),
-    )
-    .await
-    .unwrap_or(i64::MAX);
+    let new_auto_compact_limit =
+        effective_auto_compact_token_limit(sess.as_ref(), turn_context.as_ref())
+            .await
+            .unwrap_or(i64::MAX);
     let should_run = total_usage_tokens > new_auto_compact_limit
         && previous_model_turn_context.model_info.slug != turn_context.model_info.slug
         && old_context_window > new_context_window;

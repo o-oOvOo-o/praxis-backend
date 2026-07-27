@@ -153,6 +153,26 @@ impl PraxisThread {
             .await
     }
 
+    pub fn permission_generation(&self) -> u64 {
+        self.praxis.session.permission_generation()
+    }
+
+    pub fn is_promptless_full_access(&self) -> bool {
+        self.praxis.session.is_promptless_full_access()
+    }
+
+    pub async fn set_permissions(
+        &self,
+        approval_policy: AskForApproval,
+        approvals_reviewer: ApprovalsReviewer,
+        sandbox_policy: SandboxPolicy,
+    ) -> ConstraintResult<u64> {
+        self.praxis
+            .session
+            .update_permissions(approval_policy, approvals_reviewer, sandbox_policy)
+            .await
+    }
+
     /// Use sparingly: this is intended to be removed soon.
     pub async fn submit_with_id(&self, sub: Submission) -> PraxisResult<()> {
         self.praxis.submit_with_id(sub).await

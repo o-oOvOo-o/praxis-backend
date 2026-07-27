@@ -59,42 +59,52 @@ impl PraxisMessageProcessor {
         };
 
         let before = thread.config_snapshot().await;
-        let op = Op::OverrideTurnContext {
-            cwd: None,
-            approval_policy: Some(core_approval_policy),
-            approvals_reviewer: Some(core_approvals_reviewer.clone()),
-            sandbox_policy: Some(core_sandbox_policy.clone()),
-            windows_sandbox_level: None,
-            model_provider: None,
-            model: None,
-            effort: None,
-            summary: None,
-            service_tier: None,
-            collaboration_mode: None,
-            personality: None,
-        };
-        if let Err(err) = self.submit_core_op(&request_id, thread.as_ref(), op).await {
-            self.send_internal_error(
-                request_id,
-                format!("failed to apply thread permission override for {thread_uuid}: {err}"),
-            )
-            .await;
-            return;
+        let permissions_will_change = before.approval_policy != core_approval_policy
+            || before.approvals_reviewer != core_approvals_reviewer
+            || before.sandbox_policy != core_sandbox_policy;
+        if permissions_will_change {
+            self.outgoing
+                .resolve_pending_approval_requests(
+                    thread_uuid,
+                    permission_changed_request_error(
+                        thread.permission_generation().saturating_add(1),
+                    ),
+                )
+                .await;
         }
-
-        let Some(after) = self
-            .wait_for_thread_permissions_snapshot(
-                request_id.clone(),
-                thread_uuid,
-                thread.as_ref(),
+        let generation = match thread
+            .set_permissions(
                 core_approval_policy,
                 core_approvals_reviewer,
-                &core_sandbox_policy,
+                core_sandbox_policy,
             )
             .await
-        else {
-            return;
+        {
+            Ok(generation) => generation,
+            Err(err) => {
+                self.send_invalid_request_error(
+                    request_id,
+                    format!("failed to apply thread permissions for {thread_uuid}: {err}"),
+                )
+                .await;
+                return;
+            }
         };
+        let after = thread.config_snapshot().await;
+
+        if after.approval_policy == praxis_protocol::protocol::AskForApproval::Never
+            && matches!(
+                after.sandbox_policy,
+                praxis_protocol::protocol::SandboxPolicy::DangerFullAccess
+            )
+        {
+            self.outgoing
+                .resolve_pending_approval_requests(
+                    thread_uuid,
+                    permission_changed_request_error(generation),
+                )
+                .await;
+        }
 
         let mut thread_projection =
             build_thread_from_snapshot(thread_uuid, &after, thread.rollout_path());
@@ -105,6 +115,7 @@ impl PraxisMessageProcessor {
 
         let response = ThreadPermissionsSetResponse {
             thread: thread_projection.clone(),
+            generation,
             previous_approval_policy: before.approval_policy.into(),
             previous_approvals_reviewer: before.approvals_reviewer.into(),
             previous_sandbox_policy: before.sandbox_policy.clone().into(),
@@ -125,6 +136,7 @@ impl PraxisMessageProcessor {
                     ThreadPermissionsChangedNotification {
                         thread_id: thread_uuid.to_string(),
                         thread: thread_projection,
+                        generation,
                         previous_approval_policy: response.previous_approval_policy,
                         previous_approvals_reviewer: response.previous_approvals_reviewer,
                         previous_sandbox_policy: response.previous_sandbox_policy,
@@ -136,36 +148,17 @@ impl PraxisMessageProcessor {
                 .await;
         }
     }
+}
 
-    async fn wait_for_thread_permissions_snapshot(
-        &self,
-        request_id: ConnectionRequestId,
-        thread_id: ThreadId,
-        thread: &PraxisThread,
-        approval_policy: praxis_protocol::protocol::AskForApproval,
-        approvals_reviewer: praxis_protocol::config_types::ApprovalsReviewer,
-        sandbox_policy: &praxis_protocol::protocol::SandboxPolicy,
-    ) -> Option<ThreadConfigSnapshot> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-        loop {
-            let snapshot = thread.config_snapshot().await;
-            if snapshot.approval_policy == approval_policy
-                && snapshot.approvals_reviewer == approvals_reviewer
-                && snapshot.sandbox_policy == *sandbox_policy
-            {
-                return Some(snapshot);
-            }
-            if tokio::time::Instant::now() >= deadline {
-                self.send_invalid_request_error(
-                    request_id,
-                    format!(
-                        "thread/permissions/set did not become effective for running thread {thread_id}"
-                    ),
-                )
-                .await;
-                return None;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
+fn permission_changed_request_error(
+    generation: u64,
+) -> praxis_app_gateway_protocol::JSONRPCErrorError {
+    praxis_app_gateway_protocol::JSONRPCErrorError {
+        code: crate::error_code::INTERNAL_ERROR_CODE,
+        message: "approval resolved because thread permissions changed".to_string(),
+        data: Some(serde_json::json!({
+            "reason": crate::server_request_error::PERMISSION_CHANGED_PENDING_REQUEST_ERROR_REASON,
+            "generation": generation,
+        })),
     }
 }

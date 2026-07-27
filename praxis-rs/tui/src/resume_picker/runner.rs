@@ -26,11 +26,19 @@ pub async fn run_resume_picker_with_app_gateway(
 ) -> Result<SessionSelection> {
     let (bg_tx, bg_rx) = mpsc::unbounded_channel();
     let is_remote = app_gateway.is_remote();
-    let primary_loader =
-        spawn_app_gateway_page_loader(app_gateway, include_non_interactive, bg_tx.clone());
+    let primary_loader = spawn_app_gateway_page_loader(
+        app_gateway,
+        active_source,
+        include_non_interactive,
+        bg_tx.clone(),
+    );
     let source_switcher = alternate_source.map(|alternate| {
-        let alternate_loader =
-            spawn_app_gateway_page_loader(alternate.app_gateway, include_non_interactive, bg_tx);
+        let alternate_loader = spawn_app_gateway_page_loader(
+            alternate.app_gateway,
+            alternate.source,
+            include_non_interactive,
+            bg_tx,
+        );
         SourceSwitcher::from_sources(
             active_source,
             picker_source_config(config, primary_loader.clone()),
@@ -64,12 +72,14 @@ pub async fn run_fork_picker_with_app_gateway(
     let is_remote = app_gateway.is_remote();
     let primary_loader = spawn_app_gateway_page_loader(
         app_gateway,
+        active_source,
         /*include_non_interactive*/ false,
         bg_tx.clone(),
     );
     let source_switcher = alternate_source.map(|alternate| {
         let alternate_loader = spawn_app_gateway_page_loader(
             alternate.app_gateway,
+            alternate.source,
             /*include_non_interactive*/ false,
             bg_tx,
         );

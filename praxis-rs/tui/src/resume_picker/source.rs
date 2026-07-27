@@ -144,6 +144,7 @@ pub(super) struct PickerPage {
 
 pub(super) fn spawn_app_gateway_page_loader(
     app_gateway: AppGatewaySession,
+    source: SessionLookupSource,
     include_non_interactive: bool,
     bg_tx: mpsc::UnboundedSender<BackgroundEvent>,
 ) -> PageLoader {
@@ -155,6 +156,7 @@ pub(super) fn spawn_app_gateway_page_loader(
             let cursor = request.cursor;
             let page = load_app_gateway_page(
                 &mut app_gateway,
+                source,
                 cursor,
                 request.sort_key,
                 include_non_interactive,

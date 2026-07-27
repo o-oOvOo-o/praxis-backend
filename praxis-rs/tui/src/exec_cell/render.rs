@@ -19,6 +19,7 @@ use crate::wrapping::adaptive_wrap_line;
 use crate::wrapping::adaptive_wrap_lines;
 use itertools::Itertools;
 use praxis_ansi_escape::ansi_escape_line;
+use praxis_app_core::PraxisTimelineAnchor;
 use praxis_protocol::parse_command::ParsedCommand;
 use praxis_protocol::protocol::ExecCommandSource;
 use praxis_shell_command::bash::extract_bash_command;
@@ -201,6 +202,39 @@ pub(crate) fn spinner(start_time: Option<Instant>, animations_enabled: bool) -> 
 }
 
 impl HistoryCell for ExecCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        let kind = if self.is_exploring_cell() {
+            praxis_app_core::PraxisTimelineKind::Tool
+        } else {
+            praxis_app_core::PraxisTimelineKind::Command
+        };
+        let tone = if self.is_active() {
+            praxis_app_core::PraxisTimelineTone::Working
+        } else if self.iter_calls().any(|call| {
+            call.output
+                .as_ref()
+                .is_some_and(|output| output.exit_code != 0)
+        }) {
+            praxis_app_core::PraxisTimelineTone::Error
+        } else {
+            praxis_app_core::PraxisTimelineTone::Success
+        };
+        let label = if self.is_exploring_cell() {
+            format!(
+                "Explored {} item{}",
+                self.calls.len(),
+                if self.calls.len() == 1 { "" } else { "s" }
+            )
+        } else {
+            self.iter_calls()
+                .next()
+                .map(|call| strip_bash_lc_and_escape(&call.command))
+                .filter(|command| !command.trim().is_empty())
+                .unwrap_or_else(|| "Command".to_string())
+        };
+        Some(PraxisTimelineAnchor::new(kind, tone, label))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         if !self.is_card_expanded() {
             return self.collapsed_card_lines(width);

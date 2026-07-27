@@ -57,15 +57,29 @@ pub(super) fn persistent_mcp_tool_approval_key(
 
 pub(super) async fn mcp_tool_approval_is_remembered(
     sess: &Session,
+    turn_context: &TurnContext,
     key: &McpToolApprovalKey,
 ) -> bool {
+    let permission_generation = turn_context.effective_permissions().generation;
     let store = sess.services.tool_approvals.lock().await;
-    matches!(store.get(key), Some(ReviewDecision::ApprovedForSession))
+    matches!(
+        store.get(permission_generation, key),
+        Some(ReviewDecision::ApprovedForSession)
+    )
 }
 
-pub(super) async fn remember_mcp_tool_approval(sess: &Session, key: McpToolApprovalKey) {
+pub(super) async fn remember_mcp_tool_approval(
+    sess: &Session,
+    turn_context: &TurnContext,
+    key: McpToolApprovalKey,
+) {
+    let permission_generation = turn_context.effective_permissions().generation;
     let mut store = sess.services.tool_approvals.lock().await;
-    store.put(key, ReviewDecision::ApprovedForSession);
+    store.put(
+        permission_generation,
+        key,
+        ReviewDecision::ApprovedForSession,
+    );
 }
 
 pub(super) async fn apply_mcp_tool_approval_decision(
@@ -78,14 +92,14 @@ pub(super) async fn apply_mcp_tool_approval_decision(
     match decision {
         McpToolApprovalDecision::AcceptForSession => {
             if let Some(key) = session_approval_key {
-                remember_mcp_tool_approval(sess, key).await;
+                remember_mcp_tool_approval(sess, turn_context, key).await;
             }
         }
         McpToolApprovalDecision::AcceptAndRemember => {
             if let Some(key) = persistent_approval_key {
                 maybe_persist_mcp_tool_approval(sess, turn_context, key).await;
             } else if let Some(key) = session_approval_key {
-                remember_mcp_tool_approval(sess, key).await;
+                remember_mcp_tool_approval(sess, turn_context, key).await;
             }
         }
         McpToolApprovalDecision::Accept

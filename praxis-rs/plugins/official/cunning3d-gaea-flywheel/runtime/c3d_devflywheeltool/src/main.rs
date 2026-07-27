@@ -14,11 +14,13 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+mod architecture_guard;
 mod crumble;
 mod debris;
 mod toolchain;
 
 include!("flywheel/build_blackbox_inventory.rs");
+include!("flywheel/cce_graph_runner.rs");
 include!("flywheel/cmd_raw_gate.rs");
 include!("flywheel/cmd_perf_migrate.rs");
 include!("flywheel/perf_candidate_diagnosis.rs");

@@ -1315,6 +1315,7 @@ fn gaea_app_bench_default_target(
     resolution: u32,
     generate_fixture: bool,
     debris_params: &GaeaDebrisAppBenchParams,
+    canyon_params: &GaeaCanyonAppBenchParams,
 ) -> Result<(PathBuf, i32, Option<Value>), String> {
     if node.eq_ignore_ascii_case("Mountain") {
         Ok((
@@ -1330,11 +1331,213 @@ fn gaea_app_bench_default_target(
         } else {
             Ok((gaea_dir.join("Examples").join("Debris.terrain"), 269, None))
         }
+    } else if node.eq_ignore_ascii_case("Canyon") {
+        if generate_fixture {
+            let (terrain, fixture) =
+                write_canyon_app_bench_fixture(ctx, gaea_dir, resolution, canyon_params)?;
+            Ok((terrain, 876, Some(fixture)))
+        } else {
+            Ok((
+                gaea_dir
+                    .join("Examples")
+                    .join("Structure - Complex Canyon.terrain"),
+                876,
+                None,
+            ))
+        }
     } else {
         Err(format!(
             "gaea-app-bench is not wired for node '{node}' yet. Use `reverse` first, then add a node runner mapping in c3d_devflywheeltool."
         ))
     }
+}
+
+#[derive(Debug, Clone)]
+struct GaeaCanyonAppBenchParams {
+    style: String,
+    scale: f32,
+    slot: f32,
+    valley: f32,
+    surrounding: f32,
+    depth: f32,
+    structural_warp: f32,
+    detail_warp: f32,
+    alternate_style: bool,
+    seed: i32,
+}
+
+impl GaeaCanyonAppBenchParams {
+    fn from_cli(cli: &Cli) -> Result<Self, String> {
+        let style = cli.flag("canyon-style").unwrap_or("Eroded").to_string();
+        if !["Classic", "Eroded", "Eroded2", "Strata", "Both"]
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&style))
+        {
+            return Err(format!("Unsupported Canyon app-bench style '{style}'."));
+        }
+        Ok(Self {
+            style,
+            scale: optional_f32_flag(cli, "canyon-scale")?.unwrap_or(0.35),
+            slot: optional_f32_flag(cli, "canyon-slot")?.unwrap_or(0.2),
+            valley: optional_f32_flag(cli, "canyon-valley")?.unwrap_or(0.4),
+            surrounding: optional_f32_flag(cli, "canyon-surrounding")?.unwrap_or(0.6),
+            depth: optional_f32_flag(cli, "canyon-depth")?.unwrap_or(0.5),
+            structural_warp: optional_f32_flag(cli, "canyon-structural-warp")?.unwrap_or(0.5),
+            detail_warp: optional_f32_flag(cli, "canyon-detail-warp")?.unwrap_or(0.5),
+            alternate_style: optional_bool_flag(cli, "canyon-alternate-style")?
+                .unwrap_or(false),
+            seed: optional_i32_flag(cli, "canyon-seed")?.unwrap_or(0),
+        })
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "Style": self.style,
+            "Scale": self.scale,
+            "Slot": self.slot,
+            "Valley": self.valley,
+            "Surrounding": self.surrounding,
+            "Depth": self.depth,
+            "StructualWarp": self.structural_warp,
+            "DetailWarp": self.detail_warp,
+            "AlternateStyle": self.alternate_style,
+            "Seed": self.seed,
+        })
+    }
+}
+
+fn write_canyon_app_bench_fixture(
+    ctx: &Context,
+    gaea_dir: &Path,
+    resolution: u32,
+    params: &GaeaCanyonAppBenchParams,
+) -> Result<(PathBuf, Value), String> {
+    let template = gaea_dir
+        .join("Examples")
+        .join("Structure - Complex Canyon.terrain");
+    let mut project = read_json(&template)?;
+    apply_canyon_app_bench_fixture(&mut project, params, resolution)?;
+    let output = ctx
+        .artifact_root
+        .join("gaea_app_bench")
+        .join("fixtures")
+        .join(format!("canyon_direct_{}.terrain", unix_stamp_millis()));
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create '{}': {error}", parent.display()))?;
+    }
+    write_pretty_json(&output, &project)?;
+    let _: Value = read_json(&output)?;
+    let fixture = json!({
+        "kind": "canyon_direct_source",
+        "template": template,
+        "output": output,
+        "node_id": 876,
+        "removed_unrelated_nodes": true,
+        "save_definition_added": true,
+        "resolution": resolution,
+        "params": params.to_json(),
+    });
+    Ok((output, fixture))
+}
+
+fn apply_canyon_app_bench_fixture(
+    project: &mut Value,
+    params: &GaeaCanyonAppBenchParams,
+    resolution: u32,
+) -> Result<(), String> {
+    let asset = gaea_primary_asset_object_mut(project)?;
+    {
+        let terrain = asset
+            .get_mut("Terrain")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| "Gaea project asset does not contain a Terrain object.".to_string())?;
+        if let Some(metadata) = terrain.get_mut("Metadata").and_then(Value::as_object_mut) {
+            set_object_string_field(metadata, "Name", "C3D Canyon Direct App Bench");
+            set_object_string_field(
+                metadata,
+                "Description",
+                "Generated by C3D flywheel as an isolated Canyon source for Swarm timing.",
+            );
+            set_object_string_field(metadata, "ModifiedVersion", "2.2.0.0");
+        }
+        let nodes = terrain
+            .get_mut("Nodes")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| "Gaea terrain has no Nodes object.".to_string())?;
+        let mut canyon = nodes
+            .get("876")
+            .cloned()
+            .ok_or_else(|| "Canyon template node 876 was not found.".to_string())?;
+        configure_canyon_app_bench_node(&mut canyon, params)?;
+        configure_canyon_app_bench_save_definition(&mut canyon)?;
+        nodes.clear();
+        nodes.insert("876".to_string(), canyon);
+    }
+    if let Some(build) = asset
+        .get_mut("BuildDefinition")
+        .and_then(Value::as_object_mut)
+    {
+        build.insert("Type".to_string(), json!("Standard"));
+        build.insert("Resolution".to_string(), json!(resolution));
+        build.insert("BakeResolution".to_string(), json!(resolution));
+        build.insert("TileResolution".to_string(), json!(resolution));
+        build.insert("BucketResolution".to_string(), json!(resolution));
+        build.insert("NumberOfTiles".to_string(), json!(1));
+        build.insert("TileZeroIndex".to_string(), json!(true));
+    }
+    if let Some(state) = asset.get_mut("State").and_then(Value::as_object_mut) {
+        state.insert("SelectedNode".to_string(), json!(876));
+        state.insert("UnderlayNode".to_string(), json!(876));
+    }
+    Ok(())
+}
+
+fn configure_canyon_app_bench_save_definition(canyon: &mut Value) -> Result<(), String> {
+    let canyon = canyon
+        .as_object_mut()
+        .ok_or_else(|| "Canyon template node 876 is not an object.".to_string())?;
+    canyon.insert(
+        "SaveDefinition".to_string(),
+        json!({
+            "$id": "9000",
+            "Node": 876,
+            "Filename": "Canyon",
+            "Format": "TIFF32",
+            "IsEnabled": true,
+            "DisabledInProfiles": {"$id": "9001", "$values": []}
+        }),
+    );
+    Ok(())
+}
+
+fn configure_canyon_app_bench_node(
+    canyon: &mut Value,
+    params: &GaeaCanyonAppBenchParams,
+) -> Result<(), String> {
+    let canyon = canyon
+        .as_object_mut()
+        .ok_or_else(|| "Canyon template node 876 is not an object.".to_string())?;
+    for (key, value) in params
+        .to_json()
+        .as_object()
+        .expect("Canyon app-bench parameters are an object")
+    {
+        canyon.insert(key.clone(), value.clone());
+    }
+    let ports = canyon
+        .get_mut("Ports")
+        .and_then(|ports| ports.get_mut("$values"))
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| "Canyon template node has no Ports array.".to_string())?;
+    for port in ports {
+        if port.get("Name").and_then(Value::as_str) == Some("In") {
+            port.as_object_mut()
+                .expect("Canyon port is an object")
+                .remove("Record");
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]

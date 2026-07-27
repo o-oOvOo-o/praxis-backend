@@ -14,6 +14,7 @@ use tokio::sync::oneshot;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 
+use super::pending::await_pending_approval;
 use super::pending::insert_pending_approval;
 
 impl Session {
@@ -34,7 +35,7 @@ impl Session {
     ) -> ReviewDecision {
         let effective_approval_id = approval_id.clone().unwrap_or_else(|| call_id.clone());
         let (tx_approve, rx_approve) = oneshot::channel();
-        insert_pending_approval(self, effective_approval_id, tx_approve).await;
+        insert_pending_approval(self, effective_approval_id.clone(), tx_approve).await;
 
         let parsed_cmd = parse_command(&command);
         let proposed_network_policy_amendments =
@@ -62,7 +63,13 @@ impl Session {
             parsed_cmd,
         });
         self.send_event(turn_context, event).await;
-        rx_approve.await.unwrap_or(ReviewDecision::Abort)
+        await_pending_approval(
+            self,
+            turn_context,
+            &effective_approval_id,
+            rx_approve,
+        )
+        .await
     }
 }
 

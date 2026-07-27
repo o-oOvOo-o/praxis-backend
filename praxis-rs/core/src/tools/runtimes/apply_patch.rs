@@ -168,7 +168,7 @@ impl Approvable<ApplyPatchRequest> for ApplyPatchRuntime {
                 return review_approval_request(session, turn, action, retry_reason).await;
             }
             if let Some(reason) = retry_reason {
-                let rx_approve = session
+                return session
                     .request_patch_approval(
                         turn,
                         call_id,
@@ -177,20 +177,19 @@ impl Approvable<ApplyPatchRequest> for ApplyPatchRuntime {
                         /*grant_root*/ None,
                     )
                     .await;
-                return rx_approve.await.unwrap_or_default();
             }
 
             with_cached_approval(
                 &session.services,
+                turn.effective_permissions().generation,
                 "apply_patch",
                 approval_keys,
                 || async move {
-                    let rx_approve = session
+                    session
                         .request_patch_approval(
                             turn, call_id, changes, /*reason*/ None, /*grant_root*/ None,
                         )
-                        .await;
-                    rx_approve.await.unwrap_or_default()
+                        .await
                 },
             )
             .await

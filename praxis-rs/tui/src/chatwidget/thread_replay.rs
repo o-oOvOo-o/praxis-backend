@@ -228,7 +228,7 @@ impl ChatWidget {
                     praxis_app_gateway_protocol::CommandExecutionStatus::InProgress
                 ) {
                     self.on_exec_command_begin(ExecCommandBeginEvent {
-                        call_id: id,
+                        call_id: id.clone(),
                         process_id,
                         turn_id: turn_id.clone(),
                         command: split_command_string(&command),
@@ -240,6 +240,15 @@ impl ChatWidget {
                         source: source.to_core(),
                         interaction_input: None,
                     });
+                    if from_replay
+                        && let Some(output) = aggregated_output.filter(|output| !output.is_empty())
+                    {
+                        self.on_exec_command_output_delta(ExecCommandOutputDeltaEvent {
+                            call_id: id,
+                            stream: praxis_protocol::protocol::ExecOutputStream::Stdout,
+                            chunk: output.into_bytes(),
+                        });
+                    }
                 } else {
                     let aggregated_output = aggregated_output.unwrap_or_default();
                     self.on_exec_command_end(ExecCommandEndEvent {

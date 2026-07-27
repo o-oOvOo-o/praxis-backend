@@ -6,8 +6,6 @@ use crate::llm::provider::ModelProviderInfo;
 use crate::llm::provider::NATIVE_LOCAL_PROVIDER_ID;
 use crate::llm::provider::create_native_local_provider;
 use crate::llm::provider::is_native_local_provider;
-use candle_core::quantized::gguf_file::{Content, Value as GgufValue};
-use once_cell::sync::Lazy;
 use praxis_protocol::config_types::ReasoningSummary;
 use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::InputModality;
@@ -26,12 +24,9 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Mutex;
-use std::time::Duration;
-use std::time::Instant;
 use walkdir::WalkDir;
 
-const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
+pub(super) const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
 const DEFAULT_LOCAL_MODEL_CONTEXT_WINDOW: i64 = 32_768;
 const NATIVE_LOCAL_BASE_INSTRUCTIONS: &str = r#"You are Praxis running on a local GPU model.
 
@@ -42,18 +37,6 @@ Work as a pragmatic coding agent:
 - Preserve user changes and avoid destructive commands unless the user explicitly asks.
 - Keep answers direct and concise. Do not expose hidden reasoning, thinking tags, or analysis text.
 - If the local model is too small or slow for the task, say that plainly and recommend a stronger model or a narrower task."#;
-const LOCAL_MODEL_DISCOVERY_CACHE_TTL_MS: u64 = 5_000;
-
-static LOCAL_MODEL_DISCOVERY_CACHE: Lazy<Mutex<Option<LocalModelDiscoveryCache>>> =
-    Lazy::new(|| Mutex::new(None));
-
-#[derive(Debug, Clone)]
-struct LocalModelDiscoveryCache {
-    key: String,
-    captured_at: Instant,
-    entries: Vec<LocalModelEntry>,
-}
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct NativeLocalModelConfig {
     pub local_models: LocalModelsConfig,
@@ -169,33 +152,10 @@ pub(crate) fn discover_local_models(config: &Config) -> Vec<LocalModelEntry> {
 pub(crate) fn discover_local_models_from_runtime_config(
     config: &NativeLocalModelConfig,
 ) -> Vec<LocalModelEntry> {
-    let cache_key = local_model_discovery_cache_key(config);
-    {
-        let cache = LOCAL_MODEL_DISCOVERY_CACHE
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(cache) = cache.as_ref()
-            && cache.key == cache_key
-            && cache.captured_at.elapsed()
-                <= Duration::from_millis(LOCAL_MODEL_DISCOVERY_CACHE_TTL_MS)
-        {
-            return cache.entries.clone();
-        }
-    }
-
-    let entries = discover_local_models_from_runtime_config_uncached(config);
-    let mut cache = LOCAL_MODEL_DISCOVERY_CACHE
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    *cache = Some(LocalModelDiscoveryCache {
-        key: cache_key,
-        captured_at: Instant::now(),
-        entries: entries.clone(),
-    });
-    entries
+    super::catalog_cache::discover_local_models_cached(config)
 }
 
-fn discover_local_models_from_runtime_config_uncached(
+pub(super) fn discover_local_models_from_runtime_config_uncached(
     config: &NativeLocalModelConfig,
 ) -> Vec<LocalModelEntry> {
     let mut entries = BTreeMap::<PathBuf, LocalModelEntry>::new();
@@ -218,24 +178,6 @@ fn discover_local_models_from_runtime_config_uncached(
             .then_with(|| left.model_id.cmp(&right.model_id))
     });
     entries
-}
-
-fn local_model_discovery_cache_key(config: &NativeLocalModelConfig) -> String {
-    let mut hasher = Sha1::new();
-    hasher.update(config.local_models.scan_max_depth.to_le_bytes());
-    for path in &config.local_models.paths {
-        hasher.update(path.to_string_lossy().as_bytes());
-        hasher.update([0]);
-    }
-    for (host_id, host) in &config.local_model_hosts {
-        hasher.update(host_id.as_bytes());
-        hasher.update([0]);
-        let host_json = serde_json::to_string(host).unwrap_or_else(|_| format!("{host:?}"));
-        hasher.update(host_json.as_bytes());
-        hasher.update([0]);
-    }
-    let digest = hasher.finalize();
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn native_local_provider(config: &Config) -> ModelProviderInfo {
@@ -520,7 +462,7 @@ fn local_model_wire(
     }
 }
 
-fn is_supported_model_file(path: &Path) -> bool {
+pub(super) fn is_supported_model_file(path: &Path) -> bool {
     LocalModelFormat::from_model_path(path).is_some()
 }
 
@@ -537,19 +479,9 @@ struct GgufMetadata {
 }
 
 fn inspect_gguf_metadata(path: &Path) -> Option<GgufMetadata> {
-    let mut file = fs::File::open(path).ok()?;
-    let content = Content::read(&mut file).ok()?;
-    let architecture = content
-        .metadata
-        .get("general.architecture")
-        .and_then(value_string)
-        .map(LocalModelArchitecture::from_gguf_architecture)
-        .unwrap_or(LocalModelArchitecture::Unknown);
+    let architecture = super::gguf_metadata::read_general_architecture(path).ok()??;
+    let architecture = LocalModelArchitecture::from_gguf_architecture(&architecture);
     Some(GgufMetadata { architecture })
-}
-
-fn value_string(value: &GgufValue) -> Option<&str> {
-    value.to_string().ok().map(String::as_str)
 }
 
 fn entry_matches_model(entry: &LocalModelEntry, model: &str) -> bool {

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use crate::error::Result as PraxisResult;
 use crate::error::PraxisErr;
+use crate::error::Result as PraxisResult;
 use crate::praxis::Praxis;
 use crate::praxis::PraxisSpawnArgs;
 use crate::praxis::PraxisSpawnOk;

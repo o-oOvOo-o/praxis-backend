@@ -31,6 +31,88 @@ pub(crate) enum AppGatewayTarget {
     },
 }
 
+pub(super) struct PreparedAppGatewaySession {
+    app_gateway: AppGatewaySession,
+    startup_key: AppGatewayStartupKey,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct AppGatewayStartupKey {
+    target: AppGatewayTarget,
+    config: Config,
+    control_listen: Option<ControlListenConfig>,
+}
+
+impl AppGatewayStartupKey {
+    fn new(
+        target: AppGatewayTarget,
+        config: Config,
+        control_listen: Option<ControlListenConfig>,
+    ) -> Self {
+        Self {
+            control_listen: effective_control_listen(&target, control_listen),
+            target,
+            config,
+        }
+    }
+
+    fn matches(
+        &self,
+        target: &AppGatewayTarget,
+        config: &Config,
+        control_listen: Option<ControlListenConfig>,
+    ) -> bool {
+        &self.target == target
+            && &self.config == config
+            && self.control_listen == effective_control_listen(target, control_listen)
+    }
+}
+
+impl PreparedAppGatewaySession {
+    pub(super) fn new(
+        app_gateway: AppGatewaySession,
+        target: AppGatewayTarget,
+        config: Config,
+        control_listen: Option<ControlListenConfig>,
+    ) -> Self {
+        Self {
+            app_gateway,
+            startup_key: AppGatewayStartupKey::new(target, config, control_listen),
+        }
+    }
+
+    pub(super) fn app_gateway(&self) -> &AppGatewaySession {
+        &self.app_gateway
+    }
+
+    pub(super) fn app_gateway_mut(&mut self) -> &mut AppGatewaySession {
+        &mut self.app_gateway
+    }
+
+    pub(super) fn is_compatible_with(
+        &self,
+        target: &AppGatewayTarget,
+        config: &Config,
+        control_listen: Option<ControlListenConfig>,
+    ) -> bool {
+        self.startup_key.matches(target, config, control_listen)
+    }
+
+    pub(super) fn into_app_gateway(self) -> AppGatewaySession {
+        self.app_gateway
+    }
+}
+
+fn effective_control_listen(
+    target: &AppGatewayTarget,
+    control_listen: Option<ControlListenConfig>,
+) -> Option<ControlListenConfig> {
+    match target {
+        AppGatewayTarget::Embedded => control_listen,
+        AppGatewayTarget::Remote { .. } => None,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ControlListenConfig {
     pub addr: SocketAddr,
@@ -298,5 +380,50 @@ pub(super) async fn shutdown_app_gateway_if_present(app_gateway: Option<AppGatew
         && let Err(err) = app_gateway.shutdown().await
     {
         warn!(%err, "Failed to shut down temporary embedded app gateway");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> Config {
+        let praxis_home = tempfile::tempdir().expect("tempdir").keep();
+        Config::load_default_with_cli_overrides_for_praxis_home(praxis_home, Vec::new())
+            .expect("config")
+    }
+
+    #[test]
+    fn startup_key_rejects_config_changes() {
+        let config = test_config();
+        let key = AppGatewayStartupKey::new(AppGatewayTarget::Embedded, config.clone(), None);
+        let mut changed_config = config;
+        changed_config.model = Some("different-model".to_string());
+
+        assert!(!key.matches(&AppGatewayTarget::Embedded, &changed_config, None,));
+    }
+
+    #[test]
+    fn startup_key_rejects_embedded_control_listener_changes() {
+        let config = test_config();
+        let key = AppGatewayStartupKey::new(AppGatewayTarget::Embedded, config.clone(), None);
+        let control_listen =
+            ControlListenConfig::best_effort("127.0.0.1:9876".parse().expect("socket address"));
+
+        assert!(!key.matches(&AppGatewayTarget::Embedded, &config, Some(control_listen),));
+    }
+
+    #[test]
+    fn startup_key_ignores_control_listener_for_remote_target() {
+        let config = test_config();
+        let target = AppGatewayTarget::Remote {
+            websocket_url: "ws://127.0.0.1:8765/".to_string(),
+            auth_token: None,
+        };
+        let key = AppGatewayStartupKey::new(target.clone(), config.clone(), None);
+        let control_listen =
+            ControlListenConfig::required("127.0.0.1:9876".parse().expect("socket address"));
+
+        assert!(key.matches(&target, &config, Some(control_listen)));
     }
 }

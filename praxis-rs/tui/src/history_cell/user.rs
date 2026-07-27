@@ -94,6 +94,24 @@ impl HistoryCell for UserHistoryCell {
         ChatLane::User
     }
 
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        let label = self
+            .message
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let label = if label.is_empty() {
+            "User message".to_string()
+        } else {
+            label
+        };
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::User,
+            praxis_app_core::PraxisTimelineTone::Accent,
+            label,
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let wrap_width = width.max(1);
 

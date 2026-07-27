@@ -10,6 +10,7 @@ use tokio::sync::oneshot;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 
+use super::pending::await_pending_approval;
 use super::pending::insert_pending_approval;
 
 impl Session {
@@ -20,10 +21,10 @@ impl Session {
         changes: HashMap<PathBuf, FileChange>,
         reason: Option<String>,
         grant_root: Option<PathBuf>,
-    ) -> oneshot::Receiver<ReviewDecision> {
+    ) -> ReviewDecision {
         let (tx_approve, rx_approve) = oneshot::channel();
         let approval_id = call_id.clone();
-        insert_pending_approval(self, approval_id, tx_approve).await;
+        insert_pending_approval(self, approval_id.clone(), tx_approve).await;
 
         let event = EventMsg::ApplyPatchApprovalRequest(ApplyPatchApprovalRequestEvent {
             call_id,
@@ -33,6 +34,12 @@ impl Session {
             grant_root,
         });
         self.send_event(turn_context, event).await;
-        rx_approve
+        await_pending_approval(
+            self,
+            turn_context,
+            &approval_id,
+            rx_approve,
+        )
+        .await
     }
 }

@@ -44,4 +44,3 @@ impl GitSha {
         Self(sha.to_string())
     }
 }
-

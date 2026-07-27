@@ -83,13 +83,9 @@ impl WorkspaceHistoryService {
         let columns = sqlx::query("PRAGMA table_info(checkpoints)")
             .fetch_all(&pool)
             .await?;
-        if !columns
-            .iter()
-            .any(|row| {
-                row.try_get::<String, _>("name").ok().as_deref()
-                    == Some("changed_file_count")
-            })
-        {
+        if !columns.iter().any(|row| {
+            row.try_get::<String, _>("name").ok().as_deref() == Some("changed_file_count")
+        }) {
             sqlx::query(
                 "ALTER TABLE checkpoints ADD COLUMN changed_file_count INTEGER NOT NULL DEFAULT 0",
             )

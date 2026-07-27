@@ -12,7 +12,11 @@ async fn record_initial_history_resumed_aborted_turn_without_id_clears_active_tu
         current_date: turn_context.current_date.clone(),
         timezone: turn_context.timezone.clone(),
         approval_policy: turn_context.effective_approval_policy(),
-        sandbox_policy: turn_context.effective_permissions().sandbox_policy.get().clone(),
+        sandbox_policy: turn_context
+            .effective_permissions()
+            .sandbox_policy
+            .get()
+            .clone(),
         network: None,
         model: previous_model.to_string(),
         personality: turn_context.personality,
@@ -118,7 +122,11 @@ async fn record_initial_history_resumed_unmatched_abort_preserves_active_turn_fo
         current_date: turn_context.current_date.clone(),
         timezone: turn_context.timezone.clone(),
         approval_policy: turn_context.effective_approval_policy(),
-        sandbox_policy: turn_context.effective_permissions().sandbox_policy.get().clone(),
+        sandbox_policy: turn_context
+            .effective_permissions()
+            .sandbox_policy
+            .get()
+            .clone(),
         network: None,
         model: current_model.to_string(),
         personality: turn_context.personality,
@@ -220,7 +228,11 @@ async fn record_initial_history_resumed_trailing_incomplete_turn_compaction_clea
         current_date: turn_context.current_date.clone(),
         timezone: turn_context.timezone.clone(),
         approval_policy: turn_context.effective_approval_policy(),
-        sandbox_policy: turn_context.effective_permissions().sandbox_policy.get().clone(),
+        sandbox_policy: turn_context
+            .effective_permissions()
+            .sandbox_policy
+            .get()
+            .clone(),
         network: None,
         model: previous_model.to_string(),
         personality: turn_context.personality,
@@ -364,7 +376,11 @@ async fn record_initial_history_resumed_replaced_incomplete_compacted_turn_clear
         current_date: turn_context.current_date.clone(),
         timezone: turn_context.timezone.clone(),
         approval_policy: turn_context.effective_approval_policy(),
-        sandbox_policy: turn_context.effective_permissions().sandbox_policy.get().clone(),
+        sandbox_policy: turn_context
+            .effective_permissions()
+            .sandbox_policy
+            .get()
+            .clone(),
         network: None,
         model: previous_model.to_string(),
         personality: turn_context.personality,

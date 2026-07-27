@@ -36,6 +36,9 @@ use crate::tui;
 use crate::tui::TuiEvent;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use praxis_app_core::PraxisTimelineAnchor;
+use praxis_app_core::PraxisTimelineKind;
+use praxis_app_core::PraxisTimelineTone;
 use ratatui::buffer::Buffer;
 use ratatui::buffer::Cell;
 use ratatui::layout::Rect;
@@ -105,6 +108,7 @@ const KEY_CTRL_U: KeyBinding = key_hint::ctrl(KeyCode::Char('u'));
 const KEY_Q: KeyBinding = key_hint::plain(KeyCode::Char('q'));
 const KEY_ESC: KeyBinding = key_hint::plain(KeyCode::Esc);
 const KEY_ENTER: KeyBinding = key_hint::plain(KeyCode::Enter);
+const KEY_TAB: KeyBinding = key_hint::plain(KeyCode::Tab);
 const KEY_CTRL_T: KeyBinding = key_hint::ctrl(KeyCode::Char('t'));
 const KEY_CTRL_C: KeyBinding = key_hint::ctrl(KeyCode::Char('c'));
 

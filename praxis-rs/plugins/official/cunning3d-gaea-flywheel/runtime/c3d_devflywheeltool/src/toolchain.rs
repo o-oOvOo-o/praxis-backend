@@ -475,9 +475,8 @@ fn expand_toolchain_path(
         "PROGRAMW6432",
         "WINDIR",
         "SYSTEMROOT",
-        "GHOST1_ROOT",
+        "CUNNING3D_ROOT",
         "C3D_DEVFLYWHEEL_ARTIFACT_ROOT",
-        "GHOST1_DEVFLYWHEEL_ARTIFACT_ROOT",
     ] {
         if let Some(value) = env::var_os(name) {
             out = replace_case_insensitive(&out, &format!("%{name}%"), &value.to_string_lossy());

@@ -26,7 +26,7 @@ pub(super) async fn maybe_persist_mcp_tool_approval(
 
     let persist_result = if key.server == PRAXIS_APPS_MCP_SERVER_NAME {
         let Some(connector_id) = key.connector_id.clone() else {
-            remember_mcp_tool_approval(sess, key).await;
+            remember_mcp_tool_approval(sess, turn_context, key).await;
             return;
         };
         persist_praxis_app_tool_approval(
@@ -46,12 +46,12 @@ pub(super) async fn maybe_persist_mcp_tool_approval(
             tool_name,
             "failed to persist MCP tool approval"
         );
-        remember_mcp_tool_approval(sess, key).await;
+        remember_mcp_tool_approval(sess, turn_context, key).await;
         return;
     }
 
     sess.reload_user_config_layer().await;
-    remember_mcp_tool_approval(sess, key).await;
+    remember_mcp_tool_approval(sess, turn_context, key).await;
 }
 
 pub(super) async fn persist_praxis_app_tool_approval(

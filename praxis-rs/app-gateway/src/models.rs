@@ -25,6 +25,9 @@ pub async fn supported_models(
     include_hidden: bool,
 ) -> Vec<Model> {
     let models_manager = thread_manager.get_models_manager();
+    let local_models_config = config.clone();
+    let local_models_task =
+        tokio::task::spawn_blocking(move || local_model_presets_for_config(&local_models_config));
     let current_presets = models_manager
         .list_models_for_config(config, RefreshStrategy::OnlineIfUncached)
         .await
@@ -70,7 +73,13 @@ pub async fn supported_models(
         .await;
     }
 
-    let local_model_presets = local_model_presets_for_config(config);
+    let local_model_presets = match local_models_task.await {
+        Ok(presets) => presets,
+        Err(error) => {
+            tracing::error!(error = %error, "local model catalog task failed");
+            Vec::new()
+        }
+    };
     if let Some(first) = local_model_presets.first() {
         let provider_id = first.provider_id.clone();
         let provider = first.provider.clone();

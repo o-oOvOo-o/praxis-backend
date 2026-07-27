@@ -344,8 +344,9 @@ impl CoreAuthProvider {
 fn auth_scheme_for_wire(wire_api: crate::llm::wire::WireApi) -> ApiAuthScheme {
     match wire_api {
         crate::llm::wire::WireApi::Claude => ApiAuthScheme::XApiKey,
-        crate::llm::wire::WireApi::Responses
-        | crate::llm::wire::WireApi::OpenAiCompat => ApiAuthScheme::Bearer,
+        crate::llm::wire::WireApi::Responses | crate::llm::wire::WireApi::OpenAiCompat => {
+            ApiAuthScheme::Bearer
+        }
     }
 }
 

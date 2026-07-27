@@ -1,4 +1,5 @@
 use super::*;
+use crate::thread_pagination::thread_list_params;
 
 pub(super) fn session_target_from_app_gateway_thread(
     thread: AppGatewayThread,
@@ -23,8 +24,50 @@ pub(super) fn session_target_from_app_gateway_thread(
 
 pub(super) async fn lookup_session_target_with_app_gateway(
     app_gateway: &mut AppGatewaySession,
+    source: SessionLookupSource,
     id_or_name: &str,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
+    if source.is_external() {
+        let external_source = match source {
+            SessionLookupSource::Codex => {
+                praxis_app_gateway_protocol::ExternalAgentSessionSource::Codex
+            }
+            SessionLookupSource::Cursor => {
+                praxis_app_gateway_protocol::ExternalAgentSessionSource::Cursor
+            }
+            SessionLookupSource::Praxis => unreachable!("external source checked above"),
+        };
+        let mut cursor = None;
+        loop {
+            let params = thread_list_params(
+                cursor,
+                praxis_app_gateway_protocol::ThreadSortKey::UpdatedAt,
+                interactive_thread_source_kinds(/*include_non_interactive*/ false),
+                Some(id_or_name.to_string()),
+            );
+            let response = app_gateway
+                .external_agent_session_list(external_source, params)
+                .await?;
+            if let Some(target) = response
+                .data
+                .into_iter()
+                .find(|thread| {
+                    thread.id == id_or_name
+                        || thread
+                            .name
+                            .as_deref()
+                            .is_some_and(|name| name == id_or_name)
+                })
+                .and_then(session_target_from_app_gateway_thread)
+            {
+                return Ok(Some(target));
+            }
+            let Some(next_cursor) = response.next_cursor else {
+                return Ok(None);
+            };
+            cursor = Some(next_cursor);
+        }
+    }
     let params = session_lookup_params(
         ThreadLookupSelector::IdOrName {
             value: id_or_name.to_string(),
@@ -40,9 +83,38 @@ pub(super) async fn lookup_session_target_with_app_gateway(
 
 pub(super) async fn lookup_latest_session_target_with_app_gateway(
     app_gateway: &mut AppGatewaySession,
+    source: SessionLookupSource,
     cwd_filter: Option<&Path>,
     include_non_interactive: bool,
 ) -> color_eyre::Result<Option<resume_picker::SessionTarget>> {
+    if source.is_external() {
+        let external_source = match source {
+            SessionLookupSource::Codex => {
+                praxis_app_gateway_protocol::ExternalAgentSessionSource::Codex
+            }
+            SessionLookupSource::Cursor => {
+                praxis_app_gateway_protocol::ExternalAgentSessionSource::Cursor
+            }
+            SessionLookupSource::Praxis => unreachable!("external source checked above"),
+        };
+        let mut params = thread_list_params(
+            None,
+            praxis_app_gateway_protocol::ThreadSortKey::UpdatedAt,
+            interactive_thread_source_kinds(include_non_interactive),
+            None,
+        );
+        params.limit = Some(1);
+        return app_gateway
+            .external_agent_session_list(external_source, params)
+            .await
+            .map(|response| {
+                response
+                    .data
+                    .into_iter()
+                    .next()
+                    .and_then(session_target_from_app_gateway_thread)
+            });
+    }
     let params = session_lookup_params(
         ThreadLookupSelector::Latest,
         interactive_thread_source_kinds(include_non_interactive),
@@ -82,40 +154,11 @@ pub(super) struct SessionLookupContext {
     pub(super) app_gateway: AppGatewaySession,
 }
 
-async fn build_external_bridge_lookup_config(
-    source: praxis_core::external_agent_migration::ExternalAgentSource,
-    primary_config: &Config,
-) -> std::io::Result<Config> {
-    let bridge_config = source.bridge_config(primary_config);
-    praxis_core::external_agent_migration::sync_external_agent_sessions_to_praxis_home(
-        source,
-        &bridge_config,
-    )
-    .await?;
-    Ok(bridge_config)
-}
-
 pub(crate) async fn build_session_lookup_config(
-    source: SessionLookupSource,
+    _source: SessionLookupSource,
     primary_config: &Config,
 ) -> std::io::Result<Config> {
-    match source {
-        SessionLookupSource::Praxis => Ok(primary_config.clone()),
-        SessionLookupSource::Codex => {
-            build_external_bridge_lookup_config(
-                praxis_core::external_agent_migration::ExternalAgentSource::Codex,
-                primary_config,
-            )
-            .await
-        }
-        SessionLookupSource::Cursor => {
-            build_external_bridge_lookup_config(
-                praxis_core::external_agent_migration::ExternalAgentSource::Cursor,
-                primary_config,
-            )
-            .await
-        }
-    }
+    Ok(primary_config.clone())
 }
 
 pub(crate) fn picker_source_switch_enabled(app_gateway_target: &AppGatewayTarget) -> bool {

@@ -1,4 +1,3 @@
-
 fn cmd_terraces_compare(ctx: &Context, cli: &Cli) -> Result<(), String> {
     let node = cli.node();
     if !node.eq_ignore_ascii_case("Terraces") {
@@ -1539,9 +1538,6 @@ fn cmd_combiner_compare(ctx: &Context, cli: &Cli) -> Result<(), String> {
     if cli.json() {
         command.arg("--json");
     }
-    if cli.has("verify-gpu") || cli.has("gpu") {
-        command.arg("--verify-gpu");
-    }
     if cli.has("dump-stages") {
         command.arg("--dump-stages");
     }
@@ -1686,7 +1682,6 @@ fn combiner_mountain_connected_target_command(
         target_dump_root.to_str().unwrap_or_default(),
         "--json",
         "--require-pass",
-        "--verify-gpu",
     ]);
     for key in ["harness-exe"] {
         if let Some(value) = cli.flag(key) {

@@ -17,6 +17,7 @@ use crate::tools::handlers::ShellCommandHandler;
 use crate::tools::handlers::ShellHandler;
 use crate::tools::registry::ToolHandler;
 use crate::turn_diff_tracker::TurnDiffTracker;
+use praxis_loop::tool::ToolEffects;
 use praxis_shell_command::is_safe_command::is_known_safe_command;
 use praxis_shell_command::powershell::try_find_powershell_executable_blocking;
 use praxis_shell_command::powershell::try_find_pwsh_executable_blocking;
@@ -69,6 +70,86 @@ fn assert_safe(shell: &Shell, command: &str) {
     assert!(is_known_safe_command(&shell.derive_exec_args(
         command, /* use_login_shell */ /*use_login_shell*/ false
     )));
+}
+
+async fn shell_invocation(payload: ToolPayload) -> ToolInvocation {
+    let (session, turn) = make_session_and_context().await;
+    ToolInvocation {
+        session: session.into(),
+        turn: turn.into(),
+        tracker: Arc::new(Mutex::new(TurnDiffTracker::new())),
+        call_id: "effects-call".to_string(),
+        tool_name: "shell".to_string(),
+        tool_namespace: None,
+        payload,
+    }
+}
+
+#[tokio::test]
+async fn safe_shell_call_is_planned_as_read_only() {
+    let invocation = shell_invocation(ToolPayload::LocalShell {
+        params: praxis_protocol::models::ShellToolCallParams {
+            command: vec![
+                "git".to_string(),
+                "status".to_string(),
+                "--short".to_string(),
+            ],
+            workdir: None,
+            timeout_ms: None,
+            sandbox_permissions: None,
+            prefix_rule: None,
+            additional_permissions: None,
+            justification: None,
+        },
+    })
+    .await;
+
+    assert_eq!(
+        ShellHandler.effects(&invocation).await,
+        ToolEffects::unknown_read()
+    );
+}
+
+#[tokio::test]
+async fn safe_shell_command_call_is_planned_as_read_only() {
+    let invocation = shell_invocation(ToolPayload::Function {
+        arguments: json!({ "command": "git status --short" }).to_string(),
+    })
+    .await;
+    let handler = ShellCommandHandler {
+        backend: super::ShellCommandBackend::Classic,
+    };
+
+    assert_eq!(
+        handler.effects(&invocation).await,
+        ToolEffects::unknown_read()
+    );
+}
+
+#[tokio::test]
+async fn mutating_shell_call_remains_a_global_write_barrier() {
+    let invocation = shell_invocation(ToolPayload::LocalShell {
+        params: praxis_protocol::models::ShellToolCallParams {
+            command: vec![
+                "git".to_string(),
+                "commit".to_string(),
+                "-m".to_string(),
+                "test".to_string(),
+            ],
+            workdir: None,
+            timeout_ms: None,
+            sandbox_permissions: None,
+            prefix_rule: None,
+            additional_permissions: None,
+            justification: None,
+        },
+    })
+    .await;
+
+    assert_eq!(
+        ShellHandler.effects(&invocation).await,
+        ToolEffects::unknown_write()
+    );
 }
 
 #[tokio::test]

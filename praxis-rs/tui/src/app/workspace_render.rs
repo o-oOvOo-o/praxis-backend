@@ -56,11 +56,11 @@ use ratatui::widgets::Widget;
 use unicode_width::UnicodeWidthStr;
 
 pub(super) const WORKSPACE_LIST_TOP_PADDING: u16 = 4;
-pub(super) const WORKSPACE_ROW_HEIGHT: u16 = 3;
+pub(super) const WORKSPACE_ROW_HEIGHT: u16 = 2;
 const WORKSPACE_CONTEXT_MENU_WIDTH: u16 = 36;
 const WORKSPACE_RENAME_POPUP_WIDTH: u16 = 34;
 const WORKSPACE_CONFIRM_POPUP_WIDTH: u16 = 30;
-const WORKSPACE_STATUS_LABEL_WIDTH: usize = 10;
+const WORKSPACE_STATUS_LABEL_WIDTH: usize = 5;
 
 impl App {
     pub(super) fn workspace_visible_row_capacity(&self) -> usize {
@@ -590,7 +590,7 @@ impl App {
                 let row_content_x = row_area.x.saturating_add(1).saturating_add(row_indent);
                 let row_content_width = row_area.width.saturating_sub(2).saturating_sub(row_indent);
                 let row_text_width = row_content_width as usize;
-                let title_width = row_text_width.saturating_sub(WORKSPACE_STATUS_LABEL_WIDTH + 8);
+                let title_width = row_text_width.saturating_sub(WORKSPACE_STATUS_LABEL_WIDTH + 4);
                 let title = workspace_truncate(
                     &workspace_closed_subagents_label(parent_row.subagents.closed, language),
                     title_width,
@@ -681,7 +681,7 @@ impl App {
                 .unwrap_or(0);
             let tree_prefix_width = tree_prefix.width().saturating_add(1);
             let title_width = row_text_width.saturating_sub(
-                WORKSPACE_STATUS_LABEL_WIDTH + 8 + tree_prefix_width + subagent_marker_width,
+                WORKSPACE_STATUS_LABEL_WIDTH + 4 + tree_prefix_width + subagent_marker_width,
             );
             let pinned = self.workspace.pinned_thread_ids.contains(&row.thread_id);
             let pin = if pinned { "* " } else { "" };
@@ -704,7 +704,6 @@ impl App {
                             Modifier::BOLD
                         }),
                 ),
-                Span::raw(" "),
                 Span::styled(
                     workspace_row_control_marker(row),
                     Style::default()
@@ -719,7 +718,6 @@ impl App {
                             Modifier::empty()
                         }),
                 ),
-                Span::raw(" "),
                 Span::styled(
                     format!(
                         "{:<width$}",

@@ -5,6 +5,7 @@ use super::*;
 pub(super) struct TranscriptLiveTail {
     lines: Vec<Line<'static>>,
     is_stream_continuation: bool,
+    timeline_entry: Option<PraxisTimelineAnchor>,
 }
 
 pub(super) struct TranscriptPagerContent {
@@ -87,6 +88,27 @@ impl TranscriptPagerContent {
         }
 
         None
+    }
+
+    fn timeline_anchors(&self) -> Vec<TranscriptTimelineAnchor> {
+        let mut anchors = self
+            .cells
+            .iter()
+            .enumerate()
+            .filter_map(|(cell_index, cell)| {
+                cell.timeline_entry()
+                    .map(|entry| TranscriptTimelineAnchor { cell_index, entry })
+            })
+            .collect::<Vec<_>>();
+        if let Some(live_tail) = &self.live_tail
+            && let Some(entry) = live_tail.timeline_entry.clone()
+        {
+            anchors.push(TranscriptTimelineAnchor {
+                cell_index: self.cells.len(),
+                entry,
+            });
+        }
+        anchors
     }
 }
 
@@ -200,8 +222,29 @@ pub(crate) struct TranscriptOverlay {
     search_match_highlight: Option<TranscriptSearchStatus>,
     /// Cache key for the render-only live tail appended after committed cells.
     live_tail_key: Option<LiveTailKey>,
+    timeline_focus: TranscriptTimelineFocus,
+    timeline_selected: Option<usize>,
+    timeline_highlight_cell: Option<usize>,
     is_done: bool,
 }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum TranscriptTimelineFocus {
+    #[default]
+    Transcript,
+    Timeline,
+}
+
+#[derive(Clone, Debug)]
+struct TranscriptTimelineAnchor {
+    cell_index: usize,
+    entry: PraxisTimelineAnchor,
+}
+
+const TIMELINE_MIN_SPLIT_WIDTH: u16 = 96;
+const TIMELINE_MIN_WIDTH: u16 = 22;
+const TIMELINE_MAX_WIDTH: u16 = 32;
+const TIMELINE_SPLIT_GAP: u16 = 1;
 
 /// Cache key for the active-cell "live tail" appended to the transcript overlay.
 ///
@@ -240,6 +283,9 @@ impl TranscriptOverlay {
             search_highlight_cell: None,
             search_match_highlight: None,
             live_tail_key: None,
+            timeline_focus: TranscriptTimelineFocus::Transcript,
+            timeline_selected: None,
+            timeline_highlight_cell: None,
             is_done: false,
         }
     }
@@ -257,6 +303,7 @@ impl TranscriptOverlay {
     pub(crate) fn insert_cell(&mut self, cell: Arc<dyn HistoryCell>) {
         let follow_bottom = self.view.is_scrolled_to_bottom();
         self.content.borrow_mut().cells.push(cell);
+        self.clamp_timeline_selection();
         self.view.invalidate_layout();
         if follow_bottom {
             self.view.scroll_offset = usize::MAX;
@@ -280,6 +327,7 @@ impl TranscriptOverlay {
             self.search_highlight_cell = None;
         }
         self.sync_content_presentation();
+        self.clamp_timeline_selection();
         self.view.invalidate_layout();
         if follow_bottom {
             self.view.scroll_offset = usize::MAX;
@@ -304,6 +352,16 @@ impl TranscriptOverlay {
         active_key: Option<ActiveCellTranscriptKey>,
         compute_lines: impl FnOnce(u16) -> Option<Vec<Line<'static>>>,
     ) {
+        self.sync_live_tail_with_timeline(width, active_key, compute_lines, || None);
+    }
+
+    pub(crate) fn sync_live_tail_with_timeline(
+        &mut self,
+        width: u16,
+        active_key: Option<ActiveCellTranscriptKey>,
+        compute_lines: impl FnOnce(u16) -> Option<Vec<Line<'static>>>,
+        compute_timeline_entry: impl FnOnce() -> Option<PraxisTimelineAnchor>,
+    ) {
         let next_key = active_key.map(|key| LiveTailKey {
             width,
             revision: key.revision,
@@ -323,9 +381,11 @@ impl TranscriptOverlay {
             (!lines.is_empty()).then_some(TranscriptLiveTail {
                 lines,
                 is_stream_continuation: key.is_stream_continuation,
+                timeline_entry: compute_timeline_entry(),
             })
         });
         self.content.borrow_mut().live_tail = live_tail;
+        self.clamp_timeline_selection();
         self.view.invalidate_layout();
         if follow_bottom {
             self.view.scroll_offset = usize::MAX;
@@ -362,6 +422,17 @@ impl TranscriptOverlay {
         self.view.is_scrolled_to_bottom()
     }
 
+    pub(crate) fn transcript_content_width(&self, total_width: u16) -> u16 {
+        if total_width < TIMELINE_MIN_SPLIT_WIDTH {
+            return total_width.max(1);
+        }
+        let timeline_width = (total_width / 4).clamp(TIMELINE_MIN_WIDTH, TIMELINE_MAX_WIDTH);
+        total_width
+            .saturating_sub(timeline_width)
+            .saturating_sub(TIMELINE_SPLIT_GAP)
+            .max(1)
+    }
+
     fn sync_content_presentation(&mut self) {
         let mut content = self.content.borrow_mut();
         content.highlight_cell = self.effective_highlight_cell();
@@ -369,7 +440,94 @@ impl TranscriptOverlay {
     }
 
     fn effective_highlight_cell(&self) -> Option<usize> {
-        self.highlight_cell.or(self.search_highlight_cell)
+        self.highlight_cell
+            .or(self.search_highlight_cell)
+            .or(self.timeline_highlight_cell)
+    }
+
+    fn timeline_anchors(&self) -> Vec<TranscriptTimelineAnchor> {
+        self.content.borrow().timeline_anchors()
+    }
+
+    fn clamp_timeline_selection(&mut self) {
+        let anchors = self.timeline_anchors();
+        if anchors.is_empty() {
+            self.timeline_selected = None;
+            self.timeline_highlight_cell = None;
+            return;
+        }
+        let selected = self
+            .timeline_selected
+            .unwrap_or(anchors.len().saturating_sub(1))
+            .min(anchors.len().saturating_sub(1));
+        self.timeline_selected = Some(selected);
+        if self.timeline_focus == TranscriptTimelineFocus::Timeline {
+            self.timeline_highlight_cell = Some(anchors[selected].cell_index);
+        }
+        self.sync_content_presentation();
+    }
+
+    fn toggle_timeline_focus(&mut self) {
+        self.timeline_focus = match self.timeline_focus {
+            TranscriptTimelineFocus::Transcript => TranscriptTimelineFocus::Timeline,
+            TranscriptTimelineFocus::Timeline => TranscriptTimelineFocus::Transcript,
+        };
+        if self.timeline_focus == TranscriptTimelineFocus::Timeline {
+            self.clamp_timeline_selection();
+            self.jump_to_selected_timeline_anchor();
+        } else {
+            self.timeline_highlight_cell = None;
+            self.sync_content_presentation();
+        }
+    }
+
+    fn move_timeline_selection(&mut self, delta: isize) {
+        let anchors = self.timeline_anchors();
+        if anchors.is_empty() {
+            return;
+        }
+        let current = self
+            .timeline_selected
+            .unwrap_or(anchors.len().saturating_sub(1));
+        let selected = current
+            .saturating_add_signed(delta)
+            .min(anchors.len().saturating_sub(1));
+        self.timeline_selected = Some(selected);
+        self.timeline_highlight_cell = Some(anchors[selected].cell_index);
+        self.sync_content_presentation();
+        self.view
+            .scroll_chunk_into_view(anchors[selected].cell_index);
+    }
+
+    fn select_timeline_edge(&mut self, latest: bool) {
+        let anchors = self.timeline_anchors();
+        if anchors.is_empty() {
+            return;
+        }
+        let selected = if latest {
+            anchors.len().saturating_sub(1)
+        } else {
+            0
+        };
+        self.timeline_selected = Some(selected);
+        self.timeline_highlight_cell = Some(anchors[selected].cell_index);
+        self.sync_content_presentation();
+        self.view
+            .scroll_chunk_into_view(anchors[selected].cell_index);
+    }
+
+    fn jump_to_selected_timeline_anchor(&mut self) {
+        let anchors = self.timeline_anchors();
+        let Some(selected) = self
+            .timeline_selected
+            .filter(|index| *index < anchors.len())
+        else {
+            return;
+        };
+        self.timeline_highlight_cell = Some(anchors[selected].cell_index);
+        self.sync_content_presentation();
+        self.view
+            .scroll_chunk_into_view(anchors[selected].cell_index);
     }
 
     fn render_hints(&self, area: Rect, buf: &mut Buffer) {
@@ -379,7 +537,11 @@ impl TranscriptOverlay {
         render_key_hints(line1, buf, PAGER_KEY_HINTS);
 
         let mut pairs: Vec<(&[KeyBinding], &str)> = vec![(&[KEY_Q], "to quit")];
-        if self.effective_highlight_cell().is_some() {
+        pairs.push((&[KEY_TAB], "timeline"));
+        if self.timeline_focus == TranscriptTimelineFocus::Timeline {
+            pairs.push((&[KEY_UP, KEY_DOWN], "events"));
+            pairs.push((&[KEY_ENTER], "jump"));
+        } else if self.highlight_cell.is_some() {
             pairs.push((&[KEY_ESC, KEY_LEFT], "to edit prev"));
             pairs.push((&[KEY_RIGHT], "to edit next"));
             pairs.push((&[KEY_ENTER], "to edit message"));
@@ -398,8 +560,106 @@ impl TranscriptOverlay {
         let top_h = area.height.saturating_sub(3);
         let top = Rect::new(area.x, area.y, area.width, top_h);
         let bottom = Rect::new(area.x, area.y + top_h, area.width, 3);
-        self.view.render(top, buf);
+        if top.width >= TIMELINE_MIN_SPLIT_WIDTH {
+            let timeline_width = (top.width / 4).clamp(TIMELINE_MIN_WIDTH, TIMELINE_MAX_WIDTH);
+            let timeline_area = Rect::new(top.x, top.y, timeline_width, top.height);
+            let divider_area =
+                Rect::new(timeline_area.right(), top.y, TIMELINE_SPLIT_GAP, top.height);
+            let transcript_x = divider_area.right();
+            let transcript_area = Rect::new(
+                transcript_x,
+                top.y,
+                self.transcript_content_width(top.width),
+                top.height,
+            );
+            self.render_timeline(timeline_area, buf);
+            for y in divider_area.y..divider_area.bottom() {
+                buf[(divider_area.x, y)]
+                    .set_symbol("│")
+                    .set_style(Style::default().dim());
+            }
+            self.view.render(transcript_area, buf);
+        } else if self.timeline_focus == TranscriptTimelineFocus::Timeline {
+            Clear.render(top, buf);
+            self.render_timeline(top, buf);
+        } else {
+            self.view.render(top, buf);
+        }
         self.render_hints(bottom, buf);
+    }
+
+    fn render_timeline(&self, area: Rect, buf: &mut Buffer) {
+        Clear.render(area, buf);
+        if area.width == 0 || area.height == 0 {
+            return;
+        }
+        let focused = self.timeline_focus == TranscriptTimelineFocus::Timeline;
+        let title = if focused {
+            "● TIMELINE"
+        } else {
+            "○ TIMELINE"
+        };
+        Paragraph::new(title)
+            .style(if focused {
+                Style::default().cyan().bold()
+            } else {
+                Style::default().dim()
+            })
+            .render(Rect::new(area.x, area.y, area.width, 1), buf);
+
+        let anchors = self.timeline_anchors();
+        if anchors.is_empty() || area.height <= 1 {
+            Paragraph::new("  No landmarks")
+                .style(Style::default().dim())
+                .render(
+                    Rect::new(
+                        area.x,
+                        area.y.saturating_add(1),
+                        area.width,
+                        area.height.saturating_sub(1),
+                    ),
+                    buf,
+                );
+            return;
+        }
+
+        let rows = usize::from(area.height.saturating_sub(1));
+        let selected = self
+            .timeline_selected
+            .unwrap_or(anchors.len().saturating_sub(1))
+            .min(anchors.len().saturating_sub(1));
+        let first = selected
+            .saturating_sub(rows / 2)
+            .min(anchors.len().saturating_sub(rows));
+        for (screen_row, anchor_index) in (first..anchors.len()).take(rows).enumerate() {
+            let anchor = &anchors[anchor_index];
+            let selected_row = anchor_index == selected;
+            let marker = timeline_marker(anchor.entry.kind);
+            let mut style = timeline_tone_style(anchor.entry.tone);
+            if selected_row {
+                style = if focused {
+                    style.add_modifier(Modifier::REVERSED | Modifier::BOLD)
+                } else {
+                    style.add_modifier(Modifier::BOLD)
+                };
+            } else if !focused {
+                style = style.add_modifier(Modifier::DIM);
+            }
+            Paragraph::new(Line::from(vec![
+                Span::styled(format!("{marker} "), style),
+                Span::styled(anchor.entry.label.clone(), style),
+            ]))
+            .style(style)
+            .render(
+                Rect::new(
+                    area.x,
+                    area.y.saturating_add(1 + screen_row as u16),
+                    area.width,
+                    1,
+                ),
+                buf,
+            );
+        }
     }
 }
 
@@ -409,6 +669,46 @@ impl TranscriptOverlay {
             TuiEvent::Key(key_event) => match key_event {
                 e if KEY_Q.is_press(e) || KEY_CTRL_C.is_press(e) || KEY_CTRL_T.is_press(e) => {
                     self.is_done = true;
+                    Ok(())
+                }
+                e if KEY_TAB.is_press(e) => {
+                    self.toggle_timeline_focus();
+                    tui.frame_requester().schedule_frame();
+                    Ok(())
+                }
+                e if self.timeline_focus == TranscriptTimelineFocus::Timeline
+                    && (KEY_UP.is_press(e) || KEY_K.is_press(e)) =>
+                {
+                    self.move_timeline_selection(-1);
+                    tui.frame_requester().schedule_scroll_frame();
+                    Ok(())
+                }
+                e if self.timeline_focus == TranscriptTimelineFocus::Timeline
+                    && (KEY_DOWN.is_press(e) || KEY_J.is_press(e)) =>
+                {
+                    self.move_timeline_selection(1);
+                    tui.frame_requester().schedule_scroll_frame();
+                    Ok(())
+                }
+                e if self.timeline_focus == TranscriptTimelineFocus::Timeline
+                    && KEY_HOME.is_press(e) =>
+                {
+                    self.select_timeline_edge(false);
+                    tui.frame_requester().schedule_scroll_frame();
+                    Ok(())
+                }
+                e if self.timeline_focus == TranscriptTimelineFocus::Timeline
+                    && KEY_END.is_press(e) =>
+                {
+                    self.select_timeline_edge(true);
+                    tui.frame_requester().schedule_scroll_frame();
+                    Ok(())
+                }
+                e if self.timeline_focus == TranscriptTimelineFocus::Timeline
+                    && KEY_ENTER.is_press(e) =>
+                {
+                    self.jump_to_selected_timeline_anchor();
+                    tui.frame_requester().schedule_scroll_frame();
                     Ok(())
                 }
                 other => self.view.handle_key_event(tui, other),
@@ -429,5 +729,34 @@ impl TranscriptOverlay {
     #[cfg(test)]
     pub(crate) fn committed_cell_count(&self) -> usize {
         self.content.borrow().cells.len()
+    }
+}
+
+fn timeline_marker(kind: PraxisTimelineKind) -> &'static str {
+    match kind {
+        PraxisTimelineKind::Turn => "◆",
+        PraxisTimelineKind::User => "●",
+        PraxisTimelineKind::Reasoning => "·",
+        PraxisTimelineKind::Plan => "◇",
+        PraxisTimelineKind::Command => "›",
+        PraxisTimelineKind::Tool => "◉",
+        PraxisTimelineKind::FileChange => "±",
+        PraxisTimelineKind::Input => "?",
+        PraxisTimelineKind::ContextCompaction => "≋",
+        PraxisTimelineKind::ModelChange => "M",
+        PraxisTimelineKind::Status => "•",
+        PraxisTimelineKind::Error => "!",
+    }
+}
+
+fn timeline_tone_style(tone: PraxisTimelineTone) -> Style {
+    match tone {
+        PraxisTimelineTone::Neutral => Style::default(),
+        PraxisTimelineTone::Accent => Style::default().cyan(),
+        PraxisTimelineTone::Working => Style::default().blue(),
+        PraxisTimelineTone::Waiting => Style::default().yellow(),
+        PraxisTimelineTone::Success => Style::default().green(),
+        PraxisTimelineTone::Warning => Style::default().yellow(),
+        PraxisTimelineTone::Error => Style::default().red(),
     }
 }

@@ -24,8 +24,8 @@ impl ThreadManagerInner {
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<ExecPolicyManager>>,
     ) -> PraxisResult<ThreadSpawnResult> {
-        let initial_history = crate::rollout::RolloutRecorder::get_rollout_history(&rollout_path)
-            .await?;
+        let initial_history =
+            crate::rollout::RolloutRecorder::get_rollout_history(&rollout_path).await?;
         let request = ThreadSpawnRequest::new(
             config,
             initial_history,

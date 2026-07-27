@@ -20,6 +20,14 @@ impl Session {
         self.permission_ledger.granted_permissions()
     }
 
+    pub(crate) fn permission_generation(&self) -> u64 {
+        self.permission_ledger.generation()
+    }
+
+    pub(crate) fn is_promptless_full_access(&self) -> bool {
+        self.permission_ledger.is_promptless_full_access()
+    }
+
     pub(crate) fn grant_session_permissions(&self, permissions: PermissionProfile) {
         self.permission_ledger
             .grant_session_permissions(permissions);

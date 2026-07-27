@@ -1,0 +1,19 @@
+[package]
+name = "cunning3d-computer-use-runtime"
+version = "0.1.0"
+edition = "2024"
+description = "Host-neutral Praxis plugin runtime over Metra computer-use channels"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "cunning3d_computer_use_runtime"
+path = "src/lib.rs"
+
+[workspace]
+
+[dependencies]
+metra_computer_use = { path = "../../../../../../metra/crates/metra_computer_use", version = "0.19.0-dev", default-features = false }
+metra_computer_use_windows = { path = "../../../../../../metra/crates/metra_computer_use_windows", version = "0.19.0-dev", default-features = false }
+praxis-utils-approval-presets = { path = "../../../../utils/approval-presets" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

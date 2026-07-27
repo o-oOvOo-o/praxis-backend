@@ -4,18 +4,18 @@ use crate::auth_env_telemetry::AuthEnvTelemetry;
 use crate::config::Config;
 use crate::error::PraxisErr;
 use crate::error::Result as CoreResult;
-use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::llm::provider::ANTHROPIC_PROVIDER_ID;
 use crate::llm::provider::KIMI_PROVIDER_ID;
 use crate::llm::provider::ModelProviderInfo;
 use crate::llm::provider::OPENAI_PROVIDER_ID;
+use crate::llm::runtime::LlmRuntimeCatalog;
+use crate::llm::runtime::provider_setup::AuthRequestPurpose;
+use crate::llm::runtime::provider_setup::ProviderDecisionCenter;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::collaboration_mode_presets::builtin_collaboration_mode_presets;
 use crate::models_manager::model_info;
 use crate::models_manager::model_presets::bundled_api_model_presets;
 use crate::plugins::PluginsManager;
-use crate::llm::runtime::provider_setup::AuthRequestPurpose;
-use crate::llm::runtime::provider_setup::ProviderDecisionCenter;
 use crate::response_debug_context::extract_response_debug_context;
 use crate::response_debug_context::telemetry_transport_error_message;
 use crate::util::FeedbackRequestTags;
@@ -489,10 +489,21 @@ impl ModelsManager {
         refresh_strategy: RefreshStrategy,
     ) -> Vec<ModelPreset> {
         if crate::llm::local_models::config_uses_native_local_provider(config) {
-            return local_model_presets_for_config(config)
-                .into_iter()
-                .map(|local_model| local_model.preset)
-                .collect();
+            let config = config.clone();
+            return match tokio::task::spawn_blocking(move || {
+                local_model_presets_for_config(&config)
+                    .into_iter()
+                    .map(|local_model| local_model.preset)
+                    .collect()
+            })
+            .await
+            {
+                Ok(presets) => presets,
+                Err(error) => {
+                    error!(error = %error, "local model catalog task failed");
+                    Vec::new()
+                }
+            };
         }
 
         if self.provider_id == config.model_provider_id && self.provider == config.model_provider {

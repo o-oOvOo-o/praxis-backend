@@ -202,6 +202,8 @@ async fn enqueue_primary_thread_session_replays_buffered_approval_after_attach()
     app.enqueue_primary_thread_session(
         test_thread_session(thread_id, PathBuf::from("/tmp/project")),
         Vec::new(),
+        ThreadStatus::Idle,
+        None,
     )
     .await?;
 
@@ -209,20 +211,20 @@ async fn enqueue_primary_thread_session_replays_buffered_approval_after_attach()
         .active_thread_rx
         .as_mut()
         .expect("primary thread receiver should be active");
-    let event = time::timeout(Duration::from_millis(50), rx.recv())
+    let envelope = time::timeout(Duration::from_millis(50), rx.recv())
         .await
         .expect("timed out waiting for buffered approval event")
         .expect("channel closed unexpectedly");
 
     assert!(matches!(
-        &event,
+        &envelope.event,
         ThreadBufferedEvent::Request(ServerRequest::CommandExecutionRequestApproval {
             params,
             ..
         }) if params.turn_id == "turn-1"
     ));
 
-    app.handle_thread_event_now(event);
+    app.handle_thread_event_now(envelope.event);
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
 
@@ -284,6 +286,8 @@ async fn enqueue_primary_thread_session_replays_turns_before_initial_prompt_subm
                 }],
             }],
         )],
+        ThreadStatus::Idle,
+        None,
     )
     .await?;
 
@@ -405,7 +409,7 @@ async fn replay_thread_snapshot_restores_draft_and_queued_input() {
     app.thread_event_channels.insert(
         thread_id,
         ThreadEventChannel::new_with_session(
-            THREAD_EVENT_CHANNEL_CAPACITY,
+            THREAD_EVENT_REPLAY_CAPACITY,
             session.clone(),
             Vec::new(),
         ),
@@ -466,7 +470,7 @@ async fn active_turn_id_for_thread_uses_snapshot_turns() {
     app.thread_event_channels.insert(
         thread_id,
         ThreadEventChannel::new_with_session(
-            THREAD_EVENT_CHANNEL_CAPACITY,
+            THREAD_EVENT_REPLAY_CAPACITY,
             session,
             vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
         ),
@@ -510,6 +514,8 @@ async fn replayed_turn_complete_submits_restored_queued_follow_up() {
         ThreadEventSnapshot {
             session: None,
             turns: Vec::new(),
+            status: None,
+            control_state: None,
             events: vec![ThreadBufferedEvent::Notification(
                 turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
             )],
@@ -563,6 +569,8 @@ async fn replay_only_thread_keeps_restored_queue_visible() {
         ThreadEventSnapshot {
             session: None,
             turns: Vec::new(),
+            status: None,
+            control_state: None,
             events: vec![ThreadBufferedEvent::Notification(
                 turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
             )],
@@ -614,6 +622,8 @@ async fn replay_thread_snapshot_keeps_queue_when_running_state_only_comes_from_s
         ThreadEventSnapshot {
             session: None,
             turns: Vec::new(),
+            status: None,
+            control_state: None,
             events: vec![],
             input_state: Some(input_state),
         },
@@ -663,6 +673,8 @@ async fn replay_thread_snapshot_in_progress_turn_restores_running_queue_state() 
         ThreadEventSnapshot {
             session: None,
             turns: vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
+            status: None,
+            control_state: None,
             events: Vec::new(),
             input_state: Some(input_state),
         },
@@ -692,6 +704,8 @@ async fn replay_thread_snapshot_in_progress_turn_restores_running_state_without_
         ThreadEventSnapshot {
             session: None,
             turns: vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
+            status: None,
+            control_state: None,
             events: Vec::new(),
             input_state: None,
         },
@@ -734,6 +748,8 @@ async fn replay_thread_snapshot_does_not_submit_queue_before_replay_catches_up()
         ThreadEventSnapshot {
             session: None,
             turns: Vec::new(),
+            status: None,
+            control_state: None,
             events: vec![
                 ThreadBufferedEvent::Notification(turn_completed_notification(
                     thread_id,
@@ -781,7 +797,7 @@ async fn replay_thread_snapshot_restores_pending_pastes_for_submit() {
     app.thread_event_channels.insert(
         thread_id,
         ThreadEventChannel::new_with_session(
-            THREAD_EVENT_CHANNEL_CAPACITY,
+            THREAD_EVENT_REPLAY_CAPACITY,
             session.clone(),
             Vec::new(),
         ),
@@ -873,6 +889,8 @@ async fn replay_thread_snapshot_restores_collaboration_mode_for_draft_submit() {
         ThreadEventSnapshot {
             session: None,
             turns: Vec::new(),
+            status: None,
+            control_state: None,
             events: vec![],
             input_state: Some(input_state),
         },
@@ -953,6 +971,8 @@ async fn replay_thread_snapshot_restores_collaboration_mode_without_input() {
         ThreadEventSnapshot {
             session: None,
             turns: Vec::new(),
+            status: None,
+            control_state: None,
             events: vec![],
             input_state: Some(input_state),
         },
@@ -1003,6 +1023,8 @@ async fn replayed_interrupted_turn_restores_queued_input_to_composer() {
         ThreadEventSnapshot {
             session: None,
             turns: Vec::new(),
+            status: None,
+            control_state: None,
             events: vec![ThreadBufferedEvent::Notification(
                 turn_completed_notification(thread_id, "turn-1", TurnStatus::Interrupted),
             )],

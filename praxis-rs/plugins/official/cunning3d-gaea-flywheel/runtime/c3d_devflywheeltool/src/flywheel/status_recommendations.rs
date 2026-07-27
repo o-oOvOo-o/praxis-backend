@@ -1,4 +1,3 @@
-
 fn perf_candidate_next_action_kind(
     compare_passed: bool,
     exact: bool,
@@ -2433,12 +2432,6 @@ fn status_recommendations(node: &str) -> Vec<String> {
             ),
             format!(
                 "{TOOL_COMMAND} combiner-mountain-connected-probe --node Combiner --resolution 128 --epsilon 0 --repeat 5 --direct-bin --run --json"
-            ),
-            format!(
-                "{TOOL_COMMAND} combiner-compare --node Combiner --matrix p0 --epsilon 0 --repeat 3 --verify-gpu --direct-bin --run --json --require-pass"
-            ),
-            format!(
-                "{TOOL_COMMAND} combiner-compare --node Combiner --matrix p1 --epsilon 0 --repeat 3 --verify-gpu --direct-bin --run --json --require-pass"
             ),
         ];
     }

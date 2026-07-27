@@ -42,12 +42,7 @@ pub(super) async fn resolve_and_assign(input: ThreadNameInput<'_>) {
             ephemeral,
         ))
     });
-    match tokio::time::timeout(
-        THREAD_NAME_LOOKUP_TIMEOUT,
-        &mut lookup,
-    )
-    .await
-    {
+    match tokio::time::timeout(THREAD_NAME_LOOKUP_TIMEOUT, &mut lookup).await {
         Ok(Ok(thread_name)) => input.session_configuration.thread_name = thread_name,
         Ok(Err(error)) => warn!(
             conversation_id = %input.conversation_id,

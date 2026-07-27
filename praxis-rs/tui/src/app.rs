@@ -40,7 +40,6 @@ use crate::resume_picker::SessionTarget;
 #[cfg(test)]
 use crate::test_support::PathBufExt;
 use crate::thread_pagination::loaded_thread_list_params;
-use crate::thread_replay_policy::compact_conversation_replay_turns;
 use crate::thread_replay_policy::compact_visible_replay_turns;
 use crate::tui;
 use crate::tui::TuiEvent;
@@ -72,10 +71,12 @@ use praxis_app_gateway_protocol::PluginReadParams;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::SkillsListResponse;
+use praxis_app_gateway_protocol::ThreadControlState;
 use praxis_app_gateway_protocol::ThreadItem;
 use praxis_app_gateway_protocol::ThreadModelChangedNotification;
 use praxis_app_gateway_protocol::ThreadPermissionsChangedNotification;
 use praxis_app_gateway_protocol::ThreadRollbackResponse;
+use praxis_app_gateway_protocol::ThreadStatus;
 use praxis_app_gateway_protocol::Turn;
 use praxis_core::ModelProviderInfo;
 use praxis_core::config::Config;
@@ -121,7 +122,6 @@ use tokio::select;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::task::JoinHandle;
 use toml::Value as TomlValue;
@@ -187,6 +187,7 @@ use self::startup_effects::target_preset_for_upgrade;
 use self::thread_event_store::FeedbackThreadEvent;
 use self::thread_event_store::ThreadBufferedEvent;
 use self::thread_event_store::ThreadEventChannel;
+use self::thread_event_store::ThreadEventEnvelope;
 use self::thread_event_store::ThreadEventSnapshot;
 use self::thread_event_store::ThreadEventStore;
 use self::workspace_view_helpers::next_char_boundary;
@@ -368,7 +369,7 @@ pub(crate) struct App {
     thread_event_listener_tasks: HashMap<ThreadId, JoinHandle<()>>,
     agent_navigation: AgentNavigationState,
     active_thread_id: Option<ThreadId>,
-    active_thread_rx: Option<mpsc::Receiver<ThreadBufferedEvent>>,
+    active_thread_rx: Option<mpsc::UnboundedReceiver<ThreadEventEnvelope>>,
     primary_thread_id: Option<ThreadId>,
     last_subagent_backfill_attempt: Option<ThreadId>,
     primary_session_configured: Option<ThreadSessionState>,

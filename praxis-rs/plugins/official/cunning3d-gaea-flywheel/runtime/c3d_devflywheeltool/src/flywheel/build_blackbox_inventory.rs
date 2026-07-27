@@ -1,5 +1,3 @@
-
-const DEFAULT_ROOT: &str = r"D:\ghost1.0";
 const LEDGER_PATH: &str = "ledger/gaea_operator_ledger.json";
 const FLYWHEEL_GRAPH_PATH: &str = "ledger/gaea_flywheel_graph.json";
 const BLACKBOX_INVENTORY_PATH: &str = "ledger/gaea_blackbox_inventory.json";
@@ -60,6 +58,10 @@ fn main() {
         "plan" | "flywheel-plan" => cmd_flywheel_plan(&ctx, &cli),
         "export-ui" | "ui-graph" | "flywheel-ui" => cmd_flywheel_export_ui(&ctx, &cli),
         "blackbox-scan" | "scan-blackboxes" | "blackbox-inventory" => cmd_blackbox_scan(&ctx, &cli),
+        "architecture-guard" | "cce-architecture-guard" => {
+            architecture_guard::cmd_architecture_guard(&ctx, &cli)
+        }
+        "cce-graph-run" | "canonical-cce-graph" => cmd_cce_graph_run(&ctx, &cli),
         "verify" => cmd_verify(&ctx, &cli),
         "certify" => cmd_certify(&ctx, &cli),
         "sweep" => cmd_sweep(&ctx, &cli),
@@ -404,6 +406,8 @@ impl Cli {
                     | "capture-live-stages"
                     | "dump-stages"
                     | "require-gpu-active"
+                    | "require-cce"
+                    | "require-session-reuse"
                     | "gpu-exact-barrier"
                     | "trace-probe"
                     | "trace-directions"
@@ -492,6 +496,7 @@ impl Cli {
 struct Context {
     root: PathBuf,
     tools_gaea: PathBuf,
+    gaea_decompiled_root: PathBuf,
     summary_dir: PathBuf,
     harness_project: PathBuf,
     harness_exe: PathBuf,
@@ -505,49 +510,36 @@ struct Context {
 
 impl Context {
     fn discover() -> Result<Self, String> {
-        let root = env::var_os("GHOST1_ROOT")
+        let root = env::var_os("CUNNING3D_ROOT")
             .map(PathBuf::from)
-            .and_then(normalize_ghost1_root)
-            .or_else(|| {
-                env::var_os("CUNNING3D_ROOT")
-                    .map(PathBuf::from)
-                    .and_then(normalize_ghost1_root)
-            })
+            .and_then(normalize_cunning3d_root)
             .or_else(find_root_from_current_dir)
-            .or_else(|| {
-                let candidate = PathBuf::from(DEFAULT_ROOT);
-                normalize_ghost1_root(candidate)
-            })
             .ok_or_else(|| {
-                "Could not discover ghost1 root. Run from D:\\ghost1.0\\Cunning3D_1.0 or set GHOST1_ROOT.".to_string()
+                "Could not discover the Cunning3D repository root. Run from the repository or set CUNNING3D_ROOT.".to_string()
             })?;
-        let tools_gaea = root.join("tools").join("gaea");
-        let summary_dir = root.join("_gaea_decompiled").join("_summary");
-        let harness_project = tools_gaea
-            .join("GaeaReverseHarness")
-            .join("GaeaReverseHarness.csproj");
-        let harness_exe = tools_gaea
-            .join("GaeaReverseHarness")
+        let local_root = root.join(".local");
+        let tools_gaea = local_root.join("gaea");
+        let gaea_decompiled_root = tools_gaea.join("decompiled");
+        let summary_dir = gaea_decompiled_root.join("_summary");
+        let harness_root = tools_gaea.join("harness");
+        let harness_project = harness_root.join("GaeaReverseHarness.csproj");
+        let harness_exe = harness_root
             .join("bin")
             .join("Debug")
             .join("net8.0-windows")
             .join("GaeaReverseHarness.exe");
-        let cunning_core_manifest = root
-            .join("Cunning3D_1.0")
-            .join("crates")
-            .join("cunning_core")
-            .join("Cargo.toml");
+        let cunning_core_manifest = root.join("crates").join("cunning_core").join("Cargo.toml");
         let gaea_flywheel_target_dir = gaea_flywheel_target_dir();
         let cunning_core_target_debug_dir = gaea_flywheel_target_dir.join("debug");
         let cunning_core_target_release_dir = gaea_flywheel_target_dir.join("release");
         let devflywheel_dir = discover_devflywheel_dir(&root)?;
         let artifact_root = env::var_os("C3D_DEVFLYWHEEL_ARTIFACT_ROOT")
-            .or_else(|| env::var_os("GHOST1_DEVFLYWHEEL_ARTIFACT_ROOT"))
             .map(PathBuf::from)
-            .unwrap_or_else(|| root.join("_c3d_devflywheeltool"));
+            .unwrap_or_else(|| local_root.join("gaea-flywheel").join("artifacts"));
         Ok(Self {
             root,
             tools_gaea,
+            gaea_decompiled_root,
             summary_dir,
             harness_project,
             harness_exe,
@@ -564,30 +556,22 @@ impl Context {
 fn find_root_from_current_dir() -> Option<PathBuf> {
     let current = env::current_dir().ok()?;
     for dir in current.ancestors() {
-        if let Some(root) = normalize_ghost1_root(dir.to_path_buf()) {
+        if let Some(root) = normalize_cunning3d_root(dir.to_path_buf()) {
             return Some(root);
         }
     }
     None
 }
 
-fn normalize_ghost1_root(candidate: PathBuf) -> Option<PathBuf> {
+fn normalize_cunning3d_root(candidate: PathBuf) -> Option<PathBuf> {
+    // Resolve only the canonical repository that directly owns cunning_core.
     if candidate
-        .join("Cunning3D_1.0")
         .join("crates")
         .join("cunning_core")
         .join("Cargo.toml")
         .is_file()
     {
         return Some(candidate);
-    }
-    if candidate
-        .join("crates")
-        .join("cunning_core")
-        .join("Cargo.toml")
-        .is_file()
-    {
-        return candidate.parent().map(Path::to_path_buf);
     }
     None
 }
@@ -621,6 +605,7 @@ fn cmd_toolbox(ctx: &Context, cli: &Cli) -> Result<(), String> {
         "context": {
             "root": ctx.root,
             "tools_gaea": ctx.tools_gaea,
+            "gaea_decompiled_root": ctx.gaea_decompiled_root,
             "devflywheel_dir": ctx.devflywheel_dir,
             "artifact_root": ctx.artifact_root,
             "cunning_core_manifest": ctx.cunning_core_manifest,
@@ -747,6 +732,7 @@ fn cmd_reverse(ctx: &Context, cli: &Cli) -> Result<(), String> {
         "context": {
             "root": ctx.root,
             "tools_gaea": ctx.tools_gaea,
+            "gaea_decompiled_root": ctx.gaea_decompiled_root,
             "harness_project": ctx.harness_project,
             "harness_exe": ctx.harness_exe,
             "cunning_core_manifest": ctx.cunning_core_manifest,
@@ -849,8 +835,8 @@ fn node_surface_checklist() -> Vec<&'static str> {
 
 fn find_decompiled_node_source(ctx: &Context, node: &str) -> Option<PathBuf> {
     let roots = [
-        ctx.root.join("_gaea_decompiled").join("Gaea.Nodes"),
-        ctx.root.join("_gaea_decompiled").join("Gaea"),
+        ctx.gaea_decompiled_root.join("Gaea.Nodes"),
+        ctx.gaea_decompiled_root.join("Gaea"),
     ];
     let mut candidates = Vec::new();
     for root in roots {
@@ -978,22 +964,19 @@ fn cmd_gaea_viewport_reverse(ctx: &Context, cli: &Cli) -> Result<(), String> {
     let managed_dir = gaea_dir.join("Gaea.Viewport_Data").join("Managed");
     let viewport_dll = managed_dir.join("Assembly-CSharp.dll");
     let main_comms = ctx
-        .root
-        .join("_gaea_decompiled")
+        .gaea_decompiled_root
         .join("Gaea")
         .join("QuadSpinner")
         .join("Gaea")
         .join("Comms.cs");
     let main_b = ctx
-        .root
-        .join("_gaea_decompiled")
+        .gaea_decompiled_root
         .join("Gaea")
         .join("QuadSpinner")
         .join("Gaea")
         .join("B.cs");
     let viewport_area = ctx
-        .root
-        .join("_gaea_decompiled")
+        .gaea_decompiled_root
         .join("Gaea")
         .join("QuadSpinner")
         .join("Gaea")
@@ -1110,7 +1093,17 @@ fn reverse_recommendations(node: &str) -> Vec<String> {
 #[derive(Debug, Deserialize)]
 struct Ledger {
     schema_version: u32,
+    architecture_authority: LedgerArchitectureAuthority,
     entries: Vec<LedgerEntry>,
+}
+
+#[derive(Debug, Deserialize, serde::Serialize)]
+struct LedgerArchitectureAuthority {
+    document: String,
+    section: u32,
+    policy: String,
+    required_flow: String,
+    promotion_gate: String,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize)]
@@ -1289,6 +1282,7 @@ fn cmd_ledger(ctx: &Context, cli: &Cli) -> Result<(), String> {
         .collect();
     let payload = json!({
         "schema_version": ledger.schema_version,
+        "architecture_authority": &ledger.architecture_authority,
         "entry_count": entries.len(),
         "entries": entries,
     });
@@ -1299,6 +1293,44 @@ fn cmd_ledger(ctx: &Context, cli: &Cli) -> Result<(), String> {
 fn cmd_ledger_hygiene(ctx: &Context, cli: &Cli) -> Result<(), String> {
     let files = [LEDGER_PATH, FLYWHEEL_GRAPH_PATH];
     let mut findings = Vec::new();
+    let ledger: Ledger = read_json(&ctx.devflywheel_dir.join(LEDGER_PATH))?;
+    if ledger.schema_version < 3
+        || !ledger
+            .architecture_authority
+            .required_flow
+            .contains("canonical WGSL -> Naga -> Cunning Shader IR")
+        || !ledger
+            .architecture_authority
+            .required_flow
+            .contains("Canonical Compute Program")
+        || !ledger
+            .architecture_authority
+            .required_flow
+            .contains("automatic CCE ingestion or declarative HybridProductRecipe")
+        || !ledger
+            .architecture_authority
+            .promotion_gate
+            .contains("architecture-guard")
+        || !ledger
+            .architecture_authority
+            .policy
+            .contains("node-specific parameter packer")
+        || !ledger
+            .architecture_authority
+            .policy
+            .contains("raw-WGPU debt inventory is deletion-only")
+        || !ledger
+            .architecture_authority
+            .promotion_gate
+            .contains("closed_world_node_gpu_authority")
+    {
+        findings.push(json!({
+            "file": LEDGER_PATH,
+            "line_number": 1,
+            "rule": "missing_canonical_cce_architecture_authority",
+            "line": "The ledger must declare the full WGSL/Naga/Shader IR/Canonical Program flow, reject node-specific parameter packers, keep raw-WGPU debt deletion-only, and require the schema-7 closed-world architecture guard.",
+        }));
+    }
     for relative in files {
         let path = ctx.devflywheel_dir.join(relative);
         let text = fs::read_to_string(&path)
@@ -1352,7 +1384,8 @@ fn cmd_ledger_hygiene(ctx: &Context, cli: &Cli) -> Result<(), String> {
             "Ledger and graph records must not contain direct cargo run --manifest-path commands.",
             "Ledger and graph records must not contain direct F:/cargo-target2/.../debug/*.exe invocations.",
             "Ledger and graph records must not contain the retired tools/c3d_devflywheeltool wrapper.",
-            "Ledger and graph records must not contain bare c3d-devflywheeltool ledger commands; use Praxis /gaea."
+            "Ledger and graph records must not contain bare c3d-devflywheeltool ledger commands; use Praxis /gaea.",
+            "The ledger must carry the canonical CCE architecture authority; entry-level legacy execution text is historical only."
         ],
     });
     print_value(cli.json(), &payload);
@@ -1380,6 +1413,7 @@ fn cmd_contracts(ctx: &Context, cli: &Cli) -> Result<(), String> {
     let entries = ledger_entries_for_node(&ledger, &node);
     let payload = json!({
         "schema_version": ledger.schema_version,
+        "architecture_authority": &ledger.architecture_authority,
         "node": node,
         "entry_count": entries.len(),
         "status_counts": ledger_status_counts(&entries),
@@ -2292,7 +2326,10 @@ fn ensure_operator_contract(
             reusable: true,
             unlocks: Vec::new(),
             implementation: if file.is_empty() { Vec::new() } else { vec![file] },
-            evidence: vec!["D:\\ghost1.0\\_gaea_decompiled\\_summary\\gaea_nodes_and_operators_catalog.md".to_string()],
+            evidence: vec![
+                ".local/gaea/decompiled/_summary/gaea_nodes_and_operators_catalog.md"
+                    .to_string(),
+            ],
             next_commands: vec![format!("{TOOL_COMMAND} impact --operator {} --json", method.class)],
             notes: "Auto-scanned blackbox function. Promote only after clean-room substrate migration and raw parity evidence.".to_string(),
         },

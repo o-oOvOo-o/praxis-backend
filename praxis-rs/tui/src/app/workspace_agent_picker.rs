@@ -141,6 +141,23 @@ impl App {
         self.sync_active_agent_label();
     }
 
+    async fn sync_thread_read_runtime_state(
+        &mut self,
+        thread_id: ThreadId,
+        status: praxis_app_gateway_protocol::ThreadStatus,
+        control_state: Option<praxis_app_gateway_protocol::ThreadControlState>,
+    ) {
+        self.update_workspace_thread_row(thread_id, /*resort_after_update*/ true, |row| {
+            row.status = status.clone();
+            row.control_state = control_state.clone();
+        });
+        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+            let mut store = channel.store.lock().await;
+            store.set_status(status);
+            store.control_state = control_state;
+        }
+    }
+
     async fn refresh_agent_picker_thread_liveness(
         &mut self,
         app_gateway: &mut AppGatewaySession,
@@ -153,6 +170,14 @@ impl App {
             .await
         {
             Ok(thread) => {
+                let is_closed = matches!(
+                    thread.status,
+                    praxis_app_gateway_protocol::ThreadStatus::NotLoaded
+                );
+                let status = thread.status.clone();
+                let control_state = (!is_closed).then(|| thread.control_state.clone()).flatten();
+                self.sync_thread_read_runtime_state(thread_id, status, control_state)
+                    .await;
                 self.upsert_agent_picker_thread(
                     thread_id,
                     thread.agent_base_name.or_else(|| {
@@ -175,10 +200,7 @@ impl App {
                             .as_ref()
                             .and_then(|entry| entry.agent_role.clone())
                     }),
-                    matches!(
-                        thread.status,
-                        praxis_app_gateway_protocol::ThreadStatus::NotLoaded
-                    ),
+                    is_closed,
                 );
                 true
             }
@@ -191,6 +213,14 @@ impl App {
                     &err,
                     existing_entry.as_ref().map(|entry| entry.is_closed),
                 );
+                if is_closed {
+                    self.sync_thread_read_runtime_state(
+                        thread_id,
+                        praxis_app_gateway_protocol::ThreadStatus::NotLoaded,
+                        None,
+                    )
+                    .await;
+                }
                 if let Some(entry) = existing_entry {
                     self.upsert_agent_picker_thread(
                         thread_id,
@@ -268,11 +298,17 @@ impl App {
             return Ok(true);
         }
 
-        let (mut session, turns, live_attached) = match app_gateway
+        let (mut session, turns, status, control_state, live_attached) = match app_gateway
             .attach_thread(&self.config, thread_id)
             .await
         {
-            Ok(started) => (started.session, started.turns, true),
+            Ok(started) => (
+                started.session,
+                started.turns,
+                started.status,
+                started.control_state,
+                true,
+            ),
             Err(resume_err) => {
                 tracing::warn!(
                     thread_id = %thread_id,
@@ -306,13 +342,19 @@ impl App {
                 // `thread/read` can seed replay state, but it does not attach the app-gateway
                 // listener that `thread/resume` establishes, so treat this path as replay-only.
                 session.model.clear();
-                (session, turns, false)
+                (
+                    session,
+                    turns,
+                    thread.status.clone(),
+                    thread.control_state.clone(),
+                    false,
+                )
             }
         };
         self.apply_current_permissions_to_thread_session(&mut session);
         let channel = self.ensure_thread_channel(thread_id);
         let mut store = channel.store.lock().await;
-        store.set_session(session, turns);
+        store.set_runtime_snapshot(session, turns, status, control_state);
         Ok(live_attached)
     }
 
@@ -369,12 +411,14 @@ impl App {
             .get(&thread_id)
             .is_some_and(|entry| entry.is_closed);
         let mut attached_replay_only = false;
+        let mut live_snapshot_was_refreshed = false;
         if self.should_attach_live_thread_for_selection(thread_id) {
             match self
                 .attach_live_thread_for_selection(app_gateway, thread_id)
                 .await
             {
                 Ok(live_attached) => {
+                    live_snapshot_was_refreshed = live_attached;
                     attached_replay_only = !live_attached;
                     if attached_replay_only {
                         is_replay_only = true;
@@ -393,10 +437,35 @@ impl App {
             return Ok(());
         }
 
+        if !live_snapshot_was_refreshed {
+            let mut cached_snapshot = {
+                let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+                    self.chat_widget.add_error_message(format!(
+                        "Agent thread {thread_id} has no local projection to refresh."
+                    ));
+                    return Ok(());
+                };
+                channel.store.lock().await.snapshot()
+            };
+            if !self
+                .refresh_live_thread_snapshot(
+                    app_gateway,
+                    thread_id,
+                    is_replay_only,
+                    &mut cached_snapshot,
+                )
+                .await
+            {
+                self.chat_widget.add_error_message(format!(
+                    "Failed to refresh agent thread {thread_id}; the current view was left unchanged."
+                ));
+                return Ok(());
+            }
+        }
+
         let previous_thread_id = self.active_thread_id;
         self.store_active_thread_receiver().await;
-        let Some((receiver, mut snapshot)) = self.activate_thread_for_replay(thread_id).await
-        else {
+        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id).await else {
             self.chat_widget
                 .add_error_message(format!("Agent thread {thread_id} is already active."));
             if let Some(previous_thread_id) = previous_thread_id {
@@ -405,14 +474,6 @@ impl App {
             }
             return Ok(());
         };
-
-        self.refresh_snapshot_session_if_needed(
-            app_gateway,
-            thread_id,
-            is_replay_only,
-            &mut snapshot,
-        )
-        .await;
 
         self.active_thread_id = Some(thread_id);
         self.active_thread_rx = Some(receiver);

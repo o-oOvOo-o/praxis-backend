@@ -4,10 +4,10 @@ use crate::llm::ids::ProductProfileId;
 use crate::llm::profiles::plugin::ProfileDescriptor;
 use crate::llm::profiles::plugin::ProfileMatchContext;
 use crate::llm::prompts::LlmPromptPurpose;
-use crate::llm::registry::LlmProfileRegistry;
-use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::llm::provider::ModelProviderInfo;
 use crate::llm::provider::is_native_local_provider;
+use crate::llm::registry::LlmProfileRegistry;
+use crate::llm::runtime::LlmRuntimeCatalog;
 use praxis_protocol::config_types::Personality;
 use praxis_protocol::openai_models::ModelInfo;
 

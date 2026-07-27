@@ -1,4 +1,3 @@
-
 fn warp_native_timing_summary(samples: &[Value]) -> Value {
     let timings = samples
         .iter()
@@ -1205,12 +1204,7 @@ fn mask_flow_mountain_target_command(
     match node {
         "LinearGradient" => {
             command.args(["--input-map", upstream_map_arg.as_str()]);
-            pass_mapped_probe_flags(
-                cli,
-                &mut command,
-                &["scale", "direction", "edge"],
-                &["verify-gpu", "gpu"],
-            );
+            pass_mapped_probe_flags(cli, &mut command, &["scale", "direction", "edge"], &[]);
         }
         "RadialGradient" | "Cone" | "Hemisphere" => {
             command.args(["--input-map", upstream_map_arg.as_str()]);
@@ -1218,7 +1212,7 @@ fn mask_flow_mountain_target_command(
                 cli,
                 &mut command,
                 &["scale", "height", "x", "y", "flatten"],
-                &["verify-gpu", "gpu"],
+                &[],
             );
         }
         "SlopeMask" => {
@@ -1238,7 +1232,7 @@ fn mask_flow_mountain_target_command(
                     "micro-accent",
                     "flow-mode",
                 ],
-                &["verify-gpu", "gpu"],
+                &[],
             );
         }
         "Mask" => {
@@ -1247,7 +1241,7 @@ fn mask_flow_mountain_target_command(
                 cli,
                 &mut command,
                 &["layer-source", "layer-map", "mask-source", "mask-map"],
-                &["verify-gpu", "gpu"],
+                &[],
             );
         }
         _ => {}
@@ -1927,14 +1921,12 @@ fn probe_bin_is_fresh(ctx: &Context, path: &Path) -> bool {
     };
     let roots = [
         ctx.root
-            .join("Cunning3D_1.0")
             .join("src")
             .join("cunning_core")
             .join("core")
             .join("geometry")
             .join("heightfield"),
         ctx.root
-            .join("Cunning3D_1.0")
             .join("crates")
             .join("cunning_core")
             .join("src")
@@ -2038,7 +2030,6 @@ fn validate_gaea_probe_bin(ctx: &Context, bin: &str) -> Result<(), String> {
     }
     let source = ctx
         .root
-        .join("Cunning3D_1.0")
         .join("crates")
         .join("cunning_core")
         .join("src")

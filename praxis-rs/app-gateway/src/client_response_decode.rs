@@ -1,5 +1,5 @@
 use crate::outgoing_message::ClientRequestResult;
-use crate::server_request_error::is_turn_transition_server_request_error;
+use crate::server_request_error::is_server_request_lifecycle_resolution_error;
 use serde::de::DeserializeOwned;
 use std::any::type_name;
 use tokio::sync::oneshot;
@@ -27,7 +27,7 @@ where
 pub(crate) fn response_value_or_cancel(response: PendingClientResponse) -> ClientResponseValue {
     match response {
         Ok(Ok(value)) => ClientResponseValue::Value(value),
-        Ok(Err(err)) if is_turn_transition_server_request_error(&err) => {
+        Ok(Err(err)) if is_server_request_lifecycle_resolution_error(&err) => {
             ClientResponseValue::TurnTransition
         }
         Ok(Err(err)) => {

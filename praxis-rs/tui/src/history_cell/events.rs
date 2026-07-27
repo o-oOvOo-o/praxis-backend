@@ -22,6 +22,14 @@ impl ModelChangeDivider {
 }
 
 impl HistoryCell for ModelChangeDivider {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::ModelChange,
+            praxis_app_core::PraxisTimelineTone::Accent,
+            self.message.clone(),
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         vec![centered_divider_line(
             self.message.as_str(),
@@ -100,6 +108,22 @@ pub(crate) struct RequestUserInputResultCell {
 }
 
 impl HistoryCell for RequestUserInputResultCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::Input,
+            if self.interrupted {
+                praxis_app_core::PraxisTimelineTone::Warning
+            } else {
+                praxis_app_core::PraxisTimelineTone::Success
+            },
+            if self.interrupted {
+                "Input interrupted"
+            } else {
+                "Input answered"
+            },
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let width = width.max(1) as usize;
         let total = self.questions.len();
@@ -271,6 +295,14 @@ pub(crate) struct ProposedPlanStreamCell {
 }
 
 impl HistoryCell for ProposedPlanCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::Plan,
+            praxis_app_core::PraxisTimelineTone::Accent,
+            "Proposed plan",
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
         lines.push(vec!["• ".dim(), "Proposed Plan".bold()].into());
@@ -298,6 +330,16 @@ impl HistoryCell for ProposedPlanCell {
 }
 
 impl HistoryCell for ProposedPlanStreamCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        (!self.is_stream_continuation).then(|| {
+            PraxisTimelineAnchor::new(
+                praxis_app_core::PraxisTimelineKind::Plan,
+                praxis_app_core::PraxisTimelineTone::Working,
+                "Drafting plan",
+            )
+        })
+    }
+
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         self.lines.clone()
     }
@@ -314,6 +356,19 @@ pub(crate) struct PlanUpdateCell {
 }
 
 impl HistoryCell for PlanUpdateCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        let completed = self
+            .plan
+            .iter()
+            .filter(|item| matches!(&item.status, StepStatus::Completed))
+            .count();
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::Plan,
+            praxis_app_core::PraxisTimelineTone::Working,
+            format!("Plan {completed}/{}", self.plan.len()),
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let render_note = |text: &str| -> Vec<Line<'static>> {
             let wrap_width = width.saturating_sub(4).max(1) as usize;
@@ -515,6 +570,14 @@ impl FinalMessageSeparator {
     }
 }
 impl HistoryCell for FinalMessageSeparator {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::Turn,
+            praxis_app_core::PraxisTimelineTone::Success,
+            "Turn completed",
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut label_parts = Vec::new();
         if let Some(elapsed_seconds) = self

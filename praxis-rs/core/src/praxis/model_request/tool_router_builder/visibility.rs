@@ -1,6 +1,6 @@
 use crate::llm::ids::ProductProfileId;
-use crate::llm::runtime::LlmToolVisibilityPolicy;
 use crate::llm::provider::is_native_local_provider;
+use crate::llm::runtime::LlmToolVisibilityPolicy;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 

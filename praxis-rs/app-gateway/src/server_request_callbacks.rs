@@ -53,7 +53,6 @@ impl ResponseConnectionScope {
 struct PendingCallbackEntry {
     callback: oneshot::Sender<ClientRequestResult>,
     thread_id: Option<ThreadId>,
-    #[cfg(test)]
     request: ServerRequest,
     response_scope: ResponseConnectionScope,
 }
@@ -99,7 +98,6 @@ impl ServerRequestCallbackRegistry {
         let mut entry = PendingCallbackEntry {
             callback,
             thread_id,
-            #[cfg(test)]
             request,
             response_scope,
         };
@@ -255,7 +253,6 @@ impl ServerRequestCallbackRegistry {
         }
     }
 
-    #[cfg(test)]
     pub(crate) async fn pending_requests_for_thread(
         &self,
         thread_id: ThreadId,

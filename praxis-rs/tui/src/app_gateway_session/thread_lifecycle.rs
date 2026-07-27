@@ -113,6 +113,27 @@ impl AppGatewaySession {
             .wrap_err("thread/list failed during TUI session lookup")
     }
 
+    pub(crate) async fn external_agent_session_list(
+        &mut self,
+        source: ExternalAgentSessionSource,
+        params: ThreadListParams,
+    ) -> Result<ThreadListResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::ExternalAgentSessionList {
+                request_id,
+                params: ExternalAgentSessionListParams {
+                    source,
+                    cursor: params.cursor,
+                    limit: params.limit,
+                    sort_key: params.sort_key,
+                    search_term: params.search_term,
+                },
+            })
+            .await
+            .wrap_err("externalAgentSession/list failed during TUI session lookup")
+    }
+
     pub(crate) async fn thread_lookup(
         &mut self,
         params: ThreadLookupParams,

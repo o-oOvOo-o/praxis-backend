@@ -12,6 +12,10 @@ use super::conversion::response_from_protocol;
 use super::pending::remove_pending_elicitation;
 
 impl Session {
+    pub(crate) async fn discard_pending_elicitation(&self, server_name: &str, id: &RequestId) {
+        remove_pending_elicitation(self, server_name, id).await;
+    }
+
     pub(crate) async fn apply_elicitation_response(
         self: &Arc<Self>,
         server_name: String,

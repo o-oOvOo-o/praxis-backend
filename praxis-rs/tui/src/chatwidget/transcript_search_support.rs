@@ -151,6 +151,12 @@ impl ChatWidget {
         (!lines.is_empty()).then_some(lines)
     }
 
+    pub(crate) fn active_cell_timeline_entry(
+        &self,
+    ) -> Option<praxis_app_core::PraxisTimelineAnchor> {
+        self.active_cell.as_ref()?.timeline_entry()
+    }
+
     fn transcript_search_documents(
         &self,
         width: u16,

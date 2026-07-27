@@ -529,7 +529,6 @@ impl OutgoingMessageSender {
         self.server_request_callbacks.fail_all(error).await;
     }
 
-    #[cfg(test)]
     pub(crate) async fn pending_requests_for_thread(
         &self,
         thread_id: ThreadId,
@@ -547,6 +546,19 @@ impl OutgoingMessageSender {
         self.server_request_callbacks
             .fail_thread(thread_id, error)
             .await;
+    }
+
+    pub(crate) async fn resolve_pending_approval_requests(
+        &self,
+        thread_id: ThreadId,
+        error: JSONRPCErrorError,
+    ) {
+        let requests = self.pending_requests_for_thread(thread_id).await;
+        for request in requests {
+            if praxis_app_gateway_protocol::is_approval_server_request(&request) {
+                self.fail_request(request.id(), error.clone()).await;
+            }
+        }
     }
 
     pub(crate) async fn send_response<T: Serialize>(

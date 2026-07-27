@@ -175,7 +175,6 @@ impl App {
         let has_chatgpt_account = bootstrap.has_chatgpt_account;
         let status_account_display = bootstrap.status_account_display.clone();
         let initial_plan_type = bootstrap.plan_type;
-        let startup_rate_limit_snapshots = bootstrap.rate_limit_snapshots;
         let session_telemetry = SessionTelemetry::new(
             ThreadId::new(),
             model.as_str(),
@@ -339,9 +338,6 @@ impl App {
             }
         };
 
-        for snapshot in startup_rate_limit_snapshots {
-            chat_widget.on_rate_limit_snapshot(Some(snapshot));
-        }
         chat_widget
             .maybe_prompt_windows_sandbox_enable(should_prompt_windows_sandbox_nux_at_startup);
 
@@ -398,9 +394,17 @@ impl App {
             mouse: MouseInteractionState::default(),
             mouse_capture_resume_at: None,
         };
+        if app.config.model_provider.requires_openai_auth && has_chatgpt_account {
+            app.prefetch_rate_limits(&app_gateway);
+        }
         if let Some(started) = initial_started_thread {
-            app.enqueue_primary_thread_session(started.session, started.turns)
-                .await?;
+            app.enqueue_primary_thread_session(
+                started.session,
+                started.turns,
+                started.status,
+                started.control_state,
+            )
+            .await?;
         }
         app.refresh_workspace_threads(&app_gateway, true);
 
@@ -497,8 +501,14 @@ impl App {
                         waiting_for_initial_session_configured,
                         app.active_thread_rx.is_some()
                     ) => {
-                        if let Some(event) = active {
-                            if let Err(err) = app.handle_active_thread_event(tui, &mut app_gateway, event).await {
+                        if let Some(envelope) = active {
+                            if !app.active_thread_event_is_after_replay(&envelope) {
+                                AppRunControl::Continue
+                            } else if let Err(err) = app.handle_active_thread_event(
+                                tui,
+                                &mut app_gateway,
+                                envelope.event,
+                            ).await {
                                 match app.handle_app_gateway_loop_error(&app_gateway, err) {
                                     Ok(control) => control,
                                     Err(err) => break Err(err),

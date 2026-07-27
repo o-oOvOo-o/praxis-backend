@@ -9,6 +9,10 @@ use crate::praxis::Session;
 use crate::praxis::TurnContext;
 
 impl Session {
+    pub(crate) async fn discard_pending_user_input(&self, sub_id: &str) {
+        self.remove_pending_user_input(sub_id).await;
+    }
+
     pub async fn request_user_input(
         &self,
         turn_context: &TurnContext,

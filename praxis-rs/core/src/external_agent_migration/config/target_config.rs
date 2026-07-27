@@ -84,7 +84,8 @@ fn merge_missing_toml_values(existing: &mut TomlValue, incoming: &TomlValue) -> 
 }
 
 fn write_toml_file(path: &Path, value: &TomlValue) -> io::Result<()> {
-    let serialized = toml::to_string_pretty(value)
-        .map_err(|err| super::invalid_data_error(format!("failed to serialize config.toml: {err}")))?;
+    let serialized = toml::to_string_pretty(value).map_err(|err| {
+        super::invalid_data_error(format!("failed to serialize config.toml: {err}"))
+    })?;
     fs::write(path, format!("{}\n", serialized.trim_end()))
 }

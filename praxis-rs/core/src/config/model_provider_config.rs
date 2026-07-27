@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::llm::provider::ANTHROPIC_PROVIDER_ID;
-use crate::llm::provider::LMSTUDIO_OSS_PROVIDER_ID;
 use crate::llm::provider::KIMI_PROVIDER_ID;
+use crate::llm::provider::LMSTUDIO_OSS_PROVIDER_ID;
 use crate::llm::provider::ModelProviderInfo;
 use crate::llm::provider::OLLAMA_OSS_PROVIDER_ID;
 use crate::llm::provider::OPENAI_PROVIDER_ID;

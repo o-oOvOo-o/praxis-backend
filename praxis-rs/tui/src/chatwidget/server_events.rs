@@ -77,6 +77,13 @@ impl ChatWidget {
                     self.set_thread_control_state(notification.control_state.as_ref());
                 }
             }
+            ServerNotification::ThreadStatusChanged(notification) => {
+                if self.thread_id().is_some_and(|thread_id| {
+                    thread_id.to_string() == notification.thread_id.as_str()
+                }) {
+                    self.apply_thread_status_snapshot(Some(&notification.status));
+                }
+            }
             ServerNotification::ThreadNameUpdated(notification) => {
                 match ThreadId::from_string(&notification.thread_id) {
                     Ok(thread_id) => self.on_thread_name_updated(
@@ -301,7 +308,6 @@ impl ChatWidget {
             | ServerNotification::AccountUpdated(_)
             | ServerNotification::AccountRateLimitsUpdated(_)
             | ServerNotification::ThreadStarted(_)
-            | ServerNotification::ThreadStatusChanged(_)
             | ServerNotification::ThreadHeartbeatUpdated(_)
             | ServerNotification::WorkspaceChangeUpdated(_)
             | ServerNotification::AutomationRunUpdated(_)

@@ -8,6 +8,7 @@ pub(crate) use facade::ThreadStore;
 pub(in crate::praxis_message_processor) use history::ThreadHistoryPageReadError;
 pub(in crate::praxis_message_processor) use history::ThreadHistorySource;
 pub(in crate::praxis_message_processor) use history::ThreadTurnHydration;
+pub(in crate::praxis_message_processor) use list::ThreadStoreListPage;
 pub(in crate::praxis_message_processor) use list::ThreadStoreListQuery;
 pub(in crate::praxis_message_processor) use summary::ThreadStoreSummary;
 #[cfg(test)]

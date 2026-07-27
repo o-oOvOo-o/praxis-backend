@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use praxis_protocol::ThreadId;
 use praxis_protocol::config_types::ApprovalsReviewer;
 use praxis_protocol::config_types::CollaborationMode;
 use praxis_protocol::config_types::Personality;
 use praxis_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use praxis_protocol::config_types::ServiceTier;
 use praxis_protocol::config_types::WindowsSandboxLevel;
-use praxis_protocol::ThreadId;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::permissions::FileSystemSandboxPolicy;
 use praxis_protocol::permissions::NetworkSandboxPolicy;

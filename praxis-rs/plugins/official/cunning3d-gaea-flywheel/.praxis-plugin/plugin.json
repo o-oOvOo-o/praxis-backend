@@ -1,11 +1,11 @@
 {
   "name": "cunning3d-gaea-flywheel",
-  "description": "Install and run the canonical Cunning3D Gaea flywheel inside Praxis.",
+  "description": "Install and run the canonical Cunning3D Gaea flywheel with strict automatic CCE architecture enforcement inside Praxis.",
   "skills": "./skills",
   "interface": {
     "displayName": "Cunning3D Gaea Flywheel",
-    "shortDescription": "Install the real Gaea flywheel CLI and inspect its canonical status.",
-    "longDescription": "Cunning3D product plugin that owns and distributes the canonical c3d_devflywheeltool runtime, ledgers, and execution contract, then renders CLI-owned node status in the chat TUI.",
+    "shortDescription": "Run Gaea parity and strict automatic CCE promotion gates.",
+    "longDescription": "Cunning3D product plugin that owns and distributes the canonical c3d_devflywheeltool runtime, ledgers, exact-parity workflow, and no-fork automatic CCE promotion contract, then renders CLI-owned node and architecture status in the chat TUI.",
     "developerName": "Cunning3D",
     "category": "dcc-tooling",
     "capabilities": [
@@ -13,7 +13,8 @@
       "node parity status",
       "acceptance matrix status",
       "flywheel blocker triage",
-      "canonical flywheel execution"
+      "canonical flywheel execution",
+      "automatic CCE architecture guard"
     ],
     "commands": [
       {

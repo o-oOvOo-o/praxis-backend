@@ -799,6 +799,37 @@ async fn thread_snapshot_replayed_in_progress_turn_marks_task_running() {
 }
 
 #[tokio::test]
+async fn thread_snapshot_restores_in_progress_command_output() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    chat.replay_thread_turns(
+        vec![AppGatewayTurn {
+            id: "turn-1".to_string(),
+            collaboration_mode_kind: ModeKind::Default,
+            items: vec![AppGatewayThreadItem::CommandExecution {
+                id: "command-1".to_string(),
+                command: "echo partial".to_string(),
+                cwd: PathBuf::from("/tmp"),
+                process_id: Some("process-1".to_string()),
+                source: AppGatewayCommandExecutionSource::Agent,
+                status: AppGatewayCommandExecutionStatus::InProgress,
+                command_actions: vec![AppGatewayCommandAction::Unknown {
+                    command: "echo partial".to_string(),
+                }],
+                aggregated_output: Some("partial output\n".to_string()),
+                exit_code: None,
+                duration_ms: None,
+            }],
+            status: AppGatewayTurnStatus::InProgress,
+            error: None,
+        }],
+        ReplayKind::ThreadSnapshot,
+    );
+
+    assert!(active_blob(&chat).contains("partial output"));
+}
+
+#[tokio::test]
 async fn replayed_interrupted_turn_status_does_not_render_live_interrupt_banner() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 

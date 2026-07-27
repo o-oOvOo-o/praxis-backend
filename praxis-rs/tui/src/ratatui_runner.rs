@@ -64,9 +64,13 @@ pub(super) async fn run_ratatui_app(
     let has_usable_non_openai_provider = has_any_usable_non_openai_provider(&initial_config);
     let needs_openai_login_status =
         initial_config.model_provider.requires_openai_auth || !has_usable_non_openai_provider;
-    let needs_onboarding_app_gateway = should_show_trust_screen_flag || needs_openai_login_status;
-    let mut onboarding_app_gateway = if needs_onboarding_app_gateway {
-        Some(AppGatewaySession::new(
+    let startup_control_listen = if should_show_trust_screen_flag {
+        None
+    } else {
+        control_listen
+    };
+    let mut startup_app_gateway = if needs_openai_login_status {
+        let app_gateway = AppGatewaySession::new(
             start_app_gateway(
                 &app_gateway_target,
                 arg0_paths.clone(),
@@ -75,18 +79,24 @@ pub(super) async fn run_ratatui_app(
                 loader_overrides.clone(),
                 cloud_requirements.clone(),
                 feedback.clone(),
-                None,
+                startup_control_listen,
             )
             .await?,
+        );
+        Some(PreparedAppGatewaySession::new(
+            app_gateway,
+            app_gateway_target.clone(),
+            initial_config.clone(),
+            startup_control_listen,
         ))
     } else {
         None
     };
     let login_status = if needs_openai_login_status {
-        let Some(app_gateway) = onboarding_app_gateway.as_mut() else {
-            unreachable!("onboarding app gateway should exist when auth is required");
+        let Some(prepared_app_gateway) = startup_app_gateway.as_mut() else {
+            unreachable!("startup app gateway should exist when auth is required");
         };
-        get_login_status(app_gateway, &initial_config).await?
+        get_login_status(prepared_app_gateway.app_gateway_mut(), &initial_config).await?
     } else {
         LoginStatus::NotAuthenticated
     };
@@ -99,14 +109,17 @@ pub(super) async fn run_ratatui_app(
                 show_login_screen,
                 show_trust_screen: should_show_trust_screen_flag,
                 login_status,
-                app_gateway_request_handle: onboarding_app_gateway
+                app_gateway_request_handle: startup_app_gateway
                     .as_ref()
+                    .map(PreparedAppGatewaySession::app_gateway)
                     .map(AppGatewaySession::request_handle),
                 config: initial_config.clone(),
                 tui_config: initial_tui_config.clone(),
             },
             if show_login_screen {
-                onboarding_app_gateway.take()
+                startup_app_gateway
+                    .take()
+                    .map(PreparedAppGatewaySession::into_app_gateway)
             } else {
                 None
             },
@@ -114,6 +127,12 @@ pub(super) async fn run_ratatui_app(
         )
         .await?;
         if onboarding_result.should_exit {
+            shutdown_app_gateway_if_present(
+                startup_app_gateway
+                    .take()
+                    .map(PreparedAppGatewaySession::into_app_gateway),
+            )
+            .await;
             terminal_restore_guard.restore_silently();
             session_log::log_session_end();
             let _ = tui.terminal.clear();
@@ -154,10 +173,8 @@ pub(super) async fn run_ratatui_app(
             (initial_config, initial_tui_config)
         }
     } else {
-        shutdown_app_gateway_if_present(onboarding_app_gateway.take()).await;
         (initial_config, initial_tui_config)
     };
-    shutdown_app_gateway_if_present(onboarding_app_gateway.take()).await;
     if !show_login_screen
         && let Some(selection) =
             normalize_runtime_provider_model_selection(login_status, &mut config)
@@ -199,6 +216,14 @@ pub(super) async fn run_ratatui_app(
         || cli.fork_session_id.is_some()
         || cli.resume_picker
         || cli.fork_picker;
+    if needs_app_gateway_session_lookup {
+        shutdown_app_gateway_if_present(
+            startup_app_gateway
+                .take()
+                .map(PreparedAppGatewaySession::into_app_gateway),
+        )
+        .await;
+    }
     let session_lookup_source = if cli.fork_picker || cli.fork_last || cli.fork_session_id.is_some()
     {
         cli.fork_source
@@ -233,7 +258,13 @@ pub(super) async fn run_ratatui_app(
             let Some(lookup) = session_lookup_context.as_mut() else {
                 unreachable!("session lookup app gateway should be initialized for --fork <id>");
             };
-            match lookup_session_target_with_app_gateway(&mut lookup.app_gateway, id_str).await? {
+            match lookup_session_target_with_app_gateway(
+                &mut lookup.app_gateway,
+                lookup.source,
+                id_str,
+            )
+            .await?
+            {
                 Some(target_session) => resume_picker::SessionSelection::Fork(target_session),
                 None => {
                     shutdown_app_gateway_if_present(
@@ -249,6 +280,7 @@ pub(super) async fn run_ratatui_app(
             };
             match lookup_latest_session_target_with_app_gateway(
                 &mut lookup.app_gateway,
+                lookup.source,
                 /*cwd_filter*/ None,
                 /*include_non_interactive*/ false,
             )
@@ -318,7 +350,9 @@ pub(super) async fn run_ratatui_app(
         let Some(lookup) = session_lookup_context.as_mut() else {
             unreachable!("session lookup app gateway should be initialized for --resume <id>");
         };
-        match lookup_session_target_with_app_gateway(&mut lookup.app_gateway, id_str).await? {
+        match lookup_session_target_with_app_gateway(&mut lookup.app_gateway, lookup.source, id_str)
+            .await?
+        {
             Some(target_session) if lookup.source.is_external() => {
                 resume_picker::SessionSelection::Fork(target_session)
             }
@@ -342,6 +376,7 @@ pub(super) async fn run_ratatui_app(
         };
         match lookup_latest_session_target_with_app_gateway(
             &mut lookup.app_gateway,
+            lookup.source,
             filter_cwd,
             cli.resume_include_non_interactive,
         )
@@ -504,23 +539,46 @@ pub(super) async fn run_ratatui_app(
         workspace_mode || determine_alt_screen_mode(no_alt_screen, tui_config.alternate_screen);
     tui.set_alt_screen_enabled(use_alt_screen);
     tui.set_mouse_capture_enabled(workspace_mode)?;
-    let app_gateway = match start_app_gateway(
-        &app_gateway_target,
-        arg0_paths,
-        config.clone(),
-        cli_kv_overrides.clone(),
-        loader_overrides,
-        cloud_requirements.clone(),
-        feedback.clone(),
-        control_listen,
-    )
-    .await
-    {
-        Ok(app_gateway) => app_gateway,
-        Err(err) => {
-            terminal_restore_guard.restore_silently();
-            session_log::log_session_end();
-            return Err(err);
+    let can_reuse_startup_app_gateway =
+        startup_app_gateway
+            .as_ref()
+            .is_some_and(|prepared_app_gateway| {
+                prepared_app_gateway.is_compatible_with(
+                    &app_gateway_target,
+                    &config,
+                    control_listen,
+                )
+            });
+    let app_gateway = if can_reuse_startup_app_gateway {
+        startup_app_gateway
+            .take()
+            .expect("compatible startup app gateway should exist")
+            .into_app_gateway()
+    } else {
+        shutdown_app_gateway_if_present(
+            startup_app_gateway
+                .take()
+                .map(PreparedAppGatewaySession::into_app_gateway),
+        )
+        .await;
+        match start_app_gateway(
+            &app_gateway_target,
+            arg0_paths,
+            config.clone(),
+            cli_kv_overrides.clone(),
+            loader_overrides,
+            cloud_requirements.clone(),
+            feedback.clone(),
+            control_listen,
+        )
+        .await
+        {
+            Ok(app_gateway) => AppGatewaySession::new(app_gateway),
+            Err(err) => {
+                terminal_restore_guard.restore_silently();
+                session_log::log_session_end();
+                return Err(err);
+            }
         }
     };
 
@@ -530,7 +588,7 @@ pub(super) async fn run_ratatui_app(
 
     let app_result = App::run(
         &mut tui,
-        AppGatewaySession::new(app_gateway),
+        app_gateway,
         config,
         tui_config,
         cli_kv_overrides.clone(),

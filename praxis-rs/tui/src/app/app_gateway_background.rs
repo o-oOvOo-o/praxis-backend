@@ -10,6 +10,7 @@ use super::app_gateway_fetch::fetch_plugin_uninstall;
 use super::app_gateway_fetch::fetch_plugins_list;
 use super::thread_event_store::FeedbackThreadEvent;
 use super::thread_event_store::ThreadBufferedEvent;
+use super::thread_event_store::ThreadEventEnvelope;
 use crate::app_event::AppEvent;
 use crate::app_event::FeedbackCategory;
 use crate::app_gateway_session::AppGatewaySession;
@@ -22,7 +23,6 @@ use praxis_protocol::ThreadId;
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc::error::TrySendError;
 
 impl App {
     /// Spawn a background task that fetches the full MCP server inventory from the
@@ -46,6 +46,14 @@ impl App {
     }
 
     pub(super) fn refresh_rate_limits(&mut self, app_gateway: &AppGatewaySession, request_id: u64) {
+        self.load_rate_limits(app_gateway, Some(request_id));
+    }
+
+    pub(super) fn prefetch_rate_limits(&mut self, app_gateway: &AppGatewaySession) {
+        self.load_rate_limits(app_gateway, None);
+    }
+
+    fn load_rate_limits(&mut self, app_gateway: &AppGatewaySession, request_id: Option<u64>) {
         let request_handle = app_gateway.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -214,25 +222,19 @@ impl App {
             (channel.sender.clone(), Arc::clone(&channel.store))
         };
 
-        let should_send = {
+        let (should_send, sequence) = {
             let mut guard = store.lock().await;
-            guard.push_feedback_submission(event.clone());
-            guard.active
+            let sequence = guard.push_feedback_submission(event.clone());
+            (guard.active, sequence)
         };
 
         if should_send {
-            match sender.try_send(ThreadBufferedEvent::FeedbackSubmission(event)) {
-                Ok(()) => {}
-                Err(TrySendError::Full(event)) => {
-                    tokio::spawn(async move {
-                        if let Err(err) = sender.send(event).await {
-                            tracing::warn!("thread {thread_id} event channel closed: {err}");
-                        }
-                    });
-                }
-                Err(TrySendError::Closed(_)) => {
-                    tracing::warn!("thread {thread_id} event channel closed");
-                }
+            let envelope = ThreadEventEnvelope {
+                sequence,
+                event: ThreadBufferedEvent::FeedbackSubmission(event),
+            };
+            if let Err(err) = sender.send(envelope) {
+                tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
         }
     }

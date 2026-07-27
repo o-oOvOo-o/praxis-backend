@@ -24,6 +24,53 @@ impl ChatWidget {
             .set_composer_input_enabled(/*enabled*/ true, /*placeholder*/ None);
     }
 
+    pub(crate) fn apply_thread_status_snapshot(&mut self, status: Option<&ThreadStatus>) {
+        let Some(status) = status else {
+            return;
+        };
+        if let ThreadStatus::Active { active_flags } = status {
+            if !self.agent_turn_running {
+                self.on_task_started();
+            }
+            let header = if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval) {
+                "Waiting for approval"
+            } else if active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) {
+                "Waiting for input"
+            } else if active_flags.contains(&ThreadActiveFlag::Controlled)
+                && !active_flags.contains(&ThreadActiveFlag::Running)
+            {
+                "Controlled externally"
+            } else {
+                GENERIC_STATUS_HEADER
+            };
+            self.set_status_header(header.to_string());
+            return;
+        }
+
+        if self.agent_turn_running {
+            self.agent_turn_running = false;
+            self.turn_sleep_inhibitor
+                .set_turn_running(/*turn_running*/ false);
+            self.running_commands.clear();
+            self.suppressed_exec_calls.clear();
+            self.last_unified_wait = None;
+            self.unified_exec_wait_streak = None;
+            self.pending_status_indicator_restore = false;
+            self.bottom_pane
+                .set_interrupt_hint_visible(/*visible*/ false);
+            self.update_task_running_state();
+            self.request_status_line_branch_refresh();
+            self.request_redraw();
+        }
+
+        if matches!(status, ThreadStatus::SystemError) {
+            self.add_error_message(
+                "Praxis thread is in a system error state; inspect the latest error above."
+                    .to_string(),
+            );
+        }
+    }
+
     pub(super) fn reject_read_only_thread_submission(
         &mut self,
         text: &str,

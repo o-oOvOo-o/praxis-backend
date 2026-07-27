@@ -1,4 +1,6 @@
 use super::*;
+use praxis_app_gateway_protocol::Account;
+use praxis_app_gateway_protocol::GetAccountResponse;
 
 pub(super) fn install_color_eyre() -> color_eyre::Result<()> {
     match color_eyre::install() {
@@ -154,11 +156,19 @@ pub(super) async fn get_login_status(
         return Ok(LoginStatus::NotAuthenticated);
     }
 
-    let bootstrap = app_gateway.bootstrap(config).await?;
-    Ok(match bootstrap.account_auth_mode {
-        Some(auth_mode) => LoginStatus::AuthMode(auth_mode),
+    let account = app_gateway
+        .read_account()
+        .await
+        .wrap_err("account/read failed during TUI login probe")?;
+    Ok(login_status_from_account_response(account))
+}
+
+fn login_status_from_account_response(response: GetAccountResponse) -> LoginStatus {
+    match response.account {
+        Some(Account::ApiKey {}) => LoginStatus::AuthMode(AppGatewayAuthMode::ApiKey),
+        Some(Account::Chatgpt { .. }) => LoginStatus::AuthMode(AppGatewayAuthMode::Chatgpt),
         None => LoginStatus::NotAuthenticated,
-    })
+    }
 }
 
 pub(super) async fn load_config_or_exit(
@@ -429,4 +439,52 @@ pub(super) fn is_supported_deepseek_model(model: &str) -> bool {
         model.trim().to_ascii_lowercase().as_str(),
         "deepseek-v4-pro" | "deepseek-v4-flash"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use praxis_protocol::account::PlanType;
+
+    #[test]
+    fn login_status_maps_api_key_account() {
+        let response = GetAccountResponse {
+            account: Some(Account::ApiKey {}),
+            requires_openai_auth: true,
+        };
+
+        assert_eq!(
+            login_status_from_account_response(response),
+            LoginStatus::AuthMode(AppGatewayAuthMode::ApiKey)
+        );
+    }
+
+    #[test]
+    fn login_status_maps_chatgpt_account() {
+        let response = GetAccountResponse {
+            account: Some(Account::Chatgpt {
+                email: "user@example.com".to_string(),
+                plan_type: PlanType::Plus,
+            }),
+            requires_openai_auth: true,
+        };
+
+        assert_eq!(
+            login_status_from_account_response(response),
+            LoginStatus::AuthMode(AppGatewayAuthMode::Chatgpt)
+        );
+    }
+
+    #[test]
+    fn login_status_maps_missing_account() {
+        let response = GetAccountResponse {
+            account: None,
+            requires_openai_auth: true,
+        };
+
+        assert_eq!(
+            login_status_from_account_response(response),
+            LoginStatus::NotAuthenticated
+        );
+    }
 }

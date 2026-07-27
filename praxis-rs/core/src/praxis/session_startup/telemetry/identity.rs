@@ -8,8 +8,8 @@ use praxis_otel::TelemetryAuthMode;
 use praxis_protocol::ThreadId;
 
 use crate::config::Config;
-use crate::praxis::SessionConfiguration;
 use crate::llm::runtime::provider_setup::ProviderDecisionCenter;
+use crate::praxis::SessionConfiguration;
 
 pub(super) struct StartupTelemetryIdentity {
     pub(super) auth_mode: Option<TelemetryAuthMode>,

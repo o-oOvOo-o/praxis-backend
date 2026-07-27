@@ -1,7 +1,7 @@
 use super::catalog::LocalModelEntry;
-use crate::config::find_praxis_home;
 use crate::config::LocalModelHostConfig;
 use crate::config::LocalModelHostKind;
+use crate::config::find_praxis_home;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
 use once_cell::sync::Lazy;
@@ -139,9 +139,7 @@ pub(super) async fn ensure_managed_llama_gpu_server(
     validate_llama_server_gpu_args(&args)?;
     let log_paths = prepare_llama_server_logs(entry, &endpoint);
     let mut command_builder = Command::new(&command);
-    command_builder
-        .args(&args)
-        .stdin(Stdio::null());
+    command_builder.args(&args).stdin(Stdio::null());
     attach_llama_server_logs(&mut command_builder, &log_paths);
     apply_host_env(&mut command_builder, host);
 
@@ -167,8 +165,13 @@ pub(super) async fn ensure_managed_llama_gpu_server(
             command.display()
         ))
     })?;
-    wait_for_llama_server_ready(&endpoint.root_url, host, &mut child, log_paths.stderr.as_deref())
-        .await?;
+    wait_for_llama_server_ready(
+        &endpoint.root_url,
+        host,
+        &mut child,
+        log_paths.stderr.as_deref(),
+    )
+    .await?;
 
     let mut cache = LLAMA_RUNTIME
         .lock()
@@ -341,14 +344,8 @@ fn prepare_llama_server_logs(
     };
     let hash = short_llama_runtime_hash(entry, endpoint);
     LlamaServerLogPaths {
-        stdout: Some(log_dir.join(format!(
-            "local-llm-{}-{hash}.stdout.log",
-            endpoint.port
-        ))),
-        stderr: Some(log_dir.join(format!(
-            "local-llm-{}-{hash}.stderr.log",
-            endpoint.port
-        ))),
+        stdout: Some(log_dir.join(format!("local-llm-{}-{hash}.stdout.log", endpoint.port))),
+        stderr: Some(log_dir.join(format!("local-llm-{}-{hash}.stderr.log", endpoint.port))),
     }
 }
 
@@ -785,11 +782,7 @@ fn metadata_usize(host: Option<&LocalModelHostConfig>, key: &str) -> Option<usiz
             value
                 .as_u64()
                 .and_then(|value| usize::try_from(value).ok())
-                .or_else(|| {
-                    value
-                        .as_i64()
-                        .and_then(|value| usize::try_from(value).ok())
-                })
+                .or_else(|| value.as_i64().and_then(|value| usize::try_from(value).ok()))
         })
         .filter(|value| *value > 0)
 }

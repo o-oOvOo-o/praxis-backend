@@ -189,16 +189,16 @@ impl App {
                 num_turns,
             } => {
                 if let Some(thread_id) = self.active_thread_id.or(self.chat_widget.thread_id()) {
-                    match app_gateway.thread_rewind_preview(thread_id, num_turns).await {
+                    match app_gateway
+                        .thread_rewind_preview(thread_id, num_turns)
+                        .await
+                    {
                         Ok(preview)
                             if preview.checkpoint_id.is_some()
                                 && !preview.changed_files.is_empty() =>
                         {
-                            self.chat_widget.open_workspace_rewind_confirmation(
-                                selection,
-                                num_turns,
-                                preview,
-                            );
+                            self.chat_widget
+                                .open_workspace_rewind_confirmation(selection, num_turns, preview);
                         }
                         Ok(_) => self.commit_backtrack_rewind(
                             selection,
@@ -431,13 +431,17 @@ impl App {
                     for snapshot in snapshots {
                         self.chat_widget.on_rate_limit_snapshot(Some(snapshot));
                     }
-                    self.chat_widget
-                        .finish_status_rate_limit_refresh(request_id);
+                    if let Some(request_id) = request_id {
+                        self.chat_widget
+                            .finish_status_rate_limit_refresh(request_id);
+                    }
                 }
                 Err(err) => {
                     tracing::warn!("account/rateLimits/read failed during TUI refresh: {err}");
-                    self.chat_widget
-                        .finish_status_rate_limit_refresh(request_id);
+                    if let Some(request_id) = request_id {
+                        self.chat_widget
+                            .finish_status_rate_limit_refresh(request_id);
+                    }
                 }
             },
             AppEvent::WorkspaceThreadsLoaded { request_id, result } => {

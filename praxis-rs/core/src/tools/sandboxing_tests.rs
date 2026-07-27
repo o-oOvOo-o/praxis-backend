@@ -108,3 +108,13 @@ fn guardian_bypasses_sandbox_for_explicit_escalation_on_first_attempt() {
         SandboxOverride::BypassSandboxFirstAttempt
     );
 }
+
+#[test]
+fn session_approval_cache_is_scoped_to_permission_generation() {
+    let mut store = ApprovalStore::default();
+    let key = "command";
+    store.put(7, key, ReviewDecision::ApprovedForSession);
+
+    assert_eq!(store.get(7, &key), Some(ReviewDecision::ApprovedForSession));
+    assert_eq!(store.get(8, &key), None);
+}

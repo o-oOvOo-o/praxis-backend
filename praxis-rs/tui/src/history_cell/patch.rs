@@ -8,6 +8,18 @@ pub(crate) struct PatchHistoryCell {
 }
 
 impl HistoryCell for PatchHistoryCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::FileChange,
+            praxis_app_core::PraxisTimelineTone::Success,
+            format!(
+                "{} file{} changed",
+                self.changes.len(),
+                if self.changes.len() == 1 { "" } else { "s" }
+            ),
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let lines = create_patch_history_summary(&self.changes, &self.cwd, width as usize);
         let expanded = crate::history_presentation::is_diff_cell_expanded(self.id);
@@ -40,6 +52,18 @@ pub(crate) struct ResumePatchHistoryCell {
 }
 
 impl HistoryCell for ResumePatchHistoryCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::FileChange,
+            praxis_app_core::PraxisTimelineTone::Neutral,
+            format!(
+                "{} resumed file change{}",
+                self.changes.len(),
+                if self.changes.len() == 1 { "" } else { "s" }
+            ),
+        ))
+    }
+
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         let mut lines = create_diff_file_summary(&self.changes, &self.cwd);
         lines.push(Line::from(vec![

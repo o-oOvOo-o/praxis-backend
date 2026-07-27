@@ -1,4 +1,3 @@
-
 fn collect_cs_files_checked(root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut files = Vec::new();
     if !root.exists() {
@@ -607,8 +606,7 @@ fn operator_key(class: &str, method: &str) -> String {
 }
 
 fn gaea_nodes_source_dir(ctx: &Context) -> PathBuf {
-    ctx.root
-        .join("_gaea_decompiled")
+    ctx.gaea_decompiled_root
         .join("Gaea.Nodes")
         .join("QuadSpinner")
         .join("Gaea")
@@ -662,8 +660,7 @@ fn source_file_for_class(ctx: &Context, class: &str) -> Option<PathBuf> {
 }
 
 fn gaea_engine_source_dir(ctx: &Context) -> PathBuf {
-    ctx.root
-        .join("_gaea_decompiled")
+    ctx.gaea_decompiled_root
         .join("Gaea.Engine")
         .join("QuadSpinner")
         .join("Gaea")
@@ -1116,6 +1113,7 @@ fn status_payload(ctx: &Context, node: &str) -> Result<Value, String> {
     );
     Ok(json!({
         "node": node,
+        "architecture_authority": &ledger.architecture_authority,
         "state": state,
         "final_exact": final_exact,
         "headline": {
@@ -1173,7 +1171,14 @@ fn status_payload(ctx: &Context, node: &str) -> Result<Value, String> {
 fn cmd_verify(ctx: &Context, cli: &Cli) -> Result<(), String> {
     let node = cli.node();
     let payload = verify_payload(ctx, &node)?;
+    let passed = payload
+        .get("pass")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     print_value(cli.json(), &payload);
+    if cli.has("strict") && !passed {
+        return Err(format!("Verification rejected promotion for '{node}'."));
+    }
     Ok(())
 }
 
@@ -1243,7 +1248,9 @@ fn verify_payload(ctx: &Context, node: &str) -> Result<Value, String> {
     } else {
         Vec::new()
     };
-    let failures = verify_failures(
+    let architecture = architecture_guard::guard_payload(ctx, node)?;
+    let architecture_pass = !architecture_guard::has_blockers(&architecture);
+    let mut failures = verify_failures(
         &evidence_report,
         !direct_bins.is_empty(),
         direct_bin_ok,
@@ -1252,6 +1259,9 @@ fn verify_payload(ctx: &Context, node: &str) -> Result<Value, String> {
         sweep_exact,
         node,
     );
+    if !architecture_pass {
+        failures.push("cce_architecture_guard_failed".to_string());
+    }
     let verification_state = if failures.is_empty()
         && artifact_contract_gate
         && open_entries.is_empty()
@@ -1311,14 +1321,16 @@ fn verify_payload(ctx: &Context, node: &str) -> Result<Value, String> {
             "artifact_exact_gate": artifact_exact_gate,
             "artifact_acceptance_gate": artifact_acceptance_gate,
             "artifact_contract_gate": artifact_contract_gate,
+            "cce_architecture_guard": architecture_pass,
         },
+        "architecture": architecture,
         "direct_bins": direct_bins,
         "evidence_paths": evidence_report,
         "artifacts": artifacts,
         "promotion_candidates": promotion_candidates,
         "promotion_readiness": promotion_readiness,
         "recommended_next_commands": verify_recommendations(node),
-        "truth_rule": "verify validates toolchain evidence and ledger consistency; it does not create new algorithm evidence unless paired with audit/diff --run.",
+        "truth_rule": "verify validates toolchain evidence, ledger consistency, and the mandatory CCE architecture guard; it does not create new algorithm evidence unless paired with audit/diff --run.",
     }))
 }
 
@@ -1705,6 +1717,8 @@ fn cmd_certify(ctx: &Context, cli: &Cli) -> Result<(), String> {
         "final_exact": status.get("final_exact").and_then(Value::as_bool).unwrap_or(false),
         "state": status.get("state"),
         "verification_state": verify.get("verification_state"),
+        "architecture": verify.get("architecture"),
+        "pass": verify.get("pass"),
         "truth_rule": "certify creates fresh audit and matrix evidence, then reuses the same status and verify gates; it is exact for the audited suite, not a proof for untested future parameter families.",
     });
     print_value(cli.json(), &payload);
@@ -2328,6 +2342,7 @@ fn cmd_gaea_app_bench(ctx: &Context, cli: &Cli) -> Result<(), String> {
         .unwrap_or_else(|| PathBuf::from(r"F:\Gaea 2"));
     let resolution = optional_u32_flag(cli, "resolution")?.unwrap_or(256);
     let debris_params = GaeaDebrisAppBenchParams::from_cli(cli)?;
+    let canyon_params = GaeaCanyonAppBenchParams::from_cli(cli)?;
     let explicit_terrain = cli.flag("terrain").map(PathBuf::from);
     let (default_terrain, default_node_id, fixture_info) = gaea_app_bench_default_target(
         ctx,
@@ -2336,6 +2351,7 @@ fn cmd_gaea_app_bench(ctx: &Context, cli: &Cli) -> Result<(), String> {
         resolution,
         explicit_terrain.is_none(),
         &debris_params,
+        &canyon_params,
     )?;
     let swarm_exe = gaea_dir.join("Gaea.Swarm.exe");
     if !swarm_exe.exists() {

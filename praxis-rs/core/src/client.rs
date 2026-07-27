@@ -762,9 +762,7 @@ fn sanitize_input_for_responses_api(input: Vec<ResponseItem>) -> Vec<ResponseIte
                 encrypted_content: Some(encrypted_content),
                 ..
             } if !encrypted_content.is_empty()
-                && !crate::llm::wire::shared::is_claude_reasoning_content(
-                    &encrypted_content,
-                ) =>
+                && !crate::llm::wire::shared::is_claude_reasoning_content(&encrypted_content) =>
             {
                 Some(ResponseItem::Reasoning {
                     id,

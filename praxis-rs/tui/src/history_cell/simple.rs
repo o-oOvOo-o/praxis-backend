@@ -62,6 +62,14 @@ impl ReasoningSummaryCell {
 }
 
 impl HistoryCell for ReasoningSummaryCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::Reasoning,
+            praxis_app_core::PraxisTimelineTone::Neutral,
+            "Reasoning",
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         if self.transcript_only {
             Vec::new()
@@ -91,6 +99,39 @@ impl AgentMessageCell {
 }
 
 impl HistoryCell for AgentMessageCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        if !self.is_first_line {
+            return None;
+        }
+        let label = self
+            .lines
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let (kind, tone, fallback) = if label.eq_ignore_ascii_case("Context compacted") {
+            (
+                praxis_app_core::PraxisTimelineKind::ContextCompaction,
+                praxis_app_core::PraxisTimelineTone::Warning,
+                "Context compacted",
+            )
+        } else {
+            (
+                praxis_app_core::PraxisTimelineKind::Status,
+                praxis_app_core::PraxisTimelineTone::Neutral,
+                "Assistant",
+            )
+        };
+        Some(PraxisTimelineAnchor::new(
+            kind,
+            tone,
+            if label.is_empty() { fallback } else { &label },
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         adaptive_wrap_lines(&self.lines, RtOptions::new(width as usize))
     }

@@ -1,4 +1,3 @@
-
 fn cmd_erosion2_inhibitor_probe(ctx: &Context, cli: &Cli) -> Result<(), String> {
     let node = cli.flag("node").unwrap_or("Erosion2");
     if !["Erosion2", "Erosion2Node"]
@@ -610,7 +609,7 @@ fn cmd_mask_flow_bridge_probe(
             "matrix",
             "dump-dir",
         ],
-        &["verify-gpu", "gpu", "require-all-pass", "require-pass"],
+        &["require-all-pass", "require-pass"],
     );
     if cli.json() {
         command.arg("--json");

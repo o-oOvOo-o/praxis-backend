@@ -60,6 +60,21 @@
         "authentication": "ON_USE"
       },
       "category": "dcc-tooling"
+    },
+    {
+      "name": "cunning3d-computer-use",
+      "source": {
+        "source": "local",
+        "path": "./plugins/official/cunning3d-computer-use"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE",
+        "products": [
+          "cunning3d"
+        ]
+      },
+      "category": "agent-control"
     }
   ]
 }

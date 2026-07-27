@@ -40,24 +40,27 @@ use std::sync::Arc;
 #[derive(Clone, Default, Debug)]
 pub(crate) struct ApprovalStore {
     // Store serialized keys for generic caching across requests.
-    map: HashMap<String, ReviewDecision>,
+    map: HashMap<String, (u64, ReviewDecision)>,
 }
 
 impl ApprovalStore {
-    pub fn get<K>(&self, key: &K) -> Option<ReviewDecision>
+    pub fn get<K>(&self, generation: u64, key: &K) -> Option<ReviewDecision>
     where
         K: Serialize,
     {
         let s = serde_json::to_string(key).ok()?;
-        self.map.get(&s).cloned()
+        self.map
+            .get(&s)
+            .filter(|(cached_generation, _)| *cached_generation == generation)
+            .map(|(_, decision)| decision.clone())
     }
 
-    pub fn put<K>(&mut self, key: K, value: ReviewDecision)
+    pub fn put<K>(&mut self, generation: u64, key: K, value: ReviewDecision)
     where
         K: Serialize,
     {
         if let Ok(s) = serde_json::to_string(&key) {
-            self.map.insert(s, value);
+            self.map.insert(s, (generation, value));
         }
     }
 }
@@ -70,6 +73,7 @@ impl ApprovalStore {
 ///   so future requests touching any subset can also skip prompting.
 pub(crate) async fn with_cached_approval<K, F, Fut>(
     services: &SessionServices,
+    permission_generation: u64,
     // Name of the tool, used for metrics collection.
     tool_name: &str,
     keys: Vec<K>,
@@ -87,8 +91,12 @@ where
 
     let already_approved = {
         let store = services.tool_approvals.lock().await;
-        keys.iter()
-            .all(|key| matches!(store.get(key), Some(ReviewDecision::ApprovedForSession)))
+        keys.iter().all(|key| {
+            matches!(
+                store.get(permission_generation, key),
+                Some(ReviewDecision::ApprovedForSession)
+            )
+        })
     };
 
     if already_approved {
@@ -109,7 +117,11 @@ where
     if matches!(decision, ReviewDecision::ApprovedForSession) {
         let mut store = services.tool_approvals.lock().await;
         for key in keys {
-            store.put(key, ReviewDecision::ApprovedForSession);
+            store.put(
+                permission_generation,
+                key,
+                ReviewDecision::ApprovedForSession,
+            );
         }
     }
 

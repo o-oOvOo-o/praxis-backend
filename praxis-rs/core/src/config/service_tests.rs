@@ -186,11 +186,7 @@ async fn read_includes_origins_and_layers() {
     assert_eq!(response.config.model.as_deref(), Some("user"));
 
     assert_eq!(
-        response
-            .origins
-            .get("model")
-            .expect("origin")
-            .name,
+        response.origins.get("model").expect("origin").name,
         ConfigLayerSource::User {
             file: user_file.clone()
         },

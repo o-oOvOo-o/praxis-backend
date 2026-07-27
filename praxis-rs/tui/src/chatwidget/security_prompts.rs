@@ -1,3 +1,5 @@
+use praxis_app_gateway_protocol::ThreadRewindPreviewResponse;
+use praxis_app_gateway_protocol::ThreadRewindWorkspaceAction;
 use praxis_config::types::ApprovalsReviewer;
 #[cfg(target_os = "windows")]
 use praxis_core::windows_sandbox::WindowsSandboxLevelExt;
@@ -6,8 +8,6 @@ use praxis_protocol::config_types::WindowsSandboxLevel;
 #[cfg(target_os = "windows")]
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_utils_approval_presets::ApprovalPreset;
-use praxis_app_gateway_protocol::ThreadRewindPreviewResponse;
-use praxis_app_gateway_protocol::ThreadRewindWorkspaceAction;
 #[cfg(target_os = "windows")]
 use praxis_utils_approval_presets::builtin_approval_presets;
 use ratatui::style::Color;
@@ -17,8 +17,8 @@ use ratatui::widgets::Paragraph;
 use ratatui::widgets::Wrap;
 
 use super::ChatWidget;
-use crate::app_event::AppEvent;
 use crate::app_backtrack::BacktrackSelection;
+use crate::app_event::AppEvent;
 #[cfg(target_os = "windows")]
 use crate::app_event::ExitMode;
 #[cfg(target_os = "windows")]

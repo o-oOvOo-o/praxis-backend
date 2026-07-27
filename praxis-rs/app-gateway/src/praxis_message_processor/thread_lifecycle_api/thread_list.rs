@@ -4,6 +4,7 @@ use crate::outgoing_message::ConnectionRequestId;
 use crate::praxis_message_processor::PraxisMessageProcessor;
 use crate::praxis_message_processor::thread_projection_api::summary_to_thread;
 use crate::praxis_message_processor::thread_store_api::ThreadStore;
+use crate::praxis_message_processor::thread_store_api::ThreadStoreListPage;
 use crate::praxis_message_processor::thread_store_api::ThreadStoreListQuery;
 use crate::praxis_message_processor::thread_store_api::ThreadStoreSummary;
 use praxis_app_gateway_protocol::ExternalAgentSessionListParams;
@@ -93,33 +94,53 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ExternalAgentSessionListParams,
     ) {
-        let should_sync = params.cursor.is_none();
         let source = match params.source {
             ExternalAgentSessionSource::Codex => ExternalAgentSource::Codex,
             ExternalAgentSessionSource::Cursor => ExternalAgentSource::Cursor,
         };
         let bridge_config = source.bridge_config(&self.config);
 
-        if should_sync {
-            if let Err(error) =
-                praxis_core::external_agent_migration::sync_external_agent_sessions_to_praxis_home(
-                    source,
-                    &bridge_config,
-                )
-                .await
-            {
-                self.outgoing
-                    .send_error(
-                        request_id,
-                        JSONRPCErrorError {
-                            code: INTERNAL_ERROR_CODE,
-                            message: format!("failed to synchronize external sessions: {error}"),
-                            data: None,
-                        },
-                    )
-                    .await;
+        let page_size = list_page_size(params.limit);
+        let parsed_cursor = match parse_thread_list_cursor(params.cursor.clone()) {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
                 return;
             }
+        };
+        let should_sync = match list_external_session_page(
+            &bridge_config,
+            source,
+            page_size,
+            parsed_cursor.clone(),
+            params.sort_key,
+            params.search_term.clone(),
+        )
+        .await
+        {
+            Ok(page) => page.items.len() < page_size && page.next_cursor.is_none(),
+            Err(_) => true,
+        };
+        if should_sync
+            && let Err(error) =
+                praxis_core::external_agent_migration::sync_external_agent_session_page(
+                    source,
+                    &bridge_config,
+                    Some(page_size.saturating_add(1)),
+                )
+                .await
+        {
+            self.outgoing
+                .send_error(
+                    request_id,
+                    JSONRPCErrorError {
+                        code: INTERNAL_ERROR_CODE,
+                        message: format!("failed to synchronize external sessions: {error}"),
+                        data: None,
+                    },
+                )
+                .await;
+            return;
         }
 
         let sort_key = match params.sort_key.unwrap_or(ThreadSortKey::UpdatedAt) {
@@ -128,14 +149,8 @@ impl PraxisMessageProcessor {
         };
         let page = ThreadStore::new(&bridge_config)
             .list_summaries(ThreadStoreListQuery {
-                page_size: list_page_size(params.limit),
-                cursor: match parse_thread_list_cursor(params.cursor) {
-                    Ok(cursor) => cursor,
-                    Err(error) => {
-                        self.outgoing.send_error(request_id, error).await;
-                        return;
-                    }
-                },
+                page_size,
+                cursor: parsed_cursor,
                 sort_key,
                 model_providers: None,
                 source_kinds: None,
@@ -253,6 +268,32 @@ impl PraxisMessageProcessor {
 
         Ok((page.items, next_cursor_string(page.next_cursor.as_ref())))
     }
+}
+
+async fn list_external_session_page(
+    bridge_config: &praxis_core::config::Config,
+    source: ExternalAgentSource,
+    page_size: usize,
+    cursor: Option<RolloutCursor>,
+    sort_key: Option<ThreadSortKey>,
+    search_term: Option<String>,
+) -> std::io::Result<ThreadStoreListPage> {
+    ThreadStore::new(bridge_config)
+        .list_summaries(ThreadStoreListQuery {
+            page_size,
+            cursor,
+            sort_key: match sort_key.unwrap_or(ThreadSortKey::UpdatedAt) {
+                ThreadSortKey::CreatedAt => CoreThreadSortKey::CreatedAt,
+                ThreadSortKey::UpdatedAt => CoreThreadSortKey::UpdatedAt,
+            },
+            model_providers: None,
+            source_kinds: None,
+            archived: false,
+            cwd: None,
+            search_term,
+            fallback_provider: source.import_model_provider_id().to_owned(),
+        })
+        .await
 }
 
 fn list_page_size(limit: Option<u32>) -> usize {

@@ -454,8 +454,8 @@ async fn snapshot_rollback_past_compaction_replays_append_only_history() -> Resu
         num_turns: 1,
         restore_checkpoint: None,
     })
-        .await
-        .expect("submit thread rollback");
+    .await
+    .expect("submit thread rollback");
     let rollback_event =
         wait_for_event(&base, |ev| matches!(ev, EventMsg::ThreadRolledBack(_))).await;
     let EventMsg::ThreadRolledBack(rollback_event) = rollback_event else {

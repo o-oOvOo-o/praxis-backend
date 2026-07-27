@@ -69,6 +69,10 @@ impl LiveEffectivePermissions {
     pub(crate) fn snapshot(&self) -> EffectivePermissions {
         EffectivePermissions::from_resolved_turn_permissions(self.handle.current())
     }
+
+    pub(crate) fn subscribe(&self) -> tokio::sync::watch::Receiver<ResolvedTurnPermissions> {
+        self.handle.subscribe()
+    }
 }
 
 impl Debug for LiveEffectivePermissions {

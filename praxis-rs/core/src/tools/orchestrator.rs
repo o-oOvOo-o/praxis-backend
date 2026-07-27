@@ -112,9 +112,6 @@ impl ToolOrchestrator {
     where
         T: ToolRuntime<Rq, Out>,
     {
-        let permissions = turn_ctx.effective_permissions();
-        let resolved_permissions = permissions.as_resolved_turn_permissions().normalized();
-        let approval_policy = resolved_permissions.approval_policy;
         let tool_kind = tool.tool_kind();
         let otel = turn_ctx.session_telemetry.clone();
         let otel_tn = &tool_ctx.tool_name;
@@ -128,68 +125,99 @@ impl ToolOrchestrator {
 
         tool.preflight(req, tool_ctx).await?;
 
-        let requirement = tool.exec_approval_requirement(req).unwrap_or_else(|| {
-            default_exec_approval_requirement(
-                approval_policy,
-                &resolved_permissions.file_system_sandbox_policy,
-            )
-        });
         let safety = ToolSafetyOrchestrator;
-        let safety_decision = match &requirement {
-            ExecApprovalRequirement::Skip { .. } => safety.decide(ToolSafetyRequest {
-                id: &tool_ctx.call_id,
-                thread_id: None,
-                turn_id: Some(&tool_ctx.turn.sub_id),
-                kind: tool_kind,
-                permissions: &resolved_permissions,
-                approval_required: false,
-                reason: None,
-            }),
-            ExecApprovalRequirement::Forbidden { reason } => ApprovalDecision::deny(reason.clone()),
-            ExecApprovalRequirement::NeedsApproval { reason, .. } => {
-                safety.decide(ToolSafetyRequest {
+        let resolved_permissions = loop {
+            let permissions = turn_ctx.effective_permissions();
+            let resolved_permissions = permissions.as_resolved_turn_permissions().normalized();
+            let approval_policy = resolved_permissions.approval_policy;
+            let decision_generation = resolved_permissions.generation;
+            let requirement = tool.exec_approval_requirement(req).unwrap_or_else(|| {
+                default_exec_approval_requirement(
+                    approval_policy,
+                    &resolved_permissions.file_system_sandbox_policy,
+                )
+            });
+            let safety_decision = match &requirement {
+                ExecApprovalRequirement::Skip { .. } => safety.decide(ToolSafetyRequest {
                     id: &tool_ctx.call_id,
                     thread_id: None,
                     turn_id: Some(&tool_ctx.turn.sub_id),
                     kind: tool_kind,
                     permissions: &resolved_permissions,
-                    approval_required: true,
-                    reason: reason.as_deref(),
-                })
-            }
-        };
+                    approval_required: false,
+                    reason: None,
+                }),
+                ExecApprovalRequirement::Forbidden { reason } => {
+                    ApprovalDecision::deny(reason.clone())
+                }
+                ExecApprovalRequirement::NeedsApproval { reason, .. } => {
+                    safety.decide(ToolSafetyRequest {
+                        id: &tool_ctx.call_id,
+                        thread_id: None,
+                        turn_id: Some(&tool_ctx.turn.sub_id),
+                        kind: tool_kind,
+                        permissions: &resolved_permissions,
+                        approval_required: true,
+                        reason: reason.as_deref(),
+                    })
+                }
+            };
 
-        match safety_decision {
-            ApprovalDecision::Run { .. } => {
-                otel.tool_decision(otel_tn, otel_ci, &ReviewDecision::Approved, otel_cfg);
-                if matches!(requirement, ExecApprovalRequirement::NeedsApproval { .. }) {
+            match safety_decision {
+                ApprovalDecision::Run { .. } => {
+                    otel.tool_decision(otel_tn, otel_ci, &ReviewDecision::Approved, otel_cfg);
+                    if matches!(requirement, ExecApprovalRequirement::NeedsApproval { .. }) {
+                        already_approved = true;
+                    }
+                    break resolved_permissions;
+                }
+                ApprovalDecision::Deny { reason } => {
+                    return Err(ToolError::Rejected(reason));
+                }
+                ApprovalDecision::AskUser { request } => {
+                    let approval_ctx = ApprovalCtx {
+                        session: &tool_ctx.session,
+                        turn: &tool_ctx.turn,
+                        call_id: &tool_ctx.call_id,
+                        retry_reason: request.reason,
+                        network_approval_context: None,
+                    };
+                    let decision = {
+                        let approval = tool.start_approval_async(req, approval_ctx);
+                        tokio::pin!(approval);
+                        let mut permission_updates = turn_ctx.subscribe_effective_permissions();
+                        tokio::select! {
+                            decision = &mut approval => Some(decision),
+                            () = wait_for_permission_generation_change(
+                                &mut permission_updates,
+                                decision_generation,
+                            ) => None,
+                        }
+                    };
+                    let Some(decision) = decision else {
+                        tool_ctx
+                            .session
+                            .discard_pending_approval(&tool_ctx.call_id)
+                            .await;
+                        continue;
+                    };
+                    let routed_to_guardian = routes_approval_to_guardian(turn_ctx);
+                    let otel_source = if routed_to_guardian {
+                        otel_automated_reviewer.clone()
+                    } else {
+                        otel_user.clone()
+                    };
+
+                    otel.tool_decision(otel_tn, otel_ci, &decision, otel_source);
+                    apply_review_decision(decision, routed_to_guardian)?;
                     already_approved = true;
+                    let latest_generation = turn_ctx.effective_permissions().generation;
+                    if latest_generation == decision_generation {
+                        break resolved_permissions;
+                    }
                 }
             }
-            ApprovalDecision::Deny { reason } => {
-                return Err(ToolError::Rejected(reason));
-            }
-            ApprovalDecision::AskUser { request } => {
-                let approval_ctx = ApprovalCtx {
-                    session: &tool_ctx.session,
-                    turn: &tool_ctx.turn,
-                    call_id: &tool_ctx.call_id,
-                    retry_reason: request.reason,
-                    network_approval_context: None,
-                };
-                let decision = tool.start_approval_async(req, approval_ctx).await;
-                let routed_to_guardian = routes_approval_to_guardian(turn_ctx);
-                let otel_source = if routed_to_guardian {
-                    otel_automated_reviewer.clone()
-                } else {
-                    otel_user.clone()
-                };
-
-                otel.tool_decision(otel_tn, otel_ci, &decision, otel_source);
-                apply_review_decision(decision, routed_to_guardian)?;
-                already_approved = true;
-            }
-        }
+        };
 
         // 2) First attempt under the selected sandbox.
         let has_managed_network_requirements = turn_ctx
@@ -268,7 +296,7 @@ impl ToolOrchestrator {
                     })));
                 }
                 let retry_permissions = turn_ctx.effective_permissions();
-                let retry_resolved_permissions = retry_permissions
+                let mut retry_resolved_permissions = retry_permissions
                     .as_resolved_turn_permissions()
                     .normalized();
                 let retry_approval_policy = retry_resolved_permissions.approval_policy;
@@ -313,7 +341,41 @@ impl ToolOrchestrator {
                         network_approval_context: network_approval_context.clone(),
                     };
 
-                    let decision = tool.start_approval_async(req, approval_ctx).await;
+                    let decision = {
+                        let approval = tool.start_approval_async(req, approval_ctx);
+                        tokio::pin!(approval);
+                        let mut permission_updates = turn_ctx.subscribe_effective_permissions();
+                        tokio::select! {
+                            decision = &mut approval => Some(decision),
+                            () = wait_for_permission_generation_change(
+                                &mut permission_updates,
+                                retry_resolved_permissions.generation,
+                            ) => None,
+                        }
+                    };
+                    let decision = match decision {
+                        Some(decision) => decision,
+                        None => {
+                            tool_ctx
+                                .session
+                                .discard_pending_approval(&tool_ctx.call_id)
+                                .await;
+                            let latest_permissions = turn_ctx
+                                .effective_permissions()
+                                .as_resolved_turn_permissions()
+                                .normalized();
+                            if !latest_permissions.is_promptless_full_access() {
+                                return Err(ToolError::Praxis(PraxisErr::Sandbox(
+                                    SandboxErr::Denied {
+                                        output,
+                                        network_policy_decision,
+                                    },
+                                )));
+                            }
+                            retry_resolved_permissions = latest_permissions;
+                            ReviewDecision::Approved
+                        }
+                    };
                     let routed_to_guardian = routes_approval_to_guardian(turn_ctx);
                     let otel_source = if routed_to_guardian {
                         otel_automated_reviewer
@@ -322,6 +384,22 @@ impl ToolOrchestrator {
                     };
                     otel.tool_decision(otel_tn, otel_ci, &decision, otel_source);
                     apply_review_decision(decision, routed_to_guardian)?;
+
+                    let latest_permissions = turn_ctx
+                        .effective_permissions()
+                        .as_resolved_turn_permissions()
+                        .normalized();
+                    if latest_permissions.generation != retry_resolved_permissions.generation {
+                        if !latest_permissions.is_promptless_full_access() {
+                            return Err(ToolError::Praxis(PraxisErr::Sandbox(
+                                SandboxErr::Denied {
+                                    output,
+                                    network_policy_decision,
+                                },
+                            )));
+                        }
+                        retry_resolved_permissions = latest_permissions;
+                    }
                 }
 
                 let escalated_attempt = SandboxAttempt {
@@ -366,6 +444,22 @@ fn build_denial_reason_from_output(_output: &ExecToolCallOutput) -> String {
     // Keep approval reason terse and stable for UX/tests, but accept the
     // output so we can evolve heuristics later without touching call sites.
     "command failed; retry without sandbox?".to_string()
+}
+
+async fn wait_for_permission_generation_change(
+    permission_updates: &mut tokio::sync::watch::Receiver<
+        praxis_system_plugin_approval_control::ResolvedTurnPermissions,
+    >,
+    current_generation: u64,
+) {
+    loop {
+        if permission_updates.borrow().generation != current_generation {
+            return;
+        }
+        if permission_updates.changed().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
 }
 
 fn apply_review_decision(

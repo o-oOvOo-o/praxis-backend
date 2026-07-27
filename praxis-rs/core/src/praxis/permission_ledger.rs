@@ -46,6 +46,17 @@ impl PermissionLedger {
         self.controller.current().granted_permissions
     }
 
+    pub(crate) fn generation(&self) -> u64 {
+        self.controller.current().generation
+    }
+
+    pub(crate) fn is_promptless_full_access(&self) -> bool {
+        self.controller
+            .current()
+            .normalized()
+            .is_promptless_full_access()
+    }
+
     pub(crate) fn grant_session_permissions(&self, permissions: PermissionProfile) {
         self.controller.grant_session_permissions(permissions);
     }
@@ -142,5 +153,30 @@ mod tests {
         ledger.clear_turn_permissions();
 
         assert_eq!(ledger.granted_permissions(), Some(session_permissions));
+    }
+
+    #[tokio::test]
+    async fn live_subscriber_observes_promptless_full_access_generation() {
+        let ledger = ledger();
+        let live_permissions = ledger.live_effective_permissions();
+        let mut updates = live_permissions.subscribe();
+        let initial_generation = updates.borrow().generation;
+        let sandbox_policy = SandboxPolicy::DangerFullAccess;
+
+        ledger.controller.replace(ThreadPermissionState::new(
+            Some("thread".to_string()),
+            PermissionStateSource::RuntimeOverride,
+            AskForApproval::Never,
+            ApprovalsReviewer::User,
+            sandbox_policy.clone(),
+            FileSystemSandboxPolicy::from(&sandbox_policy),
+            NetworkSandboxPolicy::Enabled,
+            WindowsSandboxLevel::Disabled,
+        ));
+
+        updates.changed().await.expect("permission update");
+        let updated = updates.borrow().clone().normalized();
+        assert!(updated.generation > initial_generation);
+        assert!(updated.is_promptless_full_access());
     }
 }

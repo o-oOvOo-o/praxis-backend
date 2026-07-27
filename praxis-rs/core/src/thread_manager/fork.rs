@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use praxis_protocol::protocol::W3cTraceContext;
 use praxis_protocol::ThreadId;
+use praxis_protocol::protocol::W3cTraceContext;
 
 use crate::config::Config;
 use crate::error::Result as PraxisResult;

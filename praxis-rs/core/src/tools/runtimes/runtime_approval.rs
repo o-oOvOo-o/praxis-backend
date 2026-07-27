@@ -49,6 +49,7 @@ where
         let reason = retry_reason.clone().or(plan.justification.clone());
         let session = ctx.session;
         let turn = ctx.turn;
+        let permission_generation = turn.effective_permissions().generation;
         let call_id = ctx.call_id.to_string();
         if routes_approval_to_guardian(turn) {
             let guardian_request = match plan.kind {
@@ -82,23 +83,29 @@ where
             .proposed_execpolicy_amendment()
             .cloned();
 
-        with_cached_approval(&session.services, tool_name, keys, move || async move {
-            let available_decisions = None;
-            session
-                .request_command_approval(
-                    turn,
-                    call_id,
-                    /*approval_id*/ None,
-                    command,
-                    cwd,
-                    reason,
-                    ctx.network_approval_context.clone(),
-                    proposed_execpolicy_amendment,
-                    additional_permissions,
-                    available_decisions,
-                )
-                .await
-        })
+        with_cached_approval(
+            &session.services,
+            permission_generation,
+            tool_name,
+            keys,
+            move || async move {
+                let available_decisions = None;
+                session
+                    .request_command_approval(
+                        turn,
+                        call_id,
+                        /*approval_id*/ None,
+                        command,
+                        cwd,
+                        reason,
+                        ctx.network_approval_context.clone(),
+                        proposed_execpolicy_amendment,
+                        additional_permissions,
+                        available_decisions,
+                    )
+                    .await
+            },
+        )
         .await
     })
 }

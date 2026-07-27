@@ -22,6 +22,7 @@ pub(super) const SOURCE: ExternalAgentSource = ExternalAgentSource::Cursor;
 
 pub(super) async fn sync_sessions_to_store(
     config: &Config,
+    max_imports: Option<usize>,
 ) -> io::Result<ExternalSessionSyncStats> {
     let Some(paths) = locate_cursor_paths() else {
         return Ok(ExternalSessionSyncStats::default());
@@ -32,10 +33,19 @@ pub(super) async fn sync_sessions_to_store(
         return Ok(ExternalSessionSyncStats::default());
     }
 
+    let store = ExternalSessionStore::open(config, SOURCE).await;
+    let heads = heads
+        .into_iter()
+        .filter(|head| !store.contains_external(head.external_id(), head.created_or_updated_at()))
+        .take(max_imports.unwrap_or(usize::MAX))
+        .collect::<Vec<_>>();
+    if heads.is_empty() {
+        return Ok(ExternalSessionSyncStats::default());
+    }
+
     let global_pool = open_cursor_db(&paths.global_db).await?;
     let composer_keys = composer_data_keys_for_heads(&heads);
     let composer_values = read_cursor_disk_values(&global_pool, &composer_keys).await?;
-    let store = ExternalSessionStore::open(config, SOURCE).await;
     let mut stats = ExternalSessionSyncStats::discovered(heads.len());
 
     for head in heads {

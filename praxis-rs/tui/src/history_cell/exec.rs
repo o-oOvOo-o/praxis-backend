@@ -16,6 +16,18 @@ impl UnifiedExecInteractionCell {
 }
 
 impl HistoryCell for UnifiedExecInteractionCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::Command,
+            praxis_app_core::PraxisTimelineTone::Working,
+            if self.stdin.is_empty() {
+                "Waited for terminal"
+            } else {
+                "Terminal interaction"
+            },
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         if width == 0 {
             return Vec::new();

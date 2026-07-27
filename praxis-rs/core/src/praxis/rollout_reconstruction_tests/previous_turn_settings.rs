@@ -12,7 +12,11 @@ async fn record_initial_history_resumed_bare_turn_context_does_not_hydrate_previ
         current_date: turn_context.current_date.clone(),
         timezone: turn_context.timezone.clone(),
         approval_policy: turn_context.effective_approval_policy(),
-        sandbox_policy: turn_context.effective_permissions().sandbox_policy.get().clone(),
+        sandbox_policy: turn_context
+            .effective_permissions()
+            .sandbox_policy
+            .get()
+            .clone(),
         network: None,
         model: previous_model.to_string(),
         personality: turn_context.personality,
@@ -51,7 +55,11 @@ async fn record_initial_history_resumed_hydrates_previous_turn_settings_from_lif
         current_date: turn_context.current_date.clone(),
         timezone: turn_context.timezone.clone(),
         approval_policy: turn_context.effective_approval_policy(),
-        sandbox_policy: turn_context.effective_permissions().sandbox_policy.get().clone(),
+        sandbox_policy: turn_context
+            .effective_permissions()
+            .sandbox_policy
+            .get()
+            .clone(),
         network: None,
         model: previous_model.to_string(),
         personality: turn_context.personality,

@@ -132,7 +132,10 @@ impl AgentTask for UndoTask {
                 items.remove(idx);
                 let reference_context_item = session.reference_context_item().await;
                 session.replace_history(items, reference_context_item).await;
-                info!(checkpoint_id = checkpoint_id, "Undo restored workspace checkpoint");
+                info!(
+                    checkpoint_id = checkpoint_id,
+                    "Undo restored workspace checkpoint"
+                );
                 send_undo_completed(
                     &session,
                     ctx.as_ref(),

@@ -158,6 +158,19 @@ impl McpToolCallCell {
 }
 
 impl HistoryCell for McpToolCallCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        let tone = match self.success() {
+            Some(true) => praxis_app_core::PraxisTimelineTone::Success,
+            Some(false) => praxis_app_core::PraxisTimelineTone::Error,
+            None => praxis_app_core::PraxisTimelineTone::Working,
+        };
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::Tool,
+            tone,
+            format!("{}/{}", self.invocation.server, self.invocation.tool),
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let mut lines: Vec<Line<'static>> = Vec::new();
         let status = self.success();
@@ -309,6 +322,18 @@ impl WebSearchCell {
 }
 
 impl HistoryCell for WebSearchCell {
+    fn timeline_entry(&self) -> Option<PraxisTimelineAnchor> {
+        Some(PraxisTimelineAnchor::new(
+            praxis_app_core::PraxisTimelineKind::Tool,
+            if self.completed {
+                praxis_app_core::PraxisTimelineTone::Success
+            } else {
+                praxis_app_core::PraxisTimelineTone::Working
+            },
+            format!("Web: {}", self.query),
+        ))
+    }
+
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let expanded = self.is_card_expanded();
         let bullet = if self.completed {

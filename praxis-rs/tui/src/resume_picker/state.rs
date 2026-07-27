@@ -63,6 +63,7 @@ impl LoadingState {
 
 pub(super) async fn load_app_gateway_page(
     app_gateway: &mut AppGatewaySession,
+    source: SessionLookupSource,
     cursor: Option<String>,
     sort_key: ThreadSortKey,
     include_non_interactive: bool,
@@ -70,17 +71,34 @@ pub(super) async fn load_app_gateway_page(
     filter_cwd: Option<PathBuf>,
     archive_filter: ThreadArchiveFilter,
 ) -> std::io::Result<PickerPage> {
-    let response = app_gateway
-        .thread_list(thread_list_params(
-            cursor,
-            sort_key,
-            include_non_interactive,
-            search_term,
-            filter_cwd,
-            archive_filter,
-        ))
-        .await
-        .map_err(std::io::Error::other)?;
+    let params = thread_list_params(
+        cursor,
+        sort_key,
+        include_non_interactive,
+        search_term,
+        filter_cwd,
+        archive_filter,
+    );
+    let response = match source {
+        SessionLookupSource::Praxis => app_gateway.thread_list(params).await,
+        SessionLookupSource::Codex => {
+            app_gateway
+                .external_agent_session_list(
+                    praxis_app_gateway_protocol::ExternalAgentSessionSource::Codex,
+                    params,
+                )
+                .await
+        }
+        SessionLookupSource::Cursor => {
+            app_gateway
+                .external_agent_session_list(
+                    praxis_app_gateway_protocol::ExternalAgentSessionSource::Cursor,
+                    params,
+                )
+                .await
+        }
+    }
+    .map_err(std::io::Error::other)?;
     let num_scanned_files = response.data.len();
 
     Ok(PickerPage {

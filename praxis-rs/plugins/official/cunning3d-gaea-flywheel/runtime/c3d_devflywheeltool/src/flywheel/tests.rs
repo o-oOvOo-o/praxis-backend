@@ -1,4 +1,3 @@
-
 fn print_usage() {
     println!("c3d-devflywheeltool");
     println!("  toolbox [--json]");
@@ -25,7 +24,11 @@ fn print_usage() {
     println!("  plan --node <Node> [--json]");
     println!("  export-ui [--json]");
     println!("  blackbox-scan [--json] [--dry-run]");
-    println!("  verify --node <Node> [--json]");
+    println!("  architecture-guard --node <Node> [--json] [--strict]");
+    println!(
+        "  cce-graph-run (--ops-json JSON | --ops-file PATH) [--require-cce] [--require-session-reuse] [--run] [--json]"
+    );
+    println!("  verify --node <Node> [--json] [--strict]");
     println!("  certify --node Mountain [--run] [--json] [--direct-bin]");
     println!(
         "  sweep --node Mountain [--samples N|--seconds N] [--rng-seed N] [--run] [--json] [--direct-bin] [--keep-going] [-- fixed Mountain params]"
@@ -38,7 +41,7 @@ fn print_usage() {
     );
     println!("  gaea-viewport-reverse [--gaea-dir PATH] [--run] [--json]");
     println!(
-        "  gaea-app-bench --node Mountain|Debris [--terrain PATH] [--node-id N] [--resolution N] [--buildpath PATH] [--gaea-dir PATH] [--timeout-seconds N] [--no-new-console] [--run] [--json]"
+        "  gaea-app-bench --node Mountain|Debris|Canyon [--terrain PATH] [--node-id N] [--resolution N] [--buildpath PATH] [--gaea-dir PATH] [--timeout-seconds N] [--no-new-console] [--run] [--json]"
     );
     println!(
         "  perf-migrate --node Mountain [--candidates native_live,native_gpu_wave,...] [--samples N|--seconds N] [--gaea-app-baseline-ms N] [--target-speedup N(default 5)] [--require-speedup] [--run] [--json] [--direct-bin] [--fresh-bridge-cache]"
@@ -138,7 +141,7 @@ fn print_usage() {
         "  combiner-mountain-connected-probe [--node Combiner] [--resolution N] [--mountain-style Basic|Eroded|Old|Alpine|Strata] [--mountain-bulk Low|Medium|High] [--mountain-scale N] [--mountain-height N] [--mountain-seed N] [--epsilon 0] [--repeat N] [--direct-bin] [--run] [--json]"
     );
     println!(
-        "  combiner-compare [--node Combiner|Mix|Combiner.Insert|Combiner.SpectralBlend|ClassicCombiner|Masking.Mask] [--op mix|embed|insert|spectralblend|mask|classic] [--mode Blend|Add|Screen|...] [--classic-mode N] [--ratio N] [--extend N] [--threshold N] [--flatten N] [--boundary N] [--spectral-max true|false] [--resolution N] [--a-source TOKEN] [--b-source TOKEN] [--mask-source TOKEN] [--matrix p0|p1|classic|embed|insert|transpose|spectral|mountain-connected|acceptance|all] [--epsilon 0] [--repeat N] [--verify-gpu] [--run] [--json] [--direct-bin] [--require-pass]"
+        "  combiner-compare [--node Combiner|Mix|Combiner.Insert|Combiner.SpectralBlend|ClassicCombiner|Masking.Mask] [--op mix|embed|insert|spectralblend|mask|classic] [--mode Blend|Add|Screen|...] [--classic-mode N] [--ratio N] [--extend N] [--threshold N] [--flatten N] [--boundary N] [--spectral-max true|false] [--resolution N] [--a-source TOKEN] [--b-source TOKEN] [--mask-source TOKEN] [--matrix p0|p1|classic|embed|insert|transpose|spectral|mountain-connected|acceptance|all] [--epsilon 0] [--repeat N] [--run] [--json] [--direct-bin] [--require-pass]"
     );
     println!(
         "  slope-warp-compare --node SlopeWarp [--matrix focused|acceptance] [--input-map TOKEN] [--guide-map TOKEN] [--intensity N] [--iterations N] [--direction DEG] [--normalized true|false] [--quality 0|1|2|3] [--antialiasing 0|1|2] [--epsilon 0] [--repeat N] [--run] [--json] [--direct-bin] [--require-pass]"

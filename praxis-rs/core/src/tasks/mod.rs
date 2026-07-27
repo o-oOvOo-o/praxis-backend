@@ -2,7 +2,6 @@ mod abort;
 mod cleanup;
 mod compact;
 mod finish;
-pub(crate) mod workspace_history;
 mod metrics;
 mod pending_work;
 mod regular;
@@ -11,6 +10,7 @@ mod spawn;
 mod task_trait;
 mod undo;
 mod user_shell;
+pub(crate) mod workspace_history;
 
 pub(crate) use abort::interrupted_turn_history_marker;
 #[cfg(test)]

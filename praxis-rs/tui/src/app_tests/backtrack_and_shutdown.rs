@@ -284,6 +284,8 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     error: None,
                 },
             ],
+            status: None,
+            control_state: None,
             events: Vec::new(),
             input_state: None,
         },
@@ -351,6 +353,8 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
         ThreadEventSnapshot {
             session: None,
             turns: Vec::new(),
+            status: None,
+            control_state: None,
             events: vec![ThreadBufferedEvent::Notification(
                 ServerNotification::ItemStarted(
                     praxis_app_gateway_protocol::ItemStartedNotification {
@@ -422,6 +426,8 @@ async fn refreshed_snapshot_session_persists_resumed_turns() {
     let mut snapshot = ThreadEventSnapshot {
         session: Some(initial_session),
         turns: Vec::new(),
+        status: None,
+        control_state: None,
         events: Vec::new(),
         input_state: None,
     };
@@ -510,19 +516,34 @@ async fn queued_rollback_syncs_overlay_and_clears_deferred_history() {
 async fn thread_rollback_response_discards_queued_active_thread_events() {
     let mut app = make_test_app().await;
     let thread_id = ThreadId::new();
-    let (tx, rx) = mpsc::channel(8);
-    app.active_thread_id = Some(thread_id);
-    app.active_thread_rx = Some(rx);
-    tx.send(ThreadBufferedEvent::Notification(
-        ServerNotification::ConfigWarning(ConfigWarningNotification {
+    let mut channel = ThreadEventChannel::new(/*capacity*/ 8);
+    let event = ThreadBufferedEvent::Notification(ServerNotification::ConfigWarning(
+        ConfigWarningNotification {
             summary: "stale warning".to_string(),
             details: None,
             path: None,
             range: None,
-        }),
-    ))
-    .await
-    .expect("event should queue");
+        },
+    ));
+    let sequence = {
+        let mut store = channel.store.lock().await;
+        match &event {
+            ThreadBufferedEvent::Notification(notification) => {
+                store.push_notification(notification.clone())
+            }
+            _ => unreachable!("test event is a notification"),
+        }
+    };
+    let tx = channel.sender.clone();
+    let rx = channel
+        .receiver
+        .take()
+        .expect("test channel should own its receiver");
+    app.thread_event_channels.insert(thread_id, channel);
+    app.active_thread_id = Some(thread_id);
+    app.active_thread_rx = Some(rx);
+    tx.send(ThreadEventEnvelope { sequence, event })
+        .expect("event should queue");
 
     app.handle_thread_rollback_response(
         thread_id,
@@ -565,6 +586,12 @@ async fn thread_rollback_response_discards_queued_active_thread_events() {
         .as_mut()
         .expect("active receiver should remain attached");
     assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    assert_eq!(
+        app.thread_event_channels
+            .get(&thread_id)
+            .map(|channel| channel.replay_through_sequence),
+        Some(sequence)
+    );
 }
 
 #[tokio::test]

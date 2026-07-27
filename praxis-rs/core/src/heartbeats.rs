@@ -18,7 +18,12 @@ impl Session {
         controller: Option<String>,
     ) -> anyhow::Result<Option<ThreadHeartbeat>> {
         let state_db = self.require_state_db_for_thread_heartbeats().await?;
-        if enabled && state_db.get_thread_goal(self.conversation_id).await?.is_some() {
+        if enabled
+            && state_db
+                .get_thread_goal(self.conversation_id)
+                .await?
+                .is_some()
+        {
             anyhow::bail!("clear the thread goal before enabling heartbeat");
         }
         state_db

@@ -17,9 +17,9 @@ use crate::llm::ids::ProductProfileId;
 use crate::llm::profiles::plugin::ProfileDescriptor;
 use crate::llm::profiles::plugin::ProfileMatchContext;
 use crate::llm::prompts::LlmPromptPurpose;
+use crate::llm::provider::ModelProviderInfo;
 use crate::llm::registry::LlmProfileRegistry;
 use crate::llm::tasks::compact::CompactExecutionPolicy;
-use crate::llm::provider::ModelProviderInfo;
 use praxis_protocol::openai_models::ModelInfo;
 #[cfg(test)]
 use praxis_protocol::openai_models::ReasoningEffort;
@@ -28,11 +28,11 @@ use praxis_tools::ToolCapabilityConfig;
 mod manifest_lookup;
 mod matching;
 mod model_catalog;
-pub(crate) mod provider_setup;
 mod normalization;
 mod policies;
-pub(crate) mod provider_coordination;
 mod prompts;
+pub(crate) mod provider_coordination;
+pub(crate) mod provider_setup;
 
 pub(crate) use policies::LlmAutoTitleTaskPolicy;
 use policies::LlmTaskPolicy;

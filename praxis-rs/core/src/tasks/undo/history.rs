@@ -9,9 +9,7 @@ pub(super) fn find_latest_workspace_checkpoint(
         .enumerate()
         .rev()
         .find_map(|(index, item)| match item {
-            ResponseItem::WorkspaceCheckpoint { checkpoint } => {
-                Some((index, checkpoint.clone()))
-            }
+            ResponseItem::WorkspaceCheckpoint { checkpoint } => Some((index, checkpoint.clone())),
             _ => None,
         })
 }

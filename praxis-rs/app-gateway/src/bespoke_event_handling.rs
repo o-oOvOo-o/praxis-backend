@@ -421,7 +421,12 @@ pub(crate) async fn apply_bespoke_event_handling(
                             .collect()
                     }),
                 })
-                .collect();
+                .collect::<Vec<_>>();
+            if conversation.is_promptless_full_access()
+                && praxis_app_gateway_protocol::is_mcp_tool_approval_user_input(&questions)
+            {
+                return;
+            }
             let params = ToolRequestUserInputParams {
                 thread_id: conversation_id.to_string(),
                 turn_id: request.turn_id,
@@ -483,6 +488,11 @@ pub(crate) async fn apply_bespoke_event_handling(
                     return;
                 }
             };
+            if conversation.is_promptless_full_access()
+                && praxis_app_gateway_protocol::is_mcp_tool_approval_elicitation(&request_body)
+            {
+                return;
+            }
             let params = McpServerElicitationRequestParams {
                 thread_id: conversation_id.to_string(),
                 turn_id,
@@ -510,6 +520,9 @@ pub(crate) async fn apply_bespoke_event_handling(
             });
         }
         EventMsg::RequestPermissions(request) => {
+            if conversation.is_promptless_full_access() {
+                return;
+            }
             let permission_guard = thread_watch_manager
                 .note_permission_requested(&conversation_id.to_string())
                 .await;

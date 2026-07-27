@@ -7,27 +7,22 @@ enum ThreadViewPresentation {
 }
 
 impl App {
-    pub(super) async fn refresh_snapshot_session_if_needed(
+    pub(super) async fn refresh_live_thread_snapshot(
         &mut self,
         app_gateway: &mut AppGatewaySession,
         thread_id: ThreadId,
         is_replay_only: bool,
         snapshot: &mut ThreadEventSnapshot,
-    ) {
-        let should_refresh = !is_replay_only
-            && snapshot.session.as_ref().is_none_or(|session| {
-                session.model.trim().is_empty()
-                    || session.rollout_path.is_none()
-                    || !self.thread_session_permissions_match_config(session)
-            });
-        if !should_refresh {
-            return;
+    ) -> bool {
+        if is_replay_only {
+            return true;
         }
 
         match app_gateway.attach_thread(&self.config, thread_id).await {
             Ok(started) => {
                 self.apply_refreshed_snapshot_thread(thread_id, started, snapshot)
-                    .await
+                    .await;
+                true
             }
             Err(err) => {
                 tracing::warn!(
@@ -35,6 +30,7 @@ impl App {
                     error = %err,
                     "failed to refresh inferred thread session before replay"
                 );
+                false
             }
         }
     }
@@ -48,20 +44,25 @@ impl App {
         let AppGatewayStartedThread {
             mut session,
             turns,
-            status: _,
-            control_state: _,
+            status,
+            control_state,
         } = started;
         self.apply_current_permissions_to_thread_session(&mut session);
+        self.update_workspace_thread_row(thread_id, /*resort_after_update*/ true, |row| {
+            row.status = status.clone();
+            row.control_state = control_state.clone();
+        });
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
             let mut store = channel.store.lock().await;
-            store.set_session(session.clone(), turns.clone());
+            store.set_runtime_snapshot(session, turns, status, control_state);
             store.rebase_buffer_after_session_refresh();
+            *snapshot = store.snapshot();
+            return;
         }
         snapshot.session = Some(session);
         snapshot.turns = turns;
-        snapshot
-            .events
-            .retain(ThreadEventStore::event_survives_session_refresh);
+        snapshot.status = Some(status);
+        snapshot.control_state = control_state;
     }
 
     /// Opens the `/agent` picker after refreshing cached labels for known threads.
@@ -185,7 +186,7 @@ impl App {
         let AppGatewayStartedThread {
             mut session,
             turns,
-            status: _,
+            status,
             control_state,
         } = started;
         let previous_thread_id = self.active_thread_id;
@@ -206,6 +207,10 @@ impl App {
             thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
             /*agent_display_name*/ None, /*agent_role*/ None, /*is_closed*/ false,
         );
+        self.update_workspace_thread_row(thread_id, /*resort_after_update*/ true, |row| {
+            row.status = status.clone();
+            row.control_state = control_state.clone();
+        });
 
         let store = {
             let channel = self.ensure_thread_channel(thread_id);
@@ -213,7 +218,7 @@ impl App {
         };
         {
             let mut store = store.lock().await;
-            store.set_session(session, turns);
+            store.set_runtime_snapshot(session, turns, status, control_state);
             store.rebase_buffer_after_session_refresh();
         }
 
@@ -249,8 +254,6 @@ impl App {
         self.reset_for_thread_switch(tui)?;
         self.workspace.reset_chat_scroll();
         self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
-        self.chat_widget
-            .set_thread_control_state(control_state.as_ref());
         self.backfill_loaded_subagent_threads(app_gateway).await;
         self.drain_active_thread_events(tui).await?;
         self.refresh_pending_thread_approvals().await;
@@ -380,7 +383,11 @@ impl App {
         let mut disconnected = false;
         loop {
             match rx.try_recv() {
-                Ok(event) => self.handle_thread_event_now(event),
+                Ok(envelope) => {
+                    if self.active_thread_event_is_after_replay(&envelope) {
+                        self.handle_thread_event_now(envelope.event);
+                    }
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
                     disconnected = true;
@@ -432,21 +439,32 @@ impl App {
         snapshot: ThreadEventSnapshot,
         resume_restored_queue: bool,
     ) {
-        if let Some(session) = snapshot.session {
+        let ThreadEventSnapshot {
+            session,
+            turns,
+            status,
+            control_state,
+            events,
+            input_state,
+        } = snapshot;
+        if let Some(session) = session {
             self.chat_widget.handle_thread_session(session);
         }
         self.chat_widget
             .set_queue_autosend_suppressed(/*suppressed*/ true);
-        self.chat_widget
-            .restore_thread_input_state(snapshot.input_state);
-        if !snapshot.turns.is_empty() {
-            let turns = compact_conversation_replay_turns(snapshot.turns);
+        self.chat_widget.restore_thread_input_state(input_state);
+        if !turns.is_empty() {
+            let turns = compact_visible_replay_turns(turns);
             self.chat_widget
                 .replay_thread_turns(turns, ReplayKind::ThreadSnapshot);
         }
-        for event in snapshot.events {
+        for event in events {
             self.handle_thread_event_replay(event);
         }
+        self.chat_widget
+            .apply_thread_status_snapshot(status.as_ref());
+        self.chat_widget
+            .set_thread_control_state(control_state.as_ref());
         self.chat_widget
             .set_queue_autosend_suppressed(/*suppressed*/ false);
         self.chat_widget

@@ -1,6 +1,6 @@
 use super::App;
-use super::thread_event_store::ThreadBufferedEvent;
 use super::thread_event_store::ThreadEventChannel;
+use super::thread_event_store::ThreadEventEnvelope;
 use super::thread_event_store::ThreadEventSnapshot;
 use super::thread_event_store::ThreadEventStore;
 use crate::app_command::AppCommand;
@@ -8,7 +8,8 @@ use crate::app_gateway_session::AppGatewaySession;
 use praxis_protocol::ThreadId;
 use tokio::sync::mpsc;
 
-const THREAD_EVENT_CHANNEL_CAPACITY: usize = 32768;
+// Live delivery preserves FIFO while this cap bounds the durable replay projection.
+const THREAD_EVENT_REPLAY_CAPACITY: usize = 32768;
 
 impl App {
     pub(super) async fn shutdown_current_thread(&mut self, app_gateway: &mut AppGatewaySession) {
@@ -41,7 +42,7 @@ impl App {
     pub(super) fn ensure_thread_channel(&mut self, thread_id: ThreadId) -> &mut ThreadEventChannel {
         self.thread_event_channels
             .entry(thread_id)
-            .or_insert_with(|| ThreadEventChannel::new(THREAD_EVENT_CHANNEL_CAPACITY))
+            .or_insert_with(|| ThreadEventChannel::new(THREAD_EVENT_REPLAY_CAPACITY))
     }
 
     async fn set_thread_active(&mut self, thread_id: ThreadId, active: bool) {
@@ -85,13 +86,29 @@ impl App {
     pub(super) async fn activate_thread_for_replay(
         &mut self,
         thread_id: ThreadId,
-    ) -> Option<(mpsc::Receiver<ThreadBufferedEvent>, ThreadEventSnapshot)> {
+    ) -> Option<(
+        mpsc::UnboundedReceiver<ThreadEventEnvelope>,
+        ThreadEventSnapshot,
+    )> {
         let channel = self.thread_event_channels.get_mut(&thread_id)?;
         let receiver = channel.receiver.take()?;
         let mut store = channel.store.lock().await;
         store.active = true;
+        channel.replay_through_sequence = store.last_event_sequence();
         let snapshot = store.snapshot();
         Some((receiver, snapshot))
+    }
+
+    pub(super) fn active_thread_event_is_after_replay(
+        &self,
+        envelope: &ThreadEventEnvelope,
+    ) -> bool {
+        let Some(thread_id) = self.active_thread_id else {
+            return false;
+        };
+        self.thread_event_channels
+            .get(&thread_id)
+            .is_some_and(|channel| envelope.sequence > channel.replay_through_sequence)
     }
 
     pub(super) async fn clear_active_thread(&mut self) {

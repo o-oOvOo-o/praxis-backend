@@ -14,13 +14,13 @@ use crate::client_common::ResponseStream;
 use crate::config::LocalModelHostConfig;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
-use crate::llm::wire::ModelProviderCompatInfo;
-use crate::llm::wire::ModelProviderMaxTokensField;
-use crate::llm::wire::ModelProviderThinkingFormat;
 use crate::llm::provider::NATIVE_LOCAL_PROVIDER_ID;
 use crate::llm::provider::create_native_local_provider;
 use crate::llm::runtime::provider_setup::AuthRequestPurpose;
 use crate::llm::runtime::provider_setup::ProviderDecisionCenter;
+use crate::llm::wire::ModelProviderCompatInfo;
+use crate::llm::wire::ModelProviderMaxTokensField;
+use crate::llm::wire::ModelProviderThinkingFormat;
 use praxis_protocol::openai_models::ModelInfo;
 use serde_json::Value;
 

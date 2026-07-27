@@ -1,4 +1,5 @@
 use super::*;
+use praxis_protocol::protocol::ReviewDecision;
 
 pub(super) async fn handle_apply_patch_approval_request(
     event: ApplyPatchApprovalRequestEvent,
@@ -17,6 +18,18 @@ pub(super) async fn handle_apply_patch_approval_request(
         reason,
         grant_root,
     } = event;
+    if conversation.is_promptless_full_access() {
+        if let Err(err) = conversation
+            .submit(Op::PatchApproval {
+                id: call_id,
+                decision: ReviewDecision::Approved,
+            })
+            .await
+        {
+            error!("failed to auto-resolve stale patch approval: {err}");
+        }
+        return;
+    }
     let permission_guard = thread_watch_manager
         .note_permission_requested(&conversation_id.to_string())
         .await;
@@ -105,6 +118,19 @@ pub(super) async fn handle_exec_approval_request(
         parsed_cmd,
         ..
     } = event;
+    if conversation.is_promptless_full_access() {
+        if let Err(err) = conversation
+            .submit(Op::ExecApproval {
+                id: approval_id.unwrap_or(call_id),
+                turn_id: Some(event_turn_id),
+                decision: ReviewDecision::Approved,
+            })
+            .await
+        {
+            error!("failed to auto-resolve stale command approval: {err}");
+        }
+        return;
+    }
     let command_actions = parsed_cmd
         .iter()
         .cloned()

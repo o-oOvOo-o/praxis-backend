@@ -22,8 +22,8 @@ use serde_json::Value;
 use crate::ModelProviderInfo;
 use crate::compact;
 use crate::config::Config;
-use crate::config::WorkspaceHistoryConfig;
 use crate::config::ManagedFeatures;
+use crate::config::WorkspaceHistoryConfig;
 use crate::tools::loop_guard::ToolLoopGuardState;
 use crate::turn_metadata::TurnMetadataState;
 use crate::turn_timing::TurnTimingState;
@@ -93,6 +93,13 @@ pub(crate) struct TurnContext {
 impl TurnContext {
     pub(crate) fn effective_permissions(&self) -> EffectivePermissions {
         self.effective_permissions.snapshot()
+    }
+
+    pub(crate) fn subscribe_effective_permissions(
+        &self,
+    ) -> tokio::sync::watch::Receiver<praxis_system_plugin_approval_control::ResolvedTurnPermissions>
+    {
+        self.effective_permissions.subscribe()
     }
 
     pub(crate) fn effective_approval_policy(&self) -> AskForApproval {

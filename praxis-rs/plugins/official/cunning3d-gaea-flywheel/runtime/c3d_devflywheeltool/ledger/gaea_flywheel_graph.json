@@ -1592,9 +1592,10 @@
       ],
       "next_commands": [
         "/gaea canyon-compare --node Canyon --style Both --resolution 256 --epsilon 0.000001 --run --json",
+        "/gaea probe-bin --bin gaea_canyon_gpu_self_compare --run -- --resolution 128 --style eroded --cpu-oracle --product-route --parameter-sweep 4 --require-exact --json",
         "/gaea plan --node Volcano --json"
       ],
-      "notes": "Focused closed generator with depth output; good template for multi-output Gaea nodes."
+      "notes": "Focused closed generator with depth output. BestEffortGpu construction is nonblocking, depth-independent upstream work is cached, and 128/2048 product-route probes preserve exact final buffers. PE-backed styles remain CPU-exact until the GPU PE schedule closes native buffer parity."
     },
     {
       "id": "Voronoi",

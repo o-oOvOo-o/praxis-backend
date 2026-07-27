@@ -233,10 +233,15 @@ impl App {
         tokio::spawn(async move {
             while let Some(request) = receiver.recv().await {
                 let params = request.thread_list_params();
-                let result = picker_app_gateway
-                    .thread_list(params)
-                    .await
-                    .map_err(|err| err.to_string());
+                let result = match request.external_source() {
+                    Some(source) => {
+                        picker_app_gateway
+                            .external_agent_session_list(source, params)
+                            .await
+                    }
+                    None => picker_app_gateway.thread_list(params).await,
+                }
+                .map_err(|err| err.to_string());
                 app_event_tx.send(AppEvent::WorkspaceSessionPickerPageLoaded { request, result });
             }
             if let Err(err) = picker_app_gateway.shutdown().await {

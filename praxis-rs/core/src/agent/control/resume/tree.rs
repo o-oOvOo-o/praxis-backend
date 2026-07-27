@@ -1,5 +1,5 @@
-use super::super::*;
 use super::super::thread_tree::thread_spawn_depth;
+use super::super::*;
 
 impl AgentControl {
     /// Resume an existing agent thread from a recorded rollout file.

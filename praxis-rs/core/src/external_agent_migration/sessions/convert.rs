@@ -56,7 +56,10 @@ impl ExternalSessionBuilder {
     }
 }
 
-fn thread_id_from_source(source: ExternalAgentSource, external_id: &str) -> Option<ThreadId> {
+pub(super) fn thread_id_from_source(
+    source: ExternalAgentSource,
+    external_id: &str,
+) -> Option<ThreadId> {
     let uuid = Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
         format!("praxis:{}:{external_id}", source.import_model_provider_id()).as_bytes(),

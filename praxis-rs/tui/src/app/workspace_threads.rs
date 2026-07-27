@@ -143,7 +143,7 @@ impl App {
         self.apply_current_permissions_to_thread_session(&mut session);
         let thread_id = session.thread_id;
         self.update_workspace_thread_row(thread_id, /*resort_after_update*/ true, |row| {
-            row.status = status;
+            row.status = status.clone();
             row.control_state = control_state.clone();
         });
 
@@ -153,11 +153,12 @@ impl App {
         };
         {
             let mut store = store.lock().await;
-            store.set_session(session, turns);
+            store.set_runtime_snapshot(session, turns, status.clone(), control_state.clone());
             store.rebase_buffer_after_session_refresh();
         }
 
         if self.workspace_active_thread_id() == Some(thread_id) {
+            self.chat_widget.apply_thread_status_snapshot(Some(&status));
             self.chat_widget
                 .set_thread_control_state(control_state.as_ref());
         }

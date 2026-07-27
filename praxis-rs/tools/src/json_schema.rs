@@ -1,11 +1,13 @@
 use serde::Deserialize;
 use serde::Serialize;
+use serde::ser::Error as _;
+use serde_json::Map as JsonMap;
 use serde_json::Value as JsonValue;
 use serde_json::json;
 use std::collections::BTreeMap;
 
-/// Generic JSON-Schema subset needed for our tool definitions.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// Typed fast path plus a lossless raw representation for provider tool schemas.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum JsonSchema {
     Boolean {
@@ -38,9 +40,81 @@ pub enum JsonSchema {
         )]
         additional_properties: Option<AdditionalProperties>,
     },
+    /// Lossless schema representation for constraints outside the typed subset.
+    #[serde(skip_deserializing)]
+    Raw { schema: JsonValue },
 }
 
-/// Whether additional properties are allowed, and if so, any required schema.
+impl Serialize for JsonSchema {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if let Self::Raw { schema } = self {
+            return schema.serialize(serializer);
+        }
+
+        let mut schema = JsonMap::new();
+        match self {
+            Self::Boolean { description } => {
+                schema.insert("type".to_string(), JsonValue::String("boolean".to_string()));
+                insert_description(&mut schema, description);
+            }
+            Self::String { description } => {
+                schema.insert("type".to_string(), JsonValue::String("string".to_string()));
+                insert_description(&mut schema, description);
+            }
+            Self::Number { description } => {
+                schema.insert("type".to_string(), JsonValue::String("number".to_string()));
+                insert_description(&mut schema, description);
+            }
+            Self::Array { items, description } => {
+                schema.insert("type".to_string(), JsonValue::String("array".to_string()));
+                schema.insert(
+                    "items".to_string(),
+                    serde_json::to_value(items).map_err(S::Error::custom)?,
+                );
+                insert_description(&mut schema, description);
+            }
+            Self::Object {
+                properties,
+                required,
+                additional_properties,
+            } => {
+                schema.insert("type".to_string(), JsonValue::String("object".to_string()));
+                schema.insert(
+                    "properties".to_string(),
+                    serde_json::to_value(properties).map_err(S::Error::custom)?,
+                );
+                if let Some(required) = required {
+                    schema.insert(
+                        "required".to_string(),
+                        serde_json::to_value(required).map_err(S::Error::custom)?,
+                    );
+                }
+                if let Some(additional_properties) = additional_properties {
+                    schema.insert(
+                        "additionalProperties".to_string(),
+                        serde_json::to_value(additional_properties).map_err(S::Error::custom)?,
+                    );
+                }
+            }
+            Self::Raw { .. } => unreachable!("raw schemas return before typed serialization"),
+        }
+        JsonValue::Object(schema).serialize(serializer)
+    }
+}
+
+fn insert_description(schema: &mut JsonMap<String, JsonValue>, description: &Option<String>) {
+    if let Some(description) = description {
+        schema.insert(
+            "description".to_string(),
+            JsonValue::String(description.clone()),
+        );
+    }
+}
+
+/// Additional-properties policy with an optional nested schema.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum AdditionalProperties {
@@ -60,20 +134,32 @@ impl From<JsonSchema> for AdditionalProperties {
     }
 }
 
-/// Parse the tool `input_schema` or return an error for invalid schema.
+/// Parse and normalize a tool schema while preserving unsupported constraints losslessly.
 pub fn parse_tool_input_schema(input_schema: &JsonValue) -> Result<JsonSchema, serde_json::Error> {
     let mut input_schema = input_schema.clone();
     sanitize_json_schema(&mut input_schema);
-    serde_json::from_value::<JsonSchema>(input_schema)
+    validate_json_schema(&input_schema)?;
+
+    match serde_json::from_value::<JsonSchema>(input_schema.clone()) {
+        Ok(parsed) => {
+            let mut normalized_for_typed_comparison = input_schema.clone();
+            normalize_integer_types(&mut normalized_for_typed_comparison);
+            let typed_value = serde_json::to_value(&parsed)?;
+            if typed_value == normalized_for_typed_comparison {
+                Ok(parsed)
+            } else {
+                Ok(JsonSchema::Raw {
+                    schema: input_schema,
+                })
+            }
+        }
+        Err(_) => Ok(JsonSchema::Raw {
+            schema: input_schema,
+        }),
+    }
 }
 
-/// Sanitize a JSON Schema (as serde_json::Value) so it can fit our limited
-/// JsonSchema enum. This function:
-/// - Ensures every schema object has a "type". If missing, infers it from
-///   common keywords (properties => object, items => array, enum/const/format => string)
-///   and otherwise defaults to "string".
-/// - Fills required child fields (e.g. array items, object properties) with
-///   permissive defaults when absent.
+/// Normalize underspecified schemas without erasing references or composition constraints.
 fn sanitize_json_schema(value: &mut JsonValue) {
     match value {
         JsonValue::Bool(_) => {
@@ -93,12 +179,42 @@ fn sanitize_json_schema(value: &mut JsonValue) {
                     sanitize_json_schema(value);
                 }
             }
+            for keyword in [
+                "$defs",
+                "definitions",
+                "dependentSchemas",
+                "patternProperties",
+            ] {
+                if let Some(schemas) = map.get_mut(keyword)
+                    && let Some(schemas) = schemas.as_object_mut()
+                {
+                    for schema in schemas.values_mut() {
+                        sanitize_json_schema(schema);
+                    }
+                }
+            }
             if let Some(items) = map.get_mut("items") {
                 sanitize_json_schema(items);
             }
             for combiner in ["oneOf", "anyOf", "allOf", "prefixItems"] {
                 if let Some(value) = map.get_mut(combiner) {
                     sanitize_json_schema(value);
+                }
+            }
+            for keyword in [
+                "additionalProperties",
+                "unevaluatedProperties",
+                "propertyNames",
+                "contains",
+                "not",
+                "if",
+                "then",
+                "else",
+            ] {
+                if let Some(schema) = map.get_mut(keyword)
+                    && !schema.is_boolean()
+                {
+                    sanitize_json_schema(schema);
                 }
             }
 
@@ -146,11 +262,18 @@ fn sanitize_json_schema(value: &mut JsonValue) {
                 }
             }
 
-            let schema_type = schema_type.unwrap_or_else(|| "string".to_string());
-            map.insert("type".to_string(), JsonValue::String(schema_type.clone()));
+            let is_reference_or_composition = map.contains_key("$ref")
+                || ["oneOf", "anyOf", "allOf", "not", "if"]
+                    .iter()
+                    .any(|keyword| map.contains_key(*keyword));
+            let schema_type = schema_type
+                .or_else(|| (!is_reference_or_composition).then(|| "string".to_string()));
+            if let Some(schema_type) = &schema_type {
+                map.insert("type".to_string(), JsonValue::String(schema_type.clone()));
+            }
 
-            if schema_type == "object" {
-                if !map.contains_key("properties") {
+            if schema_type.as_deref() == Some("object") {
+                if !map.contains_key("properties") && !is_reference_or_composition {
                     map.insert(
                         "properties".to_string(),
                         JsonValue::Object(serde_json::Map::new()),
@@ -163,12 +286,148 @@ fn sanitize_json_schema(value: &mut JsonValue) {
                 }
             }
 
-            if schema_type == "array" && !map.contains_key("items") {
+            if schema_type.as_deref() == Some("array")
+                && !map.contains_key("items")
+                && !map.contains_key("prefixItems")
+            {
                 map.insert("items".to_string(), json!({ "type": "string" }));
             }
         }
         _ => {}
     }
+}
+
+fn normalize_integer_types(value: &mut JsonValue) {
+    match value {
+        JsonValue::Array(values) => {
+            for value in values {
+                normalize_integer_types(value);
+            }
+        }
+        JsonValue::Object(map) => {
+            if map.get("type").and_then(JsonValue::as_str) == Some("integer") {
+                map.insert("type".to_string(), JsonValue::String("number".to_string()));
+            }
+            for value in map.values_mut() {
+                normalize_integer_types(value);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn validate_json_schema(value: &JsonValue) -> Result<(), serde_json::Error> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| invalid_schema("tool input schema must be an object after sanitization"))?;
+
+    if let Some(reference) = object.get("$ref")
+        && !reference.is_string()
+    {
+        return Err(invalid_schema("JSON Schema $ref must be a string"));
+    }
+    if let Some(description) = object.get("description")
+        && !description.is_string()
+    {
+        return Err(invalid_schema("JSON Schema description must be a string"));
+    }
+    if let Some(required) = object.get("required") {
+        let required = required
+            .as_array()
+            .ok_or_else(|| invalid_schema("JSON Schema required must be an array"))?;
+        if required.iter().any(|name| !name.is_string()) {
+            return Err(invalid_schema(
+                "JSON Schema required entries must be strings",
+            ));
+        }
+    }
+
+    if let Some(schema_type) = object.get("type") {
+        let Some(schema_type) = schema_type.as_str() else {
+            return Err(invalid_schema("JSON Schema type must be a string"));
+        };
+        if !matches!(
+            schema_type,
+            "object" | "array" | "string" | "number" | "integer" | "boolean"
+        ) {
+            return Err(invalid_schema(format!(
+                "unsupported JSON Schema type: {schema_type}"
+            )));
+        }
+    } else if !object.contains_key("$ref")
+        && !["oneOf", "anyOf", "allOf", "not", "if"]
+            .iter()
+            .any(|keyword| object.contains_key(*keyword))
+    {
+        return Err(invalid_schema(
+            "JSON Schema requires a supported type, $ref, or composition keyword",
+        ));
+    }
+
+    if let Some(properties) = object.get("properties") {
+        let properties = properties
+            .as_object()
+            .ok_or_else(|| invalid_schema("JSON Schema properties must be an object"))?;
+        for property in properties.values() {
+            validate_json_schema(property)?;
+        }
+    }
+
+    for keyword in [
+        "$defs",
+        "definitions",
+        "dependentSchemas",
+        "patternProperties",
+    ] {
+        if let Some(schemas) = object.get(keyword) {
+            let schemas = schemas.as_object().ok_or_else(|| {
+                invalid_schema(format!("JSON Schema {keyword} must be an object"))
+            })?;
+            for schema in schemas.values() {
+                validate_json_schema(schema)?;
+            }
+        }
+    }
+
+    if let Some(items) = object.get("items") {
+        validate_json_schema(items)?;
+    }
+    for keyword in ["oneOf", "anyOf", "allOf", "prefixItems"] {
+        if let Some(schemas) = object.get(keyword) {
+            let schemas = schemas
+                .as_array()
+                .ok_or_else(|| invalid_schema(format!("JSON Schema {keyword} must be an array")))?;
+            if schemas.is_empty() {
+                return Err(invalid_schema(format!(
+                    "JSON Schema {keyword} must not be empty"
+                )));
+            }
+            for schema in schemas {
+                validate_json_schema(schema)?;
+            }
+        }
+    }
+    for keyword in [
+        "additionalProperties",
+        "unevaluatedProperties",
+        "propertyNames",
+        "contains",
+        "not",
+        "if",
+        "then",
+        "else",
+    ] {
+        if let Some(schema) = object.get(keyword)
+            && !schema.is_boolean()
+        {
+            validate_json_schema(schema)?;
+        }
+    }
+    Ok(())
+}
+
+fn invalid_schema(message: impl Into<String>) -> serde_json::Error {
+    <serde_json::Error as serde::de::Error>::custom(message.into())
 }
 
 #[cfg(test)]

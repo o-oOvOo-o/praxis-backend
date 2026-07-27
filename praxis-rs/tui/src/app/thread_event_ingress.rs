@@ -43,30 +43,24 @@ impl App {
             (channel.sender.clone(), Arc::clone(&channel.store))
         };
 
-        let should_send = {
+        let (should_send, sequence) = {
             let mut guard = store.lock().await;
             if guard.session.is_none()
                 && let Some(session) = inferred_session
             {
                 guard.session = Some(session);
             }
-            guard.push_notification(notification.clone());
-            guard.active
+            let sequence = guard.push_notification(notification.clone());
+            (guard.active, sequence)
         };
 
         if should_send {
-            match sender.try_send(ThreadBufferedEvent::Notification(notification)) {
-                Ok(()) => {}
-                Err(TrySendError::Full(event)) => {
-                    tokio::spawn(async move {
-                        if let Err(err) = sender.send(event).await {
-                            tracing::warn!("thread {thread_id} event channel closed: {err}");
-                        }
-                    });
-                }
-                Err(TrySendError::Closed(_)) => {
-                    tracing::warn!("thread {thread_id} event channel closed");
-                }
+            let envelope = ThreadEventEnvelope {
+                sequence,
+                event: ThreadBufferedEvent::Notification(notification),
+            };
+            if let Err(err) = sender.send(envelope) {
+                tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
         }
         self.refresh_pending_thread_approvals().await;
@@ -187,27 +181,24 @@ impl App {
             (channel.sender.clone(), Arc::clone(&channel.store))
         };
 
-        let should_send = {
+        let (should_send, sequence) = {
             let mut guard = store.lock().await;
-            guard.push_request(request.clone());
-            guard.active
+            let inserted = guard.push_request(request.clone());
+            let sequence = inserted.then(|| guard.last_event_sequence());
+            (guard.active, sequence)
         };
 
-        if should_send {
-            match sender.try_send(ThreadBufferedEvent::Request(request)) {
-                Ok(()) => {}
-                Err(TrySendError::Full(event)) => {
-                    tokio::spawn(async move {
-                        if let Err(err) = sender.send(event).await {
-                            tracing::warn!("thread {thread_id} event channel closed: {err}");
-                        }
-                    });
-                }
-                Err(TrySendError::Closed(_)) => {
-                    tracing::warn!("thread {thread_id} event channel closed");
-                }
+        if should_send && let Some(sequence) = sequence {
+            let envelope = ThreadEventEnvelope {
+                sequence,
+                event: ThreadBufferedEvent::Request(request),
+            };
+            if let Err(err) = sender.send(envelope) {
+                tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
-        } else if let Some(request) = inactive_interactive_request {
+        } else if sequence.is_some()
+            && let Some(request) = inactive_interactive_request
+        {
             match request {
                 ThreadInteractiveRequest::Approval(request) => {
                     self.chat_widget.push_approval_request(request);
@@ -232,25 +223,19 @@ impl App {
             (channel.sender.clone(), Arc::clone(&channel.store))
         };
 
-        let should_send = {
+        let (should_send, sequence) = {
             let mut guard = store.lock().await;
-            guard.push_history_entry_response(event.clone());
-            guard.active
+            let sequence = guard.push_history_entry_response(event.clone());
+            (guard.active, sequence)
         };
 
         if should_send {
-            match sender.try_send(ThreadBufferedEvent::HistoryEntryResponse(event)) {
-                Ok(()) => {}
-                Err(TrySendError::Full(event)) => {
-                    tokio::spawn(async move {
-                        if let Err(err) = sender.send(event).await {
-                            tracing::warn!("thread {thread_id} event channel closed: {err}");
-                        }
-                    });
-                }
-                Err(TrySendError::Closed(_)) => {
-                    tracing::warn!("thread {thread_id} event channel closed");
-                }
+            let envelope = ThreadEventEnvelope {
+                sequence,
+                event: ThreadBufferedEvent::HistoryEntryResponse(event),
+            };
+            if let Err(err) = sender.send(envelope) {
+                tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
         }
         Ok(())
@@ -260,6 +245,8 @@ impl App {
         &mut self,
         mut session: ThreadSessionState,
         turns: Vec<Turn>,
+        status: ThreadStatus,
+        control_state: Option<ThreadControlState>,
     ) -> Result<()> {
         self.apply_current_permissions_to_thread_session(&mut session);
         let thread_id = session.thread_id;
@@ -272,7 +259,12 @@ impl App {
         let channel = self.ensure_thread_channel(thread_id);
         {
             let mut store = channel.store.lock().await;
-            store.set_session(session.clone(), turns.clone());
+            store.set_runtime_snapshot(
+                session.clone(),
+                turns.clone(),
+                status.clone(),
+                control_state.clone(),
+            );
         }
         self.activate_thread_channel(thread_id).await;
         self.chat_widget
@@ -281,6 +273,9 @@ impl App {
         let turns = compact_visible_replay_turns(turns);
         self.chat_widget
             .replay_thread_turns(turns, ReplayKind::ResumeInitialMessages);
+        self.chat_widget.apply_thread_status_snapshot(Some(&status));
+        self.chat_widget
+            .set_thread_control_state(control_state.as_ref());
         let pending = std::mem::take(&mut self.pending_primary_events);
         for pending_event in pending {
             match pending_event {

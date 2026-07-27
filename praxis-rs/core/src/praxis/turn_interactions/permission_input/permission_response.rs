@@ -6,6 +6,18 @@ use tracing::warn;
 use crate::praxis::Session;
 
 impl Session {
+    pub(in crate::praxis) async fn discard_pending_request_permissions(&self, call_id: &str) {
+        let mut active = self.active_turn.lock().await;
+        let Some(active) = active.as_mut() else {
+            return;
+        };
+        active
+            .turn_state
+            .lock()
+            .await
+            .remove_pending_request_permissions(call_id);
+    }
+
     pub async fn notify_request_permissions_response(
         &self,
         call_id: &str,

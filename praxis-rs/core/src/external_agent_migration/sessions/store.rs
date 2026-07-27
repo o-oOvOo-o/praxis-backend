@@ -1,6 +1,8 @@
 use super::record::ExternalSessionRecord;
 use super::source::ExternalAgentSource;
 use crate::config::Config;
+use chrono::DateTime;
+use chrono::Utc;
 use praxis_protocol::protocol::RolloutItem;
 use praxis_protocol::protocol::RolloutLine;
 use std::io;
@@ -49,18 +51,34 @@ impl<'a> ExternalSessionStore<'a> {
         Ok(())
     }
 
+    pub(super) fn contains_external(&self, external_id: &str, created_at: DateTime<Utc>) -> bool {
+        let Some(thread_id) = super::convert::thread_id_from_source(self.source, external_id)
+        else {
+            return false;
+        };
+        self.rollout_path_for(thread_id, created_at).is_file()
+    }
+
     fn rollout_path(&self, record: &ExternalSessionRecord) -> PathBuf {
-        let year = record.created_at.format("%Y").to_string();
-        let month = record.created_at.format("%m").to_string();
-        let day = record.created_at.format("%d").to_string();
-        let file_ts = record.created_at.format("%Y-%m-%dT%H-%M-%S").to_string();
+        self.rollout_path_for(record.thread_id, record.created_at)
+    }
+
+    fn rollout_path_for(
+        &self,
+        thread_id: praxis_protocol::ThreadId,
+        created_at: DateTime<Utc>,
+    ) -> PathBuf {
+        let year = created_at.format("%Y").to_string();
+        let month = created_at.format("%m").to_string();
+        let day = created_at.format("%d").to_string();
+        let file_ts = created_at.format("%Y-%m-%dT%H-%M-%S").to_string();
         self.config
             .praxis_home
             .join(praxis_rollout::SESSIONS_SUBDIR)
             .join(year)
             .join(month)
             .join(day)
-            .join(format!("rollout-{file_ts}-{}.jsonl", record.thread_id))
+            .join(format!("rollout-{file_ts}-{thread_id}.jsonl"))
     }
 
     async fn persist_title(&self, record: &ExternalSessionRecord) {

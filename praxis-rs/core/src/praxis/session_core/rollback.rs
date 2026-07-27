@@ -111,7 +111,9 @@ impl Session {
                 Err(error) => {
                     self.raw_event_emitter(&turn_context.sub_id)
                         .error(
-                            format!("failed to restore workspace checkpoint {checkpoint_id}: {error}"),
+                            format!(
+                                "failed to restore workspace checkpoint {checkpoint_id}: {error}"
+                            ),
                             Some(PraxisErrorInfo::ThreadRollbackFailed),
                         )
                         .await;

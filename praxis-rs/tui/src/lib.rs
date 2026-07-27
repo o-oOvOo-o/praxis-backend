@@ -251,6 +251,7 @@ pub mod test_backend;
 pub(crate) mod test_support;
 
 pub(crate) use self::gateway_startup::AppGatewayTarget;
+use self::gateway_startup::PreparedAppGatewaySession;
 use self::gateway_startup::shutdown_app_gateway_if_present;
 use self::gateway_startup::start_app_gateway;
 pub(crate) use self::gateway_startup::start_app_gateway_for_picker;
@@ -549,8 +550,12 @@ mod tests {
             AppGatewaySession::new(praxis_app_gateway_client::AppGatewayClient::Native(
                 start_test_embedded_app_gateway(config).await?,
             ));
-        let target =
-            lookup_session_target_with_app_gateway(&mut app_gateway, "saved-session").await?;
+        let target = lookup_session_target_with_app_gateway(
+            &mut app_gateway,
+            SessionLookupSource::Praxis,
+            "saved-session",
+        )
+        .await?;
         let target = target.expect("name lookup should find the saved thread");
         assert_eq!(target.path, Some(rollout_path));
         assert_eq!(target.thread_id, thread_id);

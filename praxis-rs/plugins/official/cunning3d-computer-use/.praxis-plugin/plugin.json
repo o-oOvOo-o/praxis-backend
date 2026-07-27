@@ -1,0 +1,19 @@
+{
+  "name": "cunning3d-computer-use",
+  "description": "Operate native Metra and Windows UI surfaces through permission-aware computer-use tools.",
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Cunning3D Computer Use",
+    "shortDescription": "Observe and interact with native UI through Metra.",
+    "longDescription": "Host-neutral computer-use capability built on Metra semantic, accessibility, and physical-input channels with per-call Praxis permission enforcement.",
+    "developerName": "Cunning3D",
+    "category": "agent-control",
+    "capabilities": [
+      "semantic UI observation",
+      "native UI interaction",
+      "Windows UI Automation",
+      "physical input fallback",
+      "permission-aware execution"
+    ]
+  }
+}

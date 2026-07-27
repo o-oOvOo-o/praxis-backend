@@ -55,6 +55,20 @@ impl SessionPickerPageRequest {
             self.archive_filter,
         )
     }
+
+    pub(crate) fn external_source(
+        &self,
+    ) -> Option<praxis_app_gateway_protocol::ExternalAgentSessionSource> {
+        match self.source {
+            SessionLookupSource::Praxis => None,
+            SessionLookupSource::Codex => {
+                Some(praxis_app_gateway_protocol::ExternalAgentSessionSource::Codex)
+            }
+            SessionLookupSource::Cursor => {
+                Some(praxis_app_gateway_protocol::ExternalAgentSessionSource::Cursor)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

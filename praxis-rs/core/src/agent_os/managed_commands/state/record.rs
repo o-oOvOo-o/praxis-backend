@@ -35,10 +35,9 @@ impl RuntimeCommandRecord {
                 self.status = RuntimeCommandStatus::Acked;
                 changed = true;
             }
-            (
-                RuntimeCommandStatus::Acked,
-                RuntimeCommandType::AssignTask,
-            ) if self.task_id.as_deref() == current_task_id => {
+            (RuntimeCommandStatus::Acked, RuntimeCommandType::AssignTask)
+                if self.task_id.as_deref() == current_task_id =>
+            {
                 self.status = RuntimeCommandStatus::Executing;
                 changed = true;
             }

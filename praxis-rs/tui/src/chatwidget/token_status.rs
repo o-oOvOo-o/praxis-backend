@@ -81,6 +81,22 @@ impl ChatWidget {
         praxis_app_core::PraxisTokenUsageSnapshot {
             total: Self::shared_token_usage_breakdown(&info.total_token_usage),
             last: Self::shared_token_usage_breakdown(&info.last_token_usage),
+            internal_savings: praxis_app_core::PraxisTokenSaverSnapshot {
+                total_saved_tokens: info.internal_savings.total_saved_tokens,
+                last_saved_tokens: info.internal_savings.last_saved_tokens,
+                categories: info
+                    .internal_savings
+                    .categories
+                    .iter()
+                    .map(
+                        |category| praxis_app_core::PraxisTokenSavingCategorySnapshot {
+                            label: Self::token_saving_category_label(category.kind).to_owned(),
+                            total_saved_tokens: category.total_saved_tokens,
+                            occurrences: category.occurrences,
+                        },
+                    )
+                    .collect(),
+            },
             model_context_window: info
                 .model_context_window
                 .or(self.config.model_context_window),

@@ -207,7 +207,7 @@ pub(crate) enum AppEvent {
 
     /// Result of refreshing rate limits.
     RateLimitsLoaded {
-        request_id: u64,
+        request_id: Option<u64>,
         result: Result<Vec<RateLimitSnapshot>, String>,
     },
 

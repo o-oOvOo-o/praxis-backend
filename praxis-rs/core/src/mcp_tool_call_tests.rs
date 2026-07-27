@@ -1,9 +1,9 @@
 pub(super) use super::*;
 pub(super) use crate::config::ConfigBuilder;
 pub(super) use crate::config::ConfigToml;
+pub(super) use crate::praxis::SessionSettingsUpdate;
 pub(super) use crate::praxis::make_session_and_context;
 pub(super) use crate::praxis::make_session_and_context_with_rx;
-pub(super) use crate::praxis::SessionSettingsUpdate;
 pub(super) use crate::state::ActiveTurn;
 pub(super) use core_test_support::responses::ev_assistant_message;
 pub(super) use core_test_support::responses::ev_completed;

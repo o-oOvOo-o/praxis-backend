@@ -1,5 +1,7 @@
 mod catalog;
+mod catalog_cache;
 mod engine;
+mod gguf_metadata;
 mod managed_server;
 mod output_filter;
 

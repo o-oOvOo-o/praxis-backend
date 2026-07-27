@@ -110,7 +110,10 @@ async fn maybe_persist_mcp_tool_approval_reloads_session_config() {
             approval_mode: Some(AppToolApproval::Approve),
         }
     );
-    assert_eq!(mcp_tool_approval_is_remembered(&session, &key).await, true);
+    assert_eq!(
+        mcp_tool_approval_is_remembered(&session, &turn_context, &key).await,
+        true
+    );
 }
 
 #[tokio::test]
@@ -152,7 +155,10 @@ async fn maybe_persist_mcp_tool_approval_reloads_session_config_for_custom_serve
             approval_mode: Some(AppToolApproval::Approve),
         }
     );
-    assert_eq!(mcp_tool_approval_is_remembered(&session, &key).await, true);
+    assert_eq!(
+        mcp_tool_approval_is_remembered(&session, &turn_context, &key).await,
+        true
+    );
 }
 
 #[tokio::test]
@@ -208,5 +214,8 @@ async fn maybe_persist_mcp_tool_approval_writes_project_config_for_project_serve
         }
     );
     assert!(contents.contains("[mcp_servers.docs.tools.search]"));
-    assert_eq!(mcp_tool_approval_is_remembered(&session, &key).await, true);
+    assert_eq!(
+        mcp_tool_approval_is_remembered(&session, &turn_context, &key).await,
+        true
+    );
 }

@@ -1,5 +1,4 @@
 use super::AgentRoleConfig;
-use praxis_workspace_history::WorkspaceHistoryConfig;
 use super::LocalModelHostConfig;
 use super::LocalModelsConfig;
 use super::ManagedFeatures;
@@ -38,6 +37,7 @@ use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_rmcp_client::OAuthCredentialsStoreMode;
 use praxis_utils_absolute_path::AbsolutePathBuf;
+use praxis_workspace_history::WorkspaceHistoryConfig;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::PathBuf;

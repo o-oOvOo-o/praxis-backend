@@ -7,8 +7,12 @@ use crate::{
     FileChangeRequestApprovalResponse, GrantedPermissionProfile, McpServerElicitationAction,
     McpServerElicitationRequest, McpServerElicitationRequestParams,
     McpServerElicitationRequestResponse, PermissionGrantScope, PermissionsRequestApprovalParams,
-    PermissionsRequestApprovalResponse,
+    PermissionsRequestApprovalResponse, ServerRequest,
 };
+
+const MCP_TOOL_APPROVAL_QUESTION_ID_PREFIX: &str = "mcp_tool_call_approval_";
+const MCP_TOOL_APPROVAL_KIND_KEY: &str = "praxis_approval_kind";
+const MCP_TOOL_APPROVAL_KIND: &str = "mcp_tool_call";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -28,6 +32,40 @@ pub enum ApprovalResponseAction {
     ApplyNetworkPolicyAmendment,
     Decline,
     Cancel,
+}
+
+pub fn is_approval_server_request(request: &ServerRequest) -> bool {
+    match request {
+        ServerRequest::CommandExecutionRequestApproval { .. }
+        | ServerRequest::FileChangeRequestApproval { .. }
+        | ServerRequest::PermissionsRequestApproval { .. } => true,
+        ServerRequest::ToolRequestUserInput { params, .. } => {
+            is_mcp_tool_approval_user_input(&params.questions)
+        }
+        ServerRequest::McpServerElicitationRequest { params, .. } => {
+            is_mcp_tool_approval_elicitation(&params.request)
+        }
+        _ => false,
+    }
+}
+
+pub fn is_mcp_tool_approval_user_input(questions: &[crate::ToolRequestUserInputQuestion]) -> bool {
+    questions.iter().any(|question| {
+        question
+            .id
+            .starts_with(MCP_TOOL_APPROVAL_QUESTION_ID_PREFIX)
+    })
+}
+
+pub fn is_mcp_tool_approval_elicitation(request: &McpServerElicitationRequest) -> bool {
+    let meta = match request {
+        McpServerElicitationRequest::Form { meta, .. }
+        | McpServerElicitationRequest::Url { meta, .. } => meta.as_ref(),
+    };
+    meta.and_then(Value::as_object)
+        .and_then(|meta| meta.get(MCP_TOOL_APPROVAL_KIND_KEY))
+        .and_then(Value::as_str)
+        == Some(MCP_TOOL_APPROVAL_KIND)
 }
 
 pub fn command_approval_decisions_from_params(
@@ -181,4 +219,50 @@ fn mcp_elicitation_response_for_action(
         content,
         meta: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ToolRequestUserInputQuestion;
+    use praxis_protocol::mcp_elicitation::McpElicitationObjectType;
+    use praxis_protocol::mcp_elicitation::McpElicitationSchema;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn classifies_only_mcp_approval_user_input() {
+        let question = |id: &str| ToolRequestUserInputQuestion {
+            id: id.to_string(),
+            header: "header".to_string(),
+            question: "question".to_string(),
+            is_other: false,
+            is_secret: false,
+            options: None,
+        };
+
+        assert!(is_mcp_tool_approval_user_input(&[question(
+            "mcp_tool_call_approval_call-1",
+        )]));
+        assert!(!is_mcp_tool_approval_user_input(&[question(
+            "ordinary-question",
+        )]));
+    }
+
+    #[test]
+    fn classifies_mcp_approval_elicitation_from_metadata() {
+        let request = McpServerElicitationRequest::Form {
+            meta: Some(serde_json::json!({
+                "praxis_approval_kind": "mcp_tool_call",
+            })),
+            message: "approve".to_string(),
+            requested_schema: McpElicitationSchema {
+                schema_uri: None,
+                type_: McpElicitationObjectType::Object,
+                properties: BTreeMap::new(),
+                required: None,
+            },
+        };
+
+        assert!(is_mcp_tool_approval_elicitation(&request));
+    }
 }

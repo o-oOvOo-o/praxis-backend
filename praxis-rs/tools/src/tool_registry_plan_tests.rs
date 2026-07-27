@@ -278,6 +278,7 @@ fn strip_descriptions_schema(schema: &mut JsonSchema) {
                 strip_descriptions_schema(schema);
             }
         }
+        JsonSchema::Raw { .. } => {}
     }
 }
 

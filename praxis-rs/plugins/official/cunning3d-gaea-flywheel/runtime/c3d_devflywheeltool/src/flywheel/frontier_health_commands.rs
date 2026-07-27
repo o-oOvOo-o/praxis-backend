@@ -162,6 +162,7 @@ fn c3d_graph_call(
     args: Value,
     timeout: Duration,
 ) -> Result<Value, String> {
+    let token = c3d_bridge_token()?;
     let mut stream = TcpStream::connect(bridge_addr)
         .map_err(|error| format!("Failed to connect Cunning3D bridge {bridge_addr}: {error}"))?;
     stream
@@ -171,6 +172,7 @@ fn c3d_graph_call(
         .set_write_timeout(Some(timeout))
         .map_err(|error| format!("Failed to set bridge write timeout: {error}"))?;
     let request = json!({
+        "token": token,
         "command": "graph_call",
         "payload": {
             "tool": tool,
@@ -200,6 +202,82 @@ fn c3d_graph_call(
         return Err(format!("Cunning3D bridge tool {tool} failed: {value}"));
     }
     Ok(value)
+}
+
+fn c3d_bridge_token() -> Result<String, String> {
+    const TOKEN_ENV: &str = "C3D_AGENT_BRIDGE_TOKEN";
+    const SESSION_PATH_ENV: &str = "C3D_AGENT_BRIDGE_SESSION_PATH";
+    const SESSION_FILE: &str = "cunning3d_bridge_ipc.json";
+
+    if let Ok(token) = env::var(TOKEN_ENV) {
+        let token = token.trim();
+        if !token.is_empty() {
+            return Ok(token.to_owned());
+        }
+    }
+
+    let session_path = env::var(SESSION_PATH_ENV)
+        .ok()
+        .map(|path| path.trim().to_owned())
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var("LOCALAPPDATA")
+                .ok()
+                .filter(|root| !root.trim().is_empty())
+                .map(|root| {
+                    PathBuf::from(root)
+                        .join("Cunning3D")
+                        .join("bridge")
+                        .join(SESSION_FILE)
+                })
+        })
+        .or_else(|| {
+            env::var("APPDATA")
+                .ok()
+                .filter(|root| !root.trim().is_empty())
+                .map(|root| {
+                    PathBuf::from(root)
+                        .join("Cunning3D")
+                        .join("bridge")
+                        .join(SESSION_FILE)
+                })
+        })
+        .or_else(|| {
+            env::var("USERPROFILE")
+                .ok()
+                .filter(|root| !root.trim().is_empty())
+                .map(|root| PathBuf::from(root).join(".cunning3d").join(SESSION_FILE))
+        })
+        .ok_or_else(|| {
+            format!(
+                "Cunning3D bridge token is unavailable; set {TOKEN_ENV} or {SESSION_PATH_ENV}"
+            )
+        })?;
+    let bytes = fs::read(&session_path).map_err(|error| {
+        format!(
+            "Failed to read Cunning3D bridge session '{}': {error}",
+            session_path.display()
+        )
+    })?;
+    let session: Value = serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "Failed to decode Cunning3D bridge session '{}': {error}",
+            session_path.display()
+        )
+    })?;
+    let token = session
+        .get("token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "Cunning3D bridge session '{}' has no token",
+                session_path.display()
+            )
+        })?;
+    Ok(token.to_owned())
 }
 
 fn c3d_live_graph_state(bridge_addr: &str, timeout: Duration) -> Result<Value, String> {

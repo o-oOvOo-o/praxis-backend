@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
+use praxis_protocol::config_types::ApprovalsReviewer;
+use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::PraxisErrorInfo;
+use praxis_protocol::protocol::SandboxPolicy;
 use tracing::warn;
 
 use crate::config::ConstraintResult;
@@ -10,6 +13,24 @@ use super::super::SessionSettingsUpdate;
 use super::TurnContext;
 
 impl Session {
+    pub(crate) async fn update_permissions(
+        &self,
+        approval_policy: AskForApproval,
+        approvals_reviewer: ApprovalsReviewer,
+        sandbox_policy: SandboxPolicy,
+    ) -> ConstraintResult<u64> {
+        let mut state = self.state.lock().await;
+        let updated = state.session_configuration.apply(&SessionSettingsUpdate {
+            approval_policy: Some(approval_policy),
+            approvals_reviewer: Some(approvals_reviewer),
+            sandbox_policy: Some(sandbox_policy),
+            ..Default::default()
+        })?;
+        state.session_configuration = updated.clone();
+        self.publish_effective_permissions(&updated);
+        Ok(self.permission_generation())
+    }
+
     pub(crate) async fn update_settings(
         &self,
         updates: SessionSettingsUpdate,

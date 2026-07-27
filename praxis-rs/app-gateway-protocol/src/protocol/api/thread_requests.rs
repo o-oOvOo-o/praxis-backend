@@ -465,6 +465,7 @@ pub struct ThreadPermissionsSetParams {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadPermissionsSetResponse {
     pub thread: Thread,
+    pub generation: u64,
     pub previous_approval_policy: AskForApproval,
     pub previous_approvals_reviewer: ApprovalsReviewer,
     pub previous_sandbox_policy: SandboxPolicy,
@@ -478,6 +479,7 @@ pub struct ThreadPermissionsSetResponse {
 pub struct ThreadPermissionsChangedNotification {
     pub thread_id: String,
     pub thread: Thread,
+    pub generation: u64,
     pub previous_approval_policy: AskForApproval,
     pub previous_approvals_reviewer: ApprovalsReviewer,
     pub previous_sandbox_policy: SandboxPolicy,
@@ -625,7 +627,9 @@ pub struct ThreadRollbackParams {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ThreadRewindWorkspaceAction {
     Keep,
-    Restore { checkpoint_id: WorkspaceCheckpointId },
+    Restore {
+        checkpoint_id: WorkspaceCheckpointId,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

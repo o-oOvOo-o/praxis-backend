@@ -1,6 +1,5 @@
 use super::AgentsToml;
 use super::ConfigProfile;
-use super::WorkspaceHistoryToml;
 use super::LocalModelHostConfig;
 use super::LocalModelsConfig;
 use super::PermissionsToml;
@@ -10,6 +9,7 @@ use super::RealtimeToml;
 use super::ToolsToml;
 use super::TranscriptionConfig;
 use super::UserSavedConfig;
+use super::WorkspaceHistoryToml;
 use super::model_provider_config::deserialize_model_providers;
 use super::runtime_types::sandbox_settings_from_workspace_write;
 use super::sandbox_projection;

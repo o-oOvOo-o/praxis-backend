@@ -1,8 +1,8 @@
 use ratatui::layout::Rect;
 
 const WORKSPACE_SPLIT_GAP: u16 = 1;
-const WORKSPACE_LIST_MIN_WIDTH: u16 = 32;
-const WORKSPACE_LIST_MAX_WIDTH: u16 = 58;
+const WORKSPACE_LIST_MIN_WIDTH: u16 = 26;
+const WORKSPACE_LIST_MAX_WIDTH: u16 = 42;
 const WORKSPACE_CHAT_MIN_WIDTH: u16 = 48;
 
 pub(crate) struct WorkspacePaneSplit {
@@ -40,7 +40,7 @@ fn workspace_list_width(total_width: u16) -> u16 {
     if total_width <= WORKSPACE_SPLIT_GAP.saturating_add(1) {
         return total_width;
     }
-    let desired = (total_width / 4).clamp(WORKSPACE_LIST_MIN_WIDTH, WORKSPACE_LIST_MAX_WIDTH);
+    let desired = (total_width / 5).clamp(WORKSPACE_LIST_MIN_WIDTH, WORKSPACE_LIST_MAX_WIDTH);
     let chat_floor = WORKSPACE_CHAT_MIN_WIDTH.min(total_width / 2).max(1);
     desired
         .min(total_width.saturating_sub(WORKSPACE_SPLIT_GAP + chat_floor))

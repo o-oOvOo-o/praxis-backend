@@ -30,9 +30,26 @@ impl Session {
             warn!("Overwriting existing pending request_permissions for call_id: {call_id}");
         }
 
-        self.send_request_permissions_event(turn_context, call_id, args)
+        self.send_request_permissions_event(turn_context, call_id.clone(), args)
             .await;
-        rx_response.await.ok()
+        let mut permission_updates = turn_context.subscribe_effective_permissions();
+        tokio::pin!(rx_response);
+        loop {
+            let current = permission_updates.borrow().clone().normalized();
+            if current.is_promptless_full_access() {
+                self.discard_pending_request_permissions(&call_id).await;
+                return Some(default_turn_permissions_response());
+            }
+            tokio::select! {
+                response = &mut rx_response => return response.ok(),
+                changed = permission_updates.changed() => {
+                    if changed.is_err() {
+                        self.discard_pending_request_permissions(&call_id).await;
+                        return None;
+                    }
+                }
+            }
+        }
     }
 
     async fn insert_pending_request_permissions(

@@ -5,8 +5,13 @@ use tracing::error;
 use crate::praxis::TurnContext;
 
 pub(super) enum RestoreWorkspaceCheckpointResult {
-    Restored { checkpoint_id: String, short_id: String },
-    Failed { message: String },
+    Restored {
+        checkpoint_id: String,
+        short_id: String,
+    },
+    Failed {
+        message: String,
+    },
 }
 
 pub(super) async fn restore_workspace_checkpoint(
@@ -14,21 +19,21 @@ pub(super) async fn restore_workspace_checkpoint(
     checkpoint: WorkspaceCheckpointRef,
 ) -> RestoreWorkspaceCheckpointResult {
     let checkpoint_id = checkpoint.id;
-    let result = match WorkspaceHistoryService::open(
-        &ctx.config.praxis_home,
-        ctx.workspace_history.clone(),
-    )
-    .await
-    {
-        Ok(service) => service
-            .restore(
-                checkpoint_id,
-                checkpoint.thread_id.clone(),
-                checkpoint.turn_id.clone(),
-            )
-            .await,
-        Err(error) => Err(error),
-    };
+    let result =
+        match WorkspaceHistoryService::open(&ctx.config.praxis_home, ctx.workspace_history.clone())
+            .await
+        {
+            Ok(service) => {
+                service
+                    .restore(
+                        checkpoint_id,
+                        checkpoint.thread_id.clone(),
+                        checkpoint.turn_id.clone(),
+                    )
+                    .await
+            }
+            Err(error) => Err(error),
+        };
 
     match result {
         Ok(_) => {
