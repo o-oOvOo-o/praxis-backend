@@ -47,6 +47,9 @@ pub enum TurnEvent {
         call_id: String,
         name: String,
     },
+    /// The tool future settled. Transcript commit may still wait for provider order.
+    ToolExecutionCompleted(ToolResult),
+    /// The final (possibly hook-rewritten) result was committed to the transcript.
     ToolFinished(ToolResult),
     ToolProgress {
         call_id: String,

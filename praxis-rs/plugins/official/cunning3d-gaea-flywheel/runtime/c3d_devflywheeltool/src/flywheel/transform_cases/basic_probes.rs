@@ -1,0 +1,178 @@
+fn cmd_recurve_bridge_probe(ctx: &Context, cli: &Cli) -> Result<(), String> {
+    cmd_mapped_probe(
+        ctx,
+        cli,
+        "recurve-bridge-probe",
+        "Recurve",
+        &["Recurve"],
+        "gaea_recurve_bridge_probe",
+        &[
+            "resolution",
+            "terrain-width",
+            "terrain-height",
+            "source",
+            "power",
+            "scale",
+            "iterations",
+            "style",
+            "resize-target",
+            "resize-target-width",
+            "resize-target-height",
+            "epsilon",
+            "matrix",
+        ],
+        &["resize-only"],
+    )
+}
+
+fn cmd_graphic_eq_bridge_probe(ctx: &Context, cli: &Cli) -> Result<(), String> {
+    cmd_mapped_probe(
+        ctx,
+        cli,
+        "graphic-eq-bridge-probe",
+        "GraphicEQ",
+        &["GraphicEQ", "Graphic Eq"],
+        "gaea_graphic_eq_bridge_probe",
+        &[
+            "resolution",
+            "terrain-width",
+            "terrain-height",
+            "source",
+            "band1",
+            "band2",
+            "band3",
+            "band4",
+            "band5",
+            "band6",
+            "band7",
+            "epsilon",
+            "matrix",
+        ],
+        &[],
+    )
+}
+
+fn cmd_blur_bridge_probe(ctx: &Context, cli: &Cli) -> Result<(), String> {
+    cmd_mapped_probe(
+        ctx,
+        cli,
+        "blur-bridge-probe",
+        "Blur",
+        &["Blur", "GaeaBlur", "Gaea Blur"],
+        "gaea_blur_bridge_probe",
+        &[
+            "resolution",
+            "terrain-width",
+            "terrain-height",
+            "source",
+            "input-map",
+            "radius",
+            "epsilon",
+            "repeat",
+            "matrix",
+            "dump-dir",
+            "matrix",
+            "target-speedup",
+        ],
+        &["require-pass", "require-speedup", "require-speedup-gate"],
+    )
+}
+
+fn cmd_deflate_bridge_probe(ctx: &Context, cli: &Cli) -> Result<(), String> {
+    cmd_mapped_probe(
+        ctx,
+        cli,
+        "deflate-bridge-probe",
+        "Deflate",
+        &["Deflate"],
+        "gaea_deflate_bridge_probe",
+        &[
+            "resolution",
+            "terrain-width",
+            "terrain-height",
+            "source",
+            "method",
+            "amount",
+            "epsilon",
+            "matrix",
+            "dump-dir",
+        ],
+        &[],
+    )
+}
+
+fn cmd_denoise_bridge_probe(ctx: &Context, cli: &Cli) -> Result<(), String> {
+    cmd_mapped_probe(
+        ctx,
+        cli,
+        "denoise-bridge-probe",
+        "Denoise",
+        &["Denoise"],
+        "gaea_denoise_bridge_probe",
+        &[
+            "resolution",
+            "terrain-width",
+            "terrain-height",
+            "source",
+            "type",
+            "amount",
+            "passes",
+            "epsilon",
+            "matrix",
+            "dump-dir",
+        ],
+        &["include-pixels"],
+    )
+}
+
+fn cmd_peaks_bridge_probe(ctx: &Context, cli: &Cli) -> Result<(), String> {
+    cmd_mapped_probe(
+        ctx,
+        cli,
+        "peaks-bridge-probe",
+        "Peaks",
+        &["Peaks"],
+        "gaea_peaks_bridge_probe",
+        &[
+            "resolution",
+            "terrain-width",
+            "terrain-height",
+            "source",
+            "falloff",
+            "precise",
+            "epsilon",
+            "matrix",
+            "dump-dir",
+        ],
+        &[],
+    )
+}
+
+fn cmd_uplift_bridge_probe(ctx: &Context, cli: &Cli) -> Result<(), String> {
+    cmd_mapped_probe(
+        ctx,
+        cli,
+        "uplift-bridge-probe",
+        "Uplift",
+        &["Uplift"],
+        "gaea_uplift_bridge_probe",
+        &[
+            "resolution",
+            "terrain-width",
+            "terrain-height",
+            "passes",
+            "scale",
+            "height",
+            "octaves",
+            "direction",
+            "jitter",
+            "seed",
+            "source",
+            "input-source",
+            "epsilon",
+            "matrix",
+            "dump-dir",
+        ],
+        &[],
+    )
+}

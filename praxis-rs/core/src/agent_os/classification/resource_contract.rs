@@ -50,7 +50,6 @@ pub(in crate::agent_os) fn task_resource_allows(
         return true;
     }
     match (declared, required) {
-        (ResourceRequirement::CpuHeavy, ResourceRequirement::CpuHeavy) => true,
         (ResourceRequirement::Port { port: declared }, ResourceRequirement::Port { port }) => {
             declared == port
         }

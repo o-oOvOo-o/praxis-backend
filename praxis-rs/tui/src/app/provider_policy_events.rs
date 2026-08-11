@@ -115,17 +115,12 @@ impl App {
                     }
                 }
                 let provider_label = provider.name.clone();
-                let write_mode = if provider.is_anthropic() {
-                    ProviderConfigWriteMode::UpsertIfMissing
-                } else {
-                    ProviderConfigWriteMode::ForceUpsert
-                };
                 self.apply_model_provider_selection(
                     model,
                     provider_id,
                     Some(provider),
                     effort,
-                    write_mode,
+                    ProviderConfigWriteMode::ForceUpsert,
                     Some(provider_label),
                 )
                 .await;
@@ -308,6 +303,14 @@ impl App {
                 self.chat_widget
                     .set_approval_policy(self.config.permissions.approval_policy.value());
                 self.sync_cached_thread_permissions_from_config().await;
+                self.persist_tui_permission_setting(
+                    "approval_policy",
+                    &policy.to_string(),
+                    "approval policy",
+                )
+                .await;
+                self.refresh_active_thread_permissions_from_tui(app_gateway)
+                    .await;
                 if matches!(
                     self.config.permissions.approval_policy.value(),
                     AskForApproval::Never
@@ -343,6 +346,22 @@ impl App {
                 self.runtime_sandbox_policy_override =
                     Some(self.config.permissions.sandbox_policy.get().clone());
                 self.sync_cached_thread_permissions_from_config().await;
+                let sandbox_mode = match self.config.permissions.sandbox_policy.get() {
+                    SandboxPolicy::ReadOnly { .. } => Some("read-only"),
+                    SandboxPolicy::WorkspaceWrite { .. } => Some("workspace-write"),
+                    SandboxPolicy::DangerFullAccess => Some("danger-full-access"),
+                    SandboxPolicy::ExternalSandbox { .. } => None,
+                };
+                if let Some(sandbox_mode) = sandbox_mode {
+                    self.persist_tui_permission_setting(
+                        "sandbox_mode",
+                        sandbox_mode,
+                        "sandbox policy",
+                    )
+                    .await;
+                }
+                self.refresh_active_thread_permissions_from_tui(app_gateway)
+                    .await;
                 if matches!(
                     self.config.permissions.approval_policy.value(),
                     AskForApproval::Never
@@ -410,6 +429,8 @@ impl App {
                     self.chat_widget
                         .add_error_message(format!("Failed to save approvals reviewer: {err}"));
                 }
+                self.refresh_active_thread_permissions_from_tui(app_gateway)
+                    .await;
             }
             AppEvent::UpdateFeatureFlags { updates } => {
                 self.update_feature_flags(updates).await;

@@ -6,6 +6,7 @@ impl ChatWidget {
         &mut self,
         event: praxis_protocol::protocol::SessionConfiguredEvent,
     ) {
+        let report_model_substitution = self.is_session_configured();
         if self
             .thread_id
             .is_some_and(|thread_id| thread_id != event.session_id)
@@ -57,6 +58,7 @@ impl ChatWidget {
             .thread_name
             .clone()
             .filter(|name| !name.trim().is_empty());
+        let requested_model = self.current_model().to_owned();
         let model_for_header = event.model.clone();
         self.session_header.set_model(&model_for_header);
         self.current_collaboration_mode = self.current_collaboration_mode.with_updates(
@@ -74,20 +76,10 @@ impl ChatWidget {
         self.sync_personality_command_enabled();
         self.sync_plugins_command_enabled();
         self.refresh_plugin_mentions();
-        let startup_tooltip_override = self.startup_tooltip_override.take();
-        let show_fast_status = self.should_show_fast_status(&model_for_header, event.service_tier);
         #[cfg(test)]
         let initial_messages = event.initial_messages.clone();
-        let session_info_cell = history_cell::new_session_info(
-            &self.config,
-            &self.tui_config,
-            &model_for_header,
-            event,
-            self.show_welcome_banner,
-            startup_tooltip_override,
-            self.plan_type,
-            show_fast_status,
-        );
+        let session_info_cell =
+            history_cell::new_session_info(&requested_model, event, report_model_substitution);
         self.apply_session_info_cell(session_info_cell);
 
         #[cfg(test)]

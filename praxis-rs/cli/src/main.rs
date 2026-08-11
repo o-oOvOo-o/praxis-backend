@@ -484,6 +484,53 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
             tokio::task::spawn_blocking(move || praxis_stdio_to_uds::run(socket_path.as_path()))
                 .await??;
         }
+        Some(Subcommand::TokenSaver(cmd)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "token-saver",
+            )?;
+            let cli_kv_overrides = root_config_overrides
+                .parse_overrides()
+                .map_err(anyhow::Error::msg)?;
+            let config = Config::load_with_cli_overrides_and_harness_overrides(
+                cli_kv_overrides,
+                ConfigOverrides {
+                    config_profile: interactive.config_profile.clone(),
+                    ..Default::default()
+                },
+            )
+            .await?;
+            let period = match cmd.period {
+                TokenSaverPeriodArg::Month => {
+                    praxis_core::token_saver_report::TokenSaverReportPeriod::Month
+                }
+                TokenSaverPeriodArg::Week => {
+                    praxis_core::token_saver_report::TokenSaverReportPeriod::Week
+                }
+                TokenSaverPeriodArg::All => {
+                    praxis_core::token_saver_report::TokenSaverReportPeriod::All
+                }
+            };
+            let query = praxis_core::token_saver_report::resolve_report_query(
+                period,
+                cmd.from.as_deref(),
+                cmd.to.as_deref(),
+                cmd.utc_offset_minutes
+                    .unwrap_or_else(praxis_core::token_saver_report::local_utc_offset_minutes),
+            )?;
+            let report = praxis_core::token_saver_report::generate_token_saver_report(
+                &config.praxis_home,
+                &query,
+            )?;
+            match cmd.format {
+                TokenSaverFormat::Markdown => println!(
+                    "{}",
+                    praxis_core::token_saver_report::render_token_saver_report_markdown(&report)
+                ),
+                TokenSaverFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+            }
+        }
         Some(Subcommand::Features(FeaturesCli { sub })) => match sub {
             FeaturesSubcommand::List => {
                 reject_remote_mode_for_subcommand(

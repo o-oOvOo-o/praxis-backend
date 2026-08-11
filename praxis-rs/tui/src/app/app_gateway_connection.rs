@@ -226,7 +226,6 @@ impl App {
                     has_chatgpt_account,
                     model_catalog: model_catalog.clone(),
                     feedback: feedback.clone(),
-                    is_first_run,
                     status_account_display: status_account_display.clone(),
                     initial_plan_type,
                     model: Some(model.clone()),
@@ -261,7 +260,6 @@ impl App {
                     has_chatgpt_account,
                     model_catalog: model_catalog.clone(),
                     feedback: feedback.clone(),
-                    is_first_run,
                     status_account_display: status_account_display.clone(),
                     initial_plan_type,
                     model: config.model.clone(),
@@ -324,7 +322,6 @@ impl App {
                     has_chatgpt_account,
                     model_catalog: model_catalog.clone(),
                     feedback: feedback.clone(),
-                    is_first_run,
                     status_account_display: status_account_display.clone(),
                     initial_plan_type,
                     model: config.model.clone(),
@@ -338,6 +335,7 @@ impl App {
             }
         };
 
+        chat_widget.set_workspace_entry_surface_enabled(workspace_mode);
         chat_widget
             .maybe_prompt_windows_sandbox_enable(should_prompt_windows_sandbox_nux_at_startup);
 
@@ -345,6 +343,8 @@ impl App {
         #[cfg(not(debug_assertions))]
         let upgrade_version = crate::updates::get_upgrade_version(&config);
 
+        let (runtime_approval_policy_override, runtime_sandbox_policy_override) =
+            Self::runtime_permission_overrides_from_config(&config);
         let mut app = Self {
             model_catalog,
             session_telemetry: session_telemetry.clone(),
@@ -355,12 +355,13 @@ impl App {
             active_profile,
             cli_kv_overrides,
             harness_overrides,
-            runtime_approval_policy_override: None,
-            runtime_sandbox_policy_override: None,
+            runtime_approval_policy_override,
+            runtime_sandbox_policy_override,
             file_search,
             enhanced_keys_supported,
             transcript_cells: Vec::new(),
             history_view_generation: 0,
+            thread_replay_buffer_generation: None,
             overlay: None,
             deferred_history_lines: Vec::new(),
             has_emitted_history_lines: false,
@@ -594,6 +595,9 @@ impl App {
         event: TuiEvent,
     ) -> Result<AppRunControl> {
         self.restore_mouse_capture_after_terminal_zoom(tui);
+        if matches!(event, TuiEvent::Draw) && self.thread_replay_buffer_generation.is_some() {
+            return Ok(AppRunControl::Continue);
+        }
         if matches!(event, TuiEvent::Draw) {
             let size = tui.terminal.size()?;
             if size != tui.terminal.last_known_screen_size {

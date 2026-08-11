@@ -125,130 +125,37 @@ fn ps_output_empty_snapshot() {
     insta::assert_snapshot!(rendered);
 }
 
-#[tokio::test]
-async fn session_info_uses_availability_nux_tooltip_override() {
-    let config = test_config().await;
-    let tui_config = test_tui_config();
+#[test]
+fn session_info_is_empty_when_backend_uses_requested_model() {
     let cell = new_session_info(
-        &config,
-        &tui_config,
         "gpt-5",
         session_configured_event("gpt-5"),
-        /*is_first_event*/ false,
-        Some("Model just became available".to_string()),
-        Some(PlanType::Free),
-        /*show_fast_status*/ false,
+        /*report_model_substitution*/ true,
     );
-
-    let rendered = render_transcript(&cell).join("\n");
-    assert!(rendered.trim().is_empty());
+    assert!(render_transcript(&cell).is_empty());
 }
 
-#[tokio::test]
-async fn session_info_availability_nux_tooltip_snapshot() {
-    let mut config = test_config().await;
-    config.cwd = PathBuf::from("/tmp/project").abs();
-    let tui_config = test_tui_config();
+#[test]
+fn initial_session_info_never_displaces_the_workspace_entry_surface() {
     let cell = new_session_info(
-        &config,
-        &tui_config,
-        "gpt-5",
-        session_configured_event("gpt-5"),
-        /*is_first_event*/ false,
-        Some("Model just became available".to_string()),
-        Some(PlanType::Free),
-        /*show_fast_status*/ false,
+        "requested-model",
+        session_configured_event("configured-model"),
+        /*report_model_substitution*/ false,
     );
-
-    let rendered = render_transcript(&cell).join("\n");
-    assert!(rendered.trim().is_empty());
+    assert!(render_transcript(&cell).is_empty());
 }
 
-#[tokio::test]
-async fn session_info_first_event_renders_welcome_header() {
-    let config = test_config().await;
-    let tui_config = test_tui_config();
+#[test]
+fn session_info_reports_backend_model_substitution() {
     let cell = new_session_info(
-        &config,
-        &tui_config,
         "gpt-5",
-        session_configured_event("gpt-5"),
-        /*is_first_event*/ true,
-        Some("Model just became available".to_string()),
-        Some(PlanType::Free),
-        /*show_fast_status*/ false,
+        session_configured_event("gpt-5.4"),
+        /*report_model_substitution*/ true,
     );
-
-    let rendered = render_transcript(&cell).join("\n");
-    assert!(rendered.contains("Welcome back!"));
-    assert!(rendered.contains("ChatGPT Free"));
-}
-
-#[tokio::test]
-async fn session_info_first_event_uses_tooltip_override_when_enabled() {
-    let config = test_config().await;
-    let tui_config = test_tui_config();
-    let cell = new_session_info(
-        &config,
-        &tui_config,
-        "gpt-5",
-        session_configured_event("gpt-5"),
-        /*is_first_event*/ true,
-        Some("Model just became available".to_string()),
-        Some(PlanType::Free),
-        /*show_fast_status*/ false,
+    assert_eq!(
+        render_transcript(&cell),
+        vec!["model changed:", "requested: gpt-5", "used: gpt-5.4",]
     );
-
-    let rendered = render_transcript(&cell).join("\n");
-    assert!(rendered.contains("What's new"));
-    assert!(rendered.contains("Model just became available"));
-}
-
-#[tokio::test]
-async fn session_info_first_event_hides_tooltip_override_when_disabled() {
-    let config = test_config().await;
-    let tui_config = TuiRuntimeConfig {
-        show_tooltips: false,
-        animations: false,
-        ..Default::default()
-    };
-    let cell = new_session_info(
-        &config,
-        &tui_config,
-        "gpt-5",
-        session_configured_event("gpt-5"),
-        /*is_first_event*/ true,
-        Some("Model just became available".to_string()),
-        Some(PlanType::Free),
-        /*show_fast_status*/ false,
-    );
-
-    let rendered = render_transcript(&cell).join("\n");
-    assert!(rendered.contains("Welcome back!"));
-    assert!(!rendered.contains("Model just became available"));
-}
-
-#[tokio::test]
-async fn session_info_hides_tooltips_when_disabled() {
-    let config = test_config().await;
-    let tui_config = TuiRuntimeConfig {
-        show_tooltips: false,
-        animations: false,
-        ..Default::default()
-    };
-    let cell = new_session_info(
-        &config,
-        &tui_config,
-        "gpt-5",
-        session_configured_event("gpt-5"),
-        /*is_first_event*/ false,
-        Some("Model just became available".to_string()),
-        Some(PlanType::Free),
-        /*show_fast_status*/ false,
-    );
-
-    let rendered = render_transcript(&cell).join("\n");
-    assert!(!rendered.contains("Model just became available"));
 }
 
 #[test]

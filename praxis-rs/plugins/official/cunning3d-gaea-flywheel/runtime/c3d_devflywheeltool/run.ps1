@@ -14,7 +14,12 @@ $targetDir = if ($env:C3D_DEVFLYWHEELTOOL_TARGET_DIR) {
 
 $env:CARGO_TARGET_DIR = $targetDir
 $manifest = Join-Path $PSScriptRoot 'Cargo.toml'
-$cargoArgs = @('run', '--manifest-path', $manifest, '--') + $Args
+$cargoArgs = @('run', '--manifest-path', $manifest)
+$cargoProfile = $env:C3D_DEVFLYWHEELTOOL_CARGO_PROFILE
+if (-not [string]::IsNullOrWhiteSpace($cargoProfile)) {
+    $cargoArgs += @('--profile', $cargoProfile)
+}
+$cargoArgs += @('--') + $Args
 
 & cargo @cargoArgs
 exit $LASTEXITCODE

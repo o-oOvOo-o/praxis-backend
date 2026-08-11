@@ -156,6 +156,13 @@ pub(crate) fn anthropic_model_infos() -> Vec<ModelInfo> {
     ]
 }
 
+pub(crate) fn deepseek_model_infos() -> Vec<ModelInfo> {
+    ["deepseek-v4-pro", "deepseek-v4-flash"]
+        .into_iter()
+        .filter_map(known_openai_compatible_model_info)
+        .collect()
+}
+
 pub(crate) fn kimi_model_infos() -> Vec<ModelInfo> {
     vec![
         kimi_model_info(

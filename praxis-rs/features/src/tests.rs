@@ -40,6 +40,11 @@ fn default_enabled_features_are_stable() {
 }
 
 #[test]
+fn unified_exec_is_enabled_by_default_on_every_platform() {
+    assert!(Features::with_defaults().enabled(Feature::UnifiedExec));
+}
+
+#[test]
 fn code_mode_only_requires_code_mode() {
     let mut features = Features::with_defaults();
     features.enable(Feature::CodeModeOnly);

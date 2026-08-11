@@ -14,12 +14,16 @@ use serde_json::json;
 use std::path::PathBuf;
 
 fn model_info() -> ModelInfo {
+    model_info_with_shell_type("unified_exec")
+}
+
+fn model_info_with_shell_type(shell_type: &str) -> ModelInfo {
     serde_json::from_value(json!({
         "slug": "test-model",
         "display_name": "Test Model",
         "description": null,
         "supported_reasoning_levels": [],
-        "shell_type": "unified_exec",
+        "shell_type": shell_type,
         "visibility": "list",
         "supported_in_api": true,
         "priority": 1,
@@ -140,6 +144,50 @@ fn unified_exec_is_blocked_for_windows_sandboxed_policies_only() {
         &SandboxPolicy::DangerFullAccess,
         WindowsSandboxLevel::Disabled,
     ));
+}
+
+#[test]
+fn default_features_prefer_unified_exec_when_the_runtime_supports_it() {
+    let model_info = model_info_with_shell_type("shell_command");
+    let features = Features::with_defaults();
+    let available_models = Vec::new();
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features: &features,
+        web_search_mode: None,
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    });
+
+    assert_eq!(
+        tools_config.shell_type,
+        if praxis_utils_pty::conpty_supported() {
+            ConfigShellToolType::UnifiedExec
+        } else {
+            ConfigShellToolType::ShellCommand
+        }
+    );
+}
+
+#[test]
+fn explicit_feature_disable_preserves_the_model_shell_fallback() {
+    let model_info = model_info_with_shell_type("shell_command");
+    let mut features = Features::with_defaults();
+    features.disable(Feature::UnifiedExec);
+    let available_models = Vec::new();
+    let tools_config = ToolsConfig::new(&ToolsConfigParams {
+        model_info: &model_info,
+        available_models: &available_models,
+        features: &features,
+        web_search_mode: None,
+        session_source: SessionSource::Cli,
+        sandbox_policy: &SandboxPolicy::DangerFullAccess,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    });
+
+    assert_eq!(tools_config.shell_type, ConfigShellToolType::ShellCommand);
 }
 
 #[test]

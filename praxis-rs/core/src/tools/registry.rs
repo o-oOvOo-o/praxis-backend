@@ -22,7 +22,6 @@ use praxis_hooks::HookResult;
 use praxis_hooks::HookToolInput;
 use praxis_hooks::HookToolInputLocalShell;
 use praxis_hooks::HookToolKind;
-use praxis_loop::tool::EffectAccess;
 use praxis_loop::tool::ToolEffects;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::protocol::SandboxPolicy;
@@ -441,13 +440,10 @@ impl ToolRegistry {
             )));
         }
 
+        // Workspace checkpoints belong to the turn boundary, not this dispatch future. Ordered
+        // transcript commit remains a batch barrier, so awaiting a recursive capture here can
+        // withhold otherwise completed tool results behind unrelated calls.
         let is_mutating = handler.is_mutating(&invocation).await;
-        let effects = handler.effects(&invocation).await;
-        let may_mutate_workspace = is_mutating
-            && effects.iter().any(|effect| {
-                effect.access != EffectAccess::Read
-                    && matches!(effect.key.domain(), "filesystem" | "*")
-            });
         let response_cell = tokio::sync::Mutex::new(None);
         let invocation_for_tool = invocation.clone();
 
@@ -537,22 +533,6 @@ impl ToolRegistry {
             mutating: is_mutating,
         })
         .await;
-
-        if may_mutate_workspace
-            && let Err(error) = crate::tasks::workspace_history::capture_workspace_checkpoint(
-                Arc::clone(&invocation.session),
-                Arc::clone(&invocation.turn),
-                format!("tool:{}:{}", invocation.tool_name, invocation.call_id),
-                false,
-            )
-            .await
-        {
-            warn!(
-                tool = invocation.tool_name.as_str(),
-                call_id = invocation.call_id.as_str(),
-                "failed to capture post-tool workspace checkpoint: {error}"
-            );
-        }
 
         if let Some(err) = hook_abort_error {
             return Err(err);

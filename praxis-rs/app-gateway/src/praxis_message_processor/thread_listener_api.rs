@@ -271,6 +271,7 @@ impl PraxisMessageProcessor {
                             &thread_state_manager,
                             &thread_state,
                             &thread_watch_manager,
+                            thread_manager.as_ref(),
                             &outgoing_for_task,
                             listener_command,
                         )
@@ -295,6 +296,7 @@ async fn handle_thread_listener_command(
     thread_state_manager: &ThreadStateManager,
     thread_state: &Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
+    thread_manager: &ThreadManager,
     outgoing: &Arc<OutgoingMessageSender>,
     listener_command: ThreadListenerCommand,
 ) {
@@ -307,6 +309,7 @@ async fn handle_thread_listener_command(
                 thread_state_manager,
                 thread_state,
                 thread_watch_manager,
+                thread_manager,
                 outgoing,
                 *resume_request,
             )
@@ -337,6 +340,7 @@ async fn handle_pending_thread_resume_request(
     thread_state_manager: &ThreadStateManager,
     thread_state: &Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
+    thread_manager: &ThreadManager,
     outgoing: &Arc<OutgoingMessageSender>,
     pending: crate::thread_state::PendingThreadResumeRequest,
 ) {
@@ -384,6 +388,7 @@ async fn handle_pending_thread_resume_request(
 
     project_thread_runtime_state_with_turn_cleanup_from_watch(
         thread_watch_manager,
+        thread_manager,
         &mut thread,
         has_live_in_progress_turn,
     )

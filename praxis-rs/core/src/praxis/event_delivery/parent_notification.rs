@@ -33,8 +33,13 @@ impl Session {
             return;
         };
 
-        let Some(status) = agent_status_from_event(msg) else {
-            return;
+        let status = if matches!(msg, EventMsg::TurnComplete(_)) {
+            self.agent_status.borrow().clone()
+        } else {
+            let Some(status) = agent_status_from_event(msg) else {
+                return;
+            };
+            status
         };
         if !is_final(&status) {
             return;

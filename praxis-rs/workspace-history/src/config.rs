@@ -17,6 +17,7 @@ impl Default for WorkspaceHistoryConfig {
             ignored_directory_names: [
                 ".git",
                 ".praxis",
+                ".local",
                 "target",
                 "node_modules",
                 ".venv",
@@ -30,5 +31,19 @@ impl Default for WorkspaceHistoryConfig {
             .map(str::to_owned)
             .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn machine_local_workspace_data_is_ignored_by_default() {
+        assert!(
+            WorkspaceHistoryConfig::default()
+                .ignored_directory_names
+                .contains(".local")
+        );
     }
 }

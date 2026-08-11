@@ -26,15 +26,7 @@ impl ChatWidget {
     }
 
     pub(super) fn add_boxed_history(&mut self, cell: Box<dyn HistoryCell>) {
-        // Keep the placeholder session header as the active cell until real session info arrives,
-        // so we can merge headers instead of committing a duplicate box to history.
-        let keep_placeholder_header_active = !self.is_session_configured()
-            && self
-                .active_cell
-                .as_ref()
-                .is_some_and(|c| c.as_any().is::<history_cell::SessionHeaderHistoryCell>());
-
-        if !keep_placeholder_header_active && !cell.display_lines(u16::MAX).is_empty() {
+        if !cell.display_lines(u16::MAX).is_empty() {
             // Only break exec grouping if the cell renders visible lines.
             self.flush_active_cell();
             self.needs_final_message_separator = true;

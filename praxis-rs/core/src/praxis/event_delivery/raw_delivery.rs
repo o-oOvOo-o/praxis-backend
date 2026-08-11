@@ -4,7 +4,7 @@ use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::RolloutItem;
 
-use crate::agent::agent_status_from_event;
+use crate::agent::agent_status_after_event;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 
@@ -31,7 +31,8 @@ impl Session {
     }
 
     pub(in crate::praxis) async fn deliver_event_raw(&self, event: Event) {
-        if let Some(status) = agent_status_from_event(&event.msg) {
+        let current_status = self.agent_status.borrow().clone();
+        if let Some(status) = agent_status_after_event(&current_status, &event.msg) {
             self.agent_status.send_replace(status);
         }
         if let Err(e) = self.tx_event.send(event).await {

@@ -334,9 +334,14 @@ where
             &lifecycle,
         )
         .await;
-    let result = result.or_else(|error| {
+    let mut result = result.or_else(|error| {
         Ok::<_, crate::outcome::TurnError>(ToolResult::error(call.id.clone(), error.to_string()))
     });
+    if let Ok(completed) = &result
+        && let Err(error) = lifecycle.tool_execution_completed(completed).await
+    {
+        result = Err(error);
+    }
     drop(lifecycle);
     ToolRun {
         call,

@@ -1,7 +1,7 @@
 use super::super::plugin::ProfileMatchContext;
 use super::super::plugin::ProfileProviderIdentityRule;
+use crate::llm::provider::DEEPSEEK_PROVIDER_ID;
 
-pub(super) const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 const DEEPSEEK_PROVIDER_RULE: ProfileProviderIdentityRule = ProfileProviderIdentityRule::new(
     &[],
     &[DEEPSEEK_PROVIDER_ID],

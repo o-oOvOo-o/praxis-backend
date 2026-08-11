@@ -101,6 +101,8 @@ pub(crate) struct RunningAgentTask {
     pub(crate) cancellation_token: CancellationToken,
     pub(crate) handle: AbortHandle,
     pub(crate) turn_context: Arc<TurnContext>,
+    pub(crate) agent_os_task_id: Option<String>,
+    pub(crate) runtime_command_id: Option<String>,
     abort_on_drop: bool,
     // Timer recorded when the task drops to capture the full turn duration.
     pub(crate) _timer: Option<praxis_otel::Timer>,
@@ -114,6 +116,8 @@ impl RunningAgentTask {
         cancellation_token: CancellationToken,
         handle: AbortHandle,
         turn_context: Arc<TurnContext>,
+        agent_os_task_id: Option<String>,
+        runtime_command_id: Option<String>,
         timer: Option<praxis_otel::Timer>,
     ) -> Self {
         Self {
@@ -123,6 +127,8 @@ impl RunningAgentTask {
             cancellation_token,
             handle,
             turn_context,
+            agent_os_task_id,
+            runtime_command_id,
             abort_on_drop: true,
             _timer: timer,
         }

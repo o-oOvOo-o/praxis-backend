@@ -7,9 +7,7 @@ impl App {
         cfg: praxis_core::config::Config,
         tui_config: TuiRuntimeConfig,
     ) -> crate::chatwidget::ChatWidgetInit {
-        let mut init = self.chatwidget_init_for_forked_or_resumed_thread(tui, cfg, tui_config);
-        init.is_first_run = true;
-        init
+        self.chatwidget_init_for_forked_or_resumed_thread(tui, cfg, tui_config)
     }
 
     pub fn chatwidget_init_for_forked_or_resumed_thread(
@@ -31,7 +29,6 @@ impl App {
             has_chatgpt_account: self.chat_widget.has_chatgpt_account(),
             model_catalog: self.model_catalog.clone(),
             feedback: self.feedback.clone(),
-            is_first_run: false,
             status_account_display: self.chat_widget.status_account_display().cloned(),
             initial_plan_type: self.chat_widget.current_plan_type(),
             model: Some(self.chat_widget.current_model().to_string()),

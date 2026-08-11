@@ -185,6 +185,14 @@ impl ThreadWatchManager {
         self.clear_active_state(thread_id).await;
     }
 
+    pub(crate) async fn note_resource_wait(&self, thread_id: &str, waiting: bool) {
+        self.update_runtime_for_thread(thread_id, |runtime| {
+            runtime.is_loaded = true;
+            runtime.waiting_on_resource = waiting;
+        })
+        .await;
+    }
+
     pub(crate) async fn note_turn_interrupted(&self, thread_id: &str) {
         self.clear_active_state(thread_id).await;
     }
@@ -195,6 +203,7 @@ impl ThreadWatchManager {
             runtime.running = false;
             runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
+            runtime.waiting_on_resource = false;
             runtime.is_loaded = false;
         })
         .await;
@@ -206,6 +215,7 @@ impl ThreadWatchManager {
             runtime.running = false;
             runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
+            runtime.waiting_on_resource = false;
             runtime.has_system_error = true;
         })
         .await;
@@ -222,6 +232,7 @@ impl ThreadWatchManager {
                 .or_default();
             runtime.is_loaded = true;
             runtime.running = false;
+            runtime.waiting_on_resource = false;
             runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
             let status_notification =
@@ -580,6 +591,7 @@ impl ThreadWatchState {
 struct RuntimeFacts {
     is_loaded: bool,
     running: bool,
+    waiting_on_resource: bool,
     pending_permission_requests: u32,
     pending_user_input_requests: u32,
     has_system_error: bool,
@@ -594,6 +606,9 @@ fn loaded_thread_status(runtime: &RuntimeFacts) -> ThreadStatus {
     let mut active_flags = Vec::new();
     if runtime.running {
         active_flags.push(ThreadActiveFlag::Running);
+    }
+    if runtime.waiting_on_resource {
+        active_flags.push(ThreadActiveFlag::WaitingOnResource);
     }
     if runtime.pending_permission_requests > 0 {
         active_flags.push(ThreadActiveFlag::WaitingOnApproval);

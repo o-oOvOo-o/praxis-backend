@@ -48,16 +48,17 @@ impl AgentOsState {
             if command.status.clears_assigned_task() {
                 if thread.current_task_id.as_deref() == Some(task_id) {
                     thread.current_task_id = None;
+                    thread.state = command.status.assign_thread_state();
                 }
             } else {
                 thread.current_task_id = Some(task_id.to_string());
+                thread.state = command.status.assign_thread_state();
             }
             if set_current_command
                 && command.status == crate::agent_os::records::RuntimeCommandStatus::Executing
             {
                 thread.current_command_id = Some(command.command_id.clone());
             }
-            thread.state = command.status.assign_thread_state();
             thread.heartbeat_at = now;
             snapshots.thread = Some(thread.clone());
         }

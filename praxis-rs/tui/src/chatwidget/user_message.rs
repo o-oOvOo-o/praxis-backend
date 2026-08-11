@@ -55,6 +55,7 @@ pub(crate) struct ThreadInputState {
     pub(super) selfwork_runtime: SelfworkRuntimeState,
     pub(super) task_running: bool,
     pub(super) agent_turn_running: bool,
+    pub(super) turn_elapsed_seconds: Option<u64>,
 }
 
 impl From<String> for UserMessage {

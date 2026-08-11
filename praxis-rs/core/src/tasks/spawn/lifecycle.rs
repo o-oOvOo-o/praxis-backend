@@ -39,6 +39,14 @@ impl Session {
         let done = Arc::new(Notify::new());
 
         prepare_active_turn_state(self, token_usage_at_turn_start).await;
+        let (agent_os_task_id, runtime_command_id) = self
+            .services
+            .agent_os
+            .task_binding_for_thread(self.conversation_id)
+            .await
+            .map_or((None, None), |(task_id, command_id)| {
+                (Some(task_id), command_id)
+            });
 
         let handle = spawn_task_runner(
             Arc::clone(self),
@@ -48,6 +56,7 @@ impl Session {
             span_name,
             cancellation_token.child_token(),
             Arc::clone(&done),
+            runtime_command_id.clone(),
         );
 
         register_running_task(
@@ -58,6 +67,8 @@ impl Session {
             task,
             cancellation_token,
             handle,
+            agent_os_task_id,
+            runtime_command_id,
         )
         .await;
     }

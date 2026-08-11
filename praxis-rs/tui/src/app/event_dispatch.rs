@@ -5,10 +5,14 @@ impl App {
         let cell: Arc<dyn HistoryCell> = cell.into();
         if let Some(Overlay::Transcript(t)) = &mut self.overlay {
             t.insert_cell(cell.clone());
-            tui.frame_requester().schedule_frame();
+            if self.thread_replay_buffer_generation.is_none() {
+                tui.frame_requester().schedule_frame();
+            }
         }
         self.transcript_cells.push(cell);
-        tui.frame_requester().schedule_frame();
+        if self.thread_replay_buffer_generation.is_none() {
+            tui.frame_requester().schedule_frame();
+        }
     }
 
     pub(super) async fn handle_event(
@@ -177,6 +181,12 @@ impl App {
             AppEvent::InsertHistoryCellForView { generation, cell } => {
                 if generation == self.history_view_generation {
                     self.insert_history_cell_now(tui, cell);
+                }
+            }
+            AppEvent::FinishThreadReplayBuffer { generation } => {
+                if self.thread_replay_buffer_generation == Some(generation) {
+                    self.thread_replay_buffer_generation = None;
+                    tui.frame_requester().schedule_frame();
                 }
             }
             AppEvent::ApplyThreadRollback { num_turns } => {
@@ -901,6 +911,7 @@ impl App {
                         tracing::warn!(error = %err, "failed to enable mouse capture for Workspace agent picker");
                     }
                     self.workspace.enabled = true;
+                    self.chat_widget.set_workspace_entry_surface_enabled(true);
                     self.refresh_workspace_threads(app_gateway, true);
                 }
                 self.open_agent_picker(app_gateway).await;

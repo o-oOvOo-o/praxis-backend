@@ -23,6 +23,17 @@ impl ProviderDecisionCenter {
     ) -> Result<AuthResolution> {
         let interface = ProviderInterface::from_provider(provider, None);
 
+        if let Some((source, realm, api_auth)) = self.provider_api_key(provider_id, provider)? {
+            return Ok(AuthResolution {
+                auth: None,
+                auth_mode: Some(AuthMode::ApiKey),
+                api_auth,
+                source,
+                realm,
+                interface: ProviderInterface::from_provider(provider, Some(AuthMode::ApiKey)),
+            });
+        }
+
         if provider.is_anthropic()
             && let Some(auth_manager) = self.auth_manager.as_ref()
         {
@@ -45,16 +56,15 @@ impl ProviderDecisionCenter {
                 });
             }
         }
-
-        if let Some((source, realm, api_auth)) = self.provider_api_key(provider_id, provider)? {
-            return Ok(AuthResolution {
-                auth: None,
-                auth_mode: Some(AuthMode::ApiKey),
-                api_auth,
-                source,
-                realm,
-                interface: ProviderInterface::from_provider(provider, Some(AuthMode::ApiKey)),
-            });
+        if provider.is_anthropic() {
+            let env_key = provider
+                .env_key
+                .clone()
+                .unwrap_or_else(|| "ANTHROPIC_API_KEY".to_string());
+            return Err(PraxisErr::EnvVar(EnvVarError {
+                var: env_key,
+                instructions: provider.env_key_instructions.clone(),
+            }));
         }
 
         if let Some(token) = provider.experimental_bearer_token.clone() {
@@ -148,10 +158,14 @@ impl ProviderDecisionCenter {
             }
         }
 
-        Err(PraxisErr::EnvVar(EnvVarError {
-            var: env_key.clone(),
-            instructions: provider.env_key_instructions.clone(),
-        }))
+        if provider.is_anthropic() {
+            Ok(None)
+        } else {
+            Err(PraxisErr::EnvVar(EnvVarError {
+                var: env_key.clone(),
+                instructions: provider.env_key_instructions.clone(),
+            }))
+        }
     }
 
     fn resolve_from_managed_auth(

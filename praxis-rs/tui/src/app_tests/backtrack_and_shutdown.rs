@@ -23,37 +23,6 @@ async fn backtrack_selection_with_duplicate_history_targets_unique_turn() {
         )) as Arc<dyn HistoryCell>
     };
 
-    let make_header = |is_first| {
-        let event = SessionConfiguredEvent {
-            session_id: ThreadId::new(),
-            forked_from_id: None,
-            thread_name: None,
-            model: "gpt-test".to_string(),
-            model_provider_id: "test-provider".to_string(),
-            service_tier: None,
-            approval_policy: AskForApproval::Never,
-            approvals_reviewer: ApprovalsReviewer::User,
-            sandbox_policy: SandboxPolicy::new_read_only_policy(),
-            cwd: PathBuf::from("/home/user/project"),
-            reasoning_effort: None,
-            history_log_id: 0,
-            history_entry_count: 0,
-            initial_messages: None,
-            network_proxy: None,
-            rollout_path: Some(PathBuf::new()),
-        };
-        Arc::new(new_session_info(
-            app.chat_widget.config_ref(),
-            app.chat_widget.tui_config_ref(),
-            app.chat_widget.current_model(),
-            event,
-            is_first,
-            /*tooltip_override*/ None,
-            /*auth_plan*/ None,
-            /*show_fast_status*/ false,
-        )) as Arc<dyn HistoryCell>
-    };
-
     let placeholder = "[Image #1]";
     let edited_text = format!("follow-up (edited) {placeholder}");
     let edited_range = edited_text.len().saturating_sub(placeholder.len())..edited_text.len();
@@ -64,14 +33,12 @@ async fn backtrack_selection_with_duplicate_history_targets_unique_turn() {
     let edited_local_image_paths = vec![PathBuf::from("/tmp/fake-image.png")];
 
     // Simulate a transcript with duplicated history (e.g., from prior backtracks)
-    // and an edited turn appended after a session header boundary.
+    // and an edited turn appended after the repeated history.
     app.transcript_cells = vec![
-        make_header(true),
         user_cell("first question", Vec::new(), Vec::new(), Vec::new()),
         agent_cell("answer first"),
         user_cell("follow-up", Vec::new(), Vec::new(), Vec::new()),
         agent_cell("answer follow-up"),
-        make_header(false),
         user_cell("first question", Vec::new(), Vec::new(), Vec::new()),
         agent_cell("answer first"),
         user_cell(
@@ -292,12 +259,29 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
         /*resume_restored_queue*/ false,
     );
 
+    assert_eq!(app.thread_replay_buffer_generation, Some(0));
+    let mut replay_finished = false;
     while let Ok(event) = app_event_rx.try_recv() {
-        if let AppEvent::InsertHistoryCell(cell) = event {
-            let cell: Arc<dyn HistoryCell> = cell.into();
-            app.transcript_cells.push(cell);
+        match event {
+            AppEvent::InsertHistoryCell(cell) => {
+                assert!(
+                    !replay_finished,
+                    "history cells must be queued before the atomic replay commit"
+                );
+                let cell: Arc<dyn HistoryCell> = cell.into();
+                app.transcript_cells.push(cell);
+            }
+            AppEvent::FinishThreadReplayBuffer { generation } => {
+                assert_eq!(generation, 0);
+                replay_finished = true;
+            }
+            _ => {}
         }
     }
+    assert!(
+        replay_finished,
+        "snapshot replay must queue one final commit"
+    );
 
     let user_messages: Vec<String> = app
         .transcript_cells
@@ -338,7 +322,6 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
         has_chatgpt_account: app.chat_widget.has_chatgpt_account(),
         model_catalog: app.model_catalog.clone(),
         feedback: app.feedback.clone(),
-        is_first_run: false,
         status_account_display: app.chat_widget.status_account_display().cloned(),
         initial_plan_type: app.chat_widget.current_plan_type(),
         model: Some(app.chat_widget.current_model().to_string()),

@@ -53,7 +53,7 @@ impl Session {
         }
 
         events::emit_turn_aborted(self, task.turn_context.as_ref(), reason).await;
-        events::complete_aborted_runtime_command(self).await;
+        events::complete_aborted_runtime_command(self, task.runtime_command_id.as_deref()).await;
     }
 
     async fn cleanup_aborted_task_resources(
@@ -65,6 +65,7 @@ impl Session {
             .agent_os
             .cleanup_thread_resources_after_abort(
                 self.conversation_id,
+                task.agent_os_task_id.as_deref(),
                 format!("turn_aborted:{reason:?}"),
             )
             .await;

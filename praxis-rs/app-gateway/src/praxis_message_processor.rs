@@ -323,6 +323,7 @@ impl PraxisMessageProcessor {
             feedback,
             log_db,
         };
+        processor.start_agent_os_status_bridge();
         processor.start_automation_scheduler();
         processor
     }

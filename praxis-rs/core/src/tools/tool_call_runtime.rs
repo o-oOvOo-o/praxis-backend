@@ -14,11 +14,13 @@ use crate::praxis::TurnContext;
 use crate::tools::context::AbortedToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
+use crate::tools::loop_guard::ToolLoopDecision;
 use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolPreparation;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
 use crate::tools::router::ToolRouter;
+use crate::tools::settlement::settle_with_cancellation;
 use praxis_loop::tool::EffectJournal;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_tools::ToolSpec;
@@ -150,6 +152,10 @@ impl ToolCallRuntime {
         self.turn_context
             .tool_loop_guard
             .record_tool_call(call.tool_name.as_str());
+        let wait_probe_decision = self
+            .turn_context
+            .tool_loop_guard
+            .record_shell_wait_probe(call.tool_name.as_str(), &call.payload);
         let router = Arc::clone(&self.router);
         let session = Arc::clone(&self.session);
         let turn = Arc::clone(&self.turn_context);
@@ -166,15 +172,15 @@ impl ToolCallRuntime {
 
         let handle: AbortOnDropHandle<Result<AnyToolResult, FunctionCallError>> =
             AbortOnDropHandle::new(tokio::spawn(async move {
-                tokio::select! {
-                    _ = cancellation_token.cancelled() => {
-                        let secs = started.elapsed().as_secs_f32().max(0.1);
-                        dispatch_span.record("aborted", true);
-                        Ok(Self::aborted_response(&call, secs))
-                    },
-                    res = crate::tools::effects::scope_effect_journal(effect_journal, async {
-                        match preparation {
-                            Some(preparation) => router
+                if let ToolLoopDecision::Block { message } = wait_probe_decision {
+                    return Err(FunctionCallError::RespondToModel(message));
+                }
+                let aborted_call = call.clone();
+                let aborted_span = dispatch_span.clone();
+                let dispatch = crate::tools::effects::scope_effect_journal(effect_journal, async {
+                    match preparation {
+                        Some(preparation) => {
+                            router
                                 .dispatch_prepared_tool_call_with_code_mode_result(
                                     session,
                                     turn,
@@ -184,8 +190,10 @@ impl ToolCallRuntime {
                                     source,
                                 )
                                 .instrument(dispatch_span.clone())
-                                .await,
-                            None => router
+                                .await
+                        }
+                        None => {
+                            router
                                 .dispatch_tool_call_with_code_mode_result(
                                     session,
                                     turn,
@@ -194,10 +202,16 @@ impl ToolCallRuntime {
                                     source,
                                 )
                                 .instrument(dispatch_span.clone())
-                                .await,
+                                .await
                         }
-                    }) => res,
-                }
+                    }
+                });
+                settle_with_cancellation(dispatch, &cancellation_token, || {
+                    let secs = started.elapsed().as_secs_f32().max(0.1);
+                    aborted_span.record("aborted", true);
+                    Ok(Self::aborted_response(&aborted_call, secs))
+                })
+                .await
             }));
 
         async move {

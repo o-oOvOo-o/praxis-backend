@@ -263,7 +263,6 @@ async fn enqueue_primary_thread_session_replays_turns_before_initial_prompt_subm
         has_chatgpt_account: false,
         model_catalog: app.model_catalog.clone(),
         feedback: praxis_feedback::PraxisFeedback::new(),
-        is_first_run: false,
         status_account_display: None,
         initial_plan_type: None,
         model: Some(model),

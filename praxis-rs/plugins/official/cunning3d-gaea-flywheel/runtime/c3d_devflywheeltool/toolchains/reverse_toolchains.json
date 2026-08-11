@@ -64,7 +64,7 @@
       "category": "repo_script",
       "required": true,
       "path_candidates": [
-        "D:\\ghost1.0\\tools\\gaea\\ghidra\\ExportFunctionArtifacts.java"
+        "{devflywheel_dir}\\ghidra\\ExportFunctionArtifacts.java"
       ],
       "redistribution": "repo",
       "license_policy": "project_owned",

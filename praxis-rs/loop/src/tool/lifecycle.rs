@@ -10,6 +10,7 @@ use crate::outcome::TurnErrorKind;
 use crate::tool::ToolCall;
 use crate::tool::ToolLifecycleSink;
 use crate::tool::ToolProgress;
+use crate::tool::ToolResult;
 
 pub(super) struct RecordedToolLifecycle<'a, P: ToolLifecycleSink + ?Sized> {
     inner: &'a P,
@@ -75,5 +76,9 @@ where
             content: progress.content.clone(),
         })?;
         self.inner.tool_progress(progress).await
+    }
+
+    async fn tool_execution_completed(&self, result: &ToolResult) -> LoopResult<()> {
+        self.inner.tool_execution_completed(result).await
     }
 }

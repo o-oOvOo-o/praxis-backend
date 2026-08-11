@@ -58,5 +58,20 @@ if ($null -eq $FlywheelArgs -or $FlywheelArgs.Count -eq 0) {
     $FlywheelArgs = @("toolbox", "--json")
 }
 
+if ($FlywheelArgs[0] -in @("hot", "hot-ts")) {
+    $env:PYTHONDONTWRITEBYTECODE = "1"
+    $bun = Get-Command bun -ErrorAction SilentlyContinue
+    if ($null -eq $bun) {
+        throw "Bun is required for the TypeScript hot flywheel."
+    }
+    $hotRunner = Join-Path $runtime "hot/run.ts"
+    if (-not (Test-Path -LiteralPath $hotRunner -PathType Leaf)) {
+        throw "The TypeScript hot flywheel runner is missing: $hotRunner"
+    }
+    $hotArgs = @($FlywheelArgs | Select-Object -Skip 1)
+    & $bun.Source $hotRunner @hotArgs
+    exit $LASTEXITCODE
+}
+
 & $runner -- @FlywheelArgs
 exit $LASTEXITCODE

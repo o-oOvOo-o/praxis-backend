@@ -32,7 +32,9 @@ impl ChatWidget {
             if !self.agent_turn_running {
                 self.on_task_started();
             }
-            let header = if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval) {
+            let header = if active_flags.contains(&ThreadActiveFlag::WaitingOnResource) {
+                "Waiting for resource"
+            } else if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval) {
                 "Waiting for approval"
             } else if active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) {
                 "Waiting for input"

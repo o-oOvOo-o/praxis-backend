@@ -13,6 +13,7 @@ pub(super) async fn emit_turn_complete(
     turn_context: &Arc<TurnContext>,
     last_agent_message: Option<String>,
     turn_completed: bool,
+    runtime_command_id: Option<&str>,
 ) {
     if let Err(err) = session
         .goal_runtime_apply(GoalRuntimeEvent::TurnFinished {
@@ -37,8 +38,9 @@ pub(super) async fn emit_turn_complete(
     if let Err(err) = session
         .services
         .agent_os
-        .complete_active_runtime_command_for_thread(
+        .complete_runtime_command_for_turn(
             session.conversation_id,
+            runtime_command_id,
             turn_completed,
             if turn_completed {
                 "turn_finished"

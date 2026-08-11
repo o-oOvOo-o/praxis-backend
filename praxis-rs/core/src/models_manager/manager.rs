@@ -5,6 +5,7 @@ use crate::config::Config;
 use crate::error::PraxisErr;
 use crate::error::Result as CoreResult;
 use crate::llm::provider::ANTHROPIC_PROVIDER_ID;
+use crate::llm::provider::DEEPSEEK_PROVIDER_ID;
 use crate::llm::provider::KIMI_PROVIDER_ID;
 use crate::llm::provider::ModelProviderInfo;
 use crate::llm::provider::OPENAI_PROVIDER_ID;
@@ -67,6 +68,13 @@ pub fn first_party_model_presets_for_config(config: &Config) -> Vec<ProviderMode
         (
             ANTHROPIC_PROVIDER_ID,
             model_info::anthropic_model_infos()
+                .into_iter()
+                .map(ModelPreset::from)
+                .collect(),
+        ),
+        (
+            DEEPSEEK_PROVIDER_ID,
+            model_info::deepseek_model_infos()
                 .into_iter()
                 .map(ModelPreset::from)
                 .collect(),

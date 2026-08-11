@@ -142,6 +142,7 @@ mod feature_flags;
 mod key_event_handlers;
 mod loaded_threads;
 mod mouse_interaction;
+mod mouse_selection_text;
 mod pending_interactive_replay;
 mod provider_policy_events;
 mod runtime_settings;
@@ -321,6 +322,12 @@ pub(crate) struct App {
 
     pub(crate) transcript_cells: Vec<Arc<dyn HistoryCell>>,
     history_view_generation: u64,
+    /// While a restored thread is being projected, ignore intermediate draw requests.
+    ///
+    /// Replay emits many history-cell events. Allowing terminal draws between those events makes
+    /// a thread switch visibly scroll through its transcript and competes with input handling.
+    /// The generation guards the eventual replay-end event against a newer thread switch.
+    thread_replay_buffer_generation: Option<u64>,
 
     // Pager overlay state (Transcript or Static like Diff)
     pub(crate) overlay: Option<Overlay>,

@@ -1,6 +1,13 @@
 use super::App;
 use super::AppRunControl;
 use super::TERMINAL_ZOOM_MOUSE_RELEASE;
+use super::mouse_selection_text::MouseDragSelection;
+use super::mouse_selection_text::MouseSelectionMode;
+use super::mouse_selection_text::PaneTextSnapshot;
+use super::mouse_selection_text::capture_pane_text;
+use super::mouse_selection_text::extract_pane_selection;
+use super::mouse_selection_text::selected_snapshot_cells;
+use super::mouse_selection_text::selection_blocks_pane_scroll;
 use super::workspace_render::WORKSPACE_LIST_TOP_PADDING;
 use super::workspace_render::WORKSPACE_ROW_HEIGHT;
 use crate::app_gateway_session::AppGatewaySession;
@@ -116,35 +123,6 @@ pub(super) struct MouseDownState {
     pub(super) workspace_target: Option<WorkspaceMouseTarget>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct MouseDragSelection {
-    pub(super) pane: MousePane,
-    pub(super) mode: MouseSelectionMode,
-    pub(super) start_column: u16,
-    pub(super) start_row: u16,
-    pub(super) end_column: u16,
-    pub(super) end_row: u16,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum MouseSelectionMode {
-    Range,
-    FullPane,
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct PaneTextSnapshot {
-    pub(super) area: Rect,
-    pub(super) lines: Vec<String>,
-    pub(super) row_ranges: Vec<Option<PaneTextRowRange>>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(super) struct PaneTextRowRange {
-    pub(super) start: u16,
-    pub(super) end: u16,
-}
-
 impl MouseInteractionState {
     fn snapshot_for_pane(&self, pane: MousePane) -> Option<&PaneTextSnapshot> {
         match pane {
@@ -172,176 +150,6 @@ pub(super) fn rect_contains(area: Rect, column: u16, row: u16) -> bool {
         && column < area.right()
         && row >= area.y
         && row < area.bottom()
-}
-
-impl PaneTextSnapshot {
-    fn empty(area: Rect) -> Self {
-        Self {
-            area,
-            lines: Vec::new(),
-            row_ranges: Vec::new(),
-        }
-    }
-
-    fn row_range_at(&self, row: u16) -> Option<PaneTextRowRange> {
-        if row < self.area.y || row >= self.area.bottom() {
-            return None;
-        }
-        self.row_ranges
-            .get(usize::from(row.saturating_sub(self.area.y)))
-            .copied()
-            .flatten()
-    }
-}
-
-fn symbol_has_visible_text(symbol: &str) -> bool {
-    symbol.chars().any(|ch| !ch.is_whitespace())
-}
-
-pub(super) fn capture_pane_text(buf: &ratatui::buffer::Buffer, area: Rect) -> PaneTextSnapshot {
-    if area.is_empty() {
-        return PaneTextSnapshot::empty(area);
-    }
-
-    let mut lines = Vec::with_capacity(area.height as usize);
-    let mut row_ranges = Vec::with_capacity(area.height as usize);
-    for y in area.y..area.bottom() {
-        let mut line = String::new();
-        let mut first_visible = None;
-        let mut last_visible = None;
-        for x in area.x..area.right() {
-            let symbol = buf[(x, y)].symbol();
-            if symbol_has_visible_text(symbol) {
-                first_visible.get_or_insert(x);
-                last_visible = Some(x);
-            }
-            line.push_str(symbol);
-        }
-        lines.push(line.trim_end().to_string());
-        row_ranges.push(
-            first_visible
-                .zip(last_visible)
-                .map(|(start, end)| PaneTextRowRange { start, end }),
-        );
-    }
-    PaneTextSnapshot {
-        area,
-        lines,
-        row_ranges,
-    }
-}
-
-fn ordered_selection_points(
-    area: Rect,
-    selection: MouseDragSelection,
-) -> Option<((u16, u16), (u16, u16))> {
-    if area.is_empty() {
-        return None;
-    }
-
-    let clamp_x = |x: u16| x.clamp(area.x, area.right().saturating_sub(1));
-    let clamp_y = |y: u16| y.clamp(area.y, area.bottom().saturating_sub(1));
-    let start = (
-        clamp_x(selection.start_column),
-        clamp_y(selection.start_row),
-    );
-    let end = (clamp_x(selection.end_column), clamp_y(selection.end_row));
-    if (start.1, start.0) <= (end.1, end.0) {
-        Some((start, end))
-    } else {
-        Some((end, start))
-    }
-}
-
-pub(super) fn selected_snapshot_cells(
-    snapshot: &PaneTextSnapshot,
-    selection: MouseDragSelection,
-) -> Vec<(u16, u16)> {
-    let Some(((start_x, start_y), (end_x, end_y))) =
-        ordered_selection_points(snapshot.area, selection)
-    else {
-        return Vec::new();
-    };
-
-    let mut cells = Vec::new();
-    for y in start_y..=end_y {
-        let Some(range) = snapshot.row_range_at(y) else {
-            continue;
-        };
-        let row_start = if y == start_y {
-            start_x
-        } else {
-            snapshot.area.x
-        };
-        let row_end = if y == end_y {
-            end_x
-        } else {
-            snapshot.area.right().saturating_sub(1)
-        };
-        let row_start = row_start.max(range.start);
-        let row_end = row_end.min(range.end);
-        if row_start > row_end {
-            continue;
-        }
-        for x in row_start..=row_end {
-            cells.push((x, y));
-        }
-    }
-    cells
-}
-
-fn extract_line_range(line: &str, start: usize, end_inclusive: usize) -> String {
-    let width = end_inclusive.saturating_sub(start).saturating_add(1);
-    line.chars().skip(start).take(width).collect::<String>()
-}
-
-pub(super) fn extract_pane_selection(
-    snapshot: &PaneTextSnapshot,
-    selection: MouseDragSelection,
-) -> String {
-    let Some(((start_x, start_y), (end_x, end_y))) =
-        ordered_selection_points(snapshot.area, selection)
-    else {
-        return String::new();
-    };
-
-    let start_row = usize::from(start_y.saturating_sub(snapshot.area.y));
-    let end_row = usize::from(end_y.saturating_sub(snapshot.area.y));
-
-    let mut selected = Vec::new();
-    for row in start_row..=end_row {
-        let Some(line) = snapshot.lines.get(row) else {
-            continue;
-        };
-        let absolute_y = snapshot.area.y.saturating_add(row as u16);
-        let Some(range) = snapshot.row_range_at(absolute_y) else {
-            selected.push(String::new());
-            continue;
-        };
-        let row_start = if row == start_row {
-            start_x
-        } else {
-            snapshot.area.x
-        }
-        .max(range.start);
-        let row_end = if row == end_row {
-            end_x
-        } else {
-            snapshot.area.right().saturating_sub(1)
-        }
-        .min(range.end);
-        if row_start > row_end {
-            continue;
-        }
-        let row_start = usize::from(row_start.saturating_sub(snapshot.area.x));
-        let row_end = usize::from(row_end.saturating_sub(snapshot.area.x));
-        selected.push(
-            extract_line_range(line, row_start, row_end)
-                .trim_end()
-                .to_string(),
-        );
-    }
-    selected.join("\n").trim_end().to_string()
 }
 
 impl App {
@@ -441,6 +249,9 @@ impl App {
             .is_some_and(|area| rect_contains(area, mouse_event.column, mouse_event.row))
         {
             return false;
+        }
+        if selection_blocks_pane_scroll(self.mouse.selection, self.mouse.drag, MousePane::Chat) {
+            return true;
         }
         if !self.chat_widget.handle_bottom_pane_mouse_event(mouse_event) {
             return false;
@@ -924,10 +735,14 @@ impl App {
                 .chat_area
                 .is_some_and(|area| rect_contains(area, column, row))
             {
-                let scrolled = self.workspace.scroll_chat(delta_rows);
-                if scrolled {
-                    self.clear_mouse_selection_for_pane(MousePane::Chat);
+                if selection_blocks_pane_scroll(
+                    self.mouse.selection,
+                    self.mouse.drag,
+                    MousePane::Chat,
+                ) {
+                    return true;
                 }
+                let scrolled = self.workspace.scroll_chat(delta_rows);
                 self.mouse.focused_pane = Some(MousePane::Chat);
                 return scrolled;
             }
@@ -938,13 +753,17 @@ impl App {
             .list_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
+            if selection_blocks_pane_scroll(
+                self.mouse.selection,
+                self.mouse.drag,
+                MousePane::WorkspaceList,
+            ) {
+                return true;
+            }
             let visible_rows = self.workspace_visible_row_capacity();
             let previous_hover_thread = self.mouse.hover_workspace_thread_index;
             let previous_hover_target = self.mouse.hover_workspace_target;
             let scrolled = self.workspace.scroll_list(delta_rows, visible_rows);
-            if scrolled {
-                self.clear_mouse_selection_for_pane(MousePane::WorkspaceList);
-            }
             self.mouse.focused_pane = Some(MousePane::WorkspaceList);
             self.mouse.hover_workspace_thread_index = self.workspace_thread_index_at(column, row);
             self.mouse.hover_workspace_target = self.workspace_mouse_target_at(column, row);
@@ -965,17 +784,15 @@ impl App {
             .chat_area
             .is_some_and(|area| rect_contains(area, column, row))
         {
+            if selection_blocks_pane_scroll(self.mouse.selection, self.mouse.drag, MousePane::Chat)
+            {
+                return true;
+            }
             if let Some(scrolled) = self.workspace.handle_main_pane_scroll(delta_rows) {
-                if scrolled {
-                    self.clear_mouse_selection_for_pane(MousePane::Chat);
-                }
                 self.mouse.focused_pane = Some(MousePane::Chat);
                 return scrolled;
             }
             let scrolled = self.workspace.scroll_chat(delta_rows);
-            if scrolled {
-                self.clear_mouse_selection_for_pane(MousePane::Chat);
-            }
             self.mouse.focused_pane = Some(MousePane::Chat);
             return scrolled;
         }

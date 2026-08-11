@@ -19,6 +19,7 @@ pub(super) fn spawn_task_runner(
     span_name: &'static str,
     task_cancellation_token: CancellationToken,
     done: Arc<Notify>,
+    runtime_command_id: Option<String>,
 ) -> JoinHandle<()> {
     let task_span = info_span!(
         "turn",
@@ -41,7 +42,11 @@ pub(super) fn spawn_task_runner(
             session.flush_rollout().await;
             if !task_cancellation_token.is_cancelled() {
                 session
-                    .on_task_finished(Arc::clone(&ctx_for_finish), last_agent_message)
+                    .on_task_finished(
+                        Arc::clone(&ctx_for_finish),
+                        last_agent_message,
+                        runtime_command_id,
+                    )
                     .await;
             }
             done.notify_waiters();

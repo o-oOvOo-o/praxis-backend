@@ -19,22 +19,14 @@ impl AgentOs {
         let ticket_intent_plan_id = intent_plan_id.clone();
         let task_id = context.task.task_id.clone();
 
-        let lease_ids = match self
+        let lease_ids = self
             .acquire_required_leases(
                 thread_id,
                 task_id.as_str(),
                 context.thread.priority.max(context.task.priority),
                 &intent.required_resources,
             )
-            .await
-        {
-            Ok(lease_ids) => lease_ids,
-            Err(err) => {
-                self.mark_thread_state(thread_id, ThreadRuntimeState::WaitingForLease)
-                    .await;
-                return Err(err);
-            }
-        };
+            .await?;
 
         let ticket = ExecutionTicket {
             ticket_id: format!("exec-ticket-{}", Uuid::new_v4()),

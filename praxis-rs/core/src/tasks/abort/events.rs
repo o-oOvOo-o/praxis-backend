@@ -22,12 +22,16 @@ pub(super) async fn emit_turn_aborted(
         .await;
 }
 
-pub(super) async fn complete_aborted_runtime_command(session: &Session) {
+pub(super) async fn complete_aborted_runtime_command(
+    session: &Session,
+    runtime_command_id: Option<&str>,
+) {
     if let Err(err) = session
         .services
         .agent_os
-        .complete_active_runtime_command_for_thread(
+        .complete_runtime_command_for_turn(
             session.conversation_id,
+            runtime_command_id,
             /*succeeded*/ false,
             "turn_aborted",
         )

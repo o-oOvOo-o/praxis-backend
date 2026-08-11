@@ -7,6 +7,7 @@ use praxis_core::KIMI_PROVIDER_ID;
 use praxis_core::ModelProviderCompatInfo;
 use praxis_core::ModelProviderInfo;
 use praxis_core::ModelProviderThinkingFormat;
+use praxis_core::OPENAI_PROVIDER_ID;
 use praxis_core::WireApi;
 use praxis_login::ProviderApiKey;
 use praxis_protocol::openai_models::ReasoningEffort;
@@ -16,15 +17,25 @@ use zeroize::Zeroizing;
 
 pub(crate) const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 pub(crate) const COMMON_PROVIDER_ID: &str = "common";
+pub(crate) const RESPONSES_API_PROVIDER_ID: &str = "responses-api";
+pub(crate) const CLAUDE_API_PROVIDER_ID: &str = "claude-api";
 pub(crate) const COMMON_API_KEY_CREDENTIAL_ID: &str = "PRAXIS_COMMON_API_KEY";
+pub(crate) const RESPONSES_API_KEY_ENV_VAR: &str = "PRAXIS_RESPONSES_API_KEY";
+pub(crate) const CLAUDE_API_KEY_ENV_VAR: &str = "PRAXIS_CLAUDE_API_KEY";
+pub(crate) const OPENAI_API_KEY_ENV_VAR: &str = "OPENAI_API_KEY";
+pub(crate) const OPENAI_API_BASE_URL: &str = "https://api.openai.com/v1";
 pub(crate) const DEFAULT_DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com";
+pub(crate) const DEFAULT_OPENAI_MODEL: &str = "gpt-5.3-codex";
 pub(crate) const DEFAULT_DEEPSEEK_MODEL: &str = "deepseek-v4-pro";
 pub(crate) const DEFAULT_ANTHROPIC_MODEL: &str = "claude-sonnet-5";
 pub(crate) const DEFAULT_KIMI_MODEL: &str = "k3[1m]";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProviderSetupKind {
+    OpenAi,
     Anthropic,
+    ResponsesApi,
+    ClaudeApi,
     DeepSeek,
     Kimi,
     Common,
@@ -57,7 +68,10 @@ impl Drop for ParsedProviderInput {
 impl ProviderSetupKind {
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Anthropic => "Anthropic",
+            Self::OpenAi => "Codex / OpenAI API key",
+            Self::Anthropic => "Anthropic API key",
+            Self::ResponsesApi => "Responses API",
+            Self::ClaudeApi => "Claude API",
             Self::DeepSeek => "DeepSeek",
             Self::Kimi => "Kimi Code",
             Self::Common => "Common OpenAI Compatible",
@@ -66,7 +80,10 @@ impl ProviderSetupKind {
 
     pub(crate) fn provider_id(self) -> &'static str {
         match self {
+            Self::OpenAi => OPENAI_PROVIDER_ID,
             Self::Anthropic => ANTHROPIC_PROVIDER_ID,
+            Self::ResponsesApi => RESPONSES_API_PROVIDER_ID,
+            Self::ClaudeApi => CLAUDE_API_PROVIDER_ID,
             Self::DeepSeek => DEEPSEEK_PROVIDER_ID,
             Self::Kimi => KIMI_PROVIDER_ID,
             Self::Common => COMMON_PROVIDER_ID,
@@ -75,7 +92,9 @@ impl ProviderSetupKind {
 
     pub(crate) fn default_base_url(self) -> &'static str {
         match self {
+            Self::OpenAi | Self::ResponsesApi => OPENAI_API_BASE_URL,
             Self::Anthropic => ANTHROPIC_API_BASE_URL,
+            Self::ClaudeApi => ANTHROPIC_API_BASE_URL,
             Self::DeepSeek => DEFAULT_DEEPSEEK_BASE_URL,
             Self::Kimi => KIMI_API_BASE_URL,
             Self::Common => "",
@@ -84,7 +103,9 @@ impl ProviderSetupKind {
 
     pub(crate) fn default_model(self) -> &'static str {
         match self {
+            Self::OpenAi => DEFAULT_OPENAI_MODEL,
             Self::Anthropic => DEFAULT_ANTHROPIC_MODEL,
+            Self::ResponsesApi | Self::ClaudeApi => "",
             Self::DeepSeek => DEFAULT_DEEPSEEK_MODEL,
             Self::Kimi => DEFAULT_KIMI_MODEL,
             Self::Common => "",
@@ -93,7 +114,10 @@ impl ProviderSetupKind {
 
     pub(crate) fn env_key(self) -> &'static str {
         match self {
+            Self::OpenAi => OPENAI_API_KEY_ENV_VAR,
             Self::Anthropic => ANTHROPIC_API_KEY_ENV_VAR,
+            Self::ResponsesApi => RESPONSES_API_KEY_ENV_VAR,
+            Self::ClaudeApi => CLAUDE_API_KEY_ENV_VAR,
             Self::DeepSeek => "DEEPSEEK_API_KEY",
             Self::Kimi => KIMI_API_KEY_ENV_VAR,
             Self::Common => COMMON_API_KEY_CREDENTIAL_ID,
@@ -101,16 +125,11 @@ impl ProviderSetupKind {
     }
 
     pub(crate) fn is_builtin(self) -> bool {
-        matches!(self, Self::Anthropic | Self::Kimi)
+        matches!(self, Self::Kimi)
     }
 
     pub(crate) fn normalize_base_url(self, raw: &str) -> Result<String, String> {
         let base_url = normalize_base_url(raw)?;
-        if matches!(self, Self::Anthropic) && base_url != ANTHROPIC_API_BASE_URL {
-            return Err(format!(
-                "Anthropic login uses the official endpoint {ANTHROPIC_API_BASE_URL}. Configure a separate custom provider for proxies."
-            ));
-        }
         if matches!(self, Self::Kimi) && base_url != KIMI_API_BASE_URL {
             return Err(format!(
                 "Kimi Code login uses the official endpoint {KIMI_API_BASE_URL}. Configure a separate custom provider for proxies."
@@ -121,7 +140,9 @@ impl ProviderSetupKind {
 
     pub(crate) fn default_effort(self) -> Option<ReasoningEffort> {
         match self {
+            Self::OpenAi => Some(ReasoningEffort::Medium),
             Self::Anthropic => Some(ReasoningEffort::High),
+            Self::ResponsesApi | Self::ClaudeApi => None,
             Self::DeepSeek => Some(ReasoningEffort::Medium),
             Self::Kimi => Some(ReasoningEffort::Max),
             Self::Common => None,
@@ -140,9 +161,20 @@ impl ProviderSetupKind {
 
     pub(crate) fn input_placeholder(self) -> String {
         match self {
+            Self::OpenAi => format!(
+                "api_key=...\nbase_url={OPENAI_API_BASE_URL}\nmodel={DEFAULT_OPENAI_MODEL}"
+            ),
             Self::Anthropic => {
-                "Paste a Claude Console API key. Optional: model=claude-sonnet-5".to_string()
+                format!(
+                    "api_key=...\nbase_url={ANTHROPIC_API_BASE_URL}\nmodel={DEFAULT_ANTHROPIC_MODEL}"
+                )
             }
+            Self::ResponsesApi => format!(
+                "api_key=...\nbase_url={OPENAI_API_BASE_URL}\nmodel=your-responses-model"
+            ),
+            Self::ClaudeApi => format!(
+                "api_key=...\nbase_url={ANTHROPIC_API_BASE_URL}\nmodel=your-claude-model"
+            ),
             Self::DeepSeek => {
                 "Paste API key. Optional lines: base_url=https://api.deepseek.com, model=deepseek-v4-pro"
                     .to_string()
@@ -157,10 +189,20 @@ impl ProviderSetupKind {
 
     pub(crate) fn input_context_label(self) -> Option<String> {
         match self {
-            Self::Anthropic => Some(
-                "Uses the official Anthropic Messages API. Claude Pro/Max does not include API usage."
+            Self::OpenAi => Some(
+                "Uses the OpenAI Responses API and the same model catalog as Codex account login."
                     .to_string(),
             ),
+            Self::Anthropic => Some(
+                "Uses the Claude Messages API and the same model catalog as Claude account login."
+                    .to_string(),
+            ),
+            Self::ResponsesApi => {
+                Some("Configure a Responses endpoint and enter its model name.".to_string())
+            }
+            Self::ClaudeApi => {
+                Some("Configure a Claude Messages endpoint and enter its model name.".to_string())
+            }
             Self::DeepSeek => Some(format!(
                 "Default: {} with {}",
                 DEFAULT_DEEPSEEK_BASE_URL, DEFAULT_DEEPSEEK_MODEL
@@ -174,13 +216,45 @@ impl ProviderSetupKind {
     }
 
     pub(crate) fn build_provider(self, base_url: String) -> ModelProviderInfo {
+        if matches!(self, Self::OpenAi | Self::ResponsesApi) {
+            let mut provider = ModelProviderInfo::create_openai_provider(Some(base_url));
+            provider.name = self.label().to_string();
+            provider.env_key = Some(self.env_key().to_string());
+            provider.env_key_instructions = Some(format!(
+                "Run `/login {}` to store this key in the operating system credential store, or set {}.",
+                self.provider_id(),
+                self.env_key()
+            ));
+            provider.requires_openai_auth = false;
+            if matches!(self, Self::ResponsesApi) {
+                provider.supports_websockets = false;
+            }
+            return provider;
+        }
         if matches!(self, Self::Anthropic) {
-            return ModelProviderInfo::create_anthropic_provider();
+            let mut provider = ModelProviderInfo::create_anthropic_provider();
+            provider.base_url = Some(base_url);
+            return provider;
+        }
+        if matches!(self, Self::ClaudeApi) {
+            let mut provider = ModelProviderInfo::create_anthropic_provider();
+            provider.name = self.label().to_string();
+            provider.base_url = Some(base_url);
+            provider.env_key = Some(self.env_key().to_string());
+            provider.env_key_instructions = Some(format!(
+                "Run `/login {}` to store this key in the operating system credential store, or set {}.",
+                self.provider_id(),
+                self.env_key()
+            ));
+            return provider;
         }
         if matches!(self, Self::Kimi) {
             return ModelProviderInfo::create_kimi_provider();
         }
         let compat = match self {
+            Self::OpenAi | Self::ResponsesApi | Self::ClaudeApi => {
+                unreachable!("specialized provider returned above")
+            }
             Self::Anthropic => unreachable!("Anthropic provider returned above"),
             Self::Kimi => unreachable!("Kimi provider returned above"),
             Self::DeepSeek => Some(ModelProviderCompatInfo {
@@ -419,13 +493,50 @@ mod tests {
     }
 
     #[test]
-    fn anthropic_setup_rejects_proxy_endpoint_under_reserved_provider_id() {
-        let error = ProviderSetupKind::Anthropic
+    fn anthropic_setup_accepts_configurable_endpoint_under_shared_model_catalog() {
+        let selection = ProviderSetupKind::Anthropic
             .parse_selection(&format!(
                 "api_key={TEST_API_KEY} base_url=https://proxy.example.test"
             ))
-            .expect_err("reserved Anthropic provider must use the official endpoint");
-        assert!(error.contains(ANTHROPIC_API_BASE_URL));
+            .expect("Anthropic API key endpoint");
+        assert_eq!(selection.provider_id, ANTHROPIC_PROVIDER_ID);
+        assert_eq!(
+            selection.provider.base_url.as_deref(),
+            Some("https://proxy.example.test")
+        );
+    }
+
+    #[test]
+    fn openai_api_key_reuses_official_provider_and_responses_wire() {
+        let selection = ProviderSetupKind::OpenAi
+            .parse_selection("openai-test-key")
+            .expect("OpenAI provider setup");
+        assert_eq!(selection.provider_id, OPENAI_PROVIDER_ID);
+        assert_eq!(selection.model, DEFAULT_OPENAI_MODEL);
+        assert_eq!(selection.provider.wire_api, WireApi::Responses);
+        assert!(!selection.provider.requires_openai_auth);
+        assert_eq!(
+            selection.provider.env_key.as_deref(),
+            Some(OPENAI_API_KEY_ENV_VAR)
+        );
+    }
+
+    #[test]
+    fn custom_wire_providers_require_model_and_keep_distinct_credentials() {
+        let responses = ProviderSetupKind::ResponsesApi
+            .parse_selection(
+                "api_key=responses-key base_url=https://responses.example/v1 model=my-gpt",
+            )
+            .expect("Responses provider setup");
+        let claude = ProviderSetupKind::ClaudeApi
+            .parse_selection("api_key=claude-key base_url=https://claude.example model=my-claude")
+            .expect("Claude provider setup");
+        assert_eq!(responses.provider_id, RESPONSES_API_PROVIDER_ID);
+        assert_eq!(responses.provider.wire_api, WireApi::Responses);
+        assert_eq!(responses.model, "my-gpt");
+        assert_eq!(claude.provider_id, CLAUDE_API_PROVIDER_ID);
+        assert_eq!(claude.provider.wire_api, WireApi::Claude);
+        assert_eq!(claude.model, "my-claude");
     }
 
     #[test]

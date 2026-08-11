@@ -101,7 +101,7 @@ impl OnboardingScreen {
         )));
         if show_login_screen {
             let highlighted_mode = match forced_login_method {
-                Some(ForcedLoginMethod::Api) => SignInOption::DeepSeekApiKey,
+                Some(ForcedLoginMethod::Api) => SignInOption::OpenAiApiKey,
                 _ => SignInOption::ChatGpt,
             };
             if let Some(app_gateway_request_handle) = app_gateway_request_handle {

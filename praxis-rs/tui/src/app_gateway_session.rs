@@ -65,6 +65,8 @@ use praxis_app_gateway_protocol::ThreadLoadedListParams;
 use praxis_app_gateway_protocol::ThreadLoadedListResponse;
 use praxis_app_gateway_protocol::ThreadLookupParams;
 use praxis_app_gateway_protocol::ThreadLookupResponse;
+use praxis_app_gateway_protocol::ThreadPermissionsSetParams;
+use praxis_app_gateway_protocol::ThreadPermissionsSetResponse;
 use praxis_app_gateway_protocol::ThreadReadParams;
 use praxis_app_gateway_protocol::ThreadReadResponse;
 use praxis_app_gateway_protocol::ThreadRealtimeAppendAudioParams;
@@ -464,6 +466,18 @@ fn thread_attach_params(thread_id: ThreadId) -> ThreadResumeParams {
     }
 }
 
+fn thread_permissions_set_params_from_config(
+    config: &Config,
+    thread_id: ThreadId,
+) -> ThreadPermissionsSetParams {
+    ThreadPermissionsSetParams {
+        thread_id: thread_id.to_string(),
+        approval_policy: config.permissions.approval_policy.value().into(),
+        approvals_reviewer: config.approvals_reviewer.into(),
+        sandbox_policy: config.permissions.sandbox_policy.get().clone().into(),
+    }
+}
+
 fn thread_cwd_from_config(config: &Config, thread_params_mode: ThreadParamsMode) -> Option<String> {
     match thread_params_mode {
         ThreadParamsMode::Embedded => Some(config.cwd.to_string_lossy().to_string()),
@@ -740,6 +754,39 @@ mod tests {
         assert_eq!(start.model_provider, None);
         assert_eq!(resume.model_provider, None);
         assert_eq!(fork.model_provider, None);
+    }
+
+    #[tokio::test]
+    async fn thread_permissions_set_params_use_tui_permissions() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let mut config = build_config(&temp_dir).await;
+        config
+            .permissions
+            .approval_policy
+            .set(AskForApproval::Never)
+            .expect("approval policy");
+        config
+            .permissions
+            .sandbox_policy
+            .set(SandboxPolicy::DangerFullAccess)
+            .expect("sandbox policy");
+        let thread_id = ThreadId::new();
+
+        let params = thread_permissions_set_params_from_config(&config, thread_id);
+
+        assert_eq!(params.thread_id, thread_id.to_string());
+        assert_eq!(
+            params.approval_policy,
+            praxis_app_gateway_protocol::AskForApproval::Never
+        );
+        assert_eq!(
+            params.approvals_reviewer,
+            praxis_app_gateway_protocol::ApprovalsReviewer::User
+        );
+        assert_eq!(
+            params.sandbox_policy,
+            praxis_app_gateway_protocol::SandboxPolicy::DangerFullAccess
+        );
     }
 
     #[test]

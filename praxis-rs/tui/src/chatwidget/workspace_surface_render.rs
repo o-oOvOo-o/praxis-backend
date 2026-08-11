@@ -40,6 +40,47 @@ use crate::toast_queue::ToastSeverity;
 use crate::ui_language::UiLanguage;
 use crate::workspace::LaunchStripState;
 
+const WORKSPACE_CAT_TAIL_FRAMES: [[&str; 3]; 6] = [
+    [
+        " ~~~\\_                              ",
+        "     `-..__                    /\\_/\\ ",
+        "          `--..----..________( o.o )",
+    ],
+    [
+        "   ~~~\\_                            ",
+        "       `-.._                  /\\_/\\ ",
+        "           `--.----.._______( o.o )",
+    ],
+    [
+        "      ~~\\_                          ",
+        "         `-.._                /\\_/\\ ",
+        "             `----..________( o.o )",
+    ],
+    [
+        "                                    ",
+        " ~~~~~~--..__                /\\_/\\ ",
+        "             `----..________( o.o )",
+    ],
+    [
+        "       __..--~~~~~~                   ",
+        "  _..-'          `--.         /\\_/\\ ",
+        "                    `-.______( o.o )",
+    ],
+    [
+        "          __~~~~                      ",
+        "      _.-'     `-._           /\\_/\\ ",
+        "  _.-'             `-.______( -.- )",
+    ],
+];
+const WORKSPACE_CAT_BODY: [&str; 5] = [
+    "        .-'                   > ^ < ",
+    "       /       .---------.         \\",
+    "      (_______/           \\________)",
+    "          /_/             \\_\\       ",
+    " ───────────────────────────────────",
+];
+const WORKSPACE_CAT_WIDTH: usize = 38;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ChatMouseSelectionAreas {
     pub(crate) transcript: Option<Rect>,
@@ -63,6 +104,10 @@ impl Renderable for ChatWidget {
 }
 
 impl ChatWidget {
+    pub(crate) fn set_workspace_entry_surface_enabled(&mut self, enabled: bool) {
+        self.workspace_entry_surface_enabled = enabled;
+    }
+
     pub(crate) fn render_standalone_chat(
         &self,
         area: Rect,
@@ -108,6 +153,10 @@ impl ChatWidget {
         launch: &LaunchStripState,
         framed: bool,
     ) {
+        let area = area.intersection(buf.area);
+        if area.is_empty() {
+            return;
+        }
         let theme = self.workspace_theme();
         if framed {
             self.render_deepseek_background(area, buf);
@@ -688,7 +737,7 @@ impl ChatWidget {
     }
 
     fn workspace_entry_state_active(&self) -> bool {
-        self.thread_id.is_none() && self.active_cell.is_none()
+        self.workspace_entry_surface_enabled && self.active_cell.is_none()
     }
 
     fn render_workspace_entry_intro(&self, layout: ChatWidgetLayout, buf: &mut Buffer) {
@@ -715,37 +764,51 @@ impl ChatWidget {
             UiLanguage::Cn => "此工作区的新协调线程。",
         };
         let theme = self.workspace_theme();
-        let cat = self.workspace_cat_frame();
-        let lines = vec![
-            Line::from(Span::styled(cat[0], Style::default().fg(theme.accent))),
-            Line::from(Span::styled(cat[1], Style::default().fg(theme.accent))),
-            Line::from(Span::styled(cat[2], Style::default().fg(theme.accent))),
+        let mut lines = self
+            .workspace_cat_tail_frame()
+            .iter()
+            .chain(WORKSPACE_CAT_BODY.iter())
+            .map(|line| {
+                Line::from(Span::styled(
+                    format!("{line:<width$}", width = WORKSPACE_CAT_WIDTH),
+                    Style::default().fg(theme.accent),
+                ))
+            })
+            .collect::<Vec<_>>();
+        lines.extend([
             Line::from(""),
             Line::from(Span::styled(
                 title,
                 Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
             )),
             Line::from(Span::styled(subtitle, Style::default().fg(theme.muted))),
-        ];
+        ]);
+        if let Some(notice) = self
+            .startup_tooltip_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|notice| !notice.is_empty())
+        {
+            lines.push(Line::from(Span::styled(
+                notice.to_owned(),
+                Style::default().fg(theme.muted),
+            )));
+        }
         Paragraph::new(Text::from(lines))
             .alignment(Alignment::Center)
             .render(area, buf);
     }
 
-    fn workspace_cat_frame(&self) -> [&'static str; 3] {
+    fn workspace_cat_tail_frame(&self) -> &'static [&'static str; 3] {
         if !self.tui_config.animations {
-            return [" /\\_/\\ ", "( o.o )", " > ^ < "];
+            return &WORKSPACE_CAT_TAIL_FRAMES[0];
         }
         let frame = Instant::now()
             .duration_since(self.terminal_title_animation_origin)
             .as_millis()
-            / 700
-            % 3;
-        match frame {
-            1 => [" /\\_/\\ ", "( -.- )", " > ^ < "],
-            2 => [" /\\_/\\ ", "( o.o )", "  / \\  "],
-            _ => [" /\\_/\\ ", "( o.o )", " > ^ < "],
-        }
+            / 220
+            % WORKSPACE_CAT_TAIL_FRAMES.len() as u128;
+        &WORKSPACE_CAT_TAIL_FRAMES[frame as usize]
     }
 
     fn bottom_pane_total_height(&self, width: u16) -> u16 {

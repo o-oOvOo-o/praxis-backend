@@ -882,6 +882,7 @@ impl ThreadStatus {
 #[serde(rename_all = "camelCase")]
 pub enum ThreadActiveFlag {
     Running,
+    WaitingOnResource,
     WaitingOnApproval,
     WaitingOnUserInput,
     Controlled,

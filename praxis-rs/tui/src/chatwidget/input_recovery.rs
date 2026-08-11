@@ -131,11 +131,18 @@ impl ChatWidget {
             selfwork_runtime: self.selfwork_runtime,
             task_running: self.bottom_pane.is_task_running(),
             agent_turn_running: self.agent_turn_running,
+            turn_elapsed_seconds: self
+                .bottom_pane
+                .status_widget()
+                .map(crate::status_indicator_widget::StatusIndicatorWidget::elapsed_seconds),
         })
     }
 
     pub(crate) fn restore_thread_input_state(&mut self, input_state: Option<ThreadInputState>) {
         let restored_task_running = input_state.as_ref().is_some_and(|state| state.task_running);
+        let restored_elapsed_seconds = input_state
+            .as_ref()
+            .and_then(|state| state.turn_elapsed_seconds);
         if let Some(input_state) = input_state {
             self.current_collaboration_mode = input_state.current_collaboration_mode;
             self.active_collaboration_mask = input_state.active_collaboration_mask;
@@ -207,6 +214,12 @@ impl ChatWidget {
         if restored_task_running && !self.bottom_pane.is_task_running() {
             self.bottom_pane.set_task_running(/*running*/ true);
             self.refresh_terminal_title();
+        }
+        if let (Some(status), Some(elapsed_seconds)) = (
+            self.bottom_pane.status_widget_mut(),
+            restored_elapsed_seconds,
+        ) {
+            status.restore_elapsed_seconds(elapsed_seconds);
         }
         self.refresh_pending_input_preview();
         self.request_redraw();

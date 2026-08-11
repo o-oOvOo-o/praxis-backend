@@ -3,12 +3,17 @@ use crate::thread_status::ThreadRuntimeState;
 use crate::thread_status::ThreadWatchManager;
 use crate::thread_status::resolve_thread_status;
 use praxis_app_gateway_protocol::Thread;
+use praxis_app_gateway_protocol::ThreadActiveFlag;
 use praxis_app_gateway_protocol::ThreadControlState;
 use praxis_app_gateway_protocol::ThreadStatus;
 use praxis_app_gateway_protocol::TurnStatus;
+use praxis_core::ThreadManager;
+use praxis_protocol::ThreadId;
+use std::collections::HashSet;
 
 pub(super) async fn project_thread_runtime_state_from_watch(
     thread_watch_manager: &ThreadWatchManager,
+    thread_manager: &ThreadManager,
     thread: &mut Thread,
     has_live_in_progress_turn: bool,
 ) {
@@ -16,20 +21,45 @@ pub(super) async fn project_thread_runtime_state_from_watch(
         .loaded_runtime_state_for_thread(&thread.id)
         .await;
     project_thread_runtime_state_values(thread, runtime_state, has_live_in_progress_turn);
+    project_resource_wait(thread_manager, thread).await;
 }
 
 pub(super) async fn project_thread_runtime_state_with_turn_cleanup_from_watch(
     thread_watch_manager: &ThreadWatchManager,
+    thread_manager: &ThreadManager,
     thread: &mut Thread,
     has_live_in_progress_turn: bool,
 ) {
     project_thread_runtime_state_from_watch(
         thread_watch_manager,
+        thread_manager,
         thread,
         has_live_in_progress_turn,
     )
     .await;
     interrupt_stale_turns_for_current_runtime_state(thread, has_live_in_progress_turn);
+}
+
+async fn project_resource_wait(thread_manager: &ThreadManager, thread: &mut Thread) {
+    let Ok(thread_id) = ThreadId::try_from(thread.id.as_str()) else {
+        return;
+    };
+    if !thread_manager.is_waiting_for_resource(thread_id).await {
+        return;
+    }
+
+    match &mut thread.status {
+        ThreadStatus::Active { active_flags } => {
+            if !active_flags.contains(&ThreadActiveFlag::WaitingOnResource) {
+                active_flags.push(ThreadActiveFlag::WaitingOnResource);
+            }
+        }
+        status => {
+            *status = ThreadStatus::Active {
+                active_flags: vec![ThreadActiveFlag::WaitingOnResource],
+            };
+        }
+    }
 }
 
 fn project_thread_runtime_state_values(
@@ -78,6 +108,39 @@ fn interrupt_stale_turns_for_current_runtime_state(
 }
 
 impl PraxisMessageProcessor {
+    pub(super) fn start_agent_os_status_bridge(&self) {
+        let mut changes = self.thread_manager.subscribe_coordination_changes();
+        let thread_manager = self.thread_manager.clone();
+        let thread_watch_manager = self.thread_watch_manager.clone();
+        self.background_tasks.spawn(async move {
+            let mut previous = HashSet::new();
+            loop {
+                let current = thread_manager
+                    .threads_waiting_for_resources()
+                    .await
+                    .into_iter()
+                    .map(|thread_id| thread_id.to_string())
+                    .collect::<HashSet<_>>();
+
+                for thread_id in current.difference(&previous) {
+                    thread_watch_manager
+                        .note_resource_wait(thread_id, true)
+                        .await;
+                }
+                for thread_id in previous.difference(&current) {
+                    thread_watch_manager
+                        .note_resource_wait(thread_id, false)
+                        .await;
+                }
+                previous = current;
+
+                if changes.changed().await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
     pub(super) async fn project_thread_runtime_state(
         &self,
         thread: &mut Thread,
@@ -85,6 +148,7 @@ impl PraxisMessageProcessor {
     ) {
         project_thread_runtime_state_from_watch(
             &self.thread_watch_manager,
+            self.thread_manager.as_ref(),
             thread,
             has_live_in_progress_turn,
         )
@@ -98,6 +162,7 @@ impl PraxisMessageProcessor {
     ) {
         project_thread_runtime_state_with_turn_cleanup_from_watch(
             &self.thread_watch_manager,
+            self.thread_manager.as_ref(),
             thread,
             has_live_in_progress_turn,
         )
@@ -118,18 +183,18 @@ impl PraxisMessageProcessor {
             .loaded_runtime_states_for_threads(thread_ids)
             .await;
 
-        threads
-            .into_iter()
-            .map(|mut thread| {
-                if let Some(runtime_state) = runtime_states.remove(&thread.id) {
-                    project_thread_runtime_state_values(
-                        &mut thread,
-                        runtime_state,
-                        /*has_live_in_progress_turn*/ false,
-                    );
-                }
-                thread
-            })
-            .collect()
+        let mut projected = Vec::with_capacity(threads.len());
+        for mut thread in threads {
+            if let Some(runtime_state) = runtime_states.remove(&thread.id) {
+                project_thread_runtime_state_values(
+                    &mut thread,
+                    runtime_state,
+                    /*has_live_in_progress_turn*/ false,
+                );
+            }
+            project_resource_wait(self.thread_manager.as_ref(), &mut thread).await;
+            projected.push(thread);
+        }
+        projected
     }
 }

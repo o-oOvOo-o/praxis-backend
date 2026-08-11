@@ -14,6 +14,8 @@ impl AppGatewaySession {
             })
             .await
             .wrap_err("thread/start failed during TUI bootstrap")?;
+        self.refresh_thread_permissions(config, &response.thread.id)
+            .await?;
         started_thread_from_start_response(response, config).await
     }
 
@@ -35,6 +37,8 @@ impl AppGatewaySession {
             })
             .await
             .wrap_err("thread/resume with startup overrides failed during TUI bootstrap")?;
+        self.refresh_thread_permissions(&config, &response.thread.id)
+            .await?;
         started_thread_from_resume_response(response, &config).await
     }
 
@@ -52,6 +56,8 @@ impl AppGatewaySession {
             })
             .await
             .wrap_err("thread/resume attach failed in TUI")?;
+        self.refresh_thread_permissions(config, &response.thread.id)
+            .await?;
         started_thread_from_resume_response(response, config).await
     }
 
@@ -69,6 +75,8 @@ impl AppGatewaySession {
             })
             .await
             .wrap_err("thread/resume watch failed in TUI")?;
+        self.refresh_thread_permissions(config, &response.thread.id)
+            .await?;
         started_thread_from_resume_response(response, config).await
     }
 
@@ -92,7 +100,28 @@ impl AppGatewaySession {
             })
             .await
             .wrap_err("thread/fork failed during TUI bootstrap")?;
+        self.refresh_thread_permissions(&config, &response.thread.id)
+            .await?;
         started_thread_from_fork_response(response, &config).await
+    }
+
+    pub(crate) async fn refresh_thread_permissions(
+        &mut self,
+        config: &Config,
+        thread_id: &str,
+    ) -> Result<()> {
+        let thread_id = ThreadId::from_string(thread_id)
+            .map_err(|err| color_eyre::eyre::eyre!("invalid thread id from app gateway: {err}"))?;
+        let request_id = self.next_request_id();
+        let _: ThreadPermissionsSetResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadPermissionsSet {
+                request_id,
+                params: thread_permissions_set_params_from_config(config, thread_id),
+            })
+            .await
+            .wrap_err("failed to refresh thread permissions from TUI truth")?;
+        Ok(())
     }
 
     fn thread_params_mode(&self) -> ThreadParamsMode {

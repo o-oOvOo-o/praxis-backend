@@ -42,12 +42,10 @@ pub(crate) fn classify_command(command: &[String], cwd: &Path) -> ActionIntent {
         side_effects.push("runs a prebuilt verification harness".to_string());
         (ActionIntentKind::Harness, 0.88, "medium")
     } else if is_test_command(&rendered) {
-        resources.push(ResourceRequirement::CpuHeavy);
         resources.push(ResourceRequirement::BuildCache { scope: repo_scope });
         side_effects.push("writes build/test artifacts".to_string());
         (ActionIntentKind::Test, 0.92, "medium")
     } else if is_compile_command(&rendered) {
-        resources.push(ResourceRequirement::CpuHeavy);
         resources.push(ResourceRequirement::BuildCache { scope: repo_scope });
         side_effects.push("writes build artifacts".to_string());
         (ActionIntentKind::Compile, 0.90, "medium")
@@ -62,13 +60,11 @@ pub(crate) fn classify_command(command: &[String], cwd: &Path) -> ActionIntent {
         side_effects.push("may write files".to_string());
         (ActionIntentKind::FileWrite, 0.78, "medium")
     } else if is_long_process_command(&rendered) {
-        resources.push(ResourceRequirement::CpuHeavy);
         side_effects.push("may run for a long time".to_string());
         (ActionIntentKind::LongProcess, 0.72, "medium")
     } else if is_read_only_command(&rendered) {
         (ActionIntentKind::ReadOnly, 0.84, "low")
     } else {
-        resources.push(ResourceRequirement::CpuHeavy);
         side_effects.push("unknown shell side effects".to_string());
         (ActionIntentKind::UnknownRisky, 0.40, "high")
     };

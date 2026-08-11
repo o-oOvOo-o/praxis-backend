@@ -18,6 +18,11 @@ pub(crate) fn workspace_row_status_label(row: &ThreadListRow) -> String {
         ThreadStatus::Idle if workspace_row_is_controlled(row) => "LOCK",
         ThreadStatus::NotLoaded if workspace_row_is_controlled(row) => "LOCK",
         ThreadStatus::Active { active_flags }
+            if active_flags.contains(&ThreadActiveFlag::WaitingOnResource) =>
+        {
+            "WAIT/RES"
+        }
+        ThreadStatus::Active { active_flags }
             if active_flags.contains(&ThreadActiveFlag::WaitingOnApproval)
                 || active_flags.contains(&ThreadActiveFlag::WaitingOnUserInput) =>
         {

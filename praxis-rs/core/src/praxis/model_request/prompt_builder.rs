@@ -47,9 +47,7 @@ pub(crate) fn build_prompt(
     };
     tools.retain(|spec| !turn_context.tool_loop_guard.should_hide_tool(spec.name()));
 
-    if let Some(event) = project_repeated_tool_outputs(&mut input) {
-        saving_events.push(event);
-    }
+    saving_events.extend(project_repeated_tool_outputs(&mut input));
     if let Some(event) = project_plan_working_state(&mut input) {
         saving_events.push(event);
     }
@@ -90,9 +88,10 @@ fn deferred_tool_schema_event(
     })
 }
 
-fn project_repeated_tool_outputs(input: &mut [ResponseItem]) -> Option<TokenSavingEvent> {
-    let original_tokens = serialized_token_count(input);
-    let mut first_outputs = HashMap::<(Option<bool>, String), String>::new();
+fn project_repeated_tool_outputs(input: &mut [ResponseItem]) -> Vec<TokenSavingEvent> {
+    let mut canonical_outputs = Vec::<(Option<bool>, String, String)>::new();
+    let mut saved_exact_tokens: usize = 0;
+    let mut saved_delta_tokens: usize = 0;
 
     for item in input.iter_mut() {
         let (call_id, output) = match item {
@@ -112,22 +111,79 @@ fn project_repeated_tool_outputs(input: &mut [ResponseItem]) -> Option<TokenSavi
         if approx_token_count(text) < REPEATED_OUTPUT_MIN_TOKENS {
             continue;
         }
-        let key = (success, text.clone());
-        if let Some(first_call_id) = first_outputs.get(&key) {
-            *text = format!(
-                "<praxis-reference kind=\"unchanged-tool-output\" source_call_id=\"{first_call_id}\" />"
-            );
-        } else {
-            first_outputs.insert(key, call_id.clone());
+        let original = text.clone();
+        let projection = canonical_outputs
+            .iter()
+            .find(|(candidate_success, _, candidate)| {
+                *candidate_success == success && candidate == &original
+            })
+            .map(|(_, source_call_id, _)| {
+                (
+                    TokenSavingKind::UnchangedResource,
+                    format!(
+                        "<praxis-reference kind=\"unchanged-tool-output\" source_call_id=\"{source_call_id}\" />"
+                    ),
+                )
+            })
+            .or_else(|| {
+                canonical_outputs
+                    .iter()
+                    .filter(|(candidate_success, _, candidate)| {
+                        *candidate_success == success
+                            && original.len() > candidate.len()
+                            && original.starts_with(candidate)
+                    })
+                    .max_by_key(|(_, _, candidate)| candidate.len())
+                    .map(|(_, source_call_id, candidate)| {
+                        (
+                            TokenSavingKind::OutputDelta,
+                            format!(
+                                "<praxis-reference kind=\"append-only-tool-output\" source_call_id=\"{source_call_id}\" />\n{}",
+                                &original[candidate.len()..]
+                            ),
+                        )
+                    })
+            });
+        let Some((kind, projected)) = projection else {
+            canonical_outputs.push((success, call_id.clone(), original));
+            continue;
+        };
+        let saved_tokens =
+            approx_token_count(&original).saturating_sub(approx_token_count(&projected));
+        if saved_tokens == 0 {
+            canonical_outputs.push((success, call_id.clone(), original));
+            continue;
+        }
+        *text = projected;
+        match kind {
+            TokenSavingKind::UnchangedResource => {
+                saved_exact_tokens = saved_exact_tokens.saturating_add(saved_tokens);
+            }
+            TokenSavingKind::OutputDelta => {
+                saved_delta_tokens = saved_delta_tokens.saturating_add(saved_tokens);
+            }
+            _ => unreachable!("tool output projection emitted an unsupported saving kind"),
         }
     }
 
-    savings_event(
-        TokenSavingKind::UnchangedResource,
-        original_tokens,
-        serialized_token_count(input),
-        "prompt://unchanged-tool-outputs",
-    )
+    [
+        (
+            TokenSavingKind::UnchangedResource,
+            saved_exact_tokens,
+            "prompt://unchanged-tool-outputs",
+        ),
+        (
+            TokenSavingKind::OutputDelta,
+            saved_delta_tokens,
+            "prompt://append-only-tool-output-deltas",
+        ),
+    ]
+    .into_iter()
+    .filter(|(_, saved_tokens, _)| *saved_tokens > 0)
+    .map(|(kind, saved_tokens, reference)| {
+        TokenSavingEvent::reversible(kind, saved_tokens as i64, Some(reference.to_string()))
+    })
+    .collect()
 }
 
 fn project_plan_working_state(input: &mut Vec<ResponseItem>) -> Option<TokenSavingEvent> {
@@ -149,34 +205,12 @@ fn project_plan_working_state(input: &mut Vec<ResponseItem>) -> Option<TokenSavi
         return None;
     }
 
-    let mut step_ids = HashMap::<String, usize>::new();
-    let mut steps = Vec::<String>::new();
-    let encoded_updates = updates
-        .iter()
-        .map(|(call_id, update)| {
-            let plan = update
-                .plan
-                .iter()
-                .map(|item| {
-                    let id = *step_ids.entry(item.step.clone()).or_insert_with(|| {
-                        let id = steps.len();
-                        steps.push(item.step.clone());
-                        id
-                    });
-                    serde_json::json!({ "step": id, "status": item.status })
-                })
-                .collect::<Vec<_>>();
-            serde_json::json!({
-                "call_id": call_id,
-                "explanation": update.explanation,
-                "plan": plan,
-            })
-        })
-        .collect::<Vec<_>>();
+    let (call_id, update) = updates.last()?;
     let state = serde_json::json!({
-        "format": "praxis.plan-state.v1",
-        "steps": steps,
-        "updates": encoded_updates,
+        "format": "praxis.plan-state.v2",
+        "call_id": call_id,
+        "explanation": update.explanation,
+        "plan": update.plan,
     });
     let state_text = format!(
         "<praxis-working-state>\n{}\n</praxis-working-state>",
@@ -212,7 +246,7 @@ fn project_plan_working_state(input: &mut Vec<ResponseItem>) -> Option<TokenSavi
     }
     projected.push(ResponseItem::Message {
         id: None,
-        role: "system".to_string(),
+        role: "developer".to_string(),
         content: vec![ContentItem::InputText { text: state_text }],
         end_turn: None,
         phase: None,
@@ -250,4 +284,139 @@ fn serialized_token_count<T: serde::Serialize + ?Sized>(value: &T) -> i64 {
         .ok()
         .and_then(|text| i64::try_from(approx_token_count(&text)).ok())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn update_plan_call(call_id: &str, step: &str) -> ResponseItem {
+        update_plan_call_with_explanation(call_id, step, None)
+    }
+
+    fn update_plan_call_with_explanation(
+        call_id: &str,
+        step: &str,
+        explanation: Option<&str>,
+    ) -> ResponseItem {
+        ResponseItem::FunctionCall {
+            id: None,
+            provider_metadata: None,
+            name: "update_plan".to_string(),
+            namespace: None,
+            arguments: serde_json::json!({
+                "explanation": explanation,
+                "plan": [{ "step": step, "status": "in_progress" }],
+            })
+            .to_string(),
+            call_id: call_id.to_string(),
+        }
+    }
+
+    fn tool_output(call_id: &str, text: String) -> ResponseItem {
+        ResponseItem::FunctionCallOutput {
+            call_id: call_id.to_string(),
+            output: FunctionCallOutputBody::Text(text).into(),
+        }
+    }
+
+    #[test]
+    fn plan_working_state_uses_developer_role() {
+        let repeated_step =
+            "Inspect the complete provider request boundary and preserve the shared \
+            state projection without emitting unsupported message roles. "
+                .repeat(32);
+        let mut input = vec![
+            update_plan_call("plan-1", &repeated_step),
+            update_plan_call("plan-2", &repeated_step),
+        ];
+
+        assert!(project_plan_working_state(&mut input).is_some());
+
+        let working_state_roles = input
+            .iter()
+            .filter_map(|item| match item {
+                ResponseItem::Message { role, content, .. }
+                    if content.iter().any(|item| {
+                        matches!(
+                            item,
+                            ContentItem::InputText { text }
+                                if text.contains("<praxis-working-state>")
+                        )
+                    }) =>
+                {
+                    Some(role.as_str())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(working_state_roles, vec!["developer"]);
+        assert!(
+            !input
+                .iter()
+                .any(|item| matches!(item, ResponseItem::Message { role, .. } if role == "system"))
+        );
+    }
+
+    #[test]
+    fn plan_working_state_keeps_only_the_latest_complete_snapshot() {
+        let old_step = "old step ".repeat(128);
+        let latest_step = "latest step ".repeat(128);
+        let mut input = vec![
+            update_plan_call_with_explanation("plan-1", &old_step, Some("old explanation")),
+            update_plan_call_with_explanation("plan-2", &latest_step, Some("latest explanation")),
+        ];
+
+        assert!(project_plan_working_state(&mut input).is_some());
+
+        let state = input
+            .iter()
+            .find_map(|item| match item {
+                ResponseItem::Message { content, .. } => {
+                    content.iter().find_map(|item| match item {
+                        ContentItem::InputText { text }
+                            if text.contains("<praxis-working-state>") =>
+                        {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                }
+                _ => None,
+            })
+            .expect("working state");
+
+        assert!(state.contains("praxis.plan-state.v2"));
+        assert!(state.contains("plan-2"));
+        assert!(state.contains("latest explanation"));
+        assert!(state.contains(&latest_step));
+        assert!(!state.contains("plan-1"));
+        assert!(!state.contains("old explanation"));
+        assert!(!state.contains(&old_step));
+    }
+
+    #[test]
+    fn repeated_tool_outputs_project_append_only_growth_as_a_delta() {
+        let prefix = "unchanged build output\n".repeat(128);
+        let suffix = "new compiler error\n".repeat(8);
+        let mut input = vec![
+            tool_output("call-1", prefix.clone()),
+            tool_output("call-2", format!("{prefix}{suffix}")),
+        ];
+
+        let events = project_repeated_tool_outputs(&mut input);
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, TokenSavingKind::OutputDelta);
+        let ResponseItem::FunctionCallOutput { output, .. } = &input[1] else {
+            panic!("expected function output");
+        };
+        let FunctionCallOutputBody::Text(projected) = &output.body else {
+            panic!("expected text output");
+        };
+        assert!(projected.contains("source_call_id=\"call-1\""));
+        assert!(projected.contains(&suffix));
+        assert!(!projected.contains(&prefix));
+    }
 }

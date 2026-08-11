@@ -35,6 +35,8 @@ use std::time::Duration;
 
 use super::format_exec_output_str;
 
+const TOOL_TERMINAL_EVENT_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[derive(Clone, Copy)]
 pub(crate) struct ToolEventCtx<'a> {
     pub session: &'a Session,
@@ -438,7 +440,16 @@ impl ToolEmitter {
                 (event, result)
             }
         };
-        self.emit(ctx, event).await;
+        if tokio::time::timeout(TOOL_TERMINAL_EVENT_TIMEOUT, self.emit(ctx, event))
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                call_id = ctx.call_id,
+                timeout_secs = TOOL_TERMINAL_EVENT_TIMEOUT.as_secs(),
+                "tool terminal event delivery timed out; returning the tool result"
+            );
+        }
         result
     }
 }

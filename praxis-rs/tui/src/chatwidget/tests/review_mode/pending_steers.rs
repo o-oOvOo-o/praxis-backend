@@ -21,6 +21,7 @@ async fn restore_thread_input_state_restores_pending_steers_without_downgrading_
         selfwork_runtime: SelfworkRuntimeState::default(),
         task_running: false,
         agent_turn_running: false,
+        turn_elapsed_seconds: None,
     }));
 
     assert_eq!(

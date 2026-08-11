@@ -67,6 +67,22 @@ impl ThreadManager {
         self.state.get_thread(thread_id).await
     }
 
+    /// Returns whether AgentOS has parked this thread behind a scoped resource lease.
+    pub async fn is_waiting_for_resource(&self, thread_id: ThreadId) -> bool {
+        self.state
+            .agent_os
+            .thread_is_waiting_for_lease(thread_id)
+            .await
+    }
+
+    pub async fn threads_waiting_for_resources(&self) -> Vec<ThreadId> {
+        self.state.agent_os.threads_waiting_for_lease().await
+    }
+
+    pub fn subscribe_coordination_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.state.agent_os.subscribe_changes()
+    }
+
     /// Removes the thread from the manager's internal map, though the thread is stored
     /// as `Arc<PraxisThread>`, it is possible that other references to it exist elsewhere.
     /// Returns the thread if the thread was found and removed.

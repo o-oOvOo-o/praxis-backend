@@ -1,33 +1,28 @@
 use super::*;
 
 impl AgentOs {
-    pub(crate) async fn complete_active_runtime_command_for_thread(
+    pub(crate) async fn complete_runtime_command_for_turn(
         &self,
         thread_id: ThreadId,
+        command_id: Option<&str>,
         succeeded: bool,
         reason: impl Into<String>,
     ) -> PraxisResult<Option<RuntimeCommandRecord>> {
         let reason = reason.into();
+        let Some(command_id) = command_id else {
+            return Ok(None);
+        };
         let (command_id, task_id, blocked, task_already_failed) = {
             let state = self.state.read().await;
-            let candidate = state
-                .runtime_commands
-                .values()
-                .filter(|command| {
-                    command.to_thread_id == thread_id
-                        && command.command_type == RuntimeCommandType::AssignTask
-                        && command.status.is_live()
-                })
-                .max_by_key(|command| {
-                    (
-                        command.status.active_selection_rank(),
-                        command.updated_at.timestamp_millis(),
-                    )
-                })
-                .cloned();
-            let Some(command) = candidate else {
+            let Some(command) = state.runtime_commands.get(command_id) else {
                 return Ok(None);
             };
+            if command.to_thread_id != thread_id
+                || command.command_type != RuntimeCommandType::AssignTask
+                || !command.status.is_live()
+            {
+                return Ok(None);
+            }
             let blocked = command.task_id.as_ref().is_some_and(|task_id| {
                 state.worker_requests.values().any(|request| {
                     request.thread_id == thread_id
@@ -42,7 +37,7 @@ impl AgentOs {
                 })
             });
             (
-                command.command_id,
+                command.command_id.clone(),
                 command.task_id.clone(),
                 blocked,
                 task_already_failed,

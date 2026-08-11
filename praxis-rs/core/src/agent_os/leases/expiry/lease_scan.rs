@@ -11,21 +11,26 @@ impl AgentOs {
         now: chrono::DateTime<Utc>,
     ) -> Vec<ResourceLease> {
         let mut expired = Vec::new();
-        let mut state = self.state.write().await;
-        let ids: Vec<String> = state
-            .leases
-            .iter()
-            .filter_map(|(lease_id, lease)| {
-                lease
-                    .expires_at
-                    .is_some_and(|expires_at| expires_at <= now)
-                    .then(|| lease_id.clone())
-            })
-            .collect();
-        for lease_id in ids {
-            if let Some(lease) = state.leases.remove(&lease_id) {
-                expired.push(lease);
+        {
+            let mut state = self.state.write().await;
+            let ids: Vec<String> = state
+                .leases
+                .iter()
+                .filter_map(|(lease_id, lease)| {
+                    lease
+                        .expires_at
+                        .is_some_and(|expires_at| expires_at <= now)
+                        .then(|| lease_id.clone())
+                })
+                .collect();
+            for lease_id in ids {
+                if let Some(lease) = state.leases.remove(&lease_id) {
+                    expired.push(lease);
+                }
             }
+        }
+        if !expired.is_empty() {
+            self.lease_released.notify_waiters();
         }
         expired
     }

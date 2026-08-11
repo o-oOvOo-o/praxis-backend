@@ -34,12 +34,6 @@ impl Session {
             grant_root,
         });
         self.send_event(turn_context, event).await;
-        await_pending_approval(
-            self,
-            turn_context,
-            &approval_id,
-            rx_approve,
-        )
-        .await
+        await_pending_approval(self, turn_context, &approval_id, rx_approve).await
     }
 }

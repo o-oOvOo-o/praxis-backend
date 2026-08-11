@@ -5,6 +5,7 @@ use crate::outcome::LoopResult;
 use crate::tool::ToolCall;
 use crate::tool::ToolLifecycleSink;
 use crate::tool::ToolProgress;
+use crate::tool::ToolResult;
 
 #[async_trait]
 pub trait EventSink: Send + Sync {
@@ -30,5 +31,10 @@ where
             content: progress.content,
         })
         .await
+    }
+
+    async fn tool_execution_completed(&self, result: &ToolResult) -> LoopResult<()> {
+        self.emit_event(TurnEvent::ToolExecutionCompleted(result.clone()))
+            .await
     }
 }

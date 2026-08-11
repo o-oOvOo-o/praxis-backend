@@ -12,7 +12,6 @@ use crate::file_search::FileSearchManager;
 use crate::history_cell::AgentMessageCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::UserHistoryCell;
-use crate::history_cell::new_session_info;
 use crate::multi_agents::AgentPickerThreadEntry;
 use assert_matches::assert_matches;
 
@@ -157,6 +156,8 @@ mod model_and_config;
 mod startup_and_replay;
 #[path = "app_tests/thread_event_store.rs"]
 mod thread_event_store;
+#[path = "app_tests/workspace_rendering.rs"]
+mod workspace_rendering;
 
 async fn make_test_app() -> App {
     let (chat_widget, app_event_tx, _rx, _op_rx) = make_chatwidget_manual_with_sender().await;
@@ -181,6 +182,7 @@ async fn make_test_app() -> App {
         file_search,
         transcript_cells: Vec::new(),
         history_view_generation: 0,
+        thread_replay_buffer_generation: None,
         overlay: None,
         deferred_history_lines: Vec::new(),
         has_emitted_history_lines: false,
@@ -245,6 +247,7 @@ async fn make_test_app_with_channels() -> (
             file_search,
             transcript_cells: Vec::new(),
             history_view_generation: 0,
+            thread_replay_buffer_generation: None,
             overlay: None,
             deferred_history_lines: Vec::new(),
             has_emitted_history_lines: false,

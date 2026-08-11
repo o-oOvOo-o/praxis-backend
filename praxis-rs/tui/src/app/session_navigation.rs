@@ -187,6 +187,32 @@ impl App {
         };
         self.apply_runtime_policy_overrides(&mut resume_config);
 
+        if self
+            .thread_event_channels
+            .contains_key(&target_session.thread_id)
+        {
+            let previous_config = self.config.clone();
+            let previous_tui_config = self.tui_config.clone();
+            self.config = resume_config.clone();
+            self.tui_config = resume_tui_config.clone();
+            tui.set_notification_method(self.tui_config.notification_method);
+            self.file_search
+                .update_search_dir(self.config.cwd.to_path_buf());
+            if self
+                .switch_to_cached_workspace_thread(tui, target_session.thread_id)
+                .await?
+            {
+                self.refresh_workspace_threads(app_gateway, true);
+                tui.frame_requester().schedule_frame();
+                return Ok(None);
+            }
+            self.config = previous_config;
+            self.tui_config = previous_tui_config;
+            tui.set_notification_method(self.tui_config.notification_method);
+            self.file_search
+                .update_search_dir(self.config.cwd.to_path_buf());
+        }
+
         let resumed = match app_gateway
             .attach_thread(&resume_config, target_session.thread_id)
             .await

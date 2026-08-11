@@ -59,6 +59,20 @@ async fn on_event_updates_status_from_error() {
 }
 
 #[tokio::test]
+async fn turn_complete_does_not_overwrite_terminal_error() {
+    let current = AgentStatus::Errored("boom".to_string());
+    let next = crate::agent::agent_status_after_event(
+        &current,
+        &EventMsg::TurnComplete(TurnCompleteEvent {
+            turn_id: "turn-1".to_string(),
+            last_agent_message: None,
+        }),
+    );
+
+    assert_eq!(next, None);
+}
+
+#[tokio::test]
 async fn on_event_updates_status_from_turn_aborted() {
     let status = agent_status_from_event(&EventMsg::TurnAborted(TurnAbortedEvent {
         turn_id: Some("turn-1".to_string()),

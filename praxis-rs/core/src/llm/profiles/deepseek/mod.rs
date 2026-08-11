@@ -7,6 +7,7 @@ use super::plugin::ProfileProviderPolicy;
 use super::plugin::ProfileTaskPolicyDescriptor;
 use super::plugin::ProfileToolCapabilityDescriptor;
 use crate::llm::ids::BehaviorProfileId;
+use crate::llm::provider::DEEPSEEK_PROVIDER_ID;
 use crate::llm::tasks::title::AutoTitleProfile;
 use crate::llm::tasks::title::DEEPSEEK_AUTO_TITLE_MODEL;
 
@@ -28,7 +29,7 @@ pub(crate) fn profile() -> ProfileDescriptor {
         prompt_layers: PROMPT_LAYERS,
         matcher: provider::matches,
         provider_policy: Some(ProfileProviderPolicy::first_party(
-            provider::DEEPSEEK_PROVIDER_ID,
+            DEEPSEEK_PROVIDER_ID,
             "DeepSeek",
             is_first_party_provider,
             is_first_party_model,

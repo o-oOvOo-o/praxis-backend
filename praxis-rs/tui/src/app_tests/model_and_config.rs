@@ -329,6 +329,43 @@ async fn update_reasoning_effort_updates_collaboration_mode() {
 }
 
 #[tokio::test]
+async fn tui_runtime_permissions_start_as_the_config_truth() -> Result<()> {
+    let mut app = make_test_app().await;
+    app.config
+        .permissions
+        .approval_policy
+        .set(AskForApproval::Never)?;
+    app.config
+        .permissions
+        .sandbox_policy
+        .set(SandboxPolicy::DangerFullAccess)?;
+
+    let (approval_policy, sandbox_policy) =
+        App::runtime_permission_overrides_from_config(&app.config);
+
+    assert_eq!(approval_policy, Some(AskForApproval::Never));
+    assert_eq!(sandbox_policy, Some(SandboxPolicy::DangerFullAccess));
+    Ok(())
+}
+
+#[tokio::test]
+async fn tui_permission_truth_is_persisted_for_restart() -> Result<()> {
+    let mut app = make_test_app().await;
+    let praxis_home = tempdir()?;
+    app.config.praxis_home = praxis_home.path().to_path_buf();
+
+    app.persist_tui_permission_setting("approval_policy", "never", "approval policy")
+        .await;
+    app.persist_tui_permission_setting("sandbox_mode", "danger-full-access", "sandbox policy")
+        .await;
+
+    let persisted = std::fs::read_to_string(praxis_home.path().join("config.toml"))?;
+    assert!(persisted.contains("approval_policy = \"never\""));
+    assert!(persisted.contains("sandbox_mode = \"danger-full-access\""));
+    Ok(())
+}
+
+#[tokio::test]
 async fn refresh_in_memory_config_from_disk_loads_latest_apps_state() -> Result<()> {
     let mut app = make_test_app().await;
     let praxis_home = tempdir()?;

@@ -365,6 +365,7 @@ impl App {
     /// This helper copies every known nickname/role from `AgentNavigationState` into the
     /// replacement widget so that replayed collab items render agent names immediately.
     pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
+        chat_widget.set_workspace_entry_surface_enabled(self.workspace.enabled);
         chat_widget.set_ui_language(self.chat_widget.ui_language());
         // Transfer the last-written terminal title to the replacement widget
         // so it knows what OSC title is currently displayed. Without this, the
@@ -397,9 +398,11 @@ impl App {
             return Ok(());
         }
 
-        if !self
-            .refresh_agent_picker_thread_liveness(app_gateway, thread_id)
-            .await
+        let has_cached_projection = self.thread_event_channels.contains_key(&thread_id);
+        if !has_cached_projection
+            && !self
+                .refresh_agent_picker_thread_liveness(app_gateway, thread_id)
+                .await
         {
             self.chat_widget
                 .add_error_message(format!("Agent thread {thread_id} is no longer available."));
@@ -437,7 +440,7 @@ impl App {
             return Ok(());
         }
 
-        if !live_snapshot_was_refreshed {
+        if !live_snapshot_was_refreshed && !has_cached_projection {
             let mut cached_snapshot = {
                 let Some(channel) = self.thread_event_channels.get(&thread_id) else {
                     self.chat_widget.add_error_message(format!(

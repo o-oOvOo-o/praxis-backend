@@ -366,6 +366,10 @@ pub(crate) enum AppEvent {
         generation: u64,
         cell: Box<dyn HistoryCell>,
     },
+    /// Finish an atomic thread replay and allow the terminal to draw the completed projection.
+    FinishThreadReplayBuffer {
+        generation: u64,
+    },
 
     /// Apply rollback semantics to local transcript cells.
     ///

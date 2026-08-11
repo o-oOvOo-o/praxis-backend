@@ -8,7 +8,6 @@ use std::str::FromStr;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum ResourceRequirement {
-    CpuHeavy,
     BuildCache { scope: String },
     AppRuntime { scope: String },
     Port { port: u16 },
@@ -22,7 +21,6 @@ pub(crate) enum ResourceRequirement {
 impl ResourceRequirement {
     pub(crate) fn key(&self) -> String {
         match self {
-            Self::CpuHeavy => "cpu_heavy:global".to_string(),
             Self::BuildCache { scope } => format!("build_cache:{scope}"),
             Self::AppRuntime { scope } => format!("app_runtime:{scope}"),
             Self::Port { port } => format!("port:{port}"),
@@ -40,7 +38,6 @@ impl ResourceRequirement {
 
     pub(in crate::agent_os) fn resource_type(&self) -> &'static str {
         match self {
-            Self::CpuHeavy => "cpu_heavy",
             Self::BuildCache { .. } => "build_cache",
             Self::AppRuntime { .. } => "app_runtime",
             Self::Port { .. } => "port",
@@ -54,7 +51,7 @@ impl ResourceRequirement {
 
     pub(in crate::agent_os) fn mode(&self) -> LeaseMode {
         match self {
-            Self::CpuHeavy | Self::LlmBudget { .. } => LeaseMode::Capacity,
+            Self::LlmBudget { .. } => LeaseMode::Capacity,
             _ => LeaseMode::Exclusive,
         }
     }
@@ -72,7 +69,6 @@ impl ResourceRequirement {
 
     fn effects(&self) -> ToolEffects {
         let (domain, scope) = match self {
-            Self::CpuHeavy => ("agent_os.cpu", "global".to_string()),
             Self::BuildCache { scope } => ("agent_os.build_cache", scope.clone()),
             Self::AppRuntime { scope } => ("agent_os.app_runtime", scope.clone()),
             Self::Port { port } => ("agent_os.port", port.to_string()),
@@ -100,7 +96,6 @@ fn normalize_effect_scope(scope: &str) -> String {
 impl fmt::Display for ResourceRequirement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::CpuHeavy => f.write_str("cpu_heavy"),
             Self::BuildCache { scope } => write!(f, "build_cache:{scope}"),
             Self::AppRuntime { scope } => write!(f, "app_runtime:{scope}"),
             Self::Port { port } => write!(f, "port:{port}"),
@@ -126,7 +121,6 @@ impl FromStr for ResourceRequirement {
             .map(|(kind, scope)| (kind.trim(), Some(scope.trim())))
             .unwrap_or((resource, None));
         match kind {
-            "cpu_heavy" => Ok(Self::CpuHeavy),
             "build_cache" => Ok(Self::BuildCache {
                 scope: required_resource_scope(resource, scope)?,
             }),

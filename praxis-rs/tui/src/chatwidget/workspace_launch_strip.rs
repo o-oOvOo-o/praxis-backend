@@ -39,12 +39,8 @@ impl ChatWidget {
     ) {
         match action {
             LaunchStripMouseAction::ToggleModelDropdown => {
-                if self.workspace_model_presets().is_empty() {
-                    self.show_info_toast("Models are being updated; try again in a moment.");
-                    launch.clear_dropdown();
-                } else {
-                    launch.toggle_dropdown(LaunchStripDropdown::Model);
-                }
+                launch.clear_dropdown();
+                self.open_model_popup();
             }
             LaunchStripMouseAction::ToggleReasoningDropdown => {
                 if self.workspace_reasoning_choices().is_empty() {
@@ -61,9 +57,6 @@ impl ChatWidget {
             }
             LaunchStripMouseAction::TogglePermissionsDropdown => {
                 launch.toggle_dropdown(LaunchStripDropdown::Permissions);
-            }
-            LaunchStripMouseAction::SelectModel(index) => {
-                self.apply_workspace_model_dropdown_selection(launch, index);
             }
             LaunchStripMouseAction::SelectReasoning(index) => {
                 self.apply_workspace_reasoning_dropdown_selection(launch, index);
@@ -127,76 +120,6 @@ impl ChatWidget {
             .find(|preset| Self::preset_matches_current(current_approval, current_sandbox, preset))
             .map(|preset| preset.label.to_string())
             .unwrap_or_else(|| "Custom".to_string())
-    }
-
-    fn workspace_model_presets(&self) -> Vec<ModelPreset> {
-        let models = self.model_catalog.try_list_models().unwrap_or_default();
-        let mut indexed = models
-            .into_iter()
-            .enumerate()
-            .filter(|(_, preset)| preset.show_in_picker)
-            .collect::<Vec<_>>();
-        indexed.sort_by_key(|(index, preset)| {
-            let (group, order) = Self::model_picker_primary_rank(preset);
-            (group, order, *index)
-        });
-        indexed.into_iter().map(|(_, preset)| preset).collect()
-    }
-
-    fn workspace_model_display_items(&self) -> Vec<LaunchStripDropdownItem> {
-        self.workspace_model_presets()
-            .into_iter()
-            .map(|preset| {
-                let selection = self.selection_metadata_or_current(&preset);
-                let mut description = if preset.description.trim().is_empty() {
-                    selection.provider_id.clone()
-                } else {
-                    preset.description.replace(" (Identical to Agent mode)", "")
-                };
-                if !selection.provider_id.is_empty()
-                    && !description.contains(selection.provider_id.as_str())
-                {
-                    description.push_str("  ");
-                    description.push_str(selection.provider_id.as_str());
-                }
-                LaunchStripDropdownItem {
-                    name: Self::model_picker_item_name(&preset),
-                    description: Some(description),
-                    is_current: self.is_current_model_selection(&preset),
-                    is_disabled: false,
-                }
-            })
-            .collect()
-    }
-
-    fn apply_workspace_model_dropdown_selection(
-        &mut self,
-        launch: &mut LaunchStripState,
-        index: usize,
-    ) {
-        let presets = self.workspace_model_presets();
-        let Some(preset) = presets.get(index).cloned() else {
-            launch.clear_dropdown();
-            return;
-        };
-        let selection = self.selection_metadata_or_current(&preset);
-        let model = preset.model.clone();
-        let should_prompt_plan_mode_scope = self.should_prompt_plan_mode_reasoning_scope(
-            model.as_str(),
-            selection.provider_id.as_str(),
-            Some(preset.default_reasoning_effort.clone()),
-        );
-        let actions = Self::model_selection_actions(
-            model,
-            selection.provider_id.clone(),
-            Some(selection.provider.clone()),
-            Some(preset.default_reasoning_effort),
-            should_prompt_plan_mode_scope,
-        );
-        for action in actions {
-            action(&self.app_event_tx);
-        }
-        launch.clear_dropdown();
     }
 
     fn workspace_current_model_preset(&self) -> Option<ModelPreset> {
@@ -553,20 +476,6 @@ impl ChatWidget {
         };
 
         match dropdown {
-            LaunchStripDropdown::Model => {
-                let Some(anchor) = launch.model_area.get() else {
-                    return;
-                };
-                self.render_workspace_dropdown_items(
-                    layout,
-                    buf,
-                    anchor,
-                    58,
-                    self.workspace_model_display_items(),
-                    launch,
-                    LaunchStripMouseAction::SelectModel,
-                );
-            }
             LaunchStripDropdown::Reasoning => {
                 let Some(anchor) = launch.reasoning_area.get() else {
                     return;

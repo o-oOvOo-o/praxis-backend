@@ -2,7 +2,6 @@ use super::*;
 use crate::exec_cell::CommandOutput;
 use crate::exec_cell::ExecCall;
 use crate::exec_cell::ExecCell;
-use dirs::home_dir;
 use praxis_config::types::McpServerConfig;
 use praxis_config::types::McpServerDisabledReason;
 use praxis_core::config::Config;
@@ -10,7 +9,6 @@ use praxis_core::config::ConfigBuilder;
 use praxis_otel::RuntimeMetricTotals;
 use praxis_otel::RuntimeMetricsSummary;
 use praxis_protocol::ThreadId;
-use praxis_protocol::account::PlanType;
 use praxis_protocol::models::WebSearchAction;
 use praxis_protocol::parse_command::ParsedCommand;
 use praxis_protocol::protocol::AskForApproval;
@@ -35,13 +33,6 @@ async fn test_config() -> Config {
         .build()
         .await
         .expect("config")
-}
-
-fn test_tui_config() -> TuiRuntimeConfig {
-    TuiRuntimeConfig {
-        animations: false,
-        ..Default::default()
-    }
 }
 
 fn test_cwd() -> PathBuf {
@@ -179,5 +170,4 @@ fn resource_link_block(
 mod basic_and_exec;
 mod exec_commands;
 mod mcp_and_web_search;
-mod session_header;
 mod user_plan_reasoning;

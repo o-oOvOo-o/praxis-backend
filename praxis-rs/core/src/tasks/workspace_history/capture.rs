@@ -1,6 +1,9 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use praxis_protocol::models::ResponseItem;
+use praxis_protocol::protocol::EventMsg;
+use praxis_protocol::protocol::WarningEvent;
 use praxis_protocol::workspace_history::WorkspaceCheckpointRef;
 use praxis_utils_readiness::Readiness;
 use praxis_utils_readiness::Token;
@@ -10,9 +13,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use tracing::warn;
 
-use super::timeout_warning::spawn_snapshot_timeout_warning;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
+
+// Workspace history must never make a runnable tool batch appear hung.
+const SNAPSHOT_CAPTURE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) async fn run_workspace_checkpoint_capture(
     session: Arc<Session>,
@@ -20,14 +25,24 @@ pub(super) async fn run_workspace_checkpoint_capture(
     token: Token,
     cancellation_token: CancellationToken,
 ) {
-    let checkpoint_done = spawn_snapshot_timeout_warning(
-        Arc::clone(&session),
-        Arc::clone(&ctx),
-        cancellation_token.clone(),
-    );
-
     let cancelled = tokio::select! {
         _ = cancellation_token.cancelled() => true,
+        _ = tokio::time::sleep(SNAPSHOT_CAPTURE_TIMEOUT) => {
+            warn!(
+                sub_id = ctx.sub_id.as_str(),
+                timeout_secs = SNAPSHOT_CAPTURE_TIMEOUT.as_secs(),
+                "workspace checkpoint capture timed out; releasing tool gate"
+            );
+            session
+                .send_event(
+                    &ctx,
+                    EventMsg::Warning(WarningEvent {
+                        message: "Workspace checkpoint capture timed out. Continuing without blocking tool execution; large generated directories can be excluded through `workspace_history.ignored_directory_names`.".to_string(),
+                    }),
+                )
+                .await;
+            false
+        },
         result = capture_workspace_checkpoint(
             Arc::clone(&session),
             Arc::clone(&ctx),
@@ -41,7 +56,6 @@ pub(super) async fn run_workspace_checkpoint_capture(
         },
     };
 
-    let _ = checkpoint_done.send(());
     if cancelled {
         info!("workspace checkpoint task cancelled");
     }

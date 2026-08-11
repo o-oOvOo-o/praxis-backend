@@ -29,6 +29,7 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
+pub const DEEPSEEK_PROVIDER_ID: &str = "deepseek";
 const ANTHROPIC_PROVIDER_NAME: &str = "Anthropic";
 pub const ANTHROPIC_PROVIDER_ID: &str = "anthropic";
 pub const ANTHROPIC_API_KEY_ENV_VAR: &str = "ANTHROPIC_API_KEY";

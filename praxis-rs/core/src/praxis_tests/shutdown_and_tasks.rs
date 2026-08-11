@@ -564,8 +564,12 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
     .await
     .expect("inject pending input into active turn");
 
-    sess.on_task_finished(Arc::clone(&tc), /*last_agent_message*/ None)
-        .await;
+    sess.on_task_finished(
+        Arc::clone(&tc),
+        /*last_agent_message*/ None,
+        /*runtime_command_id*/ None,
+    )
+    .await;
 
     let history = sess.clone_history().await;
     let expected = ResponseItem::Message {

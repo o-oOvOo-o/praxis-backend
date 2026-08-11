@@ -20,7 +20,6 @@ pub(crate) struct LaunchStripState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LaunchStripDropdown {
-    Model,
     Reasoning,
     Rank,
     Permissions,
@@ -32,7 +31,6 @@ pub(crate) enum LaunchStripMouseAction {
     ToggleReasoningDropdown,
     ToggleRankDropdown,
     TogglePermissionsDropdown,
-    SelectModel(usize),
     SelectReasoning(usize),
     SelectRank(u8),
     SelectPermission(usize),

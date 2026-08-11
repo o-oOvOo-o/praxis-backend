@@ -1,5 +1,5 @@
 [build]
-target-dir = "F:/cargo-target2/Cunning3D_1.0"
+target-dir = "F:/cargo-target2/Cunning3D"
 
 [target.'cfg(all(windows, target_env = "msvc"))']
 rustflags = ["-C", "link-arg=/STACK:8388608"]

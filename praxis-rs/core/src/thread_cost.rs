@@ -13,8 +13,47 @@ struct ModelPricing {
     output_usd_per_million_micros: i64,
 }
 
-// Aligned to OpenAI public pricing pages on 2026-04-03.
+/// Date on which the built-in API list prices were last verified.
+pub const MODEL_PRICING_AS_OF: &str = "2026-08-09";
+
+// Aligned to the providers' public API pricing pages on 2026-08-09.
 const MODEL_PRICING: &[ModelPricing] = &[
+    ModelPricing {
+        slug: "gpt-5.6-sol",
+        input_usd_per_million_micros: 5_000_000,
+        cached_input_usd_per_million_micros: Some(500_000),
+        output_usd_per_million_micros: 30_000_000,
+    },
+    ModelPricing {
+        slug: "gpt-5.6-terra",
+        input_usd_per_million_micros: 2_500_000,
+        cached_input_usd_per_million_micros: Some(250_000),
+        output_usd_per_million_micros: 15_000_000,
+    },
+    ModelPricing {
+        slug: "gpt-5.6-luna",
+        input_usd_per_million_micros: 1_000_000,
+        cached_input_usd_per_million_micros: Some(100_000),
+        output_usd_per_million_micros: 6_000_000,
+    },
+    ModelPricing {
+        slug: "gpt-5.6",
+        input_usd_per_million_micros: 5_000_000,
+        cached_input_usd_per_million_micros: Some(500_000),
+        output_usd_per_million_micros: 30_000_000,
+    },
+    ModelPricing {
+        slug: "deepseek-v4-flash",
+        input_usd_per_million_micros: 140_000,
+        cached_input_usd_per_million_micros: Some(2_800),
+        output_usd_per_million_micros: 280_000,
+    },
+    ModelPricing {
+        slug: "deepseek-v4-pro",
+        input_usd_per_million_micros: 435_000,
+        cached_input_usd_per_million_micros: Some(3_625),
+        output_usd_per_million_micros: 870_000,
+    },
     ModelPricing {
         slug: "gpt-5.4-pro",
         input_usd_per_million_micros: 20_000_000,
@@ -180,6 +219,17 @@ pub(crate) fn estimate_turn_cost_micros(model_slug: &str, usage: &TokenUsage) ->
             .saturating_add(cached_cost)
             .saturating_add(output_cost),
     )
+}
+
+/// Returns the model's list input price in USD micros per one million tokens.
+pub fn input_price_usd_per_million_micros(model_slug: &str) -> Option<i64> {
+    pricing_for_model(model_slug).map(|pricing| pricing.input_usd_per_million_micros)
+}
+
+/// Estimates the list-price value of input tokens avoided by Praxis.
+pub fn estimate_saved_input_cost_micros(model_slug: &str, saved_tokens: i64) -> Option<i64> {
+    let rate = input_price_usd_per_million_micros(model_slug)?;
+    Some(component_cost_micros(saved_tokens, rate))
 }
 
 fn pricing_for_model(model_slug: &str) -> Option<ModelPricing> {

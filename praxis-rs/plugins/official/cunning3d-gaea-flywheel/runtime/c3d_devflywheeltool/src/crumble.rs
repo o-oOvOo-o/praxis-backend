@@ -12,6 +12,8 @@ use std::process::Command;
 struct CrumbleCompareCase {
     name: String,
     input: String,
+    area: String,
+    direction: String,
     resolution: u32,
     duration: f32,
     strength: f32,
@@ -129,6 +131,7 @@ pub(super) fn cmd_crumble_compare(ctx: &Context, cli: &Cli) -> Result<(), String
     }
 
     let all_exact = failure_count == 0 && exact_count == cases.len();
+    let all_passed = failure_count == 0 && pass_count == cases.len();
     let matrix_diagnostics = crumble_matrix_diagnostics(&samples, &all_exact, &cli.passthrough);
     let summary = json!({
         "mode": "executed",
@@ -142,6 +145,7 @@ pub(super) fn cmd_crumble_compare(ctx: &Context, cli: &Cli) -> Result<(), String
         "passed_count": pass_count,
         "failed_count": failure_count,
         "all_exact": all_exact,
+        "all_passed": all_passed,
         "stage_report": stage_report,
         "shadow_focused": shadow_focused,
         "matrix_purpose": matrix_purpose,
@@ -149,13 +153,16 @@ pub(super) fn cmd_crumble_compare(ctx: &Context, cli: &Cli) -> Result<(), String
         "passthrough_args": &cli.passthrough,
         "diagnostics": matrix_diagnostics,
         "samples": samples,
-        "truth_rule": "Crumble closure requires exact Bridge/native raw parity for height and debris, plus the node surface contract.",
+        "truth_rule": "Crumble acceptance uses the requested epsilon; --require-exact separately requires finite bit-exact height/debris buffers.",
         "performance_rule": "Native timing here is diagnostic; promotion still requires measured Gaea app baseline and a separate GPU residency plan."
     });
     write_pretty_json(&run_dir.join("matrix_report.json"), &summary)?;
     print_value(cli.json(), &summary);
 
-    if cli.has("require-all-pass") && !all_exact {
+    let require_exact = cli.has("require-exact");
+    if (cli.has("require-all-pass") || require_exact)
+        && !crumble_acceptance_satisfied(all_exact, all_passed, require_exact)
+    {
         return Err(format!(
             "Crumble compare failed: exact={exact_count}/{} pass={pass_count}/{} failures={failure_count}.",
             cases.len(),
@@ -163,6 +170,14 @@ pub(super) fn cmd_crumble_compare(ctx: &Context, cli: &Cli) -> Result<(), String
         ));
     }
     Ok(())
+}
+
+fn crumble_acceptance_satisfied(all_exact: bool, all_passed: bool, require_exact: bool) -> bool {
+    if require_exact {
+        all_exact
+    } else {
+        all_passed
+    }
 }
 
 fn crumble_compare_cases(
@@ -211,6 +226,8 @@ fn crumble_case(
     Ok(CrumbleCompareCase {
         name: name.to_string(),
         input: input.to_string(),
+        area: cli.flag("area").unwrap_or("none").to_string(),
+        direction: cli.flag("direction").unwrap_or("x").to_string(),
         resolution,
         duration: optional_f32_flag(cli, "duration")?.unwrap_or(0.25),
         strength: optional_f32_flag(cli, "strength")?.unwrap_or(0.5),
@@ -228,6 +245,8 @@ fn crumble_compare_case_json(case: &CrumbleCompareCase) -> Value {
     json!({
         "name": case.name,
         "input": case.input,
+        "area": case.area,
+        "direction": case.direction,
         "resolution": case.resolution,
         "duration": case.duration,
         "strength": case.strength,
@@ -309,6 +328,10 @@ fn crumble_matrix_diagnostics(
             })
         })
         .collect::<Vec<_>>();
+    let all_passed = !samples.is_empty()
+        && samples
+            .iter()
+            .all(|sample| sample_report_bool(sample, "passed"));
     let first_failing = samples.iter().find_map(|sample| {
         let layer = sample
             .pointer("/report/diagnostics/first_failing_layer")
@@ -339,7 +362,9 @@ fn crumble_matrix_diagnostics(
         }))
     });
     let verdict = if *all_exact {
-        "all_exact: every case passed Bridge/native raw-buffer parity at the requested epsilon."
+        "all_exact: every finite sample is bit-exact.".to_string()
+    } else if all_passed {
+        "all_passed: every case passed Bridge/native raw-buffer parity at the requested epsilon."
             .to_string()
     } else {
         match first_failing
@@ -385,6 +410,7 @@ fn crumble_matrix_diagnostics(
     json!({
         "verdict": verdict,
         "all_exact": all_exact,
+        "all_passed": all_passed,
         "failure_summary": crumble_failure_summary(&case_summaries, samples),
         "first_failing": first_failing,
         "case_summaries": case_summaries,
@@ -945,6 +971,10 @@ fn crumble_single_case_wrapper_command(
         "Crumble".to_string(),
         "--input".to_string(),
         case.input.clone(),
+        "--area".to_string(),
+        case.area.clone(),
+        "--direction".to_string(),
+        case.direction.clone(),
         "--resolution".to_string(),
         case.resolution.to_string(),
     ];
@@ -952,6 +982,8 @@ fn crumble_single_case_wrapper_command(
     let defaults = CrumbleCompareCase {
         name: String::new(),
         input: String::new(),
+        area: String::new(),
+        direction: String::new(),
         resolution: 0,
         duration: 0.25,
         strength: 0.5,
@@ -1059,6 +1091,8 @@ fn crumble_compare_case_command(
     let resolution = case.resolution.to_string();
     command.arg("--resolution").arg(resolution);
     command.arg("--input").arg(case.input.as_str());
+    command.arg("--area").arg(case.area.as_str());
+    command.arg("--direction").arg(case.direction.as_str());
     command.arg("--duration").arg(f32_cli(case.duration));
     command.arg("--strength").arg(f32_cli(case.strength));
     command.arg("--coverage").arg(f32_cli(case.coverage));
@@ -1086,4 +1120,27 @@ fn crumble_compare_case_command(
     }
     append_passthrough_args(&mut command, cli);
     command
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{configure_crumble_app_bench_save_definition, crumble_acceptance_satisfied};
+    use serde_json::json;
+
+    #[test]
+    fn crumble_acceptance_distinguishes_epsilon_pass_from_bit_exactness() {
+        assert!(crumble_acceptance_satisfied(false, true, false));
+        assert!(!crumble_acceptance_satisfied(false, true, true));
+        assert!(crumble_acceptance_satisfied(true, true, true));
+        assert!(!crumble_acceptance_satisfied(false, false, false));
+    }
+
+    #[test]
+    fn crumble_app_bench_fixture_adds_enabled_save_definition() {
+        let mut node = json!({});
+        configure_crumble_app_bench_save_definition(&mut node).unwrap();
+        assert_eq!(node["SaveDefinition"]["Node"], 660);
+        assert_eq!(node["SaveDefinition"]["Format"], "TIFF32");
+        assert_eq!(node["SaveDefinition"]["IsEnabled"], true);
+    }
 }

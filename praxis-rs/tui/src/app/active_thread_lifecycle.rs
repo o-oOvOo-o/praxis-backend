@@ -179,7 +179,7 @@ impl App {
     async fn switch_to_app_gateway_thread_preserving_background_kind(
         &mut self,
         tui: &mut tui::Tui,
-        app_gateway: &mut AppGatewaySession,
+        _app_gateway: &mut AppGatewaySession,
         started: AppGatewayStartedThread,
         presentation: ThreadViewPresentation,
     ) -> Result<()> {
@@ -254,10 +254,72 @@ impl App {
         self.reset_for_thread_switch(tui)?;
         self.workspace.reset_chat_scroll();
         self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
-        self.backfill_loaded_subagent_threads(app_gateway).await;
         self.drain_active_thread_events(tui).await?;
         self.refresh_pending_thread_approvals().await;
         Ok(())
+    }
+
+    /// Switches a workspace row from its continuously observed local projection.
+    ///
+    /// Workspace observers already keep session, turn, status, control, and live events current.
+    /// Re-attaching the same running thread adds an RPC round trip and rebuilds an identical
+    /// snapshot. This path only swaps receivers and projects the cached snapshot atomically.
+    pub(super) async fn switch_to_cached_workspace_thread(
+        &mut self,
+        tui: &mut tui::Tui,
+        thread_id: ThreadId,
+    ) -> Result<bool> {
+        if !self.thread_event_channels.contains_key(&thread_id) {
+            return Ok(false);
+        }
+
+        let previous_thread_id = self.active_thread_id;
+        self.store_active_thread_receiver().await;
+        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id).await else {
+            if let Some(previous_thread_id) = previous_thread_id {
+                self.active_thread_id = None;
+                self.activate_thread_channel(previous_thread_id).await;
+            }
+            return Ok(false);
+        };
+
+        let Some(session) = snapshot.session.clone() else {
+            self.active_thread_id = None;
+            self.active_thread_rx = None;
+            if let Some(previous_thread_id) = previous_thread_id {
+                self.activate_thread_channel(previous_thread_id).await;
+            }
+            return Ok(false);
+        };
+
+        self.active_thread_id = Some(thread_id);
+        self.active_thread_rx = Some(receiver);
+        self.primary_thread_id = Some(thread_id);
+        self.primary_session_configured = Some(session);
+        let default_launch_rank = self
+            .workspace
+            .rows
+            .iter()
+            .find(|row| row.thread_id == thread_id)
+            .map(|row| row.source_kind.agent_rank())
+            .unwrap_or(0);
+        self.workspace
+            .launch
+            .activate_thread(thread_id, default_launch_rank);
+
+        self.advance_history_view_generation();
+        let init = self.chatwidget_init_for_forked_or_resumed_thread(
+            tui,
+            self.config.clone(),
+            self.tui_config.clone(),
+        );
+        self.replace_chat_widget(ChatWidget::new_with_app_event(init));
+        self.reset_for_thread_switch(tui)?;
+        self.workspace.reset_chat_scroll();
+        self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
+        self.drain_active_thread_events(tui).await?;
+        self.refresh_pending_thread_approvals().await;
+        Ok(true)
     }
 
     /// Fetches all loaded threads from the app gateway and registers descendants of the primary
@@ -439,6 +501,12 @@ impl App {
         snapshot: ThreadEventSnapshot,
         resume_restored_queue: bool,
     ) {
+        let should_buffer_replay =
+            snapshot.session.is_some() || !snapshot.turns.is_empty() || !snapshot.events.is_empty();
+        let replay_generation = self.history_view_generation;
+        if should_buffer_replay {
+            self.thread_replay_buffer_generation = Some(replay_generation);
+        }
         let ThreadEventSnapshot {
             session,
             turns,
@@ -474,6 +542,11 @@ impl App {
             self.chat_widget.maybe_send_next_queued_input();
         }
         self.refresh_status_line();
+        if should_buffer_replay {
+            self.app_event_tx.send(AppEvent::FinishThreadReplayBuffer {
+                generation: replay_generation,
+            });
+        }
     }
 
     pub(super) fn should_wait_for_initial_session(session_selection: &SessionSelection) -> bool {

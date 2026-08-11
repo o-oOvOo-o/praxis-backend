@@ -2,6 +2,59 @@ use super::*;
 use praxis_app_core::praxis_model_change_divider_message;
 
 impl App {
+    pub(super) fn runtime_permission_overrides_from_config(
+        config: &Config,
+    ) -> (Option<AskForApproval>, Option<SandboxPolicy>) {
+        (
+            Some(config.permissions.approval_policy.value()),
+            Some(config.permissions.sandbox_policy.get().clone()),
+        )
+    }
+
+    pub(super) async fn persist_tui_permission_setting(
+        &mut self,
+        key: &str,
+        value: &str,
+        label: &str,
+    ) {
+        let segments = if let Some(profile) = self.active_profile.as_deref() {
+            vec!["profiles".to_string(), profile.to_string(), key.to_string()]
+        } else {
+            vec![key.to_string()]
+        };
+        if let Err(err) = ConfigEditsBuilder::new(&self.config.praxis_home)
+            .with_profile(self.active_profile.as_deref())
+            .with_edits([ConfigEdit::SetPath {
+                segments,
+                value: value.into(),
+            }])
+            .apply()
+            .await
+        {
+            tracing::error!(error = %err, key, "failed to persist TUI permission truth");
+            self.chat_widget
+                .add_error_message(format!("Failed to save {label}: {err}"));
+        }
+    }
+
+    pub(super) async fn refresh_active_thread_permissions_from_tui(
+        &mut self,
+        app_gateway: &mut AppGatewaySession,
+    ) {
+        let Some(thread_id) = self.active_thread_id else {
+            return;
+        };
+        if let Err(err) = app_gateway
+            .refresh_thread_permissions(&self.config, &thread_id.to_string())
+            .await
+        {
+            tracing::error!(thread_id = %thread_id, error = %err, "failed to apply TUI permission truth to active thread");
+            self.chat_widget.add_error_message(format!(
+                "Failed to apply TUI permissions to thread {thread_id}: {err}"
+            ));
+        }
+    }
+
     pub(super) async fn rebuild_config_for_cwd(
         &self,
         cwd: PathBuf,

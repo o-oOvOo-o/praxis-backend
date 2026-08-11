@@ -8,28 +8,63 @@ impl AgentOs {
         priority: i32,
         requirements: &[ResourceRequirement],
     ) -> PraxisResult<Vec<String>> {
-        let now = Utc::now();
         let mut seen = HashSet::new();
         let planned_requirements = requirements
             .iter()
             .filter(|requirement| seen.insert(requirement.key()))
             .cloned()
             .collect::<Vec<_>>();
-        let mut acquired = Vec::new();
-        let mut snapshots = Vec::new();
-        {
+
+        let mut wait_started_at = None;
+        let (acquired, snapshots) = loop {
+            // Register before checking the lease table so a release between the check and await
+            // cannot be lost. Cancellation safely drops this waiter through the outer tool runtime.
+            let released = self.lease_released.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
+
             let mut state = self.state.write().await;
-            for requirement in &planned_requirements {
-                if let Some(owner) = self.lease_conflict_owner_locked(&state, requirement) {
-                    return Err(PraxisErr::UnsupportedOperation(format!(
-                        "resource lease `{}` is held by {owner}",
-                        requirement.key()
-                    )));
+            let conflict = planned_requirements.iter().find_map(|requirement| {
+                self.lease_conflict_owner_locked(&state, requirement)
+                    .map(|owner| (requirement.key(), owner))
+            });
+            if let Some((key, owner)) = conflict {
+                tracing::debug!(
+                    thread_id = %thread_id,
+                    task_id,
+                    resource = %key,
+                    lease_owner = %owner,
+                    "waiting for conflicting resource lease"
+                );
+                drop(state);
+                if wait_started_at.is_none() {
+                    let started_at = Utc::now();
+                    wait_started_at = Some(started_at);
+                    self.mark_thread_state(thread_id, ThreadRuntimeState::WaitingForLease)
+                        .await;
+                    self.record_event(
+                        "lease_wait_started",
+                        Some(thread_id),
+                        Some(task_id.to_string()),
+                        None,
+                        json!({
+                            "resource": key,
+                            "lease_owner": owner,
+                            "queued_at": started_at,
+                        }),
+                    )
+                    .await;
                 }
+                released.await;
+                continue;
             }
+
+            let now = Utc::now();
+            let mut acquired = Vec::new();
+            let mut snapshots = Vec::new();
             state.fencing_counter = state.fencing_counter.saturating_add(1);
             let fencing_token = state.fencing_counter;
-            for requirement in planned_requirements {
+            for requirement in &planned_requirements {
                 let key = requirement.key();
                 let lease = ResourceLease {
                     lease_id: format!("lease-{}", Uuid::new_v4()),
@@ -52,7 +87,27 @@ impl AgentOs {
                 snapshots.push(lease.clone());
                 state.leases.insert(lease.lease_id.clone(), lease);
             }
+            break (acquired, snapshots);
+        };
+
+        if let Some(started_at) = wait_started_at {
+            self.mark_thread_state(thread_id, ThreadRuntimeState::Running)
+                .await;
+            self.record_event(
+                "lease_wait_finished",
+                Some(thread_id),
+                Some(task_id.to_string()),
+                None,
+                json!({
+                    "waited_ms": Utc::now()
+                        .signed_duration_since(started_at)
+                        .num_milliseconds()
+                        .max(0),
+                }),
+            )
+            .await;
         }
+
         for lease in snapshots {
             self.persist_lease_snapshot(&lease).await;
             self.record_event(
@@ -81,6 +136,9 @@ impl AgentOs {
                     released.push(lease);
                 }
             }
+        }
+        if !released.is_empty() {
+            self.lease_released.notify_waiters();
         }
         for lease in released {
             self.record_event(

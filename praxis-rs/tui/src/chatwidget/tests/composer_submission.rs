@@ -801,11 +801,18 @@ async fn restore_thread_input_state_syncs_sleep_inhibitor_state() {
         selfwork_runtime: SelfworkRuntimeState::default(),
         task_running: true,
         agent_turn_running: true,
+        turn_elapsed_seconds: Some(17),
     }));
 
     assert!(chat.agent_turn_running);
     assert!(chat.turn_sleep_inhibitor.is_turn_running());
     assert!(chat.bottom_pane.is_task_running());
+    assert_eq!(
+        chat.bottom_pane
+            .status_widget()
+            .map(StatusIndicatorWidget::elapsed_seconds),
+        Some(17)
+    );
 
     chat.restore_thread_input_state(/*input_state*/ None);
 

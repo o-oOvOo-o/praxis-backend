@@ -1,0 +1,4 @@
+interface:
+  display_name: "Praxis Token Saver"
+  short_description: "Analyze token savings and estimated API cost"
+  default_prompt: "Use $praxis-token-saver to summarize my token savings this month."

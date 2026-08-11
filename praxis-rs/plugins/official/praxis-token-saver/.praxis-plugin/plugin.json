@@ -1,6 +1,7 @@
 {
   "name": "praxis-token-saver",
   "description": "Expose token savings produced by Praxis internal output reduction for the current thread.",
+  "skills": "./skills",
   "interface": {
     "displayName": "Praxis Token Saver",
     "shortDescription": "Shows tokens saved by Praxis in the current thread.",
@@ -10,7 +11,20 @@
     "capabilities": [
       "thread-local token savings telemetry",
       "tool output reduction telemetry",
-      "worker surface contribution"
+      "worker surface contribution",
+      "historical savings reports"
+    ],
+    "commands": [
+      {
+        "name": "tokensaver",
+        "description": "Show token savings for this month or a requested range.",
+        "action": {
+          "type": "process",
+          "command": "praxis",
+          "args": ["token-saver"],
+          "timeoutMs": 60000
+        }
+      }
     ],
     "surfaces": [
       {

@@ -12,6 +12,7 @@ impl Session {
         self: &Arc<Self>,
         turn_context: Arc<TurnContext>,
         last_agent_message: Option<String>,
+        runtime_command_id: Option<String>,
     ) {
         turn_context
             .turn_metadata_state
@@ -40,7 +41,14 @@ impl Session {
         let last_agent_message_for_summary = last_agent_message.clone();
         let turn_completed = terminal_model_error.is_none();
 
-        emit_turn_complete(self, &turn_context, last_agent_message, turn_completed).await;
+        emit_turn_complete(
+            self,
+            &turn_context,
+            last_agent_message,
+            turn_completed,
+            runtime_command_id.as_deref(),
+        )
+        .await;
 
         run_post_completion_updates(
             self,

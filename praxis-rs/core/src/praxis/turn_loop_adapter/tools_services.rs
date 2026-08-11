@@ -831,7 +831,9 @@ pub(in crate::praxis::turn_loop_adapter) mod services {
                     .await;
                 }
                 TurnEvent::ToolStarted { .. } | TurnEvent::ToolProgress { .. } => {}
-                TurnEvent::ToolFinished(_) | TurnEvent::TurnCompleted => {
+                TurnEvent::ToolExecutionCompleted(_)
+                | TurnEvent::ToolFinished(_)
+                | TurnEvent::TurnCompleted => {
                     turn_event_emitter::emit_turn_diff_if_present(
                         &session,
                         &turn_context,

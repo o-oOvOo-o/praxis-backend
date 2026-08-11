@@ -14,6 +14,7 @@ pub mod registry;
 pub mod router;
 pub mod runtimes;
 pub mod sandboxing;
+mod settlement;
 pub mod spec;
 pub mod tool_call_runtime;
 

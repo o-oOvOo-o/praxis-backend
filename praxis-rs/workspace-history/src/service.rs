@@ -7,6 +7,8 @@ use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::UNIX_EPOCH;
 
 use anyhow::Context;
@@ -31,6 +33,32 @@ use crate::manifest::WorkspaceCheckpointManifest;
 use crate::manifest::WorkspaceFileVersion;
 
 const SCHEMA_VERSION: u32 = 1;
+
+#[derive(Clone, Default)]
+struct CaptureCancellation {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CaptureCancellation {
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    fn ensure_running(&self) -> Result<()> {
+        if self.cancelled.load(Ordering::Acquire) {
+            anyhow::bail!("workspace checkpoint capture cancelled");
+        }
+        Ok(())
+    }
+}
+
+struct CancelCaptureOnDrop(CaptureCancellation);
+
+impl Drop for CancelCaptureOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CaptureCheckpointRequest {
@@ -115,6 +143,8 @@ impl WorkspaceHistoryService {
         &self,
         request: CaptureCheckpointRequest,
     ) -> Result<WorkspaceCheckpointRef> {
+        let cancellation = CaptureCancellation::default();
+        let _cancel_on_drop = CancelCaptureOnDrop(cancellation.clone());
         let root = canonical_workspace_root(&request.workspace_root)?;
         let previous = self.latest_for_workspace(&root).await?;
         let id = WorkspaceCheckpointId::new();
@@ -123,13 +153,14 @@ impl WorkspaceHistoryService {
         let config = Arc::clone(&self.config);
         let manifest_request = request.clone();
         let manifest = tokio::task::spawn_blocking(move || {
-            capture_manifest(
+            capture_manifest_cancellable(
                 service_root.as_ref(),
                 config.as_ref(),
                 root,
                 id,
                 created_at_unix_ms,
                 manifest_request,
+                cancellation,
             )
         })
         .await??;
@@ -406,6 +437,7 @@ impl WorkspaceHistoryService {
     }
 }
 
+#[cfg(test)]
 fn capture_manifest(
     service_root: &Path,
     config: &WorkspaceHistoryConfig,
@@ -414,6 +446,27 @@ fn capture_manifest(
     created_at_unix_ms: i64,
     request: CaptureCheckpointRequest,
 ) -> Result<WorkspaceCheckpointManifest> {
+    capture_manifest_cancellable(
+        service_root,
+        config,
+        workspace_root,
+        id,
+        created_at_unix_ms,
+        request,
+        CaptureCancellation::default(),
+    )
+}
+
+fn capture_manifest_cancellable(
+    service_root: &Path,
+    config: &WorkspaceHistoryConfig,
+    workspace_root: PathBuf,
+    id: WorkspaceCheckpointId,
+    created_at_unix_ms: i64,
+    request: CaptureCheckpointRequest,
+    cancellation: CaptureCancellation,
+) -> Result<WorkspaceCheckpointManifest> {
+    cancellation.ensure_running()?;
     let blob_store = BlobStore::new(service_root.join("blobs"));
     let mut files = Vec::new();
     let mut skipped_files = Vec::new();
@@ -422,6 +475,7 @@ fn capture_manifest(
         .into_iter()
         .filter_entry(|entry| should_visit(entry, config));
     for entry in walker {
+        cancellation.ensure_running()?;
         let entry = entry?;
         if !entry.file_type().is_file() {
             continue;
@@ -432,6 +486,7 @@ fn capture_manifest(
             skipped_files.push(relative);
             continue;
         }
+        cancellation.ensure_running()?;
         let modified_at_unix_ns = metadata
             .modified()
             .ok()
@@ -452,6 +507,7 @@ fn capture_manifest(
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
     skipped_files.sort();
+    cancellation.ensure_running()?;
     let manifest = WorkspaceCheckpointManifest {
         schema_version: SCHEMA_VERSION,
         id,
@@ -840,6 +896,55 @@ mod tests {
             },
         )
         .expect("capture checkpoint")
+    }
+
+    #[test]
+    fn cancelled_capture_stops_before_writing_a_manifest() {
+        let service = tempfile::tempdir().expect("service tempdir");
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        fs::create_dir_all(service.path().join("blobs")).expect("blob dir");
+        fs::create_dir_all(service.path().join("manifests")).expect("manifest dir");
+        fs::write(workspace.path().join("tracked.txt"), b"content").expect("tracked file");
+        let cancellation = CaptureCancellation::default();
+        cancellation.cancel();
+
+        let result = capture_manifest_cancellable(
+            service.path(),
+            &WorkspaceHistoryConfig::default(),
+            workspace.path().to_path_buf(),
+            WorkspaceCheckpointId::new(),
+            1,
+            CaptureCheckpointRequest {
+                workspace_root: workspace.path().to_path_buf(),
+                thread_id: None,
+                turn_id: None,
+                operation_id: None,
+            },
+            cancellation,
+        );
+
+        assert!(
+            result
+                .expect_err("cancelled capture must fail")
+                .to_string()
+                .contains("cancelled")
+        );
+        assert_eq!(
+            fs::read_dir(service.path().join("manifests"))
+                .expect("manifest dir")
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn dropping_capture_guard_cancels_the_blocking_worker() {
+        let cancellation = CaptureCancellation::default();
+        let worker_cancellation = cancellation.clone();
+
+        drop(CancelCaptureOnDrop(cancellation));
+
+        assert!(worker_cancellation.ensure_running().is_err());
     }
 
     #[test]

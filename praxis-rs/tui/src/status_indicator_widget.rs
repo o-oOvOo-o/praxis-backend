@@ -247,6 +247,11 @@ impl StatusIndicatorWidget {
         self.elapsed_seconds_at(Instant::now())
     }
 
+    pub(crate) fn restore_elapsed_seconds(&mut self, elapsed_seconds: u64) {
+        self.elapsed_running = Duration::from_secs(elapsed_seconds);
+        self.last_resume_at = Instant::now();
+    }
+
     fn wrapped_prefixed_lines(
         &self,
         prefix: &'static str,

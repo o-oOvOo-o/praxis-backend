@@ -2,6 +2,66 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn workspace_new_thread_uses_cat_entry_without_legacy_session_header() {
+    let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_workspace_entry_surface_enabled(true);
+    chat.startup_tooltip_override = Some("Cached prompts reduce billed input.".to_owned());
+
+    let session_id = ThreadId::new();
+    let configured = praxis_protocol::protocol::SessionConfiguredEvent {
+        session_id,
+        forked_from_id: None,
+        thread_name: None,
+        model: chat.model_display_name().to_string(),
+        model_provider_id: "test-provider".to_string(),
+        service_tier: None,
+        approval_policy: AskForApproval::Never,
+        approvals_reviewer: ApprovalsReviewer::User,
+        sandbox_policy: SandboxPolicy::new_read_only_policy(),
+        cwd: PathBuf::from("F:/Cunning3D"),
+        reasoning_effort: Some(ReasoningEffortConfig::default()),
+        history_log_id: 0,
+        history_entry_count: 0,
+        initial_messages: None,
+        network_proxy: None,
+        rollout_path: None,
+    };
+
+    chat.handle_praxis_event(Event {
+        id: "workspace-new".into(),
+        msg: EventMsg::SessionConfigured(configured),
+    });
+
+    assert_eq!(chat.thread_id, Some(session_id));
+    assert!(chat.active_cell.is_none());
+    assert!(drain_insert_history(&mut rx).is_empty());
+
+    let area = ratatui::layout::Rect::new(0, 0, 100, 32);
+    let mut buf = ratatui::buffer::Buffer::empty(area);
+    chat.render_standalone_chat(
+        area,
+        &mut buf,
+        &[],
+        0,
+        &crate::workspace::LaunchStripState::default(),
+    );
+    let rendered = (0..area.height)
+        .map(|y| {
+            let mut row = String::new();
+            for x in 0..area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            row
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("/\\_/\\"));
+    assert!(rendered.contains("What should Praxis do in Cunning3D?"));
+    assert!(rendered.contains("Cached prompts reduce billed input."));
+    assert!(!rendered.contains("Welcome back!"));
+}
+
+#[tokio::test]
 async fn resumed_initial_messages_render_history() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
 
@@ -666,7 +726,6 @@ async fn replayed_reasoning_item_shows_raw_reasoning_when_enabled() {
 #[tokio::test]
 async fn live_reasoning_summary_is_not_rendered_twice_when_item_completes() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.show_welcome_banner = false;
 
     chat.handle_server_notification(
         ServerNotification::TurnStarted(TurnStartedNotification {

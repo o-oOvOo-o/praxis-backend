@@ -3,6 +3,28 @@ fn print_usage() {
     println!("  toolbox [--json]");
     println!("  toolchain doctor|list|sync [--json] [--strict] [--offline] [--repair]");
     println!("  reverse --node <Node> [--json]  # includes node_surface_contract");
+    println!(
+        "  houdini-fuse-capture [--matrix focused|semantic|promotion|performance] [--hython PATH] [--run] [--json]"
+    );
+    println!(
+        "  houdini-fuse-compare [--matrix focused|semantic|promotion] [--hython PATH] [--run] [--json]"
+    );
+    println!("  houdini-fuse-benchmark [--hython PATH] [--run] [--json]");
+    println!(
+        "  houdini-group-capture [--matrix focused|semantic|performance] [--hython PATH] [--run] [--json]"
+    );
+    println!("  houdini-group-native-capture [--matrix focused|semantic] [--run] [--json]");
+    println!("  houdini-group-native-performance [--run] [--json]");
+    println!("  houdini-group-native-path-profile [--axis 32|128|256] [--run] [--json]");
+    println!(
+        "  houdini-group-compare --houdini PATH --cunning3d PATH [--abs-epsilon N] [--rel-epsilon N] [--output PATH] [--json]"
+    );
+    println!(
+        "  houdini-group-performance-compare --houdini PATH --cunning3d PATH [--max-regression-ratio N] [--output PATH] [--json]"
+    );
+    println!(
+        "  houdini-native-reverse [--subject polyreduce|geo-poly-interface|measure-curvature|group-sop|group-path-gu|group-degenerate|apex-core|apex-animation] [--precision float|double (polyreduce; default double)] [--binary PATH|subject env|HFS] [--target-set core|extended|all] [--internal-target label@rva:0xHEX] [--deep] [--reanalyze] [--run] [--json]"
+    );
     println!("  ledger [--operator <Name>] [--node <Node>] [--all] [--json]");
     println!("  ledger-hygiene [--json] [--strict]");
     println!("  open-frontier [--node <Node>] [--all] [--json]");
@@ -24,6 +46,9 @@ fn print_usage() {
     println!("  plan --node <Node> [--json]");
     println!("  export-ui [--json]");
     println!("  blackbox-scan [--json] [--dry-run]");
+    println!(
+        "  harness-build [--run] [--json]  # rebuilds the repository-local GaeaReverseHarness"
+    );
     println!("  architecture-guard --node <Node> [--json] [--strict]");
     println!(
         "  cce-graph-run (--ops-json JSON | --ops-file PATH) [--require-cce] [--require-session-reuse] [--run] [--json]"
@@ -41,7 +66,7 @@ fn print_usage() {
     );
     println!("  gaea-viewport-reverse [--gaea-dir PATH] [--run] [--json]");
     println!(
-        "  gaea-app-bench --node Mountain|Debris|Canyon [--terrain PATH] [--node-id N] [--resolution N] [--buildpath PATH] [--gaea-dir PATH] [--timeout-seconds N] [--no-new-console] [--run] [--json]"
+        "  gaea-app-bench --node Mountain|Debris|Canyon|Crumble [--terrain PATH] [--node-id N] [--resolution N] [--buildpath PATH] [--gaea-dir PATH] [--timeout-seconds N] [--no-new-console] [--run] [--json]"
     );
     println!(
         "  perf-migrate --node Mountain [--candidates native_live,native_gpu_wave,...] [--samples N|--seconds N] [--gaea-app-baseline-ms N] [--target-speedup N(default 5)] [--require-speedup] [--run] [--json] [--direct-bin] [--fresh-bridge-cache]"
@@ -96,8 +121,8 @@ fn print_usage() {
         "  easy-erosion-compare --node EasyErosion [--matrix focused|examples|all] [--resolution N] [--case LABEL] [--epsilon N] [--repeat N] [--target-speedup N] [--require-all-pass] [--require-exact] [--require-speedup] [--direct-bin] [--run] [--json]"
     );
     println!(
-            "  debris-compare --node Debris [--matrix focused|single] [--resolution N] [--source ramp-x|ramp-y|cone|sine|checker] [--emitter none|left-band|center-disk|checker] [--debris-amount N] [--repeat N] [--target-speedup N] [--gaea-app-baseline-ms N] [--target-gaea-speedup N] [--compare-bridge] [--gaea-harness-exe PATH] [--require-exact] [--require-speedup] [--require-gaea-speedup] [--require-bridge-exact] [--direct-bin] [--run] [--json]"
-        );
+        "  debris-compare --node Debris [--matrix focused|single] [--resolution N] [--source ramp-x|ramp-y|cone|sine|checker] [--emitter none|left-band|center-disk|checker] [--debris-amount N] [--repeat N] [--target-speedup N] [--gaea-app-baseline-ms N] [--target-gaea-speedup N] [--compare-bridge] [--gaea-harness-exe PATH] [--require-exact] [--require-speedup] [--require-gaea-speedup] [--require-bridge-exact] [--direct-bin] [--run] [--json]"
+    );
     println!(
         "  rugged-stage-compare --node Rugged [--matrix focused|examples|all] [--surface m3|m4|m5|m6] [--resolution N] [--terrain-width N] [--terrain-height N] [--scale N] [--seed N] [--epsilon N] [--repeat N] [--target-speedup N] [--require-all-pass] [--require-exact] [--require-speedup] [--direct-bin] [--run] [--json]"
     );
@@ -120,7 +145,7 @@ fn print_usage() {
         "  ridge-compare --node Ridge [--resolution N] [--terrain-width N] [--terrain-height N] [--scale F] [--height F] [--definition F] [--seed N] [--scale-x F] [--scale-y F] [--sweep N] [--sweep-seed N] [--native-only] [--repeat N] [--direct-bin] [--run] [--json] [--require-exact]"
     );
     println!(
-        "  crumble-compare --node Crumble [--matrix focused] [--resolution N] [--input KIND] [--duration F] [--strength F] [--coverage F] [--horizontal F] [--vertical F] [--rock-hardness F] [--edge F] [--downcutting F] [--depth F] [--epsilon N] [--repeat N] [--run] [--json] [--require-all-pass]"
+        "  crumble-compare --node Crumble [--matrix focused] [--resolution N] [--input KIND] [--area none|zero|one|half|ramp-x|checker] [--direction x|n|e] [--duration F] [--strength F] [--coverage F] [--horizontal F] [--vertical F] [--rock-hardness F] [--edge F] [--downcutting F] [--depth F] [--epsilon N] [--repeat N] [--run] [--json] [--require-all-pass] [--require-exact]"
     );
     println!(
         "  slump-compare --node Slump [--matrix focused|production] [--resolution N] [--scale F] [--style A|B|C|D] [--seed N] [--epsilon N] [--repeat N] [--target-speedup N] [--run] [--json] [--direct-bin] [--require-all-pass] [--require-speedup]"
@@ -787,5 +812,18 @@ mod tests {
                 .and_then(Value::as_str),
             Some("native")
         );
+    }
+
+    #[test]
+    fn provider_probe_policy_accepts_the_polybevel_blender_oracle() {
+        assert_eq!(
+            parity_probe_provider("polybevel_blender_cube_compare"),
+            Some("blender")
+        );
+        assert_eq!(
+            parity_probe_provider("gaea_mountain_backend_compare"),
+            Some("gaea")
+        );
+        assert_eq!(parity_probe_provider("unowned_probe"), None);
     }
 }

@@ -13,10 +13,26 @@ pub(crate) fn agent_status_from_event(msg: &EventMsg) -> Option<AgentStatus> {
             }
             _ => Some(AgentStatus::Errored(format!("{:?}", ev.reason))),
         },
-        EventMsg::Error(ev) => Some(AgentStatus::Errored(ev.message.clone())),
+        EventMsg::Error(ev) if ev.affects_turn_status() => {
+            Some(AgentStatus::Errored(ev.message.clone()))
+        }
+        EventMsg::Error(_) => None,
         EventMsg::ShutdownComplete => Some(AgentStatus::Shutdown),
         _ => None,
     }
+}
+
+/// Apply an event without allowing the terminal turn boundary to erase the
+/// error that caused that boundary. `TurnComplete` means that the loop has
+/// stopped; it is not by itself proof that the turn succeeded.
+pub(crate) fn agent_status_after_event(
+    current: &AgentStatus,
+    msg: &EventMsg,
+) -> Option<AgentStatus> {
+    if matches!(msg, EventMsg::TurnComplete(_)) && matches!(current, AgentStatus::Errored(_)) {
+        return None;
+    }
+    agent_status_from_event(msg)
 }
 
 pub(crate) fn is_final(status: &AgentStatus) -> bool {

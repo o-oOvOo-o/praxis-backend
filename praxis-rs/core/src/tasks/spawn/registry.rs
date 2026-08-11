@@ -20,6 +20,8 @@ pub(super) async fn register_running_task(
     task: Arc<dyn AgentTask>,
     cancellation_token: CancellationToken,
     handle: JoinHandle<()>,
+    agent_os_task_id: Option<String>,
+    runtime_command_id: Option<String>,
 ) {
     let mut active = session.active_turn.lock().await;
     let turn = active.get_or_insert_with(ActiveTurn::default);
@@ -35,6 +37,8 @@ pub(super) async fn register_running_task(
         cancellation_token,
         handle.abort_handle(),
         Arc::clone(&turn_context),
+        agent_os_task_id,
+        runtime_command_id,
         timer,
     );
     turn.add_task(running_task);

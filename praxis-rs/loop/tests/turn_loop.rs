@@ -91,6 +91,10 @@ impl MockServices {
     fn requests(&self) -> Vec<ModelRequest> {
         self.requests.lock().expect("requests lock").clone()
     }
+
+    fn events(&self) -> Vec<TurnEvent> {
+        self.events.lock().expect("events lock").clone()
+    }
 }
 
 #[async_trait]
@@ -164,6 +168,64 @@ struct CancellationGateTool {
     name: String,
     started: Arc<Notify>,
     starts: Arc<Mutex<Vec<String>>>,
+}
+
+struct CompletionSignalTool {
+    name: String,
+    completed: Arc<Notify>,
+}
+
+struct ReleaseGateTool {
+    name: String,
+    started: Arc<Notify>,
+    release: Arc<Notify>,
+}
+
+#[async_trait]
+impl Tool for CompletionSignalTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: self.name.clone(),
+            description: String::new(),
+        }
+    }
+
+    async fn prepare(&self, _call: &ToolCall) -> LoopResult<praxis_loop::tool::PreparedToolCall> {
+        Ok(praxis_loop::tool::PreparedToolCall::new(ToolEffects::pure()))
+    }
+
+    async fn execute(
+        &self,
+        call: ToolCall,
+        _context: ToolExecutionContext,
+    ) -> LoopResult<ToolResult> {
+        self.completed.notify_waiters();
+        Ok(ToolResult::success(call.id, "quick result"))
+    }
+}
+
+#[async_trait]
+impl Tool for ReleaseGateTool {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: self.name.clone(),
+            description: String::new(),
+        }
+    }
+
+    async fn prepare(&self, _call: &ToolCall) -> LoopResult<praxis_loop::tool::PreparedToolCall> {
+        Ok(praxis_loop::tool::PreparedToolCall::new(ToolEffects::pure()))
+    }
+
+    async fn execute(
+        &self,
+        call: ToolCall,
+        _context: ToolExecutionContext,
+    ) -> LoopResult<ToolResult> {
+        self.started.notify_waiters();
+        self.release.notified().await;
+        Ok(ToolResult::success(call.id, "released result"))
+    }
 }
 
 #[async_trait]
@@ -590,6 +652,90 @@ async fn cancelled_turn_aborts_before_sampling() {
 }
 
 #[tokio::test]
+async fn completed_parallel_tool_is_visible_before_batch_barrier() {
+    let quick_completed = Arc::new(Notify::new());
+    let blocked_started = Arc::new(Notify::new());
+    let release_blocked = Arc::new(Notify::new());
+    let services = Arc::new(MockServices::with_streams(vec![
+        vec![
+            ModelEvent::ToolCall(ToolCall::new("blocked", "blocked_tool")),
+            ModelEvent::ToolCall(ToolCall::new("quick", "quick_tool")),
+            ModelEvent::Completed(TokenUsage::default()),
+        ],
+        text_stream("done"),
+    ]));
+    services.insert_tool(Arc::new(CompletionSignalTool {
+        name: "quick_tool".to_string(),
+        completed: Arc::clone(&quick_completed),
+    }));
+    services.insert_tool(Arc::new(ReleaseGateTool {
+        name: "blocked_tool".to_string(),
+        started: Arc::clone(&blocked_started),
+        release: Arc::clone(&release_blocked),
+    }));
+
+    let quick_wait = quick_completed.notified();
+    let blocked_wait = blocked_started.notified();
+    let turn_services = Arc::clone(&services);
+    let turn = tokio::spawn(async move {
+        run_turn(
+            test_context(),
+            TurnState::default(),
+            turn_services.as_ref(),
+            &praxis_loop::NoopHooks,
+            TurnInput::default(),
+            CancellationToken::new(),
+        )
+        .await
+    });
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::join!(quick_wait, blocked_wait);
+    })
+    .await
+    .expect("parallel tools should both start");
+    tokio::task::yield_now().await;
+
+    assert!(services.events().iter().any(|event| matches!(
+        event,
+        TurnEvent::ToolExecutionCompleted(result)
+            if result.call_id == "quick" && result.content == "quick result"
+    )));
+    assert_eq!(
+        services
+            .events()
+            .iter()
+            .filter(|event| matches!(
+                event,
+                TurnEvent::ToolExecutionCompleted(result) if result.call_id == "quick"
+            ))
+            .count(),
+        1,
+        "a tool execution owns exactly one completion event"
+    );
+    assert_eq!(
+        services.requests().len(),
+        1,
+        "next model round is a barrier"
+    );
+
+    release_blocked.notify_waiters();
+    assert!(matches!(
+        turn.await.expect("turn task"),
+        TurnResult::Complete { .. }
+    ));
+    let result_ids = services
+        .persisted()
+        .into_iter()
+        .filter_map(|item| match item {
+            TurnItem::ToolResult(result) => Some(result.call_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(result_ids, ["blocked", "quick"]);
+}
+
+#[tokio::test]
 async fn cancelled_turn_settles_every_provider_tool_call_in_order() {
     let started = Arc::new(Notify::new());
     let starts = Arc::new(Mutex::new(Vec::new()));
@@ -646,4 +792,29 @@ async fn cancelled_turn_settles_every_provider_tool_call_in_order() {
         vec!["active", "queued"]
     );
     assert!(results[1].is_error());
+    let events = services.events();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                TurnEvent::ToolExecutionCompleted(result) if result.call_id == "active"
+            ))
+            .count(),
+        1,
+        "cancellation must not race a second execution completion"
+    );
+    for call_id in ["active", "queued"] {
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(
+                    event,
+                    TurnEvent::ToolFinished(result) if result.call_id == call_id
+                ))
+                .count(),
+            1,
+            "every provider call must commit one terminal result"
+        );
+    }
 }

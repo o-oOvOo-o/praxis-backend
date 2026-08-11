@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "updated": "2026-08-01",
+  "entries": [
+    {
+      "subject": "Houdini Fuse 2.0",
+      "host_version": "20.5.584",
+      "provider": "SOP verb fuse::2.0",
+      "authorization": "user-owned local installation; interoperability and exact-parity analysis",
+      "contract": "docs/node_requirements/active/fuse_houdini_20_5_584.md",
+      "implementation": "src/cunning_core/core/algorithms/algorithms_editor/fuse.rs",
+      "node_adapter": "src/nodes/modeling/fuse_node.rs",
+      "provider_adapter": "runtime/c3d_devflywheeltool/providers/houdini/fuse_capture.py",
+      "canonical_command": "c3d-flywheel.ps1 houdini-fuse-compare --matrix promotion --run --json",
+      "promotion_receipt": ".local/gaea-flywheel/artifacts/houdini/fuse-2.0/compare_promotion_1785524274913/parity_receipt.json",
+      "promotion_receipt_sha256": "afb109105c18bb03d2b5956a4e6cf7f0809afa29f6ec17c04dc282d6559be1ca",
+      "performance_receipt": ".local/gaea-flywheel/artifacts/houdini/fuse-2.0/benchmark_1785523221158/performance_receipt.json",
+      "performance_receipt_sha256": "29ed789c6af0b90a5dd9991fa87913f7b8eab14374025b04c593b4902141de96",
+      "semantic_cases": 12,
+      "promotion_cases": 63,
+      "comparison_order": [
+        "point",
+        "vertex",
+        "primitive",
+        "detail"
+      ],
+      "integer_and_topology_status": "exact",
+      "floating_point_tolerance": {
+        "absolute": 1e-7,
+        "relative": 1e-6
+      },
+      "focused_status": "green",
+      "semantic_status": "green",
+      "promotion_status": "green",
+      "performance_status": "green",
+      "performance": {
+        "fixture": "paired_200k",
+        "iterations": 7,
+        "cunning3d_median_ms": 9.6897,
+        "houdini_median_ms": 27.8545,
+        "required_speedup": 2.0,
+        "actual_speedup": 2.8746504038611147
+      },
+      "next_gate": "certify determinism and invalid-input handling"
+    }
+  ]
+}

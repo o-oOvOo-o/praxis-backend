@@ -164,6 +164,7 @@ impl App {
             tracing::warn!(error = %err, "failed to enable mouse capture for Workspace picker");
         }
         self.workspace.enabled = true;
+        self.chat_widget.set_workspace_entry_surface_enabled(true);
         self.workspace.clear_session_picker_page_loaders();
         let effect = self
             .workspace

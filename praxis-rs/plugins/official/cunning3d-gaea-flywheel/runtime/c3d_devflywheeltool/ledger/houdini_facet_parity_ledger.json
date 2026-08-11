@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "updated": "2026-08-01",
+  "entries": [
+    {
+      "subject": "Houdini Facet",
+      "host_version": "20.5.584",
+      "provider": "headless Houdini facet SOP network",
+      "authorization": "user-owned local installation; interoperability and exact-parity analysis",
+      "implementation": "src/cunning_core/core/algorithms/algorithms_runtime/facet/mod.rs",
+      "node_adapter": "src/nodes/modeling/facet.rs",
+      "prototype": "runtime/c3d_devflywheeltool/hot/facet/pipeline.ts",
+      "canonical_command": "c3d-flywheel.ps1 hot houdini-facet --matrix semantic --oracle <houdini_capture.json> --run --json",
+      "oracle_capture": ".local/gaea-flywheel/artifacts/houdini/facet-sop/hot_semantic_1785558034316_32076/houdini_capture.json",
+      "oracle_capture_sha256": "63d3a24d04a0b005e8868748cac1a64a792ea2d28a758bda18eec09e120011ba",
+      "prototype_parity_receipt": ".local/gaea-flywheel/artifacts/houdini/facet-sop/hot_semantic_1785558050333_59100/parity_receipt.json",
+      "prototype_parity_receipt_sha256": "32daa9700d3f94fc5c637b55829b9dc1020dfb66b3b5ff34aff34462ede8d045",
+      "prototype_semantic_cases": 38,
+      "prototype_semantic_status": "green",
+      "prototype_determinism_status": "green",
+      "native_rust_status": "implemented on Geometry::fork() COW domain updates; core and root node type-check green; focused runtime and node contracts green",
+      "native_rust_focused_tests_authored": 5,
+      "native_rust_focused_tests_executed": 5,
+      "native_rust_performance_status": "green; optimized single-logical-processor run is faster than Houdini on the 64x64 five-stage stress workload",
+      "native_rust_benchmark": {
+        "artifact": ".local/gaea-flywheel/artifacts/houdini/facet-sop/rust_optimized_20260801_1400/rust_benchmark_final.json",
+        "artifact_sha256": "5aceb86f63964f1376b6dceccc4b56bdc58e8e3aee6d7e28692b2f7d0afd5e01",
+        "grid_size": 64,
+        "point_count": 4096,
+        "primitive_count": 3969,
+        "warmup": 100,
+        "iterations": 500,
+        "batch_median_ms": 1.3982,
+        "batch_p95_ms": 2.4182,
+        "batch_min_ms": 1.376,
+        "processor_affinity": "one logical processor; high priority used only to isolate concurrent workspace compiler contention",
+        "agent_cargo_invocations": 0
+      },
+      "houdini_stress_batch_median_ms": 2.92535,
+      "houdini_over_native_rust_ratio": 2.09222571878129,
+      "native_rust_time_reduction_vs_houdini": 0.522040097766079,
+      "typescript_over_native_rust_ratio": 30.6070662280074,
+      "typescript_stress_receipt": ".local/gaea-flywheel/artifacts/houdini/facet-sop/hot_benchmark_1785558872311_59228/benchmark_receipt.json",
+      "typescript_stress_receipt_sha256": "0975e2b508ba5e14cb0dd938bf77550ec9f0cbe3ade14ac1ba8b9c687cbc8ccd",
+      "comparison_order": [
+        "parameter_contract",
+        "domain.counts",
+        "primitive.vertex_counts",
+        "primitive.closed",
+        "vertex.point_sharing",
+        "all_numeric_attributes",
+        "all_groups"
+      ],
+      "floating_point_tolerance": {
+        "absolute": 0.000001,
+        "relative": 0.000001
+      },
+      "next_gate": "run the full 38-case native adapter without adding another concurrent Cargo process"
+    }
+  ]
+}

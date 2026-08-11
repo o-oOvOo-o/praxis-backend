@@ -84,10 +84,13 @@ pub(crate) enum SignInState {
 pub(crate) enum SignInOption {
     ChatGpt,
     DeviceCode,
+    OpenAiApiKey,
+    Anthropic,
+    ResponsesApi,
+    ClaudeApi,
     DeepSeekApiKey,
     KimiApiKey,
     CommonApiKey,
-    Anthropic,
 }
 
 const API_KEY_DISABLED_MESSAGE: &str = "API key login is disabled.";
@@ -282,11 +285,14 @@ impl AuthModeWidget {
             options.push(SignInOption::DeviceCode);
         }
         if self.is_api_login_allowed() {
+            options.push(SignInOption::OpenAiApiKey);
+            options.push(SignInOption::Anthropic);
+            options.push(SignInOption::ResponsesApi);
+            options.push(SignInOption::ClaudeApi);
             options.push(SignInOption::DeepSeekApiKey);
             options.push(SignInOption::KimiApiKey);
             options.push(SignInOption::CommonApiKey);
         }
-        options.push(SignInOption::Anthropic);
         options
     }
 
@@ -297,11 +303,14 @@ impl AuthModeWidget {
             options.push(SignInOption::DeviceCode);
         }
         if self.is_api_login_allowed() {
+            options.push(SignInOption::OpenAiApiKey);
+            options.push(SignInOption::Anthropic);
+            options.push(SignInOption::ResponsesApi);
+            options.push(SignInOption::ClaudeApi);
             options.push(SignInOption::DeepSeekApiKey);
             options.push(SignInOption::KimiApiKey);
             options.push(SignInOption::CommonApiKey);
         }
-        options.push(SignInOption::Anthropic);
         options
     }
 
@@ -339,6 +348,34 @@ impl AuthModeWidget {
                     self.start_device_code_login();
                 }
             }
+            SignInOption::OpenAiApiKey => {
+                if self.is_api_login_allowed() {
+                    self.start_provider_key_entry(ProviderSetupKind::OpenAi);
+                } else {
+                    self.disallow_api_login();
+                }
+            }
+            SignInOption::Anthropic => {
+                if self.is_api_login_allowed() {
+                    self.start_provider_key_entry(ProviderSetupKind::Anthropic);
+                } else {
+                    self.disallow_api_login();
+                }
+            }
+            SignInOption::ResponsesApi => {
+                if self.is_api_login_allowed() {
+                    self.start_provider_key_entry(ProviderSetupKind::ResponsesApi);
+                } else {
+                    self.disallow_api_login();
+                }
+            }
+            SignInOption::ClaudeApi => {
+                if self.is_api_login_allowed() {
+                    self.start_provider_key_entry(ProviderSetupKind::ClaudeApi);
+                } else {
+                    self.disallow_api_login();
+                }
+            }
             SignInOption::DeepSeekApiKey => {
                 if self.is_api_login_allowed() {
                     self.start_provider_key_entry(ProviderSetupKind::DeepSeek);
@@ -356,13 +393,6 @@ impl AuthModeWidget {
             SignInOption::CommonApiKey => {
                 if self.is_api_login_allowed() {
                     self.start_provider_key_entry(ProviderSetupKind::Common);
-                } else {
-                    self.disallow_api_login();
-                }
-            }
-            SignInOption::Anthropic => {
-                if self.is_api_login_allowed() {
-                    self.start_provider_key_entry(ProviderSetupKind::Anthropic);
                 } else {
                     self.disallow_api_login();
                 }
@@ -444,6 +474,38 @@ impl AuthModeWidget {
                         device_code_description,
                     ));
                 }
+                SignInOption::OpenAiApiKey => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Configure Codex / OpenAI API key",
+                        "Defaults to the official Responses URL and uses the Codex model catalog",
+                    ));
+                }
+                SignInOption::Anthropic => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Configure Anthropic API key",
+                        "Defaults to the official Claude URL and uses the Claude model catalog",
+                    ));
+                }
+                SignInOption::ResponsesApi => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Configure Responses API",
+                        "Enter a separate endpoint, API key, and model name",
+                    ));
+                }
+                SignInOption::ClaudeApi => {
+                    lines.extend(create_mode_item(
+                        idx,
+                        option,
+                        "Configure Claude API",
+                        "Enter a separate Claude endpoint, API key, and model name",
+                    ));
+                }
                 SignInOption::DeepSeekApiKey => {
                     lines.extend(create_mode_item(
                         idx,
@@ -466,14 +528,6 @@ impl AuthModeWidget {
                         option,
                         "Sign in with Common API key",
                         "Use a generic OpenAI-compatible endpoint",
-                    ));
-                }
-                SignInOption::Anthropic => {
-                    lines.extend(create_mode_item(
-                        idx,
-                        option,
-                        "Configure Anthropic API key",
-                        "Use the official Claude Messages API (Console billing)",
                     ));
                 }
             }

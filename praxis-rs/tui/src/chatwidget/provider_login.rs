@@ -25,6 +25,21 @@ impl ChatWidget {
                 ),
             )));
         })];
+        let openai_api_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::OpenProviderLoginPrompt {
+                provider: ProviderSetupKind::OpenAi,
+            });
+        })];
+        let responses_api_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::OpenProviderLoginPrompt {
+                provider: ProviderSetupKind::ResponsesApi,
+            });
+        })];
+        let claude_api_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::OpenProviderLoginPrompt {
+                provider: ProviderSetupKind::ClaudeApi,
+            });
+        })];
         let deepseek_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
             tx.send(AppEvent::OpenProviderLoginPrompt {
                 provider: ProviderSetupKind::DeepSeek,
@@ -40,8 +55,13 @@ impl ChatWidget {
                 provider: ProviderSetupKind::Common,
             });
         })];
-        let anthropic_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+        let anthropic_oauth_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
             tx.send(AppEvent::BeginAnthropicOauthLogin);
+        })];
+        let anthropic_api_actions: Vec<SelectionAction> = vec![Box::new(|tx| {
+            tx.send(AppEvent::OpenProviderLoginPrompt {
+                provider: ProviderSetupKind::Anthropic,
+            });
         })];
 
         let mut header = ColumnRenderable::new();
@@ -64,6 +84,55 @@ impl ChatWidget {
                         "Uses inherited ChatGPT/OpenAI credentials when present.".to_string(),
                     ),
                     actions: openai_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Codex / OpenAI API key".to_string(),
+                    description: Some(
+                        "Configure URL and API key; defaults to the official Responses endpoint and uses the Codex model catalog."
+                            .to_string(),
+                    ),
+                    actions: openai_api_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Claude Pro/Max account".to_string(),
+                    description: Some(
+                        "Authorize Praxis with the local Claude account OAuth flow.".to_string(),
+                    ),
+                    actions: anthropic_oauth_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Anthropic API key".to_string(),
+                    description: Some(
+                        "Configure URL and API key; defaults to the official Claude endpoint and uses the Claude account model catalog."
+                            .to_string(),
+                    ),
+                    actions: anthropic_api_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Responses API".to_string(),
+                    description: Some(
+                        "Configure a separate Responses endpoint and enter any model name."
+                            .to_string(),
+                    ),
+                    actions: responses_api_actions,
+                    dismiss_on_select: true,
+                    ..Default::default()
+                },
+                SelectionItem {
+                    name: "Claude API".to_string(),
+                    description: Some(
+                        "Configure a separate Claude Messages endpoint and enter any model name."
+                            .to_string(),
+                    ),
+                    actions: claude_api_actions,
                     dismiss_on_select: true,
                     ..Default::default()
                 },
@@ -94,16 +163,6 @@ impl ChatWidget {
                     dismiss_on_select: true,
                     ..Default::default()
                 },
-                SelectionItem {
-                    name: "Claude Pro/Max or Anthropic API key".to_string(),
-                    description: Some(
-                        "Use the local Claude Code OAuth login when available, otherwise enter a Console API key."
-                            .to_string(),
-                    ),
-                    actions: anthropic_actions,
-                    dismiss_on_select: true,
-                    ..Default::default()
-                },
             ],
             ..Default::default()
         });
@@ -111,10 +170,6 @@ impl ChatWidget {
     }
 
     pub(crate) fn open_provider_login_prompt(&mut self, provider: ProviderSetupKind) {
-        if provider == ProviderSetupKind::Anthropic {
-            self.app_event_tx.send(AppEvent::BeginAnthropicOauthLogin);
-            return;
-        }
         let tx = self.app_event_tx.clone();
         let on_submit = Box::new(move |raw: String| {
             let raw = zeroize::Zeroizing::new(raw);
@@ -164,6 +219,12 @@ impl ChatWidget {
                     provider.provider_id()
                 ));
             }
+            None if target.eq_ignore_ascii_case("anthropic")
+                || target.eq_ignore_ascii_case("claude")
+                || target.eq_ignore_ascii_case("claude-account") =>
+            {
+                self.app_event_tx.send(AppEvent::BeginAnthropicOauthLogin);
+            }
             None if target.eq_ignore_ascii_case("chatgpt")
                 || target.eq_ignore_ascii_case("codex")
                 || target.eq_ignore_ascii_case("openai") =>
@@ -171,13 +232,13 @@ impl ChatWidget {
                 self.add_info_message(
                     "Praxis uses your ChatGPT/OpenAI login when available.".to_string(),
                     Some(
-                        "Use /login kimi, /login deepseek, or /login common to configure API providers."
+                        "Use /login codex-api, /login responses-api, /login anthropic-api, or /login claude-api for API-key providers."
                             .to_string(),
                     ),
                 );
             }
             None => self.add_error_message(
-                "Usage: /login [anthropic|kimi|deepseek|common|chatgpt]".to_string(),
+                "Usage: /login [chatgpt|codex-api|claude|anthropic-api|responses-api|claude-api|kimi|deepseek|common]".to_string(),
             ),
         }
         self.bottom_pane.drain_pending_submission_state();
@@ -185,7 +246,10 @@ impl ChatWidget {
 
     fn login_provider_target(target: &str) -> Option<ProviderSetupKind> {
         match target.to_ascii_lowercase().as_str() {
-            "anthropic" | "claude" => Some(ProviderSetupKind::Anthropic),
+            "codex-api" | "openai-api" => Some(ProviderSetupKind::OpenAi),
+            "anthropic-api" => Some(ProviderSetupKind::Anthropic),
+            "responses" | "responses-api" => Some(ProviderSetupKind::ResponsesApi),
+            "claude-api" | "claude-messages" => Some(ProviderSetupKind::ClaudeApi),
             "deepseek" | "ds" => Some(ProviderSetupKind::DeepSeek),
             "kimi" | "moonshot" => Some(ProviderSetupKind::Kimi),
             "common" | "openai-compatible" | "compatible" => Some(ProviderSetupKind::Common),

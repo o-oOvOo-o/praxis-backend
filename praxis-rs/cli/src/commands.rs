@@ -6,6 +6,7 @@ use crate::mcp_cmd::McpCli;
 use crate::remote_control::InteractiveRemoteOptions;
 use clap::Args;
 use clap::Parser;
+use clap::ValueEnum;
 use clap_complete::Shell;
 use praxis_app_gateway_service as praxis_app_gateway;
 use praxis_chatgpt::apply_command::ApplyCommand;
@@ -123,6 +124,42 @@ pub(crate) enum Subcommand {
 
     /// Inspect feature flags.
     Features(FeaturesCli),
+
+    /// Report tokens and estimated API input cost saved by Praxis.
+    #[clap(name = "token-saver")]
+    TokenSaver(TokenSaverCommand),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct TokenSaverCommand {
+    /// Built-in reporting period, used when --from and --to are omitted.
+    #[clap(long, value_enum, default_value_t = TokenSaverPeriodArg::Month)]
+    pub(crate) period: TokenSaverPeriodArg,
+    /// Inclusive report start as an RFC3339 timestamp; requires --to.
+    #[clap(long)]
+    pub(crate) from: Option<String>,
+    /// Exclusive report end as an RFC3339 timestamp; requires --from.
+    #[clap(long)]
+    pub(crate) to: Option<String>,
+    /// Local UTC offset in minutes (for example, 480 for China Standard Time).
+    #[clap(long)]
+    pub(crate) utc_offset_minutes: Option<i32>,
+    /// Output format.
+    #[clap(long, value_enum, default_value_t = TokenSaverFormat::Markdown)]
+    pub(crate) format: TokenSaverFormat,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum TokenSaverPeriodArg {
+    Month,
+    Week,
+    All,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum TokenSaverFormat {
+    Markdown,
+    Json,
 }
 
 #[derive(Debug, Parser)]

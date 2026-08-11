@@ -287,7 +287,7 @@ const DEEPSEEK_FOOTER_HEIGHT: u16 = 1;
 const DEEPSEEK_CHROME_MIN_HEIGHT: u16 = 6;
 const WORKSPACE_ENTRY_MAX_WIDTH: u16 = 88;
 const WORKSPACE_ENTRY_MIN_SIDE_PADDING: u16 = 4;
-const WORKSPACE_ENTRY_INTRO_HEIGHT: u16 = 7;
+const WORKSPACE_ENTRY_INTRO_HEIGHT: u16 = 12;
 const LAUNCH_STRIP_RANK_MAX: u8 = 2;
 const CHAT_SURFACE_CONTENT_MAX_WIDTH: u16 = 96;
 const WORKSPACE_INPUT_BORDER_ROWS: u16 = 1;
@@ -540,7 +540,6 @@ pub(crate) struct ChatWidgetInit {
     pub(crate) has_chatgpt_account: bool,
     pub(crate) model_catalog: Arc<ModelCatalog>,
     pub(crate) feedback: praxis_feedback::PraxisFeedback,
-    pub(crate) is_first_run: bool,
     pub(crate) status_account_display: Option<StatusAccountDisplay>,
     pub(crate) initial_plan_type: Option<PlanType>,
     pub(crate) model: Option<String>,
@@ -686,8 +685,8 @@ pub(crate) struct ChatWidget {
     thread_name: Option<String>,
     forked_from: Option<ThreadId>,
     frame_requester: FrameRequester,
-    // Whether to include the initial welcome banner on session configured
-    show_welcome_banner: bool,
+    // Enables the single centered empty-thread entry surface owned by Workspace.
+    workspace_entry_surface_enabled: bool,
     // One-shot tooltip override for the primary startup session.
     startup_tooltip_override: Option<String>,
     // When resuming an existing session (selected via resume picker), avoid an

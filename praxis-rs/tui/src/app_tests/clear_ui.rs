@@ -44,39 +44,7 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
             /*is_first_line*/ true,
         )) as Arc<dyn HistoryCell>
     };
-    let make_header = |is_first| -> Arc<dyn HistoryCell> {
-        let event = SessionConfiguredEvent {
-            session_id: ThreadId::new(),
-            forked_from_id: None,
-            thread_name: None,
-            model: "gpt-test".to_string(),
-            model_provider_id: "test-provider".to_string(),
-            service_tier: None,
-            approval_policy: AskForApproval::Never,
-            approvals_reviewer: ApprovalsReviewer::User,
-            sandbox_policy: SandboxPolicy::new_read_only_policy(),
-            cwd: PathBuf::from("/tmp/project").abs().to_path_buf(),
-            reasoning_effort: Some(ReasoningEffortConfig::High),
-            history_log_id: 0,
-            history_entry_count: 0,
-            initial_messages: None,
-            network_proxy: None,
-            rollout_path: Some(PathBuf::new()),
-        };
-        Arc::new(new_session_info(
-            app.chat_widget.config_ref(),
-            app.chat_widget.tui_config_ref(),
-            app.chat_widget.current_model(),
-            event,
-            is_first,
-            /*tooltip_override*/ None,
-            /*auth_plan*/ None,
-            /*show_fast_status*/ false,
-        )) as Arc<dyn HistoryCell>
-    };
-
     app.transcript_cells = vec![
-        make_header(true),
         Arc::new(crate::history_cell::new_info_event(
             "startup tip that used to replay".to_string(),
             /*hint*/ None,

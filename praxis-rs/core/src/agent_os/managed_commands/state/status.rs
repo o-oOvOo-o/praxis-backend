@@ -38,15 +38,6 @@ impl RuntimeCommandStatus {
         )
     }
 
-    pub(in crate::agent_os) fn active_selection_rank(self) -> i8 {
-        match self {
-            Self::Executing => 2,
-            Self::Acked => 1,
-            Self::Pending => 0,
-            Self::Completed | Self::Failed | Self::Expired | Self::Rejected => -1,
-        }
-    }
-
     pub(in crate::agent_os) fn is_turn_claimed(self) -> bool {
         matches!(self, Self::Acked | Self::Executing)
     }

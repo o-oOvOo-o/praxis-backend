@@ -104,6 +104,50 @@ fn provider_for(base_url: String) -> ModelProviderInfo {
 }
 
 #[tokio::test]
+async fn first_party_catalog_exposes_both_deepseek_v4_models() {
+    let praxis_home = tempdir().expect("temp dir");
+    let mut config = ConfigBuilder::default()
+        .praxis_home(praxis_home.path().to_path_buf())
+        .build()
+        .await
+        .expect("load default test config");
+    config.model_providers.insert(
+        DEEPSEEK_PROVIDER_ID.to_string(),
+        ModelProviderInfo {
+            name: "DeepSeek".into(),
+            base_url: Some("https://api.deepseek.com".into()),
+            env_key: Some("DEEPSEEK_API_KEY".into()),
+            env_key_instructions: None,
+            experimental_bearer_token: None,
+            auth: None,
+            wire_api: WireApi::OpenAiCompat,
+            compat: None,
+            query_params: None,
+            http_headers: None,
+            env_http_headers: None,
+            request_max_retries: None,
+            stream_max_retries: None,
+            stream_idle_timeout_ms: None,
+            websocket_connect_timeout_ms: None,
+            requires_openai_auth: false,
+            supports_websockets: false,
+        },
+    );
+
+    let models = first_party_model_presets_for_config(&config);
+    let deepseek_models = models
+        .iter()
+        .filter(|entry| entry.provider_id == DEEPSEEK_PROVIDER_ID)
+        .map(|entry| entry.preset.model.as_str())
+        .collect::<HashSet<_>>();
+
+    assert_eq!(
+        deepseek_models,
+        HashSet::from(["deepseek-v4-pro", "deepseek-v4-flash"])
+    );
+}
+
+#[tokio::test]
 async fn identical_provider_configs_do_not_alias_distinct_provider_ids() {
     let praxis_home = tempdir().expect("temp dir");
     let provider = ModelProviderInfo::create_anthropic_provider();

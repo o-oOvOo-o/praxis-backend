@@ -2,7 +2,6 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::ErrorKind;
@@ -13,25 +12,22 @@ use std::process::ChildStdout;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::LazyLock;
-use std::sync::Mutex;
-use std::sync::PoisonError;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::Duration;
 
 const POWERSHELL_PARSER_SCRIPT: &str = include_str!("powershell_parser.ps1");
+const POWERSHELL_PARSER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Cache one long-lived parser process per executable path so repeated safety checks reuse
-/// PowerShell startup work while still consulting the real parser every time.
-///
-/// We keep the cache behind one mutex because each child process speaks a simple
-/// request/response protocol over a single stdin/stdout pair, so callers targeting the same
-/// executable must serialize access anyway.
+/// Use one parser process per request so a stalled PowerShell parser cannot block unrelated tools.
 pub(super) fn parse_with_powershell_ast(executable: &str, script: &str) -> PowershellParseOutcome {
-    static PARSER_PROCESSES: LazyLock<Mutex<HashMap<String, PowershellParserProcess>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
-
-    let mut parser_processes = PARSER_PROCESSES
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner);
-    parse_with_cached_process(&mut parser_processes, executable, script)
+    let Ok(mut parser) = PowershellParserProcess::spawn(executable) else {
+        return PowershellParseOutcome::Failed;
+    };
+    parser
+        .parse_with_timeout(script, POWERSHELL_PARSER_RESPONSE_TIMEOUT)
+        .unwrap_or(PowershellParseOutcome::Failed)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -39,43 +35,6 @@ pub(super) enum PowershellParseOutcome {
     Commands(Vec<Vec<String>>),
     Unsupported,
     Failed,
-}
-
-fn parse_with_cached_process(
-    parser_processes: &mut HashMap<String, PowershellParserProcess>,
-    executable: &str,
-    script: &str,
-) -> PowershellParseOutcome {
-    // `powershell.exe` and `pwsh.exe` do not accept the same language surface, so each
-    // executable keeps its own parser process and request stream.
-    let parser_key = executable.to_string();
-    for attempt in 0..=1 {
-        if !parser_processes.contains_key(&parser_key) {
-            match PowershellParserProcess::spawn(executable) {
-                Ok(process) => {
-                    parser_processes.insert(parser_key.clone(), process);
-                }
-                Err(_) => return PowershellParseOutcome::Failed,
-            }
-        }
-
-        let Some(parser_process) = parser_processes.get_mut(&parser_key) else {
-            return PowershellParseOutcome::Failed;
-        };
-        let parse_result = parser_process.parse(script);
-        match parse_result {
-            Ok(outcome) => return outcome,
-            Err(_) if attempt == 0 => {
-                // The common failure mode here is that a previously cached child exited or its
-                // stdio stream became unusable between requests. Drop that process and retry once
-                // with a fresh child before giving up.
-                parser_processes.remove(&parser_key);
-            }
-            Err(_) => return PowershellParseOutcome::Failed,
-        }
-    }
-
-    PowershellParseOutcome::Failed
 }
 
 fn encode_powershell_base64(script: &str) -> String {
@@ -95,7 +54,7 @@ fn encoded_parser_script() -> &'static str {
 struct PowershellParserProcess {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    responses: Receiver<std::io::Result<String>>,
     // Request ids are monotonic within one child process so the caller can detect protocol
     // desynchronization if stdout is contaminated or the child is unexpectedly replaced.
     next_request_id: u64,
@@ -103,7 +62,7 @@ struct PowershellParserProcess {
 
 impl PowershellParserProcess {
     fn spawn(executable: &str) -> std::io::Result<Self> {
-        let mut child = Command::new(executable)
+        let child = Command::new(executable)
             .args([
                 "-NoLogo",
                 "-NoProfile",
@@ -115,6 +74,10 @@ impl PowershellParserProcess {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
+        Self::from_child(child)
+    }
+
+    fn from_child(mut child: Child) -> std::io::Result<Self> {
         let stdin = match take_child_stdin(&mut child) {
             Ok(stdin) => stdin,
             Err(error) => {
@@ -129,15 +92,26 @@ impl PowershellParserProcess {
                 return Err(error);
             }
         };
+        let responses = match spawn_response_reader(stdout) {
+            Ok(responses) => responses,
+            Err(error) => {
+                kill_child(&mut child);
+                return Err(error);
+            }
+        };
         Ok(Self {
             child,
             stdin,
-            stdout,
+            responses,
             next_request_id: 0,
         })
     }
 
-    fn parse(&mut self, script: &str) -> std::io::Result<PowershellParseOutcome> {
+    fn parse_with_timeout(
+        &mut self,
+        script: &str,
+        response_timeout: Duration,
+    ) -> std::io::Result<PowershellParseOutcome> {
         let request = PowershellParserRequest {
             id: self.next_request_id,
             payload: encode_powershell_base64(script),
@@ -148,8 +122,25 @@ impl PowershellParserProcess {
         self.stdin.write_all(request_json.as_bytes())?;
         self.stdin.flush()?;
 
-        let mut response_line = String::new();
-        if self.stdout.read_line(&mut response_line)? == 0 {
+        let response_line = match self.responses.recv_timeout(response_timeout) {
+            Ok(response) => response?,
+            Err(RecvTimeoutError::Timeout) => {
+                return Err(std::io::Error::new(
+                    ErrorKind::TimedOut,
+                    format!(
+                        "PowerShell parser did not respond within {} ms",
+                        response_timeout.as_millis()
+                    ),
+                ));
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(std::io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "PowerShell parser response stream closed",
+                ));
+            }
+        };
+        if response_line.is_empty() {
             return Err(std::io::Error::new(
                 ErrorKind::UnexpectedEof,
                 "PowerShell parser closed stdout",
@@ -171,6 +162,23 @@ impl PowershellParserProcess {
         }
 
         Ok(response.into_outcome())
+    }
+
+    #[cfg(all(test, windows))]
+    fn spawn_unresponsive_for_test(executable: &std::path::Path) -> std::io::Result<Self> {
+        let child = Command::new(executable)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Seconds 30",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        Self::from_child(child)
     }
 }
 
@@ -196,6 +204,38 @@ fn take_child_stdout(child: &mut Child) -> std::io::Result<BufReader<ChildStdout
             "PowerShell parser child did not expose stdout",
         )
     })
+}
+
+fn spawn_response_reader(
+    mut stdout: BufReader<ChildStdout>,
+) -> std::io::Result<Receiver<std::io::Result<String>>> {
+    let (responses_tx, responses_rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("praxis-powershell-parser".to_string())
+        .spawn(move || {
+            loop {
+                let mut response = String::new();
+                match stdout.read_line(&mut response) {
+                    Ok(0) => {
+                        let _ = responses_tx.send(Err(std::io::Error::new(
+                            ErrorKind::UnexpectedEof,
+                            "PowerShell parser closed stdout",
+                        )));
+                        break;
+                    }
+                    Ok(_) => {
+                        if responses_tx.send(Ok(response)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = responses_tx.send(Err(error));
+                        break;
+                    }
+                }
+            }
+        })?;
+    Ok(responses_rx)
 }
 
 fn serialize_request(request: &PowershellParserRequest) -> std::io::Result<String> {
@@ -259,6 +299,8 @@ mod tests {
     use super::*;
     use crate::powershell::try_find_powershell_executable_blocking;
     use pretty_assertions::assert_eq;
+    use std::time::Duration;
+    use std::time::Instant;
 
     #[test]
     fn parser_process_handles_multiple_requests() {
@@ -268,7 +310,9 @@ mod tests {
         let powershell = powershell.as_path().to_str().unwrap();
         let mut parser = PowershellParserProcess::spawn(powershell).unwrap();
 
-        let first = parser.parse("Get-Content 'foo bar'").unwrap();
+        let first = parser
+            .parse_with_timeout("Get-Content 'foo bar'", POWERSHELL_PARSER_RESPONSE_TIMEOUT)
+            .unwrap();
         assert_eq!(
             first,
             PowershellParseOutcome::Commands(vec![vec![
@@ -277,13 +321,144 @@ mod tests {
             ]]),
         );
 
-        let second = parser.parse("Write-Output foo | Measure-Object").unwrap();
+        let second = parser
+            .parse_with_timeout(
+                "Write-Output foo | Measure-Object",
+                POWERSHELL_PARSER_RESPONSE_TIMEOUT,
+            )
+            .unwrap();
         assert_eq!(
             second,
             PowershellParseOutcome::Commands(vec![
                 vec!["Write-Output".to_string(), "foo".to_string()],
                 vec!["Measure-Object".to_string()],
             ]),
+        );
+    }
+
+    #[test]
+    fn parser_process_rejects_stop_parsing_forms() {
+        let Some(powershell) = try_find_powershell_executable_blocking() else {
+            return;
+        };
+        let powershell = powershell.as_path().to_str().unwrap();
+        let mut parser = PowershellParserProcess::spawn(powershell).unwrap();
+
+        let parsed = parser
+            .parse_with_timeout(
+                "git log --% HEAD --output=codex_poc.txt",
+                POWERSHELL_PARSER_RESPONSE_TIMEOUT,
+            )
+            .unwrap();
+        assert_eq!(parsed, PowershellParseOutcome::Unsupported);
+    }
+
+    #[test]
+    fn parser_process_rejects_param_blocks() {
+        let Some(powershell) = try_find_powershell_executable_blocking() else {
+            return;
+        };
+        let powershell = powershell.as_path().to_str().unwrap();
+        let mut parser = PowershellParserProcess::spawn(powershell).unwrap();
+
+        let parsed = parser
+            .parse_with_timeout(
+                "param([string]$path = (Get-Location)) Write-Output test",
+                POWERSHELL_PARSER_RESPONSE_TIMEOUT,
+            )
+            .unwrap();
+        assert_eq!(parsed, PowershellParseOutcome::Unsupported);
+    }
+
+    #[test]
+    fn parser_process_rejects_named_blocks() {
+        let Some(powershell) = try_find_powershell_executable_blocking() else {
+            return;
+        };
+        let powershell = powershell.as_path().to_str().unwrap();
+        let mut parser = PowershellParserProcess::spawn(powershell).unwrap();
+
+        let parsed = parser
+            .parse_with_timeout(
+                "begin { Set-Content codex_poc.txt pwned } end { Get-Content Cargo.toml }",
+                POWERSHELL_PARSER_RESPONSE_TIMEOUT,
+            )
+            .unwrap();
+        assert_eq!(parsed, PowershellParseOutcome::Unsupported);
+    }
+
+    #[test]
+    fn parser_process_rejects_using_statements() {
+        let Some(powershell) = try_find_powershell_executable_blocking() else {
+            return;
+        };
+        let powershell = powershell.as_path().to_str().unwrap();
+        let mut parser = PowershellParserProcess::spawn(powershell).unwrap();
+
+        let parsed = parser
+            .parse_with_timeout(
+                "using module ./codex_poc.psm1\nGet-Content Cargo.toml",
+                POWERSHELL_PARSER_RESPONSE_TIMEOUT,
+            )
+            .unwrap();
+        assert_eq!(parsed, PowershellParseOutcome::Unsupported);
+    }
+
+    #[test]
+    fn parser_process_rejects_trap_blocks() {
+        let Some(powershell) = try_find_powershell_executable_blocking() else {
+            return;
+        };
+        let powershell = powershell.as_path().to_str().unwrap();
+        let mut parser = PowershellParserProcess::spawn(powershell).unwrap();
+
+        let parsed = parser
+            .parse_with_timeout(
+                "trap { Set-Content codex_poc.txt pwned; continue } Get-Content missing -ErrorAction Stop",
+                POWERSHELL_PARSER_RESPONSE_TIMEOUT,
+            )
+            .unwrap();
+        assert_eq!(parsed, PowershellParseOutcome::Unsupported);
+    }
+
+    #[test]
+    fn parser_process_times_out_when_response_stalls() {
+        let Some(powershell) = try_find_powershell_executable_blocking() else {
+            return;
+        };
+        let mut parser =
+            PowershellParserProcess::spawn_unresponsive_for_test(powershell.as_path()).unwrap();
+        let started = Instant::now();
+
+        let error = parser
+            .parse_with_timeout("Get-Content foo.rs", Duration::from_millis(100))
+            .unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn fresh_parser_recovers_after_stalled_process() {
+        let Some(powershell) = try_find_powershell_executable_blocking() else {
+            return;
+        };
+        let executable = powershell.as_path().to_str().unwrap();
+        let mut stalled =
+            PowershellParserProcess::spawn_unresponsive_for_test(powershell.as_path()).unwrap();
+        let error = stalled
+            .parse_with_timeout("Get-Content foo.rs", Duration::from_millis(100))
+            .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::TimedOut);
+        drop(stalled);
+
+        let outcome = parse_with_powershell_ast(executable, "Get-Content foo.rs");
+        assert_eq!(
+            outcome,
+            PowershellParseOutcome::Commands(vec![vec![
+                "Get-Content".to_string(),
+                "foo.rs".to_string(),
+            ]])
         );
     }
 }

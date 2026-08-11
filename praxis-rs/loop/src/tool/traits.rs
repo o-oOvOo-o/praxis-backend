@@ -18,6 +18,11 @@ pub trait ToolLifecycleSink: Send + Sync {
     async fn tool_started(&self, call: &ToolCall) -> LoopResult<()>;
 
     async fn tool_progress(&self, progress: ToolProgress) -> LoopResult<()>;
+
+    /// Reports that execution has settled, independently of ordered transcript commit.
+    async fn tool_execution_completed(&self, _result: &ToolResult) -> LoopResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -1,6 +1,17 @@
+use crate::tools::context::ToolPayload;
+use praxis_shell_command::delay_probe_fingerprint;
 use std::sync::Mutex;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+
+const MAX_EQUIVALENT_DELAY_PROBES: usize = 2;
+const DELAY_PROBE_BLOCK_MESSAGE: &str = "Repeated delay-and-status polling was blocked after two equivalent attempts in this turn. Do not start another sleep/poll process. Resume an existing Praxis background session with write_stdin and a long yield, or use one bounded event-driven wait command for the external process. Keep the wait interruptible and continue from that single wait instead of busy-polling.";
+
+#[derive(Debug)]
+struct ShellWaitProbeStreak {
+    fingerprint: String,
+    count: usize,
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct ToolLoopGuardState {
@@ -12,6 +23,7 @@ pub(crate) struct ToolLoopGuardState {
     suppress_all_tools: std::sync::atomic::AtomicBool,
     terminal_model_error: Mutex<Option<String>>,
     pending_followup_intervention: Mutex<Option<String>>,
+    shell_wait_probe_streak: Mutex<Option<ShellWaitProbeStreak>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -41,6 +53,47 @@ impl ToolLoopGuardState {
         ) {
             self.subagent_tool_calls_seen
                 .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn record_shell_wait_probe(
+        &self,
+        tool_name: &str,
+        payload: &ToolPayload,
+    ) -> ToolLoopDecision {
+        if !matches!(tool_name, "shell_command" | "exec_command") {
+            return ToolLoopDecision::Allow;
+        }
+
+        let fingerprint = shell_command_text(tool_name, payload)
+            .as_deref()
+            .and_then(delay_probe_fingerprint);
+        let mut streak = self.shell_wait_probe_streak_guard();
+        let Some(fingerprint) = fingerprint else {
+            *streak = None;
+            return ToolLoopDecision::Allow;
+        };
+
+        let count = match streak.as_mut() {
+            Some(streak) if streak.fingerprint == fingerprint => {
+                streak.count += 1;
+                streak.count
+            }
+            _ => {
+                *streak = Some(ShellWaitProbeStreak {
+                    fingerprint,
+                    count: 1,
+                });
+                1
+            }
+        };
+
+        if count <= MAX_EQUIVALENT_DELAY_PROBES {
+            ToolLoopDecision::Allow
+        } else {
+            ToolLoopDecision::Block {
+                message: DELAY_PROBE_BLOCK_MESSAGE.to_string(),
+            }
         }
     }
 
@@ -128,11 +181,40 @@ impl ToolLoopGuardState {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+
+    fn shell_wait_probe_streak_guard(
+        &self,
+    ) -> std::sync::MutexGuard<'_, Option<ShellWaitProbeStreak>> {
+        self.shell_wait_probe_streak
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+}
+
+fn shell_command_text(tool_name: &str, payload: &ToolPayload) -> Option<String> {
+    let ToolPayload::Function { arguments } = payload else {
+        return None;
+    };
+    let arguments: serde_json::Value = serde_json::from_str(arguments).ok()?;
+    arguments
+        .get(if tool_name == "exec_command" {
+            "cmd"
+        } else {
+            "command"
+        })?
+        .as_str()
+        .map(str::to_owned)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn shell_command(command: &str) -> ToolPayload {
+        ToolPayload::Function {
+            arguments: serde_json::json!({ "command": command }).to_string(),
+        }
+    }
 
     #[test]
     fn terminal_list_agents_suppresses_visibility_then_blocks_repeats() {
@@ -205,5 +287,80 @@ mod tests {
             guard.terminal_model_error_message().as_deref(),
             Some("exceeded retry limit")
         );
+    }
+
+    #[test]
+    fn equivalent_delay_probes_are_allowed_twice_then_blocked() {
+        let guard = ToolLoopGuardState::default();
+
+        assert_eq!(
+            guard.record_shell_wait_probe(
+                "shell_command",
+                &shell_command("Start-Sleep -Seconds 45; Get-Process cargo,rustc")
+            ),
+            ToolLoopDecision::Allow
+        );
+        assert_eq!(
+            guard.record_shell_wait_probe(
+                "shell_command",
+                &shell_command("  start-sleep   -Seconds 55 ;  get-process cargo,rustc  ")
+            ),
+            ToolLoopDecision::Allow
+        );
+        let ToolLoopDecision::Block { message } = guard.record_shell_wait_probe(
+            "shell_command",
+            &shell_command("Start-Sleep -Seconds 50; Get-Process cargo,rustc"),
+        ) else {
+            panic!("third equivalent delay probe should be blocked");
+        };
+
+        assert!(message.contains("Repeated delay-and-status polling"));
+        assert!(message.contains("write_stdin"));
+        assert!(message.contains("event-driven wait"));
+    }
+
+    #[test]
+    fn productive_tool_call_resets_delay_probe_streak() {
+        let guard = ToolLoopGuardState::default();
+        let delayed_probe = shell_command("Start-Sleep -Seconds 55; Get-Process cargo,rustc");
+
+        assert_eq!(
+            guard.record_shell_wait_probe("shell_command", &delayed_probe),
+            ToolLoopDecision::Allow
+        );
+        assert_eq!(
+            guard.record_shell_wait_probe("shell_command", &delayed_probe),
+            ToolLoopDecision::Allow
+        );
+        assert_eq!(
+            guard.record_shell_wait_probe(
+                "shell_command",
+                &shell_command("Get-Content build.log -Tail 20")
+            ),
+            ToolLoopDecision::Allow
+        );
+        assert_eq!(
+            guard.record_shell_wait_probe("shell_command", &delayed_probe),
+            ToolLoopDecision::Allow
+        );
+    }
+
+    #[test]
+    fn text_mentions_and_event_driven_waits_are_not_delay_probes() {
+        let guard = ToolLoopGuardState::default();
+
+        for command in [
+            "rg 'Start-Sleep' core/src",
+            "Wait-Process -Id 42 -Timeout 300",
+            "Start-Sleep -Seconds 1; Write-Output ready",
+            "sleep 1; echo ready",
+        ] {
+            for _ in 0..3 {
+                assert_eq!(
+                    guard.record_shell_wait_probe("shell_command", &shell_command(command)),
+                    ToolLoopDecision::Allow
+                );
+            }
+        }
     }
 }

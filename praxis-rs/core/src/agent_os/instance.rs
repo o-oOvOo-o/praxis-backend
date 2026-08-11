@@ -5,6 +5,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 use praxis_rollout::StateDbHandle;
+use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tokio::sync::watch;
 
@@ -17,6 +18,7 @@ pub(crate) struct AgentOs {
     // Cleaners are indexed by runtime kind and owner so lease expiry can route cleanup directly.
     pub(super) process_cleaners: RwLock<HashMap<String, Vec<Arc<dyn AgentOsProcessCleaner>>>>,
     pub(super) process_cleaners_by_owner: RwLock<HashMap<String, Arc<dyn AgentOsProcessCleaner>>>,
+    pub(super) lease_released: Notify,
     pub(super) lease_janitor_started: AtomicBool,
     pub(super) change_seq: AtomicU64,
     pub(super) change_tx: watch::Sender<u64>,
@@ -30,6 +32,7 @@ impl Default for AgentOs {
             state_db: RwLock::new(None),
             process_cleaners: RwLock::new(HashMap::new()),
             process_cleaners_by_owner: RwLock::new(HashMap::new()),
+            lease_released: Notify::new(),
             lease_janitor_started: AtomicBool::new(false),
             change_seq: AtomicU64::new(0),
             change_tx,
