@@ -10,7 +10,8 @@ use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
 use crate::praxis::INITIAL_SUBMIT_ID;
 use crate::praxis::Praxis;
-use crate::praxis_thread::{PraxisThread, ThreadConfigSnapshot};
+use crate::praxis_thread::PraxisThread;
+use crate::praxis_thread::ThreadConfigSnapshot;
 
 use super::super::ThreadManagerInner;
 use super::super::ThreadSpawnResult;

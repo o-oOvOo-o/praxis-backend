@@ -1,11 +1,15 @@
 use super::*;
-use praxis_app_core::{
-    PraxisChatLocalImageAttachment, PraxisChatMentionBinding, PraxisChatTextElement,
-    PraxisChatTextRange, PraxisChatUserMessage, PraxisPendingInputAction,
-    PraxisPendingInputActionResult, PraxisPendingSteer as PraxisCorePendingSteer,
-    PraxisPendingSteerCompareKey, PraxisThreadInputState,
-    merge_user_messages as merge_praxis_user_messages,
-};
+use praxis_app_core::PraxisChatLocalImageAttachment;
+use praxis_app_core::PraxisChatMentionBinding;
+use praxis_app_core::PraxisChatTextElement;
+use praxis_app_core::PraxisChatTextRange;
+use praxis_app_core::PraxisChatUserMessage;
+use praxis_app_core::PraxisPendingInputAction;
+use praxis_app_core::PraxisPendingInputActionResult;
+use praxis_app_core::PraxisPendingSteer as PraxisCorePendingSteer;
+use praxis_app_core::PraxisPendingSteerCompareKey;
+use praxis_app_core::PraxisThreadInputState;
+use praxis_app_core::merge_user_messages as merge_praxis_user_messages;
 use praxis_protocol::user_input::ByteRange;
 
 #[derive(Debug, Clone, PartialEq)]

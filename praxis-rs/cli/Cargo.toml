@@ -41,6 +41,7 @@ praxis-sandboxing = { workspace = true }
 praxis-state = { workspace = true }
 praxis-stdio-to-uds = { workspace = true }
 praxis-terminal-detection = { workspace = true }
+praxis-thread-share = { workspace = true }
 praxis-tui = { workspace = true }
 praxis-utils-path = { workspace = true }
 libc = { workspace = true }

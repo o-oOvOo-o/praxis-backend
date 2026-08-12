@@ -1,8 +1,9 @@
 use super::options::AgentOsSnapshotOptions;
-use super::summaries::{
-    AgentOsArtifactSummary, AgentOsIntentPlanSummary, AgentOsLeaseSummary,
-    AgentOsWorkerRequestSummary, RuntimeCommandSummary,
-};
+use super::summaries::AgentOsArtifactSummary;
+use super::summaries::AgentOsIntentPlanSummary;
+use super::summaries::AgentOsLeaseSummary;
+use super::summaries::AgentOsWorkerRequestSummary;
+use super::summaries::RuntimeCommandSummary;
 use crate::agent_os::WorkerRequestStatus;
 use crate::agent_os::state::AgentOsState;
 use serde::Serialize;

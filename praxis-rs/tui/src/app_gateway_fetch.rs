@@ -150,6 +150,18 @@ pub(crate) async fn fetch_plugin_command_execute(
             vec![command.args.trim().to_string()]
         }
     });
+    let rollout_path = command
+        .rollout_path
+        .clone()
+        .map(AbsolutePathBuf::try_from)
+        .transpose()
+        .wrap_err("plugin command rollout path must be absolute")?;
+    let cwd = command
+        .cwd
+        .clone()
+        .map(AbsolutePathBuf::try_from)
+        .transpose()
+        .wrap_err("plugin command cwd must be absolute")?;
     request_handle
         .request_typed(ClientRequest::PluginCommandExecute {
             request_id,
@@ -157,6 +169,9 @@ pub(crate) async fn fetch_plugin_command_execute(
                 plugin_id: command.plugin_id.clone(),
                 command_name: command.name.clone(),
                 args,
+                thread_id: command.thread_id.clone(),
+                rollout_path,
+                cwd,
             },
         })
         .await

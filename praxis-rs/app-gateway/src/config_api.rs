@@ -521,7 +521,8 @@ mod requirements;
 
 use conversions::*;
 pub(crate) use feature_policy::apply_runtime_feature_enablement;
-use feature_policy::{sanitize_model_provider_id, validate_model_provider_id};
+use feature_policy::sanitize_model_provider_id;
+use feature_policy::validate_model_provider_id;
 use requirements::*;
 
 #[cfg(test)]

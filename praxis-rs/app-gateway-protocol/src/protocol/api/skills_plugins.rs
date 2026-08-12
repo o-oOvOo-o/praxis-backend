@@ -85,6 +85,18 @@ pub struct PluginCommandExecuteParams {
     pub command_name: String,
     #[serde(default)]
     pub args: Vec<String>,
+    /// Thread being viewed when the command was submitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
+    /// Durable rollout backing the current thread, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub rollout_path: Option<AbsolutePathBuf>,
+    /// Working directory associated with the current thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub cwd: Option<AbsolutePathBuf>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

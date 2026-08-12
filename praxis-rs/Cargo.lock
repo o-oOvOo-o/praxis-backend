@@ -6607,6 +6607,7 @@ dependencies = [
  "praxis-sandboxing",
  "praxis-shell-command",
  "praxis-state",
+ "praxis-thread-share",
  "praxis-tools",
  "praxis-utils-absolute-path",
  "praxis-utils-approval-presets",
@@ -6855,6 +6856,7 @@ dependencies = [
  "praxis-state",
  "praxis-stdio-to-uds",
  "praxis-terminal-detection",
+ "praxis-thread-share",
  "praxis-tui",
  "praxis-utils-cargo-bin",
  "praxis-utils-cli",
@@ -7914,6 +7916,20 @@ version = "0.0.0"
 dependencies = [
  "pretty_assertions",
  "tracing",
+]
+
+[[package]]
+name = "praxis-thread-share"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "pretty_assertions",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]

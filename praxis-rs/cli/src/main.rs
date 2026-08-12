@@ -531,6 +531,62 @@ async fn cli_main(arg0_paths: Arg0DispatchPaths) -> anyhow::Result<()> {
                 TokenSaverFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
             }
         }
+        Some(Subcommand::ThreadShare(cmd)) => {
+            reject_remote_mode_for_subcommand(
+                root_remote.as_deref(),
+                root_remote_auth_token_env.as_deref(),
+                "thread-share",
+            )?;
+            let thread_id = cmd
+                .thread_id
+                .or_else(|| std::env::var("PRAXIS_PLUGIN_THREAD_ID").ok())
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("thread-share requires --thread-id or PRAXIS_PLUGIN_THREAD_ID")
+                })?;
+            let rollout_path = cmd
+                .rollout
+                .or_else(|| std::env::var_os("PRAXIS_PLUGIN_ROLLOUT_PATH").map(Into::into))
+                .ok_or_else(|| {
+                    anyhow::anyhow!("thread-share requires --rollout or PRAXIS_PLUGIN_ROLLOUT_PATH")
+                })?;
+            let thread_cwd = std::env::var_os("PRAXIS_PLUGIN_CWD")
+                .map(std::path::PathBuf::from)
+                .map(Ok)
+                .unwrap_or_else(std::env::current_dir)?;
+            let repository_path = cmd
+                .repository
+                .or_else(|| std::env::var_os("PRAXIS_THREAD_SHARE_REPOSITORY").map(Into::into))
+                .or_else(|| praxis_thread_share::discover_repository(&thread_cwd))
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "no praxis-threads checkout found; pass --repository or set \
+                         PRAXIS_THREAD_SHARE_REPOSITORY"
+                    )
+                })?;
+            let outcome =
+                praxis_thread_share::publish_thread(praxis_thread_share::PublishRequest {
+                    rollout_path: &rollout_path,
+                    thread_id: &thread_id,
+                    repository_path: &repository_path,
+                    team: &cmd.team,
+                    mode: if cmd.no_push {
+                        praxis_thread_share::PublishMode::CommitOnly
+                    } else {
+                        praxis_thread_share::PublishMode::Push
+                    },
+                })?;
+            println!("# Thread shared\n");
+            println!("- Thread: `{}`", outcome.thread_id);
+            println!("- Project: {}", outcome.project);
+            println!("- Team: {}", outcome.team);
+            println!("- Messages: {}", outcome.message_count);
+            println!("- Redactions: {}", outcome.redaction_count);
+            println!("- Commit: `{}`", outcome.commit);
+            if let Some(url) = outcome.web_url {
+                println!("- GitHub: {url}");
+            }
+        }
         Some(Subcommand::Features(FeaturesCli { sub })) => match sub {
             FeaturesSubcommand::List => {
                 reject_remote_mode_for_subcommand(

@@ -1,7 +1,11 @@
 use praxis_protocol::protocol::SandboxPolicy as CoreSandboxPolicy;
 use praxis_utils_approval_presets::PermissionPreset;
 
-use crate::{ApprovalsReviewer, AskForApproval, ConfigRequirements, SandboxMode, SandboxPolicy};
+use crate::ApprovalsReviewer;
+use crate::AskForApproval;
+use crate::ConfigRequirements;
+use crate::SandboxMode;
+use crate::SandboxPolicy;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PermissionPresetConfig {

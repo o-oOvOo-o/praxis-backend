@@ -55,6 +55,7 @@ praxis-rollout = { workspace = true }
 praxis-sandboxing = { workspace = true }
 praxis-state = { workspace = true }
 praxis-tools = { workspace = true }
+praxis-thread-share = { workspace = true }
 praxis-workspace-history = { workspace = true }
 praxis-utils-absolute-path = { workspace = true }
 praxis-utils-json-to-toml = { workspace = true }

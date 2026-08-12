@@ -18,13 +18,17 @@ mod resolution;
 #[cfg(test)]
 mod tests;
 
+use resolution::absolute_root_path_for_cwd;
+use resolution::append_default_read_only_path_if_no_explicit_rule;
+use resolution::dedup_absolute_paths;
 pub(crate) use resolution::default_read_only_subpaths_for_writable_root;
-use resolution::{
-    absolute_root_path_for_cwd, append_default_read_only_path_if_no_explicit_rule,
-    dedup_absolute_paths, file_system_paths_share_target, has_explicit_resolved_path_entry,
-    normalize_effective_absolute_path, resolve_candidate_path, resolve_entry_path,
-    resolve_file_system_special_path, resolved_entry_precedence,
-};
+use resolution::file_system_paths_share_target;
+use resolution::has_explicit_resolved_path_entry;
+use resolution::normalize_effective_absolute_path;
+use resolution::resolve_candidate_path;
+use resolution::resolve_entry_path;
+use resolution::resolve_file_system_special_path;
+use resolution::resolved_entry_precedence;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, Default, JsonSchema, TS,

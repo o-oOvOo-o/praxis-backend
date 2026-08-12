@@ -63,9 +63,9 @@ use toml::Value as TomlValue;
 use tracing::warn;
 
 pub use crate::events::AppGatewayEvent;
-pub(crate) use crate::events::{
-    ForwardEventResult, forward_in_process_event, server_notification_requires_delivery,
-};
+pub(crate) use crate::events::ForwardEventResult;
+pub(crate) use crate::events::forward_in_process_event;
+pub(crate) use crate::events::server_notification_requires_delivery;
 pub use crate::remote::RemoteAppGatewayClient;
 pub use crate::remote::RemoteAppGatewayConnectArgs;
 

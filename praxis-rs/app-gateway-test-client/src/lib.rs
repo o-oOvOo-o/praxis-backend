@@ -102,21 +102,39 @@ mod commands;
 #[path = "lib/endpoint.rs"]
 mod endpoint;
 
-use client::{
-    CommandApprovalBehavior, PraxisClient, TestClientTracing, TraceSummary, print_trace_summary,
-};
+use client::CommandApprovalBehavior;
+use client::PraxisClient;
+use client::TestClientTracing;
+use client::TraceSummary;
+use client::print_trace_summary;
+use commands::control_message_api;
+use commands::control_release;
+use commands::ensure_dynamic_tools_unused;
+use commands::get_account_rate_limits;
+use commands::live_elicitation_timeout_pause;
+use commands::model_list;
+use commands::no_trigger_cmd_approval;
+use commands::parse_dynamic_tools_arg;
+use commands::resume_message_api;
+use commands::send_follow_up_api;
+use commands::send_message;
 pub use commands::send_message_api;
-use commands::{
-    control_message_api, control_release, ensure_dynamic_tools_unused, get_account_rate_limits,
-    live_elicitation_timeout_pause, model_list, no_trigger_cmd_approval, parse_dynamic_tools_arg,
-    resume_message_api, send_follow_up_api, send_message, send_message_api_endpoint, test_login,
-    thread_decrement_elicitation, thread_increment_elicitation, thread_list, thread_resume_follow,
-    trigger_cmd_approval, trigger_patch_approval, trigger_zsh_fork_multi_cmd_approval, watch,
-};
-use endpoint::{
-    BackgroundAppGateway, Endpoint, resolve_endpoint, resolve_shared_websocket_url, serve,
-    shell_quote,
-};
+use commands::send_message_api_endpoint;
+use commands::test_login;
+use commands::thread_decrement_elicitation;
+use commands::thread_increment_elicitation;
+use commands::thread_list;
+use commands::thread_resume_follow;
+use commands::trigger_cmd_approval;
+use commands::trigger_patch_approval;
+use commands::trigger_zsh_fork_multi_cmd_approval;
+use commands::watch;
+use endpoint::BackgroundAppGateway;
+use endpoint::Endpoint;
+use endpoint::resolve_endpoint;
+use endpoint::resolve_shared_websocket_url;
+use endpoint::serve;
+use endpoint::shell_quote;
 
 const NOTIFICATIONS_TO_OPT_OUT: &[&str] = &[
     // App-gateway item deltas.

@@ -46,6 +46,32 @@ fn finalize_resume_from_args(args: &[&str]) -> TuiCli {
     )
 }
 
+#[test]
+fn thread_share_command_accepts_explicit_context_for_automation() {
+    let cli = MultitoolCli::try_parse_from([
+        "praxis",
+        "thread-share",
+        "Geometry Core",
+        "--thread-id",
+        "thread-123",
+        "--rollout",
+        "rollout.jsonl",
+        "--repository",
+        "praxis-threads",
+        "--no-push",
+    ])
+    .expect("parse thread-share command");
+
+    let Some(Subcommand::ThreadShare(command)) = cli.subcommand else {
+        panic!("expected thread-share command");
+    };
+    assert_eq!(command.thread_id.as_deref(), Some("thread-123"));
+    assert_eq!(command.team, "Geometry Core");
+    assert_eq!(command.rollout, Some(PathBuf::from("rollout.jsonl")));
+    assert_eq!(command.repository, Some(PathBuf::from("praxis-threads")));
+    assert!(command.no_push);
+}
+
 fn finalize_fork_from_args(args: &[&str]) -> TuiCli {
     let cli = MultitoolCli::try_parse_from(args).expect("parse");
     let MultitoolCli {

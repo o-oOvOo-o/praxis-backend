@@ -2,10 +2,15 @@
 mod real;
 
 #[cfg(feature = "code_mode")]
-pub(crate) use real::{
-    CodeModeExecuteHandler, CodeModeService, CodeModeTurnWorker, CodeModeWaitHandler,
-    is_code_mode_nested_tool,
-};
+pub(crate) use real::CodeModeExecuteHandler;
+#[cfg(feature = "code_mode")]
+pub(crate) use real::CodeModeService;
+#[cfg(feature = "code_mode")]
+pub(crate) use real::CodeModeTurnWorker;
+#[cfg(feature = "code_mode")]
+pub(crate) use real::CodeModeWaitHandler;
+#[cfg(feature = "code_mode")]
+pub(crate) use real::is_code_mode_nested_tool;
 
 #[cfg(not(feature = "code_mode"))]
 mod disabled {
@@ -102,7 +107,12 @@ mod disabled {
 }
 
 #[cfg(not(feature = "code_mode"))]
-pub(crate) use disabled::{
-    CodeModeExecuteHandler, CodeModeService, CodeModeTurnWorker, CodeModeWaitHandler,
-    is_code_mode_nested_tool,
-};
+pub(crate) use disabled::CodeModeExecuteHandler;
+#[cfg(not(feature = "code_mode"))]
+pub(crate) use disabled::CodeModeService;
+#[cfg(not(feature = "code_mode"))]
+pub(crate) use disabled::CodeModeTurnWorker;
+#[cfg(not(feature = "code_mode"))]
+pub(crate) use disabled::CodeModeWaitHandler;
+#[cfg(not(feature = "code_mode"))]
+pub(crate) use disabled::is_code_mode_nested_tool;

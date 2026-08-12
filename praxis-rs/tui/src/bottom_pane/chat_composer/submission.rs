@@ -260,6 +260,9 @@ impl ChatComposer {
                     plugin_display_name: command.plugin_display_name,
                     name: command.name,
                     args: String::new(),
+                    thread_id: None,
+                    rollout_path: None,
+                    cwd: None,
                 }));
             }
             None
@@ -334,6 +337,9 @@ impl ChatComposer {
                 plugin_display_name: command.plugin_display_name,
                 name: command.name,
                 args: rest.trim().to_string(),
+                thread_id: None,
+                rollout_path: None,
+                cwd: None,
             }));
         }
 

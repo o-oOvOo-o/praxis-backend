@@ -41,30 +41,43 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
-use praxis_app_gateway_protocol::{ThreadSelfworkPhase, ThreadSelfworkStatus};
+use praxis_app_gateway_protocol::ThreadSelfworkPhase;
+use praxis_app_gateway_protocol::ThreadSelfworkStatus;
 use url::Url;
 
-use self::exec_state::{
-    RunningCommand, UnifiedExecProcessSummary, UnifiedExecWaitState, UnifiedExecWaitStreak,
-    is_standard_tool_call, is_unified_exec_source,
-};
+use self::exec_state::RunningCommand;
+use self::exec_state::UnifiedExecProcessSummary;
+use self::exec_state::UnifiedExecWaitState;
+use self::exec_state::UnifiedExecWaitStreak;
+use self::exec_state::is_standard_tool_call;
+use self::exec_state::is_unified_exec_source;
 pub(crate) use self::notification_text::Notification;
-pub(crate) use self::rate_limit_state::{
-    NUDGE_MODEL_SLUG, RATE_LIMIT_SWITCH_PROMPT_THRESHOLD, RateLimitErrorKind,
-    RateLimitSwitchPromptState, RateLimitWarningState, app_gateway_rate_limit_error_kind,
-    core_rate_limit_error_kind, get_limits_duration,
-};
+pub(crate) use self::rate_limit_state::NUDGE_MODEL_SLUG;
+pub(crate) use self::rate_limit_state::RATE_LIMIT_SWITCH_PROMPT_THRESHOLD;
+pub(crate) use self::rate_limit_state::RateLimitErrorKind;
+pub(crate) use self::rate_limit_state::RateLimitSwitchPromptState;
+pub(crate) use self::rate_limit_state::RateLimitWarningState;
+pub(crate) use self::rate_limit_state::app_gateway_rate_limit_error_kind;
+pub(crate) use self::rate_limit_state::core_rate_limit_error_kind;
+pub(crate) use self::rate_limit_state::get_limits_duration;
 use self::realtime::PendingSteerCompareKey;
-use self::selfwork_plan::{
-    SELFWORK_PICKER_VIEW_ID, SELFWORK_PLAN_SCAN_LIMIT, SELFWORK_STALL_LIMIT, SELFWORK_USAGE,
-    SelfworkCommand, SelfworkRuntimeState, discover_selfwork_plan_candidates,
-    inspect_selfwork_plan, parse_selfwork_command, resolve_selfwork_plan_path,
-    selfwork_search_root,
-};
-use self::status_text::{
-    DEFAULT_COMPOSER_PLACEHOLDER, app_gateway_goal_status_label, edited_goal_status,
-    extract_first_bold, format_goal_elapsed, reasoning_status_preview,
-};
+use self::selfwork_plan::SELFWORK_PICKER_VIEW_ID;
+use self::selfwork_plan::SELFWORK_PLAN_SCAN_LIMIT;
+use self::selfwork_plan::SELFWORK_STALL_LIMIT;
+use self::selfwork_plan::SELFWORK_USAGE;
+use self::selfwork_plan::SelfworkCommand;
+use self::selfwork_plan::SelfworkRuntimeState;
+use self::selfwork_plan::discover_selfwork_plan_candidates;
+use self::selfwork_plan::inspect_selfwork_plan;
+use self::selfwork_plan::parse_selfwork_command;
+use self::selfwork_plan::resolve_selfwork_plan_path;
+use self::selfwork_plan::selfwork_search_root;
+use self::status_text::DEFAULT_COMPOSER_PLACEHOLDER;
+use self::status_text::app_gateway_goal_status_label;
+use self::status_text::edited_goal_status;
+use self::status_text::extract_first_bold;
+use self::status_text::format_goal_elapsed;
+use self::status_text::reasoning_status_preview;
 use crate::SessionLookupSource;
 use crate::app_command::AppCommand;
 use crate::app_event::RealtimeAudioDeviceKind;
@@ -102,14 +115,14 @@ use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
 use crossterm::event::KeyEventKind;
 use crossterm::event::KeyModifiers;
+use praxis_app_core::PLAN_IMPLEMENTATION_ACCEPT_LABEL;
+use praxis_app_core::PLAN_IMPLEMENTATION_DECLINE_LABEL;
+use praxis_app_core::PLAN_IMPLEMENTATION_PROMPT;
+use praxis_app_core::PLAN_IMPLEMENTATION_TITLE;
 use praxis_app_core::thread_commands::ExternalThreadCommandAction;
 use praxis_app_core::thread_commands::ExternalThreadCommandIntent;
 use praxis_app_core::thread_commands::ExternalThreadCommandSource;
 use praxis_app_core::thread_commands::parse_external_thread_command;
-use praxis_app_core::{
-    PLAN_IMPLEMENTATION_ACCEPT_LABEL, PLAN_IMPLEMENTATION_DECLINE_LABEL,
-    PLAN_IMPLEMENTATION_PROMPT, PLAN_IMPLEMENTATION_TITLE,
-};
 use praxis_app_gateway_protocol::AppSummary;
 use praxis_app_gateway_protocol::CollabAgentState as AppGatewayCollabAgentState;
 use praxis_app_gateway_protocol::CollabAgentTool;

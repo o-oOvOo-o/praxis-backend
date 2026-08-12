@@ -8,10 +8,14 @@ mod spawn_edges;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use filters::{push_thread_filters, push_thread_order_and_limit};
+pub(crate) use filters::push_thread_filters;
+pub(crate) use filters::push_thread_order_and_limit;
 #[cfg(test)]
-use filters::{sqlite_like_escape, thread_search_fts_query};
-use rollout_items::{extract_dynamic_tools, extract_memory_mode};
+use filters::sqlite_like_escape;
+#[cfg(test)]
+use filters::thread_search_fts_query;
+use rollout_items::extract_dynamic_tools;
+use rollout_items::extract_memory_mode;
 use source::thread_source_columns_from_source_str;
 
 impl StateRuntime {

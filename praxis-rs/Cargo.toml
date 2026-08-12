@@ -90,6 +90,7 @@ members = [
     "praxis-api",
     "state",
     "terminal-detection",
+    "thread-share",
     "praxis-experimental-api-macros",
     "plugin",
 ]
@@ -171,6 +172,7 @@ praxis-skills = { path = "skills" }
 praxis-state = { path = "state" }
 praxis-stdio-to-uds = { path = "stdio-to-uds" }
 praxis-terminal-detection = { path = "terminal-detection" }
+praxis-thread-share = { path = "thread-share" }
 praxis-tools = { path = "tools", default-features = false }
 praxis-tui = { path = "tui" }
 praxis-workspace-history = { path = "workspace-history" }

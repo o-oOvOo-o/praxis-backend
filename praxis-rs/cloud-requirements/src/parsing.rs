@@ -1,13 +1,16 @@
 #[cfg(test)]
 use crate::constants::CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE;
-use crate::constants::{
-    OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_ID, OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_NAME,
-};
-use praxis_core::config_loader::{
-    CloudConfigBundle, CloudConfigBundleLoadError, CloudConfigBundleLoadErrorCode,
-    CloudConfigTomlBundle, CloudRequirementsFragment, CloudRequirementsLoadError,
-    CloudRequirementsLoadErrorCode, CloudRequirementsTomlBundle, ConfigRequirementsToml,
-};
+use crate::constants::OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_ID;
+use crate::constants::OPENAI_PRAXIS_REQUIREMENTS_FRAGMENT_NAME;
+use praxis_core::config_loader::CloudConfigBundle;
+use praxis_core::config_loader::CloudConfigBundleLoadError;
+use praxis_core::config_loader::CloudConfigBundleLoadErrorCode;
+use praxis_core::config_loader::CloudConfigTomlBundle;
+use praxis_core::config_loader::CloudRequirementsFragment;
+use praxis_core::config_loader::CloudRequirementsLoadError;
+use praxis_core::config_loader::CloudRequirementsLoadErrorCode;
+use praxis_core::config_loader::CloudRequirementsTomlBundle;
+use praxis_core::config_loader::ConfigRequirementsToml;
 
 pub(crate) fn parse_cloud_requirements(
     contents: &str,

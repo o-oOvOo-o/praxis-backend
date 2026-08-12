@@ -1,14 +1,17 @@
 use super::*;
 use crate::bottom_pane::PluginCommandInvocation;
 use crate::bottom_pane::PluginStatusDocument;
-use praxis_app_core::thread_commands::{
-    ThreadGoalCommand, ThreadGoalCommandStatus, parse_thread_goal_command,
-};
+use praxis_app_core::thread_commands::ThreadGoalCommand;
+use praxis_app_core::thread_commands::ThreadGoalCommandStatus;
+use praxis_app_core::thread_commands::parse_thread_goal_command;
 use praxis_app_gateway_protocol::PluginCommandExecuteResponse;
 use praxis_app_gateway_protocol::ThreadGoalStatus as AppGatewayThreadGoalStatus;
 
 impl ChatWidget {
-    pub(super) fn dispatch_plugin_command(&mut self, command: PluginCommandInvocation) {
+    pub(super) fn dispatch_plugin_command(&mut self, mut command: PluginCommandInvocation) {
+        command.thread_id = self.thread_id.map(|thread_id| thread_id.to_string());
+        command.rollout_path = self.current_rollout_path.clone();
+        command.cwd = Some(self.config.cwd.to_path_buf());
         let title = format!("/{}", command.name);
         self.bottom_pane
             .show_plugin_status_view(PluginStatusDocument::loading(
@@ -35,6 +38,9 @@ impl ChatWidget {
                     plugin_display_name: plugin.display_name.clone(),
                     name: command.name.clone(),
                     args: args.clone(),
+                    thread_id: None,
+                    rollout_path: None,
+                    cwd: None,
                 })
         })
     }

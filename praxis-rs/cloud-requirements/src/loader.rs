@@ -1,13 +1,19 @@
-use crate::parsing::{cloud_bundle_error_to_requirements_error, requirements_from_bundle_option};
-use crate::provider::{ConfigBundleProvider, OpenAiHostedConfigBundleProvider};
+use crate::parsing::cloud_bundle_error_to_requirements_error;
+use crate::parsing::requirements_from_bundle_option;
+use crate::provider::ConfigBundleProvider;
+use crate::provider::OpenAiHostedConfigBundleProvider;
 use praxis_core::config::ConfigToml;
-use praxis_core::config_loader::{
-    CloudConfigBundleLoadError, CloudConfigBundleLoadErrorCode, CloudConfigBundleLoader,
-    CloudRequirementsLoadError, CloudRequirementsLoader,
-};
-use praxis_login::{AuthCredentialsStoreMode, AuthManager};
+use praxis_core::config_loader::CloudConfigBundleLoadError;
+use praxis_core::config_loader::CloudConfigBundleLoadErrorCode;
+use praxis_core::config_loader::CloudConfigBundleLoader;
+use praxis_core::config_loader::CloudRequirementsLoadError;
+use praxis_core::config_loader::CloudRequirementsLoader;
+use praxis_login::AuthCredentialsStoreMode;
+use praxis_login::AuthManager;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 use tokio::task::JoinHandle;
 
 fn refresher_task_slot() -> &'static Mutex<Option<JoinHandle<()>>> {

@@ -129,6 +129,63 @@ async fn conflicting_lease_waits_for_release_instead_of_rejecting_parallel_tool(
 }
 
 #[tokio::test]
+async fn conflicting_lease_times_out_with_owner_instead_of_waiting_forever() {
+    let agent_os = AgentOs::new();
+    let requirement = [ResourceRequirement::RepoWrite {
+        scope: "repo:shared".to_string(),
+    }];
+    let first_thread = ThreadId::new();
+    let second_thread = ThreadId::new();
+    let first = agent_os
+        .acquire_required_leases(first_thread, "first", 0, &requirement)
+        .await
+        .expect("first lease should be acquired");
+
+    let error = agent_os
+        .acquire_required_leases_with_timeout(
+            second_thread,
+            "second",
+            0,
+            &requirement,
+            Duration::from_millis(20),
+        )
+        .await
+        .expect_err("conflicting lease should time out");
+    let message = error.to_string();
+    assert!(message.contains("timed out after 20 ms"));
+    assert!(message.contains(&first_thread.to_string()));
+
+    agent_os.release_leases(&first).await;
+}
+
+#[tokio::test]
+async fn same_thread_exclusive_lease_reports_self_conflict_immediately() {
+    let agent_os = AgentOs::new();
+    let thread_id = ThreadId::new();
+    let requirement = [ResourceRequirement::RepoWrite {
+        scope: "repo:shared".to_string(),
+    }];
+    let first = agent_os
+        .acquire_required_leases(thread_id, "first", 0, &requirement)
+        .await
+        .expect("first lease should be acquired");
+
+    let error = agent_os
+        .acquire_required_leases_with_timeout(
+            thread_id,
+            "second",
+            0,
+            &requirement,
+            Duration::from_secs(1),
+        )
+        .await
+        .expect_err("same-thread conflict should not wait");
+    assert!(error.to_string().contains("self-conflict"));
+
+    agent_os.release_leases(&first).await;
+}
+
+#[tokio::test]
 async fn turn_without_runtime_command_cannot_fail_newly_assigned_task() {
     let agent_os = AgentOs::new();
     let coordinator = ThreadId::new();

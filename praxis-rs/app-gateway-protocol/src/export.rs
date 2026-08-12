@@ -263,16 +263,19 @@ mod experimental_filter;
 mod generated_files;
 mod json_schema;
 
+use self::experimental_filter::filter_experimental_json_files;
+use self::experimental_filter::filter_experimental_schema;
+use self::experimental_filter::filter_experimental_ts;
 pub(crate) use self::experimental_filter::filter_experimental_ts_tree;
-use self::experimental_filter::{
-    filter_experimental_json_files, filter_experimental_schema, filter_experimental_ts,
-};
+use self::generated_files::generate_index_ts;
 pub(crate) use self::generated_files::generate_index_ts_tree;
-use self::generated_files::{generate_index_ts, prepend_header_if_missing, ts_files_in_recursive};
+use self::generated_files::prepend_header_if_missing;
+use self::generated_files::ts_files_in_recursive;
+use self::json_schema::build_schema_bundle;
+use self::json_schema::ensure_dir;
 pub(crate) use self::json_schema::write_json_schema;
-use self::json_schema::{
-    build_schema_bundle, ensure_dir, write_json_schema_with_return, write_pretty_json,
-};
+use self::json_schema::write_json_schema_with_return;
+use self::json_schema::write_pretty_json;
 
 #[cfg(test)]
 mod tests;

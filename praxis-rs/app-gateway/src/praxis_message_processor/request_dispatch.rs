@@ -52,6 +52,10 @@ impl PraxisMessageProcessor {
                 self.thread_archive(to_connection_request_id(request_id), params)
                     .await;
             }
+            ClientRequest::ThreadShare { request_id, params } => {
+                self.thread_share(to_connection_request_id(request_id), params)
+                    .await;
+            }
             ClientRequest::ThreadDelete { request_id, params } => {
                 self.thread_delete(to_connection_request_id(request_id), params)
                     .await;

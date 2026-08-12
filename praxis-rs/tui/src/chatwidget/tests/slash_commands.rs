@@ -508,6 +508,41 @@ async fn slash_rollout_handles_missing_path() {
 }
 
 #[tokio::test]
+async fn plugin_command_dispatch_attaches_current_thread_context() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let thread_id = ThreadId::new();
+    let rollout_path = chat.config.cwd.join("rollout.jsonl");
+    chat.thread_id = Some(thread_id);
+    chat.current_rollout_path = Some(rollout_path.clone());
+
+    chat.dispatch_plugin_command(crate::bottom_pane::PluginCommandInvocation {
+        plugin_id: "praxis-thread-share".to_string(),
+        plugin_display_name: "Praxis Thread Share".to_string(),
+        name: "share".to_string(),
+        args: String::new(),
+        thread_id: None,
+        rollout_path: None,
+        cwd: None,
+    });
+
+    let AppEvent::FetchPluginCommand { command } =
+        rx.try_recv().expect("plugin command fetch event")
+    else {
+        panic!("expected plugin command fetch event");
+    };
+    let thread_id_string = thread_id.to_string();
+    assert_eq!(
+        command.thread_id.as_deref(),
+        Some(thread_id_string.as_str())
+    );
+    assert_eq!(
+        command.rollout_path.as_deref(),
+        Some(rollout_path.as_path())
+    );
+    assert_eq!(command.cwd.as_deref(), Some(chat.config.cwd.as_path()));
+}
+
+#[tokio::test]
 async fn undo_success_events_render_info_messages() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 

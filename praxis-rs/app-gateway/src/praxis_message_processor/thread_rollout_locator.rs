@@ -1,5 +1,7 @@
 use super::thread_store_api::ThreadStore;
-use praxis_app_gateway_protocol::{JSONRPCErrorError, PraxisErrorInfo, TurnError};
+use praxis_app_gateway_protocol::JSONRPCErrorError;
+use praxis_app_gateway_protocol::PraxisErrorInfo;
+use praxis_app_gateway_protocol::TurnError;
 use praxis_core::config::Config;
 use praxis_protocol::ThreadId;
 use std::path::PathBuf;

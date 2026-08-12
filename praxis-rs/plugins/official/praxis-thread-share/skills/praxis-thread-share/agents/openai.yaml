@@ -1,0 +1,4 @@
+interface:
+  display_name: "Praxis Thread Share"
+  short_description: "Publish the current redacted Praxis conversation"
+  default_prompt: "Use $praxis-thread-share to publish this conversation."

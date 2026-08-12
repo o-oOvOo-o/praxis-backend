@@ -243,6 +243,10 @@ client_request_definitions! {
         params: api::ThreadArchiveParams,
         response: api::ThreadArchiveResponse,
     },
+    ThreadShare => "thread/share" {
+        params: api::ThreadShareParams,
+        response: api::ThreadShareResponse,
+    },
     ThreadDelete => "thread/delete" {
         params: api::ThreadDeleteParams,
         response: api::ThreadDeleteResponse,

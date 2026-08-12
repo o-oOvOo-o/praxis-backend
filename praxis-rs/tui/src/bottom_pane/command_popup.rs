@@ -1,6 +1,7 @@
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::WidgetRef;
+use std::path::PathBuf;
 
 use super::popup_consts::MAX_POPUP_ROWS;
 use super::scroll_state::ScrollState;
@@ -37,6 +38,9 @@ pub(crate) struct PluginCommandInvocation {
     pub(crate) plugin_display_name: String,
     pub(crate) name: String,
     pub(crate) args: String,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) rollout_path: Option<PathBuf>,
+    pub(crate) cwd: Option<PathBuf>,
 }
 
 pub(crate) struct CommandPopup {

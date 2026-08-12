@@ -2,9 +2,9 @@ use crate::constants::CLOUD_REQUIREMENTS_TIMEOUT;
 use crate::fetcher::BackendRequirementsFetcher;
 use crate::service::CloudRequirementsService;
 use async_trait::async_trait;
-use praxis_core::config_loader::{
-    CloudConfigBundle, CloudConfigBundleLoadError, CloudConfigBundleLoadErrorCode,
-};
+use praxis_core::config_loader::CloudConfigBundle;
+use praxis_core::config_loader::CloudConfigBundleLoadError;
+use praxis_core::config_loader::CloudConfigBundleLoadErrorCode;
 use praxis_login::AuthManager;
 use std::path::PathBuf;
 use std::sync::Arc;

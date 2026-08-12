@@ -112,6 +112,48 @@ fn deserialize_initialize_with_opt_out_notification_methods() -> Result<()> {
 }
 
 #[test]
+fn serialize_thread_share_request() -> Result<()> {
+    let request = ClientRequest::ThreadShare {
+        request_id: RequestId::Integer(73),
+        params: api::ThreadShareParams {
+            thread_id: "019fd67a-9190-7762-aa53-1097faf6b07f".to_owned(),
+            team: "Cunning3D Core".to_owned(),
+        },
+    };
+
+    assert_eq!(
+        json!({
+            "method": "thread/share",
+            "id": 73,
+            "params": {
+                "threadId": "019fd67a-9190-7762-aa53-1097faf6b07f",
+                "team": "Cunning3D Core"
+            }
+        }),
+        serde_json::to_value(&request)?,
+    );
+    Ok(())
+}
+
+#[test]
+fn deserialize_thread_share_response() -> Result<()> {
+    let response: api::ThreadShareResponse = serde_json::from_value(json!({
+        "threadId": "019fd67a-9190-7762-aa53-1097faf6b07f",
+        "project": "Cunning3D/Cunning3D-Dev",
+        "team": "Cunning3D Core",
+        "messageCount": 1928,
+        "redactionCount": 27,
+        "commit": "cffbc79",
+        "webUrl": "https://github.com/o-oOvOo-o/praxis-threads/blob/main/thread.json"
+    }))?;
+
+    assert_eq!(response.team, "Cunning3D Core");
+    assert_eq!(response.message_count, 1928);
+    assert_eq!(response.redaction_count, 27);
+    Ok(())
+}
+
+#[test]
 fn conversation_id_serializes_as_plain_string() -> Result<()> {
     let id = ThreadId::from_string("67e55044-10b1-426f-9247-bb680e5fe0c8")?;
 

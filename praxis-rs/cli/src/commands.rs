@@ -128,6 +128,29 @@ pub(crate) enum Subcommand {
     /// Report tokens and estimated API input cost saved by Praxis.
     #[clap(name = "token-saver")]
     TokenSaver(TokenSaverCommand),
+
+    /// Publish the current Praxis conversation to the configured Git repository.
+    #[clap(name = "thread-share")]
+    ThreadShare(ThreadShareCommand),
+}
+
+#[derive(Debug, Parser)]
+pub(crate) struct ThreadShareCommand {
+    /// Team room inside the current GitHub project.
+    #[clap(value_name = "TEAM")]
+    pub(crate) team: String,
+    /// Thread id to publish. Defaults to PRAXIS_PLUGIN_THREAD_ID.
+    #[clap(long)]
+    pub(crate) thread_id: Option<String>,
+    /// Rollout JSONL to publish. Defaults to PRAXIS_PLUGIN_ROLLOUT_PATH.
+    #[clap(long)]
+    pub(crate) rollout: Option<PathBuf>,
+    /// Dedicated praxis-threads Git checkout.
+    #[clap(long)]
+    pub(crate) repository: Option<PathBuf>,
+    /// Create the local commit without pushing it.
+    #[clap(long)]
+    pub(crate) no_push: bool,
 }
 
 #[derive(Debug, Parser)]

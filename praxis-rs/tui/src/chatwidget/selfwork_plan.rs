@@ -3,11 +3,14 @@ use std::path::PathBuf;
 
 use crate::diff_render::display_path_for;
 use crate::text_formatting::truncate_text;
-pub(super) use praxis_app_core::selfwork::{
-    SELFWORK_PLAN_SCAN_LIMIT, SELFWORK_STALL_LIMIT, SelfworkCommand, SelfworkPlanInspection,
-    SelfworkRuntimeState, collect_selfwork_plan_paths, inspect_selfwork_plan,
-    parse_selfwork_command,
-};
+pub(super) use praxis_app_core::selfwork::SELFWORK_PLAN_SCAN_LIMIT;
+pub(super) use praxis_app_core::selfwork::SELFWORK_STALL_LIMIT;
+pub(super) use praxis_app_core::selfwork::SelfworkCommand;
+pub(super) use praxis_app_core::selfwork::SelfworkPlanInspection;
+pub(super) use praxis_app_core::selfwork::SelfworkRuntimeState;
+pub(super) use praxis_app_core::selfwork::collect_selfwork_plan_paths;
+pub(super) use praxis_app_core::selfwork::inspect_selfwork_plan;
+pub(super) use praxis_app_core::selfwork::parse_selfwork_command;
 
 pub(super) const SELFWORK_PICKER_VIEW_ID: &str = "selfwork-plan-selection";
 pub(super) const SELFWORK_USAGE: &str =

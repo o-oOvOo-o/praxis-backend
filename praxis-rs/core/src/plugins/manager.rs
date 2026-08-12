@@ -378,11 +378,14 @@ mod load_plugin;
 mod manager_impl;
 mod marketplace_provider;
 
-pub use self::errors::{PluginInstallError, PluginSetEnabledError, PluginUninstallError};
-pub use self::load_plugin::{
-    installed_plugin_telemetry_metadata, load_plugin_apps, load_plugin_mcp_servers,
-    plugin_activation_delta_from_root, plugin_telemetry_metadata_from_root,
-};
+pub use self::errors::PluginInstallError;
+pub use self::errors::PluginSetEnabledError;
+pub use self::errors::PluginUninstallError;
+pub use self::load_plugin::installed_plugin_telemetry_metadata;
+pub use self::load_plugin::load_plugin_apps;
+pub use self::load_plugin::load_plugin_mcp_servers;
+pub use self::load_plugin::plugin_activation_delta_from_root;
+pub use self::load_plugin::plugin_telemetry_metadata_from_root;
 
 pub struct PluginsManager {
     praxis_home: PathBuf,

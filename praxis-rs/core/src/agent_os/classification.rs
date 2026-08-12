@@ -24,7 +24,7 @@ pub(super) use resource_contract::task_resource_allows;
 pub(super) use resource_contract::validate_task_action_contract;
 pub(super) use runtime_mapping::artifact_type_for_intent;
 pub(super) use runtime_mapping::runtime_kind_for_intent;
-pub(crate) use session_scope::{
-    coordination_scope_for_session_source, profile_for_rank, rank_for_session_source,
-};
+pub(crate) use session_scope::coordination_scope_for_session_source;
+pub(crate) use session_scope::profile_for_rank;
+pub(crate) use session_scope::rank_for_session_source;
 pub(super) use tool_intent::classify_mutating_tool;

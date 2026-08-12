@@ -1,8 +1,9 @@
-use std::{
-    fs,
-    io::{self, Read, Seek, SeekFrom},
-    path::Path,
-};
+use std::fs;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::io::{self};
+use std::path::Path;
 
 const GGUF_MAGIC: [u8; 4] = *b"GGUF";
 const GGUF_VERSION_MIN: u32 = 2;

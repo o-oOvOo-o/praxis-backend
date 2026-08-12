@@ -1,9 +1,8 @@
 use super::super::*;
 use super::finish_state::ManagedCommandFinishState;
 use super::process::mark_command_process_finished;
-use super::thread_task::{
-    update_task_after_finished_command, update_thread_after_finished_command,
-};
+use super::thread_task::update_task_after_finished_command;
+use super::thread_task::update_thread_after_finished_command;
 
 impl AgentOs {
     pub(in crate::agent_os::managed_commands::executions::finish) async fn mark_managed_command_finished_in_state(

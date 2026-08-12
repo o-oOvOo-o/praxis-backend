@@ -1,27 +1,36 @@
-use crate::cache::{CloudRequirementsCache, auth_identity};
-use crate::constants::{
-    CLOUD_REQUIREMENTS_AUTH_RECOVERY_FAILED_MESSAGE, CLOUD_REQUIREMENTS_CACHE_REFRESH_INTERVAL,
-    CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE, CLOUD_REQUIREMENTS_MAX_ATTEMPTS,
-};
-use crate::fetcher::{FetchAttemptError, RequirementsFetcher};
-use crate::metrics::{emit_fetch_attempt_metric, emit_fetch_final_metric, emit_load_metric};
+use crate::cache::CloudRequirementsCache;
+use crate::cache::auth_identity;
+use crate::constants::CLOUD_REQUIREMENTS_AUTH_RECOVERY_FAILED_MESSAGE;
+use crate::constants::CLOUD_REQUIREMENTS_CACHE_REFRESH_INTERVAL;
+use crate::constants::CLOUD_REQUIREMENTS_LOAD_FAILED_MESSAGE;
+use crate::constants::CLOUD_REQUIREMENTS_MAX_ATTEMPTS;
+use crate::fetcher::FetchAttemptError;
+use crate::fetcher::RequirementsFetcher;
+use crate::metrics::emit_fetch_attempt_metric;
+use crate::metrics::emit_fetch_final_metric;
+use crate::metrics::emit_load_metric;
 use crate::parsing::bundle_from_requirements_contents;
 #[cfg(test)]
-use crate::parsing::{
-    cloud_bundle_error_to_requirements_error, requirements_from_bundle_option,
-    requirements_parse_error,
-};
+use crate::parsing::cloud_bundle_error_to_requirements_error;
+#[cfg(test)]
+use crate::parsing::requirements_from_bundle_option;
+#[cfg(test)]
+use crate::parsing::requirements_parse_error;
+use praxis_core::config_loader::CloudConfigBundle;
+use praxis_core::config_loader::CloudConfigBundleLoadError;
+use praxis_core::config_loader::CloudConfigBundleLoadErrorCode;
 #[cfg(test)]
 use praxis_core::config_loader::CloudRequirementsLoadError;
-use praxis_core::config_loader::{
-    CloudConfigBundle, CloudConfigBundleLoadError, CloudConfigBundleLoadErrorCode,
-};
 use praxis_core::util::backoff;
-use praxis_login::{AuthManager, OpenAiAccountAuth, RefreshTokenError};
+use praxis_login::AuthManager;
+use praxis_login::OpenAiAccountAuth;
+use praxis_login::RefreshTokenError;
 use praxis_protocol::account::PlanType;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::time::{sleep, timeout};
+use std::time::Duration;
+use std::time::Instant;
+use tokio::time::sleep;
+use tokio::time::timeout;
 
 #[derive(Clone)]
 pub(crate) struct CloudRequirementsService {

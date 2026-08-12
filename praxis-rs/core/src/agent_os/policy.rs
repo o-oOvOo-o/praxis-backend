@@ -5,6 +5,7 @@ pub(super) const COORDINATOR_RANK: u8 = 0;
 pub(super) const MAX_COORDINATORS: usize = 3;
 const DEFAULT_TICKET_TTL_SECONDS: i64 = 30 * 60;
 const DEFAULT_LEASE_TTL_SECONDS: i64 = 30 * 60;
+const DEFAULT_LEASE_WAIT_TIMEOUT_SECONDS: i64 = 2 * 60;
 pub(super) const LEASE_JANITOR_INTERVAL_SECONDS: u64 = 30;
 const MAX_AGENT_OS_EVENTS_IN_MEMORY: usize = 1_000;
 const DEFAULT_ARTIFACT_READ_MAX_BYTES: usize = 64 * 1024;
@@ -16,6 +17,7 @@ static AGENT_OS_POLICY: OnceLock<AgentOsPolicy> = OnceLock::new();
 pub(super) struct AgentOsPolicy {
     ticket_ttl_seconds: i64,
     lease_ttl_seconds: i64,
+    lease_wait_timeout_seconds: i64,
     pub(super) max_events_in_memory: usize,
     pub(super) default_artifact_read_max_bytes: usize,
 }
@@ -34,6 +36,12 @@ impl AgentOsPolicy {
                 DEFAULT_LEASE_TTL_SECONDS,
                 60,
                 24 * 60 * 60,
+            ),
+            lease_wait_timeout_seconds: read_i64_env(
+                "PRAXIS_AGENTOS_LEASE_WAIT_TIMEOUT_SECONDS",
+                DEFAULT_LEASE_WAIT_TIMEOUT_SECONDS,
+                1,
+                30 * 60,
             ),
             max_events_in_memory: read_usize_env(
                 "PRAXIS_AGENTOS_MAX_EVENTS_IN_MEMORY",
@@ -56,6 +64,10 @@ impl AgentOsPolicy {
 
     pub(super) fn lease_ttl(&self) -> Duration {
         Duration::seconds(self.lease_ttl_seconds)
+    }
+
+    pub(super) fn lease_wait_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.lease_wait_timeout_seconds as u64)
     }
 }
 

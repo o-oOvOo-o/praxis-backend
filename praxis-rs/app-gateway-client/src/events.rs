@@ -45,7 +45,8 @@ pub(crate) fn server_notification_requires_delivery(notification: &ServerNotific
 #[cfg(test)]
 mod delivery_tests {
     use super::*;
-    use praxis_app_gateway_protocol::{ConfigWarningNotification, TerminalInteractionNotification};
+    use praxis_app_gateway_protocol::ConfigWarningNotification;
+    use praxis_app_gateway_protocol::TerminalInteractionNotification;
 
     #[test]
     fn terminal_interactions_are_lossless() {

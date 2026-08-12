@@ -35,17 +35,28 @@ mod refresh;
 mod source;
 
 use recovery::ReloadOutcome;
-pub use recovery::{UnauthorizedRecovery, UnauthorizedRecoveryStepResult};
+pub use recovery::UnauthorizedRecovery;
 #[cfg(test)]
-use recovery::{UnauthorizedRecoveryMode, UnauthorizedRecoveryStep};
+use recovery::UnauthorizedRecoveryMode;
+#[cfg(test)]
+use recovery::UnauthorizedRecoveryStep;
+pub use recovery::UnauthorizedRecoveryStepResult;
 pub use refresh::CLIENT_ID;
 use refresh::request_chatgpt_token_refresh;
-pub use source::{
-    AuthConfig, OPENAI_API_KEY_ENV_VAR, PRAXIS_API_KEY_ENV_VAR, enforce_login_restrictions,
-    load_auth_dot_json, login_with_api_key, login_with_chatgpt_auth_tokens, logout,
-    read_openai_api_key_from_env, read_praxis_api_key_from_env, save_auth,
-};
-use source::{load_auth, logout_all_stores, persist_tokens};
+pub use source::AuthConfig;
+pub use source::OPENAI_API_KEY_ENV_VAR;
+pub use source::PRAXIS_API_KEY_ENV_VAR;
+pub use source::enforce_login_restrictions;
+use source::load_auth;
+pub use source::load_auth_dot_json;
+pub use source::login_with_api_key;
+pub use source::login_with_chatgpt_auth_tokens;
+pub use source::logout;
+use source::logout_all_stores;
+use source::persist_tokens;
+pub use source::read_openai_api_key_from_env;
+pub use source::read_praxis_api_key_from_env;
+pub use source::save_auth;
 
 /// Authentication mechanism used by the current user.
 #[derive(Debug, Clone)]

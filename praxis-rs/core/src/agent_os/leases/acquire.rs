@@ -8,6 +8,24 @@ impl AgentOs {
         priority: i32,
         requirements: &[ResourceRequirement],
     ) -> PraxisResult<Vec<String>> {
+        self.acquire_required_leases_with_timeout(
+            thread_id,
+            task_id,
+            priority,
+            requirements,
+            AgentOsPolicy::get().lease_wait_timeout(),
+        )
+        .await
+    }
+
+    pub(in crate::agent_os) async fn acquire_required_leases_with_timeout(
+        &self,
+        thread_id: ThreadId,
+        task_id: &str,
+        priority: i32,
+        requirements: &[ResourceRequirement],
+        wait_timeout: std::time::Duration,
+    ) -> PraxisResult<Vec<String>> {
         let mut seen = HashSet::new();
         let planned_requirements = requirements
             .iter()
@@ -16,6 +34,7 @@ impl AgentOs {
             .collect::<Vec<_>>();
 
         let mut wait_started_at = None;
+        let wait_deadline = tokio::time::Instant::now() + wait_timeout;
         let (acquired, snapshots) = loop {
             // Register before checking the lease table so a release between the check and await
             // cannot be lost. Cancellation safely drops this waiter through the outer tool runtime.
@@ -37,6 +56,22 @@ impl AgentOs {
                     "waiting for conflicting resource lease"
                 );
                 drop(state);
+                if owner == thread_id.to_string() {
+                    self.record_event(
+                        "lease_self_conflict",
+                        Some(thread_id),
+                        Some(task_id.to_string()),
+                        None,
+                        json!({
+                            "resource": &key,
+                            "lease_owner": &owner,
+                        }),
+                    )
+                    .await;
+                    return Err(PraxisErr::UnsupportedOperation(format!(
+                        "resource lease self-conflict for `{key}`: this thread already owns the conflicting lease; wait for or stop its earlier tool before retrying"
+                    )));
+                }
                 if wait_started_at.is_none() {
                     let started_at = Utc::now();
                     wait_started_at = Some(started_at);
@@ -48,14 +83,36 @@ impl AgentOs {
                         Some(task_id.to_string()),
                         None,
                         json!({
-                            "resource": key,
-                            "lease_owner": owner,
+                            "resource": &key,
+                            "lease_owner": &owner,
                             "queued_at": started_at,
                         }),
                     )
                     .await;
                 }
-                released.await;
+                if tokio::time::timeout_at(wait_deadline, released)
+                    .await
+                    .is_err()
+                {
+                    self.mark_thread_state(thread_id, ThreadRuntimeState::Running)
+                        .await;
+                    self.record_event(
+                        "lease_wait_timed_out",
+                        Some(thread_id),
+                        Some(task_id.to_string()),
+                        None,
+                        json!({
+                            "resource": &key,
+                            "lease_owner": &owner,
+                            "waited_ms": wait_timeout.as_millis().min(u128::from(u64::MAX)) as u64,
+                        }),
+                    )
+                    .await;
+                    return Err(PraxisErr::UnsupportedOperation(format!(
+                        "timed out after {} ms waiting for resource lease `{key}` held by thread `{owner}`; retry after the owner finishes or stop the stale owner",
+                        wait_timeout.as_millis()
+                    )));
+                }
                 continue;
             }
 

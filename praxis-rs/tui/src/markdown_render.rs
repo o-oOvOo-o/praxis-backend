@@ -28,10 +28,10 @@ use std::path::PathBuf;
 
 mod local_links;
 
-pub(crate) use self::local_links::{
-    hyperlink_target_for_local_link_text, is_explicit_local_link_target,
-};
-use self::local_links::{is_local_path_like_link, render_local_link_target};
+pub(crate) use self::local_links::hyperlink_target_for_local_link_text;
+pub(crate) use self::local_links::is_explicit_local_link_target;
+use self::local_links::is_local_path_like_link;
+use self::local_links::render_local_link_target;
 
 struct MarkdownStyles {
     h1: Style,

@@ -20,12 +20,18 @@ use fork_snapshot::truncate_before_nth_user_message;
 use praxis_exec_server::EnvironmentManager;
 use praxis_login::AuthManager;
 use praxis_protocol::ThreadId;
+#[cfg(test)]
+use praxis_protocol::protocol::EventMsg;
+#[cfg(test)]
+use praxis_protocol::protocol::InitialHistory;
+#[cfg(test)]
+use praxis_protocol::protocol::RolloutItem;
 use praxis_protocol::protocol::SessionConfiguredEvent;
 use praxis_protocol::protocol::SessionSource;
 #[cfg(test)]
-use praxis_protocol::protocol::{
-    EventMsg, InitialHistory, RolloutItem, TurnAbortReason, TurnAbortedEvent,
-};
+use praxis_protocol::protocol::TurnAbortReason;
+#[cfg(test)]
+use praxis_protocol::protocol::TurnAbortedEvent;
 use registry::ThreadRegistry;
 use std::sync::Arc;
 use tokio::sync::broadcast;

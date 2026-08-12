@@ -1,14 +1,19 @@
 use super::*;
 use crate::thread_state::ThreadSelfworkState;
-use praxis_app_core::selfwork::{
-    SELFWORK_STALL_LIMIT, SelfworkPlanAdvance, inspect_selfwork_plan, selfwork_prompt,
-};
-use praxis_app_gateway_protocol::{
-    ThreadSelfworkGetParams, ThreadSelfworkGetResponse, ThreadSelfworkPhase,
-    ThreadSelfworkStartParams, ThreadSelfworkStartResponse, ThreadSelfworkStatus,
-    ThreadSelfworkStopParams, ThreadSelfworkStopResponse, ThreadSelfworkUpdatedNotification,
-    TurnStatus,
-};
+use praxis_app_core::selfwork::SELFWORK_STALL_LIMIT;
+use praxis_app_core::selfwork::SelfworkPlanAdvance;
+use praxis_app_core::selfwork::inspect_selfwork_plan;
+use praxis_app_core::selfwork::selfwork_prompt;
+use praxis_app_gateway_protocol::ThreadSelfworkGetParams;
+use praxis_app_gateway_protocol::ThreadSelfworkGetResponse;
+use praxis_app_gateway_protocol::ThreadSelfworkPhase;
+use praxis_app_gateway_protocol::ThreadSelfworkStartParams;
+use praxis_app_gateway_protocol::ThreadSelfworkStartResponse;
+use praxis_app_gateway_protocol::ThreadSelfworkStatus;
+use praxis_app_gateway_protocol::ThreadSelfworkStopParams;
+use praxis_app_gateway_protocol::ThreadSelfworkStopResponse;
+use praxis_app_gateway_protocol::ThreadSelfworkUpdatedNotification;
+use praxis_app_gateway_protocol::TurnStatus;
 use praxis_protocol::user_input::UserInput as CoreUserInput;
 
 impl PraxisMessageProcessor {

@@ -13,15 +13,16 @@ mod parsing;
 mod provider;
 mod service;
 
-pub use loader::{
-    cloud_config_bundle_loader, cloud_config_bundle_loader_for_config_toml,
-    cloud_config_bundle_loader_for_storage, cloud_config_bundle_loader_from_provider,
-    cloud_requirements_loader, cloud_requirements_loader_for_storage,
-};
-pub use provider::{
-    ConfigBundleProvider, LocalFileConfigBundleProvider, NoopConfigBundleProvider,
-    OpenAiHostedConfigBundleProvider,
-};
+pub use loader::cloud_config_bundle_loader;
+pub use loader::cloud_config_bundle_loader_for_config_toml;
+pub use loader::cloud_config_bundle_loader_for_storage;
+pub use loader::cloud_config_bundle_loader_from_provider;
+pub use loader::cloud_requirements_loader;
+pub use loader::cloud_requirements_loader_for_storage;
+pub use provider::ConfigBundleProvider;
+pub use provider::LocalFileConfigBundleProvider;
+pub use provider::NoopConfigBundleProvider;
+pub use provider::OpenAiHostedConfigBundleProvider;
 
 #[cfg(test)]
 mod tests;

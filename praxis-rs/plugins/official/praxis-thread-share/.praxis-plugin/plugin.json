@@ -1,0 +1,30 @@
+{
+  "name": "praxis-thread-share",
+  "description": "Publish the current real Praxis conversation to a private GitHub-backed thread repository.",
+  "skills": "./skills",
+  "interface": {
+    "displayName": "Praxis Thread Share",
+    "shortDescription": "Share the current conversation with /share <team>.",
+    "longDescription": "Publishes the real conversation into a team room under the current GitHub project, redacts sensitive values, updates the thread index, and commits and pushes through the user's configured Git credentials.",
+    "developerName": "Praxis",
+    "category": "collaboration",
+    "capabilities": [
+      "current thread export",
+      "credential and path redaction",
+      "Git commit and push",
+      "web thread indexing"
+    ],
+    "commands": [
+      {
+        "name": "share",
+        "description": "Publish the current Praxis thread to a team room. Usage: /share <team>.",
+        "action": {
+          "type": "process",
+          "command": "praxis",
+          "args": ["thread-share"],
+          "timeoutMs": 120000
+        }
+      }
+    ]
+  }
+}

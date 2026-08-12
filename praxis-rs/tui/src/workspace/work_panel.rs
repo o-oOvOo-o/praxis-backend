@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::path::PathBuf;
 
-use praxis_app_core::{
-    PraxisPluginSurfaceContribution, PraxisPluginSurfaceSlot, PraxisPluginSurfaceTone,
-};
+use praxis_app_core::PraxisPluginSurfaceContribution;
+use praxis_app_core::PraxisPluginSurfaceSlot;
+use praxis_app_core::PraxisPluginSurfaceTone;
 use praxis_protocol::plan_tool::PlanItemArg;
 use praxis_protocol::plan_tool::StepStatus;
 use praxis_protocol::plan_tool::UpdatePlanArgs;

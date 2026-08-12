@@ -1,7 +1,6 @@
-use crate::constants::{
-    CLOUD_REQUIREMENTS_FETCH_ATTEMPT_METRIC, CLOUD_REQUIREMENTS_FETCH_FINAL_METRIC,
-    CLOUD_REQUIREMENTS_LOAD_METRIC,
-};
+use crate::constants::CLOUD_REQUIREMENTS_FETCH_ATTEMPT_METRIC;
+use crate::constants::CLOUD_REQUIREMENTS_FETCH_FINAL_METRIC;
+use crate::constants::CLOUD_REQUIREMENTS_LOAD_METRIC;
 
 pub(crate) fn emit_fetch_attempt_metric(
     trigger: &str,

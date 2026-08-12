@@ -489,6 +489,9 @@ impl PraxisMessageProcessor {
                     &args,
                     cwd.as_ref().map(|path| path.as_path()),
                     timeout_ms,
+                    params.thread_id.as_deref(),
+                    params.rollout_path.as_ref().map(|path| path.as_path()),
+                    params.cwd.as_ref().map(|path| path.as_path()),
                 )
                 .await
             }
@@ -907,6 +910,9 @@ async fn run_plugin_process_command(
     args: &[String],
     cwd: Option<&Path>,
     timeout_ms: Option<u64>,
+    thread_id: Option<&str>,
+    rollout_path: Option<&Path>,
+    thread_cwd: Option<&Path>,
 ) -> Result<PluginCommandExecuteResponse, String> {
     let cwd = cwd.unwrap_or(plugin_root);
     let mut command = TokioCommand::new(program);
@@ -916,7 +922,19 @@ async fn run_plugin_process_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true);
+        .kill_on_drop(true)
+        .env("PRAXIS_PLUGIN_ID", plugin_id)
+        .env("PRAXIS_PLUGIN_COMMAND", command_name)
+        .env("PRAXIS_PLUGIN_ROOT", plugin_root);
+    if let Some(thread_id) = thread_id {
+        command.env("PRAXIS_PLUGIN_THREAD_ID", thread_id);
+    }
+    if let Some(rollout_path) = rollout_path {
+        command.env("PRAXIS_PLUGIN_ROLLOUT_PATH", rollout_path);
+    }
+    if let Some(thread_cwd) = thread_cwd {
+        command.env("PRAXIS_PLUGIN_CWD", thread_cwd);
+    }
 
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_PLUGIN_COMMAND_TIMEOUT_MS);
     let output = timeout(Duration::from_millis(timeout_ms), command.output())

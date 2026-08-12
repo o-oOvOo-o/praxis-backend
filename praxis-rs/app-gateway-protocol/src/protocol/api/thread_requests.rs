@@ -308,6 +308,25 @@ pub struct ThreadArchiveResponse {}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct ThreadShareParams {
+    pub thread_id: String,
+    pub team: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadShareResponse {
+    pub thread_id: String,
+    pub project: String,
+    pub team: String,
+    pub message_count: u64,
+    pub redaction_count: u64,
+    pub commit: String,
+    pub web_url: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadDeleteParams {
     pub thread_id: String,
 }

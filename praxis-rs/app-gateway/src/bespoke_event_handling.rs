@@ -151,16 +151,24 @@ mod tests;
 mod turn_handlers;
 pub(crate) use dispatch::apply_bespoke_event_handling;
 
-use approval_requests::{handle_apply_patch_approval_request, handle_exec_approval_request};
-use turn_handlers::{
-    complete_file_change_item, finish_automation_runs_for_turn, handle_error,
-    handle_thread_rollback_failed, handle_token_count_event, handle_turn_complete,
-    handle_turn_diff, handle_turn_interrupted, handle_turn_plan_update,
-    maybe_emit_hook_prompt_item_completed, maybe_emit_raw_response_item_completed,
-    on_command_execution_request_approval_response, on_file_change_request_approval_response,
-    on_mcp_server_elicitation_response, on_request_permissions_response,
-    on_request_user_input_response,
-};
+use approval_requests::handle_apply_patch_approval_request;
+use approval_requests::handle_exec_approval_request;
+use turn_handlers::complete_file_change_item;
+use turn_handlers::finish_automation_runs_for_turn;
+use turn_handlers::handle_error;
+use turn_handlers::handle_thread_rollback_failed;
+use turn_handlers::handle_token_count_event;
+use turn_handlers::handle_turn_complete;
+use turn_handlers::handle_turn_diff;
+use turn_handlers::handle_turn_interrupted;
+use turn_handlers::handle_turn_plan_update;
+use turn_handlers::maybe_emit_hook_prompt_item_completed;
+use turn_handlers::maybe_emit_raw_response_item_completed;
+use turn_handlers::on_command_execution_request_approval_response;
+use turn_handlers::on_file_change_request_approval_response;
+use turn_handlers::on_mcp_server_elicitation_response;
+use turn_handlers::on_request_permissions_response;
+use turn_handlers::on_request_user_input_response;
 
 enum CommandExecutionApprovalPresentation {
     Network(ApiNetworkApprovalContext),
