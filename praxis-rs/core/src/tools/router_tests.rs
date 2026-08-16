@@ -132,6 +132,7 @@ async fn function_wrapped_freeform_keeps_function_output_type() -> anyhow::Resul
             tracker,
             call,
             ToolCallSource::Direct,
+            None,
         )
         .await?;
     let response = result.into_response();

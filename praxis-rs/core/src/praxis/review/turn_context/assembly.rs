@@ -51,6 +51,13 @@ pub(super) fn build(input: ReviewTurnContextAssemblyInput<'_>) -> Arc<TurnContex
         permissions.sandbox_policy.get(),
         permissions.windows_sandbox_level,
     ));
+    let skills_outcome = crate::capabilities::publish_resolved_skills(
+        &session.services._capability_scope,
+        session.conversation_id,
+        review_turn_id.as_str(),
+        parent_turn_context.turn_skills.outcome.outcome().clone(),
+    )
+    .expect("publish review turn resolved Skills capability");
 
     Arc::new(TurnContext {
         sub_id: review_turn_id,
@@ -88,7 +95,7 @@ pub(super) fn build(input: ReviewTurnContextAssemblyInput<'_>) -> Arc<TurnContex
         dynamic_tools: parent_turn_context.dynamic_tools.clone(),
         truncation_policy: model_info.truncation_policy.into(),
         turn_metadata_state,
-        turn_skills: TurnSkillsContext::new(parent_turn_context.turn_skills.outcome.clone()),
+        turn_skills: TurnSkillsContext::new(skills_outcome),
         turn_timing_state: Arc::new(TurnTimingState::default()),
     })
 }

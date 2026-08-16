@@ -754,7 +754,7 @@ async fn dispatch_after_tool_use_hook(
     let tool_input = HookToolInput::from(&invocation.payload);
     let permissions = turn.effective_permissions();
     let hook_outcomes = session
-        .hooks()
+        .hook_capability()
         .dispatch(HookPayload {
             session_id: session.conversation_id,
             cwd: turn.cwd.to_path_buf(),

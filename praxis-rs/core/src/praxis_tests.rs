@@ -422,6 +422,21 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     );
 
     let skills_watcher = Arc::new(SkillsWatcher::noop());
+    let (capability_scope, hook_capability) = crate::capabilities::test_hook_capability(
+        conversation_id,
+        Hooks::new(HooksConfig {
+            notify_argv: config.notify.clone(),
+            ..HooksConfig::default()
+        }),
+    );
+    let provider_capability = crate::capabilities::publish_providers(
+        &capability_scope.runtime(),
+        Arc::clone(&models_manager),
+    )
+    .expect("publish test Providers capability");
+    let skills_manager =
+        crate::capabilities::publish_skills(&capability_scope.runtime(), skills_manager)
+            .expect("publish test Skills capability");
     let services = SessionServices {
         mcp_connection_manager: Arc::new(RwLock::new(McpConnectionManager::new_uninitialized(
             &config.permissions.approval_policy,
@@ -437,10 +452,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             config.chatgpt_base_url.trim_end_matches('/').to_string(),
             config.analytics_enabled,
         ),
-        hooks: Hooks::new(HooksConfig {
-            notify_argv: config.notify.clone(),
-            ..HooksConfig::default()
-        }),
+        hook_capability,
+        _capability_scope: capability_scope,
         rollout: Mutex::new(None),
         user_shell: Arc::new(default_user_shell()),
         shell_snapshot_tx: watch::channel(None).0,
@@ -448,7 +461,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         exec_policy,
         auth_manager: auth_manager.clone(),
         session_telemetry: session_telemetry.clone(),
-        models_manager: Arc::clone(&models_manager),
+        models_manager: provider_capability,
         tool_approvals: Mutex::new(ApprovalStore::default()),
         skills_manager,
         plugins_manager,
@@ -479,7 +492,13 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     let effective_skill_roots = plugin_outcome.effective_skill_roots();
     let skills_input =
         crate::skills_load_input_from_config(&per_turn_config, effective_skill_roots);
-    let skills_outcome = Arc::new(services.skills_manager.skills_for_config(&skills_input));
+    let skills_outcome = crate::capabilities::publish_resolved_skills(
+        &services._capability_scope,
+        conversation_id,
+        "turn_id",
+        services.skills_manager.skills_for_config(&skills_input),
+    )
+    .expect("publish test turn resolved Skills capability");
     let llm_runtime_catalog = crate::llm::runtime::LlmRuntimeCatalog::default();
     let turn_context = Session::make_turn_context(
         conversation_id,

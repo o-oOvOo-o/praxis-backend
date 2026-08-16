@@ -41,7 +41,6 @@ use crate::mcp_tool_call::MCP_TOOL_APPROVAL_DECLINE_SYNTHETIC;
 use crate::mcp_tool_call::build_guardian_mcp_tool_review_request;
 use crate::mcp_tool_call::is_mcp_tool_approval_question_id;
 use crate::mcp_tool_call::lookup_mcp_tool_metadata;
-use crate::models_manager::manager::ModelsManager;
 use crate::praxis::Praxis;
 use crate::praxis::PraxisSpawnArgs;
 use crate::praxis::PraxisSpawnOk;
@@ -63,7 +62,7 @@ use crate::praxis::completed_session_loop_termination;
 pub(crate) async fn run_praxis_thread_interactive(
     config: Config,
     auth_manager: Arc<AuthManager>,
-    models_manager: Arc<ModelsManager>,
+    provider_capability: crate::capabilities::ProviderCapability,
     parent_session: Arc<Session>,
     parent_ctx: Arc<TurnContext>,
     cancel_token: CancellationToken,
@@ -77,11 +76,12 @@ pub(crate) async fn run_praxis_thread_interactive(
         requested_thread_id: None,
         config,
         auth_manager,
-        models_manager,
+        provider_capability,
         environment_manager: Arc::new(EnvironmentManager::new(
             parent_ctx.environment.exec_server_url().map(str::to_owned),
         )),
-        skills_manager: Arc::clone(&parent_session.services.skills_manager),
+        capability_runtime: parent_session.services._capability_scope.runtime(),
+        skills_manager: parent_session.services.skills_manager.clone(),
         plugins_manager: Arc::clone(&parent_session.services.plugins_manager),
         mcp_manager: Arc::clone(&parent_session.services.mcp_manager),
         skills_watcher: Arc::clone(&parent_session.services.skills_watcher),
@@ -147,7 +147,7 @@ pub(crate) async fn run_praxis_thread_interactive(
 pub(crate) async fn run_praxis_thread_one_shot(
     config: Config,
     auth_manager: Arc<AuthManager>,
-    models_manager: Arc<ModelsManager>,
+    provider_capability: crate::capabilities::ProviderCapability,
     input: Vec<UserInput>,
     parent_session: Arc<Session>,
     parent_ctx: Arc<TurnContext>,
@@ -163,7 +163,7 @@ pub(crate) async fn run_praxis_thread_one_shot(
     let io = run_praxis_thread_interactive(
         config,
         auth_manager,
-        models_manager,
+        provider_capability,
         parent_session,
         parent_ctx,
         child_cancel.clone(),

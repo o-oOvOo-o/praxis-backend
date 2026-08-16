@@ -70,7 +70,7 @@ async fn guardian_mode_skips_auto_when_annotations_do_not_require_approval() {
         Arc::clone(&session.services.auth_manager),
         config.model_provider.clone(),
     ));
-    session.services.models_manager = models_manager;
+    crate::capabilities::replace_test_providers(&mut session, models_manager);
     turn_context.config = Arc::clone(&config);
     turn_context.provider = config.model_provider.clone();
 

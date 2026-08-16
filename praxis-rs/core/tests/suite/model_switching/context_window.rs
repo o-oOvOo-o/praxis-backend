@@ -87,7 +87,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         });
     let test = builder.build(&server).await?;
 
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     let available_models = models_manager.list_models(RefreshStrategy::Online).await;
     assert!(
         available_models

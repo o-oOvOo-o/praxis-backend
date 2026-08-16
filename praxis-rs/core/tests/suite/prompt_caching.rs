@@ -133,7 +133,7 @@ async fn prompt_tools_are_consistent_across_requests() -> anyhow::Result<()> {
         .build(&server)
         .await?;
     let base_instructions = thread_manager
-        .get_models_manager()
+        .provider_capability()
         .get_model_info(
             config
                 .model

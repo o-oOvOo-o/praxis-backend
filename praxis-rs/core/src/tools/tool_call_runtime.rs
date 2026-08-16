@@ -7,6 +7,7 @@ use tracing::Instrument;
 use tracing::instrument;
 use tracing::trace_span;
 
+use crate::capabilities::ToolCapability;
 use crate::error::PraxisErr;
 use crate::function_tool::FunctionCallError;
 use crate::praxis::Session;
@@ -19,7 +20,6 @@ use crate::tools::registry::AnyToolResult;
 use crate::tools::registry::ToolPreparation;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
-use crate::tools::router::ToolRouter;
 use crate::tools::settlement::settle_with_cancellation;
 use praxis_loop::tool::EffectJournal;
 use praxis_protocol::models::ResponseInputItem;
@@ -27,7 +27,8 @@ use praxis_tools::ToolSpec;
 
 #[derive(Clone)]
 pub(crate) struct ToolCallRuntime {
-    router: Arc<ToolRouter>,
+    router: ToolCapability,
+    code_mode_router: ToolCapability,
     session: Arc<Session>,
     turn_context: Arc<TurnContext>,
     tracker: SharedTurnDiffTracker,
@@ -35,13 +36,15 @@ pub(crate) struct ToolCallRuntime {
 
 impl ToolCallRuntime {
     pub(crate) fn new(
-        router: Arc<ToolRouter>,
+        router: ToolCapability,
+        code_mode_router: ToolCapability,
         session: Arc<Session>,
         turn_context: Arc<TurnContext>,
         tracker: SharedTurnDiffTracker,
     ) -> Self {
         Self {
             router,
+            code_mode_router,
             session,
             turn_context,
             tracker,
@@ -156,7 +159,8 @@ impl ToolCallRuntime {
             .turn_context
             .tool_loop_guard
             .record_shell_wait_probe(call.tool_name.as_str(), &call.payload);
-        let router = Arc::clone(&self.router);
+        let router = self.router.clone();
+        let code_mode_router = self.code_mode_router.clone();
         let session = Arc::clone(&self.session);
         let turn = Arc::clone(&self.turn_context);
         let tracker = Arc::clone(&self.tracker);
@@ -188,6 +192,7 @@ impl ToolCallRuntime {
                                     call.clone(),
                                     preparation,
                                     source,
+                                    Some(code_mode_router.clone()),
                                 )
                                 .instrument(dispatch_span.clone())
                                 .await
@@ -200,6 +205,7 @@ impl ToolCallRuntime {
                                     tracker,
                                     call.clone(),
                                     source,
+                                    Some(code_mode_router.clone()),
                                 )
                                 .instrument(dispatch_span.clone())
                                 .await

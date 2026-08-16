@@ -128,6 +128,7 @@ pub(crate) async fn run_inline_auto_compact_task(
         turn_context,
         LocalCompactMode::Auto,
         initial_context_injection,
+        None,
     )
     .await?;
     Ok(())
@@ -149,6 +150,39 @@ pub(crate) async fn run_compact_task(
         turn_context,
         local_compact_mode_for_input(&input),
         InitialContextInjection::DoNotInject,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn run_inline_auto_compact_task_with_item(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    initial_context_injection: InitialContextInjection,
+    compaction_item: TurnItem,
+) -> PraxisResult<()> {
+    run_compact_task_inner(
+        sess,
+        turn_context,
+        LocalCompactMode::Auto,
+        initial_context_injection,
+        Some(compaction_item),
+    )
+    .await
+}
+
+pub(crate) async fn run_compact_task_with_item(
+    sess: Arc<Session>,
+    turn_context: Arc<TurnContext>,
+    input: &[UserInput],
+    compaction_item: TurnItem,
+) -> PraxisResult<()> {
+    run_compact_task_inner(
+        sess,
+        turn_context,
+        local_compact_mode_for_input(input),
+        InitialContextInjection::DoNotInject,
+        Some(compaction_item),
     )
     .await
 }
@@ -164,10 +198,16 @@ async fn run_compact_task_inner(
     turn_context: Arc<TurnContext>,
     mode: LocalCompactMode,
     initial_context_injection: InitialContextInjection,
+    compaction_item: Option<TurnItem>,
 ) -> PraxisResult<()> {
-    let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
-    sess.emit_turn_item_started(&turn_context, &compaction_item)
-        .await;
+    let compaction_item = match compaction_item {
+        Some(item) => item,
+        None => {
+            let item = TurnItem::ContextCompaction(ContextCompactionItem::new());
+            sess.emit_turn_item_started(&turn_context, &item).await;
+            item
+        }
+    };
     let compact_turn_context = local_compact_turn_context(sess.as_ref(), &turn_context).await;
 
     let history_snapshot = sess.clone_history().await;

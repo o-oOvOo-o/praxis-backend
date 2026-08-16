@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_channel::Sender;
+use praxis_capability_runtime::CapabilityRuntime;
 use praxis_exec_server::EnvironmentManager;
 use praxis_login::AuthManager;
 use praxis_protocol::protocol::Event;
@@ -9,7 +10,6 @@ use praxis_protocol::protocol::SessionSource;
 use tokio::sync::watch;
 use tracing::instrument;
 
-use crate::SkillsManager;
 use crate::agent::AgentControl;
 use crate::agent::AgentStatus;
 use crate::agent_os::AgentOs;
@@ -17,7 +17,6 @@ use crate::config::Config;
 use crate::exec_policy::ExecPolicyManager;
 use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::mcp::McpManager;
-use crate::models_manager::manager::ModelsManager;
 use crate::plugins::PluginsManager;
 use crate::skills_watcher::SkillsWatcher;
 
@@ -52,14 +51,15 @@ impl Session {
         llm_runtime_catalog: LlmRuntimeCatalog,
         config: Arc<Config>,
         auth_manager: Arc<AuthManager>,
-        models_manager: Arc<ModelsManager>,
+        models_manager: crate::capabilities::ProviderCapability,
         exec_policy: Arc<ExecPolicyManager>,
         tx_event: Sender<Event>,
         agent_status: watch::Sender<AgentStatus>,
         initial_history: InitialHistory,
         session_source: SessionSource,
         environment_manager: Arc<EnvironmentManager>,
-        skills_manager: Arc<SkillsManager>,
+        capability_runtime: CapabilityRuntime,
+        skills_manager: crate::capabilities::SkillsCapability,
         plugins_manager: Arc<PluginsManager>,
         mcp_manager: Arc<McpManager>,
         skills_watcher: Arc<SkillsWatcher>,
@@ -78,6 +78,7 @@ impl Session {
             initial_history,
             session_source,
             environment_manager,
+            capability_runtime,
             skills_manager,
             plugins_manager,
             mcp_manager,

@@ -1,10 +1,11 @@
-use std::collections::HashSet;
-use std::sync::Arc;
-
 use praxis_protocol::models::ResponseItem;
+use std::collections::HashSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::SkillLoadOutcome;
+use crate::capabilities::ToolCapabilities;
+use crate::capabilities::publish_tools;
+use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
@@ -24,8 +25,25 @@ pub(crate) async fn built_tools(
     explicitly_enabled_connectors: &HashSet<String>,
     skills_outcome: Option<&SkillLoadOutcome>,
     cancellation_token: &CancellationToken,
-) -> PraxisResult<Arc<ToolRouter>> {
+) -> PraxisResult<ToolCapabilities> {
     let mcp_snapshot = mcp_snapshot::load(sess, cancellation_token).await?;
+    let tool_visibility_policy = visibility::resolve(sess, turn_context);
+    let code_mode_router = ToolRouter::from_config(
+        &turn_context.tools_config.for_code_mode_nested_tools(),
+        ToolRouterParams {
+            mcp_tools: Some(
+                mcp_snapshot
+                    .tools
+                    .iter()
+                    .map(|(name, tool)| (name.clone(), tool.tool.clone()))
+                    .collect(),
+            ),
+            app_tools: None,
+            discoverable_tools: None,
+            dynamic_tools: turn_context.dynamic_tools.as_slice(),
+            tool_visibility_policy: tool_visibility_policy.as_ref(),
+        },
+    );
     let connector_context = connector_context::build(
         sess,
         turn_context,
@@ -45,9 +63,7 @@ pub(crate) async fn built_tools(
         connector_context.app_tools,
         turn_context,
     );
-    let tool_visibility_policy = visibility::resolve(sess, turn_context);
-
-    Ok(Arc::new(ToolRouter::from_config(
+    let model_router = ToolRouter::from_config(
         &turn_context.tools_config,
         ToolRouterParams {
             mcp_tools: mcp_snapshot.has_mcp_servers.then(|| {
@@ -62,5 +78,18 @@ pub(crate) async fn built_tools(
             dynamic_tools: turn_context.dynamic_tools.as_slice(),
             tool_visibility_policy: tool_visibility_policy.as_ref(),
         },
-    )))
+    );
+
+    publish_tools(
+        &sess.services._capability_scope,
+        sess.conversation_id,
+        turn_context.sub_id.as_str(),
+        model_router,
+        code_mode_router,
+    )
+    .map_err(|error| {
+        PraxisErr::Fatal(format!(
+            "failed to publish turn tool capabilities: {error:#}"
+        ))
+    })
 }

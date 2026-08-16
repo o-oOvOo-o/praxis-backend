@@ -22,7 +22,6 @@ use core_test_support::wait_for_event;
 use core_test_support::wait_for_event_match;
 use praxis_core::ModelProviderInfo;
 use praxis_core::built_in_model_providers;
-use praxis_core::models_manager::manager::ModelsManager;
 use praxis_core::models_manager::manager::RefreshStrategy;
 use praxis_login::OpenAiAccountAuth;
 use praxis_protocol::config_types::ReasoningSummary;
@@ -344,7 +343,7 @@ async fn remote_models_remote_model_uses_unified_exec() -> Result<()> {
         ..
     } = builder.build(&server).await?;
 
-    let models_manager = thread_manager.get_models_manager();
+    let models_manager = thread_manager.provider_capability();
     let available_model = wait_for_model_available(&models_manager, REMOTE_MODEL_SLUG).await;
 
     assert_eq!(available_model.model, REMOTE_MODEL_SLUG);
@@ -463,7 +462,7 @@ async fn remote_models_truncation_policy_without_override_preserves_remote() -> 
         });
     let test = builder.build(&server).await?;
 
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     wait_for_model_available(&models_manager, slug).await;
 
     let model_info = models_manager.get_model_info(slug, &test.config).await;
@@ -508,7 +507,7 @@ async fn remote_models_truncation_policy_with_tool_output_override() -> Result<(
         });
     let test = builder.build(&server).await?;
 
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     wait_for_model_available(&models_manager, slug).await;
 
     let model_info = models_manager.get_model_info(slug, &test.config).await;
@@ -600,7 +599,7 @@ async fn remote_models_apply_remote_base_instructions() -> Result<()> {
         ..
     } = builder.build(&server).await?;
 
-    let models_manager = thread_manager.get_models_manager();
+    let models_manager = thread_manager.provider_capability();
     wait_for_model_available(&models_manager, model).await;
 
     codex
@@ -965,7 +964,10 @@ async fn remote_models_hide_picker_only_models() -> Result<()> {
     Ok(())
 }
 
-async fn wait_for_model_available(manager: &Arc<ModelsManager>, slug: &str) -> ModelPreset {
+async fn wait_for_model_available(
+    manager: &praxis_core::capabilities::ProviderCapability,
+    slug: &str,
+) -> ModelPreset {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         if let Some(model) = {

@@ -8,7 +8,6 @@ use core_test_support::skip_if_no_network;
 use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_config::types::Personality;
-use praxis_core::models_manager::manager::ModelsManager;
 use praxis_core::models_manager::manager::RefreshStrategy;
 use praxis_features::Feature;
 use praxis_protocol::config_types::ReasoningSummary;
@@ -700,7 +699,7 @@ async fn remote_model_friendly_personality_instructions_with_feature() -> anyhow
         });
     let test = builder.build(&server).await?;
 
-    wait_for_model_available(&test.thread_manager.get_models_manager(), remote_slug).await;
+    wait_for_model_available(&test.thread_manager.provider_capability(), remote_slug).await;
 
     test.thread
         .submit(Op::UserTurn {
@@ -821,7 +820,7 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
         });
     let test = builder.build(&server).await?;
 
-    wait_for_model_available(&test.thread_manager.get_models_manager(), remote_slug).await;
+    wait_for_model_available(&test.thread_manager.provider_capability(), remote_slug).await;
 
     test.thread
         .submit(Op::UserTurn {
@@ -907,7 +906,10 @@ async fn user_turn_personality_remote_model_template_includes_update_message() -
     Ok(())
 }
 
-async fn wait_for_model_available(manager: &Arc<ModelsManager>, slug: &str) {
+async fn wait_for_model_available(
+    manager: &praxis_core::capabilities::ProviderCapability,
+    slug: &str,
+) {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let models = manager.list_models(RefreshStrategy::OnlineIfUncached).await;

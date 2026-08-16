@@ -23,7 +23,7 @@ impl<'a> SessionAssemblyInput<'a> {
             },
             managers: services_bootstrap::ServiceManagerSet {
                 auth_manager: Arc::clone(managers.auth_manager),
-                models_manager: Arc::clone(managers.models_manager),
+                models_manager: managers.models_manager.clone(),
                 skills_manager: managers.skills_manager,
                 plugins_manager: Arc::clone(managers.plugins_manager),
                 mcp_manager: Arc::clone(managers.mcp_manager),
@@ -34,7 +34,8 @@ impl<'a> SessionAssemblyInput<'a> {
             },
             runtime: services_bootstrap::ServiceRuntimeArtifacts {
                 exec_policy: runtime.exec_policy,
-                hooks: runtime.hooks,
+                capability_scope: runtime.capability_scope,
+                hook_capability: runtime.hook_capability,
                 rollout_recorder: runtime.rollout_recorder,
                 default_shell: runtime.default_shell,
                 shell_snapshot_tx: runtime.shell_snapshot_tx,

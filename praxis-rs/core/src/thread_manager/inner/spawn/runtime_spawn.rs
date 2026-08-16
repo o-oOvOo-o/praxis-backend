@@ -54,7 +54,7 @@ impl ThreadManagerInner {
         let initial_session_source = request.session_source.clone();
         let watch_registration = self.skills_watcher.register_config(
             &request.config,
-            self.skills_manager.as_ref(),
+            self.skills_manager.value().as_ref(),
             self.plugins_manager.as_ref(),
         );
         let PraxisSpawnOk {
@@ -63,9 +63,10 @@ impl ThreadManagerInner {
             requested_thread_id: request.requested_thread_id,
             config: request.config,
             auth_manager: request.auth_manager,
-            models_manager: Arc::clone(&self.models_manager),
+            provider_capability: self.provider_capability.clone(),
             environment_manager: Arc::clone(&self.environment_manager),
-            skills_manager: Arc::clone(&self.skills_manager),
+            capability_runtime: self.capability_runtime.clone(),
+            skills_manager: self.skills_manager.clone(),
             plugins_manager: Arc::clone(&self.plugins_manager),
             mcp_manager: Arc::clone(&self.mcp_manager),
             skills_watcher: Arc::clone(&self.skills_watcher),

@@ -72,11 +72,16 @@ pub(in crate::praxis::session_startup::pipeline) async fn prepare(
     } = network_bootstrap;
 
     tracing::info!(conversation_id = %identity.conversation_id, phase = "hooks", "Session runtime preparation entering phase");
-    let hooks = hook_runtime::build(
+    let capability_scope = crate::capabilities::open_thread_scope(
+        control.capability_runtime,
+        identity.conversation_id,
+    )?;
+    let hook_capability = hook_runtime::build(
         identity.config.as_ref(),
         &default_shell,
+        &capability_scope,
         control.post_session_configured_events,
-    );
+    )?;
     tracing::info!(conversation_id = %identity.conversation_id, phase = "agent_os", "Session runtime preparation entering phase");
     let unified_exec_manager = agent_os_runtime::register_and_attach(
         control.agent_os,
@@ -96,7 +101,8 @@ pub(in crate::praxis::session_startup::pipeline) async fn prepare(
         session_network_proxy,
         network_approval,
         network_policy_decider_session,
-        hooks,
+        capability_scope,
+        hook_capability,
         unified_exec_manager,
     })
 }

@@ -61,6 +61,7 @@ async fn registry_does_not_own_workspace_checkpoint_persistence() {
             tracker: Arc::new(tokio::sync::Mutex::new(
                 crate::turn_diff_tracker::TurnDiffTracker::new(),
             )),
+            code_mode_router: None,
             call_id: "call-mutating".to_string(),
             tool_name: "mutating".to_string(),
             tool_namespace: None,

@@ -39,7 +39,7 @@ async fn model_change_from_image_to_text_strips_prior_image_content() -> Result<
             config.model = Some(image_model_slug.to_string());
         });
     let test = builder.build(&server).await?;
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     let _ = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
         .await;
@@ -175,7 +175,7 @@ async fn generated_image_is_replayed_for_image_capable_models() -> Result<()> {
         "ig_123",
     );
     let _ = std::fs::remove_file(&saved_path);
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     let _ = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
         .await;
@@ -307,7 +307,7 @@ async fn model_change_from_generated_image_to_text_preserves_prior_generated_ima
         "ig_123",
     );
     let _ = std::fs::remove_file(&saved_path);
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     let _ = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
         .await;
@@ -441,7 +441,7 @@ async fn thread_rollback_after_generated_image_drops_entire_image_turn_history()
         "ig_rollback",
     );
     let _ = std::fs::remove_file(&saved_path);
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     let _ = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
         .await;

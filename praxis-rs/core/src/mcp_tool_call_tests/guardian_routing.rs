@@ -68,7 +68,7 @@ async fn approve_mode_routes_arc_ask_user_to_guardian_when_guardian_reviewer_is_
         Arc::clone(&session.services.auth_manager),
         config.model_provider.clone(),
     ));
-    session.services.models_manager = models_manager;
+    crate::capabilities::replace_test_providers(&mut session, models_manager);
     turn_context.config = Arc::clone(&config);
     turn_context.provider = config.model_provider.clone();
 

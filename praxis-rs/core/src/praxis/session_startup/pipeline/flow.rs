@@ -70,6 +70,7 @@ impl SessionStartupFlow {
                 exec_policy: &self.services.exec_policy,
                 agent_os: &self.control.agent_os,
                 post_session_configured_events: &mut self.events.post_session_configured_events,
+                capability_runtime: &self.services.capability_runtime,
             },
         })
         .await

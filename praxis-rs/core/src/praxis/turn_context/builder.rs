@@ -36,7 +36,7 @@ impl Session {
                 &per_turn_config,
             )
             .await;
-        let skills_outcome = turn_skills::load(self, &per_turn_config);
+        let skills_outcome = turn_skills::load(self, &sub_id, &per_turn_config);
         let mut turn_context: TurnContext = Self::make_turn_context(
             self.conversation_id,
             Some(Arc::clone(&self.services.auth_manager)),

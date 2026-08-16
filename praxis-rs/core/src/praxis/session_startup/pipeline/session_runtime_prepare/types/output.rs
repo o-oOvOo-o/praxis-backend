@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use praxis_hooks::Hooks;
+use praxis_capability_runtime::CapabilityScope;
 use praxis_otel::SessionTelemetry;
 use praxis_protocol::protocol::SessionNetworkProxyRuntime;
 use tokio::sync::watch;
@@ -12,6 +12,7 @@ use crate::tools::network_approval::NetworkApprovalService;
 use crate::unified_exec::UnifiedExecProcessManager;
 
 use super::super::super::super::network_proxy;
+use crate::capabilities::HookCapability;
 
 pub(in crate::praxis::session_startup::pipeline) struct SessionRuntimePreparation {
     pub(in crate::praxis::session_startup::pipeline) session_telemetry: SessionTelemetry,
@@ -25,7 +26,8 @@ pub(in crate::praxis::session_startup::pipeline) struct SessionRuntimePreparatio
     pub(in crate::praxis::session_startup::pipeline) network_approval: Arc<NetworkApprovalService>,
     pub(in crate::praxis::session_startup::pipeline) network_policy_decider_session:
         network_proxy::PolicyDeciderSession,
-    pub(in crate::praxis::session_startup::pipeline) hooks: Hooks,
+    pub(in crate::praxis::session_startup::pipeline) capability_scope: CapabilityScope,
+    pub(in crate::praxis::session_startup::pipeline) hook_capability: HookCapability,
     pub(in crate::praxis::session_startup::pipeline) unified_exec_manager:
         Arc<UnifiedExecProcessManager>,
 }

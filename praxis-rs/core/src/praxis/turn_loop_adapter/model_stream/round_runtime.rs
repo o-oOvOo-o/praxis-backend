@@ -72,29 +72,32 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
         use tokio_util::sync::CancellationToken;
 
         use crate::SkillLoadOutcome;
+        use crate::capabilities::ToolCapabilities;
+        use crate::capabilities::ToolCapability;
         use crate::error::Result as PraxisResult;
         use crate::praxis::Session;
         use crate::praxis::TurnContext;
-        use crate::tools::ToolRouter;
         use crate::tools::context::SharedTurnDiffTracker;
         use crate::tools::tool_call_runtime::ToolCallRuntime;
 
         use super::super::super::super::model_request::built_tools;
 
         pub(in crate::praxis::turn_loop_adapter::model_stream) struct ModelRoundTools {
-            router: Arc<ToolRouter>,
+            routers: ToolCapabilities,
             runtime: ToolCallRuntime,
         }
 
         impl ModelRoundTools {
-            pub(in crate::praxis::turn_loop_adapter::model_stream) fn router(&self) -> &ToolRouter {
-                self.router.as_ref()
+            pub(in crate::praxis::turn_loop_adapter::model_stream) fn router(
+                &self,
+            ) -> &crate::tools::ToolRouter {
+                self.routers.as_ref()
             }
 
-            pub(in crate::praxis::turn_loop_adapter::model_stream) fn router_arc(
+            pub(in crate::praxis::turn_loop_adapter::model_stream) fn code_mode_router(
                 &self,
-            ) -> Arc<ToolRouter> {
-                Arc::clone(&self.router)
+            ) -> ToolCapability {
+                self.routers.code_mode()
             }
 
             pub(in crate::praxis::turn_loop_adapter::model_stream) fn runtime(
@@ -113,7 +116,7 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
             skills_outcome: Option<&SkillLoadOutcome>,
             cancellation_token: &CancellationToken,
         ) -> PraxisResult<ModelRoundTools> {
-            let router = built_tools(
+            let routers = built_tools(
                 sess.as_ref(),
                 turn_context.as_ref(),
                 input,
@@ -123,13 +126,14 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
             )
             .await?;
             let runtime = ToolCallRuntime::new(
-                Arc::clone(&router),
+                routers.model(),
+                routers.code_mode(),
                 Arc::clone(&sess),
                 Arc::clone(&turn_context),
                 Arc::clone(&turn_diff_tracker),
             );
 
-            Ok(ModelRoundTools { router, runtime })
+            Ok(ModelRoundTools { routers, runtime })
         }
     }
     mod tooling {
@@ -184,7 +188,7 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
             let code_mode_worker = code_mode_worker::start_turn_worker(
                 &input.session,
                 &input.turn_context,
-                tools.router_arc(),
+                tools.code_mode_router(),
                 Arc::clone(&turn_diff_tracker),
             )
             .await;
@@ -276,16 +280,16 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
 pub(in crate::praxis::turn_loop_adapter::model_stream) mod code_mode_worker {
     use std::sync::Arc;
 
+    use crate::capabilities::ToolCapability;
     use crate::praxis::Session;
     use crate::praxis::TurnContext;
-    use crate::tools::ToolRouter;
     use crate::tools::code_mode::CodeModeTurnWorker;
     use crate::tools::context::SharedTurnDiffTracker;
 
     pub(in crate::praxis::turn_loop_adapter::model_stream) async fn start_turn_worker(
         session: &Arc<Session>,
         turn_context: &Arc<TurnContext>,
-        router: Arc<ToolRouter>,
+        router: ToolCapability,
         turn_diff_tracker: SharedTurnDiffTracker,
     ) -> Option<CodeModeTurnWorker> {
         session

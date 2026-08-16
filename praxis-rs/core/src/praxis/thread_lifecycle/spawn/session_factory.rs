@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_channel::Sender;
+use praxis_capability_runtime::CapabilityRuntime;
 use praxis_exec_server::EnvironmentManager;
 use praxis_login::AuthManager;
 use praxis_protocol::protocol::Event;
@@ -8,7 +9,6 @@ use praxis_protocol::protocol::InitialHistory;
 use tokio::sync::watch;
 use tracing::error;
 
-use crate::SkillsManager;
 use crate::agent::AgentControl;
 use crate::agent::AgentStatus;
 use crate::agent_os::AgentOs;
@@ -17,7 +17,6 @@ use crate::error::Result as PraxisResult;
 use crate::exec_policy::ExecPolicyManager;
 use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::mcp::McpManager;
-use crate::models_manager::manager::ModelsManager;
 use crate::plugins::PluginsManager;
 use crate::rollout::map_session_init_error;
 use crate::skills_watcher::SkillsWatcher;
@@ -30,13 +29,14 @@ pub(super) struct SessionFactoryInput {
     pub(super) llm_runtime_catalog: LlmRuntimeCatalog,
     pub(super) config: Arc<Config>,
     pub(super) auth_manager: Arc<AuthManager>,
-    pub(super) models_manager: Arc<ModelsManager>,
+    pub(super) provider_capability: crate::capabilities::ProviderCapability,
     pub(super) exec_policy: Arc<ExecPolicyManager>,
     pub(super) tx_event: Sender<Event>,
     pub(super) agent_status_tx: watch::Sender<AgentStatus>,
     pub(super) conversation_history: InitialHistory,
     pub(super) environment_manager: Arc<EnvironmentManager>,
-    pub(super) skills_manager: Arc<SkillsManager>,
+    pub(super) capability_runtime: CapabilityRuntime,
+    pub(super) skills_manager: crate::capabilities::SkillsCapability,
     pub(super) plugins_manager: Arc<PluginsManager>,
     pub(super) mcp_manager: Arc<McpManager>,
     pub(super) skills_watcher: Arc<SkillsWatcher>,
@@ -52,13 +52,14 @@ pub(super) async fn build(input: SessionFactoryInput) -> PraxisResult<Arc<Sessio
         input.llm_runtime_catalog,
         input.config,
         input.auth_manager,
-        input.models_manager,
+        input.provider_capability,
         input.exec_policy,
         input.tx_event,
         input.agent_status_tx,
         input.conversation_history,
         session_source,
         input.environment_manager,
+        input.capability_runtime,
         input.skills_manager,
         input.plugins_manager,
         input.mcp_manager,

@@ -6806,6 +6806,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "praxis-capability-runtime"
+version = "0.0.0"
+
+[[package]]
 name = "praxis-chatgpt"
 version = "0.0.0"
 dependencies = [
@@ -7086,6 +7090,7 @@ dependencies = [
  "praxis-apply-patch",
  "praxis-arg0",
  "praxis-async-utils",
+ "praxis-capability-runtime",
  "praxis-code-mode",
  "praxis-config",
  "praxis-connectors",

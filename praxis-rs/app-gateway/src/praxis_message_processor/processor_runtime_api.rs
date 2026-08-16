@@ -5,7 +5,7 @@ use crate::thread_state::TurnControllerReservationError;
 impl PraxisMessageProcessor {
     pub(crate) fn clear_plugin_related_caches(&self) {
         self.thread_manager.plugins_manager().clear_cache();
-        self.thread_manager.skills_manager().clear_cache();
+        self.thread_manager.skills_capability().clear_cache();
     }
 
     pub(crate) async fn maybe_start_plugin_startup_tasks_for_latest_config(&self) {

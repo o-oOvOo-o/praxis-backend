@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use praxis_capability_runtime::CapabilityRuntime;
 use praxis_config::types::McpServerConfig;
 use praxis_login::AuthManager;
 use praxis_login::OpenAiAccountAuth;
@@ -38,4 +39,5 @@ pub(in crate::praxis::session_startup::pipeline) struct SessionRuntimeControlInp
     pub(in crate::praxis::session_startup::pipeline) agent_os: &'a Arc<AgentOs>,
     pub(in crate::praxis::session_startup::pipeline) post_session_configured_events:
         &'a mut Vec<Event>,
+    pub(in crate::praxis::session_startup::pipeline) capability_runtime: &'a CapabilityRuntime,
 }

@@ -11,7 +11,6 @@ use tokio::runtime::RuntimeFlavor;
 use tokio::sync::broadcast;
 use tracing::warn;
 
-use crate::SkillsManager;
 use crate::file_watcher::FileWatcher;
 use crate::skills_watcher::SkillsWatcher;
 use crate::skills_watcher::SkillsWatcherEvent;
@@ -44,7 +43,9 @@ impl Drop for TempPraxisHomeGuard {
     }
 }
 
-pub(super) fn build_skills_watcher(skills_manager: Arc<SkillsManager>) -> Arc<SkillsWatcher> {
+pub(super) fn build_skills_watcher(
+    skills_manager: crate::capabilities::SkillsCapability,
+) -> Arc<SkillsWatcher> {
     if should_use_test_thread_manager_behavior()
         && let Ok(handle) = Handle::try_current()
         && handle.runtime_flavor() == RuntimeFlavor::CurrentThread
@@ -65,7 +66,7 @@ pub(super) fn build_skills_watcher(skills_manager: Arc<SkillsManager>) -> Arc<Sk
     let skills_watcher = Arc::new(SkillsWatcher::new(&file_watcher));
 
     let mut rx = skills_watcher.subscribe();
-    let skills_manager = Arc::clone(&skills_manager);
+    let skills_manager = skills_manager.clone();
     if let Ok(handle) = Handle::try_current() {
         handle.spawn(async move {
             loop {

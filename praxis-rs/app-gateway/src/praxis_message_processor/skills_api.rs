@@ -91,7 +91,7 @@ impl PraxisMessageProcessor {
                 return;
             }
         };
-        let skills_manager = self.thread_manager.skills_manager();
+        let skills_manager = self.thread_manager.skills_capability();
         let plugins_manager = self.thread_manager.plugins_manager();
         let cli_overrides = self.current_cli_overrides();
         let mut data = Vec::new();
@@ -204,7 +204,7 @@ impl PraxisMessageProcessor {
         match result {
             Ok(()) => {
                 self.thread_manager.plugins_manager().clear_cache();
-                self.thread_manager.skills_manager().clear_cache();
+                self.thread_manager.skills_capability().clear_cache();
                 self.outgoing
                     .send_response(
                         request_id,
@@ -348,7 +348,7 @@ impl PraxisMessageProcessor {
 
     fn clear_skill_caches(&self) {
         self.thread_manager.plugins_manager().clear_cache();
-        self.thread_manager.skills_manager().clear_cache();
+        self.thread_manager.skills_capability().clear_cache();
     }
 }
 

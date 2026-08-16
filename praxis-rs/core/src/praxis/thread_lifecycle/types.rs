@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use futures::future::Shared;
+use praxis_capability_runtime::CapabilityRuntime;
 use praxis_exec_server::EnvironmentManager;
 use praxis_login::AuthManager;
 use praxis_protocol::ThreadId;
@@ -10,13 +11,11 @@ use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::W3cTraceContext;
 
-use crate::SkillsManager;
 use crate::agent::AgentControl;
 use crate::agent_os::AgentOs;
 use crate::config::Config;
 use crate::exec_policy::ExecPolicyManager;
 use crate::mcp::McpManager;
-use crate::models_manager::manager::ModelsManager;
 use crate::plugins::PluginsManager;
 use crate::shell;
 use crate::shell_snapshot::ShellSnapshot;
@@ -36,9 +35,10 @@ pub(crate) struct PraxisSpawnArgs {
     pub(crate) requested_thread_id: Option<ThreadId>,
     pub(crate) config: Config,
     pub(crate) auth_manager: Arc<AuthManager>,
-    pub(crate) models_manager: Arc<ModelsManager>,
+    pub(crate) provider_capability: crate::capabilities::ProviderCapability,
     pub(crate) environment_manager: Arc<EnvironmentManager>,
-    pub(crate) skills_manager: Arc<SkillsManager>,
+    pub(crate) capability_runtime: CapabilityRuntime,
+    pub(crate) skills_manager: crate::capabilities::SkillsCapability,
     pub(crate) plugins_manager: Arc<PluginsManager>,
     pub(crate) mcp_manager: Arc<McpManager>,
     pub(crate) skills_watcher: Arc<SkillsWatcher>,

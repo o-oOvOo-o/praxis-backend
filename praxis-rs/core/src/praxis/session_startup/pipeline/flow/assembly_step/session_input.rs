@@ -8,7 +8,6 @@ use praxis_protocol::protocol::Event;
 use praxis_rollout::state_db::StateDbHandle;
 use tokio::sync::watch;
 
-use crate::SkillsManager;
 use crate::agent::AgentControl;
 use crate::agent::AgentStatus;
 use crate::agent_os::AgentOs;
@@ -16,7 +15,6 @@ use crate::config::Config;
 use crate::exec_policy::ExecPolicyManager;
 use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::mcp::McpManager;
-use crate::models_manager::manager::ModelsManager;
 use crate::plugins::PluginsManager;
 use crate::rollout::RolloutRecorder;
 use crate::skills_watcher::SkillsWatcher;
@@ -33,9 +31,9 @@ pub(super) struct SessionInputProjection<'a> {
     pub(super) session_configuration: &'a SessionConfiguration,
     pub(super) llm_runtime_catalog: LlmRuntimeCatalog,
     pub(super) auth_manager: &'a Arc<AuthManager>,
-    pub(super) models_manager: &'a Arc<ModelsManager>,
+    pub(super) models_manager: &'a crate::capabilities::ProviderCapability,
     pub(super) exec_policy: Arc<ExecPolicyManager>,
-    pub(super) skills_manager: Arc<SkillsManager>,
+    pub(super) skills_manager: crate::capabilities::SkillsCapability,
     pub(super) plugins_manager: &'a Arc<PluginsManager>,
     pub(super) mcp_manager: &'a Arc<McpManager>,
     pub(super) skills_watcher: Arc<SkillsWatcher>,
@@ -58,7 +56,8 @@ pub(super) fn build(
         session_network_proxy: _,
         network_approval,
         network_policy_decider_session,
-        hooks,
+        capability_scope,
+        hook_capability,
         unified_exec_manager,
     } = input.runtime;
 
@@ -85,7 +84,8 @@ pub(super) fn build(
         },
         runtime: session_assembly::SessionAssemblyRuntime {
             exec_policy: input.exec_policy,
-            hooks,
+            capability_scope,
+            hook_capability,
             rollout_recorder: input.rollout_recorder,
             default_shell,
             shell_snapshot_tx,

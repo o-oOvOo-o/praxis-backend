@@ -67,7 +67,7 @@ impl PraxisMessageProcessor {
         if collaboration_mode.settings.developer_instructions.is_none()
             && let Some(instructions) = self
                 .thread_manager
-                .get_models_manager()
+                .provider_capability()
                 .list_collaboration_modes_for_config(collaboration_modes_config)
                 .into_iter()
                 .find(|preset| preset.mode == Some(collaboration_mode.mode))

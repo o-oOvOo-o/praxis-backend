@@ -2,11 +2,17 @@ use std::sync::Arc;
 
 use crate::compact::InitialContextInjection;
 use crate::compact::run_inline_auto_compact_task;
+use crate::compact::run_inline_auto_compact_task_with_item;
 use crate::compact::should_use_remote_compact_task;
-use crate::compact_remote::run_inline_remote_auto_compact_task;
+use crate::compact_remote::is_remote_compaction_unsupported;
+use crate::compact_remote::notify_remote_compact_fallback;
+use crate::compact_remote::report_remote_compact_error;
+use crate::compact_remote::run_remote_compact_task_with_item;
 use crate::error::Result as PraxisResult;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
+use praxis_protocol::items::ContextCompactionItem;
+use praxis_protocol::items::TurnItem;
 
 use super::token_limit::effective_auto_compact_token_limit;
 
@@ -78,12 +84,33 @@ pub(in crate::praxis) async fn run_auto_compact(
     initial_context_injection: InitialContextInjection,
 ) -> PraxisResult<()> {
     if should_use_remote_compact_task(sess.as_ref(), turn_context.as_ref()) {
-        run_inline_remote_auto_compact_task(
-            Arc::clone(sess),
-            Arc::clone(turn_context),
+        let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
+        sess.emit_turn_item_started(turn_context, &compaction_item)
+            .await;
+        match run_remote_compact_task_with_item(
+            sess,
+            turn_context,
             initial_context_injection,
+            compaction_item.clone(),
         )
-        .await?;
+        .await
+        {
+            Ok(()) => {}
+            Err(err) if is_remote_compaction_unsupported(&err) => {
+                notify_remote_compact_fallback(sess.as_ref(), turn_context.as_ref()).await;
+                run_inline_auto_compact_task_with_item(
+                    Arc::clone(sess),
+                    Arc::clone(turn_context),
+                    initial_context_injection,
+                    compaction_item,
+                )
+                .await?;
+            }
+            Err(err) => {
+                report_remote_compact_error(sess.as_ref(), turn_context.as_ref(), &err).await;
+                return Err(err);
+            }
+        }
     } else {
         run_inline_auto_compact_task(
             Arc::clone(sess),

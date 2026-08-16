@@ -14,65 +14,60 @@ use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::praxis::model_request::built_tools;
 use futures::TryFutureExt;
-use praxis_protocol::items::ContextCompactionItem;
 use praxis_protocol::items::TurnItem;
 use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::ResponseItem;
 use praxis_protocol::protocol::CompactedItem;
 use praxis_protocol::protocol::EventMsg;
-use praxis_protocol::protocol::TurnStartedEvent;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 use tracing::info;
 
-pub(crate) async fn run_inline_remote_auto_compact_task(
-    sess: Arc<Session>,
-    turn_context: Arc<TurnContext>,
-    initial_context_injection: InitialContextInjection,
-) -> PraxisResult<()> {
-    run_remote_compact_task_inner(&sess, &turn_context, initial_context_injection).await?;
-    Ok(())
+pub(crate) fn is_remote_compaction_unsupported(err: &PraxisErr) -> bool {
+    matches!(
+        err,
+        PraxisErr::UnexpectedStatus(response)
+            if matches!(
+                response.status,
+                reqwest::StatusCode::NOT_FOUND
+                    | reqwest::StatusCode::METHOD_NOT_ALLOWED
+                    | reqwest::StatusCode::NOT_IMPLEMENTED
+            )
+                && response.url.as_deref().is_some_and(is_compact_endpoint_url)
+    )
 }
 
-pub(crate) async fn run_remote_compact_task(
-    sess: Arc<Session>,
-    turn_context: Arc<TurnContext>,
-) -> PraxisResult<()> {
-    let start_event = EventMsg::TurnStarted(TurnStartedEvent {
-        turn_id: turn_context.sub_id.clone(),
-        model_context_window: turn_context.model_context_window(),
-        collaboration_mode_kind: turn_context.collaboration_mode.mode,
-    });
-    sess.send_event(&turn_context, start_event).await;
-
-    run_remote_compact_task_inner(&sess, &turn_context, InitialContextInjection::DoNotInject).await
+fn is_compact_endpoint_url(url: &str) -> bool {
+    url.split(['?', '#'])
+        .next()
+        .is_some_and(|url| url.trim_end_matches('/').ends_with("/responses/compact"))
 }
 
-async fn run_remote_compact_task_inner(
+pub(crate) async fn report_remote_compact_error(
+    sess: &Session,
+    turn_context: &TurnContext,
+    err: &PraxisErr,
+) {
+    let event =
+        EventMsg::Error(err.to_error_event(Some("Error running remote compact task".to_string())));
+    sess.send_event(turn_context, event).await;
+}
+
+pub(crate) async fn notify_remote_compact_fallback(sess: &Session, turn_context: &TurnContext) {
+    sess.notify_background_event(
+        turn_context,
+        "Remote compaction is unavailable for this account. Falling back to local compaction."
+            .to_string(),
+    )
+    .await;
+}
+
+pub(crate) async fn run_remote_compact_task_with_item(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     initial_context_injection: InitialContextInjection,
+    compaction_item: TurnItem,
 ) -> PraxisResult<()> {
-    if let Err(err) =
-        run_remote_compact_task_inner_impl(sess, turn_context, initial_context_injection).await
-    {
-        let event = EventMsg::Error(
-            err.to_error_event(Some("Error running remote compact task".to_string())),
-        );
-        sess.send_event(turn_context, event).await;
-        return Err(err);
-    }
-    Ok(())
-}
-
-async fn run_remote_compact_task_inner_impl(
-    sess: &Arc<Session>,
-    turn_context: &Arc<TurnContext>,
-    initial_context_injection: InitialContextInjection,
-) -> PraxisResult<()> {
-    let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
-    sess.emit_turn_item_started(turn_context, &compaction_item)
-        .await;
     let mut history = sess.clone_history().await;
     let base_instructions = sess.get_base_instructions().await;
     let deleted_items = trim_function_call_history_to_fit_context_window(
@@ -181,6 +176,60 @@ async fn run_remote_compact_task_inner_impl(
     sess.emit_turn_item_completed(turn_context, compaction_item)
         .await;
     Ok(())
+}
+
+#[cfg(test)]
+mod fallback_tests {
+    use super::is_remote_compaction_unsupported;
+    use crate::error::PraxisErr;
+    use crate::error::UnexpectedResponseError;
+    use reqwest::StatusCode;
+
+    fn status_error(status: StatusCode, url: Option<&str>) -> PraxisErr {
+        PraxisErr::UnexpectedStatus(UnexpectedResponseError {
+            status,
+            body: String::new(),
+            url: url.map(str::to_string),
+            cf_ray: None,
+            request_id: None,
+            identity_authorization_error: None,
+            identity_error_code: None,
+        })
+    }
+
+    #[test]
+    fn only_endpoint_capability_errors_enable_local_fallback() {
+        for status in [
+            StatusCode::NOT_FOUND,
+            StatusCode::METHOD_NOT_ALLOWED,
+            StatusCode::NOT_IMPLEMENTED,
+        ] {
+            assert!(is_remote_compaction_unsupported(&status_error(
+                status,
+                Some("https://chatgpt.com/backend-api/codex/responses/compact?stream=false"),
+            )));
+        }
+
+        for status in [
+            StatusCode::UNAUTHORIZED,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            assert!(!is_remote_compaction_unsupported(&status_error(
+                status,
+                Some("http://localhost/v1/responses/compact"),
+            )));
+        }
+
+        assert!(!is_remote_compaction_unsupported(&status_error(
+            StatusCode::NOT_FOUND,
+            Some("https://chatgpt.com/backend-api/codex/responses"),
+        )));
+        assert!(!is_remote_compaction_unsupported(&status_error(
+            StatusCode::NOT_FOUND,
+            None,
+        )));
+    }
 }
 
 pub(crate) async fn process_compacted_history(

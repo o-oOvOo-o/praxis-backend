@@ -9,10 +9,8 @@ use praxis_protocol::protocol::Op;
 use praxis_protocol::protocol::SessionSource;
 use tokio::sync::broadcast;
 
-use crate::SkillsManager;
 use crate::error::Result as PraxisResult;
 use crate::mcp::McpManager;
-use crate::models_manager::manager::ModelsManager;
 use crate::models_manager::manager::RefreshStrategy;
 use crate::plugins::PluginsManager;
 use crate::praxis_thread::PraxisThread;
@@ -28,7 +26,7 @@ impl ThreadManager {
         self.state.auth_manager.clone()
     }
 
-    pub fn skills_manager(&self) -> Arc<SkillsManager> {
+    pub fn skills_capability(&self) -> crate::capabilities::SkillsCapability {
         self.state.skills_manager.clone()
     }
 
@@ -40,19 +38,19 @@ impl ThreadManager {
         self.state.mcp_manager.clone()
     }
 
-    pub fn get_models_manager(&self) -> Arc<ModelsManager> {
-        self.state.models_manager.clone()
+    pub fn provider_capability(&self) -> crate::capabilities::ProviderCapability {
+        self.state.provider_capability.clone()
     }
 
     pub async fn list_models(&self, refresh_strategy: RefreshStrategy) -> Vec<ModelPreset> {
         self.state
-            .models_manager
+            .provider_capability
             .list_models(refresh_strategy)
             .await
     }
 
     pub fn list_collaboration_modes(&self) -> Vec<CollaborationModeMask> {
-        self.state.models_manager.list_collaboration_modes()
+        self.state.provider_capability.list_collaboration_modes()
     }
 
     pub async fn list_thread_ids(&self) -> Vec<ThreadId> {

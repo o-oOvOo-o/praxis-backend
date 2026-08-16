@@ -93,7 +93,7 @@ async fn guardian_allows_shell_additional_permissions_requests_past_policy_valid
         Arc::clone(&session.services.auth_manager),
         config.model_provider.clone(),
     ));
-    session.services.models_manager = models_manager;
+    crate::capabilities::replace_test_providers(&mut session, models_manager);
     turn_context_raw.config = Arc::clone(&config);
     turn_context_raw.provider = config.model_provider.clone();
     let session = Arc::new(session);
@@ -137,6 +137,7 @@ async fn guardian_allows_shell_additional_permissions_requests_past_policy_valid
             session: Arc::clone(&session),
             turn: Arc::clone(&turn_context),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
+            code_mode_router: None,
             call_id: "test-call".to_string(),
             tool_name: "shell".to_string(),
             tool_namespace: None,
@@ -207,6 +208,7 @@ async fn guardian_allows_unified_exec_additional_permissions_requests_past_polic
             session: Arc::clone(&session),
             turn: Arc::clone(&turn_context),
             tracker: Arc::clone(&tracker),
+            code_mode_router: None,
             call_id: "exec-call".to_string(),
             tool_name: "exec_command".to_string(),
             tool_namespace: None,
@@ -316,6 +318,7 @@ async fn shell_handler_allows_sticky_turn_permissions_without_inline_request_per
             session: Arc::clone(&session),
             turn: Arc::clone(&turn_context),
             tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
+            code_mode_router: None,
             call_id: "sticky-turn-grant".to_string(),
             tool_name: "shell".to_string(),
             tool_namespace: None,
@@ -426,12 +429,19 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
     let mcp_manager = Arc::new(McpManager::new(Arc::clone(&plugins_manager)));
     let skills_watcher = Arc::new(SkillsWatcher::noop());
 
+    let capability_runtime = crate::capabilities::new_runtime();
+    let provider_capability =
+        crate::capabilities::publish_providers(&capability_runtime, models_manager)
+            .expect("publish guardian test Providers capability");
+    let skills_manager = crate::capabilities::publish_skills(&capability_runtime, skills_manager)
+        .expect("publish guardian test Skills capability");
     let PraxisSpawnOk { praxis, .. } = Praxis::spawn(PraxisSpawnArgs {
         requested_thread_id: None,
         config,
         auth_manager,
-        models_manager,
+        provider_capability,
         environment_manager: Arc::new(EnvironmentManager::new(/*exec_server_url*/ None)),
+        capability_runtime,
         skills_manager,
         plugins_manager,
         mcp_manager,

@@ -340,7 +340,7 @@ pub(in crate::praxis::turn_loop_adapter) mod stop_hooks {
             last_agent_message: Option<String>,
         ) -> TurnStopHooksDecision {
             let hook_outcomes = sess
-                .hooks()
+                .hook_capability()
                 .dispatch(HookPayload {
                     session_id: sess.conversation_id,
                     cwd: turn_context.cwd.to_path_buf(),
@@ -428,7 +428,7 @@ pub(in crate::praxis::turn_loop_adapter) mod stop_hooks {
             let stop_request =
                 build_stop_request(sess, turn_context, last_agent_message, *stop_hook_active).await;
             emit_stop_hook_starts(sess, turn_context, &stop_request).await;
-            let stop_outcome = sess.hooks().run_stop(stop_request).await;
+            let stop_outcome = sess.hook_capability().run_stop(stop_request).await;
 
             for completed in stop_outcome.hook_events {
                 sess.send_event(turn_context, EventMsg::HookCompleted(completed))
@@ -484,7 +484,7 @@ pub(in crate::praxis::turn_loop_adapter) mod stop_hooks {
             turn_context: &Arc<TurnContext>,
             stop_request: &praxis_hooks::StopRequest,
         ) {
-            for run in sess.hooks().preview_stop(stop_request) {
+            for run in sess.hook_capability().preview_stop(stop_request) {
                 sess.send_event(
                     turn_context,
                     EventMsg::HookStarted(praxis_protocol::protocol::HookStartedEvent {

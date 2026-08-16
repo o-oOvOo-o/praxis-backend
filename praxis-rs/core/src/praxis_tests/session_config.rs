@@ -267,12 +267,18 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         config.praxis_home.clone(),
         /*bundled_skills_enabled*/ true,
     ));
+    let capability_runtime = crate::capabilities::new_runtime();
+    let provider_capability =
+        crate::capabilities::publish_providers(&capability_runtime, models_manager)
+            .expect("publish session test Providers capability");
+    let skills_manager = crate::capabilities::publish_skills(&capability_runtime, skills_manager)
+        .expect("publish session test Skills capability");
     let result = Session::new(
         session_configuration,
         crate::llm::runtime::LlmRuntimeCatalog::default(),
         Arc::clone(&config),
         auth_manager,
-        models_manager,
+        provider_capability,
         Arc::new(ExecPolicyManager::default()),
         tx_event,
         agent_status_tx,
@@ -281,6 +287,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         Arc::new(praxis_exec_server::EnvironmentManager::new(
             /*exec_server_url*/ None,
         )),
+        capability_runtime,
         skills_manager,
         plugins_manager,
         mcp_manager,

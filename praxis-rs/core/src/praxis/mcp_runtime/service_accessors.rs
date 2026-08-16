@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use praxis_hooks::Hooks;
 #[cfg(test)]
 use tokio_util::sync::CancellationToken;
 
@@ -9,8 +8,12 @@ use crate::praxis::Session;
 use crate::shell;
 
 impl Session {
-    pub(crate) fn hooks(&self) -> &Hooks {
-        &self.services.hooks
+    pub(crate) fn hook_capability(&self) -> &crate::capabilities::HookCapability {
+        &self.services.hook_capability
+    }
+
+    pub(crate) fn provider_capability(&self) -> &crate::capabilities::ProviderCapability {
+        &self.services.models_manager
     }
 
     pub(crate) fn user_shell(&self) -> Arc<shell::Shell> {

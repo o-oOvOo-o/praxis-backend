@@ -67,7 +67,7 @@ async fn renews_cache_ttl_on_matching_models_etag() -> Result<()> {
     let config = test.config.clone();
 
     // Populate cache via initial refresh.
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     let _ = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
         .await;
@@ -166,7 +166,7 @@ async fn uses_cache_when_version_matches() -> Result<()> {
         });
 
     let test = builder.build(&server).await?;
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     let models = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
         .await;
@@ -214,7 +214,7 @@ async fn refreshes_when_cache_version_missing() -> Result<()> {
         });
 
     let test = builder.build(&server).await?;
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     let models = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
         .await;
@@ -263,7 +263,7 @@ async fn refreshes_when_cache_version_differs() -> Result<()> {
         });
 
     let test = builder.build(&server).await?;
-    let models_manager = test.thread_manager.get_models_manager();
+    let models_manager = test.thread_manager.provider_capability();
     let models = models_manager
         .list_models(RefreshStrategy::OnlineIfUncached)
         .await;

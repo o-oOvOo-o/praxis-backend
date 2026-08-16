@@ -15,6 +15,7 @@ mod auth_env_telemetry;
 mod auto_summary;
 mod auto_title;
 mod auto_title_profile;
+pub mod capabilities;
 mod client;
 mod client_common;
 mod llm;

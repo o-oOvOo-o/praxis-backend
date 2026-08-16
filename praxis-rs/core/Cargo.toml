@@ -36,6 +36,7 @@ praxis-analytics = { workspace = true }
 praxis-api = { workspace = true }
 praxis-apply-patch = { workspace = true }
 praxis-async-utils = { workspace = true }
+praxis-capability-runtime = { workspace = true }
 praxis-code-mode = { workspace = true, optional = true }
 praxis-connectors = { workspace = true }
 praxis-config = { workspace = true }

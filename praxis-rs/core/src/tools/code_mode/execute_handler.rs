@@ -19,13 +19,14 @@ impl CodeModeExecuteHandler {
         &self,
         session: std::sync::Arc<crate::praxis::Session>,
         turn: std::sync::Arc<crate::praxis::TurnContext>,
+        code_mode_router: crate::capabilities::ToolCapability,
         call_id: String,
         code: String,
     ) -> Result<FunctionToolOutput, FunctionCallError> {
         let args = praxis_code_mode::parse_exec_source(&code)
             .map_err(FunctionCallError::RespondToModel)?;
         let exec = ExecContext { session, turn };
-        let enabled_tools = build_enabled_tools(&exec).await;
+        let enabled_tools = build_enabled_tools(&code_mode_router);
         let stored_values = exec
             .session
             .services
@@ -69,6 +70,7 @@ impl ToolHandler for CodeModeExecuteHandler {
         let ToolInvocation {
             session,
             turn,
+            code_mode_router,
             call_id,
             tool_name,
             payload,
@@ -77,7 +79,13 @@ impl ToolHandler for CodeModeExecuteHandler {
 
         match payload {
             ToolPayload::Custom { input } if tool_name == PUBLIC_TOOL_NAME => {
-                self.execute(session, turn, call_id, input).await
+                let code_mode_router = code_mode_router.ok_or_else(|| {
+                    FunctionCallError::RespondToModel(
+                        "Code Mode tools are unavailable for this invocation".to_string(),
+                    )
+                })?;
+                self.execute(session, turn, code_mode_router, call_id, input)
+                    .await
             }
             _ => Err(FunctionCallError::RespondToModel(format!(
                 "{PUBLIC_TOOL_NAME} expects raw JavaScript source text"

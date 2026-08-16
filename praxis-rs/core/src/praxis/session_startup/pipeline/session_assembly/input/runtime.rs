@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use praxis_hooks::Hooks;
+use praxis_capability_runtime::CapabilityScope;
 use praxis_otel::SessionTelemetry;
 use praxis_rollout::state_db::StateDbHandle;
 use tokio::sync::watch;
 
+use crate::capabilities::HookCapability;
 use crate::config::StartedNetworkProxy;
 use crate::exec_policy::ExecPolicyManager;
 use crate::rollout::RolloutRecorder;
@@ -15,7 +16,8 @@ use crate::unified_exec::UnifiedExecProcessManager;
 
 pub(in crate::praxis::session_startup::pipeline) struct SessionAssemblyRuntime {
     pub(in crate::praxis::session_startup::pipeline) exec_policy: Arc<ExecPolicyManager>,
-    pub(in crate::praxis::session_startup::pipeline) hooks: Hooks,
+    pub(in crate::praxis::session_startup::pipeline) capability_scope: CapabilityScope,
+    pub(in crate::praxis::session_startup::pipeline) hook_capability: HookCapability,
     pub(in crate::praxis::session_startup::pipeline) rollout_recorder: Option<RolloutRecorder>,
     pub(in crate::praxis::session_startup::pipeline) default_shell: Shell,
     pub(in crate::praxis::session_startup::pipeline) shell_snapshot_tx:

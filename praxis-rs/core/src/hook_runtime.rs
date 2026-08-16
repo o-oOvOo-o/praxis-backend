@@ -124,12 +124,12 @@ pub(crate) async fn run_pending_session_start_hooks(
         permission_mode: hook_permission_mode(turn_context),
         source: session_start_source,
     };
-    let preview_runs = sess.hooks().preview_session_start(&request);
+    let preview_runs = sess.hook_capability().preview_session_start(&request);
     run_context_injecting_hook(
         sess,
         turn_context,
         preview_runs,
-        sess.hooks()
+        sess.hook_capability()
             .run_session_start(request, Some(turn_context.sub_id.clone())),
     )
     .await
@@ -154,14 +154,14 @@ pub(crate) async fn run_pre_tool_use_hooks(
         tool_use_id,
         command,
     };
-    let preview_runs = sess.hooks().preview_pre_tool_use(&request);
+    let preview_runs = sess.hook_capability().preview_pre_tool_use(&request);
     emit_hook_started_events(sess, turn_context, preview_runs).await;
 
     let PreToolUseOutcome {
         hook_events,
         should_block,
         block_reason,
-    } = sess.hooks().run_pre_tool_use(request).await;
+    } = sess.hook_capability().run_pre_tool_use(request).await;
     emit_hook_completed_events(sess, turn_context, hook_events).await;
 
     if should_block { block_reason } else { None }
@@ -186,10 +186,10 @@ pub(crate) async fn run_post_tool_use_hooks(
         command,
         tool_response,
     };
-    let preview_runs = sess.hooks().preview_post_tool_use(&request);
+    let preview_runs = sess.hook_capability().preview_post_tool_use(&request);
     emit_hook_started_events(sess, turn_context, preview_runs).await;
 
-    let outcome = sess.hooks().run_post_tool_use(request).await;
+    let outcome = sess.hook_capability().run_post_tool_use(request).await;
     emit_hook_completed_events(sess, turn_context, outcome.hook_events.clone()).await;
     outcome
 }
@@ -208,12 +208,12 @@ pub(crate) async fn run_user_prompt_submit_hooks(
         permission_mode: hook_permission_mode(turn_context),
         prompt,
     };
-    let preview_runs = sess.hooks().preview_user_prompt_submit(&request);
+    let preview_runs = sess.hook_capability().preview_user_prompt_submit(&request);
     run_context_injecting_hook(
         sess,
         turn_context,
         preview_runs,
-        sess.hooks().run_user_prompt_submit(request),
+        sess.hook_capability().run_user_prompt_submit(request),
     )
     .await
 }

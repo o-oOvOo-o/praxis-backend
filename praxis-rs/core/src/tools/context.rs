@@ -1,3 +1,4 @@
+use crate::capabilities::ToolCapability;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::tools::TELEMETRY_PREVIEW_MAX_BYTES;
@@ -37,6 +38,7 @@ pub struct ToolInvocation {
     pub session: Arc<Session>,
     pub turn: Arc<TurnContext>,
     pub tracker: SharedTurnDiffTracker,
+    pub(crate) code_mode_router: Option<ToolCapability>,
     pub call_id: String,
     pub tool_name: String,
     pub tool_namespace: Option<String>,

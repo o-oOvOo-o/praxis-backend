@@ -1,3 +1,4 @@
+use crate::capabilities::ToolCapability;
 use crate::function_tool::FunctionCallError;
 use crate::llm::runtime::LlmToolVisibilityPolicy;
 use crate::praxis::Session;
@@ -50,7 +51,7 @@ pub(crate) struct ToolRouterParams<'a> {
 }
 
 impl ToolRouter {
-    pub fn from_config(config: &ToolsConfig, params: ToolRouterParams<'_>) -> Self {
+    pub(crate) fn from_config(config: &ToolsConfig, params: ToolRouterParams<'_>) -> Self {
         let ToolRouterParams {
             mcp_tools,
             app_tools,
@@ -203,16 +204,24 @@ impl ToolRouter {
     }
 
     #[instrument(level = "trace", skip_all, err)]
-    pub async fn dispatch_tool_call_with_code_mode_result(
+    pub(crate) async fn dispatch_tool_call_with_code_mode_result(
         &self,
         session: Arc<Session>,
         turn: Arc<TurnContext>,
         tracker: SharedTurnDiffTracker,
         call: ToolCall,
         _source: ToolCallSource,
+        code_mode_router: Option<ToolCapability>,
     ) -> Result<AnyToolResult, FunctionCallError> {
-        self.dispatch_tool_call_with_preparation(session, turn, tracker, call, None)
-            .await
+        self.dispatch_tool_call_with_preparation(
+            session,
+            turn,
+            tracker,
+            call,
+            None,
+            code_mode_router,
+        )
+        .await
     }
 
     pub(crate) async fn dispatch_prepared_tool_call_with_code_mode_result(
@@ -223,9 +232,17 @@ impl ToolRouter {
         call: ToolCall,
         preparation: ToolPreparation,
         _source: ToolCallSource,
+        code_mode_router: Option<ToolCapability>,
     ) -> Result<AnyToolResult, FunctionCallError> {
-        self.dispatch_tool_call_with_preparation(session, turn, tracker, call, Some(preparation))
-            .await
+        self.dispatch_tool_call_with_preparation(
+            session,
+            turn,
+            tracker,
+            call,
+            Some(preparation),
+            code_mode_router,
+        )
+        .await
     }
 
     async fn dispatch_tool_call_with_preparation(
@@ -235,6 +252,7 @@ impl ToolRouter {
         tracker: SharedTurnDiffTracker,
         call: ToolCall,
         preparation: Option<ToolPreparation>,
+        code_mode_router: Option<ToolCapability>,
     ) -> Result<AnyToolResult, FunctionCallError> {
         let ToolCall {
             tool_name,
@@ -249,6 +267,7 @@ impl ToolRouter {
             session,
             turn,
             tracker,
+            code_mode_router,
             call_id,
             tool_name,
             tool_namespace,
@@ -285,6 +304,7 @@ impl ToolRouter {
             session,
             turn,
             tracker,
+            code_mode_router: None,
             call_id,
             tool_name,
             tool_namespace,

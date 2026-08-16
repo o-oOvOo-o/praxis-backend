@@ -9,7 +9,6 @@ use core_test_support::responses::mount_sse_once;
 use core_test_support::responses::sse;
 use core_test_support::responses::start_mock_server;
 use core_test_support::test_praxis::test_praxis;
-use praxis_core::models_manager::manager::ModelsManager;
 use praxis_core::models_manager::manager::RefreshStrategy;
 use praxis_features::Feature;
 use praxis_login::OpenAiAccountAuth;
@@ -88,7 +87,10 @@ fn test_model_info(
     }
 }
 
-async fn wait_for_model_available(manager: &Arc<ModelsManager>, slug: &str) {
+async fn wait_for_model_available(
+    manager: &praxis_core::capabilities::ProviderCapability,
+    slug: &str,
+) {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         let available_models = manager.list_models(RefreshStrategy::Online).await;
@@ -160,7 +162,7 @@ async fn spawn_agent_description_lists_visible_models_and_reasoning_efforts() ->
                 .expect("test config should allow feature update");
         });
     let test = builder.build(&server).await?;
-    wait_for_model_available(&test.thread_manager.get_models_manager(), "visible-model").await;
+    wait_for_model_available(&test.thread_manager.provider_capability(), "visible-model").await;
 
     test.submit_turn("hello").await?;
 

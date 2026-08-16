@@ -1,0 +1,13 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "praxis-capability-runtime"
+version.workspace = true
+
+[lib]
+doctest = false
+name = "praxis_capability_runtime"
+path = "src/lib.rs"
+
+[lints]
+workspace = true

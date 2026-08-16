@@ -24,6 +24,7 @@ members = [
     "cloud-tasks",
     "cloud-tasks-client",
     "cloud-tasks-mock-client",
+    "capability-runtime",
     "cli",
     "connectors",
     "config",
@@ -132,6 +133,7 @@ praxis-cloud-requirements = { path = "cloud-requirements" }
 praxis-cloud-tasks-client = { path = "cloud-tasks-client" }
 praxis-cloud-tasks-mock-client = { path = "cloud-tasks-mock-client" }
 praxis-code-mode = { path = "code-mode" }
+praxis-capability-runtime = { path = "capability-runtime" }
 praxis-config = { path = "config" }
 praxis-connectors = { path = "connectors" }
 praxis-core = { path = "core" }

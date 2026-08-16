@@ -30,7 +30,7 @@ pub(super) async fn start(
     let _ = sub_agent_config.features.disable(Feature::SpawnCsv);
     let _ = sub_agent_config.features.disable(Feature::Collab);
     let auth_manager = Arc::clone(&session.services.auth_manager);
-    let models_manager = Arc::clone(&session.services.models_manager);
+    let provider_capability = session.provider_capability().clone();
 
     sub_agent_config.base_instructions = Some(crate::REVIEW_PROMPT.to_string());
     sub_agent_config.permissions.approval_policy = Constrained::allow_only(AskForApproval::Never);
@@ -43,7 +43,7 @@ pub(super) async fn start(
     (run_praxis_thread_one_shot(
         sub_agent_config,
         auth_manager,
-        models_manager,
+        provider_capability,
         input,
         session,
         ctx.clone(),

@@ -20,10 +20,10 @@ mod disabled {
     use async_trait::async_trait;
     use serde_json::Value as JsonValue;
 
+    use crate::capabilities::ToolCapability;
     use crate::function_tool::FunctionCallError;
     use crate::praxis::Session;
     use crate::praxis::TurnContext;
-    use crate::tools::ToolRouter;
     use crate::tools::context::FunctionToolOutput;
     use crate::tools::context::SharedTurnDiffTracker;
     use crate::tools::context::ToolInvocation;
@@ -50,7 +50,7 @@ mod disabled {
             &self,
             _session: &Arc<Session>,
             _turn: &Arc<TurnContext>,
-            _router: Arc<ToolRouter>,
+            _router: ToolCapability,
             _tracker: SharedTurnDiffTracker,
         ) -> Option<CodeModeTurnWorker> {
             None

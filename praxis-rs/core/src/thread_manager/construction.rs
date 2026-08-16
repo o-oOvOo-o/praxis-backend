@@ -30,7 +30,17 @@ impl ThreadManager {
         environment_manager: Arc<EnvironmentManager>,
     ) -> Self {
         let praxis_home = config.praxis_home.clone();
+        let models_manager = Arc::new(ModelsManager::new_with_provider(
+            praxis_home.clone(),
+            Arc::clone(&auth_manager),
+            config.model_catalog.clone(),
+            collaboration_modes_config,
+            config.model_provider_id.clone(),
+            config.model_provider.clone(),
+        ));
         let ThreadManagerServices {
+            capability_runtime,
+            provider_capability,
             skills_manager,
             plugins_manager,
             mcp_manager,
@@ -39,20 +49,15 @@ impl ThreadManager {
             praxis_home.clone(),
             config.bundled_skills_enabled(),
             session_source.restriction_product(),
+            models_manager,
         );
         Self {
             state: Arc::new(assemble_thread_manager_inner(ThreadManagerInnerAssembly {
                 auth_manager: Arc::clone(&auth_manager),
-                models_manager: Arc::new(ModelsManager::new_with_provider(
-                    praxis_home,
-                    auth_manager,
-                    config.model_catalog.clone(),
-                    collaboration_modes_config,
-                    config.model_provider_id.clone(),
-                    config.model_provider.clone(),
-                )),
                 environment_manager,
                 services: ThreadManagerServices {
+                    capability_runtime,
+                    provider_capability,
                     skills_manager,
                     plugins_manager,
                     mcp_manager,
@@ -97,7 +102,14 @@ impl ThreadManager {
     ) -> Self {
         set_thread_manager_test_mode_for_tests(/*enabled*/ true);
         let auth_manager = AuthManager::from_auth_for_testing(auth);
+        let models_manager = Arc::new(ModelsManager::with_provider_for_tests(
+            praxis_home.clone(),
+            Arc::clone(&auth_manager),
+            provider,
+        ));
         let ThreadManagerServices {
+            capability_runtime,
+            provider_capability,
             skills_manager,
             plugins_manager,
             mcp_manager,
@@ -106,17 +118,15 @@ impl ThreadManager {
             praxis_home.clone(),
             /*bundled_skills_enabled*/ true,
             SessionSource::Exec.restriction_product(),
+            models_manager,
         );
         Self {
             state: Arc::new(assemble_thread_manager_inner(ThreadManagerInnerAssembly {
                 auth_manager: Arc::clone(&auth_manager),
-                models_manager: Arc::new(ModelsManager::with_provider_for_tests(
-                    praxis_home,
-                    auth_manager,
-                    provider,
-                )),
                 environment_manager,
                 services: ThreadManagerServices {
+                    capability_runtime,
+                    provider_capability,
                     skills_manager,
                     plugins_manager,
                     mcp_manager,

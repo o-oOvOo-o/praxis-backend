@@ -71,7 +71,7 @@ async fn guardian_test_session_and_turn_with_base_url(
         Arc::clone(&session.services.auth_manager),
         config.model_provider.clone(),
     ));
-    session.services.models_manager = models_manager;
+    crate::capabilities::replace_test_providers(&mut session, models_manager);
     turn.config = Arc::clone(&config);
     turn.provider = config.model_provider.clone();
     turn.user_instructions = None;
@@ -520,7 +520,7 @@ async fn guardian_review_request_layout_matches_model_visible_request_snapshot()
         Arc::clone(&session.services.auth_manager),
         config.model_provider.clone(),
     ));
-    session.services.models_manager = models_manager;
+    crate::capabilities::replace_test_providers(&mut session, models_manager);
     turn.config = Arc::clone(&config);
     turn.provider = config.model_provider.clone();
     let session = Arc::new(session);
@@ -747,10 +747,10 @@ async fn guardian_review_surfaces_responses_api_errors_in_rejection_reason() -> 
         Arc::clone(&session.services.auth_manager),
         config.model_provider.clone(),
     ));
-    Arc::get_mut(&mut session)
-        .expect("session should be uniquely owned")
-        .services
-        .models_manager = models_manager;
+    crate::capabilities::replace_test_providers(
+        Arc::get_mut(&mut session).expect("session should be uniquely owned"),
+        models_manager,
+    );
     let turn_mut = Arc::get_mut(&mut turn).expect("turn should be uniquely owned");
     turn_mut.config = Arc::clone(&config);
     turn_mut.provider = config.model_provider.clone();

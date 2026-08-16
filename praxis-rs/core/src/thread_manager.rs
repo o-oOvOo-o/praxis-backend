@@ -1,9 +1,7 @@
-use crate::SkillsManager;
 use crate::agent_os::AgentOs;
 #[cfg(test)]
 use crate::config::Config;
 use crate::mcp::McpManager;
-use crate::models_manager::manager::ModelsManager;
 use crate::plugins::PluginsManager;
 use crate::praxis_thread::PraxisThread;
 use crate::skills_watcher::SkillsWatcher;
@@ -17,6 +15,7 @@ use fork_snapshot::append_interrupted_boundary;
 use fork_snapshot::snapshot_turn_state;
 #[cfg(test)]
 use fork_snapshot::truncate_before_nth_user_message;
+use praxis_capability_runtime::CapabilityRuntime;
 use praxis_exec_server::EnvironmentManager;
 use praxis_login::AuthManager;
 use praxis_protocol::ThreadId;
@@ -76,9 +75,10 @@ pub(crate) struct ThreadManagerInner {
     threads: ThreadRegistry,
     thread_created_tx: broadcast::Sender<ThreadId>,
     auth_manager: Arc<AuthManager>,
-    models_manager: Arc<ModelsManager>,
+    provider_capability: crate::capabilities::ProviderCapability,
     environment_manager: Arc<EnvironmentManager>,
-    skills_manager: Arc<SkillsManager>,
+    capability_runtime: CapabilityRuntime,
+    skills_manager: crate::capabilities::SkillsCapability,
     plugins_manager: Arc<PluginsManager>,
     mcp_manager: Arc<McpManager>,
     skills_watcher: Arc<SkillsWatcher>,

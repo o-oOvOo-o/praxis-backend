@@ -16,16 +16,15 @@ use praxis_protocol::models::ResponseInputItem;
 use serde_json::Value as JsonValue;
 use tokio_util::sync::CancellationToken;
 
+use crate::capabilities::ToolCapability;
 use crate::function_tool::FunctionCallError;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
-use crate::tools::ToolRouter;
 use crate::tools::context::FunctionToolOutput;
 use crate::tools::context::SharedTurnDiffTracker;
 use crate::tools::context::ToolPayload;
 use crate::tools::router::ToolCall;
 use crate::tools::router::ToolCallSource;
-use crate::tools::router::ToolRouterParams;
 use crate::tools::tool_call_runtime::ToolCallRuntime;
 use crate::unified_exec::resolve_max_tokens;
 use praxis_features::Feature;
@@ -90,7 +89,7 @@ impl CodeModeService {
         &self,
         session: &Arc<Session>,
         turn: &Arc<TurnContext>,
-        router: Arc<ToolRouter>,
+        router: ToolCapability,
         tracker: SharedTurnDiffTracker,
     ) -> Option<praxis_code_mode::CodeModeTurnWorker> {
         if !turn.features.enabled(Feature::CodeMode) {
@@ -101,8 +100,13 @@ impl CodeModeService {
             session: Arc::clone(session),
             turn: Arc::clone(turn),
         };
-        let tool_runtime =
-            ToolCallRuntime::new(router, Arc::clone(session), Arc::clone(turn), tracker);
+        let tool_runtime = ToolCallRuntime::new(
+            router.clone(),
+            router,
+            Arc::clone(session),
+            Arc::clone(turn),
+            tracker,
+        );
         let host = Arc::new(CoreTurnHost { exec, tool_runtime });
         Some(self.inner.start_turn_worker(host))
     }
@@ -243,50 +247,11 @@ fn truncate_code_mode_result(
     truncate_function_output_items_with_policy(&items, policy)
 }
 
-pub(super) async fn build_enabled_tools(
-    exec: &ExecContext,
+pub(super) fn build_enabled_tools(
+    router: &ToolCapability,
 ) -> Vec<praxis_code_mode::ToolDefinition> {
-    let router = build_nested_router(exec).await;
     let specs = router.model_visible_specs();
     collect_code_mode_tool_definitions(&specs)
-}
-
-async fn build_nested_router(exec: &ExecContext) -> ToolRouter {
-    let nested_tools_config = exec.turn.tools_config.for_code_mode_nested_tools();
-    let mcp_tools = exec
-        .session
-        .services
-        .mcp_connection_manager
-        .read()
-        .await
-        .list_all_tools()
-        .await
-        .into_iter()
-        .map(|(name, tool_info)| (name, tool_info.tool))
-        .collect();
-    let tool_visibility_policy = exec
-        .session
-        .llm_runtime_catalog()
-        .tool_visibility_policy_for_model(
-            &exec.turn.model_info,
-            &exec.turn.config.model_provider_id,
-            &exec.turn.provider,
-            exec.turn
-                .session_source
-                .restriction_product()
-                .and_then(crate::llm::ids::ProductProfileId::from_product),
-        );
-
-    ToolRouter::from_config(
-        &nested_tools_config,
-        ToolRouterParams {
-            mcp_tools: Some(mcp_tools),
-            app_tools: None,
-            discoverable_tools: None,
-            dynamic_tools: exec.turn.dynamic_tools.as_slice(),
-            tool_visibility_policy: tool_visibility_policy.as_ref(),
-        },
-    )
 }
 
 async fn call_nested_tool(

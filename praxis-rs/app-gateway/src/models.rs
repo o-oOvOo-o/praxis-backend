@@ -9,8 +9,8 @@ use praxis_app_gateway_protocol::ReasoningEffortOption;
 use praxis_core::ModelProviderInfo;
 use praxis_core::ThreadManager;
 use praxis_core::WireApi;
+use praxis_core::capabilities::ProviderCapability;
 use praxis_core::config::Config;
-use praxis_core::models_manager::manager::ModelsManager;
 use praxis_core::models_manager::manager::RefreshStrategy;
 use praxis_core::models_manager::manager::first_party_model_presets_for_config;
 use praxis_core::models_manager::manager::local_model_presets_for_config;
@@ -24,7 +24,7 @@ pub async fn supported_models(
     config: &Config,
     include_hidden: bool,
 ) -> Vec<Model> {
-    let models_manager = thread_manager.get_models_manager();
+    let models_manager = thread_manager.provider_capability();
     let local_models_config = config.clone();
     let local_models_task =
         tokio::task::spawn_blocking(move || local_model_presets_for_config(&local_models_config));
@@ -118,7 +118,7 @@ pub async fn supported_models(
 }
 
 async fn append_provider_models(
-    models_manager: &Arc<ModelsManager>,
+    models_manager: &ProviderCapability,
     base_config: &Config,
     provider_id: &str,
     provider: &ModelProviderInfo,

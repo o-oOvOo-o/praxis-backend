@@ -1,0 +1,6 @@
+load("//:defs.bzl", "praxis_rust_crate")
+
+praxis_rust_crate(
+    name = "capability-runtime",
+    crate_name = "praxis_capability_runtime",
+)

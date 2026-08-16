@@ -23,7 +23,7 @@ use crate::exec::ExecToolCallOutput;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::formatted_truncate_text;
 use praxis_utils_output_truncation::truncate_text;
-pub use router::ToolRouter;
+pub(crate) use router::ToolRouter;
 use serde::Serialize;
 
 // Telemetry preview limits: keep log events smaller than model budgets.

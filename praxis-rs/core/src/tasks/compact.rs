@@ -5,6 +5,10 @@ use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::state::AgentTaskKind;
 use async_trait::async_trait;
+use praxis_protocol::items::ContextCompactionItem;
+use praxis_protocol::items::TurnItem;
+use praxis_protocol::protocol::EventMsg;
+use praxis_protocol::protocol::TurnStartedEvent;
 use praxis_protocol::user_input::UserInput;
 use tokio_util::sync::CancellationToken;
 
@@ -54,7 +58,7 @@ impl AgentTask for CompactTask {
                 /*inc*/ 1,
                 &[("type", compact_policy.telemetry_kind())],
             );
-            crate::compact_remote::run_remote_compact_task(session.clone(), ctx).await
+            run_remote_compact_with_local_fallback(session.clone(), ctx, &input).await
         } else {
             let _ = session.services.session_telemetry.counter(
                 "praxis.task.compact",
@@ -64,5 +68,45 @@ impl AgentTask for CompactTask {
             crate::compact::run_compact_task(session.clone(), ctx, input).await
         };
         None
+    }
+}
+
+async fn run_remote_compact_with_local_fallback(
+    session: Arc<Session>,
+    ctx: Arc<TurnContext>,
+    input: &[UserInput],
+) -> crate::error::Result<()> {
+    let start_event = EventMsg::TurnStarted(TurnStartedEvent {
+        turn_id: ctx.sub_id.clone(),
+        model_context_window: ctx.model_context_window(),
+        collaboration_mode_kind: ctx.collaboration_mode.mode,
+    });
+    session.send_event(&ctx, start_event).await;
+
+    let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
+    session.emit_turn_item_started(&ctx, &compaction_item).await;
+    match crate::compact_remote::run_remote_compact_task_with_item(
+        &session,
+        &ctx,
+        crate::compact::InitialContextInjection::DoNotInject,
+        compaction_item.clone(),
+    )
+    .await
+    {
+        Ok(()) => Ok(()),
+        Err(err) if crate::compact_remote::is_remote_compaction_unsupported(&err) => {
+            crate::compact_remote::notify_remote_compact_fallback(session.as_ref(), ctx.as_ref())
+                .await;
+            crate::compact::run_compact_task_with_item(session, ctx, input, compaction_item).await
+        }
+        Err(err) => {
+            crate::compact_remote::report_remote_compact_error(
+                session.as_ref(),
+                ctx.as_ref(),
+                &err,
+            )
+            .await;
+            Err(err)
+        }
     }
 }

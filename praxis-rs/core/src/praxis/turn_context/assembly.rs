@@ -11,7 +11,7 @@ use praxis_protocol::openai_models::ModelInfo;
 use praxis_utils_readiness::ReadinessFlag;
 
 use crate::ModelProviderInfo;
-use crate::SkillLoadOutcome;
+use crate::capabilities::ResolvedSkillsCapability;
 use crate::config::Config;
 use crate::llm::runtime::LlmRuntimeCatalog;
 use crate::models_manager::manager::ModelsManager;
@@ -47,7 +47,7 @@ impl Session {
         environment: Arc<Environment>,
         sub_id: String,
         effective_permissions: LiveEffectivePermissions,
-        skills_outcome: Arc<SkillLoadOutcome>,
+        skills_outcome: ResolvedSkillsCapability,
     ) -> TurnContext {
         let reasoning_effort = session_configuration.collaboration_mode.reasoning_effort();
         let reasoning_summary = session_configuration
