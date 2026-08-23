@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "updated": "2026-08-23",
+  "entries": [
+    {
+      "subject": "SideFX Labs UV Transfer 1.1",
+      "host_version": "22.0.368",
+      "provider": "HDA labs::uv_transfer::1.1",
+      "authorization": "user-owned local installation; interoperability and exact-parity analysis",
+      "contract": "docs/node_requirements/active/labs_uv_transfer_houdini.md",
+      "implementation": "src/cunning_core/core/algorithms/algorithms_runtime/uv_transfer.rs",
+      "node_adapter": "src/nodes/uv/labs_uv_transfer.rs",
+      "provider_adapter": "tools/houdini_uv_transfer_capture.py",
+      "semantic_capture": ".local/gaea-flywheel/artifacts/houdini-native/uv-transfer/22.0.368/semantic_matrix_v1.json",
+      "semantic_capture_sha256": "940b60823400b3b7a153a069f408f6e287d5d3820be48c6d192ef0cac086ef5b",
+      "promotion_receipt": ".local/gaea-flywheel/artifacts/houdini-native/uv-transfer/22.0.368/cunning_compare_receipt_v1.json",
+      "promotion_receipt_sha256": "0d341ca1245cdb03811b6683e542050837714141a92591c9c50ac2be60b3cc28",
+      "semantic_cases": 14,
+      "integer_topology_string_and_error_status": "exact",
+      "floating_point_absolute_tolerance": 1e-6,
+      "determinism_runs": 5,
+      "determinism_status": "green",
+      "semantic_status": "green",
+      "performance_status": "green",
+      "performance": [
+        {
+          "triangles": 32768,
+          "warmups": 2,
+          "iterations": 7,
+          "cunning3d_prepared_median_ms": 12.0954,
+          "cunning3d_cold_ms": 59.2225,
+          "houdini_median_ms": 74.3486,
+          "speedup": 6.147,
+          "cunning_receipt_sha256": "20a48b54cf46bcd6a13e3890468d31db060e9aabac9935bca66051c066f72799",
+          "houdini_receipt_sha256": "411e8d1f7be91fe51e090cf0df87d95b13ecc85137db387fb4cd8ca0608b4ac9"
+        },
+        {
+          "triangles": 100352,
+          "warmups": 2,
+          "iterations": 7,
+          "cunning3d_prepared_median_ms": 39.5098,
+          "cunning3d_cold_ms": 190.6028,
+          "houdini_median_ms": 224.5055,
+          "speedup": 5.682,
+          "cunning_receipt_sha256": "1bc31de37e136d87e4de60f83ddbf6fee451e47fb6ffae7f3f3777f85bfc5505",
+          "houdini_receipt_sha256": "5156c7ef53f1f24eead8f48e397e08d0f29494d61ae24049faf6ddab3ff95a37"
+        }
+      ],
+      "promotion_status": "green",
+      "next_gate": "user acceptance"
+    }
+  ]
+}
