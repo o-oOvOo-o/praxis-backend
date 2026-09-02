@@ -92,9 +92,12 @@ impl<'a> ExternalSessionStore<'a> {
         else {
             return;
         };
-        if let Err(err) = praxis_rollout::ThreadNameWriter::new(Some(state_db))
-            .write_name(record.thread_id, &title)
-            .await
+        if let Err(err) = praxis_rollout::ThreadNameWriter::with_praxis_home(
+            Some(state_db),
+            self.config.praxis_home.as_path(),
+        )
+        .write_name(record.thread_id, &title)
+        .await
         {
             warn!(
                 "failed to persist {} external thread name for {}: {err}",

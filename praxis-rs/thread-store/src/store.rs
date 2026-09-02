@@ -537,6 +537,23 @@ impl ThreadStore {
         Ok(())
     }
 
+    pub async fn set_name(
+        &self,
+        thread_id: ThreadId,
+        name: Option<String>,
+    ) -> Result<(), ThreadStoreError> {
+        let thread = self.open_thread(thread_id).await?;
+        thread
+            .execute(
+                ThreadActor::User,
+                None,
+                ThreadCommand::SetName { name },
+                crate::CommitMode::Durable,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Permanently remove one exact thread journal and its rebuildable projection.
     pub async fn delete_thread(&self, thread_id: ThreadId) -> Result<bool, ThreadStoreError> {
         let thread_dir = self.root.join("threads").join(thread_id.to_string());

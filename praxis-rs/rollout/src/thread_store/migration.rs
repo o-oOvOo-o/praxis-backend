@@ -10,6 +10,7 @@ use crate::RolloutConfig;
 use crate::RolloutConfigView;
 use crate::list::ThreadSortKey;
 use crate::recorder::NativeRolloutWriter;
+use crate::state_db;
 
 const MIGRATION_PAGE_SIZE: usize = 64;
 
@@ -51,16 +52,19 @@ pub(super) fn is_complete(praxis_home: &Path) -> bool {
 }
 
 async fn migrate_all(config: &RolloutConfig) -> io::Result<()> {
+    let state_db = state_db::get_state_db(config).await;
     for archived in [false, true] {
-        migrate_directory(config, archived).await?;
+        migrate_directory(config, state_db.as_deref(), archived).await?;
     }
     write_completion_marker(config.praxis_home.as_path()).await
 }
 
-async fn migrate_directory(config: &RolloutConfig, archived: bool) -> io::Result<()> {
+async fn migrate_directory(
+    config: &RolloutConfig,
+    state_db: Option<&praxis_state::StateRuntime>,
+    archived: bool,
+) -> io::Result<()> {
     let mut cursor = None;
-    let native_store =
-        praxis_thread_store::ThreadStore::from_praxis_home(config.praxis_home.clone());
     loop {
         let page = super::directory::list_raw_threads(
             config,
@@ -77,6 +81,21 @@ async fn migrate_directory(config: &RolloutConfig, archived: bool) -> io::Result
             None,
         )
         .await?;
+        let thread_ids = page
+            .items
+            .iter()
+            .filter_map(|item| {
+                item.thread_id
+                    .or_else(|| super::thread_id_from_rollout_path(item.path.as_path()))
+            })
+            .collect::<HashSet<_>>();
+        let names = match state_db {
+            Some(state_db) => state_db
+                .get_thread_names(&thread_ids)
+                .await
+                .unwrap_or_default(),
+            None => Default::default(),
+        };
         for item in page.items {
             let thread_id = item
                 .thread_id
@@ -84,16 +103,16 @@ async fn migrate_directory(config: &RolloutConfig, archived: bool) -> io::Result
             let writer =
                 NativeRolloutWriter::resume(config.praxis_home.clone(), item.path.as_path())
                     .await?;
-            writer.sync().await?;
-            if archived && let Some(thread_id) = thread_id {
-                let thread_id =
-                    praxis_thread_store_contracts::ThreadId::parse(thread_id.to_string().as_str())
-                        .map_err(|error| io::Error::other(error.to_string()))?;
-                native_store
-                    .set_archived(thread_id, true)
-                    .await
-                    .map_err(|error| io::Error::other(error.to_string()))?;
+            if let Some(thread_id) = thread_id {
+                let name = names.get(&thread_id).cloned();
+                if let Some(name) = name {
+                    writer.set_name(name).await?;
+                }
+                if archived {
+                    writer.set_archived(true).await?;
+                }
             }
+            writer.sync().await?;
         }
         let Some(next) = page.next_cursor else {
             return Ok(());
@@ -105,7 +124,7 @@ async fn migrate_directory(config: &RolloutConfig, archived: bool) -> io::Result
 fn completion_marker(praxis_home: &Path) -> PathBuf {
     praxis_home
         .join(praxis_thread_store::THREAD_STORE_SUBDIR)
-        .join("rollout-import-v2.complete")
+        .join("rollout-import-v3.complete")
 }
 
 async fn write_completion_marker(praxis_home: &Path) -> io::Result<()> {
@@ -122,7 +141,7 @@ async fn write_completion_marker(praxis_home: &Path) -> io::Result<()> {
         .open(&temporary)
         .await?;
     use tokio::io::AsyncWriteExt;
-    file.write_all(b"2\n").await?;
+    file.write_all(b"3\n").await?;
     file.sync_all().await?;
     drop(file);
     match tokio::fs::rename(&temporary, &marker).await {

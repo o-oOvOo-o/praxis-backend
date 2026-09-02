@@ -1,5 +1,6 @@
 //! Persist native Praxis threads and a minimal `.jsonl` identity locator.
 
+use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
 use std::io::Error as IoError;
@@ -72,6 +73,10 @@ pub enum RolloutRecorderParams {
 
 enum RolloutCmd {
     AddItems(Vec<RolloutItem>),
+    SetThreadName {
+        name: String,
+        ack: oneshot::Sender<std::io::Result<()>>,
+    },
     Persist {
         ack: oneshot::Sender<std::io::Result<()>>,
     },
@@ -319,6 +324,16 @@ impl RolloutRecorder {
             .map_err(|e| IoError::other(format!("failed waiting for rollout persist: {e}")))?
     }
 
+    pub async fn set_thread_name(&self, name: String) -> std::io::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(RolloutCmd::SetThreadName { name, ack: tx })
+            .await
+            .map_err(|e| IoError::other(format!("failed to queue thread name: {e}")))?;
+        rx.await
+            .map_err(|e| IoError::other(format!("failed waiting for thread name: {e}")))?
+    }
+
     /// Flush all queued writes and wait until they are committed by the writer task.
     pub async fn flush(&self) -> std::io::Result<()> {
         let (tx, rx) = oneshot::channel();
@@ -422,6 +437,8 @@ async fn rollout_writer(
     let mut locator_writer = file.map(JsonlWriter::new);
     let mut persisted = locator_writer.is_some();
     let mut buffered_items = Vec::<RolloutItem>::new();
+    let mut pending_name = None;
+    let mut name_reconciled = false;
     if let Some(builder) = state_builder.as_mut() {
         builder.rollout_path = rollout_path.clone();
     }
@@ -459,6 +476,16 @@ async fn rollout_writer(
                     continue;
                 }
 
+                if !name_reconciled {
+                    reconcile_thread_name_from_state(
+                        native_writer.as_ref(),
+                        state_db_ctx.as_deref(),
+                        &rollout_path,
+                    )
+                    .await?;
+                    name_reconciled = true;
+                }
+
                 write_native_items_and_project_state(
                     native_writer.as_mut(),
                     items.as_slice(),
@@ -468,6 +495,32 @@ async fn rollout_writer(
                     default_provider.as_str(),
                 )
                 .await?;
+            }
+            RolloutCmd::SetThreadName { name, ack } => {
+                let result = async {
+                    if let Some(native_writer) = native_writer.as_ref() {
+                        native_writer.set_name(name.clone()).await?;
+                    } else {
+                        pending_name = Some(name.clone());
+                    }
+                    if let Some(state_db) = state_db_ctx.as_deref() {
+                        if let Err(error) = state_db
+                            .set_thread_name(
+                                crate::thread_store::thread_id_from_rollout_path(&rollout_path)
+                                    .ok_or_else(|| {
+                                        IoError::other("rollout path does not contain a thread id")
+                                    })?,
+                                &name,
+                            )
+                            .await
+                        {
+                            warn!("failed to update compatibility thread name projection: {error}");
+                        }
+                    }
+                    Ok(())
+                }
+                .await;
+                acknowledge(ack, result)?;
             }
             RolloutCmd::Persist { ack } => {
                 let result = if !persisted {
@@ -499,6 +552,25 @@ async fn rollout_writer(
                                 generate_memories,
                             )
                             .await?;
+                        }
+
+                        if let Some(name) = pending_name.take() {
+                            native_writer
+                                .as_ref()
+                                .ok_or_else(|| {
+                                    IoError::other("rollout recorder missing native thread writer")
+                                })?
+                                .set_name(name)
+                                .await?;
+                            name_reconciled = true;
+                        } else if !name_reconciled {
+                            reconcile_thread_name_from_state(
+                                native_writer.as_ref(),
+                                state_db_ctx.as_deref(),
+                                &rollout_path,
+                            )
+                            .await?;
+                            name_reconciled = true;
                         }
 
                         if !buffered_items.is_empty() {
@@ -633,6 +705,34 @@ async fn write_native_items_and_project_state(
         /*new_thread_memory_mode*/ None,
     )
     .await;
+    Ok(())
+}
+
+async fn reconcile_thread_name_from_state(
+    native_writer: Option<&NativeRolloutWriter>,
+    state_db: Option<&praxis_state::StateRuntime>,
+    rollout_path: &Path,
+) -> io::Result<()> {
+    let (Some(native_writer), Some(state_db), Some(thread_id)) = (
+        native_writer,
+        state_db,
+        crate::thread_store::thread_id_from_rollout_path(rollout_path),
+    ) else {
+        return Ok(());
+    };
+    let names = match state_db
+        .get_thread_names(&HashSet::from([thread_id]))
+        .await
+    {
+        Ok(names) => names,
+        Err(error) => {
+            warn!("failed to read compatibility thread name projection: {error}");
+            return Ok(());
+        }
+    };
+    if let Some(name) = names.get(&thread_id) {
+        native_writer.set_name(name.clone()).await?;
+    }
     Ok(())
 }
 

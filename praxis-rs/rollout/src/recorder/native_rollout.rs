@@ -276,6 +276,32 @@ impl NativeRolloutWriter {
         Ok(())
     }
 
+    pub(crate) async fn set_name(&self, name: String) -> io::Result<()> {
+        self.thread
+            .execute(
+                ThreadActor::Runtime,
+                None,
+                ThreadCommand::SetName { name: Some(name) },
+                CommitMode::Durable,
+            )
+            .await
+            .map_err(store_error)?;
+        Ok(())
+    }
+
+    pub(crate) async fn set_archived(&self, archived: bool) -> io::Result<()> {
+        self.thread
+            .execute(
+                ThreadActor::Runtime,
+                None,
+                ThreadCommand::SetArchived { archived },
+                CommitMode::Durable,
+            )
+            .await
+            .map_err(store_error)?;
+        Ok(())
+    }
+
     async fn reconcile_locator(&mut self, rollout_path: &Path) -> io::Result<()> {
         if !tokio::fs::try_exists(rollout_path).await? {
             return self.rebuild_locator(rollout_path).await;

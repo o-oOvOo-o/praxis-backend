@@ -36,10 +36,13 @@ use crate::state_db::StateDbHandle;
 mod directory;
 mod history;
 mod migration;
+mod names;
 pub(crate) mod native_codec;
 pub(crate) mod resume_selection;
 
 pub use history::ThreadHistoryReader;
+pub use names::ThreadNameResolver;
+pub use names::ThreadNameWriter;
 use resume_selection::select_resume_path;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -96,14 +99,6 @@ pub struct ThreadStore<'a, C: RolloutConfigView> {
     config: &'a C,
     state_db: Option<StateDbHandle>,
     history: ThreadHistoryReader,
-}
-
-pub struct ThreadNameResolver<'a> {
-    state_db: Option<&'a praxis_state::StateRuntime>,
-}
-
-pub struct ThreadNameWriter<'a> {
-    state_db: Option<&'a praxis_state::StateRuntime>,
 }
 
 struct SourceFilters {
@@ -164,7 +159,7 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
     }
 
     pub fn name_writer(&self) -> ThreadNameWriter<'_> {
-        ThreadNameWriter::new(self.state_db())
+        ThreadNameWriter::with_praxis_home(self.state_db(), self.config.praxis_home())
     }
 
     pub async fn list_threads(&self, query: ListThreadsQuery) -> io::Result<ThreadSummaryPage> {
@@ -435,51 +430,6 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
     }
 }
 
-impl<'a> ThreadNameResolver<'a> {
-    pub fn new(state_db: Option<&'a praxis_state::StateRuntime>) -> Self {
-        Self { state_db }
-    }
-
-    pub async fn resolve_names(&self, thread_ids: &HashSet<ThreadId>) -> HashMap<ThreadId, String> {
-        if thread_ids.is_empty() {
-            return HashMap::new();
-        }
-        let Some(state_db) = self.state_db else {
-            return HashMap::new();
-        };
-        match state_db.get_thread_names(thread_ids).await {
-            Ok(names) => names,
-            Err(err) => {
-                warn!("state db get_thread_names failed: {err}");
-                HashMap::new()
-            }
-        }
-    }
-
-    pub async fn resolve_name(&self, thread_id: ThreadId) -> Option<String> {
-        let thread_ids = HashSet::from([thread_id]);
-        self.resolve_names(&thread_ids).await.remove(&thread_id)
-    }
-}
-
-impl<'a> ThreadNameWriter<'a> {
-    pub fn new(state_db: Option<&'a praxis_state::StateRuntime>) -> Self {
-        Self { state_db }
-    }
-
-    pub async fn write_name(&self, thread_id: ThreadId, name: &str) -> io::Result<()> {
-        let Some(state_db) = self.state_db else {
-            return Err(io::Error::other(
-                "state db unavailable for thread name write",
-            ));
-        };
-        state_db
-            .set_thread_name(thread_id, name)
-            .await
-            .map_err(io::Error::other)
-    }
-}
-
 pub async fn list_threads(
     config: &impl RolloutConfigView,
     query: ListThreadsQuery,
@@ -683,7 +633,7 @@ async fn list_directory_page(
     cwd: Option<&Path>,
     search_term: Option<&str>,
 ) -> std::io::Result<DirectoryPage> {
-    if search_term.is_none() && migration::is_complete(config.praxis_home()) {
+    if migration::is_complete(config.praxis_home()) {
         match list_native_directory_page(
             config,
             state_db_ctx,
