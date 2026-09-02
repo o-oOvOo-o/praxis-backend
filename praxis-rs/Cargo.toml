@@ -94,6 +94,7 @@ members = [
     "terminal-detection",
     "thread-store-contracts",
     "thread-store-journal",
+    "thread-store",
     "thread-share",
     "praxis-experimental-api-macros",
     "plugin",
@@ -180,6 +181,7 @@ praxis-stdio-to-uds = { path = "stdio-to-uds" }
 praxis-terminal-detection = { path = "terminal-detection" }
 praxis-thread-store-contracts = { path = "thread-store-contracts" }
 praxis-thread-store-journal = { path = "thread-store-journal" }
+praxis-thread-store = { path = "thread-store" }
 praxis-thread-share = { path = "thread-share" }
 praxis-tools = { path = "tools", default-features = false }
 praxis-tui = { path = "tui" }

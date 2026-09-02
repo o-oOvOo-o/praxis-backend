@@ -7791,7 +7791,7 @@ dependencies = [
  "praxis-otel",
  "praxis-protocol",
  "praxis-state",
- "praxis-thread-store-journal",
+ "praxis-thread-store",
  "praxis-utils-path",
  "praxis-utils-string",
  "pretty_assertions",
@@ -7972,6 +7972,21 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "praxis-thread-store"
+version = "0.0.0"
+dependencies = [
+ "praxis-thread-store-contracts",
+ "praxis-thread-store-journal",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
