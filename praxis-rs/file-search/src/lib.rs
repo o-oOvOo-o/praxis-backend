@@ -1,9 +1,9 @@
 use crossbeam_channel::Receiver;
 use crossbeam_channel::Sender;
 use crossbeam_channel::after;
+use crossbeam_channel::bounded;
 use crossbeam_channel::never;
 use crossbeam_channel::select;
-use crossbeam_channel::unbounded;
 use ignore::WalkBuilder;
 use ignore::overrides::OverrideBuilder;
 use nucleo::Config;
@@ -141,10 +141,18 @@ pub struct FileSearchSession {
 impl FileSearchSession {
     /// Update the query. This should be cheap relative to re-walking.
     pub fn update_query(&self, pattern_text: &str) {
-        let _ = self
+        *self
             .inner
-            .work_tx
-            .send(WorkSignal::QueryUpdated(pattern_text.to_string()));
+            .pending_query
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(pattern_text.to_string());
+        if !self.inner.query_signal_pending.swap(true, Ordering::AcqRel)
+            && self.inner.work_tx.send(WorkSignal::QueryUpdated).is_err()
+        {
+            self.inner
+                .query_signal_pending
+                .store(false, Ordering::Release);
+        }
     }
 }
 
@@ -173,11 +181,17 @@ pub fn create_session(
         anyhow::bail!("at least one search directory is required");
     };
     let override_matcher = build_override_matcher(primary_search_directory, &exclude)?;
-    let (work_tx, work_rx) = unbounded();
+    let (work_tx, work_rx) = bounded(4);
 
     let notify_tx = work_tx.clone();
+    let nucleo_signal_pending = Arc::new(AtomicBool::new(false));
+    let callback_signal_pending = Arc::clone(&nucleo_signal_pending);
     let notify = Arc::new(move || {
-        let _ = notify_tx.send(WorkSignal::NucleoNotify);
+        if !callback_signal_pending.swap(true, Ordering::AcqRel)
+            && notify_tx.send(WorkSignal::NucleoNotify).is_err()
+        {
+            callback_signal_pending.store(false, Ordering::Release);
+        }
     });
     let nucleo = Nucleo::new(
         Config::DEFAULT.match_paths(),
@@ -199,6 +213,9 @@ pub fn create_session(
         shutdown: Arc::new(AtomicBool::new(false)),
         reporter,
         work_tx,
+        pending_query: Mutex::new(None),
+        query_signal_pending: AtomicBool::new(false),
+        nucleo_signal_pending,
     });
 
     let matcher_inner = inner.clone();
@@ -352,10 +369,13 @@ struct SessionInner {
     shutdown: Arc<AtomicBool>,
     reporter: Arc<dyn SessionReporter>,
     work_tx: Sender<WorkSignal>,
+    pending_query: Mutex<Option<String>>,
+    query_signal_pending: AtomicBool,
+    nucleo_signal_pending: Arc<AtomicBool>,
 }
 
 enum WorkSignal {
-    QueryUpdated(String),
+    QueryUpdated,
     NucleoNotify,
     WalkComplete,
     Shutdown,
@@ -503,7 +523,16 @@ fn matcher_worker(
                     break;
                 };
                 match signal {
-                    WorkSignal::QueryUpdated(query) => {
+                    WorkSignal::QueryUpdated => {
+                        inner.query_signal_pending.store(false, Ordering::Release);
+                        let query = inner
+                            .pending_query
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .take();
+                        let Some(query) = query else {
+                            continue;
+                        };
                         let append = query.starts_with(&last_query);
                         nucleo.pattern.reparse(
                             0,
@@ -517,6 +546,7 @@ fn matcher_worker(
                         next_notify = after(Duration::from_millis(0));
                     }
                     WorkSignal::NucleoNotify => {
+                        inner.nucleo_signal_pending.store(false, Ordering::Release);
                         if !will_notify {
                             will_notify = true;
                             next_notify = after(Duration::from_millis(TICK_TIMEOUT_MS));
