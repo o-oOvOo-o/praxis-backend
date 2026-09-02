@@ -81,6 +81,7 @@ struct DisposalJob {
 }
 
 struct RuntimeState {
+    revision: u64,
     next_generation: u64,
     graph: CapabilityGraph,
     scope_handles: BTreeMap<ScopeId, usize>,
@@ -94,6 +95,7 @@ impl CapabilityRuntime {
         let inner = Arc::new(RuntimeInner {
             commit_gate: Mutex::new(()),
             state: Mutex::new(RuntimeState {
+                revision: 0,
                 next_generation: 1,
                 graph: CapabilityGraph::new(scopes),
                 scope_handles: BTreeMap::new(),
@@ -126,11 +128,10 @@ impl CapabilityRuntime {
         parent: ScopeId,
     ) -> Result<(), ScopeGraphError> {
         let _commit_guard = self.inner.lock_commit_gate();
-        self.inner
-            .lock_state()
-            .graph
-            .scopes_mut()
-            .ensure_child(id, kind, parent)
+        let mut state = self.inner.lock_state();
+        state.graph.scopes_mut().ensure_child(id, kind, parent)?;
+        state.revision = state.revision.wrapping_add(1);
+        Ok(())
     }
 
     pub fn open_child_scope(
@@ -146,6 +147,7 @@ impl CapabilityRuntime {
             .scopes_mut()
             .ensure_child(id.clone(), kind, parent)?;
         *state.scope_handles.entry(id.clone()).or_default() += 1;
+        state.revision = state.revision.wrapping_add(1);
         Ok(CapabilityScope {
             runtime: self.clone(),
             id,
@@ -315,6 +317,7 @@ impl CapabilityRuntime {
                     }
                 }
             }
+            state.revision = state.revision.wrapping_add(1);
             immediate_disposal
         };
         drop(commit_guard);
@@ -426,29 +429,32 @@ impl CapabilityTransaction {
     }
 
     pub fn commit(self) -> Result<CapabilityCommitReport, CapabilityCommitError> {
-        let commit_guard = self.runtime.inner.lock_commit_gate();
-        let mut candidate = self.runtime.graph();
-        let replaced = candidate
-            .manifests()
-            .filter(|manifest| manifest.owner == self.owner && manifest.scope == self.scope)
-            .map(|manifest| manifest.id.clone())
-            .collect::<Vec<_>>();
-        for id in &replaced {
-            candidate.remove_in_scope(id, &self.scope);
-        }
-        for staged in self.staged.values() {
-            candidate.insert(staged.manifest.clone())?;
-        }
-        candidate.validate()?;
-
         let staged_ids = self.staged.keys().cloned().collect::<BTreeSet<_>>();
-        let activation_order = candidate
-            .resolve(&self.scope, staged_ids.iter().cloned())?
-            .ordered_ids()
-            .iter()
-            .filter(|id| staged_ids.contains(*id))
-            .cloned()
-            .collect::<Vec<_>>();
+        let (candidate, replaced, activation_order, expected_revision) = {
+            let _commit_guard = self.runtime.inner.lock_commit_gate();
+            let state = self.runtime.inner.lock_state();
+            let mut candidate = state.graph.clone();
+            let replaced = candidate
+                .manifests()
+                .filter(|manifest| manifest.owner == self.owner && manifest.scope == self.scope)
+                .map(|manifest| manifest.id.clone())
+                .collect::<Vec<_>>();
+            for id in &replaced {
+                candidate.remove_in_scope(id, &self.scope);
+            }
+            for staged in self.staged.values() {
+                candidate.insert(staged.manifest.clone())?;
+            }
+            candidate.validate()?;
+            let activation_order = candidate
+                .resolve(&self.scope, staged_ids.iter().cloned())?
+                .ordered_ids()
+                .iter()
+                .filter(|id| staged_ids.contains(*id))
+                .cloned()
+                .collect::<Vec<_>>();
+            (candidate, replaced, activation_order, state.revision)
+        };
 
         let mut staged = self.staged;
         let mut activated = Vec::new();
@@ -479,8 +485,20 @@ impl CapabilityTransaction {
             }
         }
 
+        let commit_guard = self.runtime.inner.lock_commit_gate();
         let (generation, retired, immediate_disposal) = {
             let mut state = self.runtime.inner.lock_state();
+            if state.revision != expected_revision {
+                let actual_revision = state.revision;
+                drop(state);
+                drop(commit_guard);
+                let rollback_failures = dispose_all(disposers);
+                return Err(CapabilityCommitError::ConcurrentMutation {
+                    expected_revision,
+                    actual_revision,
+                    rollback_failures,
+                });
+            }
             let generation = GenerationId::new(state.next_generation);
             state.next_generation += 1;
 
@@ -520,6 +538,7 @@ impl CapabilityTransaction {
                     disposal_failures: Vec::new(),
                 },
             );
+            state.revision = state.revision.wrapping_add(1);
 
             let mut immediate_disposal = Vec::new();
             for retired_generation in &retired {
@@ -737,6 +756,11 @@ pub enum CapabilityCommitError {
     },
     InternalInvariant {
         reason: String,
+        rollback_failures: Vec<String>,
+    },
+    ConcurrentMutation {
+        expected_revision: u64,
+        actual_revision: u64,
         rollback_failures: Vec<String>,
     },
 }
