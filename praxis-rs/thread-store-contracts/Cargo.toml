@@ -1,0 +1,25 @@
+[package]
+name = "praxis-thread-store-contracts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+doctest = false
+name = "praxis_thread_store_contracts"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v5", "v7"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+proptest = "1.9"
+serde_json = { workspace = true }
+
