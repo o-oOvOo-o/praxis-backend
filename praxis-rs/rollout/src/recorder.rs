@@ -712,7 +712,7 @@ async fn reconcile_thread_name_from_state(
     native_writer: Option<&NativeRolloutWriter>,
     state_db: Option<&praxis_state::StateRuntime>,
     rollout_path: &Path,
-) -> io::Result<()> {
+) -> std::io::Result<()> {
     let (Some(native_writer), Some(state_db), Some(thread_id)) = (
         native_writer,
         state_db,
