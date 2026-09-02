@@ -70,18 +70,11 @@ impl AgentControl {
         let inherited_exec_policy = self
             .inherited_exec_policy_for_source(&state, Some(&session_source), &config)
             .await;
-        let rollout_path =
-            match find_thread_path_by_id_str(config.praxis_home.as_path(), &thread_id.to_string())
-                .await?
-            {
-                Some(rollout_path) => rollout_path,
-                None => find_archived_thread_path_by_id_str(
-                    config.praxis_home.as_path(),
-                    &thread_id.to_string(),
-                )
-                .await?
-                .ok_or_else(|| PraxisErr::ThreadNotFound(thread_id))?,
-            };
+        let rollout_path = praxis_rollout::ThreadStore::open(&config)
+            .await
+            .find_rollout_path(thread_id, None)
+            .await?
+            .ok_or_else(|| PraxisErr::ThreadNotFound(thread_id))?;
 
         let resumed_thread = state
             .resume_thread_from_rollout_with_source(

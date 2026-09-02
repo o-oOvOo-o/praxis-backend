@@ -6772,6 +6772,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "praxis-artifacts"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "sha2",
+ "tempfile",
+ "zstd",
+]
+
+[[package]]
 name = "praxis-async-utils"
 version = "0.0.0"
 dependencies = [
@@ -8297,6 +8308,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "fs2",
+ "praxis-artifacts",
  "praxis-protocol",
  "pretty_assertions",
  "serde",

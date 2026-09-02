@@ -208,15 +208,7 @@ fn parse_json<T>(stdout: &str) -> Option<T>
 where
     T: for<'de> serde::Deserialize<'de>,
 {
-    let trimmed = stdout.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let value: serde_json::Value = serde_json::from_str(trimmed).ok()?;
-    if !value.is_object() {
-        return None;
-    }
-    serde_json::from_value(value).ok()
+    serde_json::from_str(stdout.trim()).ok()
 }
 
 fn invalid_block_message(event_name: &str) -> String {

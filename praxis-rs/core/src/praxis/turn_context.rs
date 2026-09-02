@@ -18,6 +18,7 @@ use praxis_utils_absolute_path::AbsolutePathBuf;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_readiness::ReadinessFlag;
 use serde_json::Value;
+use tokio::sync::OnceCell;
 
 use crate::ModelProviderInfo;
 use crate::compact;
@@ -88,6 +89,7 @@ pub(crate) struct TurnContext {
     pub(crate) turn_metadata_state: Arc<TurnMetadataState>,
     pub(crate) turn_skills: TurnSkillsContext,
     pub(crate) turn_timing_state: Arc<TurnTimingState>,
+    pub(crate) tool_capabilities: Arc<OnceCell<crate::capabilities::ToolCapabilities>>,
 }
 
 impl TurnContext {

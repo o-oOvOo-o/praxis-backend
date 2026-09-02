@@ -18,7 +18,7 @@ const MODEL_TOOLS_ID: &str = "praxis.core.tools";
 const CODE_MODE_TOOLS_ID: &str = "praxis.core.tools.code_mode";
 const TOOLS_OWNER_ID: &str = "praxis.core.tools";
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct ToolCapability {
     router: TypedCapability<ToolRouter>,
     _scope: Arc<CapabilityScope>,
@@ -38,6 +38,7 @@ impl Deref for ToolCapability {
     }
 }
 
+#[derive(Clone, Debug)]
 pub(crate) struct ToolCapabilities {
     model: ToolCapability,
     code_mode: ToolCapability,

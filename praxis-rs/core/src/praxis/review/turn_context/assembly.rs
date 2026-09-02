@@ -97,5 +97,6 @@ pub(super) fn build(input: ReviewTurnContextAssemblyInput<'_>) -> Arc<TurnContex
         turn_metadata_state,
         turn_skills: TurnSkillsContext::new(skills_outcome),
         turn_timing_state: Arc::new(TurnTimingState::default()),
+        tool_capabilities: Arc::new(tokio::sync::OnceCell::new()),
     })
 }

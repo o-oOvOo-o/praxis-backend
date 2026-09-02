@@ -11,8 +11,6 @@ pub use praxis_rollout::ThreadNameWriter;
 pub use praxis_rollout::ThreadStore;
 pub use praxis_rollout::ThreadSummary;
 pub use praxis_rollout::ThreadSummaryPage;
-pub use praxis_rollout::find_archived_thread_path_by_id_str;
-pub use praxis_rollout::find_thread_path_by_id_str;
 pub use praxis_rollout::list_threads;
 pub use praxis_rollout::rollout_date_parts;
 

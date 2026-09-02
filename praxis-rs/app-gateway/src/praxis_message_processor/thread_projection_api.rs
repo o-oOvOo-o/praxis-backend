@@ -56,7 +56,7 @@ async fn project_thread_from_rollout_summary(
 pub(crate) async fn project_rollback_thread_from_rollout(
     rollout_path: &Path,
     fallback_provider: &str,
-    praxis_home: &Path,
+    state_db_ctx: Option<&StateDbHandle>,
     thread_id: &ThreadId,
 ) -> std::result::Result<Thread, String> {
     let mut thread = project_thread_from_rollout_summary(rollout_path, fallback_provider)
@@ -67,7 +67,9 @@ pub(crate) async fn project_rollback_thread_from_rollout(
             .await
             .map_err(|err| format!("failed to load rollout `{}`: {err}", rollout_path.display()))?;
     thread.name =
-        ThreadProjection::resolve_thread_name_from_home(praxis_home, thread_id.clone()).await;
+        praxis_rollout::ThreadNameResolver::new(state_db_ctx.map(|state_db| state_db.as_ref()))
+            .resolve_name(*thread_id)
+            .await;
     Ok(thread)
 }
 

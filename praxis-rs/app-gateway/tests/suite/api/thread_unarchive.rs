@@ -15,8 +15,9 @@ use praxis_app_gateway_protocol::ThreadUnarchivedNotification;
 use praxis_app_gateway_protocol::TurnStartParams;
 use praxis_app_gateway_protocol::TurnStartResponse;
 use praxis_app_gateway_protocol::UserInput;
-use praxis_core::find_archived_thread_path_by_id_str;
-use praxis_core::find_thread_path_by_id_str;
+use praxis_core::ThreadStore;
+use praxis_protocol::ThreadId;
+use praxis_rollout::RolloutConfig;
 use pretty_assertions::assert_eq;
 use serde_json::Value;
 use std::fs::FileTimes;
@@ -28,6 +29,27 @@ use tempfile::TempDir;
 use tokio::time::timeout;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+async fn find_rollout_path(
+    praxis_home: &Path,
+    thread_id: &str,
+    archived_only: Option<bool>,
+) -> std::io::Result<Option<std::path::PathBuf>> {
+    let config = RolloutConfig {
+        praxis_home: praxis_home.to_path_buf(),
+        sqlite_home: praxis_home.to_path_buf(),
+        cwd: praxis_home.to_path_buf(),
+        model_provider_id: String::new(),
+        generate_memories: false,
+    };
+    let Ok(thread_id) = ThreadId::from_string(thread_id) else {
+        return Ok(None);
+    };
+    ThreadStore::open(&config)
+        .await
+        .find_rollout_path(thread_id, archived_only)
+        .await
+}
 
 #[tokio::test]
 async fn thread_unarchive_moves_rollout_back_into_sessions_directory() -> Result<()> {
@@ -75,7 +97,7 @@ async fn thread_unarchive_moves_rollout_back_into_sessions_directory() -> Result
     )
     .await??;
 
-    let found_rollout_path = find_thread_path_by_id_str(praxis_home.path(), &thread.id)
+    let found_rollout_path = find_rollout_path(praxis_home.path(), &thread.id, Some(false))
         .await?
         .expect("expected rollout path for thread id to exist");
     assert_paths_match_on_disk(&found_rollout_path, &rollout_path)?;
@@ -92,7 +114,7 @@ async fn thread_unarchive_moves_rollout_back_into_sessions_directory() -> Result
     .await??;
     let _: ThreadArchiveResponse = to_response::<ThreadArchiveResponse>(archive_resp)?;
 
-    let archived_path = find_archived_thread_path_by_id_str(praxis_home.path(), &thread.id)
+    let archived_path = find_rollout_path(praxis_home.path(), &thread.id, Some(true))
         .await?
         .expect("expected archived rollout path for thread id to exist");
     let archived_path_display = archived_path.display();

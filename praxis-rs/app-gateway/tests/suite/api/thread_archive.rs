@@ -19,13 +19,35 @@ use praxis_app_gateway_protocol::TurnStartParams;
 use praxis_app_gateway_protocol::TurnStartResponse;
 use praxis_app_gateway_protocol::UserInput;
 use praxis_core::ARCHIVED_SESSIONS_SUBDIR;
-use praxis_core::find_thread_path_by_id_str;
+use praxis_core::ThreadStore;
+use praxis_protocol::ThreadId;
+use praxis_rollout::RolloutConfig;
 use pretty_assertions::assert_eq;
 use std::path::Path;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+async fn find_active_rollout_path(
+    praxis_home: &Path,
+    thread_id: &str,
+) -> std::io::Result<Option<std::path::PathBuf>> {
+    let config = RolloutConfig {
+        praxis_home: praxis_home.to_path_buf(),
+        sqlite_home: praxis_home.to_path_buf(),
+        cwd: praxis_home.to_path_buf(),
+        model_provider_id: String::new(),
+        generate_memories: false,
+    };
+    let Ok(thread_id) = ThreadId::from_string(thread_id) else {
+        return Ok(None);
+    };
+    ThreadStore::open(&config)
+        .await
+        .find_rollout_path(thread_id, Some(false))
+        .await
+}
 
 #[tokio::test]
 async fn thread_archive_requires_materialized_rollout() -> Result<()> {
@@ -58,7 +80,7 @@ async fn thread_archive_requires_materialized_rollout() -> Result<()> {
         rollout_path.display()
     );
     assert!(
-        find_thread_path_by_id_str(praxis_home.path(), &thread.id)
+        find_active_rollout_path(praxis_home.path(), &thread.id)
             .await?
             .is_none(),
         "thread id should not be discoverable before rollout materialization"
@@ -113,7 +135,7 @@ async fn thread_archive_requires_materialized_rollout() -> Result<()> {
         rollout_path.display()
     );
 
-    let discovered_path = find_thread_path_by_id_str(praxis_home.path(), &thread.id)
+    let discovered_path = find_active_rollout_path(praxis_home.path(), &thread.id)
         .await?
         .expect("expected rollout path for thread id to exist after materialization");
     assert_paths_match_on_disk(&discovered_path, &rollout_path)?;

@@ -67,6 +67,7 @@ impl TurnContext {
             turn_metadata_state: self.turn_metadata_state.clone(),
             turn_skills: self.turn_skills.clone(),
             turn_timing_state: Arc::clone(&self.turn_timing_state),
+            tool_capabilities: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
 }

@@ -19,11 +19,12 @@ use time::macros::format_description;
 use uuid::Uuid;
 
 use crate::INTERACTIVE_SESSION_SOURCES;
-use crate::find_thread_path_by_id_str;
 use crate::list::Cursor;
+use crate::list::ThreadArchiveFilter;
 use crate::list::ThreadItem;
 use crate::list::ThreadSortKey;
 use crate::list::ThreadsPage;
+use crate::list::find_thread_path_by_id_str_with_db_context;
 use crate::list::get_threads;
 use crate::list::read_head_for_summary;
 use crate::rollout_date_parts;
@@ -245,9 +246,14 @@ async fn find_thread_path_falls_back_when_db_path_is_stale() {
     )
     .await;
 
-    let found = find_thread_path_by_id_str(home, &uuid.to_string())
-        .await
-        .expect("lookup should succeed");
+    let found = find_thread_path_by_id_str_with_db_context(
+        home,
+        &uuid.to_string(),
+        ThreadArchiveFilter::ActiveOnly,
+        None,
+    )
+    .await
+    .expect("lookup should succeed");
     assert_eq!(found, Some(fs_rollout_path.clone()));
     assert_state_db_rollout_path(home, thread_id, Some(fs_rollout_path.as_path())).await;
 }
@@ -278,9 +284,14 @@ async fn find_thread_path_repairs_missing_db_row_after_filesystem_fallback() {
         .await
         .expect("backfill should be complete");
 
-    let found = find_thread_path_by_id_str(home, &uuid.to_string())
-        .await
-        .expect("lookup should succeed");
+    let found = find_thread_path_by_id_str_with_db_context(
+        home,
+        &uuid.to_string(),
+        ThreadArchiveFilter::ActiveOnly,
+        None,
+    )
+    .await
+    .expect("lookup should succeed");
     assert_eq!(found, Some(fs_rollout_path.clone()));
     assert_state_db_rollout_path(home, thread_id, Some(fs_rollout_path.as_path())).await;
 }

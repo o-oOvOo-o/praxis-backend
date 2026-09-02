@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -23,7 +24,10 @@ use tokio::sync::Notify;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio::time::sleep_until;
+use tokio_util::task::AbortOnDropHandle;
 use tracing::warn;
+
+const NATIVE_EVENT_CAPACITY: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Coalesced file change notification for a subscriber.
@@ -264,28 +268,32 @@ impl Drop for WatchRegistration {
 pub struct FileWatcher {
     inner: Option<Mutex<FileWatcherInner>>,
     state: Arc<RwLock<WatchState>>,
+    _event_loop: Option<AbortOnDropHandle<()>>,
 }
 
 impl FileWatcher {
     /// Creates a live filesystem watcher and starts its background event loop
     /// on the current Tokio runtime.
     pub fn new() -> notify::Result<Self> {
-        let (raw_tx, raw_rx) = mpsc::unbounded_channel();
-        let raw_tx_clone = raw_tx;
+        let (raw_tx, raw_rx) = mpsc::channel(NATIVE_EVENT_CAPACITY);
+        let overflowed = Arc::new(AtomicBool::new(false));
+        let callback_overflowed = Arc::clone(&overflowed);
         let watcher = notify::recommended_watcher(move |res| {
-            let _ = raw_tx_clone.send(res);
+            if raw_tx.try_send(res).is_err() {
+                callback_overflowed.store(true, Ordering::Release);
+            }
         })?;
         let inner = FileWatcherInner {
             watcher,
             watched_paths: HashMap::new(),
         };
         let state = Arc::new(RwLock::new(WatchState::default()));
-        let file_watcher = Self {
+        let event_loop = Self::spawn_event_loop(Arc::clone(&state), raw_rx, overflowed);
+        Ok(Self {
             inner: Some(Mutex::new(inner)),
             state,
-        };
-        file_watcher.spawn_event_loop(raw_rx);
-        Ok(file_watcher)
+            _event_loop: event_loop,
+        })
     }
 
     /// Creates an inert watcher that only supports test-driven synthetic
@@ -294,6 +302,7 @@ impl FileWatcher {
         Self {
             inner: None,
             state: Arc::new(RwLock::new(WatchState::default())),
+            _event_loop: None,
         }
     }
 
@@ -355,30 +364,34 @@ impl FileWatcher {
 
     // Bridge `notify`'s callback-based events into the Tokio runtime and
     // notify the matching subscribers.
-    fn spawn_event_loop(&self, mut raw_rx: mpsc::UnboundedReceiver<notify::Result<Event>>) {
-        if let Ok(handle) = Handle::try_current() {
-            let state = Arc::clone(&self.state);
-            handle.spawn(async move {
-                loop {
-                    match raw_rx.recv().await {
-                        Some(Ok(event)) => {
-                            if !is_mutating_event(&event) {
-                                continue;
-                            }
-                            if event.paths.is_empty() {
-                                continue;
-                            }
+    fn spawn_event_loop(
+        state: Arc<RwLock<WatchState>>,
+        mut raw_rx: mpsc::Receiver<notify::Result<Event>>,
+        overflowed: Arc<AtomicBool>,
+    ) -> Option<AbortOnDropHandle<()>> {
+        match Handle::try_current() {
+            Ok(handle) => Some(AbortOnDropHandle::new(handle.spawn(async move {
+                while let Some(event) = raw_rx.recv().await {
+                    if overflowed.swap(false, Ordering::AcqRel) {
+                        warn!(
+                            capacity = NATIVE_EVENT_CAPACITY,
+                            "filesystem event ingress saturated; refreshing subscribed paths"
+                        );
+                        Self::notify_all_watched_paths(&state).await;
+                    }
+                    match event {
+                        Ok(event) if is_mutating_event(&event) && !event.paths.is_empty() => {
                             Self::notify_subscribers(&state, &event.paths).await;
                         }
-                        Some(Err(err)) => {
-                            warn!("file watcher error: {err}");
-                        }
-                        None => break,
+                        Ok(_) => {}
+                        Err(err) => warn!("file watcher error: {err}"),
                     }
                 }
-            });
-        } else {
-            warn!("file watcher loop skipped: no Tokio runtime available");
+            }))),
+            Err(_) => {
+                warn!("file watcher loop skipped: no Tokio runtime available");
+                None
+            }
         }
     }
 
@@ -516,6 +529,19 @@ impl FileWatcher {
         }
     }
 
+    async fn notify_all_watched_paths(state: &RwLock<WatchState>) {
+        let watched_paths = state
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .path_ref_counts
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        if !watched_paths.is_empty() {
+            Self::notify_subscribers(state, &watched_paths).await;
+        }
+    }
+
     #[cfg(test)]
     pub(crate) async fn send_paths_for_test(&self, paths: Vec<PathBuf>) {
         Self::notify_subscribers(&self.state, &paths).await;
@@ -524,9 +550,14 @@ impl FileWatcher {
     #[cfg(test)]
     pub(crate) fn spawn_event_loop_for_test(
         &self,
-        raw_rx: mpsc::UnboundedReceiver<notify::Result<Event>>,
-    ) {
-        self.spawn_event_loop(raw_rx);
+        raw_rx: mpsc::Receiver<notify::Result<Event>>,
+    ) -> AbortOnDropHandle<()> {
+        Self::spawn_event_loop(
+            Arc::clone(&self.state),
+            raw_rx,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .expect("test runtime")
     }
 
     #[cfg(test)]

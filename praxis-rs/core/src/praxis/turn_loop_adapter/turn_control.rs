@@ -341,7 +341,7 @@ pub(in crate::praxis::turn_loop_adapter) mod stop_hooks {
         ) -> TurnStopHooksDecision {
             let hook_outcomes = sess
                 .hook_capability()
-                .dispatch(HookPayload {
+                .run_after_agent(HookPayload {
                     session_id: sess.conversation_id,
                     cwd: turn_context.cwd.to_path_buf(),
                     client: turn_context.app_gateway_client_name.clone(),

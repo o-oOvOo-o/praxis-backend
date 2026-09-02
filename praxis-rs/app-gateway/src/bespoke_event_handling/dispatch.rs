@@ -12,7 +12,6 @@ pub(crate) async fn apply_bespoke_event_handling(
     thread_watch_manager: ThreadWatchManager,
     workspace_change_store: WorkspaceChangeStore,
     fallback_model_provider: String,
-    praxis_home: &Path,
     state_db: Option<Arc<StateRuntime>>,
 ) {
     let Event {
@@ -962,7 +961,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 let response = match project_rollback_thread_from_rollout(
                     rollout_path.as_path(),
                     fallback_model_provider.as_str(),
-                    praxis_home,
+                    state_db.as_ref(),
                     &conversation_id,
                 )
                 .await

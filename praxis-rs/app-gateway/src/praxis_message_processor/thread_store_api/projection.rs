@@ -23,18 +23,28 @@ use std::path::PathBuf;
 
 pub(crate) struct ThreadProjection<'a> {
     config: &'a Config,
+    store: tokio::sync::OnceCell<praxis_rollout::ThreadStore<'a, Config>>,
 }
 
 impl<'a> ThreadProjection<'a> {
     pub(in crate::praxis_message_processor) fn new(config: &'a Config) -> Self {
-        Self { config }
+        Self {
+            config,
+            store: tokio::sync::OnceCell::new(),
+        }
+    }
+
+    async fn store(&self) -> &praxis_rollout::ThreadStore<'a, Config> {
+        self.store
+            .get_or_init(|| async { praxis_rollout::ThreadStore::open(self.config).await })
+            .await
     }
 
     pub(in crate::praxis_message_processor) async fn list_summaries(
         &self,
         query: ThreadStoreListQuery,
     ) -> std::io::Result<ThreadStoreListPage> {
-        list::list_thread_summaries(self.config, query).await
+        list::list_thread_summaries(self.store().await, query).await
     }
 
     pub(in crate::praxis_message_processor) async fn read_history_cwd(
@@ -42,7 +52,7 @@ impl<'a> ThreadProjection<'a> {
         thread_id: Option<ThreadId>,
         rollout_path: &Path,
     ) -> Option<PathBuf> {
-        paths::read_thread_history_cwd(self.config, thread_id, rollout_path).await
+        paths::read_thread_history_cwd(self.store().await, thread_id, rollout_path).await
     }
 
     pub(in crate::praxis_message_processor) async fn find_active_rollout_path(
@@ -71,7 +81,7 @@ impl<'a> ThreadProjection<'a> {
         thread_id: ThreadId,
         archived_only: Option<bool>,
     ) -> std::io::Result<bool> {
-        paths::thread_exists(self.config, thread_id, archived_only).await
+        paths::thread_exists(self.store().await, thread_id, archived_only).await
     }
 
     pub(in crate::praxis_message_processor) async fn write_thread_name(
@@ -79,14 +89,14 @@ impl<'a> ThreadProjection<'a> {
         thread_id: ThreadId,
         name: &str,
     ) -> std::io::Result<()> {
-        paths::write_thread_name(self.config, thread_id, name).await
+        paths::write_thread_name(self.store().await, thread_id, name).await
     }
 
     pub(in crate::praxis_message_processor) async fn resolve_thread_name(
         &self,
         thread_id: ThreadId,
     ) -> Option<String> {
-        paths::resolve_thread_name(self.config, thread_id).await
+        paths::resolve_thread_name(self.store().await, thread_id).await
     }
 
     pub(in crate::praxis_message_processor) async fn read_directory_summary(
@@ -103,7 +113,12 @@ impl<'a> ThreadProjection<'a> {
         &self,
         thread_id: ThreadId,
     ) -> std::io::Result<Option<ThreadStoreSummary>> {
-        summary::try_read_directory_summary(self.config, thread_id).await
+        summary::try_read_directory_summary(
+            self.store().await,
+            thread_id,
+            self.config.model_provider_id.as_str(),
+        )
+        .await
     }
 
     async fn find_rollout_path(
@@ -111,18 +126,11 @@ impl<'a> ThreadProjection<'a> {
         thread_id: ThreadId,
         archived_only: Option<bool>,
     ) -> std::io::Result<Option<PathBuf>> {
-        paths::find_thread_rollout_path(self.config, thread_id, archived_only).await
+        paths::find_thread_rollout_path(self.store().await, thread_id, archived_only).await
     }
 }
 
 impl ThreadProjection<'_> {
-    pub(in crate::praxis_message_processor) async fn resolve_thread_name_from_home(
-        praxis_home: &Path,
-        thread_id: ThreadId,
-    ) -> Option<String> {
-        paths::resolve_thread_name_from_home(praxis_home, thread_id).await
-    }
-
     pub(in crate::praxis_message_processor) fn preview_from_rollout_items(
         items: &[RolloutItem],
     ) -> String {

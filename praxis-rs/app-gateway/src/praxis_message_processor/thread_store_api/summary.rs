@@ -108,12 +108,12 @@ impl ThreadStoreSummary {
 }
 
 pub(super) async fn try_read_directory_summary(
-    config: &Config,
+    store: &praxis_rollout::ThreadStore<'_, Config>,
     thread_id: ThreadId,
+    fallback_provider: &str,
 ) -> std::io::Result<Option<ThreadStoreSummary>> {
-    let store = praxis_rollout::ThreadStore::open(config).await;
     store
-        .read_thread_summary(thread_id, None, config.model_provider_id.as_str())
+        .read_thread_summary(thread_id, None, fallback_provider)
         .await
         .map(|summary| summary.map(ThreadStoreSummary::from_rollout_summary))
 }

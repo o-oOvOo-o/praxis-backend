@@ -32,8 +32,6 @@ pub static INTERACTIVE_SESSION_SOURCES: LazyLock<Vec<SessionSource>> = LazyLock:
 
 pub use config::RolloutConfig;
 pub use config::RolloutConfigView;
-pub use list::find_archived_thread_path_by_id_str;
-pub use list::find_thread_path_by_id_str;
 pub use list::rollout_date_parts;
 pub use policy::EventPersistenceMode;
 pub use praxis_protocol::protocol::SessionMeta;

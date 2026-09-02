@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "analytics",
+    "artifacts",
     "backend-client",
     "ansi-escape",
     "async-utils",
@@ -110,6 +111,7 @@ license = "Apache-2.0"
 # Internal
 app_test_support = { path = "app-gateway/tests/common" }
 praxis-analytics = { path = "analytics" }
+praxis-artifacts = { path = "artifacts" }
 praxis-ansi-escape = { path = "ansi-escape" }
 praxis-app-core = { path = "../../praxis-app-core" }
 praxis-api = { path = "praxis-api" }

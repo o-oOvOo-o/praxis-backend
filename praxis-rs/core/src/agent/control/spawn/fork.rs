@@ -40,19 +40,22 @@ impl AgentControl {
             parent_thread.praxis.session.flush_rollout().await;
         }
 
-        let rollout_path = parent_thread
+        let rollout_path = if let Some(path) = parent_thread
             .as_ref()
             .and_then(|parent_thread| parent_thread.rollout_path())
-            .or(find_thread_path_by_id_str(
-                config.praxis_home.as_path(),
-                &parent_thread_id.to_string(),
-            )
-            .await?)
-            .ok_or_else(|| {
-                PraxisErr::Fatal(format!(
-                    "parent thread rollout unavailable for fork: {parent_thread_id}"
-                ))
-            })?;
+        {
+            path
+        } else {
+            praxis_rollout::ThreadStore::open(&config)
+                .await
+                .find_rollout_path(parent_thread_id, Some(false))
+                .await?
+                .ok_or_else(|| {
+                    PraxisErr::Fatal(format!(
+                        "parent thread rollout unavailable for fork: {parent_thread_id}"
+                    ))
+                })?
+        };
 
         let mut forked_rollout_items =
             praxis_rollout::thread_store::read_initial_history(&rollout_path)

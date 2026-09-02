@@ -7,34 +7,20 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use chrono::SecondsFormat;
 use chrono::Utc;
 use praxis_protocol::ThreadId;
 use praxis_protocol::dynamic_tools::DynamicToolSpec;
 use praxis_protocol::models::BaseInstructions;
 use praxis_utils_string::truncate_middle_chars;
-use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::FormatItem;
-use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
 use tracing::warn;
 
-use super::ARCHIVED_SESSIONS_SUBDIR;
 use super::SESSIONS_SUBDIR;
-use super::list::Cursor;
-use super::list::ThreadItem;
-use super::list::ThreadListConfig;
-use super::list::ThreadListLayout;
-use super::list::ThreadSortKey;
-use super::list::ThreadsPage;
-use super::list::get_threads;
-use super::list::get_threads_in_root;
-use super::list::parse_cursor;
-use super::list::parse_timestamp_uuid_from_filename;
 use super::metadata;
 use super::policy::EventPersistenceMode;
 use super::policy::is_persisted_response_item;
@@ -53,12 +39,8 @@ use praxis_state::StateRuntime;
 use praxis_state::ThreadMetadataBuilder;
 
 mod jsonl_writer;
-mod resume_selection;
 
 use jsonl_writer::JsonlWriter;
-use resume_selection::filter_fs_page_by_cwd;
-use resume_selection::select_resume_path;
-use resume_selection::select_resume_path_from_db_page;
 
 /// Records all [`ResponseItem`]s for a session and flushes them to disk after
 /// every update.
@@ -162,253 +144,6 @@ fn sanitize_rollout_item_for_persistence(
 }
 
 impl RolloutRecorder {
-    /// List threads (rollout files) under the provided Praxis home directory.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn list_threads(
-        config: &impl RolloutConfigView,
-        page_size: usize,
-        cursor: Option<&Cursor>,
-        sort_key: ThreadSortKey,
-        allowed_sources: &[SessionSource],
-        model_providers: Option<&[String]>,
-        default_provider: &str,
-        cwd: Option<&Path>,
-        search_term: Option<&str>,
-    ) -> std::io::Result<ThreadsPage> {
-        let state_db_ctx = state_db::get_state_db(config).await;
-        Self::list_threads_with_db_context(
-            config,
-            state_db_ctx.as_deref(),
-            page_size,
-            cursor,
-            sort_key,
-            allowed_sources,
-            /*source_kinds*/ None,
-            model_providers,
-            default_provider,
-            /*archived*/ false,
-            cwd,
-            search_term,
-        )
-        .await
-    }
-
-    /// List archived threads (rollout files) under the archived sessions directory.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn list_archived_threads(
-        config: &impl RolloutConfigView,
-        page_size: usize,
-        cursor: Option<&Cursor>,
-        sort_key: ThreadSortKey,
-        allowed_sources: &[SessionSource],
-        model_providers: Option<&[String]>,
-        default_provider: &str,
-        cwd: Option<&Path>,
-        search_term: Option<&str>,
-    ) -> std::io::Result<ThreadsPage> {
-        let state_db_ctx = state_db::get_state_db(config).await;
-        Self::list_threads_with_db_context(
-            config,
-            state_db_ctx.as_deref(),
-            page_size,
-            cursor,
-            sort_key,
-            allowed_sources,
-            /*source_kinds*/ None,
-            model_providers,
-            default_provider,
-            /*archived*/ true,
-            cwd,
-            search_term,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn list_threads_with_db_context(
-        config: &impl RolloutConfigView,
-        state_db_ctx: Option<&StateRuntime>,
-        page_size: usize,
-        cursor: Option<&Cursor>,
-        sort_key: ThreadSortKey,
-        allowed_sources: &[SessionSource],
-        source_kinds: Option<&[praxis_state::ThreadSourceKind]>,
-        model_providers: Option<&[String]>,
-        default_provider: &str,
-        archived: bool,
-        cwd: Option<&Path>,
-        search_term: Option<&str>,
-    ) -> std::io::Result<ThreadsPage> {
-        let praxis_home = config.praxis_home();
-        if let Some(ctx) = state_db_ctx {
-            let backfill_complete =
-                state_db::is_backfill_complete(Some(ctx), "list_threads_with_db_fallback")
-                    .await
-                    .unwrap_or(false);
-            if let Some(db_page) = state_db::list_threads_db(
-                Some(ctx),
-                praxis_home,
-                page_size,
-                cursor,
-                sort_key,
-                allowed_sources,
-                source_kinds,
-                model_providers,
-                archived,
-                cwd,
-                search_term,
-            )
-            .await
-            {
-                let can_return_db_page = backfill_complete
-                    || cursor.is_some()
-                    || search_term.is_some()
-                    || db_page.items.len() >= page_size
-                    || db_page.next_anchor.is_some();
-                if !can_return_db_page {
-                    tracing::warn!(
-                        "state db returned a partial first page before backfill completed; falling back to session files"
-                    );
-                } else {
-                    // Hot resume/list paths are DB-only. Backfill may still be running, but
-                    // foreground listing must remain O(page_size), not O(session_files).
-                    return Ok(db_page.into());
-                }
-            } else if backfill_complete {
-                tracing::warn!(
-                    "state db list failed after backfill completed; returning an empty partial page"
-                );
-                return Ok(ThreadsPage::default());
-            } else if search_term.is_some() {
-                tracing::warn!(
-                    "state db search failed before backfill completed; returning an empty partial page"
-                );
-                return Ok(ThreadsPage::default());
-            } else {
-                tracing::warn!(
-                    "state db list failed before backfill completed; falling back to session files"
-                );
-            }
-        }
-
-        if search_term.is_some() {
-            tracing::warn!(
-                "state db unavailable for indexed thread search; returning an empty page"
-            );
-            return Ok(ThreadsPage::default());
-        }
-
-        // Filesystem fallback is bounded and keeps resume usable while the index catches up.
-        let fs_page = if archived {
-            let root = praxis_home.join(ARCHIVED_SESSIONS_SUBDIR);
-            get_threads_in_root(
-                root,
-                page_size,
-                cursor,
-                sort_key,
-                ThreadListConfig {
-                    allowed_sources,
-                    model_providers,
-                    default_provider,
-                    layout: ThreadListLayout::Flat,
-                },
-            )
-            .await?
-        } else {
-            get_threads(
-                praxis_home,
-                page_size,
-                cursor,
-                sort_key,
-                allowed_sources,
-                model_providers,
-                default_provider,
-            )
-            .await?
-        };
-
-        let fs_page = filter_fs_page_by_cwd(fs_page, cwd, default_provider).await;
-        Ok(truncate_fs_page(fs_page, page_size, sort_key))
-    }
-
-    /// Find the newest recorded thread path, optionally filtering to a matching cwd.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn find_latest_thread_path(
-        config: &impl RolloutConfigView,
-        page_size: usize,
-        cursor: Option<&Cursor>,
-        sort_key: ThreadSortKey,
-        allowed_sources: &[SessionSource],
-        model_providers: Option<&[String]>,
-        default_provider: &str,
-        filter_cwd: Option<&Path>,
-    ) -> std::io::Result<Option<PathBuf>> {
-        let praxis_home = config.praxis_home();
-        let state_db_ctx = state_db::get_state_db(config).await;
-        if let Some(ctx) = state_db_ctx.as_deref() {
-            let backfill_complete =
-                state_db::is_backfill_complete(Some(ctx), "find_latest_thread_path")
-                    .await
-                    .unwrap_or(false);
-            let mut db_cursor = cursor.cloned();
-            loop {
-                let Some(db_page) = state_db::list_threads_db(
-                    Some(ctx),
-                    praxis_home,
-                    page_size,
-                    db_cursor.as_ref(),
-                    sort_key,
-                    allowed_sources,
-                    /*source_kinds*/ None,
-                    model_providers,
-                    /*archived*/ false,
-                    filter_cwd,
-                    /*search_term*/ None,
-                )
-                .await
-                else {
-                    break;
-                };
-                if let Some(path) =
-                    select_resume_path_from_db_page(&db_page, filter_cwd, default_provider).await
-                {
-                    return Ok(Some(path));
-                }
-                db_cursor = db_page.next_anchor.map(Into::into);
-                if db_cursor.is_none() {
-                    break;
-                }
-            }
-            if backfill_complete {
-                return Ok(None);
-            }
-            tracing::warn!(
-                "state db did not resolve latest thread before backfill completed; falling back to session files"
-            );
-        }
-
-        let mut cursor = cursor.cloned();
-        loop {
-            let page = get_threads(
-                praxis_home,
-                page_size,
-                cursor.as_ref(),
-                sort_key,
-                allowed_sources,
-                model_providers,
-                default_provider,
-            )
-            .await?;
-            if let Some(path) = select_resume_path(&page, filter_cwd, default_provider).await {
-                return Ok(Some(path));
-            }
-            cursor = page.next_cursor;
-            if cursor.is_none() {
-                return Ok(None);
-            }
-        }
-    }
-
     /// Attempt to create a new [`RolloutRecorder`].
     ///
     /// For newly created sessions, this precomputes path/metadata and defers
@@ -593,27 +328,6 @@ impl RolloutRecorder {
         };
         Ok(())
     }
-}
-
-fn truncate_fs_page(
-    mut page: ThreadsPage,
-    page_size: usize,
-    sort_key: ThreadSortKey,
-) -> ThreadsPage {
-    if page.items.len() <= page_size {
-        return page;
-    }
-    page.items.truncate(page_size);
-    page.next_cursor = page.items.last().and_then(|item| {
-        let file_name = item.path.file_name()?.to_str()?;
-        let (created_at, id) = parse_timestamp_uuid_from_filename(file_name)?;
-        let cursor_token = match sort_key {
-            ThreadSortKey::CreatedAt => format!("{}|{id}", created_at.format(&Rfc3339).ok()?),
-            ThreadSortKey::UpdatedAt => format!("{}|{id}", item.updated_at.as_deref()?),
-        };
-        parse_cursor(cursor_token.as_str())
-    });
-    page
 }
 
 struct LogFileInfo {
@@ -949,43 +663,6 @@ async fn sync_thread_state_after_write(
         Some(updated_at),
     )
     .await;
-}
-
-impl From<praxis_state::ThreadsPage> for ThreadsPage {
-    fn from(db_page: praxis_state::ThreadsPage) -> Self {
-        let items = db_page
-            .items
-            .into_iter()
-            .map(|item| ThreadItem {
-                path: item.rollout_path,
-                thread_id: Some(item.id),
-                first_user_message: item.first_user_message,
-                cwd: Some(item.cwd),
-                git_branch: item.git_branch,
-                git_sha: item.git_sha,
-                git_origin_url: item.git_origin_url,
-                source: Some(
-                    serde_json::from_str(item.source.as_str())
-                        .or_else(|_| serde_json::from_value(Value::String(item.source)))
-                        .unwrap_or(SessionSource::Unknown),
-                ),
-                agent_base_name: item.agent_base_name,
-                agent_title: item.agent_title,
-                agent_display_name: item.agent_display_name,
-                agent_role: item.agent_role,
-                model_provider: Some(item.model_provider),
-                cli_version: Some(item.cli_version),
-                created_at: Some(item.created_at.to_rfc3339_opts(SecondsFormat::Secs, true)),
-                updated_at: Some(item.updated_at.to_rfc3339_opts(SecondsFormat::Secs, true)),
-            })
-            .collect();
-        Self {
-            items,
-            next_cursor: db_page.next_anchor.map(Into::into),
-            num_scanned_files: db_page.num_scanned_rows,
-            reached_scan_cap: false,
-        }
-    }
 }
 
 #[cfg(test)]

@@ -16,7 +16,6 @@ use crate::events::stop::StopRequest;
 use crate::events::user_prompt_submit::UserPromptSubmitOutcome;
 use crate::events::user_prompt_submit::UserPromptSubmitRequest;
 use crate::types::Hook;
-use crate::types::HookEvent;
 use crate::types::HookPayload;
 use crate::types::HookResponse;
 
@@ -49,7 +48,6 @@ impl Default for HooksConfig {
 #[derive(Clone)]
 pub struct Hooks {
     after_agent: Arc<[Hook]>,
-    after_tool_use: Arc<[Hook]>,
     engine: CommandHookAdapter,
 }
 
@@ -78,7 +76,6 @@ impl Hooks {
         );
         Self {
             after_agent,
-            after_tool_use: Arc::from([]),
             engine,
         }
     }
@@ -87,17 +84,9 @@ impl Hooks {
         self.engine.warnings()
     }
 
-    fn hooks_for_event(&self, hook_event: &HookEvent) -> &[Hook] {
-        match hook_event {
-            HookEvent::AfterAgent { .. } => &self.after_agent,
-            HookEvent::AfterToolUse { .. } => &self.after_tool_use,
-        }
-    }
-
-    pub async fn dispatch(&self, hook_payload: HookPayload) -> Vec<HookResponse> {
-        let hooks = self.hooks_for_event(&hook_payload.hook_event);
-        let mut outcomes = Vec::with_capacity(hooks.len());
-        for hook in hooks {
+    pub async fn run_after_agent(&self, hook_payload: HookPayload) -> Vec<HookResponse> {
+        let mut outcomes = Vec::with_capacity(self.after_agent.len());
+        for hook in self.after_agent.iter() {
             let outcome = hook.execute(&hook_payload).await;
             let should_abort_operation = outcome.result.should_abort_operation();
             outcomes.push(outcome);

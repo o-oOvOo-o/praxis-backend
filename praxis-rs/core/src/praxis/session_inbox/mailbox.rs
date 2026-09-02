@@ -10,8 +10,11 @@ impl Session {
         self.mailbox.subscribe()
     }
 
-    pub(crate) fn enqueue_mailbox_communication(&self, communication: InterAgentCommunication) {
-        self.mailbox.send(communication);
+    pub(crate) fn enqueue_mailbox_communication(
+        &self,
+        communication: InterAgentCommunication,
+    ) -> bool {
+        self.mailbox.send(communication).is_some()
     }
 
     pub(crate) async fn receive_inter_agent_communication(
@@ -20,8 +23,8 @@ impl Session {
         communication: InterAgentCommunication,
     ) {
         let trigger_turn = communication.trigger_turn;
-        self.enqueue_mailbox_communication(communication);
-        if trigger_turn {
+        let accepted = self.enqueue_mailbox_communication(communication);
+        if accepted && trigger_turn {
             self.maybe_start_turn_for_pending_work_with_sub_id(sub_id)
                 .await;
         }

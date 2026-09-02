@@ -250,7 +250,6 @@ impl PraxisMessageProcessor {
                             thread_watch_manager.clone(),
                             workspace_change_store.clone(),
                             fallback_model_provider.clone(),
-                            praxis_home.as_path(),
                             state_db.clone(),
                         )
                         .await;
@@ -267,7 +266,7 @@ impl PraxisMessageProcessor {
                         handle_thread_listener_command(
                             conversation_id,
                             &conversation,
-                            praxis_home.as_path(),
+                            state_db.as_deref(),
                             &thread_state_manager,
                             &thread_state,
                             &thread_watch_manager,
@@ -292,7 +291,7 @@ impl PraxisMessageProcessor {
 async fn handle_thread_listener_command(
     conversation_id: ThreadId,
     conversation: &Arc<PraxisThread>,
-    praxis_home: &Path,
+    state_db: Option<&StateRuntime>,
     thread_state_manager: &ThreadStateManager,
     thread_state: &Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
@@ -305,7 +304,7 @@ async fn handle_thread_listener_command(
             handle_pending_thread_resume_request(
                 conversation_id,
                 conversation,
-                praxis_home,
+                state_db,
                 thread_state_manager,
                 thread_state,
                 thread_watch_manager,
@@ -336,7 +335,7 @@ async fn handle_thread_listener_command(
 async fn handle_pending_thread_resume_request(
     conversation_id: ThreadId,
     conversation: &Arc<PraxisThread>,
-    praxis_home: &Path,
+    state_db: Option<&StateRuntime>,
     thread_state_manager: &ThreadStateManager,
     thread_state: &Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
@@ -394,8 +393,9 @@ async fn handle_pending_thread_resume_request(
     )
     .await;
 
-    thread.name =
-        ThreadProjection::resolve_thread_name_from_home(praxis_home, conversation_id).await;
+    thread.name = praxis_rollout::ThreadNameResolver::new(state_db)
+        .resolve_name(conversation_id)
+        .await;
     let history_entry_count = u64::try_from(thread.turns.len()).unwrap_or(u64::MAX);
 
     let ThreadConfigSnapshot {

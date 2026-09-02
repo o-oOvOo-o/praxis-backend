@@ -4,24 +4,27 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
+use tracing::warn;
 
 #[cfg(test)]
 use praxis_protocol::AgentPath;
 
 pub(crate) struct Mailbox {
-    tx: mpsc::UnboundedSender<InterAgentCommunication>,
+    tx: mpsc::Sender<InterAgentCommunication>,
     next_seq: AtomicU64,
     seq_tx: watch::Sender<u64>,
 }
 
 pub(crate) struct MailboxReceiver {
-    rx: mpsc::UnboundedReceiver<InterAgentCommunication>,
+    rx: mpsc::Receiver<InterAgentCommunication>,
     pending_mails: VecDeque<InterAgentCommunication>,
 }
 
 impl Mailbox {
+    const CAPACITY: usize = 256;
+
     pub(crate) fn new() -> (Self, MailboxReceiver) {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(Self::CAPACITY);
         let (seq_tx, _) = watch::channel(0);
         (
             Self {
@@ -40,17 +43,26 @@ impl Mailbox {
         self.seq_tx.subscribe()
     }
 
-    pub(crate) fn send(&self, communication: InterAgentCommunication) -> u64 {
+    pub(crate) fn send(&self, communication: InterAgentCommunication) -> Option<u64> {
+        if let Err(error) = self.tx.try_send(communication) {
+            let closed = matches!(error, mpsc::error::TrySendError::Closed(_));
+            warn!(
+                capacity = Self::CAPACITY,
+                closed, "agent mailbox rejected communication"
+            );
+            return None;
+        }
         let seq = self.next_seq.fetch_add(1, Ordering::Relaxed) + 1;
-        let _ = self.tx.send(communication);
         self.seq_tx.send_replace(seq);
-        seq
+        Some(seq)
     }
 }
 
 impl MailboxReceiver {
     fn sync_pending_mails(&mut self) {
-        while let Ok(mail) = self.rx.try_recv() {
+        while self.pending_mails.len() < Mailbox::CAPACITY
+            && let Ok(mail) = self.rx.try_recv()
+        {
             self.pending_mails.push_back(mail);
         }
     }
@@ -65,9 +77,9 @@ impl MailboxReceiver {
         self.pending_mails.iter().any(|mail| mail.trigger_turn)
     }
 
-    pub(crate) fn drain(&mut self) -> Vec<InterAgentCommunication> {
+    pub(crate) fn take_pending(&mut self) -> VecDeque<InterAgentCommunication> {
         self.sync_pending_mails();
-        self.pending_mails.drain(..).collect()
+        std::mem::take(&mut self.pending_mails)
     }
 }
 
@@ -110,9 +122,9 @@ mod tests {
         ));
 
         seq_rx.changed().await.expect("first seq update");
-        assert_eq!(*seq_rx.borrow(), seq_b);
-        assert_eq!(seq_a, 1);
-        assert_eq!(seq_b, 2);
+        assert_eq!(*seq_rx.borrow(), seq_b.expect("second mail accepted"));
+        assert_eq!(seq_a, Some(1));
+        assert_eq!(seq_b, Some(2));
     }
 
     #[tokio::test]
@@ -134,7 +146,10 @@ mod tests {
         mailbox.send(mail_one.clone());
         mailbox.send(mail_two.clone());
 
-        assert_eq!(receiver.drain(), vec![mail_one, mail_two]);
+        assert_eq!(
+            receiver.take_pending(),
+            VecDeque::from([mail_one, mail_two])
+        );
         assert!(!receiver.has_pending());
     }
 
@@ -157,5 +172,27 @@ mod tests {
             /*trigger_turn*/ true,
         ));
         assert!(receiver.has_pending_trigger_turn());
+    }
+
+    #[test]
+    fn mailbox_rejects_overload_without_growing() {
+        let (mailbox, _receiver) = Mailbox::new();
+        let worker = AgentPath::try_from("/root/worker").expect("agent path");
+
+        for index in 0..Mailbox::CAPACITY {
+            assert_eq!(
+                mailbox.send(make_mail(
+                    AgentPath::root(),
+                    worker.clone(),
+                    &index.to_string(),
+                    false,
+                )),
+                Some(index as u64 + 1)
+            );
+        }
+        assert_eq!(
+            mailbox.send(make_mail(AgentPath::root(), worker, "overflow", false)),
+            None
+        );
     }
 }

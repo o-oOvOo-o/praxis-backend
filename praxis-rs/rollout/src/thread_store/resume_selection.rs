@@ -7,7 +7,7 @@ use praxis_utils_path as path_utils;
 use crate::list::ThreadsPage;
 use crate::metadata;
 
-pub(super) async fn filter_fs_page_by_cwd(
+pub(crate) async fn filter_fs_page_by_cwd(
     mut page: ThreadsPage,
     cwd: Option<&Path>,
     default_provider: &str,
@@ -58,32 +58,7 @@ pub(super) async fn select_resume_path(
     }
 }
 
-pub(super) async fn select_resume_path_from_db_page(
-    page: &praxis_state::ThreadsPage,
-    filter_cwd: Option<&Path>,
-    default_provider: &str,
-) -> Option<PathBuf> {
-    match filter_cwd {
-        Some(cwd) => {
-            for item in &page.items {
-                if resume_candidate_matches_cwd(
-                    item.rollout_path.as_path(),
-                    Some(item.cwd.as_path()),
-                    cwd,
-                    default_provider,
-                )
-                .await
-                {
-                    return Some(item.rollout_path.clone());
-                }
-            }
-            None
-        }
-        None => page.items.first().map(|item| item.rollout_path.clone()),
-    }
-}
-
-async fn resume_candidate_matches_cwd(
+pub(crate) async fn resume_candidate_matches_cwd(
     rollout_path: &Path,
     cached_cwd: Option<&Path>,
     cwd: &Path,
@@ -93,16 +68,17 @@ async fn resume_candidate_matches_cwd(
         return true;
     }
 
-    if let Ok((items, _, _)) = crate::thread_store::read_items(rollout_path).await
-        && let Some(latest_turn_context_cwd) = items.iter().rev().find_map(|item| match item {
-            RolloutItem::TurnContext(turn_context) => Some(turn_context.cwd.as_path()),
-            RolloutItem::SessionMeta(_)
-            | RolloutItem::ResponseItem(_)
-            | RolloutItem::Compacted(_)
-            | RolloutItem::EventMsg(_) => None,
-        })
+    let mut latest_turn_context_cwd = None;
+    if crate::thread_store::scan_items(rollout_path, |item| {
+        if let RolloutItem::TurnContext(turn_context) = item {
+            latest_turn_context_cwd = Some(turn_context.cwd);
+        }
+    })
+    .await
+    .is_ok()
+        && let Some(latest_turn_context_cwd) = latest_turn_context_cwd
     {
-        return cwd_matches(latest_turn_context_cwd, cwd);
+        return cwd_matches(latest_turn_context_cwd.as_path(), cwd);
     }
 
     metadata::extract_metadata_from_rollout(rollout_path, default_provider)
@@ -110,7 +86,7 @@ async fn resume_candidate_matches_cwd(
         .is_ok_and(|outcome| cwd_matches(outcome.metadata.cwd.as_path(), cwd))
 }
 
-fn cwd_matches(session_cwd: &Path, cwd: &Path) -> bool {
+pub(crate) fn cwd_matches(session_cwd: &Path, cwd: &Path) -> bool {
     if let (Ok(ca), Ok(cb)) = (
         path_utils::normalize_for_path_comparison(session_cwd),
         path_utils::normalize_for_path_comparison(cwd),

@@ -1,7 +1,6 @@
 use super::ThreadStoreSummary;
 use praxis_core::Cursor as RolloutCursor;
 use praxis_core::ThreadSortKey;
-use praxis_core::config::Config;
 use praxis_rollout::ThreadSourceKind as ThreadStoreSourceKind;
 use std::path::PathBuf;
 
@@ -23,10 +22,9 @@ pub(in crate::praxis_message_processor) struct ThreadStoreListPage {
 }
 
 pub(super) async fn list_thread_summaries(
-    config: &Config,
+    store: &praxis_rollout::ThreadStore<'_, praxis_core::config::Config>,
     query: ThreadStoreListQuery,
 ) -> std::io::Result<ThreadStoreListPage> {
-    let store = praxis_rollout::ThreadStore::open(config).await;
     let page = store
         .list_threads(praxis_rollout::ListThreadsQuery {
             page_size: query.page_size,

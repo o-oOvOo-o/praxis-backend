@@ -2,9 +2,6 @@ use crate::agent::AgentStatus;
 use crate::agent::registry::AgentMetadata;
 use crate::error::PraxisErr;
 use crate::error::Result as PraxisResult;
-#[cfg(test)]
-use crate::find_archived_thread_path_by_id_str;
-use crate::find_thread_path_by_id_str;
 use crate::praxis_thread::ThreadConfigSnapshot;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::thread_manager::ThreadManagerInner;

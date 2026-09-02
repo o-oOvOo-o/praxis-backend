@@ -2,11 +2,17 @@
 
 use super::*;
 use crate::config::RolloutConfig;
+use crate::list::ThreadSortKey;
+use crate::thread_store::ThreadStore;
+use crate::thread_store::resume_selection::cwd_matches;
+use crate::thread_store::resume_selection::resume_candidate_matches_cwd;
 use chrono::TimeZone;
+use praxis_protocol::ThreadId;
 use praxis_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use praxis_protocol::protocol::AgentMessageEvent;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::EventMsg;
+use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_protocol::protocol::TurnContextItem;
 use praxis_protocol::protocol::UserMessageEvent;
@@ -334,34 +340,35 @@ async fn list_threads_db_paginates_without_filesystem_fallback() -> std::io::Res
     }
 
     let default_provider = config.model_provider_id.clone();
-    let page1 = RolloutRecorder::list_threads(
-        &config,
-        /*page_size*/ 1,
-        /*cursor*/ None,
-        ThreadSortKey::CreatedAt,
-        &[],
-        /*model_providers*/ None,
-        default_provider.as_str(),
-        /*cwd*/ None,
-        /*search_term*/ None,
-    )
-    .await?;
+    let store = ThreadStore::open(&config).await;
+    let page1 = store
+        .list_raw_threads(
+            /*page_size*/ 1,
+            /*cursor*/ None,
+            ThreadSortKey::CreatedAt,
+            &[],
+            /*model_providers*/ None,
+            default_provider.as_str(),
+            /*cwd*/ None,
+            /*search_term*/ None,
+        )
+        .await?;
     assert_eq!(page1.items.len(), 1);
     assert_eq!(page1.items[0].path, newest);
     let cursor = page1.next_cursor.clone().expect("cursor should be present");
 
-    let page2 = RolloutRecorder::list_threads(
-        &config,
-        /*page_size*/ 1,
-        Some(&cursor),
-        ThreadSortKey::CreatedAt,
-        &[],
-        /*model_providers*/ None,
-        default_provider.as_str(),
-        /*cwd*/ None,
-        /*search_term*/ None,
-    )
-    .await?;
+    let page2 = store
+        .list_raw_threads(
+            /*page_size*/ 1,
+            Some(&cursor),
+            ThreadSortKey::CreatedAt,
+            &[],
+            /*model_providers*/ None,
+            default_provider.as_str(),
+            /*cwd*/ None,
+            /*search_term*/ None,
+        )
+        .await?;
     assert_eq!(page2.items.len(), 1);
     assert_eq!(page2.items[0].path, middle);
     Ok(())
@@ -408,18 +415,19 @@ async fn list_threads_db_enabled_drops_missing_rollout_paths() -> std::io::Resul
         .expect("state db upsert should succeed");
 
     let default_provider = config.model_provider_id.clone();
-    let page = RolloutRecorder::list_threads(
-        &config,
-        /*page_size*/ 10,
-        /*cursor*/ None,
-        ThreadSortKey::CreatedAt,
-        &[],
-        /*model_providers*/ None,
-        default_provider.as_str(),
-        /*cwd*/ None,
-        /*search_term*/ None,
-    )
-    .await?;
+    let store = ThreadStore::open(&config).await;
+    let page = store
+        .list_raw_threads(
+            /*page_size*/ 10,
+            /*cursor*/ None,
+            ThreadSortKey::CreatedAt,
+            &[],
+            /*model_providers*/ None,
+            default_provider.as_str(),
+            /*cwd*/ None,
+            /*search_term*/ None,
+        )
+        .await?;
     assert_eq!(page.items.len(), 0);
     let stored_path = runtime
         .find_rollout_path_by_id(thread_id, Some(false))
@@ -471,18 +479,19 @@ async fn list_threads_db_enabled_does_not_repair_stale_paths_on_hot_list() -> st
         .expect("state db upsert should succeed");
 
     let default_provider = config.model_provider_id.clone();
-    let page = RolloutRecorder::list_threads(
-        &config,
-        /*page_size*/ 1,
-        /*cursor*/ None,
-        ThreadSortKey::CreatedAt,
-        &[],
-        /*model_providers*/ None,
-        default_provider.as_str(),
-        /*cwd*/ None,
-        /*search_term*/ None,
-    )
-    .await?;
+    let store = ThreadStore::open(&config).await;
+    let page = store
+        .list_raw_threads(
+            /*page_size*/ 1,
+            /*cursor*/ None,
+            ThreadSortKey::CreatedAt,
+            &[],
+            /*model_providers*/ None,
+            default_provider.as_str(),
+            /*cwd*/ None,
+            /*search_term*/ None,
+        )
+        .await?;
     assert_eq!(page.items.len(), 0);
 
     let stored_path = runtime

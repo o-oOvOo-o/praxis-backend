@@ -37,9 +37,6 @@ pub fn notify_payload_json(payload: &HookPayload) -> Result<String, serde_json::
                 last_assistant_message: event.last_assistant_message.clone(),
             })
         }
-        HookEvent::AfterToolUse { .. } => Err(serde_json::Error::io(std::io::Error::other(
-            "notify payload is only supported for after_agent",
-        ))),
     }
 }
 

@@ -58,11 +58,7 @@ impl Session {
         let runtime_command_items = self.claim_runtime_command_input_items().await;
         let mailbox_items = {
             let mut mailbox_rx = self.mailbox_rx.lock().await;
-            mailbox_rx
-                .drain()
-                .into_iter()
-                .map(|mail| mail.to_response_input_item())
-                .collect::<Vec<_>>()
+            mailbox_rx.take_pending()
         };
 
         let mut combined = Vec::with_capacity(
@@ -71,7 +67,11 @@ impl Session {
         // Priority order matters: explicit input, AgentOS commands, then mailbox notifications.
         combined.extend(pending_input);
         combined.extend(runtime_command_items.into_iter().map(Into::into));
-        combined.extend(mailbox_items.into_iter().map(Into::into));
+        combined.extend(
+            mailbox_items
+                .into_iter()
+                .map(|mail| mail.to_response_input_item().into()),
+        );
         combined
     }
 

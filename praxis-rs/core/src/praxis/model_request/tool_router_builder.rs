@@ -26,6 +26,46 @@ pub(crate) async fn built_tools(
     skills_outcome: Option<&SkillLoadOutcome>,
     cancellation_token: &CancellationToken,
 ) -> PraxisResult<ToolCapabilities> {
+    if let Some(tools) = turn_context.tool_capabilities.get() {
+        tracing::trace!(
+            turn_id = %turn_context.sub_id,
+            "reusing frozen turn tool capabilities"
+        );
+        return Ok(tools.clone());
+    }
+    let started_at = std::time::Instant::now();
+    turn_context
+        .tool_capabilities
+        .get_or_try_init(|| async {
+            build_and_publish_tools(
+                sess,
+                turn_context,
+                input,
+                explicitly_enabled_connectors,
+                skills_outcome,
+                cancellation_token,
+            )
+            .await
+        })
+        .await
+        .cloned()
+        .inspect(|_| {
+            tracing::debug!(
+                turn_id = %turn_context.sub_id,
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "prepared frozen turn tool capabilities"
+            );
+        })
+}
+
+async fn build_and_publish_tools(
+    sess: &Session,
+    turn_context: &TurnContext,
+    input: &[ResponseItem],
+    explicitly_enabled_connectors: &HashSet<String>,
+    skills_outcome: Option<&SkillLoadOutcome>,
+    cancellation_token: &CancellationToken,
+) -> PraxisResult<ToolCapabilities> {
     let mcp_snapshot = mcp_snapshot::load(sess, cancellation_token).await?;
     let tool_visibility_policy = visibility::resolve(sess, turn_context);
     let code_mode_router = ToolRouter::from_config(

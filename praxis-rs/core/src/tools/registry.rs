@@ -2,7 +2,6 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use crate::function_tool::FunctionCallError;
 use crate::hook_runtime::record_additional_contexts;
@@ -15,13 +14,6 @@ use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
 use async_trait::async_trait;
-use praxis_hooks::HookEvent;
-use praxis_hooks::HookEventAfterToolUse;
-use praxis_hooks::HookPayload;
-use praxis_hooks::HookResult;
-use praxis_hooks::HookToolInput;
-use praxis_hooks::HookToolInputLocalShell;
-use praxis_hooks::HookToolKind;
 use praxis_loop::tool::ToolEffects;
 use praxis_protocol::models::ResponseInputItem;
 use praxis_protocol::protocol::SandboxPolicy;
@@ -447,7 +439,6 @@ impl ToolRegistry {
         let response_cell = tokio::sync::Mutex::new(None);
         let invocation_for_tool = invocation.clone();
 
-        let started = Instant::now();
         let result = otel
             .log_tool_result_with_tags(
                 tool_name.as_ref(),
@@ -491,10 +482,9 @@ impl ToolRegistry {
                 },
             )
             .await;
-        let duration = started.elapsed();
-        let (output_preview, success) = match &result {
-            Ok((preview, success)) => (preview.clone(), *success),
-            Err(err) => (err.to_string(), false),
+        let success = match &result {
+            Ok((_, success)) => *success,
+            Err(_) => false,
         };
         emit_metric_for_tool_read(&invocation, success).await;
         let post_tool_use_payload = if success {
@@ -523,21 +513,6 @@ impl ToolRegistry {
         } else {
             None
         };
-        // Deprecated: this is the legacy AfterToolUse hook. Prefer the new PostToolUse
-        let hook_abort_error = dispatch_after_tool_use_hook(AfterToolUseHookDispatch {
-            invocation: &invocation,
-            output_preview,
-            success,
-            executed: true,
-            duration,
-            mutating: is_mutating,
-        })
-        .await;
-
-        if let Some(err) = hook_abort_error {
-            return Err(err);
-        }
-
         if let Some(outcome) = &post_tool_use_outcome {
             record_additional_contexts(
                 &invocation.session,
@@ -684,134 +659,6 @@ fn sandbox_policy_tag(policy: &SandboxPolicy) -> &'static str {
         SandboxPolicy::DangerFullAccess => "danger-full-access",
         SandboxPolicy::ExternalSandbox { .. } => "external-sandbox",
     }
-}
-
-// Hooks use a separate wire-facing input type so hook payload JSON stays stable
-// and decoupled from core's internal tool runtime representation.
-impl From<&ToolPayload> for HookToolInput {
-    fn from(payload: &ToolPayload) -> Self {
-        match payload {
-            ToolPayload::Function { arguments } => HookToolInput::Function {
-                arguments: arguments.clone(),
-            },
-            ToolPayload::ToolSearch { arguments } => HookToolInput::Function {
-                arguments: serde_json::json!({
-                    "query": arguments.query,
-                    "limit": arguments.limit,
-                })
-                .to_string(),
-            },
-            ToolPayload::Custom { input } => HookToolInput::Custom {
-                input: input.clone(),
-            },
-            ToolPayload::LocalShell { params } => HookToolInput::LocalShell {
-                params: HookToolInputLocalShell {
-                    command: params.command.clone(),
-                    workdir: params.workdir.clone(),
-                    timeout_ms: params.timeout_ms,
-                    sandbox_permissions: params.sandbox_permissions,
-                    prefix_rule: params.prefix_rule.clone(),
-                    justification: params.justification.clone(),
-                },
-            },
-            ToolPayload::Mcp {
-                server,
-                tool,
-                raw_arguments,
-            } => HookToolInput::Mcp {
-                server: server.clone(),
-                tool: tool.clone(),
-                arguments: raw_arguments.clone(),
-            },
-        }
-    }
-}
-
-fn hook_tool_kind(tool_input: &HookToolInput) -> HookToolKind {
-    match tool_input {
-        HookToolInput::Function { .. } => HookToolKind::Function,
-        HookToolInput::Custom { .. } => HookToolKind::Custom,
-        HookToolInput::LocalShell { .. } => HookToolKind::LocalShell,
-        HookToolInput::Mcp { .. } => HookToolKind::Mcp,
-    }
-}
-
-struct AfterToolUseHookDispatch<'a> {
-    invocation: &'a ToolInvocation,
-    output_preview: String,
-    success: bool,
-    executed: bool,
-    duration: Duration,
-    mutating: bool,
-}
-
-async fn dispatch_after_tool_use_hook(
-    dispatch: AfterToolUseHookDispatch<'_>,
-) -> Option<FunctionCallError> {
-    let AfterToolUseHookDispatch { invocation, .. } = dispatch;
-    let session = invocation.session.as_ref();
-    let turn = invocation.turn.as_ref();
-    let tool_input = HookToolInput::from(&invocation.payload);
-    let permissions = turn.effective_permissions();
-    let hook_outcomes = session
-        .hook_capability()
-        .dispatch(HookPayload {
-            session_id: session.conversation_id,
-            cwd: turn.cwd.to_path_buf(),
-            client: turn.app_gateway_client_name.clone(),
-            triggered_at: chrono::Utc::now(),
-            hook_event: HookEvent::AfterToolUse {
-                event: HookEventAfterToolUse {
-                    turn_id: turn.sub_id.clone(),
-                    call_id: invocation.call_id.clone(),
-                    tool_name: invocation.tool_name.clone(),
-                    tool_kind: hook_tool_kind(&tool_input),
-                    tool_input,
-                    executed: dispatch.executed,
-                    success: dispatch.success,
-                    duration_ms: u64::try_from(dispatch.duration.as_millis()).unwrap_or(u64::MAX),
-                    mutating: dispatch.mutating,
-                    sandbox: sandbox_tag(
-                        &permissions.sandbox_policy,
-                        permissions.windows_sandbox_level,
-                    )
-                    .to_string(),
-                    sandbox_policy: sandbox_policy_tag(&permissions.sandbox_policy).to_string(),
-                    output_preview: dispatch.output_preview.clone(),
-                },
-            },
-        })
-        .await;
-
-    for hook_outcome in hook_outcomes {
-        let hook_name = hook_outcome.hook_name;
-        match hook_outcome.result {
-            HookResult::Success => {}
-            HookResult::FailedContinue(error) => {
-                warn!(
-                    call_id = %invocation.call_id,
-                    tool_name = %invocation.tool_name,
-                    hook_name = %hook_name,
-                    error = %error,
-                    "after_tool_use hook failed; continuing"
-                );
-            }
-            HookResult::FailedAbort(error) => {
-                warn!(
-                    call_id = %invocation.call_id,
-                    tool_name = %invocation.tool_name,
-                    hook_name = %hook_name,
-                    error = %error,
-                    "after_tool_use hook failed; aborting operation"
-                );
-                return Some(FunctionCallError::Fatal(format!(
-                    "after_tool_use hook '{hook_name}' failed and aborted operation: {error}"
-                )));
-            }
-        }
-    }
-
-    None
 }
 
 #[cfg(test)]

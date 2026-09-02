@@ -24,7 +24,6 @@ use tracing::warn;
 
 use crate::INTERACTIVE_SESSION_SOURCES;
 use crate::RolloutConfigView;
-use crate::RolloutRecorder;
 use crate::list::Cursor;
 use crate::list::ThreadArchiveFilter;
 use crate::list::ThreadItem;
@@ -33,6 +32,11 @@ use crate::list::ThreadsPage;
 use crate::metadata;
 use crate::state_db;
 use crate::state_db::StateDbHandle;
+
+mod directory;
+pub(crate) mod resume_selection;
+
+use resume_selection::select_resume_path;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadGitInfo {
@@ -128,6 +132,99 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
 
     pub async fn list_threads(&self, query: ListThreadsQuery) -> io::Result<ThreadSummaryPage> {
         list_threads_with_state_db(self.config, self.state_db(), query).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn list_raw_threads(
+        &self,
+        page_size: usize,
+        cursor: Option<&Cursor>,
+        sort_key: ThreadSortKey,
+        allowed_sources: &[SessionSource],
+        model_providers: Option<&[String]>,
+        default_provider: &str,
+        cwd: Option<&Path>,
+        search_term: Option<&str>,
+    ) -> io::Result<ThreadsPage> {
+        directory::list_raw_threads(
+            self.config,
+            self.state_db(),
+            page_size,
+            cursor,
+            sort_key,
+            allowed_sources,
+            None,
+            model_providers,
+            default_provider,
+            false,
+            cwd,
+            search_term,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn list_archived_raw_threads(
+        &self,
+        page_size: usize,
+        cursor: Option<&Cursor>,
+        sort_key: ThreadSortKey,
+        allowed_sources: &[SessionSource],
+        model_providers: Option<&[String]>,
+        default_provider: &str,
+        cwd: Option<&Path>,
+        search_term: Option<&str>,
+    ) -> io::Result<ThreadsPage> {
+        directory::list_raw_threads(
+            self.config,
+            self.state_db(),
+            page_size,
+            cursor,
+            sort_key,
+            allowed_sources,
+            None,
+            model_providers,
+            default_provider,
+            true,
+            cwd,
+            search_term,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn find_latest_rollout_path(
+        &self,
+        page_size: usize,
+        cursor: Option<&Cursor>,
+        sort_key: ThreadSortKey,
+        allowed_sources: &[SessionSource],
+        model_providers: Option<&[String]>,
+        default_provider: &str,
+        filter_cwd: Option<&Path>,
+    ) -> io::Result<Option<PathBuf>> {
+        let mut cursor = cursor.cloned();
+        loop {
+            let page = self
+                .list_raw_threads(
+                    page_size,
+                    cursor.as_ref(),
+                    sort_key,
+                    allowed_sources,
+                    model_providers,
+                    default_provider,
+                    filter_cwd,
+                    None,
+                )
+                .await?;
+            if let Some(path) = select_resume_path(&page, filter_cwd, default_provider).await {
+                return Ok(Some(path));
+            }
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                return Ok(None);
+            }
+        }
     }
 
     pub async fn resolve_thread_names(
@@ -557,7 +654,7 @@ async fn list_directory_page(
         }
     }
 
-    let page = RolloutRecorder::list_threads_with_db_context(
+    let page = directory::list_raw_threads(
         config,
         None,
         page_size,

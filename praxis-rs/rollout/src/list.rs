@@ -989,21 +989,6 @@ async fn find_thread_path_by_id_str_in_subdir_with_db_context(
     Ok(found)
 }
 
-async fn find_thread_path_by_id_str_for_archive_filter(
-    praxis_home: &Path,
-    id_str: &str,
-    archive_filter: ThreadArchiveFilter,
-) -> io::Result<Option<PathBuf>> {
-    let state_db_ctx = state_db::open_if_present(praxis_home, "").await;
-    find_thread_path_by_id_str_with_db_context(
-        praxis_home,
-        id_str,
-        archive_filter,
-        state_db_ctx.as_deref(),
-    )
-    .await
-}
-
 pub(crate) async fn find_thread_path_by_id_str_with_db_context(
     praxis_home: &Path,
     id_str: &str,
@@ -1049,34 +1034,6 @@ pub(crate) async fn find_thread_path_by_id_str_with_db_context(
             .await
         }
     }
-}
-
-/// Locate a recorded thread rollout file by its UUID string using the existing
-/// paginated listing implementation. Returns `Ok(Some(path))` if found, `Ok(None)` if not present
-/// or the id is invalid.
-pub async fn find_thread_path_by_id_str(
-    praxis_home: &Path,
-    id_str: &str,
-) -> io::Result<Option<PathBuf>> {
-    find_thread_path_by_id_str_for_archive_filter(
-        praxis_home,
-        id_str,
-        ThreadArchiveFilter::ActiveOnly,
-    )
-    .await
-}
-
-/// Locate an archived thread rollout file by its UUID string.
-pub async fn find_archived_thread_path_by_id_str(
-    praxis_home: &Path,
-    id_str: &str,
-) -> io::Result<Option<PathBuf>> {
-    find_thread_path_by_id_str_for_archive_filter(
-        praxis_home,
-        id_str,
-        ThreadArchiveFilter::ArchivedOnly,
-    )
-    .await
 }
 
 /// Extract the `YYYY/MM/DD` directory components from a rollout filename.

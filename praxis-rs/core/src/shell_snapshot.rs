@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use crate::rollout::list::find_thread_path_by_id_str;
 use crate::shell::Shell;
 use crate::shell::ShellType;
 use crate::shell::get_shell;
@@ -503,6 +502,14 @@ pub async fn cleanup_stale_snapshots(
 
     let now = SystemTime::now();
     let active_session_id = active_session_id.to_string();
+    let store_config = praxis_rollout::RolloutConfig {
+        praxis_home: praxis_home.to_path_buf(),
+        sqlite_home: praxis_home.to_path_buf(),
+        cwd: praxis_home.to_path_buf(),
+        model_provider_id: String::new(),
+        generate_memories: false,
+    };
+    let thread_store = praxis_rollout::ThreadStore::open(&store_config).await;
 
     while let Some(entry) = entries.next_entry().await? {
         if !entry.file_type().await?.is_file() {
@@ -521,7 +528,13 @@ pub async fn cleanup_stale_snapshots(
             continue;
         }
 
-        let rollout_path = find_thread_path_by_id_str(praxis_home, session_id).await?;
+        let Ok(thread_id) = ThreadId::from_string(session_id) else {
+            remove_snapshot_file(&path).await;
+            continue;
+        };
+        let rollout_path = thread_store
+            .find_rollout_path(thread_id, Some(false))
+            .await?;
         let Some(rollout_path) = rollout_path else {
             remove_snapshot_file(&path).await;
             continue;
