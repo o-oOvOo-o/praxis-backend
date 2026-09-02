@@ -736,11 +736,11 @@ async fn run_exec_session(args: ExecRunArgs) -> anyhow::Result<()> {
 
     info!("Praxis initialized with event: {session_configured:?}");
 
-    let (interrupt_tx, mut interrupt_rx) = mpsc::unbounded_channel::<()>();
+    let (interrupt_tx, mut interrupt_rx) = mpsc::channel::<()>(1);
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
             tracing::debug!("Keyboard interrupt");
-            let _ = interrupt_tx.send(());
+            let _ = interrupt_tx.send(()).await;
         }
     });
 
