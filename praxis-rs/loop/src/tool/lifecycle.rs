@@ -1,7 +1,6 @@
 use async_trait::async_trait;
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::mpsc::UnboundedSender;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::model::TurnItem;
 use crate::outcome::LoopResult;
@@ -14,11 +13,11 @@ use crate::tool::ToolResult;
 
 pub(super) struct RecordedToolLifecycle<'a, P: ToolLifecycleSink + ?Sized> {
     inner: &'a P,
-    items: UnboundedSender<TurnItem>,
+    items: Arc<Mutex<Vec<TurnItem>>>,
 }
 
 pub(super) struct RecordedToolLifecycleDrain {
-    items: UnboundedReceiver<TurnItem>,
+    items: Arc<Mutex<Vec<TurnItem>>>,
 }
 
 impl<'a, P> RecordedToolLifecycle<'a, P>
@@ -26,34 +25,41 @@ where
     P: ToolLifecycleSink + ?Sized,
 {
     pub(super) fn new(inner: &'a P) -> (Self, RecordedToolLifecycleDrain) {
-        let (items_tx, items_rx) = mpsc::unbounded_channel();
+        let items = Arc::new(Mutex::new(Vec::new()));
         (
             Self {
                 inner,
-                items: items_tx,
+                items: Arc::clone(&items),
             },
-            RecordedToolLifecycleDrain { items: items_rx },
+            RecordedToolLifecycleDrain { items },
         )
     }
 
     fn record_item(&self, item: TurnItem) -> LoopResult<()> {
-        self.items.send(item).map_err(|_| {
-            TurnError::new(
-                TurnErrorKind::Internal,
-                "tool lifecycle recorder receiver was closed",
-            )
-        })
+        self.items
+            .lock()
+            .map_err(|_| {
+                TurnError::new(
+                    TurnErrorKind::Internal,
+                    "tool lifecycle recorder lock was poisoned",
+                )
+            })?
+            .push(item);
+        Ok(())
     }
 }
 
 impl RecordedToolLifecycleDrain {
-    pub(super) fn finish(mut self) -> Vec<TurnItem> {
-        self.items.close();
-        let mut items = Vec::new();
-        while let Ok(item) = self.items.try_recv() {
-            items.push(item);
+    pub(super) fn finish(self) -> Vec<TurnItem> {
+        match Arc::try_unwrap(self.items) {
+            Ok(items) => items
+                .into_inner()
+                .unwrap_or_else(|error| error.into_inner()),
+            Err(items) => {
+                let mut items = items.lock().unwrap_or_else(|error| error.into_inner());
+                std::mem::take(&mut *items)
+            }
         }
-        items
     }
 }
 
