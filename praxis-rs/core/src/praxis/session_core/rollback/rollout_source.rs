@@ -15,7 +15,16 @@ pub(super) async fn load_flushed_history(
     if !flush_current_rollout(session, &turn_context.sub_id, &rollout_path).await {
         return None;
     }
-    load_rollout_history(session, &turn_context.sub_id, &rollout_path).await
+    let history_reader = praxis_rollout::ThreadHistoryReader::from_praxis_home(
+        turn_context.config.praxis_home.clone(),
+    );
+    load_rollout_history(
+        session,
+        &turn_context.sub_id,
+        &rollout_path,
+        &history_reader,
+    )
+    .await
 }
 
 async fn persisted_rollout_path(session: &Session, event_id: &str) -> Option<PathBuf> {
@@ -63,8 +72,9 @@ async fn load_rollout_history(
     session: &Session,
     event_id: &str,
     rollout_path: &Path,
+    history_reader: &praxis_rollout::ThreadHistoryReader,
 ) -> Option<InitialHistory> {
-    match praxis_rollout::thread_store::read_initial_history(rollout_path).await {
+    match history_reader.read_initial_history(rollout_path).await {
         Ok(history) => Some(history),
         Err(err) => {
             session

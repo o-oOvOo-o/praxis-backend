@@ -564,7 +564,9 @@ async fn load_rollout_items_for_fork(
         return Ok(None);
     };
     let history =
-        praxis_rollout::thread_store::read_initial_history(rollout_path.as_path()).await?;
+        praxis_rollout::ThreadHistoryReader::from_praxis_home(session.praxis_home().await)
+            .read_initial_history(rollout_path.as_path())
+            .await?;
     Ok(Some(history.get_rollout_items()))
 }
 

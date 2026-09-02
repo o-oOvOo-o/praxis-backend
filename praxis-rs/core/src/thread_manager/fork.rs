@@ -57,7 +57,10 @@ impl ThreadManager {
         S: Into<ThreadForkSnapshot>,
     {
         let snapshot = snapshot.into();
-        let history = praxis_rollout::thread_store::read_initial_history(&path).await?;
+        let history =
+            praxis_rollout::ThreadHistoryReader::from_praxis_home(config.praxis_home.clone())
+                .read_initial_history(&path)
+                .await?;
         let history = fork_initial_history(snapshot, history);
         Box::pin(self.state.spawn_thread_with_requested_id(
             config,

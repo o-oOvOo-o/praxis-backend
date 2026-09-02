@@ -320,7 +320,10 @@ mod job {
         rollout_cwd: &Path,
         stage_one_context: &RequestContext,
     ) -> anyhow::Result<(StageOneOutput, Option<TokenUsage>)> {
-        let (rollout_items, _, _) = praxis_rollout::thread_store::read_items(rollout_path).await?;
+        let rollout_items =
+            praxis_rollout::ThreadHistoryReader::from_praxis_home(session.praxis_home().await)
+                .read_items(rollout_path)
+                .await?;
         let rollout_contents = serialize_filtered_rollout_response_items(&rollout_items)?;
 
         let prompt = Prompt {
