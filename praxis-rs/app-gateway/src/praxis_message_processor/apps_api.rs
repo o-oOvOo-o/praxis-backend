@@ -96,7 +96,7 @@ impl PraxisMessageProcessor {
         );
         let cached_all_connectors = all_connectors.clone();
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, mut rx) = tokio::sync::mpsc::channel(2);
 
         let accessible_config = config.clone();
         let accessible_tx = tx.clone();
@@ -107,7 +107,9 @@ impl PraxisMessageProcessor {
             )
             .await
             .map_err(|err| format!("failed to load accessible apps: {err}"));
-            let _ = accessible_tx.send(AppListLoadResult::Accessible(result));
+            let _ = accessible_tx
+                .send(AppListLoadResult::Accessible(result))
+                .await;
         });
 
         let all_config = config.clone();
@@ -115,7 +117,7 @@ impl PraxisMessageProcessor {
             let result = connectors::list_all_connectors_with_options(&all_config, force_refetch)
                 .await
                 .map_err(|err| format!("failed to list apps: {err}"));
-            let _ = tx.send(AppListLoadResult::Directory(result));
+            let _ = tx.send(AppListLoadResult::Directory(result)).await;
         });
 
         let app_list_deadline = tokio::time::Instant::now() + APP_LIST_LOAD_TIMEOUT;
