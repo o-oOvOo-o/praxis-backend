@@ -29,7 +29,7 @@ pub(super) struct NativeRolloutInit {
     pub workspace: String,
 }
 
-pub(super) struct NativeRolloutWriter {
+pub(crate) struct NativeRolloutWriter {
     thread: LiveThreadStore,
     thread_id: ThreadId,
     next_sequence: u64,
@@ -38,7 +38,7 @@ pub(super) struct NativeRolloutWriter {
 }
 
 impl NativeRolloutWriter {
-    pub(super) async fn resume(praxis_home: PathBuf, rollout_path: &Path) -> io::Result<Self> {
+    pub(crate) async fn resume(praxis_home: PathBuf, rollout_path: &Path) -> io::Result<Self> {
         let thread_id = crate::thread_store::thread_id_from_rollout_path(rollout_path)
             .ok_or_else(|| io::Error::other("rollout path does not contain a thread id"))?;
         let native_thread_id = native_thread_id(thread_id)?;
@@ -78,7 +78,7 @@ impl NativeRolloutWriter {
                 .map(NativeRolloutMetadata::from_summary)
                 .unwrap_or_default()
         } else {
-            recover_metadata(&thread, thread_id).await?
+            recover_metadata(&thread, thread_id, rollout_path).await?
         };
         let mut writer = Self {
             thread,
@@ -117,6 +117,11 @@ impl NativeRolloutWriter {
             .next_agent_event_sequence()
             .await
             .map_err(store_error)?;
+        let projection_updated_at = if projection_exists {
+            rollout_modified_unix_ms(rollout_path).await
+        } else {
+            None
+        };
         let metadata_generation = thread
             .agent_event_metadata_generation()
             .await
@@ -130,9 +135,10 @@ impl NativeRolloutWriter {
                 .map(NativeRolloutMetadata::from_summary)
                 .unwrap_or_default()
         } else if existed {
-            recover_metadata(&thread, init.thread_id).await?
+            recover_metadata(&thread, init.thread_id, rollout_path).await?
         } else {
             NativeRolloutMetadata {
+                updated_at_unix_ms: projection_updated_at,
                 workspace: Some(init.workspace),
                 ..NativeRolloutMetadata::default()
             }
@@ -153,9 +159,11 @@ impl NativeRolloutWriter {
                 .import_projection(rollout_path, init.thread_id)
                 .await?;
         }
-        writer
-            .reconcile_metadata_if_needed(NativeMetadataDelta::default())
-            .await?;
+        if writer.next_sequence > 1 {
+            writer
+                .reconcile_metadata_if_needed(NativeMetadataDelta::default())
+                .await?;
+        }
         Ok(writer)
     }
 
@@ -165,6 +173,7 @@ impl NativeRolloutWriter {
         expected_thread_id: ThreadId,
     ) -> io::Result<()> {
         let items = read_projection(rollout_path, expected_thread_id).await?;
+        self.metadata.updated_at_unix_ms = rollout_modified_unix_ms(rollout_path).await;
         self.append(&items).await
     }
 
@@ -235,8 +244,10 @@ impl NativeRolloutWriter {
                 .await?;
         }
         if upgrading {
-            self.execute_metadata(ThreadCommand::MarkAgentEventMetadataReconciled {
+            self.execute_metadata(ThreadCommand::ReconcileAgentEventTimeline {
                 generation: METADATA_GENERATION,
+                created_at_unix_ms: self.metadata.created_at_unix_ms,
+                updated_at_unix_ms: self.metadata.updated_at_unix_ms,
             })
             .await?;
             self.metadata_generation = METADATA_GENERATION;
@@ -257,7 +268,7 @@ impl NativeRolloutWriter {
         Ok(())
     }
 
-    pub(super) async fn sync(&self) -> io::Result<()> {
+    pub(crate) async fn sync(&self) -> io::Result<()> {
         self.thread.sync().await.map_err(store_error)?;
         Ok(())
     }
@@ -324,8 +335,9 @@ impl NativeRolloutWriter {
 async fn recover_metadata(
     thread: &LiveThreadStore,
     expected_thread_id: ThreadId,
+    rollout_path: &Path,
 ) -> io::Result<NativeRolloutMetadata> {
-    thread
+    let mut metadata = thread
         .fold_all(NativeRolloutMetadata::default(), move |metadata, event| {
             if let ThreadEventBody::NativeAgentEventRecorded { payload, .. } = &event.body
                 && let Some(item) = decode_item(payload)
@@ -334,7 +346,18 @@ async fn recover_metadata(
             }
         })
         .await
-        .map_err(store_error)
+        .map_err(store_error)?;
+    metadata.updated_at_unix_ms = rollout_modified_unix_ms(rollout_path).await;
+    Ok(metadata)
+}
+
+async fn rollout_modified_unix_ms(rollout_path: &Path) -> Option<i64> {
+    tokio::fs::metadata(rollout_path)
+        .await
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
 }
 
 struct ProjectionRebuild {

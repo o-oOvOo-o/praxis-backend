@@ -960,6 +960,15 @@ fn replay_command(body: ThreadEventBody) -> Option<ThreadCommand> {
         ThreadEventBody::AgentEventMetadataReconciled { generation } => {
             ThreadCommand::MarkAgentEventMetadataReconciled { generation }
         }
+        ThreadEventBody::AgentEventTimelineReconciled {
+            generation,
+            created_at_unix_ms,
+            updated_at_unix_ms,
+        } => ThreadCommand::ReconcileAgentEventTimeline {
+            generation,
+            created_at_unix_ms,
+            updated_at_unix_ms,
+        },
     })
 }
 

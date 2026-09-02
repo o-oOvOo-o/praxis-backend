@@ -637,6 +637,15 @@ fn event_body(command: ThreadCommand) -> ThreadEventBody {
         ThreadCommand::MarkAgentEventMetadataReconciled { generation } => {
             ThreadEventBody::AgentEventMetadataReconciled { generation }
         }
+        ThreadCommand::ReconcileAgentEventTimeline {
+            generation,
+            created_at_unix_ms,
+            updated_at_unix_ms,
+        } => ThreadEventBody::AgentEventTimelineReconciled {
+            generation,
+            created_at_unix_ms,
+            updated_at_unix_ms,
+        },
         ThreadCommand::ReconcileSessionMetadata { .. } => {
             unreachable!("metadata reconciliation is projected as an event batch")
         }

@@ -35,6 +35,7 @@ use crate::state_db::StateDbHandle;
 
 mod directory;
 mod history;
+mod migration;
 pub(crate) mod native_codec;
 pub(crate) mod resume_selection;
 
@@ -112,6 +113,7 @@ struct SourceFilters {
 }
 
 enum DirectoryPage {
+    Native(Vec<ThreadSummary>, Option<Cursor>),
     Db(praxis_state::ThreadsPage),
     Fs(ThreadsPage),
 }
@@ -119,6 +121,7 @@ enum DirectoryPage {
 impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
     pub async fn open(config: &'a C) -> Self {
         let state_db = state_db::get_state_db(config).await;
+        migration::ensure_started(config);
         let history = ThreadHistoryReader::from_praxis_home(config.praxis_home().to_path_buf());
         Self {
             config,
@@ -274,6 +277,32 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
 
     pub async fn write_thread_name(&self, thread_id: ThreadId, name: &str) -> io::Result<()> {
         self.name_writer().write_name(thread_id, name).await
+    }
+
+    pub async fn set_archived(&self, thread_id: ThreadId, archived: bool) -> io::Result<()> {
+        let native_id =
+            praxis_thread_store_contracts::ThreadId::parse(thread_id.to_string().as_str())
+                .map_err(|error| io::Error::other(error.to_string()))?;
+        let native_store = praxis_thread_store::ThreadStore::from_praxis_home(
+            self.config.praxis_home().to_path_buf(),
+        );
+        if native_store.thread_exists(native_id).await {
+            native_store
+                .set_archived(native_id, archived)
+                .await
+                .map_err(|error| io::Error::other(error.to_string()))?;
+        }
+        Ok(())
+    }
+
+    pub async fn delete_native_thread(&self, thread_id: ThreadId) -> io::Result<bool> {
+        let native_id =
+            praxis_thread_store_contracts::ThreadId::parse(thread_id.to_string().as_str())
+                .map_err(|error| io::Error::other(error.to_string()))?;
+        praxis_thread_store::ThreadStore::from_praxis_home(self.config.praxis_home().to_path_buf())
+            .delete_thread(native_id)
+            .await
+            .map_err(|error| io::Error::other(error.to_string()))
     }
 
     pub async fn thread_exists(
@@ -565,6 +594,10 @@ async fn list_threads_with_state_db(
 
         let (mut summaries, page_next_cursor, page_scanned_files, page_reached_scan_cap) =
             match page {
+                DirectoryPage::Native(summaries, next_cursor) => {
+                    let num_scanned_rows = summaries.len();
+                    (summaries, next_cursor, num_scanned_rows, false)
+                }
                 DirectoryPage::Db(page) => {
                     let next_cursor = page.next_anchor.map(Into::into);
                     let num_scanned_rows = page.num_scanned_rows;
@@ -623,7 +656,9 @@ async fn list_threads_with_state_db(
         .resolve_names(&thread_ids)
         .await;
     for summary in &mut items {
-        summary.thread_name = names.get(&summary.conversation_id).cloned();
+        if let Some(name) = names.get(&summary.conversation_id) {
+            summary.thread_name = Some(name.clone());
+        }
     }
 
     Ok(ThreadSummaryPage {
@@ -648,6 +683,29 @@ async fn list_directory_page(
     cwd: Option<&Path>,
     search_term: Option<&str>,
 ) -> std::io::Result<DirectoryPage> {
+    if search_term.is_none() && migration::is_complete(config.praxis_home()) {
+        match list_native_directory_page(
+            config,
+            state_db_ctx,
+            page_size,
+            cursor,
+            sort_key,
+            source_filters,
+            model_providers,
+            fallback_provider,
+            archived,
+            cwd,
+            search_term,
+        )
+        .await
+        {
+            Ok(page) => return Ok(page),
+            Err(error) => {
+                warn!("native thread index list failed; using migration fallback: {error}")
+            }
+        }
+    }
+
     if let Some(ctx) = state_db_ctx {
         let backfill_complete = state_db::is_backfill_complete(Some(ctx), "list_threads")
             .await
@@ -704,6 +762,144 @@ async fn list_directory_page(
     )
     .await?;
     Ok(DirectoryPage::Fs(page))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn list_native_directory_page(
+    config: &impl RolloutConfigView,
+    state_db_ctx: Option<&praxis_state::StateRuntime>,
+    page_size: usize,
+    cursor: Option<&Cursor>,
+    sort_key: ThreadSortKey,
+    source_filters: &SourceFilters,
+    model_providers: Option<&[String]>,
+    fallback_provider: &str,
+    archived: bool,
+    cwd: Option<&Path>,
+    search_term: Option<&str>,
+) -> io::Result<DirectoryPage> {
+    let mut query = praxis_thread_store::ThreadListQuery {
+        archived: Some(archived),
+        workspace: cwd.map(|path| {
+            state_db::normalize_cwd_for_state_db(path)
+                .to_string_lossy()
+                .into_owned()
+        }),
+        sources: Some(
+            source_filters
+                .allowed_sources
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
+        ),
+        model_providers: model_providers.map(<[String]>::to_vec),
+        search: search_term.map(str::to_owned),
+        limit: Some(page_size),
+        sort: match sort_key {
+            ThreadSortKey::CreatedAt => praxis_thread_store::ThreadListSort::CreatedAt,
+            ThreadSortKey::UpdatedAt => praxis_thread_store::ThreadListSort::UpdatedAt,
+        },
+        ..praxis_thread_store::ThreadListQuery::default()
+    };
+    if let Some(cursor) = cursor {
+        let (sort_value, id) = cursor.native_parts();
+        let thread_id = praxis_thread_store_contracts::ThreadId::parse(id.to_string().as_str())
+            .map_err(|error| io::Error::other(error.to_string()))?;
+        query.set_cursor_after(sort_value, thread_id);
+    }
+    let page =
+        praxis_thread_store::ThreadStore::from_praxis_home(config.praxis_home().to_path_buf())
+            .list_threads(query)
+            .await
+            .map_err(|error| io::Error::other(error.to_string()))?;
+    let protocol_ids = page
+        .items
+        .iter()
+        .filter_map(|summary| ThreadId::from_string(&summary.thread_id.to_string()).ok())
+        .collect::<HashSet<_>>();
+    let state_threads = if let Some(state_db) = state_db_ctx {
+        state_db
+            .get_threads(&protocol_ids)
+            .await
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
+    let next_cursor = page.next_cursor.as_ref().and_then(|_| {
+        let last = page.items.last()?;
+        let unix_ms = match sort_key {
+            ThreadSortKey::CreatedAt => last.created_at_unix_ms,
+            ThreadSortKey::UpdatedAt => last.updated_at_unix_ms,
+        };
+        let id = uuid::Uuid::parse_str(&last.thread_id.to_string()).ok()?;
+        Cursor::from_native_parts(unix_ms, id)
+    });
+    let mut summaries = Vec::with_capacity(page.items.len());
+    for native in page.items {
+        let Some(thread_id) = ThreadId::from_string(&native.thread_id.to_string()).ok() else {
+            continue;
+        };
+        let path = if let Some(metadata) = state_threads.get(&thread_id) {
+            Some(metadata.rollout_path.clone())
+        } else {
+            crate::list::find_thread_path_by_id_str_with_db_context(
+                config.praxis_home(),
+                &thread_id.to_string(),
+                ThreadArchiveFilter::from_archived_only(Some(archived)),
+                state_db_ctx,
+            )
+            .await?
+        };
+        let Some(path) = path else {
+            continue;
+        };
+        let mut summary = state_threads
+            .get(&thread_id)
+            .map(summary_from_thread_metadata)
+            .unwrap_or_else(|| summary_from_native(native.clone(), thread_id, path));
+        summary.preview = native.first_user_message.unwrap_or_default();
+        summary.summary = native.summary;
+        summary.model_provider = native
+            .model_provider
+            .unwrap_or_else(|| fallback_provider.to_owned());
+        summary.model = native.model;
+        summary.cwd = PathBuf::from(native.workspace);
+        summary.total_cost_micros = native.total_cost_micros;
+        summary.last_cost_micros = native.last_cost_micros;
+        summary.thread_name = native.name;
+        summaries.push(summary);
+    }
+    Ok(DirectoryPage::Native(summaries, next_cursor))
+}
+
+fn summary_from_native(
+    native: praxis_thread_store::ThreadSummary,
+    thread_id: ThreadId,
+    path: PathBuf,
+) -> ThreadSummary {
+    let timestamp = chrono::DateTime::from_timestamp_millis(native.created_at_unix_ms)
+        .map(|value| value.to_rfc3339_opts(SecondsFormat::Secs, true));
+    let updated_at = chrono::DateTime::from_timestamp_millis(native.updated_at_unix_ms)
+        .map(|value| value.to_rfc3339_opts(SecondsFormat::Secs, true));
+    ThreadSummary {
+        conversation_id: thread_id,
+        path,
+        preview: native.first_user_message.unwrap_or_default(),
+        summary: native.summary,
+        timestamp,
+        updated_at,
+        model_provider: native.model_provider.unwrap_or_default(),
+        model: native.model,
+        cwd: PathBuf::from(native.workspace),
+        cli_version: String::new(),
+        source: parse_session_source(native.source.as_str()),
+        total_cost_micros: native.total_cost_micros,
+        last_cost_micros: native.last_cost_micros,
+        token_usage_info: None,
+        selfwork_plan_path: None,
+        git_info: None,
+        thread_name: native.name,
+    }
 }
 
 fn should_return_db_page(

@@ -93,6 +93,21 @@ impl<'a> ThreadProjection<'a> {
         paths::write_thread_name(self.store().await, thread_id, name).await
     }
 
+    pub(in crate::praxis_message_processor) async fn set_archived(
+        &self,
+        thread_id: ThreadId,
+        archived: bool,
+    ) -> std::io::Result<()> {
+        self.store().await.set_archived(thread_id, archived).await
+    }
+
+    pub(in crate::praxis_message_processor) async fn delete_native_thread(
+        &self,
+        thread_id: ThreadId,
+    ) -> std::io::Result<bool> {
+        self.store().await.delete_native_thread(thread_id).await
+    }
+
     pub(in crate::praxis_message_processor) async fn resolve_thread_name(
         &self,
         thread_id: ThreadId,

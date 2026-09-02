@@ -25,7 +25,7 @@ use tokio::sync::OnceCell;
 
 mod write;
 
-const CURRENT_PROJECTION_GENERATION: i64 = 6;
+const CURRENT_PROJECTION_GENERATION: i64 = 7;
 const TURN_CHECKPOINT_INSERT_BATCH: usize = 128;
 
 #[derive(Clone, Debug)]
@@ -275,8 +275,21 @@ impl ThreadIndex {
         if let Some(workspace) = query.workspace {
             sql.push(" AND workspace = ").push_bind(workspace);
         }
-        if let Some(source) = query.source {
-            sql.push(" AND source = ").push_bind(source);
+        if let Some(sources) = query.sources.filter(|values| !values.is_empty()) {
+            sql.push(" AND source IN (");
+            let mut separated = sql.separated(", ");
+            for source in sources {
+                separated.push_bind(source);
+            }
+            separated.push_unseparated(")");
+        }
+        if let Some(providers) = query.model_providers.filter(|values| !values.is_empty()) {
+            sql.push(" AND model_provider IN (");
+            let mut separated = sql.separated(", ");
+            for provider in providers {
+                separated.push_bind(provider);
+            }
+            separated.push_unseparated(")");
         }
         if let Some(search) = search.as_deref() {
             sql.push(" AND (name LIKE ")
@@ -838,7 +851,7 @@ mod cursor_tests {
         assert!(source.contains("INTEGER NOT NULL DEFAULT 0"));
         assert!(source.contains("AND projection_generation = ?"));
         assert!(source.contains("write_projection(projection, true)"));
-        assert!(source.contains("const CURRENT_PROJECTION_GENERATION: i64 = 6"));
+        assert!(source.contains("const CURRENT_PROJECTION_GENERATION: i64 = 7"));
         assert!(!source.contains("transcript_index_complete"));
         assert!(source.contains("model_context_checkpoint_revision INTEGER"));
         assert!(source.contains("ADD COLUMN model_context_checkpoint_revision"));

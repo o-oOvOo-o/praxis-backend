@@ -44,7 +44,7 @@ mod native_rollout;
 
 use jsonl_writer::JsonlWriter;
 use native_rollout::NativeRolloutInit;
-use native_rollout::NativeRolloutWriter;
+pub(crate) use native_rollout::NativeRolloutWriter;
 
 /// Records all [`ResponseItem`]s for a session and flushes them to disk after
 /// every update.

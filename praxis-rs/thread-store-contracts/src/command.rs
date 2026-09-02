@@ -194,6 +194,11 @@ pub enum ThreadCommand {
     MarkAgentEventMetadataReconciled {
         generation: u32,
     },
+    ReconcileAgentEventTimeline {
+        generation: u32,
+        created_at_unix_ms: Option<i64>,
+        updated_at_unix_ms: Option<i64>,
+    },
     ReconcileSessionMetadata {
         name: Option<String>,
         resume_config: Option<ThreadResumeConfig>,
@@ -395,6 +400,17 @@ impl CanonicalEncode for ThreadCommand {
                 // Append-only command tag: existing persisted command digests must remain stable.
                 hasher.u8(26);
                 generation.encode_canonical(hasher);
+            }
+            Self::ReconcileAgentEventTimeline {
+                generation,
+                created_at_unix_ms,
+                updated_at_unix_ms,
+            } => {
+                // Append-only command tag: existing persisted command digests must remain stable.
+                hasher.u8(27);
+                generation.encode_canonical(hasher);
+                created_at_unix_ms.encode_canonical(hasher);
+                updated_at_unix_ms.encode_canonical(hasher);
             }
         }
     }

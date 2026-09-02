@@ -23,11 +23,24 @@ pub enum ThreadListSort {
 pub struct ThreadListQuery {
     pub archived: Option<bool>,
     pub workspace: Option<String>,
-    pub source: Option<String>,
+    pub sources: Option<Vec<String>>,
+    pub model_providers: Option<Vec<String>>,
     pub search: Option<String>,
     pub cursor: Option<String>,
     pub limit: Option<usize>,
     pub sort: ThreadListSort,
+}
+
+impl ThreadListQuery {
+    pub fn set_cursor_after(&mut self, sort_value_unix_ms: i64, thread_id: ThreadId) {
+        self.cursor = Some(format!(
+            "v1:{}:{sort_value_unix_ms}:{thread_id}",
+            match self.sort {
+                ThreadListSort::CreatedAt => "c",
+                ThreadListSort::UpdatedAt => "u",
+            }
+        ));
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -220,6 +233,7 @@ pub(crate) enum ThreadIndexMutation<'a> {
     ModelContextCheckpoint(Option<ThreadRevision>),
     DynamicTools(&'a ContentRef),
     AgentEventMetadataGeneration(u32),
+    AgentEventTimeline(u32, &'a Option<i64>, &'a Option<i64>),
 }
 
 impl<'a> ThreadIndexMutation<'a> {
@@ -254,6 +268,11 @@ impl<'a> ThreadIndexMutation<'a> {
             ThreadEventBody::AgentEventMetadataReconciled { generation } => {
                 Self::AgentEventMetadataGeneration(*generation)
             }
+            ThreadEventBody::AgentEventTimelineReconciled {
+                generation,
+                created_at_unix_ms,
+                updated_at_unix_ms,
+            } => Self::AgentEventTimeline(*generation, created_at_unix_ms, updated_at_unix_ms),
             ThreadEventBody::TurnCostRecorded { cost_micros } => Self::Cost(*cost_micros),
             ThreadEventBody::ThreadResumeConfigSet {
                 model,
@@ -343,6 +362,15 @@ impl<'a> ThreadIndexMutation<'a> {
             }
             Self::AgentEventMetadataGeneration(generation) => {
                 projection.agent_event_metadata_generation = generation;
+            }
+            Self::AgentEventTimeline(generation, created_at, updated_at) => {
+                projection.agent_event_metadata_generation = generation;
+                if let Some(created_at) = created_at {
+                    projection.summary.created_at_unix_ms = *created_at;
+                }
+                if let Some(updated_at) = updated_at {
+                    projection.summary.updated_at_unix_ms = *updated_at;
+                }
             }
         }
     }
@@ -666,7 +694,11 @@ mod tests {
             ),
             (
                 3,
-                ThreadEventBody::AgentEventMetadataReconciled { generation: 1 },
+                ThreadEventBody::AgentEventTimelineReconciled {
+                    generation: 1,
+                    created_at_unix_ms: Some(10),
+                    updated_at_unix_ms: Some(20),
+                },
             ),
         ] {
             accumulator.push(&event(thread_id, revision, body));
@@ -679,6 +711,8 @@ mod tests {
             Some("first")
         );
         assert_eq!(projection.agent_event_metadata_generation, 1);
+        assert_eq!(projection.summary.created_at_unix_ms, 10);
+        assert_eq!(projection.summary.updated_at_unix_ms, 20);
     }
 
     #[test]

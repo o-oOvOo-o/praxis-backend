@@ -129,6 +129,17 @@ impl Cursor {
     fn new(ts: OffsetDateTime, id: Uuid) -> Self {
         Self { ts, id }
     }
+
+    pub(crate) fn native_parts(&self) -> (i64, Uuid) {
+        let millis = self.ts.unix_timestamp_nanos() / 1_000_000;
+        (i64::try_from(millis).unwrap_or(i64::MIN), self.id)
+    }
+
+    pub(crate) fn from_native_parts(unix_ms: i64, id: Uuid) -> Option<Self> {
+        OffsetDateTime::from_unix_timestamp_nanos(i128::from(unix_ms) * 1_000_000)
+            .ok()
+            .map(|ts| Self::new(ts, id))
+    }
 }
 
 /// Keeps track of where a paginated listing left off. As the file scan goes newest -> oldest,

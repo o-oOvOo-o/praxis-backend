@@ -281,6 +281,11 @@ pub enum ThreadEventBody {
     AgentEventMetadataReconciled {
         generation: u32,
     },
+    AgentEventTimelineReconciled {
+        generation: u32,
+        created_at_unix_ms: Option<i64>,
+        updated_at_unix_ms: Option<i64>,
+    },
 }
 
 impl ThreadEventBody {
@@ -313,6 +318,7 @@ impl ThreadEventBody {
             Self::ThreadDynamicToolsSet { .. } => "thread_dynamic_tools_set",
             Self::ThreadPreviewSet { .. } => "thread_preview_set",
             Self::AgentEventMetadataReconciled { .. } => "agent_event_metadata_reconciled",
+            Self::AgentEventTimelineReconciled { .. } => "agent_event_timeline_reconciled",
         }
     }
 }
@@ -485,6 +491,15 @@ impl CanonicalEncode for ThreadEventBody {
             }
             Self::AgentEventMetadataReconciled { generation } => {
                 generation.encode_canonical(hasher);
+            }
+            Self::AgentEventTimelineReconciled {
+                generation,
+                created_at_unix_ms,
+                updated_at_unix_ms,
+            } => {
+                generation.encode_canonical(hasher);
+                created_at_unix_ms.encode_canonical(hasher);
+                updated_at_unix_ms.encode_canonical(hasher);
             }
         }
     }

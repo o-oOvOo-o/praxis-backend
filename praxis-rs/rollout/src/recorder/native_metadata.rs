@@ -4,7 +4,7 @@ use praxis_thread_store::ThreadSummary;
 use praxis_thread_store_contracts::ContentRef;
 use praxis_thread_store_contracts::ThreadResumeConfig;
 
-pub(super) const METADATA_GENERATION: u32 = 1;
+pub(super) const METADATA_GENERATION: u32 = 2;
 const PREVIEW_CHAR_LIMIT: usize = 160;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -26,6 +26,8 @@ impl NativeMetadataDelta {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct NativeRolloutMetadata {
+    pub created_at_unix_ms: Option<i64>,
+    pub updated_at_unix_ms: Option<i64>,
     pub workspace: Option<String>,
     pub preview: Option<String>,
     pub first_user_message: Option<String>,
@@ -36,6 +38,8 @@ pub(super) struct NativeRolloutMetadata {
 impl Default for NativeRolloutMetadata {
     fn default() -> Self {
         Self {
+            created_at_unix_ms: None,
+            updated_at_unix_ms: None,
             workspace: None,
             preview: None,
             first_user_message: None,
@@ -52,6 +56,8 @@ impl Default for NativeRolloutMetadata {
 impl NativeRolloutMetadata {
     pub fn from_summary(summary: &ThreadSummary) -> Self {
         Self {
+            created_at_unix_ms: Some(summary.created_at_unix_ms),
+            updated_at_unix_ms: Some(summary.updated_at_unix_ms),
             workspace: Some(summary.workspace.clone()),
             preview: summary.preview.clone(),
             first_user_message: summary.first_user_message.clone(),
@@ -72,10 +78,20 @@ impl NativeRolloutMetadata {
         match item {
             RolloutItem::SessionMeta(meta) if meta.meta.id == expected_thread_id => {
                 let mut delta = NativeMetadataDelta::default();
+                if self.created_at_unix_ms.is_none() {
+                    self.created_at_unix_ms =
+                        chrono::DateTime::parse_from_rfc3339(meta.meta.timestamp.as_str())
+                            .ok()
+                            .map(|timestamp| timestamp.timestamp_millis());
+                }
                 if !meta.meta.cwd.as_os_str().is_empty() {
                     delta.workspace |= replace_option(
                         &mut self.workspace,
-                        Some(meta.meta.cwd.to_string_lossy().into_owned()),
+                        Some(
+                            crate::state_db::normalize_cwd_for_state_db(&meta.meta.cwd)
+                                .to_string_lossy()
+                                .into_owned(),
+                        ),
                     );
                 }
                 if let Some(provider) = meta.meta.model_provider.as_ref() {
@@ -97,7 +113,11 @@ impl NativeRolloutMetadata {
             RolloutItem::TurnContext(context) => {
                 let mut delta = NativeMetadataDelta::default();
                 if self.workspace.is_none() && !context.cwd.as_os_str().is_empty() {
-                    self.workspace = Some(context.cwd.to_string_lossy().into_owned());
+                    self.workspace = Some(
+                        crate::state_db::normalize_cwd_for_state_db(&context.cwd)
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
                     delta.workspace = true;
                 }
                 delta.resume_config |=

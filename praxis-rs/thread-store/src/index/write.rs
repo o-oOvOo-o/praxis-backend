@@ -248,6 +248,17 @@ impl ThreadIndex {
                     .push(", agent_event_metadata_generation = ")
                     .push_bind(i64::from(generation));
             }
+            ThreadIndexMutation::AgentEventTimeline(generation, created_at, updated_at) => {
+                query
+                    .push(", agent_event_metadata_generation = ")
+                    .push_bind(i64::from(generation));
+                if let Some(created_at) = created_at {
+                    query.push(", created_at = ").push_bind(*created_at);
+                }
+                if let Some(updated_at) = updated_at {
+                    query.push(", updated_at = ").push_bind(*updated_at);
+                }
+            }
             ThreadIndexMutation::Unchanged | ThreadIndexMutation::NativeAgent { .. } => {
                 return Err(ThreadStoreError::Worker(
                     "index mutation routed to the wrong writer".to_string(),

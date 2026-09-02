@@ -1,4 +1,5 @@
 use super::thread_lifecycle_api::ThreadShutdownResult;
+use super::thread_store_api::ThreadProjection;
 use super::*;
 use crate::json_rpc_error::internal_error;
 use crate::json_rpc_error::invalid_request;
@@ -188,6 +189,12 @@ impl PraxisMessageProcessor {
 
         match result {
             Ok(mut thread) => {
+                if let Err(error) = ThreadProjection::new(&self.config)
+                    .set_archived(thread_id, false)
+                    .await
+                {
+                    warn!("failed to project unarchived thread {thread_id}: {error}");
+                }
                 self.project_thread_runtime_state(
                     &mut thread,
                     /*has_live_in_progress_turn*/ false,
@@ -298,6 +305,13 @@ impl PraxisMessageProcessor {
 
         let result =
             result.map_err(|err| internal_error(format!("failed to archive thread: {err}")));
+        if result.is_ok()
+            && let Err(error) = ThreadProjection::new(&self.config)
+                .set_archived(thread_id, true)
+                .await
+        {
+            warn!("failed to project archived thread {thread_id}: {error}");
+        }
         result
     }
 
@@ -382,6 +396,10 @@ impl PraxisMessageProcessor {
         if let Some(ctx) = state_db_ctx {
             let _ = ctx.delete_thread(thread_id).await;
         }
+        ThreadProjection::new(&self.config)
+            .delete_native_thread(thread_id)
+            .await
+            .map_err(|err| internal_error(format!("failed to delete native thread: {err}")))?;
         Ok(())
     }
 }
