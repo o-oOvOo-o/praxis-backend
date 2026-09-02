@@ -1,7 +1,9 @@
 use praxis_config::ConfigLayerStack;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
 use tokio::process::Command;
 
-use crate::engine::ClaudeHooksEngine;
+use crate::engine::CommandHookAdapter;
 use crate::engine::CommandShell;
 use crate::events::post_tool_use::PostToolUseOutcome;
 use crate::events::post_tool_use::PostToolUseRequest;
@@ -18,20 +20,37 @@ use crate::types::HookEvent;
 use crate::types::HookPayload;
 use crate::types::HookResponse;
 
-#[derive(Default, Clone)]
+const DEFAULT_COMMAND_CONCURRENCY: usize = 4;
+
+#[derive(Clone)]
 pub struct HooksConfig {
     pub notify_argv: Option<Vec<String>>,
     pub feature_enabled: bool,
     pub config_layer_stack: Option<ConfigLayerStack>,
     pub shell_program: Option<String>,
     pub shell_args: Vec<String>,
+    pub command_concurrency: NonZeroUsize,
+}
+
+impl Default for HooksConfig {
+    fn default() -> Self {
+        Self {
+            notify_argv: None,
+            feature_enabled: false,
+            config_layer_stack: None,
+            shell_program: None,
+            shell_args: Vec::new(),
+            command_concurrency: NonZeroUsize::new(DEFAULT_COMMAND_CONCURRENCY)
+                .expect("default hook concurrency is non-zero"),
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct Hooks {
-    after_agent: Vec<Hook>,
-    after_tool_use: Vec<Hook>,
-    engine: ClaudeHooksEngine,
+    after_agent: Arc<[Hook]>,
+    after_tool_use: Arc<[Hook]>,
+    engine: CommandHookAdapter,
 }
 
 impl Default for Hooks {
@@ -48,17 +67,18 @@ impl Hooks {
             .map(crate::notify_hook)
             .into_iter()
             .collect();
-        let engine = ClaudeHooksEngine::new(
+        let engine = CommandHookAdapter::new(
             config.feature_enabled,
             config.config_layer_stack.as_ref(),
             CommandShell {
                 program: config.shell_program.unwrap_or_default(),
                 args: config.shell_args,
+                concurrency: config.command_concurrency,
             },
         );
         Self {
             after_agent,
-            after_tool_use: Vec::new(),
+            after_tool_use: Arc::from([]),
             engine,
         }
     }

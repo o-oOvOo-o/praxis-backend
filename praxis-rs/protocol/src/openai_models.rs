@@ -643,7 +643,7 @@ fn openai_first_party_model_info(
         base_instructions: BASE_INSTRUCTIONS_DEFAULT.to_string(),
         model_messages: None,
         supports_reasoning_summaries: true,
-        default_reasoning_summary: ReasoningSummary::None,
+        default_reasoning_summary: ReasoningSummary::Auto,
         support_verbosity: true,
         default_verbosity: Some(Verbosity::Low),
         apply_patch_tool_type: Some(ApplyPatchToolType::Freeform),

@@ -1,9 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
-# Long-lived PowerShell AST parser used by the Rust command-safety layer on Windows.
-# The caller starts one child process per PowerShell executable variant and then sends
-# newline-delimited JSON requests over stdin:
+# Isolated PowerShell AST parser used by the Rust command-safety layer on Windows.
+# A bounded Rust session sends newline-delimited JSON requests over stdin:
 #   { "id": <u64>, "payload": "<base64-encoded UTF-16LE script>" }
 # We answer with one compact JSON line per request:
 #   { "id": <same>, "status": "ok", "commands": [["Get-Content", "foo.txt"]] }

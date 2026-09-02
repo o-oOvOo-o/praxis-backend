@@ -1,14 +1,16 @@
-use crate::StreamTextChunk;
-use crate::StreamTextParser;
+use crate::TextProjection;
+use crate::TextProjector;
+use crate::literal_matcher::LiteralMatcher;
+use crate::literal_matcher::partial_suffix_len;
 
-/// One hidden inline tag extracted by [`InlineHiddenTagParser`].
+/// One hidden inline tag extracted by [`HiddenTagProjector`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractedInlineTag<T> {
     pub tag: T,
     pub content: String,
 }
 
-/// Literal tag specification used by [`InlineHiddenTagParser`].
+/// Literal tag specification used by [`HiddenTagProjector`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InlineTagSpec<T> {
     pub tag: T,
@@ -23,26 +25,33 @@ struct ActiveTag<T> {
     content: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParseMode<T> {
+    Visible,
+    Hidden(ActiveTag<T>),
+}
+
 /// Generic streaming parser that hides configured inline tags and extracts their contents.
 ///
 /// Example:
-/// - input: `hello <oai-mem-citation>doc A</oai-mem-citation> world`
+/// - input: `hello <praxis-memory-citation>doc A</praxis-memory-citation> world`
 /// - visible output: `hello  world`
 /// - extracted: `["doc A"]`
 ///
 /// Matching is literal and non-nested. If EOF is reached while a tag is still open, the parser
 /// auto-closes it and returns the buffered content as extracted data.
 #[derive(Debug)]
-pub struct InlineHiddenTagParser<T>
+pub struct HiddenTagProjector<T>
 where
     T: Clone + Eq,
 {
-    specs: Vec<InlineTagSpec<T>>,
+    specs: Box<[InlineTagSpec<T>]>,
+    openers: LiteralMatcher<usize>,
     pending: String,
-    active: Option<ActiveTag<T>>,
+    mode: ParseMode<T>,
 }
 
-impl<T> InlineHiddenTagParser<T>
+impl<T> HiddenTagProjector<T>
 where
     T: Clone + Eq,
 {
@@ -50,114 +59,101 @@ where
     pub fn new(specs: Vec<InlineTagSpec<T>>) -> Self {
         assert!(
             !specs.is_empty(),
-            "InlineHiddenTagParser requires at least one tag spec"
+            "HiddenTagProjector requires at least one tag spec"
         );
         for spec in &specs {
             assert!(
                 !spec.open.is_empty(),
-                "InlineHiddenTagParser requires non-empty open delimiters"
+                "HiddenTagProjector requires non-empty open delimiters"
             );
             assert!(
                 !spec.close.is_empty(),
-                "InlineHiddenTagParser requires non-empty close delimiters"
+                "HiddenTagProjector requires non-empty close delimiters"
             );
         }
+        let openers = LiteralMatcher::new(
+            specs
+                .iter()
+                .enumerate()
+                .map(|(index, spec)| (spec.open, index)),
+        );
         Self {
-            specs,
+            specs: specs.into_boxed_slice(),
+            openers,
             pending: String::new(),
-            active: None,
+            mode: ParseMode::Visible,
         }
     }
 
-    fn find_next_open(&self) -> Option<(usize, usize)> {
-        self.specs
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, spec)| {
-                self.pending
-                    .find(spec.open)
-                    .map(|pos| (pos, spec.open.len(), idx))
-            })
-            .min_by(|(pos_a, len_a, idx_a), (pos_b, len_b, idx_b)| {
-                pos_a
-                    .cmp(pos_b)
-                    .then_with(|| len_b.cmp(len_a))
-                    .then_with(|| idx_a.cmp(idx_b))
-            })
-            .map(|(pos, _len, idx)| (pos, idx))
+    fn drain_visible(&mut self, len: usize, out: &mut TextProjection<ExtractedInlineTag<T>>) {
+        out.renderable.push_str(&self.pending[..len]);
+        self.pending.drain(..len);
     }
 
-    fn max_open_prefix_suffix_len(&self) -> usize {
-        self.specs
-            .iter()
-            .map(|spec| longest_suffix_prefix_len(&self.pending, spec.open))
-            .max()
-            .map_or(0, std::convert::identity)
-    }
-
-    fn push_visible_prefix(out: &mut StreamTextChunk<ExtractedInlineTag<T>>, pending: &str) {
-        if !pending.is_empty() {
-            out.visible_text.push_str(pending);
+    fn consume_hidden(&mut self, out: &mut TextProjection<ExtractedInlineTag<T>>) -> bool {
+        let ParseMode::Hidden(active) = &self.mode else {
+            return false;
+        };
+        if let Some(close_at) = self.pending.find(active.close) {
+            let prior = std::mem::replace(&mut self.mode, ParseMode::Visible);
+            let ParseMode::Hidden(mut active) = prior else {
+                return false;
+            };
+            active.content.push_str(&self.pending[..close_at]);
+            self.pending.drain(..close_at + active.close.len());
+            out.events.push(ExtractedInlineTag {
+                tag: active.tag,
+                content: active.content,
+            });
+            return true;
         }
-    }
 
-    fn drain_visible_to_suffix_match(
-        &mut self,
-        out: &mut StreamTextChunk<ExtractedInlineTag<T>>,
-        keep_suffix_len: usize,
-    ) {
-        let take = self.pending.len().saturating_sub(keep_suffix_len);
-        if take == 0 {
-            return;
+        let keep = partial_suffix_len(&self.pending, active.close);
+        let drain = self.pending.len().saturating_sub(keep);
+        if drain > 0 {
+            let content = &self.pending[..drain];
+            if let ParseMode::Hidden(active) = &mut self.mode {
+                active.content.push_str(content);
+            }
+            self.pending.drain(..drain);
         }
-        Self::push_visible_prefix(out, &self.pending[..take]);
-        self.pending.drain(..take);
+        false
     }
 }
 
-impl<T> StreamTextParser for InlineHiddenTagParser<T>
+impl<T> TextProjector for HiddenTagProjector<T>
 where
     T: Clone + Eq,
 {
-    type Extracted = ExtractedInlineTag<T>;
+    type Event = ExtractedInlineTag<T>;
 
-    fn push_str(&mut self, chunk: &str) -> StreamTextChunk<Self::Extracted> {
-        self.pending.push_str(chunk);
-        let mut out = StreamTextChunk::default();
+    fn project(&mut self, input: &str) -> TextProjection<Self::Event> {
+        self.pending.push_str(input);
+        let mut out = TextProjection::default();
 
         loop {
-            if let Some(close) = self.active.as_ref().map(|active| active.close) {
-                if let Some(close_idx) = self.pending.find(close) {
-                    let Some(mut active) = self.active.take() else {
-                        continue;
-                    };
-                    active.content.push_str(&self.pending[..close_idx]);
-                    out.extracted.push(ExtractedInlineTag {
-                        tag: active.tag,
-                        content: active.content,
-                    });
-                    let close_len = close.len();
-                    self.pending.drain(..close_idx + close_len);
+            if matches!(self.mode, ParseMode::Hidden(_)) {
+                if self.consume_hidden(&mut out) {
                     continue;
-                }
-
-                let keep = longest_suffix_prefix_len(&self.pending, close);
-                let take = self.pending.len().saturating_sub(keep);
-                if take > 0 {
-                    if let Some(active) = self.active.as_mut() {
-                        active.content.push_str(&self.pending[..take]);
-                    }
-                    self.pending.drain(..take);
                 }
                 break;
             }
 
-            if let Some((open_idx, spec_idx)) = self.find_next_open() {
-                Self::push_visible_prefix(&mut out, &self.pending[..open_idx]);
-                let spec = &self.specs[spec_idx];
+            if let Some((open_at, spec_index)) = self
+                .openers
+                .earliest(&self.pending)
+                .map(|(offset, index)| (offset, *index))
+            {
+                let candidate = &self.pending[open_at..];
+                if self.openers.could_extend_match(candidate) {
+                    self.drain_visible(open_at, &mut out);
+                    break;
+                }
+                self.drain_visible(open_at, &mut out);
+                let spec = &self.specs[spec_index];
                 let open_len = spec.open.len();
-                self.pending.drain(..open_idx + open_len);
-                self.active = Some(ActiveTag {
+                self.pending.drain(..open_len);
+                self.mode = ParseMode::Hidden(ActiveTag {
                     tag: spec.tag.clone(),
                     close: spec.close,
                     content: String::new(),
@@ -165,23 +161,24 @@ where
                 continue;
             }
 
-            let keep = self.max_open_prefix_suffix_len();
-            self.drain_visible_to_suffix_match(&mut out, keep);
+            let keep = self.openers.retained_suffix_len(&self.pending);
+            self.drain_visible(self.pending.len().saturating_sub(keep), &mut out);
             break;
         }
 
         out
     }
 
-    fn finish(&mut self) -> StreamTextChunk<Self::Extracted> {
-        let mut out = StreamTextChunk::default();
+    fn close(&mut self) -> TextProjection<Self::Event> {
+        let mut out = TextProjection::default();
 
-        if let Some(mut active) = self.active.take() {
+        if let ParseMode::Hidden(mut active) = std::mem::replace(&mut self.mode, ParseMode::Visible)
+        {
             if !self.pending.is_empty() {
                 active.content.push_str(&self.pending);
                 self.pending.clear();
             }
-            out.extracted.push(ExtractedInlineTag {
+            out.events.push(ExtractedInlineTag {
                 tag: active.tag,
                 content: active.content,
             });
@@ -189,7 +186,7 @@ where
         }
 
         if !self.pending.is_empty() {
-            out.visible_text.push_str(&self.pending);
+            out.renderable.push_str(&self.pending);
             self.pending.clear();
         }
 
@@ -197,22 +194,12 @@ where
     }
 }
 
-fn longest_suffix_prefix_len(s: &str, needle: &str) -> usize {
-    let max = s.len().min(needle.len().saturating_sub(1));
-    for k in (1..=max).rev() {
-        if needle.is_char_boundary(k) && s.ends_with(&needle[..k]) {
-            return k;
-        }
-    }
-    0
-}
-
 #[cfg(test)]
 mod tests {
-    use super::InlineHiddenTagParser;
+    use super::HiddenTagProjector;
     use super::InlineTagSpec;
-    use crate::StreamTextChunk;
-    use crate::StreamTextParser;
+    use crate::TextProjection;
+    use crate::TextProjector;
     use pretty_assertions::assert_eq;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,25 +208,21 @@ mod tests {
         B,
     }
 
-    fn collect_chunks<P>(parser: &mut P, chunks: &[&str]) -> StreamTextChunk<P::Extracted>
+    fn collect_chunks<P>(parser: &mut P, chunks: &[&str]) -> TextProjection<P::Event>
     where
-        P: StreamTextParser,
+        P: TextProjector,
     {
-        let mut all = StreamTextChunk::default();
+        let mut all = TextProjection::default();
         for chunk in chunks {
-            let next = parser.push_str(chunk);
-            all.visible_text.push_str(&next.visible_text);
-            all.extracted.extend(next.extracted);
+            all.merge(parser.project(chunk));
         }
-        let tail = parser.finish();
-        all.visible_text.push_str(&tail.visible_text);
-        all.extracted.extend(tail.extracted);
+        all.merge(parser.close());
         all
     }
 
     #[test]
     fn generic_inline_parser_supports_multiple_tag_types() {
-        let mut parser = InlineHiddenTagParser::new(vec![
+        let mut parser = HiddenTagProjector::new(vec![
             InlineTagSpec {
                 tag: Tag::A,
                 open: "<a>",
@@ -254,17 +237,17 @@ mod tests {
 
         let out = collect_chunks(&mut parser, &["1<a>x</a>2<b>y</b>3"]);
 
-        assert_eq!(out.visible_text, "123");
-        assert_eq!(out.extracted.len(), 2);
-        assert_eq!(out.extracted[0].tag, Tag::A);
-        assert_eq!(out.extracted[0].content, "x");
-        assert_eq!(out.extracted[1].tag, Tag::B);
-        assert_eq!(out.extracted[1].content, "y");
+        assert_eq!(out.renderable, "123");
+        assert_eq!(out.events.len(), 2);
+        assert_eq!(out.events[0].tag, Tag::A);
+        assert_eq!(out.events[0].content, "x");
+        assert_eq!(out.events[1].tag, Tag::B);
+        assert_eq!(out.events[1].content, "y");
     }
 
     #[test]
     fn generic_inline_parser_supports_non_ascii_tag_delimiters() {
-        let mut parser = InlineHiddenTagParser::new(vec![InlineTagSpec {
+        let mut parser = HiddenTagProjector::new(vec![InlineTagSpec {
             tag: Tag::A,
             open: "<é>",
             close: "</é>",
@@ -272,15 +255,15 @@ mod tests {
 
         let out = collect_chunks(&mut parser, &["a<", "é>中</", "é>b"]);
 
-        assert_eq!(out.visible_text, "ab");
-        assert_eq!(out.extracted.len(), 1);
-        assert_eq!(out.extracted[0].tag, Tag::A);
-        assert_eq!(out.extracted[0].content, "中");
+        assert_eq!(out.renderable, "ab");
+        assert_eq!(out.events.len(), 1);
+        assert_eq!(out.events[0].tag, Tag::A);
+        assert_eq!(out.events[0].content, "中");
     }
 
     #[test]
     fn generic_inline_parser_prefers_longest_opener_at_same_offset() {
-        let mut parser = InlineHiddenTagParser::new(vec![
+        let mut parser = HiddenTagProjector::new(vec![
             InlineTagSpec {
                 tag: Tag::A,
                 open: "<a>",
@@ -295,16 +278,16 @@ mod tests {
 
         let out = collect_chunks(&mut parser, &["x<ab>y</ab>z"]);
 
-        assert_eq!(out.visible_text, "xz");
-        assert_eq!(out.extracted.len(), 1);
-        assert_eq!(out.extracted[0].tag, Tag::B);
-        assert_eq!(out.extracted[0].content, "y");
+        assert_eq!(out.renderable, "xz");
+        assert_eq!(out.events.len(), 1);
+        assert_eq!(out.events[0].tag, Tag::B);
+        assert_eq!(out.events[0].content, "y");
     }
 
     #[test]
     #[should_panic(expected = "non-empty open delimiters")]
     fn generic_inline_parser_rejects_empty_open_delimiter() {
-        let _ = InlineHiddenTagParser::new(vec![InlineTagSpec {
+        let _ = HiddenTagProjector::new(vec![InlineTagSpec {
             tag: Tag::A,
             open: "",
             close: "</a>",
@@ -314,7 +297,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "non-empty close delimiters")]
     fn generic_inline_parser_rejects_empty_close_delimiter() {
-        let _ = InlineHiddenTagParser::new(vec![InlineTagSpec {
+        let _ = HiddenTagProjector::new(vec![InlineTagSpec {
             tag: Tag::A,
             open: "<a>",
             close: "",

@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::path::PathBuf;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -13,23 +12,52 @@ pub enum ShellType {
     Cmd,
 }
 
-pub fn detect_shell_type(shell_path: &PathBuf) -> Option<ShellType> {
-    match shell_path.as_os_str().to_str() {
-        Some("zsh") => Some(ShellType::Zsh),
-        Some("sh") => Some(ShellType::Sh),
-        Some("cmd") => Some(ShellType::Cmd),
-        Some("bash") => Some(ShellType::Bash),
-        Some("pwsh") => Some(ShellType::PowerShell),
-        Some("powershell") => Some(ShellType::PowerShell),
-        _ => {
-            let shell_name = shell_path.file_stem();
-            if let Some(shell_name) = shell_name {
-                let shell_name_path = Path::new(shell_name);
-                if shell_name_path != Path::new(shell_path) {
-                    return detect_shell_type(&shell_name_path.to_path_buf());
-                }
-            }
-            None
+/// Identifies a supported shell from an executable name or path.
+pub fn detect_shell_type(shell_path: &Path) -> Option<ShellType> {
+    let name = shell_path.file_stem()?.to_str()?;
+    if name.eq_ignore_ascii_case("zsh") {
+        Some(ShellType::Zsh)
+    } else if name.eq_ignore_ascii_case("bash") {
+        Some(ShellType::Bash)
+    } else if name.eq_ignore_ascii_case("pwsh") || name.eq_ignore_ascii_case("powershell") {
+        Some(ShellType::PowerShell)
+    } else if name.eq_ignore_ascii_case("sh") {
+        Some(ShellType::Sh)
+    } else if name.eq_ignore_ascii_case("cmd") {
+        Some(ShellType::Cmd)
+    } else {
+        None
+    }
+}
+
+impl ShellType {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Zsh => "zsh",
+            Self::Bash => "bash",
+            Self::PowerShell => "powershell",
+            Self::Sh => "sh",
+            Self::Cmd => "cmd",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::ShellType;
+    use super::detect_shell_type;
+
+    #[test]
+    fn executable_identity_is_path_and_ascii_case_independent() {
+        assert_eq!(
+            detect_shell_type(&PathBuf::from(r"C:\Tools\PWSH.EXE")),
+            Some(ShellType::PowerShell)
+        );
+        assert_eq!(
+            detect_shell_type(&PathBuf::from("/usr/local/bin/BASH")),
+            Some(ShellType::Bash)
+        );
     }
 }

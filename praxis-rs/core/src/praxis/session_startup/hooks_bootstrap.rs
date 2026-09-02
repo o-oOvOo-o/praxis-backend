@@ -15,5 +15,6 @@ pub(super) fn build(config: &Config, shell: &Shell) -> Hooks {
         config_layer_stack: Some(config.config_layer_stack.clone()),
         shell_program: Some(hook_shell_program),
         shell_args: hook_shell_argv,
+        ..HooksConfig::default()
     })
 }

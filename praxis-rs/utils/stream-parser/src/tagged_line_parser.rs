@@ -3,6 +3,8 @@
 //! The parser buffers each line until it can disprove that the line is a tag,
 //! which is required for tags that must appear alone on a line.
 
+use crate::literal_matcher::LiteralMatcher;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TagSpec<T> {
     pub(crate) open: &'static str,
@@ -18,15 +20,23 @@ pub(crate) enum TaggedLineSegment<T> {
     TagEnd(T),
 }
 
-/// Stateful line parser that splits input into normal text vs tag blocks.
 #[derive(Debug, Default)]
+enum LineMode {
+    #[default]
+    Probe,
+    Stream,
+}
+
+/// Stateful line parser that splits input into normal text vs tag blocks.
+#[derive(Debug)]
 pub(crate) struct TaggedLineParser<T>
 where
     T: Copy + Eq,
 {
-    specs: Vec<TagSpec<T>>,
+    opens: LiteralMatcher<T>,
+    closes: LiteralMatcher<T>,
     active_tag: Option<T>,
-    detect_tag: bool,
+    mode: LineMode,
     line_buffer: String,
 }
 
@@ -36,9 +46,10 @@ where
 {
     pub(crate) fn new(specs: Vec<TagSpec<T>>) -> Self {
         Self {
-            specs,
+            opens: LiteralMatcher::new(specs.iter().map(|spec| (spec.open, spec.tag))),
+            closes: LiteralMatcher::new(specs.iter().map(|spec| (spec.close, spec.tag))),
             active_tag: None,
-            detect_tag: true,
+            mode: LineMode::Probe,
             line_buffer: String::new(),
         }
     }
@@ -48,21 +59,21 @@ where
         let mut run = String::new();
 
         for ch in delta.chars() {
-            if self.detect_tag {
+            if matches!(self.mode, LineMode::Probe) {
                 if !run.is_empty() {
                     self.push_text(std::mem::take(&mut run), &mut segments);
                 }
                 self.line_buffer.push(ch);
                 if ch == '\n' {
-                    self.finish_line(&mut segments);
+                    self.classify_buffer(&mut segments);
                     continue;
                 }
-                let slug = self.line_buffer.trim_start();
-                if slug.is_empty() || self.is_tag_prefix(slug) {
+                let candidate = self.line_buffer.trim();
+                if candidate.is_empty() || self.could_be_marker(candidate) {
                     continue;
                 }
                 let buffered = std::mem::take(&mut self.line_buffer);
-                self.detect_tag = false;
+                self.mode = LineMode::Stream;
                 self.push_text(buffered, &mut segments);
                 continue;
             }
@@ -70,7 +81,7 @@ where
             run.push(ch);
             if ch == '\n' {
                 self.push_text(std::mem::take(&mut run), &mut segments);
-                self.detect_tag = true;
+                self.mode = LineMode::Probe;
             }
         }
 
@@ -84,55 +95,38 @@ where
     pub(crate) fn finish(&mut self) -> Vec<TaggedLineSegment<T>> {
         let mut segments = Vec::new();
         if !self.line_buffer.is_empty() {
-            let buffered = std::mem::take(&mut self.line_buffer);
-            let without_newline = buffered.strip_suffix('\n').unwrap_or(&buffered);
-            let slug = without_newline.trim_start().trim_end();
-
-            if let Some(tag) = self.match_open(slug)
-                && self.active_tag.is_none()
-            {
-                push_segment(&mut segments, TaggedLineSegment::TagStart(tag));
-                self.active_tag = Some(tag);
-            } else if let Some(tag) = self.match_close(slug)
-                && self.active_tag == Some(tag)
-            {
-                push_segment(&mut segments, TaggedLineSegment::TagEnd(tag));
-                self.active_tag = None;
-            } else {
-                self.push_text(buffered, &mut segments);
-            }
+            self.classify_buffer(&mut segments);
         }
         if let Some(tag) = self.active_tag.take() {
             push_segment(&mut segments, TaggedLineSegment::TagEnd(tag));
         }
-        self.detect_tag = true;
+        self.mode = LineMode::Probe;
         segments
     }
 
-    fn finish_line(&mut self, segments: &mut Vec<TaggedLineSegment<T>>) {
+    fn classify_buffer(&mut self, segments: &mut Vec<TaggedLineSegment<T>>) {
         let line = std::mem::take(&mut self.line_buffer);
-        let without_newline = line.strip_suffix('\n').unwrap_or(&line);
-        let slug = without_newline.trim_start().trim_end();
+        let candidate = line.strip_suffix('\n').unwrap_or(&line).trim();
 
-        if let Some(tag) = self.match_open(slug)
+        if let Some(&tag) = self.opens.exact(candidate)
             && self.active_tag.is_none()
         {
             push_segment(segments, TaggedLineSegment::TagStart(tag));
             self.active_tag = Some(tag);
-            self.detect_tag = true;
+            self.mode = LineMode::Probe;
             return;
         }
 
-        if let Some(tag) = self.match_close(slug)
+        if let Some(&tag) = self.closes.exact(candidate)
             && self.active_tag == Some(tag)
         {
             push_segment(segments, TaggedLineSegment::TagEnd(tag));
             self.active_tag = None;
-            self.detect_tag = true;
+            self.mode = LineMode::Probe;
             return;
         }
 
-        self.detect_tag = true;
+        self.mode = LineMode::Probe;
         self.push_text(line, segments);
     }
 
@@ -144,25 +138,17 @@ where
         }
     }
 
-    fn is_tag_prefix(&self, slug: &str) -> bool {
-        let slug = slug.trim_end();
-        self.specs
-            .iter()
-            .any(|spec| spec.open.starts_with(slug) || spec.close.starts_with(slug))
+    fn could_be_marker(&self, candidate: &str) -> bool {
+        self.opens.could_match_prefix(candidate) || self.closes.could_match_prefix(candidate)
     }
+}
 
-    fn match_open(&self, slug: &str) -> Option<T> {
-        self.specs
-            .iter()
-            .find(|spec| spec.open == slug)
-            .map(|spec| spec.tag)
-    }
-
-    fn match_close(&self, slug: &str) -> Option<T> {
-        self.specs
-            .iter()
-            .find(|spec| spec.close == slug)
-            .map(|spec| spec.tag)
+impl<T> Default for TaggedLineParser<T>
+where
+    T: Copy + Eq,
+{
+    fn default() -> Self {
+        Self::new(Vec::new())
     }
 }
 

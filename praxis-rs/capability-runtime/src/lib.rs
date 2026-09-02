@@ -16,6 +16,8 @@
 //!   leaves the previously published graph unchanged.
 //! - Replaced generations enter [`CapabilityLifecycle::Quiescing`]. Their
 //!   disposers cannot run until the last cloneable [`CapabilityLease`] drops.
+//!   Retirement is executed by the runtime reaper, never by the consumer that
+//!   releases the final lease or scope handle.
 //! - Packaging must consume [`CapabilityGraph::resolve`] so runtime activation
 //!   and product dependency closure cannot diverge.
 //!

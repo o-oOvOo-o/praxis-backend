@@ -16,8 +16,8 @@ use praxis_protocol::protocol::InterAgentCommunication;
 use praxis_protocol::protocol::TokenUsage;
 use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_protocol::protocol::TurnContextItem;
-use praxis_utils_cache::BlockingLruCache;
-use praxis_utils_cache::sha1_digest;
+use praxis_utils_cache::MemoCache;
+use praxis_utils_cache::sha1_fingerprint;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::approx_bytes_for_tokens;
 use praxis_utils_output_truncation::approx_token_count;
@@ -462,9 +462,9 @@ const RESIZED_IMAGE_BYTES_ESTIMATE: i64 = 7373;
 const ORIGINAL_IMAGE_PATCH_SIZE: u32 = 32;
 const ORIGINAL_IMAGE_ESTIMATE_CACHE_SIZE: usize = 32;
 
-static ORIGINAL_IMAGE_ESTIMATE_CACHE: LazyLock<BlockingLruCache<[u8; 20], Option<i64>>> =
+static ORIGINAL_IMAGE_ESTIMATE_CACHE: LazyLock<MemoCache<[u8; 20], Option<i64>>> =
     LazyLock::new(|| {
-        BlockingLruCache::new(
+        MemoCache::new(
             NonZeroUsize::new(ORIGINAL_IMAGE_ESTIMATE_CACHE_SIZE).unwrap_or(NonZeroUsize::MIN),
         )
     });
@@ -532,8 +532,8 @@ fn parse_base64_image_data_url(url: &str) -> Option<&str> {
 }
 
 fn estimate_original_image_bytes(image_url: &str) -> Option<i64> {
-    let key = sha1_digest(image_url.as_bytes());
-    ORIGINAL_IMAGE_ESTIMATE_CACHE.get_or_insert_with(key, || {
+    let key = sha1_fingerprint(image_url.as_bytes());
+    ORIGINAL_IMAGE_ESTIMATE_CACHE.get_or_compute(key, || {
         let payload = match parse_base64_image_data_url(image_url) {
             Some(payload) => payload,
             None => {

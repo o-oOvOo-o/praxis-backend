@@ -79,6 +79,9 @@ fn known_gpt56_models_match_official_reasoning_capabilities() {
     assert_eq!(sol.default_reasoning_level, Some(ReasoningEffort::Medium));
     assert_eq!(terra.default_reasoning_level, Some(ReasoningEffort::Medium));
     assert_eq!(luna.default_reasoning_level, Some(ReasoningEffort::Medium));
+    assert_eq!(sol.default_reasoning_summary, ReasoningSummary::Auto);
+    assert_eq!(terra.default_reasoning_summary, ReasoningSummary::Auto);
+    assert_eq!(luna.default_reasoning_summary, ReasoningSummary::Auto);
     assert_eq!(sol.context_window, Some(372_000));
     assert_eq!(sol.multi_agent_version, Some(MultiAgentVersion::V2));
     assert_eq!(terra.multi_agent_version, Some(MultiAgentVersion::V2));

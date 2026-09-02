@@ -5,7 +5,9 @@ pub(crate) mod dispatcher;
 pub(crate) mod output_parser;
 pub(crate) mod schema_loader;
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use praxis_config::ConfigLayerStack;
 use praxis_protocol::protocol::HookRunSummary;
@@ -25,12 +27,14 @@ use crate::events::user_prompt_submit::UserPromptSubmitRequest;
 pub(crate) struct CommandShell {
     pub program: String,
     pub args: Vec<String>,
+    pub concurrency: NonZeroUsize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct ConfiguredHandler {
     pub event_name: praxis_protocol::protocol::HookEventName,
     pub matcher: Option<String>,
+    pub matcher_regex: Option<regex::Regex>,
     pub command: String,
     pub timeout_sec: u64,
     pub status_message: Option<String>,
@@ -38,7 +42,28 @@ pub(crate) struct ConfiguredHandler {
     pub display_order: i64,
 }
 
+impl PartialEq for ConfiguredHandler {
+    fn eq(&self, other: &Self) -> bool {
+        self.event_name == other.event_name
+            && self.matcher == other.matcher
+            && self.command == other.command
+            && self.timeout_sec == other.timeout_sec
+            && self.status_message == other.status_message
+            && self.source_path == other.source_path
+            && self.display_order == other.display_order
+    }
+}
+
+impl Eq for ConfiguredHandler {}
+
 impl ConfiguredHandler {
+    pub fn matches(&self, input: Option<&str>) -> bool {
+        match &self.matcher_regex {
+            Some(matcher) => input.is_some_and(|input| matcher.is_match(input)),
+            None => true,
+        }
+    }
+
     pub fn run_id(&self) -> String {
         format!(
             "{}:{}:{}",
@@ -60,13 +85,13 @@ impl ConfiguredHandler {
 }
 
 #[derive(Clone)]
-pub(crate) struct ClaudeHooksEngine {
-    handlers: Vec<ConfiguredHandler>,
-    warnings: Vec<String>,
-    shell: CommandShell,
+pub(crate) struct CommandHookAdapter {
+    handlers: Arc<[ConfiguredHandler]>,
+    warnings: Arc<[String]>,
+    shell: Arc<CommandShell>,
 }
 
-impl ClaudeHooksEngine {
+impl CommandHookAdapter {
     pub(crate) fn new(
         enabled: bool,
         config_layer_stack: Option<&ConfigLayerStack>,
@@ -74,29 +99,29 @@ impl ClaudeHooksEngine {
     ) -> Self {
         if !enabled {
             return Self {
-                handlers: Vec::new(),
-                warnings: Vec::new(),
-                shell,
+                handlers: Arc::from([]),
+                warnings: Arc::from([]),
+                shell: Arc::new(shell),
             };
         }
 
         if cfg!(windows) {
             return Self {
-                handlers: Vec::new(),
-                warnings: vec![
+                handlers: Arc::from([]),
+                warnings: Arc::from([
                     "Disabled `praxis_hooks` for this session because `hooks.json` lifecycle hooks are not supported on Windows yet."
                         .to_string(),
-                ],
-                shell,
+                ]),
+                shell: Arc::new(shell),
             };
         }
 
         let _ = schema_loader::generated_hook_schemas();
         let discovered = discovery::discover_handlers(config_layer_stack);
         Self {
-            handlers: discovered.handlers,
-            warnings: discovered.warnings,
-            shell,
+            handlers: discovered.handlers.into(),
+            warnings: discovered.warnings.into(),
+            shell: Arc::new(shell),
         }
     }
 

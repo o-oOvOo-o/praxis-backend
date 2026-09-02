@@ -252,13 +252,12 @@ impl CapabilityGraph {
         visiting.insert(id.clone());
         path.push(id.clone());
         for dependency in &manifest.dependencies {
-            let dependency_manifest =
-                self.visible(&manifest.scope, dependency).ok_or_else(|| {
-                    CapabilityGraphError::MissingDependency {
-                        capability: id.clone(),
-                        dependency: dependency.clone(),
-                    }
-                })?;
+            self.visible(&manifest.scope, dependency).ok_or_else(|| {
+                CapabilityGraphError::MissingDependency {
+                    capability: id.clone(),
+                    dependency: dependency.clone(),
+                }
+            })?;
             if included.contains(dependency) {
                 self.visit(
                     request_scope,

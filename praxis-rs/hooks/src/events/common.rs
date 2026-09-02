@@ -88,6 +88,7 @@ pub(crate) fn validate_matcher_pattern(matcher: &str) -> Result<(), regex::Error
     regex::Regex::new(matcher).map(|_| ())
 }
 
+#[cfg(test)]
 pub(crate) fn matches_matcher(matcher: Option<&str>, input: Option<&str>) -> bool {
     match matcher {
         None => true,

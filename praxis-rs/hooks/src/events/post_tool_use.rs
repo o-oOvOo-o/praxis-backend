@@ -467,6 +467,7 @@ mod tests {
         ConfiguredHandler {
             event_name: HookEventName::PostToolUse,
             matcher: Some("^Bash$".to_string()),
+            matcher_regex: Some(regex::Regex::new("^Bash$").expect("valid matcher")),
             command: "python3 post_tool_use_hook.py".to_string(),
             timeout_sec: 5,
             status_message: Some("running post tool use hook".to_string()),

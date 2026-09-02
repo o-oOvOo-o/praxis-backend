@@ -157,6 +157,9 @@ fn append_group_handlers(
                 handlers.push(ConfiguredHandler {
                     event_name,
                     matcher: matcher.map(ToOwned::to_owned),
+                    matcher_regex: matcher
+                        .filter(|matcher| !matcher.is_empty() && *matcher != "*")
+                        .and_then(|matcher| regex::Regex::new(matcher).ok()),
                     command,
                     timeout_sec,
                     status_message,
@@ -238,6 +241,7 @@ mod tests {
             vec![ConfiguredHandler {
                 event_name: HookEventName::UserPromptSubmit,
                 matcher: None,
+                matcher_regex: None,
                 command: "echo hello".to_string(),
                 timeout_sec: 600,
                 status_message: None,
@@ -274,6 +278,7 @@ mod tests {
             vec![ConfiguredHandler {
                 event_name: HookEventName::PreToolUse,
                 matcher: Some("^Bash$".to_string()),
+                matcher_regex: Some(regex::Regex::new("^Bash$").expect("valid matcher")),
                 command: "echo hello".to_string(),
                 timeout_sec: 600,
                 status_message: None,

@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_block_decision_blocks_processing() {
+    fn block_decision_blocks_processing() {
         let parsed = parse_completed(
             &handler(),
             run_result(
@@ -354,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn claude_block_decision_requires_reason() {
+    fn block_decision_requires_reason() {
         let parsed = parse_completed(
             &handler(),
             run_result(
@@ -414,6 +414,7 @@ mod tests {
         ConfiguredHandler {
             event_name: HookEventName::UserPromptSubmit,
             matcher: None,
+            matcher_regex: None,
             command: "echo hook".to_string(),
             timeout_sec: 5,
             status_message: None,

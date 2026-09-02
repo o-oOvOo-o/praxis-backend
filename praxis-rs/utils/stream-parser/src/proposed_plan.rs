@@ -1,5 +1,5 @@
-use crate::StreamTextChunk;
-use crate::StreamTextParser;
+use crate::TextProjection;
+use crate::TextProjector;
 use crate::tagged_line_parser::TagSpec;
 use crate::tagged_line_parser::TaggedLineParser;
 use crate::tagged_line_parser::TaggedLineSegment;
@@ -22,15 +22,14 @@ pub enum ProposedPlanSegment {
 
 /// Parser for `<proposed_plan>` blocks emitted in plan mode.
 ///
-/// Implements [`StreamTextParser`] so callers can consume:
-/// - `visible_text`: normal assistant text with plan blocks removed
-/// - `extracted`: ordered plan segments (includes `Normal(...)` segments for ordering fidelity)
+/// Implements [`TextProjector`] so hosts receive renderable text separately
+/// from ordered plan events.
 #[derive(Debug)]
-pub struct ProposedPlanParser {
+pub struct ProposedPlanProjector {
     parser: TaggedLineParser<PlanTag>,
 }
 
-impl ProposedPlanParser {
+impl ProposedPlanProjector {
     pub fn new() -> Self {
         Self {
             parser: TaggedLineParser::new(vec![TagSpec {
@@ -42,107 +41,121 @@ impl ProposedPlanParser {
     }
 }
 
-impl Default for ProposedPlanParser {
+impl Default for ProposedPlanProjector {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl StreamTextParser for ProposedPlanParser {
-    type Extracted = ProposedPlanSegment;
+impl TextProjector for ProposedPlanProjector {
+    type Event = ProposedPlanSegment;
 
-    fn push_str(&mut self, chunk: &str) -> StreamTextChunk<Self::Extracted> {
-        map_segments(self.parser.parse(chunk))
+    fn project(&mut self, input: &str) -> TextProjection<Self::Event> {
+        map_segments(self.parser.parse(input))
     }
 
-    fn finish(&mut self) -> StreamTextChunk<Self::Extracted> {
+    fn close(&mut self) -> TextProjection<Self::Event> {
         map_segments(self.parser.finish())
     }
 }
 
-fn map_segments(segments: Vec<TaggedLineSegment<PlanTag>>) -> StreamTextChunk<ProposedPlanSegment> {
-    let mut out = StreamTextChunk::default();
+fn map_segments(segments: Vec<TaggedLineSegment<PlanTag>>) -> TextProjection<ProposedPlanSegment> {
+    let mut out = TextProjection::default();
     for segment in segments {
-        let mapped = match segment {
-            TaggedLineSegment::Normal(text) => ProposedPlanSegment::Normal(text),
+        match segment {
+            TaggedLineSegment::Normal(text) => {
+                out.renderable.push_str(&text);
+                out.events.push(ProposedPlanSegment::Normal(text));
+            }
             TaggedLineSegment::TagStart(PlanTag::ProposedPlan) => {
-                ProposedPlanSegment::ProposedPlanStart
+                out.events.push(ProposedPlanSegment::ProposedPlanStart);
             }
             TaggedLineSegment::TagDelta(PlanTag::ProposedPlan, text) => {
-                ProposedPlanSegment::ProposedPlanDelta(text)
+                out.events
+                    .push(ProposedPlanSegment::ProposedPlanDelta(text));
             }
             TaggedLineSegment::TagEnd(PlanTag::ProposedPlan) => {
-                ProposedPlanSegment::ProposedPlanEnd
+                out.events.push(ProposedPlanSegment::ProposedPlanEnd);
             }
-        };
-        if let ProposedPlanSegment::Normal(text) = &mapped {
-            out.visible_text.push_str(text);
         }
-        out.extracted.push(mapped);
     }
     out
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ProposedPlanCapture {
+    saw_plan: bool,
+    active: bool,
+    text: String,
+}
+
+impl ProposedPlanCapture {
+    pub fn observe(&mut self, segment: &ProposedPlanSegment) {
+        match segment {
+            ProposedPlanSegment::ProposedPlanStart => {
+                self.saw_plan = true;
+                self.active = true;
+                self.text.clear();
+            }
+            ProposedPlanSegment::ProposedPlanDelta(delta) if self.active => {
+                self.text.push_str(delta);
+            }
+            ProposedPlanSegment::ProposedPlanEnd => self.active = false,
+            ProposedPlanSegment::Normal(_) | ProposedPlanSegment::ProposedPlanDelta(_) => {}
+        }
+    }
+
+    pub fn captured(&self) -> Option<&str> {
+        self.saw_plan.then_some(self.text.as_str())
+    }
 }
 
 pub fn strip_proposed_plan_blocks(text: &str) -> String {
-    let mut parser = ProposedPlanParser::new();
-    let mut out = parser.push_str(text).visible_text;
-    out.push_str(&parser.finish().visible_text);
-    out
+    let mut parser = ProposedPlanProjector::new();
+    let mut out = parser.project(text);
+    out.merge(parser.close());
+    out.renderable
 }
 
 pub fn extract_proposed_plan_text(text: &str) -> Option<String> {
-    let mut parser = ProposedPlanParser::new();
-    let mut plan_text = String::new();
-    let mut saw_plan_block = false;
+    let mut parser = ProposedPlanProjector::new();
+    let mut capture = ProposedPlanCapture::default();
     for segment in parser
-        .push_str(text)
-        .extracted
+        .project(text)
+        .events
         .into_iter()
-        .chain(parser.finish().extracted)
+        .chain(parser.close().events)
     {
-        match segment {
-            ProposedPlanSegment::ProposedPlanStart => {
-                saw_plan_block = true;
-                plan_text.clear();
-            }
-            ProposedPlanSegment::ProposedPlanDelta(delta) => {
-                plan_text.push_str(&delta);
-            }
-            ProposedPlanSegment::ProposedPlanEnd | ProposedPlanSegment::Normal(_) => {}
-        }
+        capture.observe(&segment);
     }
-    saw_plan_block.then_some(plan_text)
+    capture.captured().map(str::to_owned)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ProposedPlanParser;
+    use super::ProposedPlanProjector;
     use super::ProposedPlanSegment;
     use super::extract_proposed_plan_text;
     use super::strip_proposed_plan_blocks;
-    use crate::StreamTextChunk;
-    use crate::StreamTextParser;
+    use crate::TextProjection;
+    use crate::TextProjector;
     use pretty_assertions::assert_eq;
 
-    fn collect_chunks<P>(parser: &mut P, chunks: &[&str]) -> StreamTextChunk<P::Extracted>
+    fn collect_chunks<P>(parser: &mut P, chunks: &[&str]) -> TextProjection<P::Event>
     where
-        P: StreamTextParser,
+        P: TextProjector,
     {
-        let mut all = StreamTextChunk::default();
+        let mut all = TextProjection::default();
         for chunk in chunks {
-            let next = parser.push_str(chunk);
-            all.visible_text.push_str(&next.visible_text);
-            all.extracted.extend(next.extracted);
+            all.merge(parser.project(chunk));
         }
-        let tail = parser.finish();
-        all.visible_text.push_str(&tail.visible_text);
-        all.extracted.extend(tail.extracted);
+        all.merge(parser.close());
         all
     }
 
     #[test]
     fn streams_proposed_plan_segments_and_visible_text() {
-        let mut parser = ProposedPlanParser::new();
+        let mut parser = ProposedPlanProjector::new();
         let out = collect_chunks(
             &mut parser,
             &[
@@ -152,9 +165,9 @@ mod tests {
             ],
         );
 
-        assert_eq!(out.visible_text, "Intro text\nOutro");
+        assert_eq!(out.renderable, "Intro text\nOutro");
         assert_eq!(
-            out.extracted,
+            out.events,
             vec![
                 ProposedPlanSegment::Normal("Intro text\n".to_string()),
                 ProposedPlanSegment::ProposedPlanStart,
@@ -167,12 +180,12 @@ mod tests {
 
     #[test]
     fn preserves_non_tag_lines() {
-        let mut parser = ProposedPlanParser::new();
+        let mut parser = ProposedPlanProjector::new();
         let out = collect_chunks(&mut parser, &["  <proposed_plan> extra\n"]);
 
-        assert_eq!(out.visible_text, "  <proposed_plan> extra\n");
+        assert_eq!(out.renderable, "  <proposed_plan> extra\n");
         assert_eq!(
-            out.extracted,
+            out.events,
             vec![ProposedPlanSegment::Normal(
                 "  <proposed_plan> extra\n".to_string()
             )]
@@ -181,12 +194,12 @@ mod tests {
 
     #[test]
     fn closes_unterminated_plan_block_on_finish() {
-        let mut parser = ProposedPlanParser::new();
+        let mut parser = ProposedPlanProjector::new();
         let out = collect_chunks(&mut parser, &["<proposed_plan>\n- step 1\n"]);
 
-        assert_eq!(out.visible_text, "");
+        assert_eq!(out.renderable, "");
         assert_eq!(
-            out.extracted,
+            out.events,
             vec![
                 ProposedPlanSegment::ProposedPlanStart,
                 ProposedPlanSegment::ProposedPlanDelta("- step 1\n".to_string()),

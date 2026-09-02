@@ -262,8 +262,8 @@ pub(crate) struct StopCommandOutputWire {
     pub universal: HookUniversalOutputWire,
     #[serde(default)]
     pub decision: Option<BlockDecisionWire>,
-    /// Claude requires `reason` when `decision` is `block`; we enforce that
-    /// semantic rule during output parsing rather than in the JSON schema.
+    /// Blocking decisions require a reason. Output parsing enforces that
+    /// semantic rule because the JSON schema cannot express it precisely.
     #[serde(default)]
     pub reason: Option<String>,
 }
@@ -604,8 +604,7 @@ mod tests {
 
     #[test]
     fn turn_scoped_hook_inputs_include_praxis_turn_id_extension() {
-        // Praxis intentionally diverges from Claude's public hook docs here so
-        // internal hook consumers can key off the active turn.
+        // Internal hook consumers use the extension to key events by active turn.
         let pre_tool_use: Value = serde_json::from_slice(
             &schema_json::<PreToolUseCommandInput>().expect("serialize pre tool use input schema"),
         )

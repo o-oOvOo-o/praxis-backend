@@ -1,6 +1,9 @@
+use std::future::Future;
 use std::path::Path;
+use std::sync::Arc;
 
-use futures::future::join_all;
+use futures::StreamExt;
+use futures::stream;
 
 use praxis_protocol::protocol::HookCompletedEvent;
 use praxis_protocol::protocol::HookEventName;
@@ -14,7 +17,6 @@ use super::CommandShell;
 use super::ConfiguredHandler;
 use super::command_runner::CommandRunResult;
 use super::command_runner::run_command;
-use crate::events::common::matches_matcher;
 
 #[derive(Debug)]
 pub(crate) struct ParsedHandler<T> {
@@ -33,9 +35,7 @@ pub(crate) fn select_handlers(
         .filter(|handler| match event_name {
             HookEventName::PreToolUse
             | HookEventName::PostToolUse
-            | HookEventName::SessionStart => {
-                matches_matcher(handler.matcher.as_deref(), matcher_input)
-            }
+            | HookEventName::SessionStart => handler.matches(matcher_input),
             HookEventName::UserPromptSubmit | HookEventName::Stop => true,
         })
         .cloned()
@@ -68,10 +68,18 @@ pub(crate) async fn execute_handlers<T>(
     turn_id: Option<String>,
     parse: fn(&ConfiguredHandler, CommandRunResult, Option<String>) -> ParsedHandler<T>,
 ) -> Vec<ParsedHandler<T>> {
-    let results = join_all(
-        handlers
-            .iter()
-            .map(|handler| run_command(shell, handler, &input_json, cwd)),
+    let shell = Arc::new(shell.clone());
+    let input_json: Arc<str> = input_json.into();
+    let cwd = Arc::new(cwd.to_path_buf());
+    let results = collect_bounded(
+        handlers.iter().cloned(),
+        shell.concurrency.get(),
+        move |handler| {
+            let shell = Arc::clone(&shell);
+            let input_json = Arc::clone(&input_json);
+            let cwd = Arc::clone(&cwd);
+            async move { run_command(&shell, &handler, &input_json, &cwd).await }
+        },
     )
     .await;
 
@@ -80,6 +88,20 @@ pub(crate) async fn execute_handlers<T>(
         .zip(results)
         .map(|(handler, result)| parse(&handler, result, turn_id.clone()))
         .collect()
+}
+
+async fn collect_bounded<Items, T, F, Fut>(items: Items, limit: usize, run: F) -> Vec<T>
+where
+    Items: IntoIterator,
+    F: Fn(Items::Item) -> Fut + Send + Sync,
+    Fut: Future<Output = T> + Send,
+    T: Send,
+{
+    stream::iter(items)
+        .map(run)
+        .buffered(limit.max(1))
+        .collect()
+        .await
 }
 
 pub(crate) fn completed_summary(
@@ -118,11 +140,40 @@ fn scope_for_event(event_name: HookEventName) -> HookScope {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
 
     use praxis_protocol::protocol::HookEventName;
 
     use super::ConfiguredHandler;
+    use super::collect_bounded;
     use super::select_handlers;
+
+    #[tokio::test]
+    async fn bounded_collection_never_exceeds_its_budget() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let results = collect_bounded((0..12).collect(), 3, {
+            let active = Arc::clone(&active);
+            let peak = Arc::clone(&peak);
+            move |value| {
+                let active = Arc::clone(&active);
+                let peak = Arc::clone(&peak);
+                async move {
+                    let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(current, Ordering::SeqCst);
+                    tokio::task::yield_now().await;
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    value
+                }
+            }
+        })
+        .await;
+
+        assert_eq!(results, (0..12).collect::<Vec<_>>());
+        assert!(peak.load(Ordering::SeqCst) <= 3);
+    }
 
     fn make_handler(
         event_name: HookEventName,
@@ -133,6 +184,9 @@ mod tests {
         ConfiguredHandler {
             event_name,
             matcher: matcher.map(str::to_owned),
+            matcher_regex: matcher
+                .filter(|matcher| !matcher.is_empty() && *matcher != "*")
+                .and_then(|matcher| regex::Regex::new(matcher).ok()),
             command: command.to_string(),
             timeout_sec: 5,
             status_message: None,

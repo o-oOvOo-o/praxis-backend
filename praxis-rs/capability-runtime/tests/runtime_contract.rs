@@ -14,6 +14,9 @@ use praxis_capability_runtime::ScopeId;
 use praxis_capability_runtime::ScopeKind;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::mpsc;
+use std::time::Duration;
+use std::time::Instant;
 
 fn capability_id(value: &str) -> CapabilityId {
     CapabilityId::new(value).expect("valid capability id")
@@ -52,6 +55,29 @@ fn process_scopes() -> (ScopeGraph, ScopeId, ScopeId, ScopeId) {
         .add_child(sibling.clone(), ScopeKind::Workspace, process.clone())
         .expect("sibling scope");
     (scopes, process, workspace, sibling)
+}
+
+fn wait_for_generation_lifecycle(
+    runtime: &CapabilityRuntime,
+    generation: praxis_capability_runtime::GenerationId,
+    expected: CapabilityLifecycle,
+) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if runtime
+            .snapshot()
+            .generations
+            .iter()
+            .any(|snapshot| snapshot.id == generation && snapshot.lifecycle == expected)
+        {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "generation did not reach {expected:?}"
+        );
+        std::thread::yield_now();
+    }
 }
 
 #[test]
@@ -352,7 +378,7 @@ fn cloned_leases_delay_disposal_until_the_last_clone_drops() {
             }))
         })
         .unwrap();
-    initial.commit().unwrap();
+    let generation = initial.commit().unwrap().generation;
 
     let first = runtime
         .acquire(&workspace, &capability_id("tools"))
@@ -366,6 +392,7 @@ fn cloned_leases_delay_disposal_until_the_last_clone_drops() {
     drop(first);
     assert!(events.lock().unwrap().is_empty());
     drop(second);
+    wait_for_generation_lifecycle(&runtime, generation, CapabilityLifecycle::Disposed);
     assert_eq!(*events.lock().unwrap(), ["disposed"]);
 }
 
@@ -433,9 +460,58 @@ fn dropping_scope_quiesces_then_disposes_typed_payload_after_lease_release() {
     assert_eq!(hooks.lease().lifecycle(), CapabilityLifecycle::Quiescing);
     drop(hooks);
 
-    assert!(runtime.snapshot().generations.iter().any(|snapshot| {
-        snapshot.id == generation && snapshot.lifecycle == CapabilityLifecycle::Disposed
-    }));
+    wait_for_generation_lifecycle(&runtime, generation, CapabilityLifecycle::Disposed);
+}
+
+#[test]
+fn final_lease_drop_never_runs_the_disposer_inline() {
+    let process = ScopeId::process();
+    let runtime =
+        CapabilityRuntime::new(ScopeGraph::single_root(process.clone(), ScopeKind::Process));
+    let scope = runtime
+        .open_child_scope(
+            scope_id("thread:non-blocking-drop"),
+            ScopeKind::Thread,
+            process,
+        )
+        .expect("thread scope");
+    let (disposer_started_tx, disposer_started_rx) = mpsc::channel();
+    let (allow_disposal_tx, allow_disposal_rx) = mpsc::channel();
+    let mut transaction = scope.begin_transaction(owner_id("slow-disposer"));
+    transaction
+        .stage_typed(
+            manifest("slow", "slow-disposer", scope.id(), &[]),
+            move || {
+                Ok((
+                    (),
+                    Box::new(move || {
+                        disposer_started_tx.send(()).expect("signal disposer start");
+                        allow_disposal_rx.recv().expect("release disposer");
+                        Ok(())
+                    }),
+                ))
+            },
+        )
+        .expect("stage capability");
+    transaction.commit().expect("publish capability");
+    let lease = scope
+        .acquire(&capability_id("slow"))
+        .expect("active capability");
+    drop(scope);
+
+    let (drop_finished_tx, drop_finished_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        drop(lease);
+        drop_finished_tx.send(()).expect("signal lease drop");
+    });
+
+    drop_finished_rx
+        .recv_timeout(Duration::from_millis(250))
+        .expect("lease drop must not wait for disposer completion");
+    disposer_started_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("reaper must start disposer");
+    allow_disposal_tx.send(()).expect("finish disposer");
 }
 
 #[test]

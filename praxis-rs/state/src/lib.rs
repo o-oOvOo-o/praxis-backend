@@ -79,7 +79,10 @@ pub const SQLITE_HOME_ENV: &str = "PRAXIS_SQLITE_HOME";
 
 pub const LOGS_DB_FILENAME: &str = "logs";
 pub const LOGS_DB_VERSION: u32 = 2;
-pub const STATE_DB_FILENAME: &str = "state";
+// Keep this runtime's schema lineage independent from stores created by newer
+// composable runtimes. Rollout files remain the shared source of truth and are
+// backfilled into this index without risking destructive cross-version opens.
+pub const STATE_DB_FILENAME: &str = "state_runtime";
 pub const STATE_DB_VERSION: u32 = 5;
 
 /// Errors encountered during DB operations. Tags: [stage]

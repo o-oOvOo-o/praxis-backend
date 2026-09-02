@@ -14,8 +14,8 @@ use image::codecs::jpeg::JpegEncoder;
 use image::codecs::png::PngEncoder;
 use image::codecs::webp::WebPEncoder;
 use image::imageops::FilterType;
-use praxis_utils_cache::BlockingLruCache;
-use praxis_utils_cache::sha1_digest;
+use praxis_utils_cache::MemoCache;
+use praxis_utils_cache::sha1_fingerprint;
 /// Maximum width used when resizing images before uploading.
 pub const MAX_WIDTH: u32 = 2048;
 /// Maximum height used when resizing images before uploading.
@@ -50,8 +50,8 @@ struct ImageCacheKey {
     mode: PromptImageMode,
 }
 
-static IMAGE_CACHE: LazyLock<BlockingLruCache<ImageCacheKey, EncodedImage>> =
-    LazyLock::new(|| BlockingLruCache::new(NonZeroUsize::new(32).unwrap_or(NonZeroUsize::MIN)));
+static IMAGE_CACHE: LazyLock<MemoCache<ImageCacheKey, EncodedImage>> =
+    LazyLock::new(|| MemoCache::new(NonZeroUsize::new(32).unwrap_or(NonZeroUsize::MIN)));
 
 pub fn load_for_prompt_bytes(
     path: &Path,
@@ -61,11 +61,11 @@ pub fn load_for_prompt_bytes(
     let path_buf = path.to_path_buf();
 
     let key = ImageCacheKey {
-        digest: sha1_digest(&file_bytes),
+        digest: sha1_fingerprint(&file_bytes),
         mode,
     };
 
-    IMAGE_CACHE.get_or_try_insert_with(key, move || {
+    IMAGE_CACHE.try_get_or_compute(key, move || {
         let format = match image::guess_format(&file_bytes) {
             Ok(ImageFormat::Png) => Some(ImageFormat::Png),
             Ok(ImageFormat::Jpeg) => Some(ImageFormat::Jpeg),

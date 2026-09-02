@@ -457,6 +457,7 @@ mod tests {
         ConfiguredHandler {
             event_name: HookEventName::PreToolUse,
             matcher: Some("^Bash$".to_string()),
+            matcher_regex: Some(regex::Regex::new("^Bash$").expect("valid matcher")),
             command: "echo hook".to_string(),
             timeout_sec: 5,
             status_message: None,

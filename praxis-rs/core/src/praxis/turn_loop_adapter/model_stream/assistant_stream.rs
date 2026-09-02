@@ -62,12 +62,12 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod assistant_text_stream
         use std::collections::HashMap;
 
         use praxis_utils_stream_parser::AssistantTextChunk;
-        use praxis_utils_stream_parser::AssistantTextStreamParser;
+        use praxis_utils_stream_parser::AssistantTextProjector;
 
         #[derive(Debug, Default)]
         pub(in crate::praxis::turn_loop_adapter) struct AssistantMessageStreamParsers {
             plan_mode: bool,
-            parsers_by_item: HashMap<String, AssistantTextStreamParser>,
+            parsers_by_item: HashMap<String, AssistantTextProjector>,
         }
 
         pub(in crate::praxis::turn_loop_adapter) type ParsedAssistantTextDelta = AssistantTextChunk;
@@ -88,7 +88,7 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod assistant_text_stream
                 if text.is_empty() {
                     return ParsedAssistantTextDelta::default();
                 }
-                self.parser_mut(item_id).push_str(text)
+                self.parser_mut(item_id).project(text)
             }
 
             pub(in crate::praxis::turn_loop_adapter) fn parse_delta(
@@ -96,7 +96,7 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod assistant_text_stream
                 item_id: &str,
                 delta: &str,
             ) -> ParsedAssistantTextDelta {
-                self.parser_mut(item_id).push_str(delta)
+                self.parser_mut(item_id).project(delta)
             }
 
             pub(in crate::praxis::turn_loop_adapter::model_stream) fn finish_item(
@@ -106,7 +106,7 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod assistant_text_stream
                 let Some(mut parser) = self.parsers_by_item.remove(item_id) else {
                     return ParsedAssistantTextDelta::default();
                 };
-                parser.finish()
+                parser.close()
             }
 
             pub(in crate::praxis::turn_loop_adapter::model_stream) fn drain_finished(
@@ -115,15 +115,15 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod assistant_text_stream
                 let parsers_by_item = std::mem::take(&mut self.parsers_by_item);
                 parsers_by_item
                     .into_iter()
-                    .map(|(item_id, mut parser)| (item_id, parser.finish()))
+                    .map(|(item_id, mut parser)| (item_id, parser.close()))
                     .collect()
             }
 
-            fn parser_mut(&mut self, item_id: &str) -> &mut AssistantTextStreamParser {
+            fn parser_mut(&mut self, item_id: &str) -> &mut AssistantTextProjector {
                 let plan_mode = self.plan_mode;
                 self.parsers_by_item
                     .entry(item_id.to_string())
-                    .or_insert_with(|| AssistantTextStreamParser::new(plan_mode))
+                    .or_insert_with(|| AssistantTextProjector::new(plan_mode))
             }
         }
     }

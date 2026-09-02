@@ -17,13 +17,19 @@ use std::any::type_name;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::Weak;
+use std::sync::mpsc;
+use std::thread;
 
 pub type CapabilityDisposer = Box<dyn FnOnce() -> Result<(), String> + Send + 'static>;
 pub type CapabilityActivation =
     Box<dyn FnOnce() -> Result<CapabilityDisposer, String> + Send + 'static>;
+
+const DISPOSAL_REAPER_STACK_BYTES: usize = 512 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityLifecycle {
@@ -66,6 +72,12 @@ pub struct CapabilityRuntime {
 pub(crate) struct RuntimeInner {
     commit_gate: Mutex<()>,
     state: Mutex<RuntimeState>,
+    disposal_tx: mpsc::Sender<DisposalJob>,
+}
+
+struct DisposalJob {
+    generation: GenerationId,
+    disposers: Vec<CapabilityDisposer>,
 }
 
 struct RuntimeState {
@@ -78,18 +90,20 @@ struct RuntimeState {
 
 impl CapabilityRuntime {
     pub fn new(scopes: ScopeGraph) -> Self {
-        Self {
-            inner: Arc::new(RuntimeInner {
-                commit_gate: Mutex::new(()),
-                state: Mutex::new(RuntimeState {
-                    next_generation: 1,
-                    graph: CapabilityGraph::new(scopes),
-                    scope_handles: BTreeMap::new(),
-                    active_generations: BTreeMap::new(),
-                    generations: BTreeMap::new(),
-                }),
+        let (disposal_tx, disposal_rx) = mpsc::channel();
+        let inner = Arc::new(RuntimeInner {
+            commit_gate: Mutex::new(()),
+            state: Mutex::new(RuntimeState {
+                next_generation: 1,
+                graph: CapabilityGraph::new(scopes),
+                scope_handles: BTreeMap::new(),
+                active_generations: BTreeMap::new(),
+                generations: BTreeMap::new(),
             }),
-        }
+            disposal_tx,
+        });
+        spawn_disposal_reaper(Arc::downgrade(&inner), disposal_rx);
+        Self { inner }
     }
 
     pub fn begin_transaction(
@@ -306,12 +320,7 @@ impl CapabilityRuntime {
         drop(commit_guard);
 
         for (generation_id, disposers) in immediate_disposal {
-            let failures = dispose_all(disposers);
-            let mut state = self.inner.lock_state();
-            if let Some(record) = state.generations.get_mut(&generation_id) {
-                record.disposal_failures.extend(failures);
-                record.lifecycle = CapabilityLifecycle::Disposed;
-            }
+            self.inner.schedule_disposal(generation_id, disposers);
         }
     }
 }
@@ -562,7 +571,12 @@ fn dispose_all(disposers: Vec<CapabilityDisposer>) -> Vec<String> {
     disposers
         .into_iter()
         .rev()
-        .filter_map(|dispose| dispose().err())
+        .filter_map(
+            |dispose| match std::panic::catch_unwind(AssertUnwindSafe(dispose)) {
+                Ok(result) => result.err(),
+                Err(_) => Some("capability disposer panicked".to_string()),
+            },
+        )
         .collect()
 }
 
@@ -620,13 +634,49 @@ impl RuntimeInner {
         let Some(disposers) = disposers else {
             return;
         };
-        let failures = dispose_all(disposers);
-        let mut state = self.lock_state();
-        if let Some(record) = state.generations.get_mut(&generation) {
-            record.disposal_failures.extend(failures);
-            record.lifecycle = CapabilityLifecycle::Disposed;
+        self.schedule_disposal(generation, disposers);
+    }
+
+    fn schedule_disposal(&self, generation: GenerationId, disposers: Vec<CapabilityDisposer>) {
+        if disposers.is_empty() {
+            if let Some(record) = self.lock_state().generations.get_mut(&generation) {
+                record.lifecycle = CapabilityLifecycle::Disposed;
+            }
+            return;
+        }
+        if let Err(error) = self.disposal_tx.send(DisposalJob {
+            generation,
+            disposers,
+        }) {
+            let job = error.0;
+            let _ = thread::Builder::new()
+                .name("praxis-capability-disposal-fallback".to_string())
+                .stack_size(DISPOSAL_REAPER_STACK_BYTES)
+                .spawn(move || {
+                    let _ = dispose_all(job.disposers);
+                });
         }
     }
+}
+
+fn spawn_disposal_reaper(runtime: Weak<RuntimeInner>, jobs: mpsc::Receiver<DisposalJob>) {
+    thread::Builder::new()
+        .name("praxis-capability-reaper".to_string())
+        .stack_size(DISPOSAL_REAPER_STACK_BYTES)
+        .spawn(move || {
+            while let Ok(job) = jobs.recv() {
+                let failures = dispose_all(job.disposers);
+                let Some(runtime) = runtime.upgrade() else {
+                    continue;
+                };
+                let mut state = runtime.lock_state();
+                if let Some(record) = state.generations.get_mut(&job.generation) {
+                    record.disposal_failures.extend(failures);
+                    record.lifecycle = CapabilityLifecycle::Disposed;
+                }
+            }
+        })
+        .expect("failed to start capability disposal reaper");
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

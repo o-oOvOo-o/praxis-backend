@@ -1149,3 +1149,6 @@ fn find_type_only_path() {
 
 #[path = "parse_command_tests/shell_wrappers.rs"]
 mod shell_wrappers;
+
+#[path = "parse_command_tests/summary_contract.rs"]
+mod summary_contract;

@@ -1,193 +1,192 @@
-use std::borrow::Borrow;
-use std::hash::Hash;
-use std::num::NonZeroUsize;
-
 use lru::LruCache;
 use sha1::Digest;
 use sha1::Sha1;
-use tokio::sync::Mutex;
-use tokio::sync::MutexGuard;
+use std::borrow::Borrow;
+use std::convert::Infallible;
+use std::hash::Hash;
+use std::num::NonZeroUsize;
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
+use std::sync::Condvar;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 
-/// A minimal LRU cache protected by a Tokio mutex.
-/// Calls outside a Tokio runtime are no-ops.
-pub struct BlockingLruCache<K, V> {
-    inner: Mutex<LruCache<K, V>>,
+/// A bounded, synchronous memoization table.
+///
+/// Values are cloned out of the table so no cache lock escapes into caller code. A miss installs a
+/// per-key computation slot before invoking the producer, allowing unrelated keys to progress and
+/// ensuring concurrent requests for the same resident key share one computation.
+pub struct MemoCache<K, V> {
+    entries: Mutex<LruCache<K, Arc<Slot<V>>>>,
 }
 
-impl<K, V> BlockingLruCache<K, V>
+/// A small, thread-safe LRU map for already-computed snapshots.
+///
+/// Unlike [`MemoCache`], this type does not coordinate value production. Callers use `with_mut`
+/// when insertion must be atomic with a final duplicate check.
+pub struct LruMap<K, V> {
+    entries: Mutex<LruCache<K, V>>,
+}
+
+impl<K, V> LruMap<K, V>
 where
     K: Eq + Hash,
 {
-    /// Creates a cache with the provided non-zero capacity.
-    #[must_use]
     pub fn new(capacity: NonZeroUsize) -> Self {
         Self {
-            inner: Mutex::new(LruCache::new(capacity)),
+            entries: Mutex::new(LruCache::new(capacity)),
         }
     }
 
-    /// Returns a clone of the cached value for `key`, or computes and inserts it.
-    pub fn get_or_insert_with(&self, key: K, value: impl FnOnce() -> V) -> V
-    where
-        V: Clone,
-    {
-        if let Some(mut guard) = lock_if_runtime(&self.inner) {
-            if let Some(v) = guard.get(&key) {
-                return v.clone();
-            }
-            let v = value();
-            // Insert and return a clone to keep ownership in the cache.
-            guard.put(key, v.clone());
-            return v;
-        }
-        value()
-    }
-
-    /// Like `get_or_insert_with`, but the value factory may fail.
-    pub fn get_or_try_insert_with<E>(
-        &self,
-        key: K,
-        value: impl FnOnce() -> Result<V, E>,
-    ) -> Result<V, E>
-    where
-        V: Clone,
-    {
-        if let Some(mut guard) = lock_if_runtime(&self.inner) {
-            if let Some(v) = guard.get(&key) {
-                return Ok(v.clone());
-            }
-            let v = value()?;
-            guard.put(key, v.clone());
-            return Ok(v);
-        }
-        value()
-    }
-
-    /// Builds a cache if `capacity` is non-zero, returning `None` otherwise.
-    #[must_use]
-    pub fn try_with_capacity(capacity: usize) -> Option<Self> {
-        NonZeroUsize::new(capacity).map(Self::new)
-    }
-
-    /// Returns a clone of the cached value corresponding to `key`, if present.
     pub fn get<Q>(&self, key: &Q) -> Option<V>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
+        Q: Eq + Hash + ?Sized,
         V: Clone,
     {
-        let mut guard = lock_if_runtime(&self.inner)?;
-        guard.get(key).cloned()
+        lock(&self.entries).get(key).cloned()
     }
 
-    /// Inserts `value` for `key`, returning the previous entry if it existed.
-    pub fn insert(&self, key: K, value: V) -> Option<V> {
-        let mut guard = lock_if_runtime(&self.inner)?;
-        guard.put(key, value)
-    }
-
-    /// Removes the entry for `key` if it exists, returning it.
-    pub fn remove<Q>(&self, key: &Q) -> Option<V>
-    where
-        K: Borrow<Q>,
-        Q: Hash + Eq + ?Sized,
-    {
-        let mut guard = lock_if_runtime(&self.inner)?;
-        guard.pop(key)
-    }
-
-    /// Clears all entries from the cache.
     pub fn clear(&self) {
-        if let Some(mut guard) = lock_if_runtime(&self.inner) {
-            guard.clear();
-        }
+        lock(&self.entries).clear();
     }
 
-    /// Executes `callback` with a mutable reference to the underlying cache.
-    pub fn with_mut<R>(&self, callback: impl FnOnce(&mut LruCache<K, V>) -> R) -> R {
-        if let Some(mut guard) = lock_if_runtime(&self.inner) {
-            callback(&mut guard)
-        } else {
-            let mut disabled = LruCache::unbounded();
-            callback(&mut disabled)
-        }
+    pub fn len(&self) -> usize {
+        lock(&self.entries).len()
     }
 
-    /// Provides direct access to the cache guard when a Tokio runtime is available.
-    pub fn blocking_lock(&self) -> Option<MutexGuard<'_, LruCache<K, V>>> {
-        lock_if_runtime(&self.inner)
+    pub fn with_mut<R>(&self, operation: impl FnOnce(&mut LruCache<K, V>) -> R) -> R {
+        operation(&mut lock(&self.entries))
     }
 }
 
-fn lock_if_runtime<K, V>(m: &Mutex<LruCache<K, V>>) -> Option<MutexGuard<'_, LruCache<K, V>>>
+impl<K, V> MemoCache<K, V>
 where
     K: Eq + Hash,
+    V: Clone,
 {
-    tokio::runtime::Handle::try_current().ok()?;
-    Some(tokio::task::block_in_place(|| m.blocking_lock()))
+    pub fn new(capacity: NonZeroUsize) -> Self {
+        Self {
+            entries: Mutex::new(LruCache::new(capacity)),
+        }
+    }
+
+    pub fn get_or_compute<F>(&self, key: K, producer: F) -> V
+    where
+        F: FnOnce() -> V,
+    {
+        match self.try_get_or_compute(key, || Ok::<V, Infallible>(producer())) {
+            Ok(value) => value,
+            Err(never) => match never {},
+        }
+    }
+
+    pub fn clear(&self) {
+        lock(&self.entries).clear();
+    }
+
+    pub fn try_get_or_compute<F, E>(&self, key: K, producer: F) -> Result<V, E>
+    where
+        F: FnOnce() -> Result<V, E>,
+    {
+        let slot = {
+            let mut entries = lock(&self.entries);
+            if let Some(slot) = entries.get(&key) {
+                Arc::clone(slot)
+            } else {
+                let slot = Arc::new(Slot::new());
+                entries.put(key, Arc::clone(&slot));
+                slot
+            }
+        };
+
+        slot.get_or_compute(producer)
+    }
 }
 
-/// Computes the SHA-1 digest of `bytes`.
-///
-/// Useful for content-based cache keys when you want to avoid staleness
-/// caused by path-only keys.
-#[must_use]
-pub fn sha1_digest(bytes: &[u8]) -> [u8; 20] {
-    let mut hasher = Sha1::new();
-    hasher.update(bytes);
-    let result = hasher.finalize();
-    let mut out = [0; 20];
-    out.copy_from_slice(&result);
-    out
+struct Slot<V> {
+    state: Mutex<SlotState<V>>,
+    changed: Condvar,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::BlockingLruCache;
-    use std::num::NonZeroUsize;
+enum SlotState<V> {
+    Empty,
+    Computing,
+    Ready(V),
+}
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn stores_and_retrieves_values() {
-        let cache = BlockingLruCache::new(NonZeroUsize::new(2).expect("capacity"));
-
-        assert!(cache.get(&"first").is_none());
-        cache.insert("first", /*value*/ 1);
-        assert_eq!(cache.get(&"first"), Some(1));
+impl<V: Clone> Slot<V> {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(SlotState::Empty),
+            changed: Condvar::new(),
+        }
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn evicts_least_recently_used() {
-        let cache = BlockingLruCache::new(NonZeroUsize::new(2).expect("capacity"));
-        cache.insert("a", /*value*/ 1);
-        cache.insert("b", /*value*/ 2);
-        assert_eq!(cache.get(&"a"), Some(1));
+    fn get_or_compute<F, E>(&self, producer: F) -> Result<V, E>
+    where
+        F: FnOnce() -> Result<V, E>,
+    {
+        let mut producer = Some(producer);
 
-        cache.insert("c", /*value*/ 3);
+        loop {
+            let mut state = lock(&self.state);
+            match &*state {
+                SlotState::Ready(value) => return Ok(value.clone()),
+                SlotState::Computing => {
+                    state = wait(&self.changed, state);
+                    drop(state);
+                }
+                SlotState::Empty => {
+                    *state = SlotState::Computing;
+                    drop(state);
 
-        assert!(cache.get(&"b").is_none());
-        assert_eq!(cache.get(&"a"), Some(1));
-        assert_eq!(cache.get(&"c"), Some(3));
+                    let run = producer
+                        .take()
+                        .expect("a cache caller can own at most one computation");
+                    match std::panic::catch_unwind(AssertUnwindSafe(run)) {
+                        Ok(Ok(value)) => {
+                            let mut state = lock(&self.state);
+                            *state = SlotState::Ready(value.clone());
+                            self.changed.notify_all();
+                            return Ok(value);
+                        }
+                        Ok(Err(error)) => {
+                            let mut state = lock(&self.state);
+                            *state = SlotState::Empty;
+                            self.changed.notify_all();
+                            return Err(error);
+                        }
+                        Err(payload) => {
+                            let mut state = lock(&self.state);
+                            *state = SlotState::Empty;
+                            self.changed.notify_all();
+                            drop(state);
+                            std::panic::resume_unwind(payload);
+                        }
+                    }
+                }
+            }
+        }
     }
+}
 
-    #[test]
-    fn disabled_without_runtime() {
-        let cache = BlockingLruCache::new(NonZeroUsize::new(2).expect("capacity"));
-        cache.insert("first", /*value*/ 1);
-        assert!(cache.get(&"first").is_none());
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
-        assert_eq!(cache.get_or_insert_with("first", || 2), 2);
-        assert!(cache.get(&"first").is_none());
+fn wait<'a, T>(condition: &Condvar, guard: MutexGuard<'a, T>) -> MutexGuard<'a, T> {
+    condition
+        .wait(guard)
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
-        assert!(cache.remove(&"first").is_none());
-        cache.clear();
-
-        let result = cache.with_mut(|inner| {
-            inner.put("tmp", 3);
-            inner.get(&"tmp").cloned()
-        });
-        assert_eq!(result, Some(3));
-        assert!(cache.get(&"tmp").is_none());
-
-        assert!(cache.blocking_lock().is_none());
-    }
+/// Computes the stable 20-byte SHA-1 fingerprint used by content-addressed cache keys.
+pub fn sha1_fingerprint(bytes: &[u8]) -> [u8; 20] {
+    let digest = Sha1::digest(bytes);
+    let mut fingerprint = [0; 20];
+    fingerprint.copy_from_slice(&digest);
+    fingerprint
 }

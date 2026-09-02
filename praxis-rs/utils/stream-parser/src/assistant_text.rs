@@ -1,8 +1,8 @@
-use crate::CitationStreamParser;
-use crate::ProposedPlanParser;
+use crate::CitationProjector;
+use crate::ProposedPlanProjector;
 use crate::ProposedPlanSegment;
-use crate::StreamTextChunk;
-use crate::StreamTextParser;
+use crate::TextProjection;
+use crate::TextProjector;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AssistantTextChunk {
@@ -17,74 +17,104 @@ impl AssistantTextChunk {
     }
 }
 
-/// Parses assistant text streaming markup in one pass:
-/// - strips `<oai-mem-citation>` tags and extracts citation payloads
-/// - in plan mode, also strips `<proposed_plan>` blocks and emits plan segments
-#[derive(Debug, Default)]
-pub struct AssistantTextStreamParser {
-    plan_mode: bool,
-    citations: CitationStreamParser,
-    plan: ProposedPlanParser,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssistantTextFeatures {
+    pub citations: bool,
+    pub proposed_plan: bool,
 }
 
-impl AssistantTextStreamParser {
-    pub fn new(plan_mode: bool) -> Self {
+impl Default for AssistantTextFeatures {
+    fn default() -> Self {
         Self {
-            plan_mode,
-            ..Self::default()
+            citations: true,
+            proposed_plan: false,
+        }
+    }
+}
+
+/// Parses assistant text streaming markup in one pass:
+/// - strips `<praxis-memory-citation>` tags and extracts citation payloads
+/// - in plan mode, also strips `<proposed_plan>` blocks and emits plan segments
+#[derive(Debug)]
+pub struct AssistantTextProjector {
+    citations: Option<CitationProjector>,
+    plan: Option<ProposedPlanProjector>,
+}
+
+impl AssistantTextProjector {
+    pub fn new(plan_mode: bool) -> Self {
+        Self::with_features(AssistantTextFeatures {
+            proposed_plan: plan_mode,
+            ..AssistantTextFeatures::default()
+        })
+    }
+
+    pub fn with_features(features: AssistantTextFeatures) -> Self {
+        Self {
+            citations: features.citations.then(CitationProjector::default),
+            plan: features.proposed_plan.then(ProposedPlanProjector::default),
         }
     }
 
-    pub fn push_str(&mut self, chunk: &str) -> AssistantTextChunk {
-        let citation_chunk = self.citations.push_str(chunk);
-        let mut out = self.parse_visible_text(citation_chunk.visible_text);
-        out.citations = citation_chunk.extracted;
-        out
+    pub fn project(&mut self, input: &str) -> AssistantTextChunk {
+        let citations = self.citations.as_mut().map_or_else(
+            || TextProjection::renderable(input),
+            |projector| projector.project(input),
+        );
+        self.route(citations)
     }
 
-    pub fn finish(&mut self) -> AssistantTextChunk {
-        let citation_chunk = self.citations.finish();
-        let mut out = self.parse_visible_text(citation_chunk.visible_text);
-        if self.plan_mode {
-            let mut tail = self.plan.finish();
-            if !tail.is_empty() {
-                out.visible_text.push_str(&tail.visible_text);
-                out.plan_segments.append(&mut tail.extracted);
-            }
+    pub fn close(&mut self) -> AssistantTextChunk {
+        let citation_tail = self
+            .citations
+            .as_mut()
+            .map(TextProjector::close)
+            .unwrap_or_default();
+        let mut out = self.route(citation_tail);
+        if let Some(plan) = &mut self.plan {
+            let tail = plan.close();
+            out.visible_text.push_str(&tail.renderable);
+            out.plan_segments.extend(tail.events);
         }
-        out.citations = citation_chunk.extracted;
         out
     }
 
-    fn parse_visible_text(&mut self, visible_text: String) -> AssistantTextChunk {
-        if !self.plan_mode {
+    fn route(&mut self, citations: TextProjection<String>) -> AssistantTextChunk {
+        let Some(plan) = &mut self.plan else {
             return AssistantTextChunk {
-                visible_text,
+                visible_text: citations.renderable,
+                citations: citations.events,
                 ..AssistantTextChunk::default()
             };
-        }
-        let plan_chunk: StreamTextChunk<ProposedPlanSegment> = self.plan.push_str(&visible_text);
+        };
+        let plan_projection = plan.project(&citations.renderable);
         AssistantTextChunk {
-            visible_text: plan_chunk.visible_text,
-            plan_segments: plan_chunk.extracted,
-            ..AssistantTextChunk::default()
+            visible_text: plan_projection.renderable,
+            citations: citations.events,
+            plan_segments: plan_projection.events,
         }
+    }
+}
+
+impl Default for AssistantTextProjector {
+    fn default() -> Self {
+        Self::with_features(AssistantTextFeatures::default())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::AssistantTextStreamParser;
+    use super::AssistantTextProjector;
     use crate::ProposedPlanSegment;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn parses_citations_across_seed_and_delta_boundaries() {
-        let mut parser = AssistantTextStreamParser::new(/*plan_mode*/ false);
+        let mut parser = AssistantTextProjector::new(/*plan_mode*/ false);
 
-        let seeded = parser.push_str("hello <oai-mem-citation>doc");
-        let parsed = parser.push_str("1</oai-mem-citation> world");
-        let tail = parser.finish();
+        let seeded = parser.project("hello <praxis-memory-citation>doc");
+        let parsed = parser.project("1</praxis-memory-citation> world");
+        let tail = parser.close();
 
         assert_eq!(seeded.visible_text, "hello ");
         assert_eq!(seeded.citations, Vec::<String>::new());
@@ -96,12 +126,13 @@ mod tests {
 
     #[test]
     fn parses_plan_segments_after_citation_stripping() {
-        let mut parser = AssistantTextStreamParser::new(/*plan_mode*/ true);
+        let mut parser = AssistantTextProjector::new(/*plan_mode*/ true);
 
-        let seeded = parser.push_str("Intro\n<proposed");
-        let parsed = parser.push_str("_plan>\n- step <oai-mem-citation>doc</oai-mem-citation>\n");
-        let tail = parser.push_str("</proposed_plan>\nOutro");
-        let finish = parser.finish();
+        let seeded = parser.project("Intro\n<proposed");
+        let parsed =
+            parser.project("_plan>\n- step <praxis-memory-citation>doc</praxis-memory-citation>\n");
+        let tail = parser.project("</proposed_plan>\nOutro");
+        let finish = parser.close();
 
         assert_eq!(seeded.visible_text, "Intro\n");
         assert_eq!(
