@@ -46,6 +46,8 @@ struct WsStream {
     pump_task: tokio::task::JoinHandle<()>,
 }
 
+const WEBSOCKET_MESSAGE_CAPACITY: usize = 256;
+
 enum WsCommand {
     Send {
         message: Message,
@@ -59,9 +61,10 @@ enum WsCommand {
 impl WsStream {
     fn new(
         inner: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    ) -> (Self, mpsc::UnboundedReceiver<Result<Message, WsError>>) {
+    ) -> (Self, mpsc::Receiver<Result<Message, WsError>>) {
         let (tx_command, mut rx_command) = mpsc::channel::<WsCommand>(32);
-        let (tx_message, rx_message) = mpsc::unbounded_channel::<Result<Message, WsError>>();
+        let (tx_message, rx_message) =
+            mpsc::channel::<Result<Message, WsError>>(WEBSOCKET_MESSAGE_CAPACITY);
 
         let pump_task = tokio::spawn(async move {
             let mut inner = inner;
@@ -104,7 +107,7 @@ impl WsStream {
                                 trace!(payload_len = payload.len(), "realtime websocket received ping");
                                 if let Err(err) = inner.send(Message::Pong(payload)).await {
                                     error!("realtime websocket failed to send pong: {err}");
-                                    let _ = tx_message.send(Err(err));
+                                    let _ = tx_message.send(Err(err)).await;
                                     break;
                                 }
                             }
@@ -132,7 +135,7 @@ impl WsStream {
                                     }
                                     Message::Ping(_) | Message::Pong(_) => {}
                                 }
-                                if tx_message.send(Ok(message)).is_err() {
+                                if tx_message.send(Ok(message)).await.is_err() {
                                     break;
                                 }
                                 if is_close {
@@ -141,7 +144,7 @@ impl WsStream {
                             }
                             Err(err) => {
                                 error!("realtime websocket receive failed: {err}");
-                                let _ = tx_message.send(Err(err));
+                                let _ = tx_message.send(Err(err)).await;
                                 break;
                             }
                         }
@@ -202,7 +205,7 @@ pub struct RealtimeWebsocketWriter {
 
 #[derive(Clone)]
 pub struct RealtimeWebsocketEvents {
-    rx_message: Arc<Mutex<mpsc::UnboundedReceiver<Result<Message, WsError>>>>,
+    rx_message: Arc<Mutex<mpsc::Receiver<Result<Message, WsError>>>>,
     active_transcript: Arc<Mutex<ActiveTranscriptState>>,
     event_parser: RealtimeEventParser,
     is_closed: Arc<AtomicBool>,
@@ -250,7 +253,7 @@ impl RealtimeWebsocketConnection {
 
     fn new(
         stream: WsStream,
-        rx_message: mpsc::UnboundedReceiver<Result<Message, WsError>>,
+        rx_message: mpsc::Receiver<Result<Message, WsError>>,
         event_parser: RealtimeEventParser,
     ) -> Self {
         let stream = Arc::new(stream);
