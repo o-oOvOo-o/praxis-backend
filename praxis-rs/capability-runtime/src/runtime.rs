@@ -12,6 +12,7 @@ use crate::ScopeId;
 use crate::ScopeKind;
 use crate::TypedCapability;
 use crate::graph::ScopedCapabilityKey;
+use arc_swap::ArcSwap;
 use std::any::Any;
 use std::any::type_name;
 use std::collections::BTreeMap;
@@ -21,7 +22,6 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
-use std::sync::Weak;
 use std::sync::mpsc;
 use std::thread;
 
@@ -53,12 +53,18 @@ struct ActivatedCapability {
     disposer: CapabilityDisposer,
 }
 
-struct GenerationRecord {
+pub(crate) struct GenerationRecord {
+    id: GenerationId,
     owner: CapabilityOwnerId,
     scope: ScopeId,
+    capabilities: Vec<CapabilityId>,
+    mutable: Mutex<GenerationMutable>,
+    disposal_tx: mpsc::Sender<DisposalJob>,
+}
+
+struct GenerationMutable {
     lifecycle: CapabilityLifecycle,
     leases: usize,
-    capabilities: Vec<CapabilityId>,
     payloads: BTreeMap<CapabilityId, Arc<dyn Any + Send + Sync>>,
     disposers: Vec<CapabilityDisposer>,
     disposal_failures: Vec<String>,
@@ -72,11 +78,12 @@ pub struct CapabilityRuntime {
 pub(crate) struct RuntimeInner {
     commit_gate: Mutex<()>,
     state: Mutex<RuntimeState>,
+    routes: ArcSwap<RouteSnapshot>,
     disposal_tx: mpsc::Sender<DisposalJob>,
 }
 
 struct DisposalJob {
-    generation: GenerationId,
+    generation: Arc<GenerationRecord>,
     disposers: Vec<CapabilityDisposer>,
 }
 
@@ -86,25 +93,70 @@ struct RuntimeState {
     graph: CapabilityGraph,
     scope_handles: BTreeMap<ScopeId, usize>,
     active_generations: BTreeMap<ScopedCapabilityKey, GenerationId>,
-    generations: BTreeMap<GenerationId, GenerationRecord>,
+    generations: BTreeMap<GenerationId, Arc<GenerationRecord>>,
+}
+
+struct RouteSnapshot {
+    scopes: ScopeGraph,
+    routes: BTreeMap<ScopedCapabilityKey, Arc<GenerationRecord>>,
+}
+
+impl RouteSnapshot {
+    fn from_state(state: &RuntimeState) -> Self {
+        let routes = state
+            .active_generations
+            .iter()
+            .filter_map(|(key, generation)| {
+                state
+                    .generations
+                    .get(generation)
+                    .map(|record| (key.clone(), Arc::clone(record)))
+            })
+            .collect();
+        Self {
+            scopes: state.graph.scopes().clone(),
+            routes,
+        }
+    }
+
+    fn visible(
+        &self,
+        request_scope: &ScopeId,
+        capability: &CapabilityId,
+    ) -> Option<Arc<GenerationRecord>> {
+        let mut current = Some(request_scope);
+        while let Some(scope) = current {
+            if let Some(generation) = self.routes.get(&ScopedCapabilityKey {
+                id: capability.clone(),
+                scope: scope.clone(),
+            }) {
+                return Some(Arc::clone(generation));
+            }
+            current = self.scopes.parent(scope);
+        }
+        None
+    }
 }
 
 impl CapabilityRuntime {
     pub fn new(scopes: ScopeGraph) -> Self {
         let (disposal_tx, disposal_rx) = mpsc::channel();
+        let state = RuntimeState {
+            revision: 0,
+            next_generation: 1,
+            graph: CapabilityGraph::new(scopes),
+            scope_handles: BTreeMap::new(),
+            active_generations: BTreeMap::new(),
+            generations: BTreeMap::new(),
+        };
+        let routes = ArcSwap::from_pointee(RouteSnapshot::from_state(&state));
         let inner = Arc::new(RuntimeInner {
             commit_gate: Mutex::new(()),
-            state: Mutex::new(RuntimeState {
-                revision: 0,
-                next_generation: 1,
-                graph: CapabilityGraph::new(scopes),
-                scope_handles: BTreeMap::new(),
-                active_generations: BTreeMap::new(),
-                generations: BTreeMap::new(),
-            }),
+            state: Mutex::new(state),
+            routes,
             disposal_tx,
         });
-        spawn_disposal_reaper(Arc::downgrade(&inner), disposal_rx);
+        spawn_disposal_reaper(disposal_rx);
         Self { inner }
     }
 
@@ -131,6 +183,9 @@ impl CapabilityRuntime {
         let mut state = self.inner.lock_state();
         state.graph.scopes_mut().ensure_child(id, kind, parent)?;
         state.revision = state.revision.wrapping_add(1);
+        self.inner
+            .routes
+            .store(Arc::new(RouteSnapshot::from_state(&state)));
         Ok(())
     }
 
@@ -148,6 +203,9 @@ impl CapabilityRuntime {
             .ensure_child(id.clone(), kind, parent)?;
         *state.scope_handles.entry(id.clone()).or_default() += 1;
         state.revision = state.revision.wrapping_add(1);
+        self.inner
+            .routes
+            .store(Arc::new(RouteSnapshot::from_state(&state)));
         Ok(CapabilityScope {
             runtime: self.clone(),
             id,
@@ -163,25 +221,13 @@ impl CapabilityRuntime {
         request_scope: &ScopeId,
         capability: &CapabilityId,
     ) -> Option<CapabilityLease> {
-        let mut state = self.inner.lock_state();
-        let manifest = state.graph.visible(request_scope, capability)?;
-        if !state.graph.scopes().can_see(request_scope, &manifest.scope) {
-            return None;
+        loop {
+            let routes = self.inner.routes.load_full();
+            let generation = routes.visible(request_scope, capability)?;
+            if generation.try_acquire() {
+                return Some(CapabilityLease::new(capability.clone(), generation));
+            }
         }
-        let generation_id = *state.active_generations.get(&ScopedCapabilityKey {
-            id: capability.clone(),
-            scope: manifest.scope.clone(),
-        })?;
-        let generation = state.generations.get_mut(&generation_id)?;
-        if generation.lifecycle != CapabilityLifecycle::Active {
-            return None;
-        }
-        generation.leases += 1;
-        Some(CapabilityLease::new(
-            Arc::clone(&self.inner),
-            capability.clone(),
-            generation_id,
-        ))
     }
 
     pub fn acquire_typed<T>(
@@ -192,45 +238,34 @@ impl CapabilityRuntime {
     where
         T: Any + Send + Sync + 'static,
     {
-        let mut state = self.inner.lock_state();
-        let Some(manifest) = state.graph.visible(request_scope, capability) else {
-            return Ok(None);
+        let generation = loop {
+            let routes = self.inner.routes.load_full();
+            let Some(generation) = routes.visible(request_scope, capability) else {
+                return Ok(None);
+            };
+            if generation.try_acquire() {
+                break generation;
+            }
         };
-        if !state.graph.scopes().can_see(request_scope, &manifest.scope) {
-            return Ok(None);
-        }
-        let Some(generation_id) = state
-            .active_generations
-            .get(&ScopedCapabilityKey {
-                id: capability.clone(),
-                scope: manifest.scope.clone(),
-            })
-            .copied()
-        else {
-            return Ok(None);
-        };
-        let Some(generation) = state.generations.get_mut(&generation_id) else {
-            return Ok(None);
-        };
-        if generation.lifecycle != CapabilityLifecycle::Active {
-            return Ok(None);
-        }
-        let Some(payload) = generation.payloads.get(capability).cloned() else {
+        let generation_id = generation.id();
+        let Some(payload) = generation.payload(capability) else {
+            generation.release_lease();
             return Err(CapabilityPayloadError::MissingPayload {
                 capability: capability.clone(),
                 generation: generation_id,
             });
         };
-        let value =
-            Arc::downcast::<T>(payload).map_err(|_| CapabilityPayloadError::TypeMismatch {
+        let value = Arc::downcast::<T>(payload).map_err(|_| {
+            generation.release_lease();
+            CapabilityPayloadError::TypeMismatch {
                 capability: capability.clone(),
                 generation: generation_id,
                 requested_type: type_name::<T>(),
-            })?;
-        generation.leases += 1;
+            }
+        })?;
         Ok(Some(TypedCapability::new(
             value,
-            CapabilityLease::new(Arc::clone(&self.inner), capability.clone(), generation_id),
+            CapabilityLease::new(capability.clone(), generation),
         )))
     }
 
@@ -244,7 +279,7 @@ impl CapabilityRuntime {
                     id: manifest.id.clone(),
                     scope: manifest.scope.clone(),
                 })?;
-                let lifecycle = state.generations.get(&generation)?.lifecycle;
+                let lifecycle = state.generations.get(&generation)?.lifecycle();
                 Some(CapabilitySnapshot {
                     id: manifest.id.clone(),
                     kind: manifest.kind,
@@ -258,14 +293,17 @@ impl CapabilityRuntime {
         let generations = state
             .generations
             .iter()
-            .map(|(id, generation)| GenerationSnapshot {
-                id: *id,
-                owner: generation.owner.clone(),
-                scope: generation.scope.clone(),
-                lifecycle: generation.lifecycle,
-                leases: generation.leases,
-                capabilities: generation.capabilities.clone(),
-                disposal_failures: generation.disposal_failures.clone(),
+            .map(|(id, generation)| {
+                let (lifecycle, leases, disposal_failures) = generation.snapshot_state();
+                GenerationSnapshot {
+                    id: *id,
+                    owner: generation.owner.clone(),
+                    scope: generation.scope.clone(),
+                    lifecycle,
+                    leases,
+                    capabilities: generation.capabilities.clone(),
+                    disposal_failures,
+                }
             })
             .collect();
         RuntimeSnapshot {
@@ -276,7 +314,7 @@ impl CapabilityRuntime {
 
     fn retire_scope(&self, scope: &ScopeId) {
         let commit_guard = self.inner.lock_commit_gate();
-        let immediate_disposal = {
+        let (retired_generations, routes) = {
             let mut state = self.inner.lock_state();
             let Some(handles) = state.scope_handles.get_mut(scope) else {
                 return;
@@ -292,7 +330,7 @@ impl CapabilityRuntime {
                 .filter(|manifest| &manifest.scope == scope)
                 .map(|manifest| manifest.id.clone())
                 .collect::<Vec<_>>();
-            let retired_generations = retired_capabilities
+            let retired_generation_ids = retired_capabilities
                 .iter()
                 .filter_map(|id| {
                     state.active_generations.remove(&ScopedCapabilityKey {
@@ -305,26 +343,21 @@ impl CapabilityRuntime {
                 state.graph.remove_in_scope(&id, scope);
             }
 
-            let mut immediate_disposal = Vec::new();
-            for generation_id in retired_generations {
-                if let Some(record) = state.generations.get_mut(&generation_id) {
-                    record.lifecycle = CapabilityLifecycle::Quiescing;
-                    if record.leases == 0 {
-                        record.lifecycle = CapabilityLifecycle::Retired;
-                        record.payloads.clear();
-                        immediate_disposal
-                            .push((generation_id, std::mem::take(&mut record.disposers)));
-                    }
-                }
-            }
+            let retired_generations = retired_generation_ids
+                .into_iter()
+                .filter_map(|generation| state.generations.get(&generation).cloned())
+                .collect::<Vec<_>>();
             state.revision = state.revision.wrapping_add(1);
-            immediate_disposal
+            let routes = Arc::new(RouteSnapshot::from_state(&state));
+            (retired_generations, routes)
         };
-        drop(commit_guard);
-
-        for (generation_id, disposers) in immediate_disposal {
-            self.inner.schedule_disposal(generation_id, disposers);
+        for generation in &retired_generations {
+            if let Some(disposers) = generation.begin_quiescing() {
+                generation.schedule_disposal(disposers);
+            }
         }
+        self.inner.routes.store(routes);
+        drop(commit_guard);
     }
 }
 
@@ -486,7 +519,7 @@ impl CapabilityTransaction {
         }
 
         let commit_guard = self.runtime.inner.lock_commit_gate();
-        let (generation, retired, immediate_disposal) = {
+        let (generation, retired, retired_records, routes) = {
             let mut state = self.runtime.inner.lock_state();
             if state.revision != expected_revision {
                 let actual_revision = state.revision;
@@ -521,58 +554,57 @@ impl CapabilityTransaction {
                 );
             }
             state.graph = candidate;
-            state.generations.insert(
-                generation,
-                GenerationRecord {
-                    owner: self.owner.clone(),
-                    scope: self.scope.clone(),
+            let record = Arc::new(GenerationRecord {
+                id: generation,
+                owner: self.owner.clone(),
+                scope: self.scope.clone(),
+                capabilities: activated.clone(),
+                mutable: Mutex::new(GenerationMutable {
                     lifecycle: if activated.is_empty() {
                         CapabilityLifecycle::Disposed
                     } else {
                         CapabilityLifecycle::Active
                     },
                     leases: 0,
-                    capabilities: activated.clone(),
                     payloads,
                     disposers,
                     disposal_failures: Vec::new(),
-                },
-            );
+                }),
+                disposal_tx: self.runtime.inner.disposal_tx.clone(),
+            });
+            state.generations.insert(generation, record);
             state.revision = state.revision.wrapping_add(1);
 
-            let mut immediate_disposal = Vec::new();
-            for retired_generation in &retired {
-                if let Some(record) = state.generations.get_mut(retired_generation) {
-                    record.lifecycle = CapabilityLifecycle::Quiescing;
-                    if record.leases == 0 {
-                        record.lifecycle = CapabilityLifecycle::Retired;
-                        record.payloads.clear();
-                        immediate_disposal
-                            .push((*retired_generation, std::mem::take(&mut record.disposers)));
-                    }
-                }
-            }
+            let retired_records = retired
+                .iter()
+                .filter_map(|generation| state.generations.get(generation).cloned())
+                .collect::<Vec<_>>();
+            let routes = Arc::new(RouteSnapshot::from_state(&state));
             (
                 generation,
                 retired.into_iter().collect::<Vec<_>>(),
-                immediate_disposal,
+                retired_records,
+                routes,
             )
         };
+        let mut immediate_disposal = Vec::new();
+        for record in retired_records {
+            if let Some(disposers) = record.begin_quiescing() {
+                immediate_disposal.push((record, disposers));
+            }
+        }
+        self.runtime.inner.routes.store(routes);
         drop(commit_guard);
 
         let mut disposal_failures = Vec::new();
-        for (retired_generation, retired_disposers) in immediate_disposal {
+        for (record, retired_disposers) in immediate_disposal {
             let failures = dispose_all(retired_disposers);
             disposal_failures.extend(
                 failures
                     .iter()
-                    .map(|failure| format!("generation {retired_generation}: {failure}")),
+                    .map(|failure| format!("generation {}: {failure}", record.id())),
             );
-            let mut state = self.runtime.inner.lock_state();
-            if let Some(record) = state.generations.get_mut(&retired_generation) {
-                record.disposal_failures.extend(failures);
-                record.lifecycle = CapabilityLifecycle::Disposed;
-            }
+            record.complete_disposal(failures);
         }
 
         Ok(CapabilityCommitReport {
@@ -599,6 +631,117 @@ fn dispose_all(disposers: Vec<CapabilityDisposer>) -> Vec<String> {
         .collect()
 }
 
+impl GenerationRecord {
+    pub(crate) fn id(&self) -> GenerationId {
+        self.id
+    }
+
+    fn lock_mutable(&self) -> MutexGuard<'_, GenerationMutable> {
+        self.mutable
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) fn lifecycle(&self) -> CapabilityLifecycle {
+        self.lock_mutable().lifecycle
+    }
+
+    fn snapshot_state(&self) -> (CapabilityLifecycle, usize, Vec<String>) {
+        let mutable = self.lock_mutable();
+        (
+            mutable.lifecycle,
+            mutable.leases,
+            mutable.disposal_failures.clone(),
+        )
+    }
+
+    fn payload(&self, capability: &CapabilityId) -> Option<Arc<dyn Any + Send + Sync>> {
+        self.lock_mutable().payloads.get(capability).cloned()
+    }
+
+    fn try_acquire(&self) -> bool {
+        let mut mutable = self.lock_mutable();
+        if mutable.lifecycle != CapabilityLifecycle::Active {
+            return false;
+        }
+        mutable.leases = mutable
+            .leases
+            .checked_add(1)
+            .expect("capability lease count overflow");
+        true
+    }
+
+    pub(crate) fn retain_lease(&self) -> bool {
+        let mut mutable = self.lock_mutable();
+        if matches!(
+            mutable.lifecycle,
+            CapabilityLifecycle::Retired | CapabilityLifecycle::Disposed
+        ) {
+            return false;
+        }
+        mutable.leases = mutable
+            .leases
+            .checked_add(1)
+            .expect("capability lease count overflow");
+        true
+    }
+
+    fn begin_quiescing(&self) -> Option<Vec<CapabilityDisposer>> {
+        let mut mutable = self.lock_mutable();
+        if mutable.lifecycle == CapabilityLifecycle::Active {
+            mutable.lifecycle = CapabilityLifecycle::Quiescing;
+        }
+        take_disposal_if_drained(&mut mutable)
+    }
+
+    pub(crate) fn release_lease(self: &Arc<Self>) {
+        let disposers = {
+            let mut mutable = self.lock_mutable();
+            debug_assert!(mutable.leases > 0, "lease count must not underflow");
+            mutable.leases = mutable.leases.saturating_sub(1);
+            take_disposal_if_drained(&mut mutable)
+        };
+        if let Some(disposers) = disposers {
+            self.schedule_disposal(disposers);
+        }
+    }
+
+    fn schedule_disposal(self: &Arc<Self>, disposers: Vec<CapabilityDisposer>) {
+        if disposers.is_empty() {
+            self.complete_disposal(Vec::new());
+            return;
+        }
+        if let Err(error) = self.disposal_tx.send(DisposalJob {
+            generation: Arc::clone(self),
+            disposers,
+        }) {
+            let job = error.0;
+            let _ = thread::Builder::new()
+                .name("praxis-capability-disposal-fallback".to_string())
+                .stack_size(DISPOSAL_REAPER_STACK_BYTES)
+                .spawn(move || {
+                    let failures = dispose_all(job.disposers);
+                    job.generation.complete_disposal(failures);
+                });
+        }
+    }
+
+    fn complete_disposal(&self, failures: Vec<String>) {
+        let mut mutable = self.lock_mutable();
+        mutable.disposal_failures.extend(failures);
+        mutable.lifecycle = CapabilityLifecycle::Disposed;
+    }
+}
+
+fn take_disposal_if_drained(mutable: &mut GenerationMutable) -> Option<Vec<CapabilityDisposer>> {
+    if mutable.leases != 0 || mutable.lifecycle != CapabilityLifecycle::Quiescing {
+        return None;
+    }
+    mutable.lifecycle = CapabilityLifecycle::Retired;
+    mutable.payloads.clear();
+    Some(std::mem::take(&mut mutable.disposers))
+}
+
 impl RuntimeInner {
     fn lock_commit_gate(&self) -> MutexGuard<'_, ()> {
         self.commit_gate
@@ -611,88 +754,16 @@ impl RuntimeInner {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
-
-    pub(crate) fn lease_lifecycle(&self, generation: GenerationId) -> CapabilityLifecycle {
-        self.lock_state()
-            .generations
-            .get(&generation)
-            .map_or(CapabilityLifecycle::Disposed, |record| record.lifecycle)
-    }
-
-    pub(crate) fn clone_lease(&self, generation: GenerationId) -> bool {
-        let mut state = self.lock_state();
-        let Some(record) = state.generations.get_mut(&generation) else {
-            return false;
-        };
-        if matches!(
-            record.lifecycle,
-            CapabilityLifecycle::Disposed | CapabilityLifecycle::Retired
-        ) {
-            return false;
-        }
-        record.leases += 1;
-        true
-    }
-
-    pub(crate) fn release_lease(&self, generation: GenerationId) {
-        let disposers = {
-            let mut state = self.lock_state();
-            let Some(record) = state.generations.get_mut(&generation) else {
-                return;
-            };
-            debug_assert!(record.leases > 0, "lease count must not underflow");
-            record.leases = record.leases.saturating_sub(1);
-            if record.leases == 0 && record.lifecycle == CapabilityLifecycle::Quiescing {
-                record.lifecycle = CapabilityLifecycle::Retired;
-                record.payloads.clear();
-                Some(std::mem::take(&mut record.disposers))
-            } else {
-                None
-            }
-        };
-        let Some(disposers) = disposers else {
-            return;
-        };
-        self.schedule_disposal(generation, disposers);
-    }
-
-    fn schedule_disposal(&self, generation: GenerationId, disposers: Vec<CapabilityDisposer>) {
-        if disposers.is_empty() {
-            if let Some(record) = self.lock_state().generations.get_mut(&generation) {
-                record.lifecycle = CapabilityLifecycle::Disposed;
-            }
-            return;
-        }
-        if let Err(error) = self.disposal_tx.send(DisposalJob {
-            generation,
-            disposers,
-        }) {
-            let job = error.0;
-            let _ = thread::Builder::new()
-                .name("praxis-capability-disposal-fallback".to_string())
-                .stack_size(DISPOSAL_REAPER_STACK_BYTES)
-                .spawn(move || {
-                    let _ = dispose_all(job.disposers);
-                });
-        }
-    }
 }
 
-fn spawn_disposal_reaper(runtime: Weak<RuntimeInner>, jobs: mpsc::Receiver<DisposalJob>) {
+fn spawn_disposal_reaper(jobs: mpsc::Receiver<DisposalJob>) {
     thread::Builder::new()
         .name("praxis-capability-reaper".to_string())
         .stack_size(DISPOSAL_REAPER_STACK_BYTES)
         .spawn(move || {
             while let Ok(job) = jobs.recv() {
                 let failures = dispose_all(job.disposers);
-                let Some(runtime) = runtime.upgrade() else {
-                    continue;
-                };
-                let mut state = runtime.lock_state();
-                if let Some(record) = state.generations.get_mut(&job.generation) {
-                    record.disposal_failures.extend(failures);
-                    record.lifecycle = CapabilityLifecycle::Disposed;
-                }
+                job.generation.complete_disposal(failures);
             }
         })
         .expect("failed to start capability disposal reaper");

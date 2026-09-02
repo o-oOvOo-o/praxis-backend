@@ -9,5 +9,8 @@ doctest = false
 name = "praxis_capability_runtime"
 path = "src/lib.rs"
 
+[dependencies]
+arc-swap = { workspace = true }
+
 [lints]
 workspace = true

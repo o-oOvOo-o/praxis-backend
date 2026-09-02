@@ -88,6 +88,10 @@ impl ScopeGraph {
         self.nodes.get(id).map(|node| node.kind)
     }
 
+    pub(crate) fn parent(&self, id: &ScopeId) -> Option<&ScopeId> {
+        self.nodes.get(id).and_then(|node| node.parent.as_ref())
+    }
+
     pub fn can_see(&self, request_scope: &ScopeId, contribution_scope: &ScopeId) -> bool {
         let mut current = Some(request_scope);
         let mut visited = BTreeSet::new();

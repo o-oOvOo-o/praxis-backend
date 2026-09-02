@@ -1,25 +1,19 @@
 use crate::CapabilityId;
 use crate::CapabilityLifecycle;
 use crate::GenerationId;
-use crate::runtime::RuntimeInner;
+use crate::runtime::GenerationRecord;
 use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
 pub struct CapabilityLease {
-    runtime: Arc<RuntimeInner>,
     capability: CapabilityId,
-    generation: GenerationId,
+    generation: Arc<GenerationRecord>,
 }
 
 impl CapabilityLease {
-    pub(crate) fn new(
-        runtime: Arc<RuntimeInner>,
-        capability: CapabilityId,
-        generation: GenerationId,
-    ) -> Self {
+    pub(crate) fn new(capability: CapabilityId, generation: Arc<GenerationRecord>) -> Self {
         Self {
-            runtime,
             capability,
             generation,
         }
@@ -30,24 +24,23 @@ impl CapabilityLease {
     }
 
     pub fn generation_id(&self) -> GenerationId {
-        self.generation
+        self.generation.id()
     }
 
     pub fn lifecycle(&self) -> CapabilityLifecycle {
-        self.runtime.lease_lifecycle(self.generation)
+        self.generation.lifecycle()
     }
 }
 
 impl Clone for CapabilityLease {
     fn clone(&self) -> Self {
         assert!(
-            self.runtime.clone_lease(self.generation),
+            self.generation.retain_lease(),
             "cannot clone a retired capability lease"
         );
         Self {
-            runtime: Arc::clone(&self.runtime),
             capability: self.capability.clone(),
-            generation: self.generation,
+            generation: Arc::clone(&self.generation),
         }
     }
 }
@@ -57,7 +50,7 @@ impl fmt::Debug for CapabilityLease {
         formatter
             .debug_struct("CapabilityLease")
             .field("capability", &self.capability)
-            .field("generation", &self.generation)
+            .field("generation", &self.generation.id())
             .field("lifecycle", &self.lifecycle())
             .finish()
     }
@@ -65,7 +58,7 @@ impl fmt::Debug for CapabilityLease {
 
 impl Drop for CapabilityLease {
     fn drop(&mut self) {
-        self.runtime.release_lease(self.generation);
+        self.generation.release_lease();
     }
 }
 

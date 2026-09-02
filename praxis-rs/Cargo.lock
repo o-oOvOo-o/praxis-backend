@@ -6843,6 +6843,9 @@ dependencies = [
 [[package]]
 name = "praxis-capability-runtime"
 version = "0.0.0"
+dependencies = [
+ "arc-swap",
+]
 
 [[package]]
 name = "praxis-chatgpt"
