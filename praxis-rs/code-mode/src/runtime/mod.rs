@@ -100,7 +100,7 @@ pub(crate) enum RuntimeEvent {
 
 pub(crate) fn spawn_runtime(
     request: ExecuteRequest,
-    event_tx: mpsc::UnboundedSender<RuntimeEvent>,
+    event_tx: mpsc::Sender<RuntimeEvent>,
 ) -> Result<(std_mpsc::Sender<RuntimeCommand>, v8::IsolateHandle), String> {
     let (command_tx, command_rx) = std_mpsc::channel();
     let (isolate_handle_tx, isolate_handle_rx) = std_mpsc::sync_channel(1);
@@ -135,7 +135,7 @@ struct RuntimeConfig {
 }
 
 pub(super) struct RuntimeState {
-    event_tx: mpsc::UnboundedSender<RuntimeEvent>,
+    event_tx: mpsc::Sender<RuntimeEvent>,
     pending_tool_calls: HashMap<String, v8::Global<v8::PromiseResolver>>,
     stored_values: HashMap<String, JsonValue>,
     enabled_tools: Vec<EnabledToolMetadata>,
@@ -165,7 +165,7 @@ fn initialize_v8() {
 
 fn run_runtime(
     config: RuntimeConfig,
-    event_tx: mpsc::UnboundedSender<RuntimeEvent>,
+    event_tx: mpsc::Sender<RuntimeEvent>,
     command_rx: std_mpsc::Receiver<RuntimeCommand>,
     isolate_handle_tx: std_mpsc::SyncSender<v8::IsolateHandle>,
 ) {
@@ -197,7 +197,7 @@ fn run_runtime(
         return;
     }
 
-    let _ = event_tx.send(RuntimeEvent::Started);
+    let _ = event_tx.blocking_send(RuntimeEvent::Started);
 
     let pending_promise = match module_loader::evaluate_main_module(scope, &config.source) {
         Ok(pending_promise) => pending_promise,
@@ -266,7 +266,7 @@ fn run_runtime(
 
 fn capture_scope_send_error(
     scope: &mut v8::PinScope<'_, '_>,
-    event_tx: &mpsc::UnboundedSender<RuntimeEvent>,
+    event_tx: &mpsc::Sender<RuntimeEvent>,
     error_text: Option<String>,
 ) {
     let stored_values = scope
@@ -278,11 +278,11 @@ fn capture_scope_send_error(
 }
 
 fn send_result(
-    event_tx: &mpsc::UnboundedSender<RuntimeEvent>,
+    event_tx: &mpsc::Sender<RuntimeEvent>,
     stored_values: HashMap<String, JsonValue>,
     error_text: Option<String>,
 ) {
-    let _ = event_tx.send(RuntimeEvent::Result {
+    let _ = event_tx.blocking_send(RuntimeEvent::Result {
         stored_values,
         error_text,
     });
@@ -313,7 +313,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminate_execution_stops_cpu_bound_module() {
-        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let (event_tx, mut event_rx) = mpsc::channel(16);
         let (_runtime_tx, runtime_terminate_handle) =
             spawn_runtime(execute_request("while (true) {}"), event_tx).unwrap();
 

@@ -43,7 +43,7 @@ pub(super) fn tool_callback(
     state.next_tool_call_id = state.next_tool_call_id.saturating_add(1);
     let event_tx = state.event_tx.clone();
     state.pending_tool_calls.insert(id.clone(), resolver);
-    let _ = event_tx.send(RuntimeEvent::ToolCall {
+    let _ = event_tx.blocking_send(RuntimeEvent::ToolCall {
         id,
         name: tool_name,
         input,
@@ -69,7 +69,7 @@ pub(super) fn text_callback(
         }
     };
     if let Some(state) = scope.get_slot::<RuntimeState>() {
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(
+        let _ = state.event_tx.blocking_send(RuntimeEvent::ContentItem(
             FunctionCallOutputContentItem::InputText { text },
         ));
     }
@@ -91,7 +91,9 @@ pub(super) fn image_callback(
         Err(()) => return,
     };
     if let Some(state) = scope.get_slot::<RuntimeState>() {
-        let _ = state.event_tx.send(RuntimeEvent::ContentItem(image_item));
+        let _ = state
+            .event_tx
+            .blocking_send(RuntimeEvent::ContentItem(image_item));
     }
     retval.set(v8::undefined(scope).into());
 }
@@ -177,7 +179,7 @@ pub(super) fn notify_callback(
         return;
     }
     if let Some(state) = scope.get_slot::<RuntimeState>() {
-        let _ = state.event_tx.send(RuntimeEvent::Notify {
+        let _ = state.event_tx.blocking_send(RuntimeEvent::Notify {
             call_id: state.tool_call_id.clone(),
             text,
         });
@@ -191,7 +193,7 @@ pub(super) fn yield_control_callback(
     _retval: v8::ReturnValue<v8::Value>,
 ) {
     if let Some(state) = scope.get_slot::<RuntimeState>() {
-        let _ = state.event_tx.send(RuntimeEvent::YieldRequested);
+        let _ = state.event_tx.blocking_send(RuntimeEvent::YieldRequested);
     }
 }
 

@@ -36,15 +36,15 @@ pub trait CodeModeTurnHost: Send + Sync {
 
 #[derive(Clone)]
 struct SessionHandle {
-    control_tx: mpsc::UnboundedSender<SessionControlCommand>,
+    control_tx: mpsc::Sender<SessionControlCommand>,
     runtime_tx: std::sync::mpsc::Sender<RuntimeCommand>,
 }
 
 struct Inner {
     stored_values: Mutex<HashMap<String, JsonValue>>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
-    turn_message_tx: mpsc::UnboundedSender<TurnMessage>,
-    turn_message_rx: Arc<Mutex<mpsc::UnboundedReceiver<TurnMessage>>>,
+    turn_message_tx: mpsc::Sender<TurnMessage>,
+    turn_message_rx: Arc<Mutex<mpsc::Receiver<TurnMessage>>>,
     next_cell_id: AtomicU64,
 }
 
@@ -53,8 +53,12 @@ pub struct CodeModeService {
 }
 
 impl CodeModeService {
+    const CONTROL_CAPACITY: usize = 4;
+    const RUNTIME_EVENT_CAPACITY: usize = 256;
+    const TURN_MESSAGE_CAPACITY: usize = 128;
+
     pub fn new() -> Self {
-        let (turn_message_tx, turn_message_rx) = mpsc::unbounded_channel();
+        let (turn_message_tx, turn_message_rx) = mpsc::channel(Self::TURN_MESSAGE_CAPACITY);
 
         Self {
             inner: Arc::new(Inner {
@@ -81,9 +85,9 @@ impl CodeModeService {
             .next_cell_id
             .fetch_add(1, Ordering::Relaxed)
             .to_string();
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::channel(Self::RUNTIME_EVENT_CAPACITY);
         let (runtime_tx, runtime_terminate_handle) = spawn_runtime(request.clone(), event_tx)?;
-        let (control_tx, control_rx) = mpsc::unbounded_channel();
+        let (control_tx, control_rx) = mpsc::channel(Self::CONTROL_CAPACITY);
         let (response_tx, response_rx) = oneshot::channel();
 
         self.inner.sessions.lock().await.insert(
@@ -133,7 +137,7 @@ impl CodeModeService {
                 response_tx,
             }
         };
-        if handle.control_tx.send(control_message).is_err() {
+        if handle.control_tx.send(control_message).await.is_err() {
             return Ok(missing_cell_response(cell_id));
         }
         match response_rx.await {
@@ -285,8 +289,8 @@ fn send_or_buffer_result(
 async fn run_session_control(
     inner: Arc<Inner>,
     context: SessionControlContext,
-    mut event_rx: mpsc::UnboundedReceiver<RuntimeEvent>,
-    mut control_rx: mpsc::UnboundedReceiver<SessionControlCommand>,
+    mut event_rx: mpsc::Receiver<RuntimeEvent>,
+    mut control_rx: mpsc::Receiver<SessionControlCommand>,
     initial_response_tx: oneshot::Sender<RuntimeResponse>,
     initial_yield_time_ms: u64,
 ) {
@@ -360,7 +364,7 @@ async fn run_session_control(
                             cell_id: cell_id.clone(),
                             call_id,
                             text,
-                        });
+                        }).await;
                     }
                     RuntimeEvent::ToolCall { id, name, input } => {
                         let _ = inner.turn_message_tx.send(TurnMessage::ToolCall {
@@ -368,7 +372,7 @@ async fn run_session_control(
                             id,
                             name,
                             input,
-                        });
+                        }).await;
                     }
                     RuntimeEvent::Result {
                         stored_values,
@@ -499,7 +503,8 @@ mod tests {
     }
 
     fn test_inner() -> Arc<Inner> {
-        let (turn_message_tx, turn_message_rx) = mpsc::unbounded_channel();
+        let (turn_message_tx, turn_message_rx) =
+            mpsc::channel(CodeModeService::TURN_MESSAGE_CAPACITY);
         Arc::new(Inner {
             stored_values: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
@@ -607,10 +612,11 @@ text(JSON.stringify(returnsUndefined));
     #[tokio::test]
     async fn terminate_waits_for_runtime_shutdown_before_responding() {
         let inner = test_inner();
-        let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let (control_tx, control_rx) = mpsc::unbounded_channel();
+        let (event_tx, event_rx) = mpsc::channel(CodeModeService::RUNTIME_EVENT_CAPACITY);
+        let (control_tx, control_rx) = mpsc::channel(CodeModeService::CONTROL_CAPACITY);
         let (initial_response_tx, initial_response_rx) = oneshot::channel();
-        let (runtime_event_tx, _runtime_event_rx) = mpsc::unbounded_channel();
+        let (runtime_event_tx, _runtime_event_rx) =
+            mpsc::channel(CodeModeService::RUNTIME_EVENT_CAPACITY);
         let (runtime_tx, runtime_terminate_handle) = spawn_runtime(
             ExecuteRequest {
                 source: "await new Promise(() => {})".to_string(),
@@ -634,8 +640,8 @@ text(JSON.stringify(returnsUndefined));
             /*initial_yield_time_ms*/ 60_000,
         ));
 
-        event_tx.send(RuntimeEvent::Started).unwrap();
-        event_tx.send(RuntimeEvent::YieldRequested).unwrap();
+        event_tx.send(RuntimeEvent::Started).await.unwrap();
+        event_tx.send(RuntimeEvent::YieldRequested).await.unwrap();
         assert_eq!(
             initial_response_rx.await.unwrap(),
             RuntimeResponse::Yielded {
@@ -649,6 +655,7 @@ text(JSON.stringify(returnsUndefined));
             .send(SessionControlCommand::Terminate {
                 response_tx: terminate_response_tx,
             })
+            .await
             .unwrap();
         let terminate_response = async { terminate_response_rx.await.unwrap() };
         tokio::pin!(terminate_response);
