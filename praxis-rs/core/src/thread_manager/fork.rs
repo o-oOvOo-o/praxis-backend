@@ -6,7 +6,6 @@ use praxis_protocol::protocol::W3cTraceContext;
 
 use crate::config::Config;
 use crate::error::Result as PraxisResult;
-use crate::rollout::RolloutRecorder;
 
 use super::ThreadManager;
 use super::ThreadSpawnResult;
@@ -58,7 +57,7 @@ impl ThreadManager {
         S: Into<ThreadForkSnapshot>,
     {
         let snapshot = snapshot.into();
-        let history = RolloutRecorder::get_rollout_history(&path).await?;
+        let history = praxis_rollout::thread_store::read_initial_history(&path).await?;
         let history = fork_initial_history(snapshot, history);
         Box::pin(self.state.spawn_thread_with_requested_id(
             config,

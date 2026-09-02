@@ -1,6 +1,6 @@
 use super::thread_runtime_api::project_thread_runtime_state_from_watch;
 use super::thread_store_api::ThreadHistorySource;
-use super::thread_store_api::ThreadStore;
+use super::thread_store_api::ThreadProjection;
 use super::thread_store_api::ThreadTurnHydration;
 use super::*;
 use praxis_core::windows_sandbox::WindowsSandboxLevelExt;
@@ -554,7 +554,7 @@ impl PraxisMessageProcessor {
             rollout_path
         };
 
-        match ThreadStore::read_initial_history(&rollout_path).await {
+        match ThreadProjection::read_initial_history(&rollout_path).await {
             Ok(initial_history) => Some(initial_history),
             Err(err) => {
                 self.send_invalid_request_error(
@@ -595,7 +595,7 @@ impl PraxisMessageProcessor {
                     &config_snapshot,
                     Some(rollout_path.into()),
                 );
-                thread.preview = ThreadStore::preview_from_rollout_items(items);
+                thread.preview = ThreadProjection::preview_from_rollout_items(items);
                 Ok(thread)
             }
             InitialHistory::New => Err(format!(
@@ -606,7 +606,7 @@ impl PraxisMessageProcessor {
         thread.id = thread_id.to_string();
         thread.path = Some(rollout_path.to_path_buf());
         let history_items = thread_history.get_rollout_items();
-        ThreadStore::hydrate_turns(
+        ThreadProjection::hydrate_turns(
             &mut thread,
             ThreadHistorySource::RolloutItems(&history_items),
             ThreadTurnHydration::recent(turn_limit.map(|limit| limit as usize)),

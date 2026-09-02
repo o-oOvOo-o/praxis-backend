@@ -3,7 +3,6 @@ use crate::SESSIONS_SUBDIR;
 use crate::config::RolloutConfigView;
 use crate::list;
 use crate::list::parse_timestamp_uuid_from_filename;
-use crate::recorder::RolloutRecorder;
 use crate::state_db::normalize_cwd_for_state_db;
 use chrono::DateTime;
 use chrono::NaiveDateTime;
@@ -101,8 +100,7 @@ pub async fn extract_metadata_from_rollout(
     rollout_path: &Path,
     default_provider: &str,
 ) -> anyhow::Result<ExtractionOutcome> {
-    let (items, _thread_id, parse_errors) =
-        RolloutRecorder::load_rollout_items(rollout_path).await?;
+    let (items, _thread_id, parse_errors) = crate::thread_store::read_items(rollout_path).await?;
     if items.is_empty() {
         return Err(anyhow::anyhow!(
             "empty session file: {}",

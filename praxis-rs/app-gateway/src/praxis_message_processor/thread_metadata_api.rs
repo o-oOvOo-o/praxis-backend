@@ -1,5 +1,5 @@
 use super::thread_projection_api::load_thread_summary_from_state_db_context;
-use super::thread_store_api::ThreadStore;
+use super::thread_store_api::ThreadProjection;
 use super::*;
 use crate::json_rpc_error::internal_error;
 use crate::json_rpc_error::invalid_request;
@@ -46,7 +46,7 @@ impl PraxisMessageProcessor {
             return;
         }
 
-        let thread_store = ThreadStore::new(&self.config);
+        let thread_store = ThreadProjection::new(&self.config);
         let thread_exists = match thread_store.thread_exists(thread_id, None).await {
             Ok(exists) => exists,
             Err(err) => {
@@ -430,7 +430,7 @@ impl PraxisMessageProcessor {
     }
 
     async fn thread_name(&self, thread_id: ThreadId) -> Option<String> {
-        ThreadStore::new(&self.config)
+        ThreadProjection::new(&self.config)
             .resolve_thread_name(thread_id)
             .await
     }

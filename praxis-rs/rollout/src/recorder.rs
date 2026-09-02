@@ -18,13 +18,9 @@ use time::OffsetDateTime;
 use time::format_description::FormatItem;
 use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::BufReader;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
-use tracing::info;
-use tracing::trace;
 use tracing::warn;
 
 use super::ARCHIVED_SESSIONS_SUBDIR;
@@ -49,10 +45,7 @@ use crate::state_db::StateDbHandle;
 use praxis_git_utils::collect_git_info;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::GitInfo as ProtocolGitInfo;
-use praxis_protocol::protocol::InitialHistory;
-use praxis_protocol::protocol::ResumedHistory;
 use praxis_protocol::protocol::RolloutItem;
-use praxis_protocol::protocol::RolloutLine;
 use praxis_protocol::protocol::SessionMeta;
 use praxis_protocol::protocol::SessionMetaLine;
 use praxis_protocol::protocol::SessionSource;
@@ -583,92 +576,6 @@ impl RolloutRecorder {
             .map_err(|e| IoError::other(format!("failed to queue rollout flush: {e}")))?;
         rx.await
             .map_err(|e| IoError::other(format!("failed waiting for rollout flush: {e}")))
-    }
-
-    pub async fn load_rollout_items(
-        path: &Path,
-    ) -> std::io::Result<(Vec<RolloutItem>, Option<ThreadId>, usize)> {
-        let mut items: Vec<RolloutItem> = Vec::new();
-        let (thread_id, parse_errors) = Self::scan_rollout_items(path, |item| {
-            items.push(item);
-        })
-        .await?;
-        Ok((items, thread_id, parse_errors))
-    }
-
-    pub async fn scan_rollout_items<F>(
-        path: &Path,
-        mut on_item: F,
-    ) -> std::io::Result<(Option<ThreadId>, usize)>
-    where
-        F: FnMut(RolloutItem),
-    {
-        trace!("Resuming rollout from {path:?}");
-        let file = tokio::fs::File::open(path).await?;
-        let mut lines = BufReader::new(file).lines();
-
-        let mut thread_id: Option<ThreadId> = None;
-        let mut parse_errors = 0usize;
-        let mut item_count = 0usize;
-        let mut saw_non_empty_line = false;
-
-        while let Some(line) = lines.next_line().await? {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            saw_non_empty_line = true;
-
-            // Parse each JSONL record exactly once. The previous implementation loaded the
-            // whole file into memory, parsed each line into serde_json::Value, cloned that
-            // value, then parsed it again into RolloutLine.
-            match serde_json::from_str::<RolloutLine>(line) {
-                Ok(rollout_line) => {
-                    let item = rollout_line.item;
-                    if let RolloutItem::SessionMeta(session_meta_line) = &item {
-                        if thread_id.is_none() {
-                            // Use the FIRST SessionMeta encountered as the canonical thread id.
-                            thread_id = Some(session_meta_line.meta.id);
-                        }
-                    }
-                    item_count = item_count.saturating_add(1);
-                    on_item(item);
-                }
-                Err(e) => {
-                    warn!("failed to parse rollout line: {line:?}, error: {e}");
-                    parse_errors = parse_errors.saturating_add(1);
-                }
-            }
-        }
-
-        if !saw_non_empty_line {
-            return Err(IoError::other("empty session file"));
-        }
-
-        tracing::debug!(
-            "Scanned rollout with {} items, thread ID: {:?}, parse errors: {}",
-            item_count,
-            thread_id,
-            parse_errors,
-        );
-        Ok((thread_id, parse_errors))
-    }
-
-    pub async fn get_rollout_history(path: &Path) -> std::io::Result<InitialHistory> {
-        let (items, thread_id, _parse_errors) = Self::load_rollout_items(path).await?;
-        let conversation_id = thread_id
-            .ok_or_else(|| IoError::other("failed to parse thread ID from rollout file"))?;
-
-        if items.is_empty() {
-            return Ok(InitialHistory::New);
-        }
-
-        info!("Resumed rollout successfully from {path:?}");
-        Ok(InitialHistory::Resumed(ResumedHistory {
-            conversation_id,
-            history: items,
-            rollout_path: path.to_path_buf(),
-        }))
     }
 
     pub async fn shutdown(&self) -> std::io::Result<()> {

@@ -63,6 +63,22 @@ fn write_session_file(root: &Path, ts: &str, uuid: Uuid) -> std::io::Result<Path
 }
 
 #[tokio::test]
+async fn thread_store_owns_history_hydration() -> std::io::Result<()> {
+    let home = TempDir::new().expect("temp dir");
+    let uuid = Uuid::now_v7();
+    let thread_id = ThreadId::from_string(&uuid.to_string()).expect("thread id");
+    let path = write_session_file(home.path(), "2025-01-03T10-15-30", uuid)?;
+
+    let InitialHistory::Resumed(history) = crate::thread_store::read_initial_history(&path).await?
+    else {
+        panic!("persisted thread should hydrate resumed history");
+    };
+    assert_eq!(history.conversation_id, thread_id);
+    assert_eq!(history.history.len(), 2);
+    Ok(())
+}
+
+#[tokio::test]
 async fn recorder_materializes_only_after_explicit_persist() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());

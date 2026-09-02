@@ -10,7 +10,7 @@ pub mod metadata;
 pub mod policy;
 pub mod recorder;
 pub mod state_db;
-pub mod thread_directory;
+pub mod thread_store;
 
 pub(crate) mod default_client {
     pub use praxis_login::default_client::*;
@@ -41,14 +41,14 @@ pub use praxis_state::ThreadSourceKind;
 pub use recorder::RolloutRecorder;
 pub use recorder::RolloutRecorderParams;
 pub use state_db::StateDbHandle;
-pub use thread_directory::ListThreadsQuery;
-pub use thread_directory::ThreadDirectory;
-pub use thread_directory::ThreadGitInfo;
-pub use thread_directory::ThreadNameResolver;
-pub use thread_directory::ThreadNameWriter;
-pub use thread_directory::ThreadSummary;
-pub use thread_directory::ThreadSummaryPage;
-pub use thread_directory::list_threads;
+pub use thread_store::ListThreadsQuery;
+pub use thread_store::ThreadGitInfo;
+pub use thread_store::ThreadNameResolver;
+pub use thread_store::ThreadNameWriter;
+pub use thread_store::ThreadStore;
+pub use thread_store::ThreadSummary;
+pub use thread_store::ThreadSummaryPage;
+pub use thread_store::list_threads;
 
 #[cfg(test)]
 mod tests;

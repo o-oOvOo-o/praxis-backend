@@ -182,7 +182,7 @@ async fn reconcile_rollout(
     archived: bool,
     state_db: Option<&praxis_state::StateRuntime>,
 ) {
-    let items = match praxis_rollout::RolloutRecorder::load_rollout_items(path).await {
+    let items = match praxis_rollout::thread_store::read_items(path).await {
         Ok((items, _, _)) => items,
         Err(err) => {
             warn!(

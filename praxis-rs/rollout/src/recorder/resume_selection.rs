@@ -6,7 +6,6 @@ use praxis_utils_path as path_utils;
 
 use crate::list::ThreadsPage;
 use crate::metadata;
-use crate::recorder::RolloutRecorder;
 
 pub(super) async fn filter_fs_page_by_cwd(
     mut page: ThreadsPage,
@@ -94,7 +93,7 @@ async fn resume_candidate_matches_cwd(
         return true;
     }
 
-    if let Ok((items, _, _)) = RolloutRecorder::load_rollout_items(rollout_path).await
+    if let Ok((items, _, _)) = crate::thread_store::read_items(rollout_path).await
         && let Some(latest_turn_context_cwd) = items.iter().rev().find_map(|item| match item {
             RolloutItem::TurnContext(turn_context) => Some(turn_context.cwd.as_path()),
             RolloutItem::SessionMeta(_)

@@ -13,7 +13,6 @@ use anyhow::Result;
 use anyhow::anyhow;
 use praxis_core::ModelProviderInfo;
 use praxis_core::PraxisThread;
-use praxis_core::RolloutRecorder;
 use praxis_core::ThreadManager;
 use praxis_core::built_in_model_providers;
 use praxis_core::config::Config;
@@ -517,7 +516,8 @@ impl TestPraxisBuilder {
             }
             (Some(path), None) => {
                 let auth_manager = praxis_core::test_support::auth_manager_from_auth(auth);
-                let initial_history = RolloutRecorder::get_rollout_history(&path).await?;
+                let initial_history =
+                    praxis_rollout::thread_store::read_initial_history(&path).await?;
                 Box::pin(thread_manager.resume_thread_with_history(
                     config.clone(),
                     initial_history,

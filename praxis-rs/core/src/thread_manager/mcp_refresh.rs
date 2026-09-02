@@ -6,7 +6,7 @@ use super::ThreadManager;
 
 impl ThreadManager {
     pub async fn refresh_mcp_servers(&self, refresh_config: McpServerRefreshConfig) {
-        let threads = self.state.threads.snapshot_threads().await;
+        let threads = self.state.threads.snapshot_threads();
         for thread in threads {
             if let Err(err) = thread
                 .submit(Op::RefreshMcpServers {

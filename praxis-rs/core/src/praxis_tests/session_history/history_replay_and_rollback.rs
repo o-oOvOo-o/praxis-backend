@@ -525,9 +525,10 @@ async fn thread_rollback_drops_last_turn_from_history() {
     assert_eq!(sess.previous_turn_settings().await, None);
     assert!(sess.reference_context_item().await.is_none());
 
-    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
-        .await
-        .expect("read rollout history")
+    let InitialHistory::Resumed(resumed) =
+        praxis_rollout::thread_store::read_initial_history(&rollout_path)
+            .await
+            .expect("read rollout history")
     else {
         panic!("expected resumed rollout history");
     };
@@ -870,9 +871,10 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
         ]
     );
 
-    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
-        .await
-        .expect("read rollout history")
+    let InitialHistory::Resumed(resumed) =
+        praxis_rollout::thread_store::read_initial_history(&rollout_path)
+            .await
+            .expect("read rollout history")
     else {
         panic!("expected resumed rollout history");
     };

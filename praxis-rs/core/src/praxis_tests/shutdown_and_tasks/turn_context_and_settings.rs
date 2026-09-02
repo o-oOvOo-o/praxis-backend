@@ -610,9 +610,10 @@ async fn record_context_updates_and_set_reference_context_item_persists_baseline
     session.ensure_rollout_materialized().await;
     session.flush_rollout().await;
 
-    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
-        .await
-        .expect("read rollout history")
+    let InitialHistory::Resumed(resumed) =
+        praxis_rollout::thread_store::read_initial_history(&rollout_path)
+            .await
+            .expect("read rollout history")
     else {
         panic!("expected resumed rollout history");
     };
@@ -712,9 +713,10 @@ async fn record_context_updates_and_set_reference_context_item_persists_full_rei
     session.ensure_rollout_materialized().await;
     session.flush_rollout().await;
 
-    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
-        .await
-        .expect("read rollout history")
+    let InitialHistory::Resumed(resumed) =
+        praxis_rollout::thread_store::read_initial_history(&rollout_path)
+            .await
+            .expect("read rollout history")
     else {
         panic!("expected resumed rollout history");
     };

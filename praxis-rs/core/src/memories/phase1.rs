@@ -1,5 +1,4 @@
 use crate::Prompt;
-use crate::RolloutRecorder;
 use crate::config::Config;
 use crate::contextual_user_message::is_memory_excluded_contextual_user_fragment;
 use crate::error::PraxisErr;
@@ -321,7 +320,7 @@ mod job {
         rollout_cwd: &Path,
         stage_one_context: &RequestContext,
     ) -> anyhow::Result<(StageOneOutput, Option<TokenUsage>)> {
-        let (rollout_items, _, _) = RolloutRecorder::load_rollout_items(rollout_path).await?;
+        let (rollout_items, _, _) = praxis_rollout::thread_store::read_items(rollout_path).await?;
         let rollout_contents = serialize_filtered_rollout_response_items(&rollout_items)?;
 
         let prompt = Prompt {

@@ -177,8 +177,11 @@ impl EffectJournal {
     }
 
     pub fn record_all(&self, effects: &ToolEffects) {
+        let mut recorded = self.effects.lock().expect("effect journal lock poisoned");
         for effect in effects.iter() {
-            self.record(effect.clone());
+            if !recorded.contains(effect) {
+                recorded.push(effect.clone());
+            }
         }
     }
 
@@ -282,5 +285,15 @@ mod tests {
         let validation = journal.validate(&ToolEffects::write(file(&["repo", "main.rs"])));
         assert!(!validation.is_valid());
         assert_eq!(validation.unexpected.len(), 1);
+    }
+
+    #[test]
+    fn journal_records_a_batch_once() {
+        let effect = ToolEffect::write(file(&["repo", "main.rs"]));
+        let journal = EffectJournal::default();
+        journal.record(effect.clone());
+        journal.record_all(&ToolEffects::new([effect]));
+
+        assert_eq!(journal.snapshot().iter().count(), 1);
     }
 }

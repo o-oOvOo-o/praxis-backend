@@ -37,30 +37,31 @@ impl PraxisMessageProcessor {
                 }
             };
 
-        let page =
-            match ThreadStore::read_turn_page_from_rollout(&rollout_path, cursor, limit).await {
-                Ok(page) => page,
-                Err(error @ ThreadHistoryPageReadError::InvalidCursor { .. })
-                | Err(error @ ThreadHistoryPageReadError::InvalidLimit { .. }) => {
-                    self.send_invalid_request_error(
-                        request_id,
-                        format!("invalid history page: {error}"),
-                    )
-                    .await;
-                    return;
-                }
-                Err(ThreadHistoryPageReadError::Io(error)) => {
-                    self.send_internal_error(
-                        request_id,
-                        format!(
-                            "failed to load rollout `{}` for thread {thread_uuid}: {error}",
-                            rollout_path.display()
-                        ),
-                    )
-                    .await;
-                    return;
-                }
-            };
+        let page = match ThreadProjection::read_turn_page_from_rollout(&rollout_path, cursor, limit)
+            .await
+        {
+            Ok(page) => page,
+            Err(error @ ThreadHistoryPageReadError::InvalidCursor { .. })
+            | Err(error @ ThreadHistoryPageReadError::InvalidLimit { .. }) => {
+                self.send_invalid_request_error(
+                    request_id,
+                    format!("invalid history page: {error}"),
+                )
+                .await;
+                return;
+            }
+            Err(ThreadHistoryPageReadError::Io(error)) => {
+                self.send_internal_error(
+                    request_id,
+                    format!(
+                        "failed to load rollout `{}` for thread {thread_uuid}: {error}",
+                        rollout_path.display()
+                    ),
+                )
+                .await;
+                return;
+            }
+        };
 
         self.outgoing
             .send_response(
@@ -239,7 +240,7 @@ impl PraxisMessageProcessor {
         turn_limit: Option<u32>,
     ) -> Result<Option<Thread>, JSONRPCErrorError> {
         let loaded_thread = self.thread_manager.get_thread(thread_uuid).await.ok();
-        let directory_summary = match ThreadStore::new(&self.config)
+        let directory_summary = match ThreadProjection::new(&self.config)
             .try_read_directory_summary(thread_uuid)
             .await
         {
@@ -290,7 +291,7 @@ impl PraxisMessageProcessor {
         }
 
         if include_turns && let Some(rollout_path) = rollout_path.as_ref() {
-            match ThreadStore::read_turns_from_rollout(
+            match ThreadProjection::read_turns_from_rollout(
                 rollout_path,
                 ThreadTurnHydration::recent(turn_limit.map(|limit| limit as usize)),
             )

@@ -6,7 +6,6 @@ use crate::error::Result as PraxisResult;
 use crate::find_archived_thread_path_by_id_str;
 use crate::find_thread_path_by_id_str;
 use crate::praxis_thread::ThreadConfigSnapshot;
-use crate::rollout::RolloutRecorder;
 use crate::shell_snapshot::ShellSnapshot;
 use crate::thread_manager::ThreadManagerInner;
 use crate::thread_rollout_truncation::truncate_rollout_to_last_n_fork_turns;

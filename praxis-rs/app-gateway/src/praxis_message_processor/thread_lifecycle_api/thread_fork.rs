@@ -51,7 +51,7 @@ impl PraxisMessageProcessor {
             (path, Some(existing_thread_id))
         };
 
-        let history_cwd = ThreadStore::new(&self.config)
+        let history_cwd = ThreadProjection::new(&self.config)
             .read_history_cwd(source_thread_id, rollout_path.as_path())
             .await;
 
@@ -200,22 +200,23 @@ impl PraxisMessageProcessor {
             let mut thread =
                 build_thread_from_snapshot(thread_id, &config_snapshot, /*path*/ None);
             let source_rollout_path = rollout_path.as_path();
-            let history_items = match ThreadStore::read_rollout_items(source_rollout_path).await {
-                Ok(items) => items,
-                Err(err) => {
-                    self.send_internal_error(
-                        request_id,
-                        format!(
-                            "failed to load source rollout `{}` for thread {thread_id}: {err}",
-                            rollout_path.display()
-                        ),
-                    )
-                    .await;
-                    return;
-                }
-            };
-            thread.preview = ThreadStore::preview_from_rollout_items(&history_items);
-            if let Err(message) = ThreadStore::hydrate_turns(
+            let history_items =
+                match ThreadProjection::read_rollout_items(source_rollout_path).await {
+                    Ok(items) => items,
+                    Err(err) => {
+                        self.send_internal_error(
+                            request_id,
+                            format!(
+                                "failed to load source rollout `{}` for thread {thread_id}: {err}",
+                                rollout_path.display()
+                            ),
+                        )
+                        .await;
+                        return;
+                    }
+                };
+            thread.preview = ThreadProjection::preview_from_rollout_items(&history_items);
+            if let Err(message) = ThreadProjection::hydrate_turns(
                 &mut thread,
                 ThreadHistorySource::RolloutItems(&history_items),
                 ThreadTurnHydration::all(),
@@ -230,7 +231,7 @@ impl PraxisMessageProcessor {
         };
 
         if let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
-            && let Err(message) = ThreadStore::hydrate_turns(
+            && let Err(message) = ThreadProjection::hydrate_turns(
                 &mut thread,
                 ThreadHistorySource::RolloutPath(fork_rollout_path.as_path()),
                 ThreadTurnHydration::all(),

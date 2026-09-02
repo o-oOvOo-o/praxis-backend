@@ -85,7 +85,7 @@ impl ThreadManager {
     /// as `Arc<PraxisThread>`, it is possible that other references to it exist elsewhere.
     /// Returns the thread if the thread was found and removed.
     pub async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<PraxisThread>> {
-        self.state.threads.remove(thread_id).await
+        self.state.threads.remove(thread_id)
     }
 
     #[cfg(test)]

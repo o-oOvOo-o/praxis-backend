@@ -54,9 +54,10 @@ impl AgentControl {
                 ))
             })?;
 
-        let mut forked_rollout_items = RolloutRecorder::get_rollout_history(&rollout_path)
-            .await?
-            .get_rollout_items();
+        let mut forked_rollout_items =
+            praxis_rollout::thread_store::read_initial_history(&rollout_path)
+                .await?
+                .get_rollout_items();
         if let SpawnAgentForkMode::LastNTurns(last_n_turns) = fork_mode {
             forked_rollout_items =
                 truncate_rollout_to_last_n_fork_turns(&forked_rollout_items, *last_n_turns);

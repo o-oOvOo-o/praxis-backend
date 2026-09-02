@@ -24,7 +24,6 @@ use core_test_support::responses::sse;
 use core_test_support::test_praxis::test_praxis;
 use core_test_support::wait_for_event;
 use praxis_core::PraxisThread;
-use praxis_core::RolloutRecorder;
 use praxis_core::ThreadManager;
 use praxis_core::compact::SUMMARIZATION_PROMPT;
 use praxis_core::config::Config;
@@ -828,7 +827,7 @@ async fn resume_conversation(
     let auth_manager = praxis_core::test_support::auth_manager_from_auth(
         praxis_login::OpenAiAccountAuth::from_api_key("dummy"),
     );
-    let initial_history = RolloutRecorder::get_rollout_history(&path)
+    let initial_history = praxis_rollout::thread_store::read_initial_history(&path)
         .await
         .expect("read rollout history");
     Box::pin(manager.resume_thread_with_history(

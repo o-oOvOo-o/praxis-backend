@@ -21,11 +21,11 @@ use praxis_state::ThreadMetadata;
 use std::path::Path;
 use std::path::PathBuf;
 
-pub(crate) struct ThreadStore<'a> {
+pub(crate) struct ThreadProjection<'a> {
     config: &'a Config,
 }
 
-impl<'a> ThreadStore<'a> {
+impl<'a> ThreadProjection<'a> {
     pub(in crate::praxis_message_processor) fn new(config: &'a Config) -> Self {
         Self { config }
     }
@@ -115,7 +115,7 @@ impl<'a> ThreadStore<'a> {
     }
 }
 
-impl ThreadStore<'_> {
+impl ThreadProjection<'_> {
     pub(in crate::praxis_message_processor) async fn resolve_thread_name_from_home(
         praxis_home: &Path,
         thread_id: ThreadId,

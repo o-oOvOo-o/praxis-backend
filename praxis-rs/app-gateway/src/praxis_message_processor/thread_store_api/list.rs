@@ -26,8 +26,8 @@ pub(super) async fn list_thread_summaries(
     config: &Config,
     query: ThreadStoreListQuery,
 ) -> std::io::Result<ThreadStoreListPage> {
-    let directory = praxis_rollout::ThreadDirectory::open(config).await;
-    let page = directory
+    let store = praxis_rollout::ThreadStore::open(config).await;
+    let page = store
         .list_threads(praxis_rollout::ListThreadsQuery {
             page_size: query.page_size,
             cursor: query.cursor,

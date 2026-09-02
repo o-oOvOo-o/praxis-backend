@@ -8,6 +8,7 @@ use crate::praxis::PraxisSpawnOk;
 
 use super::super::super::ThreadManagerInner;
 use super::super::super::ThreadSpawnResult;
+use super::super::super::registry::ThreadIdReservation;
 use super::super::spawn_request::ThreadSpawnRequest;
 
 impl ThreadManagerInner {
@@ -17,14 +18,14 @@ impl ThreadManagerInner {
     ) -> PraxisResult<ThreadSpawnResult> {
         let requested_thread_id = request.requested_thread_id;
         let reservation = if let Some(thread_id) = requested_thread_id {
-            let Some(reservation) = self.threads.reserve(thread_id).await else {
+            let Some(reservation) = self.threads.reserve(thread_id) else {
                 return Err(PraxisErr::InvalidRequest(format!(
                     "thread `{thread_id}` already exists or is being created"
                 )));
             };
 
-            let directory = praxis_rollout::ThreadDirectory::open(&request.config).await;
-            match directory.thread_exists(thread_id, None).await {
+            let store = praxis_rollout::ThreadStore::open(&request.config).await;
+            match store.thread_exists(thread_id, None).await {
                 Ok(false) => {}
                 Ok(true) => {
                     return Err(PraxisErr::InvalidRequest(format!(
@@ -40,14 +41,13 @@ impl ThreadManagerInner {
             None
         };
 
-        self.spawn_reserved_request(request, reservation.is_some())
-            .await
+        self.spawn_reserved_request(request, reservation).await
     }
 
     async fn spawn_reserved_request(
         &self,
         request: ThreadSpawnRequest,
-        has_reserved_thread_id: bool,
+        reservation: Option<ThreadIdReservation>,
     ) -> PraxisResult<ThreadSpawnResult> {
         let initial_ephemeral = request.config.ephemeral;
         let initial_personality = request.config.personality.clone();
@@ -88,7 +88,7 @@ impl ThreadManagerInner {
             praxis,
             thread_id,
             watch_registration,
-            has_reserved_thread_id,
+            reservation,
             initial_ephemeral,
             initial_personality,
             initial_session_source,

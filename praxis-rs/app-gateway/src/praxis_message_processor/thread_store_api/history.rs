@@ -7,7 +7,6 @@ use praxis_app_gateway_protocol::ThreadHistoryRange;
 use praxis_app_gateway_protocol::Turn;
 use praxis_app_gateway_protocol::build_recent_turns_from_rollout_items;
 use praxis_app_gateway_protocol::build_turns_from_rollout_items;
-use praxis_core::RolloutRecorder;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::RolloutItem;
 use std::path::Path;
@@ -111,7 +110,7 @@ pub(super) async fn read_thread_rollout_items(path: &Path) -> std::io::Result<Ve
 }
 
 pub(super) async fn read_thread_initial_history(path: &Path) -> std::io::Result<InitialHistory> {
-    RolloutRecorder::get_rollout_history(path).await
+    praxis_rollout::thread_store::read_initial_history(path).await
 }
 
 pub(super) async fn read_thread_turns_from_rollout(
@@ -119,7 +118,7 @@ pub(super) async fn read_thread_turns_from_rollout(
     hydration: ThreadTurnHydration,
 ) -> std::io::Result<Vec<Turn>> {
     let mut builder = hydration.builder();
-    RolloutRecorder::scan_rollout_items(path, |item| {
+    praxis_rollout::thread_store::scan_items(path, |item| {
         builder.handle_rollout_item(&item);
     })
     .await?;
@@ -134,7 +133,7 @@ pub(super) async fn read_thread_turn_page_from_rollout(
     validate_turn_page_limit(limit)?;
 
     let mut builder = ThreadHistoryBuilder::new();
-    RolloutRecorder::scan_rollout_items(path, |item| {
+    praxis_rollout::thread_store::scan_items(path, |item| {
         builder.handle_rollout_item(&item);
     })
     .await?;

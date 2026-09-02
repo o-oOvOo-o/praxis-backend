@@ -24,7 +24,7 @@ impl ThreadManager {
     /// Threads that complete shutdown are removed from the manager; incomplete shutdowns
     /// remain tracked so callers can retry or inspect them later.
     pub async fn shutdown_all_threads_bounded(&self, timeout: Duration) -> ThreadShutdownReport {
-        let threads = self.state.threads.snapshot_entries().await;
+        let threads = self.state.threads.snapshot_entries();
 
         let mut shutdowns = threads
             .into_iter()
@@ -49,7 +49,7 @@ impl ThreadManager {
         }
 
         for thread_id in &report.completed {
-            self.state.threads.remove(thread_id).await;
+            self.state.threads.remove(thread_id);
         }
 
         report

@@ -1,16 +1,25 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io;
+use std::io::Error as IoError;
 use std::path::Path;
 use std::path::PathBuf;
 
 use chrono::SecondsFormat;
 use praxis_protocol::ThreadId;
+use praxis_protocol::protocol::InitialHistory;
+use praxis_protocol::protocol::ResumedHistory;
+use praxis_protocol::protocol::RolloutItem;
+use praxis_protocol::protocol::RolloutLine;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
 use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_state::ThreadSourceKind;
 use serde_json::Value;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::BufReader;
+use tracing::info;
+use tracing::trace;
 use tracing::warn;
 
 use crate::INTERACTIVE_SESSION_SOURCES;
@@ -74,7 +83,8 @@ pub struct ListThreadsQuery {
     pub fallback_provider: String,
 }
 
-pub struct ThreadDirectory<'a, C: RolloutConfigView> {
+/// Canonical owner for persisted thread discovery and metadata operations.
+pub struct ThreadStore<'a, C: RolloutConfigView> {
     config: &'a C,
     state_db: Option<StateDbHandle>,
 }
@@ -98,7 +108,7 @@ enum DirectoryPage {
     Fs(ThreadsPage),
 }
 
-impl<'a, C: RolloutConfigView> ThreadDirectory<'a, C> {
+impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
     pub async fn open(config: &'a C) -> Self {
         let state_db = state_db::get_state_db(config).await;
         Self { config, state_db }
@@ -314,8 +324,80 @@ pub async fn list_threads(
     config: &impl RolloutConfigView,
     query: ListThreadsQuery,
 ) -> io::Result<ThreadSummaryPage> {
-    let directory = ThreadDirectory::open(config).await;
-    directory.list_threads(query).await
+    let store = ThreadStore::open(config).await;
+    store.list_threads(query).await
+}
+
+/// Reads all persisted items and the canonical thread identity in one scan.
+pub async fn read_items(path: &Path) -> io::Result<(Vec<RolloutItem>, Option<ThreadId>, usize)> {
+    let mut items = Vec::new();
+    let (thread_id, parse_errors) = scan_items(path, |item| items.push(item)).await?;
+    Ok((items, thread_id, parse_errors))
+}
+
+/// Streams persisted items through a caller-owned projection without retaining the transcript.
+pub async fn scan_items(
+    path: &Path,
+    mut on_item: impl FnMut(RolloutItem),
+) -> io::Result<(Option<ThreadId>, usize)> {
+    trace!("Reading persisted thread from {path:?}");
+    let file = tokio::fs::File::open(path).await?;
+    let mut lines = BufReader::new(file).lines();
+    let mut thread_id = None;
+    let mut parse_errors = 0usize;
+    let mut item_count = 0usize;
+    let mut saw_non_empty_line = false;
+
+    while let Some(line) = lines.next_line().await? {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        saw_non_empty_line = true;
+        match serde_json::from_str::<RolloutLine>(line) {
+            Ok(rollout_line) => {
+                let item = rollout_line.item;
+                if thread_id.is_none()
+                    && let RolloutItem::SessionMeta(session_meta) = &item
+                {
+                    thread_id = Some(session_meta.meta.id);
+                }
+                item_count = item_count.saturating_add(1);
+                on_item(item);
+            }
+            Err(error) => {
+                warn!("failed to parse persisted thread line: {line:?}, error: {error}");
+                parse_errors = parse_errors.saturating_add(1);
+            }
+        }
+    }
+
+    if !saw_non_empty_line {
+        return Err(IoError::other("empty session file"));
+    }
+    tracing::debug!(
+        item_count,
+        ?thread_id,
+        parse_errors,
+        "scanned persisted thread"
+    );
+    Ok((thread_id, parse_errors))
+}
+
+/// Hydrates the canonical initial-history value for a persisted thread.
+pub async fn read_initial_history(path: &Path) -> io::Result<InitialHistory> {
+    let (items, thread_id, _) = read_items(path).await?;
+    let conversation_id =
+        thread_id.ok_or_else(|| IoError::other("failed to parse thread ID from session file"))?;
+    if items.is_empty() {
+        return Ok(InitialHistory::New);
+    }
+    info!("Hydrated persisted thread from {path:?}");
+    Ok(InitialHistory::Resumed(ResumedHistory {
+        conversation_id,
+        history: items,
+        rollout_path: path.to_path_buf(),
+    }))
 }
 
 async fn list_threads_with_state_db(

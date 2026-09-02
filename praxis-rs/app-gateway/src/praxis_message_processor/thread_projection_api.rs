@@ -1,4 +1,4 @@
-use super::thread_store_api::ThreadStore;
+use super::thread_store_api::ThreadProjection;
 use super::thread_store_api::ThreadStoreSummary;
 use super::thread_store_api::ThreadTurnHydration;
 use chrono::DateTime;
@@ -21,7 +21,7 @@ pub(super) async fn load_thread_summary_for_rollout(
     fallback_provider: &str,
     persisted_metadata: Option<&ThreadMetadata>,
 ) -> std::result::Result<Thread, String> {
-    let mut thread = ThreadStore::read_rollout_summary(rollout_path, fallback_provider)
+    let mut thread = ThreadProjection::read_rollout_summary(rollout_path, fallback_provider)
         .await
         .map(summary_to_thread)
         .map_err(|err| {
@@ -33,9 +33,9 @@ pub(super) async fn load_thread_summary_for_rollout(
     if let Some(persisted_metadata) = persisted_metadata {
         merge_mutable_thread_metadata(
             &mut thread,
-            summary_to_thread(ThreadStore::summary_from_metadata(persisted_metadata)),
+            summary_to_thread(ThreadProjection::summary_from_metadata(persisted_metadata)),
         );
-    } else if let Some(summary) = ThreadStore::new(config)
+    } else if let Some(summary) = ThreadProjection::new(config)
         .read_directory_summary(thread_id)
         .await
     {
@@ -48,7 +48,7 @@ async fn project_thread_from_rollout_summary(
     rollout_path: &Path,
     fallback_provider: &str,
 ) -> std::io::Result<Thread> {
-    ThreadStore::read_rollout_summary(rollout_path, fallback_provider)
+    ThreadProjection::read_rollout_summary(rollout_path, fallback_provider)
         .await
         .map(summary_to_thread)
 }
@@ -62,10 +62,12 @@ pub(crate) async fn project_rollback_thread_from_rollout(
     let mut thread = project_thread_from_rollout_summary(rollout_path, fallback_provider)
         .await
         .map_err(|err| format!("failed to load rollout `{}`: {err}", rollout_path.display()))?;
-    thread.turns = ThreadStore::read_turns_from_rollout(rollout_path, ThreadTurnHydration::all())
-        .await
-        .map_err(|err| format!("failed to load rollout `{}`: {err}", rollout_path.display()))?;
-    thread.name = ThreadStore::resolve_thread_name_from_home(praxis_home, thread_id.clone()).await;
+    thread.turns =
+        ThreadProjection::read_turns_from_rollout(rollout_path, ThreadTurnHydration::all())
+            .await
+            .map_err(|err| format!("failed to load rollout `{}`: {err}", rollout_path.display()))?;
+    thread.name =
+        ThreadProjection::resolve_thread_name_from_home(praxis_home, thread_id.clone()).await;
     Ok(thread)
 }
 
@@ -73,7 +75,7 @@ pub(super) async fn load_thread_summary_from_state_db_context(
     state_db_ctx: Option<&StateDbHandle>,
     thread_id: ThreadId,
 ) -> Option<Thread> {
-    ThreadStore::read_state_db_summary(state_db_ctx, thread_id)
+    ThreadProjection::read_state_db_summary(state_db_ctx, thread_id)
         .await
         .map(summary_to_thread)
 }

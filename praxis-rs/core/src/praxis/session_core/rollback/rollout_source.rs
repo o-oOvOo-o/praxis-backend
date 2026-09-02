@@ -6,7 +6,6 @@ use praxis_protocol::protocol::PraxisErrorInfo;
 
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
-use crate::rollout::RolloutRecorder;
 
 pub(super) async fn load_flushed_history(
     session: &Session,
@@ -65,7 +64,7 @@ async fn load_rollout_history(
     event_id: &str,
     rollout_path: &Path,
 ) -> Option<InitialHistory> {
-    match RolloutRecorder::get_rollout_history(rollout_path).await {
+    match praxis_rollout::thread_store::read_initial_history(rollout_path).await {
         Ok(history) => Some(history),
         Err(err) => {
             session

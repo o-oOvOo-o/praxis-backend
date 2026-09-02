@@ -1,4 +1,4 @@
-use super::thread_store_api::ThreadStore;
+use super::thread_store_api::ThreadProjection;
 use praxis_app_gateway_protocol::JSONRPCErrorError;
 use praxis_app_gateway_protocol::PraxisErrorInfo;
 use praxis_app_gateway_protocol::TurnError;
@@ -42,7 +42,7 @@ impl ThreadRolloutLookupMode {
         config: &Config,
         thread_id: ThreadId,
     ) -> std::io::Result<Option<PathBuf>> {
-        let store = ThreadStore::new(config);
+        let store = ThreadProjection::new(config);
         match self {
             Self::Scoped(ThreadRolloutScope::Active) => {
                 store.find_active_rollout_path(thread_id).await

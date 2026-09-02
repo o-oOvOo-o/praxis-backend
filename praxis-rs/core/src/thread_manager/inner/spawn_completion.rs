@@ -15,6 +15,7 @@ use crate::praxis_thread::ThreadConfigSnapshot;
 
 use super::super::ThreadManagerInner;
 use super::super::ThreadSpawnResult;
+use super::super::registry::ThreadIdReservation;
 
 impl ThreadManagerInner {
     pub(super) async fn finalize_thread_spawn(
@@ -22,7 +23,7 @@ impl ThreadManagerInner {
         praxis: Praxis,
         thread_id: ThreadId,
         watch_registration: crate::file_watcher::WatchRegistration,
-        has_reserved_thread_id: bool,
+        reservation: Option<ThreadIdReservation>,
         initial_ephemeral: bool,
         initial_personality: Option<Personality>,
         initial_session_source: SessionSource,
@@ -46,11 +47,13 @@ impl ThreadManagerInner {
             watch_registration,
         ));
         tracing::info!(%thread_id, "thread spawn registering runtime");
-        if !self
-            .threads
-            .insert(thread_id, thread.clone(), has_reserved_thread_id)
-            .await
-        {
+        let registered = match reservation {
+            Some(reservation) => {
+                self.threads.insert_reserved(reservation, thread.clone()) == Some(thread_id)
+            }
+            None => self.threads.insert(thread_id, thread.clone()),
+        };
+        if !registered {
             return Err(PraxisErr::InvalidRequest(format!(
                 "thread `{thread_id}` already exists"
             )));

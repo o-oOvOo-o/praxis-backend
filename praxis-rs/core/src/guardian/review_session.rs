@@ -35,7 +35,6 @@ use crate::praxis::Praxis;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::praxis_delegate::run_praxis_thread_interactive;
-use crate::rollout::recorder::RolloutRecorder;
 use praxis_config::types::McpServerConfig;
 use praxis_features::Feature;
 
@@ -564,7 +563,8 @@ async fn load_rollout_items_for_fork(
     let Some(rollout_path) = session.current_rollout_path().await else {
         return Ok(None);
     };
-    let history = RolloutRecorder::get_rollout_history(rollout_path.as_path()).await?;
+    let history =
+        praxis_rollout::thread_store::read_initial_history(rollout_path.as_path()).await?;
     Ok(Some(history.get_rollout_items()))
 }
 

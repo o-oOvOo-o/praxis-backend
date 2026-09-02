@@ -3,7 +3,7 @@ use crate::error_code::INVALID_REQUEST_ERROR_CODE;
 use crate::outgoing_message::ConnectionRequestId;
 use crate::praxis_message_processor::PraxisMessageProcessor;
 use crate::praxis_message_processor::thread_projection_api::summary_to_thread;
-use crate::praxis_message_processor::thread_store_api::ThreadStore;
+use crate::praxis_message_processor::thread_store_api::ThreadProjection;
 use crate::praxis_message_processor::thread_store_api::ThreadStoreListPage;
 use crate::praxis_message_processor::thread_store_api::ThreadStoreListQuery;
 use crate::praxis_message_processor::thread_store_api::ThreadStoreSummary;
@@ -147,7 +147,7 @@ impl PraxisMessageProcessor {
             ThreadSortKey::CreatedAt => CoreThreadSortKey::CreatedAt,
             ThreadSortKey::UpdatedAt => CoreThreadSortKey::UpdatedAt,
         };
-        let page = ThreadStore::new(&bridge_config)
+        let page = ThreadProjection::new(&bridge_config)
             .list_summaries(ThreadStoreListQuery {
                 page_size,
                 cursor: parsed_cursor,
@@ -247,7 +247,7 @@ impl PraxisMessageProcessor {
             cwd_scope,
             search_term,
         } = filters;
-        let page = ThreadStore::new(&self.config)
+        let page = ThreadProjection::new(&self.config)
             .list_summaries(ThreadStoreListQuery {
                 page_size: requested_page_size.min(THREAD_LIST_MAX_LIMIT as usize),
                 cursor: parse_thread_list_cursor(cursor)?,
@@ -278,7 +278,7 @@ async fn list_external_session_page(
     sort_key: Option<ThreadSortKey>,
     search_term: Option<String>,
 ) -> std::io::Result<ThreadStoreListPage> {
-    ThreadStore::new(bridge_config)
+    ThreadProjection::new(bridge_config)
         .list_summaries(ThreadStoreListQuery {
             page_size,
             cursor,

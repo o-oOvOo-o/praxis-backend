@@ -6,7 +6,6 @@ use praxis_protocol::protocol::InitialHistory;
 
 use crate::config::Config;
 use crate::error::Result as PraxisResult;
-use crate::rollout::RolloutRecorder;
 
 use super::super::ThreadManager;
 use super::super::ThreadSpawnResult;
@@ -38,7 +37,8 @@ impl ThreadManager {
         auth_manager: Arc<AuthManager>,
         user_shell_override: crate::shell::Shell,
     ) -> PraxisResult<ThreadSpawnResult> {
-        let initial_history = RolloutRecorder::get_rollout_history(&rollout_path).await?;
+        let initial_history =
+            praxis_rollout::thread_store::read_initial_history(&rollout_path).await?;
         Box::pin(self.state.spawn_thread(
             config,
             initial_history,

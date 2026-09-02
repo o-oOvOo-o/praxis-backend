@@ -3,7 +3,6 @@ use crate::config::test_config;
 use crate::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 use crate::models_manager::manager::RefreshStrategy;
 use crate::praxis::make_session_and_context;
-use crate::rollout::RolloutRecorder;
 use crate::tasks::interrupted_turn_history_marker;
 use core_test_support::PathExt;
 use core_test_support::responses::mount_models_once;
@@ -385,7 +384,7 @@ async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_when_missing() {
         .thread
         .rollout_path()
         .expect("source rollout path should exist");
-    let source_history = RolloutRecorder::get_rollout_history(&source_path)
+    let source_history = praxis_rollout::thread_store::read_initial_history(&source_path)
         .await
         .expect("read source rollout history");
     let source_snapshot_state = snapshot_turn_state(&source_history);
@@ -407,7 +406,7 @@ async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_when_missing() {
         .thread
         .rollout_path()
         .expect("forked rollout path should exist");
-    let history = RolloutRecorder::get_rollout_history(&forked_path)
+    let history = praxis_rollout::thread_store::read_initial_history(&forked_path)
         .await
         .expect("read forked rollout history");
     assert!(!snapshot_turn_state(&history).ends_mid_turn);
@@ -491,7 +490,7 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
         .thread
         .rollout_path()
         .expect("source rollout path should exist");
-    let source_history = RolloutRecorder::get_rollout_history(&source_path)
+    let source_history = praxis_rollout::thread_store::read_initial_history(&source_path)
         .await
         .expect("read source rollout history");
     let source_snapshot_state = snapshot_turn_state(&source_history);
@@ -518,7 +517,7 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
         .thread
         .rollout_path()
         .expect("forked rollout path should exist");
-    let history = RolloutRecorder::get_rollout_history(&forked_path)
+    let history = praxis_rollout::thread_store::read_initial_history(&forked_path)
         .await
         .expect("read forked rollout history");
     let rollout_items: Vec<_> = history
@@ -576,7 +575,7 @@ async fn interrupted_fork_snapshot_uses_persisted_mid_turn_history_without_live_
         .thread
         .rollout_path()
         .expect("source rollout path should exist");
-    let source_history = RolloutRecorder::get_rollout_history(&source_path)
+    let source_history = praxis_rollout::thread_store::read_initial_history(&source_path)
         .await
         .expect("read source rollout history");
     assert!(snapshot_turn_state(&source_history).ends_mid_turn);
@@ -596,7 +595,7 @@ async fn interrupted_fork_snapshot_uses_persisted_mid_turn_history_without_live_
         .thread
         .rollout_path()
         .expect("forked rollout path should exist");
-    let history = RolloutRecorder::get_rollout_history(&forked_path)
+    let history = praxis_rollout::thread_store::read_initial_history(&forked_path)
         .await
         .expect("read forked rollout history");
     assert!(!snapshot_turn_state(&history).ends_mid_turn);
@@ -635,7 +634,7 @@ async fn interrupted_fork_snapshot_uses_persisted_mid_turn_history_without_live_
         .thread
         .rollout_path()
         .expect("re-forked rollout path should exist");
-    let reforked_history = RolloutRecorder::get_rollout_history(&reforked_path)
+    let reforked_history = praxis_rollout::thread_store::read_initial_history(&reforked_path)
         .await
         .expect("read re-forked rollout history");
     let reforked_rollout_items: Vec<_> = reforked_history

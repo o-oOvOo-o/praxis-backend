@@ -1,6 +1,6 @@
 use super::thread_runtime_api::project_thread_runtime_state_with_turn_cleanup_from_watch;
 use super::thread_store_api::ThreadHistorySource;
-use super::thread_store_api::ThreadStore;
+use super::thread_store_api::ThreadProjection;
 use super::thread_store_api::ThreadTurnHydration;
 use super::*;
 use crate::bespoke_event_handling::apply_bespoke_event_handling;
@@ -365,7 +365,7 @@ async fn handle_pending_thread_resume_request(
     let request_id = pending.request_id;
     let connection_id = request_id.connection_id;
     let mut thread = pending.thread_summary;
-    if let Err(message) = ThreadStore::hydrate_turns(
+    if let Err(message) = ThreadProjection::hydrate_turns(
         &mut thread,
         ThreadHistorySource::RolloutPath(pending.rollout_path.as_path()),
         ThreadTurnHydration::recent(pending.turn_limit.map(|limit| limit as usize)),
@@ -394,7 +394,8 @@ async fn handle_pending_thread_resume_request(
     )
     .await;
 
-    thread.name = ThreadStore::resolve_thread_name_from_home(praxis_home, conversation_id).await;
+    thread.name =
+        ThreadProjection::resolve_thread_name_from_home(praxis_home, conversation_id).await;
     let history_entry_count = u64::try_from(thread.turns.len()).unwrap_or(u64::MAX);
 
     let ThreadConfigSnapshot {

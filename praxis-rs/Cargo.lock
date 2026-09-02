@@ -7282,6 +7282,7 @@ dependencies = [
 name = "praxis-execpolicy"
 version = "0.0.0"
 dependencies = [
+ "allocative",
  "anyhow",
  "clap",
  "multimap",

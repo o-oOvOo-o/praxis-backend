@@ -1,4 +1,4 @@
-use super::thread_store_api::ThreadStore;
+use super::thread_store_api::ThreadProjection;
 use super::*;
 use praxis_protocol::user_input::UserInput as CoreUserInput;
 
@@ -487,7 +487,7 @@ impl PraxisMessageProcessor {
         if self.thread_manager.get_thread(thread_id).await.is_ok() {
             return true;
         }
-        ThreadStore::new(&self.config)
+        ThreadProjection::new(&self.config)
             .thread_exists(thread_id, None)
             .await
             .unwrap_or(false)

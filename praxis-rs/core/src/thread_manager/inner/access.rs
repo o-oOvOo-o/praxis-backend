@@ -13,14 +13,13 @@ use super::super::ThreadManagerInner;
 
 impl ThreadManagerInner {
     pub(crate) async fn list_thread_ids(&self) -> Vec<ThreadId> {
-        self.threads.list_ids().await
+        self.threads.list_ids()
     }
 
     /// Fetch a thread by ID or return ThreadNotFound.
     pub(crate) async fn get_thread(&self, thread_id: ThreadId) -> PraxisResult<Arc<PraxisThread>> {
         self.threads
             .get(thread_id)
-            .await
             .ok_or_else(|| PraxisErr::ThreadNotFound(thread_id))
     }
 
@@ -48,6 +47,6 @@ impl ThreadManagerInner {
 
     /// Remove a thread from the manager by ID, returning it when present.
     pub(crate) async fn remove_thread(&self, thread_id: &ThreadId) -> Option<Arc<PraxisThread>> {
-        self.threads.remove(thread_id).await
+        self.threads.remove(thread_id)
     }
 }
