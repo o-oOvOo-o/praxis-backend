@@ -160,6 +160,8 @@ pub struct ResponseStream {
     pub(crate) rx_event: mpsc::Receiver<Result<ResponseEvent>>,
 }
 
+pub(crate) const RESPONSE_STREAM_CAPACITY: usize = 256;
+
 impl Stream for ResponseStream {
     type Item = Result<ResponseEvent>;
 

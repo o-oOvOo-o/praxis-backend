@@ -1,4 +1,5 @@
 use super::*;
+use crate::client_common::RESPONSE_STREAM_CAPACITY;
 
 mod claude;
 mod common;
@@ -20,7 +21,7 @@ pub(super) fn spawn_claude_sse_stream(
     response: reqwest::Response,
     idle_timeout: Duration,
 ) -> ResponseStream {
-    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(256);
+    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(RESPONSE_STREAM_CAPACITY);
     tokio::spawn(process_claude_sse(response, tx_event, idle_timeout));
     ResponseStream { rx_event }
 }
@@ -30,7 +31,7 @@ pub(super) fn spawn_common_sse_stream(
     idle_timeout: Duration,
     thinking_policy: CommonThinkingPolicy,
 ) -> ResponseStream {
-    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(256);
+    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(RESPONSE_STREAM_CAPACITY);
     tokio::spawn(process_common_sse(
         response,
         tx_event,

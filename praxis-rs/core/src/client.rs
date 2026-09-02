@@ -99,6 +99,7 @@ use tracing::warn;
 
 use crate::client_common::Prompt;
 use crate::client_common::ResponseEvent;
+use crate::client_common::RESPONSE_STREAM_CAPACITY;
 use crate::client_common::ResponseStream;
 use crate::error::PraxisErr;
 use crate::error::Result;
@@ -849,7 +850,7 @@ where
         + Send
         + 'static,
 {
-    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(1600);
+    let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(RESPONSE_STREAM_CAPACITY);
     let (tx_last_response, rx_last_response) = oneshot::channel::<LastResponse>();
 
     tokio::spawn(async move {
