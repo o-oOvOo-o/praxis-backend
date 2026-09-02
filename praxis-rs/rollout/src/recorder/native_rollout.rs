@@ -88,7 +88,7 @@ impl NativeRolloutWriter {
             metadata_generation,
         };
         if next_sequence > 1 {
-            writer.reconcile_projection(rollout_path).await?;
+            writer.reconcile_locator(rollout_path).await?;
         } else {
             writer.import_projection(rollout_path, thread_id).await?;
         }
@@ -151,13 +151,16 @@ impl NativeRolloutWriter {
             metadata_generation,
         };
         if existed && next_sequence > 1 {
-            writer.reconcile_projection(rollout_path).await?;
+            writer.reconcile_locator(rollout_path).await?;
         } else if let Some(items) = imported_items {
             writer.append(&items).await?;
         } else if projection_exists {
             writer
                 .import_projection(rollout_path, init.thread_id)
                 .await?;
+        }
+        if !existed && projection_exists && writer.next_sequence > 1 {
+            writer.reconcile_locator(rollout_path).await?;
         }
         if writer.next_sequence > 1 {
             writer
@@ -273,9 +276,9 @@ impl NativeRolloutWriter {
         Ok(())
     }
 
-    async fn reconcile_projection(&mut self, rollout_path: &Path) -> io::Result<()> {
+    async fn reconcile_locator(&mut self, rollout_path: &Path) -> io::Result<()> {
         if !tokio::fs::try_exists(rollout_path).await? {
-            return self.rebuild_projection(rollout_path).await;
+            return self.rebuild_locator(rollout_path).await;
         }
         let mut projected_items = 0u64;
         let (projected_thread_id, parse_errors) =
@@ -283,33 +286,41 @@ impl NativeRolloutWriter {
                 projected_items = projected_items.saturating_add(1);
             })
             .await?;
-        let native_items = self.next_sequence.saturating_sub(1);
         let expected_thread_id = ThreadId::from_string(&self.thread.thread_id().to_string()).ok();
-        if parse_errors != 0
-            || projected_thread_id != expected_thread_id
-            || projected_items != native_items
-        {
-            self.rebuild_projection(rollout_path).await?;
+        if parse_errors != 0 || projected_thread_id != expected_thread_id || projected_items != 1 {
+            self.rebuild_locator(rollout_path).await?;
         }
         Ok(())
     }
 
-    async fn rebuild_projection(&self, rollout_path: &Path) -> io::Result<()> {
+    async fn rebuild_locator(&self, rollout_path: &Path) -> io::Result<()> {
         let parent = rollout_path
             .parent()
             .ok_or_else(|| io::Error::other("rollout projection path has no parent"))?;
         tokio::fs::create_dir_all(parent).await?;
         let temporary = tempfile::NamedTempFile::new_in(parent)?;
         let (file, temporary_path) = temporary.into_parts();
+        let expected_thread_id = ThreadId::from_string(&self.thread.thread_id().to_string())
+            .map_err(|error| io::Error::other(error.to_string()))?;
         let rebuild = self
             .thread
-            .fold_all(ProjectionRebuild::new(file), |rebuild, event| {
+            .fold_all(LocatorRebuild::new(file), move |rebuild, event| {
                 if rebuild.error.is_some() {
                     return;
                 }
-                if let ThreadEventBody::NativeAgentEventRecorded { payload, .. } = &event.body {
+                if !rebuild.wrote_locator
+                    && let ThreadEventBody::NativeAgentEventRecorded { payload, .. } = &event.body
+                {
                     match decode_item(payload) {
-                        Some(item) => rebuild.write(&item),
+                        Some(item) => {
+                            if matches!(
+                                &item,
+                                RolloutItem::SessionMeta(meta)
+                                    if meta.meta.id == expected_thread_id
+                            ) {
+                                rebuild.write(&item);
+                            }
+                        }
                         None => {
                             rebuild.foreign_events = rebuild.foreign_events.saturating_add(1);
                         }
@@ -323,6 +334,11 @@ impl NativeRolloutWriter {
                 "native thread contains {} events from an incompatible schema",
                 rebuild.foreign_events
             )));
+        }
+        if !rebuild.wrote_locator {
+            return Err(io::Error::other(
+                "native thread does not contain a session metadata locator",
+            ));
         }
         rebuild.finish()?;
         temporary_path
@@ -360,18 +376,20 @@ async fn rollout_modified_unix_ms(rollout_path: &Path) -> Option<i64> {
         .and_then(|duration| i64::try_from(duration.as_millis()).ok())
 }
 
-struct ProjectionRebuild {
+struct LocatorRebuild {
     writer: BufWriter<std::fs::File>,
     foreign_events: usize,
     error: Option<io::Error>,
+    wrote_locator: bool,
 }
 
-impl ProjectionRebuild {
+impl LocatorRebuild {
     fn new(file: std::fs::File) -> Self {
         Self {
             writer: BufWriter::new(file),
             foreign_events: 0,
             error: None,
+            wrote_locator: false,
         }
     }
 
@@ -380,6 +398,8 @@ impl ProjectionRebuild {
             encode_rollout_line(item).and_then(|line| self.writer.write_all(line.as_bytes()));
         if let Err(error) = result {
             self.error = Some(error);
+        } else {
+            self.wrote_locator = true;
         }
     }
 

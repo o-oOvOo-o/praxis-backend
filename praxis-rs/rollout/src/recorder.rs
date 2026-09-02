@@ -1,11 +1,10 @@
-//! Persist Praxis session rollouts (.jsonl) so sessions can be replayed or inspected later.
+//! Persist native Praxis threads and a minimal `.jsonl` identity locator.
 
 use std::fs;
 use std::fs::File;
 use std::io::Error as IoError;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::Duration;
 
 use chrono::Utc;
 use praxis_protocol::ThreadId;
@@ -46,15 +45,7 @@ use jsonl_writer::JsonlWriter;
 use native_rollout::NativeRolloutInit;
 pub(crate) use native_rollout::NativeRolloutWriter;
 
-/// Records all [`ResponseItem`]s for a session and flushes them to disk after
-/// every update.
-///
-/// Rollouts are recorded as JSONL and can be inspected with tools such as:
-///
-/// ```ignore
-/// $ jq -C . ~/.praxis/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// $ fx ~/.praxis/sessions/rollout-2025-05-07T17-24-21-5973b6c0-94b8-487b-a530-2aeb6098ae0e.jsonl
-/// ```
+/// Records session facts in the native journal while retaining a stable path locator.
 #[derive(Clone)]
 pub struct RolloutRecorder {
     tx: Sender<RolloutCmd>,
@@ -428,22 +419,21 @@ async fn rollout_writer(
     default_provider: String,
     generate_memories: bool,
 ) -> std::io::Result<()> {
-    let mut writer = file.map(JsonlWriter::new);
+    let mut locator_writer = file.map(JsonlWriter::new);
+    let mut persisted = locator_writer.is_some();
     let mut buffered_items = Vec::<RolloutItem>::new();
-    let mut flush_interval = tokio::time::interval(Duration::from_millis(100));
-    flush_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     if let Some(builder) = state_builder.as_mut() {
         builder.rollout_path = rollout_path.clone();
     }
 
     // Resumed sessions already have a file handle open, so session metadata can
     // be written immediately if present.
-    if writer.is_some()
+    if locator_writer.is_some()
         && let Some(session_meta) = meta.take()
     {
         write_session_meta(
             native_writer.as_mut(),
-            writer.as_mut(),
+            locator_writer.as_mut(),
             session_meta,
             &cwd,
             &rollout_path,
@@ -454,28 +444,23 @@ async fn rollout_writer(
         )
         .await?;
     }
+    drop(locator_writer);
 
     // Process rollout commands
-    loop {
-        tokio::select! {
-            cmd = rx.recv() => {
-                let Some(cmd) = cmd else {
-                    break;
-                };
-                match cmd {
-                    RolloutCmd::AddItems(items) => {
+    while let Some(cmd) = rx.recv().await {
+        match cmd {
+            RolloutCmd::AddItems(items) => {
                 if items.is_empty() {
                     continue;
                 }
 
-                if writer.is_none() {
+                if !persisted {
                     buffered_items.extend(items);
                     continue;
                 }
 
-                write_and_reconcile_items(
+                write_native_items_and_project_state(
                     native_writer.as_mut(),
-                    writer.as_mut(),
                     items.as_slice(),
                     &rollout_path,
                     state_db_ctx.as_deref(),
@@ -483,9 +468,9 @@ async fn rollout_writer(
                     default_provider.as_str(),
                 )
                 .await?;
-                    }
-                    RolloutCmd::Persist { ack } => {
-                let result = if writer.is_none() {
+            }
+            RolloutCmd::Persist { ack } => {
+                let result = if !persisted {
                     async {
                         let Some(log_file_info) = deferred_log_file_info.take() else {
                             return Err(IoError::other(
@@ -499,12 +484,12 @@ async fn rollout_writer(
                             NativeRolloutWriter::open(init, log_file_info.path.as_path()).await?,
                         );
                         let file = open_log_file(log_file_info.path.as_path())?;
-                        writer = Some(JsonlWriter::new(tokio::fs::File::from_std(file)));
+                        let mut locator_writer = JsonlWriter::new(tokio::fs::File::from_std(file));
 
                         if let Some(session_meta) = meta.take() {
                             write_session_meta(
                                 native_writer.as_mut(),
-                                writer.as_mut(),
+                                Some(&mut locator_writer),
                                 session_meta,
                                 &cwd,
                                 &rollout_path,
@@ -517,9 +502,8 @@ async fn rollout_writer(
                         }
 
                         if !buffered_items.is_empty() {
-                            write_and_reconcile_items(
+                            write_native_items_and_project_state(
                                 native_writer.as_mut(),
-                                writer.as_mut(),
                                 buffered_items.as_slice(),
                                 &rollout_path,
                                 state_db_ctx.as_deref(),
@@ -529,39 +513,32 @@ async fn rollout_writer(
                             .await?;
                             buffered_items.clear();
                         }
-                        flush_writers(native_writer.as_ref(), writer.as_mut()).await?;
+                        locator_writer.flush().await?;
+                        persisted = true;
+                        flush_writers(native_writer.as_ref()).await?;
 
                         Ok(())
                     }
                     .await
                 } else {
-                    flush_writers(native_writer.as_ref(), writer.as_mut()).await
+                    flush_writers(native_writer.as_ref()).await
                 };
                 acknowledge(ack, result)?;
-                    }
-                    RolloutCmd::Flush { ack } => {
-                // Deferred fresh threads may not have an initialized file yet.
-                let result = flush_writers(native_writer.as_ref(), writer.as_mut()).await;
-                acknowledge(ack, result)?;
-                    }
-                    RolloutCmd::Shutdown { ack } => {
-                let result = flush_writers(native_writer.as_ref(), writer.as_mut()).await;
-                acknowledge(ack, result)?;
-                        break;
-                    }
-                }
             }
-            _ = flush_interval.tick(), if writer.is_some() => {
-                if let Some(writer) = writer.as_mut()
-                    && let Err(err) = writer.flush().await
-                {
-                    return Err(err);
-                }
+            RolloutCmd::Flush { ack } => {
+                // Deferred fresh threads may not have an initialized file yet.
+                let result = flush_writers(native_writer.as_ref()).await;
+                acknowledge(ack, result)?;
+            }
+            RolloutCmd::Shutdown { ack } => {
+                let result = flush_writers(native_writer.as_ref()).await;
+                acknowledge(ack, result)?;
+                break;
             }
         }
     }
 
-    flush_writers(native_writer.as_ref(), writer.as_mut()).await?;
+    flush_writers(native_writer.as_ref()).await?;
     Ok(())
 }
 
@@ -582,15 +559,9 @@ fn acknowledge(
     }
 }
 
-async fn flush_writers(
-    native_writer: Option<&NativeRolloutWriter>,
-    writer: Option<&mut JsonlWriter>,
-) -> std::io::Result<()> {
+async fn flush_writers(native_writer: Option<&NativeRolloutWriter>) -> std::io::Result<()> {
     if let Some(native_writer) = native_writer {
         native_writer.sync().await?;
-    }
-    if let Some(writer) = writer {
-        writer.flush().await?;
     }
     Ok(())
 }
@@ -642,9 +613,8 @@ async fn write_session_meta(
     Ok(())
 }
 
-async fn write_and_reconcile_items(
+async fn write_native_items_and_project_state(
     native_writer: Option<&mut NativeRolloutWriter>,
-    mut writer: Option<&mut JsonlWriter>,
     items: &[RolloutItem],
     rollout_path: &Path,
     state_db_ctx: Option<&StateRuntime>,
@@ -654,11 +624,6 @@ async fn write_and_reconcile_items(
     let native_writer = native_writer
         .ok_or_else(|| IoError::other("rollout recorder missing native thread writer"))?;
     native_writer.append(items).await?;
-    if let Some(writer) = writer.as_mut() {
-        for item in items {
-            writer.write_rollout_item(item).await?;
-        }
-    }
     sync_thread_state_after_write(
         state_db_ctx,
         rollout_path,
