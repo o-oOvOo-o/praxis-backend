@@ -39,6 +39,7 @@ use praxis_state::StateRuntime;
 use praxis_state::ThreadMetadataBuilder;
 
 mod jsonl_writer;
+mod native_metadata;
 mod native_rollout;
 
 use jsonl_writer::JsonlWriter;

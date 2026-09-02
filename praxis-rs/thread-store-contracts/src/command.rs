@@ -187,6 +187,13 @@ pub enum ThreadCommand {
     SetDynamicTools {
         tools: ContentRef,
     },
+    SetPreview {
+        preview: Option<String>,
+        first_user_message: Option<String>,
+    },
+    MarkAgentEventMetadataReconciled {
+        generation: u32,
+    },
     ReconcileSessionMetadata {
         name: Option<String>,
         resume_config: Option<ThreadResumeConfig>,
@@ -374,6 +381,20 @@ impl CanonicalEncode for ThreadCommand {
                 name.encode_canonical(hasher);
                 resume_config.encode_canonical(hasher);
                 dynamic_tools.encode_canonical(hasher);
+            }
+            Self::SetPreview {
+                preview,
+                first_user_message,
+            } => {
+                // Append-only command tag: existing persisted command digests must remain stable.
+                hasher.u8(25);
+                preview.encode_canonical(hasher);
+                first_user_message.encode_canonical(hasher);
+            }
+            Self::MarkAgentEventMetadataReconciled { generation } => {
+                // Append-only command tag: existing persisted command digests must remain stable.
+                hasher.u8(26);
+                generation.encode_canonical(hasher);
             }
         }
     }

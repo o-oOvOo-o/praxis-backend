@@ -25,7 +25,7 @@ use tokio::sync::OnceCell;
 
 mod write;
 
-const CURRENT_PROJECTION_GENERATION: i64 = 5;
+const CURRENT_PROJECTION_GENERATION: i64 = 6;
 const TURN_CHECKPOINT_INSERT_BATCH: usize = 128;
 
 #[derive(Clone, Debug)]
@@ -77,6 +77,7 @@ impl ThreadIndex {
                 last_agent_sequence INTEGER NOT NULL DEFAULT 0,
                 model_context_checkpoint_revision INTEGER,
                 dynamic_tools_digest BLOB,
+                agent_event_metadata_generation INTEGER NOT NULL DEFAULT 0,
                 transcript_total_turns INTEGER NOT NULL DEFAULT 0,
                 projection_generation INTEGER NOT NULL DEFAULT {}
             )",
@@ -164,9 +165,10 @@ impl ThreadIndex {
                  created_at, updated_at, preview, first_user_message, total_cost_micros,
                  last_cost_micros, model, model_provider, reasoning_effort, last_agent_sequence,
                  model_context_checkpoint_revision, dynamic_tools_digest,
+                 agent_event_metadata_generation,
                  transcript_total_turns,
                  projection_generation)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(thread_id) DO UPDATE SET
                 revision=excluded.revision, source=excluded.source,
                 workspace=excluded.workspace, name=excluded.name,
@@ -182,6 +184,7 @@ impl ThreadIndex {
                 last_agent_sequence=excluded.last_agent_sequence,
                 model_context_checkpoint_revision=excluded.model_context_checkpoint_revision,
                 dynamic_tools_digest=excluded.dynamic_tools_digest,
+                agent_event_metadata_generation=excluded.agent_event_metadata_generation,
                 transcript_total_turns=excluded.transcript_total_turns,
                 projection_generation=excluded.projection_generation
              WHERE ?
@@ -219,6 +222,7 @@ impl ThreadIndex {
                 .dynamic_tools_digest
                 .map(|digest| digest.as_bytes().to_vec()),
         )
+        .bind(i64::from(projection.agent_event_metadata_generation))
         .bind(
             i64::try_from(projection.transcript_index.total_turns)
                 .map_err(|_| ThreadStoreError::RevisionOverflow)?,
@@ -344,7 +348,8 @@ impl ThreadIndex {
                     created_at, updated_at, preview, first_user_message,
                     total_cost_micros, last_cost_micros, model, model_provider, reasoning_effort,
                     last_agent_sequence, model_context_checkpoint_revision,
-                    dynamic_tools_digest, transcript_total_turns
+                    dynamic_tools_digest, agent_event_metadata_generation,
+                    transcript_total_turns
              FROM thread_projection
              WHERE thread_id = ? AND projection_generation = ?",
         )
@@ -453,6 +458,23 @@ impl ThreadIndex {
             .map(|value| value.unwrap_or_default())
     }
 
+    pub(crate) async fn agent_event_metadata_generation(
+        &self,
+        thread_id: ThreadId,
+    ) -> Result<u32, ThreadStoreError> {
+        self.initialize().await?;
+        let generation = sqlx::query_scalar::<_, i64>(
+            "SELECT agent_event_metadata_generation FROM thread_projection
+             WHERE thread_id = ? AND projection_generation = ?",
+        )
+        .bind(thread_id.to_string())
+        .bind(CURRENT_PROJECTION_GENERATION)
+        .fetch_optional(&self.shared.pool)
+        .await?
+        .unwrap_or_default();
+        u32::try_from(generation).map_err(|_| ThreadStoreError::RevisionOverflow)
+    }
+
     pub(crate) async fn model_context_checkpoint(
         &self,
         thread_id: ThreadId,
@@ -546,6 +568,16 @@ async fn migrate_projection_schema(pool: &SqlitePool) -> Result<(), ThreadStoreE
         .execute(pool)
         .await?;
     }
+    if !columns.iter().any(|row| {
+        row.try_get::<String, _>("name").ok().as_deref() == Some("agent_event_metadata_generation")
+    }) {
+        sqlx::query(
+            "ALTER TABLE thread_projection
+             ADD COLUMN agent_event_metadata_generation INTEGER NOT NULL DEFAULT 0",
+        )
+        .execute(pool)
+        .await?;
+    }
     if !columns
         .iter()
         .any(|row| row.try_get::<String, _>("name").ok().as_deref() == Some("first_user_message"))
@@ -632,6 +664,8 @@ fn row_to_projection(
         .try_get::<Option<Vec<u8>>, _>("dynamic_tools_digest")?
         .map(digest_from_blob)
         .transpose()?;
+    let agent_event_metadata_generation =
+        row.try_get::<i64, _>("agent_event_metadata_generation")?;
     let summary = row_to_summary(row)?;
     Ok(ThreadIndexProjection {
         transcript_index: crate::projection::NativeTranscriptIndex {
@@ -649,6 +683,8 @@ fn row_to_projection(
             .map_err(|_| ThreadStoreError::RevisionOverflow)?,
         model_context_checkpoint,
         dynamic_tools_digest,
+        agent_event_metadata_generation: u32::try_from(agent_event_metadata_generation)
+            .map_err(|_| ThreadStoreError::RevisionOverflow)?,
     })
 }
 
@@ -802,7 +838,7 @@ mod cursor_tests {
         assert!(source.contains("INTEGER NOT NULL DEFAULT 0"));
         assert!(source.contains("AND projection_generation = ?"));
         assert!(source.contains("write_projection(projection, true)"));
-        assert!(source.contains("const CURRENT_PROJECTION_GENERATION: i64 = 5"));
+        assert!(source.contains("const CURRENT_PROJECTION_GENERATION: i64 = 6"));
         assert!(!source.contains("transcript_index_complete"));
         assert!(source.contains("model_context_checkpoint_revision INTEGER"));
         assert!(source.contains("ADD COLUMN model_context_checkpoint_revision"));

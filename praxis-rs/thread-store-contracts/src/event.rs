@@ -274,6 +274,13 @@ pub enum ThreadEventBody {
     ThreadDynamicToolsSet {
         tools: ContentRef,
     },
+    ThreadPreviewSet {
+        preview: Option<String>,
+        first_user_message: Option<String>,
+    },
+    AgentEventMetadataReconciled {
+        generation: u32,
+    },
 }
 
 impl ThreadEventBody {
@@ -304,6 +311,8 @@ impl ThreadEventBody {
             Self::TurnCostRecorded { .. } => "turn_cost_recorded",
             Self::ThreadResumeConfigSet { .. } => "thread_resume_config_set",
             Self::ThreadDynamicToolsSet { .. } => "thread_dynamic_tools_set",
+            Self::ThreadPreviewSet { .. } => "thread_preview_set",
+            Self::AgentEventMetadataReconciled { .. } => "agent_event_metadata_reconciled",
         }
     }
 }
@@ -467,6 +476,16 @@ impl CanonicalEncode for ThreadEventBody {
                 }
             }
             Self::ThreadDynamicToolsSet { tools } => tools.encode_canonical(hasher),
+            Self::ThreadPreviewSet {
+                preview,
+                first_user_message,
+            } => {
+                preview.encode_canonical(hasher);
+                first_user_message.encode_canonical(hasher);
+            }
+            Self::AgentEventMetadataReconciled { generation } => {
+                generation.encode_canonical(hasher);
+            }
         }
     }
 }

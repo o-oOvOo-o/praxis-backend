@@ -950,6 +950,16 @@ fn replay_command(body: ThreadEventBody) -> Option<ThreadCommand> {
         ThreadEventBody::ThreadDynamicToolsSet { tools } => {
             ThreadCommand::SetDynamicTools { tools }
         }
+        ThreadEventBody::ThreadPreviewSet {
+            preview,
+            first_user_message,
+        } => ThreadCommand::SetPreview {
+            preview,
+            first_user_message,
+        },
+        ThreadEventBody::AgentEventMetadataReconciled { generation } => {
+            ThreadCommand::MarkAgentEventMetadataReconciled { generation }
+        }
     })
 }
 

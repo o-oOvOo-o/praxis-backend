@@ -198,6 +198,13 @@ impl ThreadIndex {
             ThreadIndexMutation::Preview(value) => {
                 query.push(", preview = ").push_bind(value);
             }
+            ThreadIndexMutation::PreviewSnapshot(preview, first_user_message) => {
+                query
+                    .push(", preview = ")
+                    .push_bind(preview.as_deref())
+                    .push(", first_user_message = ")
+                    .push_bind(first_user_message.as_deref());
+            }
             ThreadIndexMutation::UserMessage(value) => {
                 query
                     .push(", preview = ")
@@ -235,6 +242,11 @@ impl ThreadIndex {
                         .as_bytes()
                         .to_vec(),
                 );
+            }
+            ThreadIndexMutation::AgentEventMetadataGeneration(generation) => {
+                query
+                    .push(", agent_event_metadata_generation = ")
+                    .push_bind(i64::from(generation));
             }
             ThreadIndexMutation::Unchanged | ThreadIndexMutation::NativeAgent { .. } => {
                 return Err(ThreadStoreError::Worker(

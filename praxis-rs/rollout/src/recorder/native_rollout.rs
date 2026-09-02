@@ -16,6 +16,9 @@ use praxis_thread_store_contracts::ThreadCommand;
 use praxis_thread_store_contracts::ThreadEventBody;
 
 use super::jsonl_writer::encode_rollout_line;
+use super::native_metadata::METADATA_GENERATION;
+use super::native_metadata::NativeMetadataDelta;
+use super::native_metadata::NativeRolloutMetadata;
 use crate::thread_store::native_codec::decode_item;
 use crate::thread_store::native_codec::encode_item;
 
@@ -28,7 +31,10 @@ pub(super) struct NativeRolloutInit {
 
 pub(super) struct NativeRolloutWriter {
     thread: LiveThreadStore,
+    thread_id: ThreadId,
     next_sequence: u64,
+    metadata: NativeRolloutMetadata,
+    metadata_generation: u32,
 }
 
 impl NativeRolloutWriter {
@@ -59,15 +65,36 @@ impl NativeRolloutWriter {
             .next_agent_event_sequence()
             .await
             .map_err(store_error)?;
+        let metadata_generation = thread
+            .agent_event_metadata_generation()
+            .await
+            .map_err(store_error)?;
+        let metadata = if metadata_generation >= METADATA_GENERATION {
+            thread
+                .summary()
+                .await
+                .map_err(store_error)?
+                .as_ref()
+                .map(NativeRolloutMetadata::from_summary)
+                .unwrap_or_default()
+        } else {
+            recover_metadata(&thread, thread_id).await?
+        };
         let mut writer = Self {
             thread,
+            thread_id,
             next_sequence,
+            metadata,
+            metadata_generation,
         };
         if next_sequence > 1 {
             writer.reconcile_projection(rollout_path).await?;
         } else {
             writer.import_projection(rollout_path, thread_id).await?;
         }
+        writer
+            .reconcile_metadata_if_needed(NativeMetadataDelta::default())
+            .await?;
         Ok(writer)
     }
 
@@ -83,16 +110,39 @@ impl NativeRolloutWriter {
         };
         let thread = store.open_thread(thread_id).await.map_err(store_error)?;
         thread
-            .ensure_created(init.source, init.workspace, None)
+            .ensure_created(init.source, init.workspace.clone(), None)
             .await
             .map_err(store_error)?;
         let next_sequence = thread
             .next_agent_event_sequence()
             .await
             .map_err(store_error)?;
+        let metadata_generation = thread
+            .agent_event_metadata_generation()
+            .await
+            .map_err(store_error)?;
+        let metadata = if metadata_generation >= METADATA_GENERATION {
+            thread
+                .summary()
+                .await
+                .map_err(store_error)?
+                .as_ref()
+                .map(NativeRolloutMetadata::from_summary)
+                .unwrap_or_default()
+        } else if existed {
+            recover_metadata(&thread, init.thread_id).await?
+        } else {
+            NativeRolloutMetadata {
+                workspace: Some(init.workspace),
+                ..NativeRolloutMetadata::default()
+            }
+        };
         let mut writer = Self {
             thread,
+            thread_id: init.thread_id,
             next_sequence,
+            metadata,
+            metadata_generation,
         };
         if existed && next_sequence > 1 {
             writer.reconcile_projection(rollout_path).await?;
@@ -103,6 +153,9 @@ impl NativeRolloutWriter {
                 .import_projection(rollout_path, init.thread_id)
                 .await?;
         }
+        writer
+            .reconcile_metadata_if_needed(NativeMetadataDelta::default())
+            .await?;
         Ok(writer)
     }
 
@@ -116,7 +169,9 @@ impl NativeRolloutWriter {
     }
 
     pub(super) async fn append(&mut self, items: &[RolloutItem]) -> io::Result<()> {
+        let mut metadata_delta = NativeMetadataDelta::default();
         for item in items {
+            metadata_delta.merge(self.metadata.apply(self.thread_id, item));
             let sequence = self.next_sequence;
             self.thread
                 .execute(
@@ -135,9 +190,70 @@ impl NativeRolloutWriter {
                 .map_err(store_error)?;
             self.next_sequence = sequence.saturating_add(1);
         }
+        self.reconcile_metadata_if_needed(metadata_delta).await?;
         if !items.is_empty() {
             self.thread.sync().await.map_err(store_error)?;
         }
+        Ok(())
+    }
+
+    async fn reconcile_metadata_if_needed(&mut self, delta: NativeMetadataDelta) -> io::Result<()> {
+        let upgrading = self.metadata_generation < METADATA_GENERATION;
+        if !upgrading
+            && !delta.workspace
+            && !delta.preview
+            && !delta.resume_config
+            && !delta.dynamic_tools
+        {
+            return Ok(());
+        }
+        if (upgrading || delta.workspace)
+            && let Some(workspace) = self.metadata.workspace.clone()
+        {
+            self.execute_metadata(ThreadCommand::SetWorkspace { workspace })
+                .await?;
+        }
+        if upgrading || delta.preview {
+            self.execute_metadata(ThreadCommand::SetPreview {
+                preview: self.metadata.preview.clone(),
+                first_user_message: self.metadata.first_user_message.clone(),
+            })
+            .await?;
+        }
+        if upgrading || delta.resume_config {
+            self.execute_metadata(ThreadCommand::SetResumeConfig {
+                model: self.metadata.resume_config.model.clone(),
+                model_provider: self.metadata.resume_config.model_provider.clone(),
+                reasoning_effort: self.metadata.resume_config.reasoning_effort.clone(),
+            })
+            .await?;
+        }
+        if (upgrading || delta.dynamic_tools)
+            && let Some(tools) = self.metadata.dynamic_tools.clone()
+        {
+            self.execute_metadata(ThreadCommand::SetDynamicTools { tools })
+                .await?;
+        }
+        if upgrading {
+            self.execute_metadata(ThreadCommand::MarkAgentEventMetadataReconciled {
+                generation: METADATA_GENERATION,
+            })
+            .await?;
+            self.metadata_generation = METADATA_GENERATION;
+        }
+        Ok(())
+    }
+
+    async fn execute_metadata(&self, command: ThreadCommand) -> io::Result<()> {
+        self.thread
+            .execute(
+                ThreadActor::Runtime,
+                Some(format!("rollout-metadata:{METADATA_GENERATION}")),
+                command,
+                CommitMode::Buffered,
+            )
+            .await
+            .map_err(store_error)?;
         Ok(())
     }
 
@@ -203,6 +319,22 @@ impl NativeRolloutWriter {
             .map_err(|error| error.error)?;
         Ok(())
     }
+}
+
+async fn recover_metadata(
+    thread: &LiveThreadStore,
+    expected_thread_id: ThreadId,
+) -> io::Result<NativeRolloutMetadata> {
+    thread
+        .fold_all(NativeRolloutMetadata::default(), move |metadata, event| {
+            if let ThreadEventBody::NativeAgentEventRecorded { payload, .. } = &event.body
+                && let Some(item) = decode_item(payload)
+            {
+                metadata.apply(expected_thread_id, &item);
+            }
+        })
+        .await
+        .map_err(store_error)
 }
 
 struct ProjectionRebuild {

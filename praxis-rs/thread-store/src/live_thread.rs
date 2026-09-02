@@ -230,6 +230,12 @@ impl LiveThreadStore {
         Ok(last.saturating_add(1).max(1))
     }
 
+    pub async fn agent_event_metadata_generation(&self) -> Result<u32, ThreadStoreError> {
+        self.index
+            .agent_event_metadata_generation(self.thread_id)
+            .await
+    }
+
     pub async fn summary(&self) -> Result<Option<crate::ThreadSummary>, ThreadStoreError> {
         self.index.read_summary(self.thread_id).await
     }
@@ -620,6 +626,16 @@ fn event_body(command: ThreadCommand) -> ThreadEventBody {
         },
         ThreadCommand::SetDynamicTools { tools } => {
             ThreadEventBody::ThreadDynamicToolsSet { tools }
+        }
+        ThreadCommand::SetPreview {
+            preview,
+            first_user_message,
+        } => ThreadEventBody::ThreadPreviewSet {
+            preview,
+            first_user_message,
+        },
+        ThreadCommand::MarkAgentEventMetadataReconciled { generation } => {
+            ThreadEventBody::AgentEventMetadataReconciled { generation }
         }
         ThreadCommand::ReconcileSessionMetadata { .. } => {
             unreachable!("metadata reconciliation is projected as an event batch")

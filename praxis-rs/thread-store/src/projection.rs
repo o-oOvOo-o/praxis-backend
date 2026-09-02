@@ -68,6 +68,7 @@ pub(crate) struct ThreadIndexProjection {
     pub(crate) last_agent_sequence: u64,
     pub(crate) model_context_checkpoint: Option<ThreadRevision>,
     pub(crate) dynamic_tools_digest: Option<Digest>,
+    pub(crate) agent_event_metadata_generation: u32,
     pub(crate) transcript_index: NativeTranscriptIndex,
 }
 
@@ -190,6 +191,7 @@ impl ThreadIndexProjection {
             last_agent_sequence: 0,
             model_context_checkpoint: None,
             dynamic_tools_digest: None,
+            agent_event_metadata_generation: 0,
             transcript_index: NativeTranscriptIndex {
                 through_revision: event.revision,
                 ..NativeTranscriptIndex::default()
@@ -207,6 +209,7 @@ pub(crate) enum ThreadIndexMutation<'a> {
     Archived(bool),
     Workspace(&'a str),
     Preview(Option<&'a str>),
+    PreviewSnapshot(&'a Option<String>, &'a Option<String>),
     UserMessage(&'a str),
     Cost(Option<i64>),
     ResumeConfig(&'a Option<String>, &'a Option<String>, &'a Option<String>),
@@ -216,6 +219,7 @@ pub(crate) enum ThreadIndexMutation<'a> {
     },
     ModelContextCheckpoint(Option<ThreadRevision>),
     DynamicTools(&'a ContentRef),
+    AgentEventMetadataGeneration(u32),
 }
 
 impl<'a> ThreadIndexMutation<'a> {
@@ -243,6 +247,13 @@ impl<'a> ThreadIndexMutation<'a> {
             }
             ThreadEventBody::ModelContextRolledBack { .. } => Self::ModelContextCheckpoint(None),
             ThreadEventBody::ThreadDynamicToolsSet { tools } => Self::DynamicTools(tools),
+            ThreadEventBody::ThreadPreviewSet {
+                preview,
+                first_user_message,
+            } => Self::PreviewSnapshot(preview, first_user_message),
+            ThreadEventBody::AgentEventMetadataReconciled { generation } => {
+                Self::AgentEventMetadataGeneration(*generation)
+            }
             ThreadEventBody::TurnCostRecorded { cost_micros } => Self::Cost(*cost_micros),
             ThreadEventBody::ThreadResumeConfigSet {
                 model,
@@ -273,6 +284,13 @@ impl<'a> ThreadIndexMutation<'a> {
             Self::Archived(value) => projection.summary.archived = value,
             Self::Workspace(value) => replace_string(&mut projection.summary.workspace, value),
             Self::Preview(value) => replace_optional_string(&mut projection.summary.preview, value),
+            Self::PreviewSnapshot(preview, first_user_message) => {
+                replace_optional_string(&mut projection.summary.preview, preview.as_deref());
+                replace_optional_string(
+                    &mut projection.summary.first_user_message,
+                    first_user_message.as_deref(),
+                );
+            }
             Self::UserMessage(value) => {
                 replace_optional_string(&mut projection.summary.preview, Some(value));
                 if projection.summary.first_user_message.is_none() {
@@ -322,6 +340,9 @@ impl<'a> ThreadIndexMutation<'a> {
             }
             Self::DynamicTools(tools) => {
                 projection.dynamic_tools_digest = Some(dynamic_tools_digest(tools));
+            }
+            Self::AgentEventMetadataGeneration(generation) => {
+                projection.agent_event_metadata_generation = generation;
             }
         }
     }
@@ -621,6 +642,43 @@ mod tests {
         let summary = accumulator.finish().expect("projection").summary;
         assert_eq!(summary.first_user_message.as_deref(), Some("first ask"));
         assert_eq!(summary.preview.as_deref(), Some("later ask"));
+    }
+
+    #[test]
+    fn reconciled_agent_metadata_replaces_preview_and_records_generation() {
+        let thread_id = ThreadId::new();
+        let mut accumulator = ThreadIndexAccumulator::default();
+        for (revision, body) in [
+            (
+                1,
+                ThreadEventBody::ThreadCreated {
+                    source: "run".into(),
+                    workspace: "F:/Cunning3D".into(),
+                    parent: None,
+                },
+            ),
+            (
+                2,
+                ThreadEventBody::ThreadPreviewSet {
+                    preview: Some("latest".into()),
+                    first_user_message: Some("first".into()),
+                },
+            ),
+            (
+                3,
+                ThreadEventBody::AgentEventMetadataReconciled { generation: 1 },
+            ),
+        ] {
+            accumulator.push(&event(thread_id, revision, body));
+        }
+
+        let projection = accumulator.finish().expect("reconciled projection");
+        assert_eq!(projection.summary.preview.as_deref(), Some("latest"));
+        assert_eq!(
+            projection.summary.first_user_message.as_deref(),
+            Some("first")
+        );
+        assert_eq!(projection.agent_event_metadata_generation, 1);
     }
 
     #[test]
