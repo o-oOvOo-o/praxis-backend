@@ -9,6 +9,7 @@ use praxis_app_gateway_protocol::ThreadStatus;
 use praxis_core::ThreadConfigSnapshot;
 use praxis_core::config::Config;
 use praxis_protocol::ThreadId;
+use praxis_rollout::ThreadHistoryReader;
 use praxis_rollout::state_db::StateDbHandle;
 use praxis_state::ThreadMetadata;
 use std::path::Path;
@@ -58,14 +59,18 @@ pub(crate) async fn project_rollback_thread_from_rollout(
     fallback_provider: &str,
     state_db_ctx: Option<&StateDbHandle>,
     thread_id: &ThreadId,
+    history_reader: &ThreadHistoryReader,
 ) -> std::result::Result<Thread, String> {
     let mut thread = project_thread_from_rollout_summary(rollout_path, fallback_provider)
         .await
         .map_err(|err| format!("failed to load rollout `{}`: {err}", rollout_path.display()))?;
-    thread.turns =
-        ThreadProjection::read_turns_from_rollout(rollout_path, ThreadTurnHydration::all())
-            .await
-            .map_err(|err| format!("failed to load rollout `{}`: {err}", rollout_path.display()))?;
+    thread.turns = ThreadProjection::read_turns_with_reader(
+        history_reader,
+        rollout_path,
+        ThreadTurnHydration::all(),
+    )
+    .await
+    .map_err(|err| format!("failed to load rollout `{}`: {err}", rollout_path.display()))?;
     thread.name =
         praxis_rollout::ThreadNameResolver::new(state_db_ctx.map(|state_db| state_db.as_ref()))
             .resolve_name(*thread_id)

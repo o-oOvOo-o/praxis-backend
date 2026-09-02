@@ -132,6 +132,7 @@ use praxis_protocol::request_permissions::RequestPermissionProfile as CoreReques
 use praxis_protocol::request_permissions::RequestPermissionsResponse as CoreRequestPermissionsResponse;
 use praxis_protocol::request_user_input::RequestUserInputAnswer as CoreRequestUserInputAnswer;
 use praxis_protocol::request_user_input::RequestUserInputResponse as CoreRequestUserInputResponse;
+use praxis_rollout::ThreadHistoryReader;
 use praxis_sandboxing::policy_transforms::intersect_permission_profiles;
 use praxis_shell_command::parse_command::shlex_join;
 use praxis_state::AutomationRunStatus;

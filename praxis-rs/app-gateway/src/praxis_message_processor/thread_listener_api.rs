@@ -5,6 +5,7 @@ use super::thread_store_api::ThreadTurnHydration;
 use super::*;
 use crate::bespoke_event_handling::apply_bespoke_event_handling;
 use praxis_app_gateway_protocol::TurnStatus;
+use praxis_rollout::ThreadHistoryReader;
 
 #[derive(Clone)]
 pub(super) struct ListenerTaskContext {
@@ -191,6 +192,7 @@ impl PraxisMessageProcessor {
             praxis_home,
             state_db,
         } = listener_task_context;
+        let history_reader = ThreadHistoryReader::from_praxis_home(praxis_home);
         let outgoing_for_task = Arc::clone(&outgoing);
         tokio::spawn(async move {
             loop {
@@ -251,6 +253,7 @@ impl PraxisMessageProcessor {
                             workspace_change_store.clone(),
                             fallback_model_provider.clone(),
                             state_db.clone(),
+                            &history_reader,
                         )
                         .await;
                         if let Some(turn_id) = completed_turn_id {
@@ -268,6 +271,7 @@ impl PraxisMessageProcessor {
                             &conversation,
                             state_db.as_deref(),
                             &thread_state_manager,
+                            &history_reader,
                             &thread_state,
                             &thread_watch_manager,
                             thread_manager.as_ref(),
@@ -293,6 +297,7 @@ async fn handle_thread_listener_command(
     conversation: &Arc<PraxisThread>,
     state_db: Option<&StateRuntime>,
     thread_state_manager: &ThreadStateManager,
+    history_reader: &ThreadHistoryReader,
     thread_state: &Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
     thread_manager: &ThreadManager,
@@ -306,6 +311,7 @@ async fn handle_thread_listener_command(
                 conversation,
                 state_db,
                 thread_state_manager,
+                history_reader,
                 thread_state,
                 thread_watch_manager,
                 thread_manager,
@@ -337,6 +343,7 @@ async fn handle_pending_thread_resume_request(
     conversation: &Arc<PraxisThread>,
     state_db: Option<&StateRuntime>,
     thread_state_manager: &ThreadStateManager,
+    history_reader: &ThreadHistoryReader,
     thread_state: &Arc<Mutex<ThreadState>>,
     thread_watch_manager: &ThreadWatchManager,
     thread_manager: &ThreadManager,
@@ -364,7 +371,8 @@ async fn handle_pending_thread_resume_request(
     let request_id = pending.request_id;
     let connection_id = request_id.connection_id;
     let mut thread = pending.thread_summary;
-    if let Err(message) = ThreadProjection::hydrate_turns(
+    if let Err(message) = ThreadProjection::hydrate_turns_with_reader(
+        history_reader,
         &mut thread,
         ThreadHistorySource::RolloutPath(pending.rollout_path.as_path()),
         ThreadTurnHydration::recent(pending.turn_limit.map(|limit| limit as usize)),

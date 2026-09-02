@@ -37,7 +37,9 @@ impl PraxisMessageProcessor {
                 }
             };
 
-        let page = match ThreadProjection::read_turn_page_from_rollout(&rollout_path, cursor, limit)
+        let projection = ThreadProjection::new(&self.config);
+        let page = match projection
+            .read_turn_page_from_rollout(&rollout_path, cursor, limit)
             .await
         {
             Ok(page) => page,
@@ -291,11 +293,12 @@ impl PraxisMessageProcessor {
         }
 
         if include_turns && let Some(rollout_path) = rollout_path.as_ref() {
-            match ThreadProjection::read_turns_from_rollout(
-                rollout_path,
-                ThreadTurnHydration::recent(turn_limit.map(|limit| limit as usize)),
-            )
-            .await
+            match ThreadProjection::new(&self.config)
+                .read_turns_from_rollout(
+                    rollout_path,
+                    ThreadTurnHydration::recent(turn_limit.map(|limit| limit as usize)),
+                )
+                .await
             {
                 Ok(turns) => {
                     thread.turns = turns;

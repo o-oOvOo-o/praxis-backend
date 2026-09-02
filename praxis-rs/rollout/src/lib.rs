@@ -41,6 +41,7 @@ pub use recorder::RolloutRecorderParams;
 pub use state_db::StateDbHandle;
 pub use thread_store::ListThreadsQuery;
 pub use thread_store::ThreadGitInfo;
+pub use thread_store::ThreadHistoryReader;
 pub use thread_store::ThreadNameResolver;
 pub use thread_store::ThreadNameWriter;
 pub use thread_store::ThreadStore;

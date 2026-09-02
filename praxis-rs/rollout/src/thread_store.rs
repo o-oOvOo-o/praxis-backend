@@ -34,8 +34,11 @@ use crate::state_db;
 use crate::state_db::StateDbHandle;
 
 mod directory;
+mod history;
+pub(crate) mod native_codec;
 pub(crate) mod resume_selection;
 
+pub use history::ThreadHistoryReader;
 use resume_selection::select_resume_path;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +94,7 @@ pub struct ListThreadsQuery {
 pub struct ThreadStore<'a, C: RolloutConfigView> {
     config: &'a C,
     state_db: Option<StateDbHandle>,
+    history: ThreadHistoryReader,
 }
 
 pub struct ThreadNameResolver<'a> {
@@ -115,11 +119,41 @@ enum DirectoryPage {
 impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
     pub async fn open(config: &'a C) -> Self {
         let state_db = state_db::get_state_db(config).await;
-        Self { config, state_db }
+        let history = ThreadHistoryReader::from_praxis_home(config.praxis_home().to_path_buf());
+        Self {
+            config,
+            state_db,
+            history,
+        }
     }
 
     pub fn state_db(&self) -> Option<&praxis_state::StateRuntime> {
         self.state_db.as_deref()
+    }
+
+    pub fn history(&self) -> &ThreadHistoryReader {
+        &self.history
+    }
+
+    pub async fn fold_rollout_items<S, F>(
+        &self,
+        rollout_path: &Path,
+        state: S,
+        fold: F,
+    ) -> io::Result<S>
+    where
+        S: Send + 'static,
+        F: FnMut(&mut S, RolloutItem) + Send + 'static,
+    {
+        self.history.fold_items(rollout_path, state, fold).await
+    }
+
+    pub async fn read_rollout_items(&self, rollout_path: &Path) -> io::Result<Vec<RolloutItem>> {
+        self.history.read_items(rollout_path).await
+    }
+
+    pub async fn read_initial_history(&self, rollout_path: &Path) -> io::Result<InitialHistory> {
+        self.history.read_initial_history(rollout_path).await
     }
 
     pub fn name_resolver(&self) -> ThreadNameResolver<'_> {

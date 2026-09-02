@@ -554,7 +554,10 @@ impl PraxisMessageProcessor {
             rollout_path
         };
 
-        match ThreadProjection::read_initial_history(&rollout_path).await {
+        match ThreadProjection::new(&self.config)
+            .read_initial_history(&rollout_path)
+            .await
+        {
             Ok(initial_history) => Some(initial_history),
             Err(err) => {
                 self.send_invalid_request_error(
@@ -606,13 +609,12 @@ impl PraxisMessageProcessor {
         thread.id = thread_id.to_string();
         thread.path = Some(rollout_path.to_path_buf());
         let history_items = thread_history.get_rollout_items();
-        ThreadProjection::hydrate_turns(
+        ThreadProjection::hydrate_turns_from_items(
             &mut thread,
-            ThreadHistorySource::RolloutItems(&history_items),
+            &history_items,
             ThreadTurnHydration::recent(turn_limit.map(|limit| limit as usize)),
             /*active_turn*/ None,
-        )
-        .await?;
+        );
         self.attach_thread_name(thread_id, &mut thread).await;
         Ok(thread)
     }

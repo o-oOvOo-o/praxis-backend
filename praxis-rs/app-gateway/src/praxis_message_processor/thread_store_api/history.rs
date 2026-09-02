@@ -11,6 +11,8 @@ use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::RolloutItem;
 use std::path::Path;
 
+use praxis_rollout::ThreadHistoryReader;
+
 #[derive(Debug)]
 pub(in crate::praxis_message_processor) enum ThreadHistoryPageReadError {
     Io(std::io::Error),
@@ -99,8 +101,11 @@ pub(super) fn preview_from_rollout_items(items: &[RolloutItem]) -> String {
         .unwrap_or_default()
 }
 
-pub(super) async fn read_thread_rollout_items(path: &Path) -> std::io::Result<Vec<RolloutItem>> {
-    let items = match read_thread_initial_history(path).await? {
+pub(super) async fn read_thread_rollout_items(
+    history: &ThreadHistoryReader,
+    path: &Path,
+) -> std::io::Result<Vec<RolloutItem>> {
+    let items = match read_thread_initial_history(history, path).await? {
         InitialHistory::New => Vec::new(),
         InitialHistory::Forked(items) => items,
         InitialHistory::Resumed(resumed) => resumed.history,
@@ -109,34 +114,39 @@ pub(super) async fn read_thread_rollout_items(path: &Path) -> std::io::Result<Ve
     Ok(items)
 }
 
-pub(super) async fn read_thread_initial_history(path: &Path) -> std::io::Result<InitialHistory> {
-    praxis_rollout::thread_store::read_initial_history(path).await
+pub(super) async fn read_thread_initial_history(
+    history: &ThreadHistoryReader,
+    path: &Path,
+) -> std::io::Result<InitialHistory> {
+    history.read_initial_history(path).await
 }
 
 pub(super) async fn read_thread_turns_from_rollout(
+    history: &ThreadHistoryReader,
     path: &Path,
     hydration: ThreadTurnHydration,
 ) -> std::io::Result<Vec<Turn>> {
-    let mut builder = hydration.builder();
-    praxis_rollout::thread_store::scan_items(path, |item| {
-        builder.handle_rollout_item(&item);
-    })
-    .await?;
+    let builder = history
+        .fold_items(path, hydration.builder(), |builder, item| {
+            builder.handle_rollout_item(&item);
+        })
+        .await?;
     Ok(builder.finish())
 }
 
 pub(super) async fn read_thread_turn_page_from_rollout(
+    history: &ThreadHistoryReader,
     path: &Path,
     cursor: Option<ThreadHistoryCursor>,
     limit: u32,
 ) -> Result<ThreadTurnPage, ThreadHistoryPageReadError> {
     validate_turn_page_limit(limit)?;
 
-    let mut builder = ThreadHistoryBuilder::new();
-    praxis_rollout::thread_store::scan_items(path, |item| {
-        builder.handle_rollout_item(&item);
-    })
-    .await?;
+    let builder = history
+        .fold_items(path, ThreadHistoryBuilder::new(), |builder, item| {
+            builder.handle_rollout_item(&item);
+        })
+        .await?;
     select_turn_page(builder.finish(), cursor, limit)
 }
 
@@ -188,30 +198,46 @@ fn validate_turn_page_limit(limit: u32) -> Result<(), ThreadHistoryPageReadError
 }
 
 pub(super) async fn hydrate_thread_turns(
+    history: &ThreadHistoryReader,
     thread: &mut Thread,
     source: ThreadHistorySource<'_>,
     hydration: ThreadTurnHydration,
     active_turn: Option<&Turn>,
 ) -> std::result::Result<(), String> {
-    let mut turns = match source {
-        ThreadHistorySource::RolloutPath(rollout_path) => {
-            read_thread_turns_from_rollout(rollout_path, hydration)
-                .await
-                .map_err(|err| {
-                    format!(
-                        "failed to load rollout `{}` for thread {}: {err}",
-                        rollout_path.display(),
-                        thread.id
-                    )
-                })?
+    let rollout_path = match source {
+        ThreadHistorySource::RolloutPath(rollout_path) => rollout_path,
+        ThreadHistorySource::RolloutItems(items) => {
+            hydrate_thread_turns_from_items(thread, items, hydration, active_turn);
+            return Ok(());
         }
-        ThreadHistorySource::RolloutItems(items) => hydration.build_turns(items),
     };
+    let mut turns = read_thread_turns_from_rollout(history, rollout_path, hydration)
+        .await
+        .map_err(|err| {
+            format!(
+                "failed to load rollout `{}` for thread {}: {err}",
+                rollout_path.display(),
+                thread.id
+            )
+        })?;
     if let Some(active_turn) = active_turn {
         merge_active_turn(&mut turns, active_turn.clone());
     }
     thread.turns = turns;
     Ok(())
+}
+
+pub(super) fn hydrate_thread_turns_from_items(
+    thread: &mut Thread,
+    items: &[RolloutItem],
+    hydration: ThreadTurnHydration,
+    active_turn: Option<&Turn>,
+) {
+    let mut turns = hydration.build_turns(items);
+    if let Some(active_turn) = active_turn {
+        merge_active_turn(&mut turns, active_turn.clone());
+    }
+    thread.turns = turns;
 }
 
 fn merge_active_turn(turns: &mut Vec<Turn>, active_turn: Turn) {

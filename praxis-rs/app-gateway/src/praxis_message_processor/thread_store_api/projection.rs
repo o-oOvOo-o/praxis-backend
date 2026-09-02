@@ -16,6 +16,7 @@ use praxis_core::config::Config;
 use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::RolloutItem;
+use praxis_rollout::ThreadHistoryReader;
 use praxis_rollout::state_db::StateDbHandle;
 use praxis_state::ThreadMetadata;
 use std::path::Path;
@@ -121,6 +122,23 @@ impl<'a> ThreadProjection<'a> {
         .await
     }
 
+    pub(in crate::praxis_message_processor) async fn hydrate_turns(
+        &self,
+        thread: &mut Thread,
+        source: ThreadHistorySource<'_>,
+        hydration: ThreadTurnHydration,
+        active_turn: Option<&Turn>,
+    ) -> std::result::Result<(), String> {
+        history::hydrate_thread_turns(
+            self.store().await.history(),
+            thread,
+            source,
+            hydration,
+            active_turn,
+        )
+        .await
+    }
+
     async fn find_rollout_path(
         &self,
         thread_id: ThreadId,
@@ -138,39 +156,67 @@ impl ThreadProjection<'_> {
     }
 
     pub(in crate::praxis_message_processor) async fn read_rollout_items(
+        &self,
         path: &Path,
     ) -> std::io::Result<Vec<RolloutItem>> {
-        history::read_thread_rollout_items(path).await
+        history::read_thread_rollout_items(self.store().await.history(), path).await
     }
 
     pub(in crate::praxis_message_processor) async fn read_initial_history(
+        &self,
         path: &Path,
     ) -> std::io::Result<InitialHistory> {
-        history::read_thread_initial_history(path).await
+        history::read_thread_initial_history(self.store().await.history(), path).await
     }
 
     pub(in crate::praxis_message_processor) async fn read_turns_from_rollout(
+        &self,
         path: &Path,
         hydration: ThreadTurnHydration,
     ) -> std::io::Result<Vec<Turn>> {
-        history::read_thread_turns_from_rollout(path, hydration).await
+        history::read_thread_turns_from_rollout(self.store().await.history(), path, hydration).await
     }
 
     pub(in crate::praxis_message_processor) async fn read_turn_page_from_rollout(
+        &self,
         path: &Path,
         cursor: Option<ThreadHistoryCursor>,
         limit: u32,
     ) -> Result<ThreadTurnPage, ThreadHistoryPageReadError> {
-        history::read_thread_turn_page_from_rollout(path, cursor, limit).await
+        history::read_thread_turn_page_from_rollout(
+            self.store().await.history(),
+            path,
+            cursor,
+            limit,
+        )
+        .await
     }
 
-    pub(in crate::praxis_message_processor) async fn hydrate_turns(
+    pub(in crate::praxis_message_processor) async fn hydrate_turns_with_reader(
+        history_reader: &ThreadHistoryReader,
         thread: &mut Thread,
         source: ThreadHistorySource<'_>,
         hydration: ThreadTurnHydration,
         active_turn: Option<&Turn>,
     ) -> std::result::Result<(), String> {
-        history::hydrate_thread_turns(thread, source, hydration, active_turn).await
+        history::hydrate_thread_turns(history_reader, thread, source, hydration, active_turn).await
+    }
+
+    pub(in crate::praxis_message_processor) async fn read_turns_with_reader(
+        history_reader: &ThreadHistoryReader,
+        path: &Path,
+        hydration: ThreadTurnHydration,
+    ) -> std::io::Result<Vec<Turn>> {
+        history::read_thread_turns_from_rollout(history_reader, path, hydration).await
+    }
+
+    pub(in crate::praxis_message_processor) fn hydrate_turns_from_items(
+        thread: &mut Thread,
+        items: &[RolloutItem],
+        hydration: ThreadTurnHydration,
+        active_turn: Option<&Turn>,
+    ) {
+        history::hydrate_thread_turns_from_items(thread, items, hydration, active_turn);
     }
 
     pub(in crate::praxis_message_processor) async fn read_rollout_summary(

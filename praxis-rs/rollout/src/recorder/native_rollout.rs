@@ -11,16 +11,13 @@ use praxis_thread_store::CommitMode;
 use praxis_thread_store::LiveThreadStore;
 use praxis_thread_store::ThreadStore;
 use praxis_thread_store_contracts::AgentEventRoute;
-use praxis_thread_store_contracts::ContentRef;
 use praxis_thread_store_contracts::ThreadActor;
 use praxis_thread_store_contracts::ThreadCommand;
 use praxis_thread_store_contracts::ThreadEventBody;
-use serde::Deserialize;
-use serde::Serialize;
 
 use super::jsonl_writer::encode_rollout_line;
-
-const NATIVE_ROLLOUT_SCHEMA: &str = "praxis.rollout-item.v1";
+use crate::thread_store::native_codec::decode_item;
+use crate::thread_store::native_codec::encode_item;
 
 pub(super) struct NativeRolloutInit {
     pub praxis_home: PathBuf,
@@ -32,18 +29,6 @@ pub(super) struct NativeRolloutInit {
 pub(super) struct NativeRolloutWriter {
     thread: LiveThreadStore,
     next_sequence: u64,
-}
-
-#[derive(Serialize)]
-struct StoredRolloutItemRef<'a> {
-    schema: &'static str,
-    item: &'a RolloutItem,
-}
-
-#[derive(Deserialize)]
-struct StoredRolloutItem {
-    schema: String,
-    item: RolloutItem,
 }
 
 impl NativeRolloutWriter {
@@ -252,23 +237,6 @@ impl ProjectionRebuild {
     }
 }
 
-pub(super) fn encode_item(item: &RolloutItem) -> io::Result<ContentRef> {
-    Ok(ContentRef::InlineText {
-        text: serde_json::to_string(&StoredRolloutItemRef {
-            schema: NATIVE_ROLLOUT_SCHEMA,
-            item,
-        })?,
-    })
-}
-
-pub(super) fn decode_item(content: &ContentRef) -> Option<RolloutItem> {
-    let ContentRef::InlineText { text } = content else {
-        return None;
-    };
-    let stored: StoredRolloutItem = serde_json::from_str(text).ok()?;
-    (stored.schema == NATIVE_ROLLOUT_SCHEMA).then_some(stored.item)
-}
-
 fn route(item: &RolloutItem) -> AgentEventRoute {
     match item {
         RolloutItem::EventMsg(EventMsg::TurnStarted(_)) => AgentEventRoute::TurnStarted,
@@ -304,7 +272,3 @@ async fn read_projection(
     }
     Ok(items)
 }
-
-#[cfg(test)]
-#[path = "native_rollout_tests.rs"]
-mod tests;

@@ -13,6 +13,7 @@ pub(crate) async fn apply_bespoke_event_handling(
     workspace_change_store: WorkspaceChangeStore,
     fallback_model_provider: String,
     state_db: Option<Arc<StateRuntime>>,
+    history_reader: &ThreadHistoryReader,
 ) {
     let Event {
         id: event_turn_id,
@@ -963,6 +964,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     fallback_model_provider.as_str(),
                     state_db.as_ref(),
                     &conversation_id,
+                    history_reader,
                 )
                 .await
                 {
