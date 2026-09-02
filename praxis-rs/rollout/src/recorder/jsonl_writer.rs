@@ -31,22 +31,7 @@ impl JsonlWriter {
         &mut self,
         rollout_item: &RolloutItem,
     ) -> std::io::Result<()> {
-        let timestamp_format: &[FormatItem] = format_description!(
-            "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
-        );
-        let timestamp = OffsetDateTime::now_utc()
-            .format(timestamp_format)
-            .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
-
-        let line = RolloutLineRef {
-            timestamp,
-            item: rollout_item,
-        };
-        self.write_line(&line).await
-    }
-    async fn write_line(&mut self, item: &impl serde::Serialize) -> std::io::Result<()> {
-        let mut json = serde_json::to_string(item)?;
-        json.push('\n');
+        let json = encode_rollout_line(rollout_item)?;
         self.file.write_all(json.as_bytes()).await?;
         self.needs_flush = true;
         Ok(())
@@ -59,4 +44,20 @@ impl JsonlWriter {
         }
         Ok(())
     }
+}
+
+pub(super) fn encode_rollout_line(rollout_item: &RolloutItem) -> std::io::Result<String> {
+    let timestamp_format: &[FormatItem] =
+        format_description!("[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z");
+    let timestamp = OffsetDateTime::now_utc()
+        .format(timestamp_format)
+        .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
+
+    let line = RolloutLineRef {
+        timestamp,
+        item: rollout_item,
+    };
+    let mut json = serde_json::to_string(&line)?;
+    json.push('\n');
+    Ok(json)
 }

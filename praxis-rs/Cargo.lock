@@ -7792,6 +7792,7 @@ dependencies = [
  "praxis-protocol",
  "praxis-state",
  "praxis-thread-store",
+ "praxis-thread-store-contracts",
  "praxis-utils-path",
  "praxis-utils-string",
  "pretty_assertions",

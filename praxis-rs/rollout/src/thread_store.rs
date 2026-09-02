@@ -919,7 +919,7 @@ fn thread_git_info(
     }
 }
 
-fn thread_id_from_rollout_path(path: &Path) -> Option<ThreadId> {
+pub(crate) fn thread_id_from_rollout_path(path: &Path) -> Option<ThreadId> {
     let file_name = path.file_name()?.to_str()?;
     let stem = file_name.strip_suffix(".jsonl")?;
     if stem.len() < 37 {

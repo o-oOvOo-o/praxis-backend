@@ -559,3 +559,23 @@ fn cwd_matches_accepts_descendant_paths_after_normalization() {
     assert!(cwd_matches(child.as_path(), root.as_path()));
     assert!(!cwd_matches(sibling.as_path(), root.as_path()));
 }
+
+#[test]
+fn writer_acknowledgement_preserves_io_failures() {
+    let (tx, mut rx) = oneshot::channel();
+    let writer_error = acknowledge(
+        tx,
+        Err(std::io::Error::new(
+            std::io::ErrorKind::WriteZero,
+            "durable write failed",
+        )),
+    )
+    .expect_err("writer must stop after a failed acknowledgement");
+    let caller_error = rx
+        .try_recv()
+        .expect("caller acknowledgement")
+        .expect_err("caller must receive the write failure");
+
+    assert_eq!(writer_error.kind(), std::io::ErrorKind::WriteZero);
+    assert_eq!(caller_error.kind(), std::io::ErrorKind::WriteZero);
+}
