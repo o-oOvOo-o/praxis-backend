@@ -136,6 +136,13 @@ impl ContextManager {
             .collect()
     }
 
+    pub(crate) fn user_turn_count(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| is_user_turn_boundary(item))
+            .count()
+    }
+
     pub(crate) fn estimate_token_count_with_base_instructions(
         &self,
         base_instructions: &BaseInstructions,

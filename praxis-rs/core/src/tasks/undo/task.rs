@@ -66,8 +66,7 @@ impl AgentTask for UndoTask {
             return None;
         }
 
-        let history = session.clone_history().await;
-        let mut items = history.raw_items().to_vec();
+        let mut items = session.clone_history_items().await;
         let Some((idx, latest_checkpoint)) = find_latest_workspace_checkpoint(&items) else {
             send_undo_completed(
                 &session,

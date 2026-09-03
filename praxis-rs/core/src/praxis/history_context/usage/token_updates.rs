@@ -33,11 +33,14 @@ impl Session {
     }
 
     pub(crate) async fn recompute_token_usage(&self, turn_context: &TurnContext) {
-        let history = self.clone_history().await;
         let base_instructions = self.get_base_instructions().await;
-        let Some(estimated_total_tokens) =
-            history.estimate_token_count_with_base_instructions(&base_instructions)
-        else {
+        let estimated_total_tokens = {
+            let state = self.state.lock().await;
+            state
+                .history
+                .estimate_token_count_with_base_instructions(&base_instructions)
+        };
+        let Some(estimated_total_tokens) = estimated_total_tokens else {
             return;
         };
         let effective_context_window = self

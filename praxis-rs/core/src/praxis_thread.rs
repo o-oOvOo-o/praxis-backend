@@ -322,8 +322,8 @@ impl PraxisThread {
     }
 
     pub async fn thread_title_preview(&self) -> Option<String> {
-        let history = self.praxis.session.clone_history().await;
-        crate::auto_title::title_preview_from_response_items(history.raw_items())
+        let messages = self.praxis.session.clone_message_history().await;
+        crate::auto_title::title_preview_from_response_items(&messages)
     }
 
     pub async fn config_snapshot(&self) -> ThreadConfigSnapshot {

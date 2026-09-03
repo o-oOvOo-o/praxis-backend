@@ -29,6 +29,11 @@ impl Session {
         state.clone_history()
     }
 
+    pub(crate) async fn clone_history_items(&self) -> Vec<ResponseItem> {
+        let state = self.state.lock().await;
+        state.history.raw_items().to_vec()
+    }
+
     pub(crate) async fn clone_message_history(&self) -> Vec<ResponseItem> {
         let state = self.state.lock().await;
         state.history.clone_message_items()

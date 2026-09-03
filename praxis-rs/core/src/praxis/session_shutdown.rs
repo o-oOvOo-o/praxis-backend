@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::context_manager::is_user_turn_boundary;
 use crate::praxis::Session;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::EventMsg;
@@ -26,12 +25,7 @@ impl Session {
     }
 
     async fn record_shutdown_turn_count_metric(&self) {
-        let history = self.clone_history().await;
-        let turn_count = history
-            .raw_items()
-            .iter()
-            .filter(|item| is_user_turn_boundary(item))
-            .count();
+        let turn_count = self.state.lock().await.history.user_turn_count();
         self.services.session_telemetry.counter(
             "praxis.conversation.turn.count",
             i64::try_from(turn_count).unwrap_or(0),
