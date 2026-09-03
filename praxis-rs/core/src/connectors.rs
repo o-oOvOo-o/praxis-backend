@@ -10,7 +10,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use anyhow::Context;
-use async_channel::unbounded;
+use async_channel::bounded;
 use praxis_connectors::AllConnectorsCacheKey;
 use praxis_connectors::DirectoryListResponse;
 use praxis_login::token_data::TokenData;
@@ -216,7 +216,7 @@ pub async fn list_accessible_connectors_from_mcp_tools_with_options_and_status(
     let auth_status_entries =
         compute_auth_statuses(mcp_servers.iter(), config.mcp_oauth_credentials_store_mode).await;
 
-    let (tx_event, rx_event) = unbounded();
+    let (tx_event, rx_event) = bounded(1);
     drop(rx_event);
 
     let sandbox_state = SandboxState {

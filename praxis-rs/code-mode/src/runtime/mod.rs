@@ -20,7 +20,11 @@ pub const DEFAULT_WAIT_YIELD_TIME_MS: u64 = 10_000;
 pub const DEFAULT_MAX_OUTPUT_TOKENS_PER_EXEC_CALL: usize = 10_000;
 const EXIT_SENTINEL: &str = "__praxis_code_mode_exit__";
 
-pub type StoredValues = Arc<HashMap<String, JsonValue>>;
+/// Copy-on-write cell storage with independently shared values.
+///
+/// A cell's first `store()` clones the map structure, but large values already
+/// present in the session remain shared instead of recursively cloning JSON.
+pub type StoredValues = Arc<HashMap<String, Arc<JsonValue>>>;
 
 #[derive(Clone, Debug)]
 pub struct ExecuteRequest {
