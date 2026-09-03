@@ -182,22 +182,12 @@ async fn reconcile_rollout(
     archived: bool,
     state_db: Option<&praxis_state::StateRuntime>,
 ) {
-    let items = match praxis_rollout::thread_store::read_items(path).await {
-        Ok((items, _, _)) => items,
-        Err(err) => {
-            warn!(
-                "failed to load Codex bridge rollout {}: {err}",
-                path.display()
-            );
-            Vec::new()
-        }
-    };
     praxis_rollout::state_db::reconcile_rollout(
         state_db,
         path,
         SOURCE.import_model_provider_id(),
         None,
-        &items,
+        &[],
         Some(archived),
         Some("disabled"),
     )
