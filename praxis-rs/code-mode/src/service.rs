@@ -10,6 +10,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 use tokio::sync::Mutex;
+use tokio::sync::Semaphore;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
@@ -41,7 +42,7 @@ pub trait CodeModeTurnHost: Send + Sync {
 #[derive(Clone)]
 struct SessionHandle {
     control_tx: mpsc::Sender<SessionControlCommand>,
-    runtime_tx: std::sync::mpsc::Sender<RuntimeCommand>,
+    runtime_tx: mpsc::Sender<RuntimeCommand>,
     cancellation_token: CancellationToken,
 }
 
@@ -67,6 +68,7 @@ pub struct CodeModeService {
 impl CodeModeService {
     const CONTROL_CAPACITY: usize = 4;
     const RUNTIME_EVENT_CAPACITY: usize = 256;
+    const TOOL_CALL_CONCURRENCY: usize = 32;
     const TURN_MESSAGE_CAPACITY: usize = 128;
 
     pub fn new() -> Self {
@@ -206,9 +208,10 @@ impl CodeModeService {
         let turn_message_rx = Arc::clone(&self.inner.turn_message_rx);
         let host = Arc::new(RwLock::new(host));
         let worker_host = Arc::clone(&host);
+        let tool_call_permits = Arc::new(Semaphore::new(Self::TOOL_CALL_CONCURRENCY));
 
         tokio::spawn(async move {
-            loop {
+            'worker: loop {
                 let next_message = tokio::select! {
                     _ = &mut shutdown_rx => {
                         terminate_active_sessions(&inner).await;
@@ -257,8 +260,21 @@ impl CodeModeService {
                             .read()
                             .unwrap_or_else(PoisonError::into_inner)
                             .clone();
+                        let permit = tokio::select! {
+                            _ = &mut shutdown_rx => {
+                                terminate_active_sessions(&inner).await;
+                                break 'worker;
+                            }
+                            permit = Arc::clone(&tool_call_permits).acquire_owned() => {
+                                let Ok(permit) = permit else {
+                                    break 'worker;
+                                };
+                                permit
+                            }
+                        };
                         let inner = Arc::clone(&inner);
                         tokio::spawn(async move {
+                            let _permit = permit;
                             let response = host.invoke_tool(name, input, cancellation_token).await;
                             let runtime_tx = inner
                                 .sessions
@@ -273,7 +289,7 @@ impl CodeModeService {
                                 Ok(result) => RuntimeCommand::ToolResponse { id, result },
                                 Err(error_text) => RuntimeCommand::ToolError { id, error_text },
                             };
-                            let _ = runtime_tx.send(command);
+                            let _ = runtime_tx.send(command).await;
                         });
                     }
                 }
@@ -365,7 +381,7 @@ struct PendingResult {
 
 struct SessionControlContext {
     cell_id: String,
-    runtime_tx: std::sync::mpsc::Sender<RuntimeCommand>,
+    runtime_tx: mpsc::Sender<RuntimeCommand>,
     runtime_terminate_handle: v8::IsolateHandle,
     cancellation_token: CancellationToken,
 }
@@ -548,7 +564,7 @@ async fn run_session_control(
                         termination_requested = true;
                         yield_timer = None;
                         cancellation_token.cancel();
-                        let _ = runtime_tx.send(RuntimeCommand::Terminate);
+                        let _ = runtime_tx.try_send(RuntimeCommand::Terminate);
                         let _ = runtime_terminate_handle.terminate_execution();
                         if runtime_closed {
                             if let Some(response_tx) = response_tx.take() {
@@ -583,7 +599,7 @@ async fn run_session_control(
     }
 
     cancellation_token.cancel();
-    let _ = runtime_tx.send(RuntimeCommand::Terminate);
+    let _ = runtime_tx.try_send(RuntimeCommand::Terminate);
     inner.sessions.lock().await.remove(&cell_id);
 }
 
@@ -801,6 +817,6 @@ text(JSON.stringify(returnsUndefined));
             }
         );
 
-        let _ = runtime_tx.send(RuntimeCommand::Terminate);
+        let _ = runtime_tx.try_send(RuntimeCommand::Terminate);
     }
 }

@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
-use std::sync::mpsc as std_mpsc;
 use std::thread;
 
 use serde_json::Value as JsonValue;
@@ -104,9 +103,9 @@ pub(crate) fn spawn_runtime(
     request: ExecuteRequest,
     module_sources: Arc<BTreeMap<String, Arc<str>>>,
     event_tx: mpsc::Sender<RuntimeEvent>,
-) -> Result<(std_mpsc::Sender<RuntimeCommand>, v8::IsolateHandle), String> {
-    let (command_tx, command_rx) = std_mpsc::channel();
-    let (isolate_handle_tx, isolate_handle_rx) = std_mpsc::sync_channel(1);
+) -> Result<(mpsc::Sender<RuntimeCommand>, v8::IsolateHandle), String> {
+    let (command_tx, command_rx) = mpsc::channel(256);
+    let (isolate_handle_tx, isolate_handle_rx) = std::sync::mpsc::sync_channel(1);
     let config = RuntimeConfig {
         tool_call_id: request.tool_call_id,
         enabled_tools: request.enabled_tools,
@@ -168,8 +167,8 @@ fn initialize_v8() {
 fn run_runtime(
     config: RuntimeConfig,
     event_tx: mpsc::Sender<RuntimeEvent>,
-    command_rx: std_mpsc::Receiver<RuntimeCommand>,
-    isolate_handle_tx: std_mpsc::SyncSender<v8::IsolateHandle>,
+    mut command_rx: mpsc::Receiver<RuntimeCommand>,
+    isolate_handle_tx: std::sync::mpsc::SyncSender<v8::IsolateHandle>,
 ) {
     initialize_v8();
 
@@ -224,7 +223,7 @@ fn run_runtime(
 
     let mut pending_promise = pending_promise;
     loop {
-        let Ok(command) = command_rx.recv() else {
+        let Some(command) = command_rx.blocking_recv() else {
             break;
         };
         match command {
