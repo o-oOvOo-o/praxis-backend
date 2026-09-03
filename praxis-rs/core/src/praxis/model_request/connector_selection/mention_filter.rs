@@ -4,13 +4,14 @@ use std::collections::HashSet;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
 
-use crate::compact::collect_user_messages;
+use crate::compact::is_summary_message;
 use crate::connectors;
 use crate::injection::ToolMentionKind;
 use crate::injection::app_id_from_path;
 use crate::injection::tool_kind_for_path;
 use crate::mentions::build_connector_slug_counts;
 use crate::mentions::collect_tool_mentions_from_messages;
+use praxis_protocol::items::TurnItem;
 
 pub(crate) fn collect_explicit_app_ids_from_skill_items(
     skill_items: &[ResponseItem],
@@ -21,23 +22,16 @@ pub(crate) fn collect_explicit_app_ids_from_skill_items(
         return HashSet::new();
     }
 
-    let skill_messages = skill_items
-        .iter()
-        .filter_map(|item| match item {
+    let mentions =
+        collect_tool_mentions_from_messages(skill_items.iter().filter_map(|item| match item {
             ResponseItem::Message { content, .. } => {
                 content.iter().find_map(|content_item| match content_item {
-                    ContentItem::InputText { text } => Some(text.clone()),
+                    ContentItem::InputText { text } => Some(text.as_str()),
                     _ => None,
                 })
             }
             _ => None,
-        })
-        .collect::<Vec<String>>();
-    if skill_messages.is_empty() {
-        return HashSet::new();
-    }
-
-    let mentions = collect_tool_mentions_from_messages(&skill_messages);
+        }));
     let mention_names_lower = mentions
         .plain_names
         .iter()
@@ -78,12 +72,19 @@ pub(crate) fn filter_connectors_for_input(
         return Vec::new();
     }
 
-    let user_messages = collect_user_messages(input);
-    if user_messages.is_empty() && explicitly_enabled_connectors.is_empty() {
+    let mentions = collect_tool_mentions_from_messages(input.iter().filter_map(|item| {
+        let Some(TurnItem::UserMessage(user)) = crate::event_mapping::parse_turn_item(item) else {
+            return None;
+        };
+        let message = user.message();
+        (!is_summary_message(&message)).then_some(message)
+    }));
+    if mentions.plain_names.is_empty()
+        && mentions.paths.is_empty()
+        && explicitly_enabled_connectors.is_empty()
+    {
         return Vec::new();
     }
-
-    let mentions = collect_tool_mentions_from_messages(&user_messages);
     let mention_names_lower = mentions
         .plain_names
         .iter()

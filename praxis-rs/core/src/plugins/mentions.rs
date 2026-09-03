@@ -19,18 +19,26 @@ pub(crate) struct CollectedToolMentions {
     pub(crate) paths: HashSet<String>,
 }
 
-pub(crate) fn collect_tool_mentions_from_messages(messages: &[String]) -> CollectedToolMentions {
+pub(crate) fn collect_tool_mentions_from_messages<I, S>(messages: I) -> CollectedToolMentions
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     collect_tool_mentions_from_messages_with_sigil(messages, TOOL_MENTION_SIGIL)
 }
 
-fn collect_tool_mentions_from_messages_with_sigil(
-    messages: &[String],
+fn collect_tool_mentions_from_messages_with_sigil<I, S>(
+    messages: I,
     sigil: char,
-) -> CollectedToolMentions {
+) -> CollectedToolMentions
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     let mut plain_names = HashSet::new();
     let mut paths = HashSet::new();
     for message in messages {
-        let mentions = extract_tool_mentions_with_sigil(message, sigil);
+        let mentions = extract_tool_mentions_with_sigil(message.as_ref(), sigil);
         plain_names.extend(mentions.plain_names().map(str::to_string));
         paths.extend(mentions.paths().map(str::to_string));
     }
@@ -38,13 +46,11 @@ fn collect_tool_mentions_from_messages_with_sigil(
 }
 
 pub(crate) fn collect_explicit_app_ids(input: &[UserInput]) -> HashSet<String> {
-    let messages = input
-        .iter()
-        .filter_map(|item| match item {
-            UserInput::Text { text, .. } => Some(text.clone()),
+    let text_mentions =
+        collect_tool_mentions_from_messages(input.iter().filter_map(|item| match item {
+            UserInput::Text { text, .. } => Some(text.as_str()),
             _ => None,
-        })
-        .collect::<Vec<String>>();
+        }));
 
     input
         .iter()
@@ -52,7 +58,7 @@ pub(crate) fn collect_explicit_app_ids(input: &[UserInput]) -> HashSet<String> {
             UserInput::Mention { path, .. } => Some(path.clone()),
             _ => None,
         })
-        .chain(collect_tool_mentions_from_messages(&messages).paths)
+        .chain(text_mentions.paths)
         .filter(|path| tool_kind_for_path(path.as_str()) == ToolMentionKind::App)
         .filter_map(|path| app_id_from_path(path.as_str()).map(str::to_string))
         .collect()
@@ -67,13 +73,13 @@ pub(crate) fn collect_explicit_plugin_mentions(
         return Vec::new();
     }
 
-    let messages = input
-        .iter()
-        .filter_map(|item| match item {
-            UserInput::Text { text, .. } => Some(text.clone()),
+    let text_mentions = collect_tool_mentions_from_messages_with_sigil(
+        input.iter().filter_map(|item| match item {
+            UserInput::Text { text, .. } => Some(text.as_str()),
             _ => None,
-        })
-        .collect::<Vec<String>>();
+        }),
+        PLUGIN_TEXT_MENTION_SIGIL,
+    );
 
     let mentioned_config_names: HashSet<String> = input
         .iter()
@@ -81,11 +87,8 @@ pub(crate) fn collect_explicit_plugin_mentions(
             UserInput::Mention { path, .. } => Some(path.clone()),
             _ => None,
         })
-        .chain(
-            // Plugin plaintext links use `@`, not the default `$` tool sigil.
-            collect_tool_mentions_from_messages_with_sigil(&messages, PLUGIN_TEXT_MENTION_SIGIL)
-                .paths,
-        )
+        // Plugin plaintext links use `@`, not the default `$` tool sigil.
+        .chain(text_mentions.paths)
         .filter(|path| tool_kind_for_path(path.as_str()) == ToolMentionKind::Plugin)
         .filter_map(|path| plugin_config_name_from_path(path.as_str()).map(str::to_string))
         .collect();

@@ -438,6 +438,7 @@ pub fn content_items_to_text(content: &[ContentItem]) -> Option<String> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn collect_user_messages(items: &[ResponseItem]) -> Vec<String> {
     items
         .iter()
