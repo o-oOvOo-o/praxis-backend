@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::PoisonError;
+use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -38,6 +40,7 @@ pub trait CodeModeTurnHost: Send + Sync {
 struct SessionHandle {
     control_tx: mpsc::Sender<SessionControlCommand>,
     runtime_tx: std::sync::mpsc::Sender<RuntimeCommand>,
+    cancellation_token: CancellationToken,
 }
 
 struct Inner {
@@ -89,12 +92,14 @@ impl CodeModeService {
         let (runtime_tx, runtime_terminate_handle) = spawn_runtime(request.clone(), event_tx)?;
         let (control_tx, control_rx) = mpsc::channel(Self::CONTROL_CAPACITY);
         let (response_tx, response_rx) = oneshot::channel();
+        let cancellation_token = CancellationToken::new();
 
         self.inner.sessions.lock().await.insert(
             cell_id.clone(),
             SessionHandle {
                 control_tx: control_tx.clone(),
                 runtime_tx: runtime_tx.clone(),
+                cancellation_token: cancellation_token.clone(),
             },
         );
 
@@ -104,6 +109,7 @@ impl CodeModeService {
                 cell_id: cell_id.clone(),
                 runtime_tx,
                 runtime_terminate_handle,
+                cancellation_token,
             },
             event_rx,
             control_rx,
@@ -130,6 +136,7 @@ impl CodeModeService {
         };
         let (response_tx, response_rx) = oneshot::channel();
         let control_message = if request.terminate {
+            handle.cancellation_token.cancel();
             SessionControlCommand::Terminate { response_tx }
         } else {
             SessionControlCommand::Poll {
@@ -150,11 +157,16 @@ impl CodeModeService {
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
         let inner = Arc::clone(&self.inner);
         let turn_message_rx = Arc::clone(&self.inner.turn_message_rx);
+        let host = Arc::new(RwLock::new(host));
+        let worker_host = Arc::clone(&host);
 
         tokio::spawn(async move {
             loop {
                 let next_message = tokio::select! {
-                    _ = &mut shutdown_rx => break,
+                    _ = &mut shutdown_rx => {
+                        terminate_active_sessions(&inner).await;
+                        break;
+                    },
                     message = async {
                         let mut turn_message_rx = turn_message_rx.lock().await;
                         turn_message_rx.recv().await
@@ -169,6 +181,10 @@ impl CodeModeService {
                         call_id,
                         text,
                     } => {
+                        let host = worker_host
+                            .read()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .clone();
                         if let Err(err) = host.notify(call_id, cell_id.clone(), text).await {
                             warn!(
                                 "failed to deliver code mode notification for cell {cell_id}: {err}"
@@ -181,12 +197,22 @@ impl CodeModeService {
                         name,
                         input,
                     } => {
-                        let host = Arc::clone(&host);
+                        let cancellation_token = inner
+                            .sessions
+                            .lock()
+                            .await
+                            .get(&cell_id)
+                            .map(|handle| handle.cancellation_token.child_token());
+                        let Some(cancellation_token) = cancellation_token else {
+                            continue;
+                        };
+                        let host = worker_host
+                            .read()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .clone();
                         let inner = Arc::clone(&inner);
                         tokio::spawn(async move {
-                            let response = host
-                                .invoke_tool(name, input, CancellationToken::new())
-                                .await;
+                            let response = host.invoke_tool(name, input, cancellation_token).await;
                             let runtime_tx = inner
                                 .sessions
                                 .lock()
@@ -209,7 +235,26 @@ impl CodeModeService {
 
         CodeModeTurnWorker {
             shutdown_tx: Some(shutdown_tx),
+            host,
         }
+    }
+}
+
+async fn terminate_active_sessions(inner: &Inner) {
+    let handles = inner
+        .sessions
+        .lock()
+        .await
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    for handle in handles {
+        handle.cancellation_token.cancel();
+        let (response_tx, _response_rx) = oneshot::channel();
+        let _ = handle
+            .control_tx
+            .send(SessionControlCommand::Terminate { response_tx })
+            .await;
     }
 }
 
@@ -221,6 +266,13 @@ impl Default for CodeModeService {
 
 pub struct CodeModeTurnWorker {
     shutdown_tx: Option<oneshot::Sender<()>>,
+    host: Arc<RwLock<Arc<dyn CodeModeTurnHost>>>,
+}
+
+impl CodeModeTurnWorker {
+    pub fn replace_host(&self, host: Arc<dyn CodeModeTurnHost>) {
+        *self.host.write().unwrap_or_else(PoisonError::into_inner) = host;
+    }
 }
 
 impl Drop for CodeModeTurnWorker {
@@ -251,6 +303,7 @@ struct SessionControlContext {
     cell_id: String,
     runtime_tx: std::sync::mpsc::Sender<RuntimeCommand>,
     runtime_terminate_handle: v8::IsolateHandle,
+    cancellation_token: CancellationToken,
 }
 
 fn missing_cell_response(cell_id: String) -> RuntimeResponse {
@@ -298,6 +351,7 @@ async fn run_session_control(
         cell_id,
         runtime_tx,
         runtime_terminate_handle,
+        cancellation_token,
     } = context;
     let mut content_items = Vec::new();
     let mut pending_result: Option<PendingResult> = None;
@@ -429,6 +483,7 @@ async fn run_session_control(
                         response_tx = Some(next_response_tx);
                         termination_requested = true;
                         yield_timer = None;
+                        cancellation_token.cancel();
                         let _ = runtime_tx.send(RuntimeCommand::Terminate);
                         let _ = runtime_terminate_handle.terminate_execution();
                         if runtime_closed {
@@ -463,6 +518,7 @@ async fn run_session_control(
         }
     }
 
+    cancellation_token.cancel();
     let _ = runtime_tx.send(RuntimeCommand::Terminate);
     inner.sessions.lock().await.remove(&cell_id);
 }
@@ -633,6 +689,7 @@ text(JSON.stringify(returnsUndefined));
                 cell_id: "cell-1".to_string(),
                 runtime_tx: runtime_tx.clone(),
                 runtime_terminate_handle,
+                cancellation_token: CancellationToken::new(),
             },
             event_rx,
             control_rx,

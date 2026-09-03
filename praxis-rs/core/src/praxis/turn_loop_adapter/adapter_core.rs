@@ -424,6 +424,7 @@ pub(in crate::praxis::turn_loop_adapter) mod model_round_state {
     use std::sync::Arc;
 
     use crate::client::ModelClientSession;
+    use crate::tools::code_mode::CodeModeTurnWorker;
     use crate::tools::context::SharedTurnDiffTracker;
     use crate::turn_diff_tracker::TurnDiffTracker;
 
@@ -434,6 +435,7 @@ pub(in crate::praxis::turn_loop_adapter) mod model_round_state {
         turn_diff_tracker: SharedTurnDiffTracker,
         client_session: ModelClientSession,
         server_model_warning_emitted_for_turn: bool,
+        code_mode_worker: Option<CodeModeTurnWorker>,
     }
 
     impl PraxisModelRoundState {
@@ -461,6 +463,7 @@ pub(in crate::praxis::turn_loop_adapter) mod model_round_state {
                 turn_diff_tracker: Arc::new(tokio::sync::Mutex::new(TurnDiffTracker::new())),
                 client_session,
                 server_model_warning_emitted_for_turn: false,
+                code_mode_worker: None,
             }
         }
 
@@ -480,6 +483,19 @@ pub(in crate::praxis::turn_loop_adapter) mod model_round_state {
             &mut self,
         ) -> &mut bool {
             &mut self.server_model_warning_emitted_for_turn
+        }
+
+        pub(in crate::praxis::turn_loop_adapter) fn code_mode_worker(
+            &self,
+        ) -> Option<&CodeModeTurnWorker> {
+            self.code_mode_worker.as_ref()
+        }
+
+        pub(in crate::praxis::turn_loop_adapter) fn set_code_mode_worker(
+            &mut self,
+            worker: Option<CodeModeTurnWorker>,
+        ) {
+            self.code_mode_worker = worker;
         }
     }
 }

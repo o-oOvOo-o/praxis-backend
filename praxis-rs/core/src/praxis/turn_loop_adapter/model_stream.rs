@@ -39,7 +39,6 @@ use provider_transport::stream_run_state;
 use request_runtime::request_context;
 use request_runtime::request_context_update;
 use request_runtime::request_settings;
-use round_runtime::code_mode_worker;
 use round_runtime::model_round;
 use round_runtime::tool_error_response;
 use stream_items::non_tool_item;
@@ -69,6 +68,5 @@ pub(super) async fn stream_model(
         round.prompt,
         round.turn_metadata_header,
         cancellation_token,
-        round.code_mode_worker,
     ))
 }

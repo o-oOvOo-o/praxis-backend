@@ -110,6 +110,28 @@ impl CodeModeService {
         let host = Arc::new(CoreTurnHost { exec, tool_runtime });
         Some(self.inner.start_turn_worker(host))
     }
+
+    pub(crate) fn refresh_turn_worker(
+        &self,
+        worker: &praxis_code_mode::CodeModeTurnWorker,
+        session: &Arc<Session>,
+        turn: &Arc<TurnContext>,
+        router: ToolCapability,
+        tracker: SharedTurnDiffTracker,
+    ) {
+        let exec = ExecContext {
+            session: Arc::clone(session),
+            turn: Arc::clone(turn),
+        };
+        let tool_runtime = ToolCallRuntime::new(
+            router.clone(),
+            router,
+            Arc::clone(session),
+            Arc::clone(turn),
+            tracker,
+        );
+        worker.replace_host(Arc::new(CoreTurnHost { exec, tool_runtime }));
+    }
 }
 
 struct CoreTurnHost {

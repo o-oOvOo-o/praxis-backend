@@ -18,8 +18,6 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod provider_stream {
     use super::provider_projection;
     use super::provider_projection::ProviderStreamStep;
     use super::stream_run_state::ProviderStreamRunState;
-    use crate::tools::code_mode::CodeModeTurnWorker;
-
     mod driver {
 
         use std::sync::Arc;
@@ -510,14 +508,12 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod provider_stream {
         prompt: Prompt,
         turn_metadata_header: Option<String>,
         cancellation_token: CancellationToken,
-        code_mode_worker: Option<CodeModeTurnWorker>,
     ) -> ModelEventStream {
         let stream = try_stream! {
             let input = input;
             let prompt = prompt;
             let turn_metadata_header = turn_metadata_header;
             let cancellation_token = cancellation_token;
-            let _code_mode_worker = code_mode_worker;
             let mut run_state = ProviderStreamRunState::default();
 
             loop {

@@ -9,11 +9,9 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
     use praxis_loop::services::ModelRequest;
     use tokio_util::sync::CancellationToken;
 
-    use crate::client_common::Prompt;
-    use crate::tools::code_mode::CodeModeTurnWorker;
-
     use super::PraxisModelStreamInput;
     use super::request_context;
+    use crate::client_common::Prompt;
 
     mod input_projection {
 
@@ -143,18 +141,14 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
         use praxis_protocol::models::ResponseItem;
         use tokio_util::sync::CancellationToken;
 
-        use crate::client_common::Prompt;
-        use crate::tools::code_mode::CodeModeTurnWorker;
-
         use super::super::PraxisModelStreamInput;
         use super::super::code_mode_worker;
         use super::prompt;
         use super::tools;
+        use crate::client_common::Prompt;
 
         pub(in crate::praxis::turn_loop_adapter::model_stream) struct PreparedTooling {
             pub(in crate::praxis::turn_loop_adapter::model_stream) prompt: Prompt,
-            pub(in crate::praxis::turn_loop_adapter::model_stream) code_mode_worker:
-                Option<CodeModeTurnWorker>,
         }
 
         pub(in crate::praxis::turn_loop_adapter::model_stream) async fn prepare_tooling(
@@ -185,18 +179,19 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
 
             input.tool_runtime_slot.store(tools.runtime())?;
 
-            let code_mode_worker = code_mode_worker::start_turn_worker(
-                &input.session,
-                &input.turn_context,
-                tools.code_mode_router(),
-                Arc::clone(&turn_diff_tracker),
-            )
-            .await;
+            {
+                let mut runtime_state = input.runtime_state.lock().await;
+                code_mode_worker::ensure_turn_worker(
+                    &mut runtime_state,
+                    &input.session,
+                    &input.turn_context,
+                    tools.code_mode_router(),
+                    Arc::clone(&turn_diff_tracker),
+                )
+                .await;
+            }
 
-            Ok(PreparedTooling {
-                prompt,
-                code_mode_worker,
-            })
+            Ok(PreparedTooling { prompt })
         }
     }
     mod tools {
@@ -240,8 +235,6 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
         pub(in crate::praxis::turn_loop_adapter::model_stream) input: PraxisModelStreamInput,
         pub(in crate::praxis::turn_loop_adapter::model_stream) prompt: Prompt,
         pub(in crate::praxis::turn_loop_adapter::model_stream) turn_metadata_header: Option<String>,
-        pub(in crate::praxis::turn_loop_adapter::model_stream) code_mode_worker:
-            Option<CodeModeTurnWorker>,
     }
 
     pub(in crate::praxis::turn_loop_adapter::model_stream) async fn prepare_model_round(
@@ -272,7 +265,6 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
             input,
             prompt: tooling.prompt,
             turn_metadata_header: round_input.turn_metadata_header,
-            code_mode_worker: tooling.code_mode_worker,
         })
     }
 }
@@ -280,23 +272,28 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
 pub(in crate::praxis::turn_loop_adapter::model_stream) mod code_mode_worker {
     use std::sync::Arc;
 
+    use super::super::PraxisModelRoundState;
     use crate::capabilities::ToolCapability;
     use crate::praxis::Session;
     use crate::praxis::TurnContext;
-    use crate::tools::code_mode::CodeModeTurnWorker;
     use crate::tools::context::SharedTurnDiffTracker;
 
-    pub(in crate::praxis::turn_loop_adapter::model_stream) async fn start_turn_worker(
+    pub(in crate::praxis::turn_loop_adapter::model_stream) async fn ensure_turn_worker(
+        runtime_state: &mut PraxisModelRoundState,
         session: &Arc<Session>,
         turn_context: &Arc<TurnContext>,
         router: ToolCapability,
         turn_diff_tracker: SharedTurnDiffTracker,
-    ) -> Option<CodeModeTurnWorker> {
-        session
-            .services
-            .code_mode_service
+    ) {
+        let service = &session.services.code_mode_service;
+        if let Some(worker) = runtime_state.code_mode_worker() {
+            service.refresh_turn_worker(worker, session, turn_context, router, turn_diff_tracker);
+            return;
+        }
+        let worker = service
             .start_turn_worker(session, turn_context, router, turn_diff_tracker)
-            .await
+            .await;
+        runtime_state.set_code_mode_worker(worker);
     }
 }
 

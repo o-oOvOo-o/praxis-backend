@@ -55,6 +55,16 @@ mod disabled {
         ) -> Option<CodeModeTurnWorker> {
             None
         }
+
+        pub(crate) fn refresh_turn_worker(
+            &self,
+            _worker: &CodeModeTurnWorker,
+            _session: &Arc<Session>,
+            _turn: &Arc<TurnContext>,
+            _router: ToolCapability,
+            _tracker: SharedTurnDiffTracker,
+        ) {
+        }
     }
 
     pub(crate) struct CodeModeExecuteHandler;
