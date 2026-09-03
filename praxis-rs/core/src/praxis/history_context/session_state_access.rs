@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use praxis_features::Feature;
 use praxis_protocol::config_types::CollaborationMode;
+use praxis_protocol::models::ResponseItem;
 use praxis_protocol::protocol::TurnContextItem;
 
 use crate::config::ManagedFeatures;
@@ -26,6 +27,11 @@ impl Session {
     pub(crate) async fn clone_history(&self) -> ContextManager {
         let state = self.state.lock().await;
         state.clone_history()
+    }
+
+    pub(crate) async fn clone_message_history(&self) -> Vec<ResponseItem> {
+        let state = self.state.lock().await;
+        state.history.clone_message_items()
     }
 
     pub(crate) async fn reference_context_item(&self) -> Option<TurnContextItem> {

@@ -21,13 +21,17 @@ pub(crate) struct HistoryPreview {
 impl HistoryPreview {
     pub(crate) async fn for_session(sess: &Session) -> Self {
         Self {
-            items: sess.clone_history().await.into_raw_items(),
+            items: sess.clone_message_history().await,
         }
     }
 
     pub(crate) fn from_items(items: &[ResponseItem]) -> Self {
         Self {
-            items: items.to_vec(),
+            items: items
+                .iter()
+                .filter(|item| matches!(item, ResponseItem::Message { .. }))
+                .cloned()
+                .collect(),
         }
     }
 

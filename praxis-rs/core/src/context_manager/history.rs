@@ -127,8 +127,13 @@ impl ContextManager {
         &self.items
     }
 
-    pub(crate) fn into_raw_items(self) -> Vec<ResponseItem> {
+    /// Clones only message items for lightweight title, summary, and continuity previews.
+    pub(crate) fn clone_message_items(&self) -> Vec<ResponseItem> {
         self.items
+            .iter()
+            .filter(|item| matches!(item, ResponseItem::Message { .. }))
+            .cloned()
+            .collect()
     }
 
     pub(crate) fn estimate_token_count_with_base_instructions(
