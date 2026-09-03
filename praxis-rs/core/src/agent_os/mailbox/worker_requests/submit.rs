@@ -51,6 +51,7 @@ impl AgentOs {
                 created_at: now,
                 updated_at: now,
             };
+            state.pending_worker_request_ids.insert(request_id.clone());
             state.worker_requests.insert(request_id, record.clone());
             (record, thread_snapshot)
         };

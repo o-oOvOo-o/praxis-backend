@@ -17,12 +17,12 @@ impl AgentOs {
             return Some(process.command_id.clone());
         }
         state
-            .commands
-            .values()
+            .live_command_ids
+            .iter()
+            .filter_map(|command_id| state.commands.get(command_id))
             .find(|command| {
                 command.process_id == Some(process_id)
                     && command.runtime_owner_id.as_deref() == runtime_owner_id
-                    && command.ended_at.is_none()
             })
             .map(|command| command.command_id.clone())
     }

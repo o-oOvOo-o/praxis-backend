@@ -6,9 +6,9 @@ impl AgentOs {
         let expired = {
             let mut state = self.state.write().await;
             let active_ticket_ids = state
-                .commands
-                .values()
-                .filter(|command| command.ended_at.is_none())
+                .live_command_ids
+                .iter()
+                .filter_map(|command_id| state.commands.get(command_id))
                 .map(|command| command.ticket_id.clone())
                 .collect::<HashSet<_>>();
             let ids = state

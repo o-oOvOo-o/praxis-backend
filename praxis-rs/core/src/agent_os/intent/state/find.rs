@@ -5,7 +5,6 @@ use praxis_protocol::ThreadId;
 
 use crate::agent_os::records::ActionIntentKind;
 use crate::agent_os::records::CommandIntentPlan;
-use crate::agent_os::records::CommandIntentPlanStatus;
 use crate::agent_os::state::AgentOsState;
 use crate::path_scope::normalize_path_for_scope;
 
@@ -20,9 +19,9 @@ impl AgentOsState {
     ) -> Option<&CommandIntentPlan> {
         let cwd = normalize_path_for_scope(cwd);
         let now = Utc::now();
-        self.intent_plans
-            .values()
-            .filter(|plan| plan.status == CommandIntentPlanStatus::Pending)
+        self.pending_intent_plan_ids
+            .iter()
+            .filter_map(|plan_id| self.intent_plans.get(plan_id))
             .filter(|plan| plan.expires_at > now)
             .filter(|plan| plan.thread_id == thread_id)
             .filter(|plan| plan.task_id == task_id)

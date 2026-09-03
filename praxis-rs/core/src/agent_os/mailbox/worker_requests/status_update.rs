@@ -59,6 +59,13 @@ impl AgentOs {
             request.status = status;
             request.updated_at = now;
             let record = request.clone();
+            if status == WorkerRequestStatus::Pending {
+                state
+                    .pending_worker_request_ids
+                    .insert(request_id.to_string());
+            } else {
+                state.pending_worker_request_ids.remove(request_id);
+            }
             let thread_snapshot = if record.blocking && status != WorkerRequestStatus::Pending {
                 state.threads.get_mut(&record.thread_id).map(|thread| {
                     if matches!(

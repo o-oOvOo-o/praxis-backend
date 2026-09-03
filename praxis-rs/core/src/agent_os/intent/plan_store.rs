@@ -7,24 +7,33 @@ impl AgentOs {
         let superseded_plans = {
             let mut state = self.state.write().await;
             let normalized_cwd = normalize_path_for_scope(plan.cwd.as_path());
-            let superseded_plans = state
-                .intent_plans
-                .values_mut()
-                .filter(|existing| existing.status == CommandIntentPlanStatus::Pending)
-                .filter(|existing| existing.thread_id == plan.thread_id)
-                .filter(|existing| existing.task_id == plan.task_id.as_str())
-                .filter(|existing| existing.intent == plan.intent)
-                .filter(|existing| {
-                    existing.command_fingerprint == plan.command_fingerprint.as_str()
-                })
-                .filter(|existing| {
-                    normalize_path_for_scope(existing.cwd.as_path()) == normalized_cwd
-                })
-                .map(|existing| {
-                    existing.status = CommandIntentPlanStatus::Rejected;
-                    existing.clone()
-                })
+            let pending_ids = state
+                .pending_intent_plan_ids
+                .iter()
+                .cloned()
                 .collect::<Vec<_>>();
+            let mut superseded_plans = Vec::new();
+            for plan_id in pending_ids {
+                let Some(existing) = state.intent_plans.get_mut(&plan_id) else {
+                    state.pending_intent_plan_ids.remove(&plan_id);
+                    continue;
+                };
+                if existing.thread_id == plan.thread_id
+                    && existing.task_id == plan.task_id
+                    && existing.intent == plan.intent
+                    && existing.command_fingerprint == plan.command_fingerprint
+                    && normalize_path_for_scope(existing.cwd.as_path()) == normalized_cwd
+                {
+                    existing.status = CommandIntentPlanStatus::Rejected;
+                    superseded_plans.push(existing.clone());
+                }
+            }
+            for superseded in &superseded_plans {
+                state.pending_intent_plan_ids.remove(&superseded.plan_id);
+            }
+            if plan.status == CommandIntentPlanStatus::Pending {
+                state.pending_intent_plan_ids.insert(plan.plan_id.clone());
+            }
             state
                 .intent_plans
                 .insert(plan.plan_id.clone(), plan.clone());
@@ -51,16 +60,24 @@ impl AgentOs {
         let now = Utc::now();
         let expired = {
             let mut state = self.state.write().await;
-            state
-                .intent_plans
-                .values_mut()
-                .filter(|plan| plan.status == CommandIntentPlanStatus::Pending)
-                .filter(|plan| plan.expires_at <= now)
-                .map(|plan| {
+            let pending_ids = state
+                .pending_intent_plan_ids
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut expired = Vec::new();
+            for plan_id in pending_ids {
+                let Some(plan) = state.intent_plans.get_mut(&plan_id) else {
+                    state.pending_intent_plan_ids.remove(&plan_id);
+                    continue;
+                };
+                if plan.expires_at <= now {
                     plan.status = CommandIntentPlanStatus::Expired;
-                    plan.clone()
-                })
-                .collect::<Vec<_>>()
+                    expired.push(plan.clone());
+                    state.pending_intent_plan_ids.remove(&plan_id);
+                }
+            }
+            expired
         };
         for plan in expired {
             self.persist_intent_plan_snapshot(&plan).await;

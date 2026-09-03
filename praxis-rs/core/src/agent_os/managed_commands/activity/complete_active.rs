@@ -24,11 +24,15 @@ impl AgentOs {
                 return Ok(None);
             }
             let blocked = command.task_id.as_ref().is_some_and(|task_id| {
-                state.worker_requests.values().any(|request| {
-                    request.thread_id == thread_id
-                        && request.task_id.as_deref() == Some(task_id.as_str())
-                        && request.blocking
-                        && matches!(request.status, WorkerRequestStatus::Pending)
+                state.pending_worker_request_ids.iter().any(|request_id| {
+                    state
+                        .worker_requests
+                        .get(request_id)
+                        .is_some_and(|request| {
+                            request.thread_id == thread_id
+                                && request.task_id.as_deref() == Some(task_id.as_str())
+                                && request.blocking
+                        })
                 })
             });
             let task_already_failed = command.task_id.as_ref().is_some_and(|task_id| {

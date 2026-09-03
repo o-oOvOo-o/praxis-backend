@@ -4,7 +4,6 @@ use super::summaries::AgentOsIntentPlanSummary;
 use super::summaries::AgentOsLeaseSummary;
 use super::summaries::AgentOsWorkerRequestSummary;
 use super::summaries::RuntimeCommandSummary;
-use crate::agent_os::WorkerRequestStatus;
 use crate::agent_os::state::AgentOsState;
 use serde::Serialize;
 
@@ -31,9 +30,9 @@ impl AgentOsSnapshot {
         );
         let pending_worker_requests = newest_by_created_at(
             state
-                .worker_requests
-                .values()
-                .filter(|request| request.status == WorkerRequestStatus::Pending),
+                .pending_worker_request_ids
+                .iter()
+                .filter_map(|request_id| state.worker_requests.get(request_id)),
             options.pending_worker_request_limit,
             |request| request.created_at,
         );

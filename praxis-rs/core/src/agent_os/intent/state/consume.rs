@@ -43,6 +43,7 @@ impl AgentOsState {
                 )));
             }
         };
+        self.pending_intent_plan_ids.remove(intent_plan_id);
         self.tickets
             .insert(ticket.ticket_id.clone(), ticket.clone());
         Ok(plan_snapshot)
