@@ -10,16 +10,12 @@ use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::InitialHistory;
 use praxis_protocol::protocol::ResumedHistory;
 use praxis_protocol::protocol::RolloutItem;
-use praxis_protocol::protocol::RolloutLine;
 use praxis_protocol::protocol::SessionSource;
 use praxis_protocol::protocol::SubAgentSource;
 use praxis_protocol::protocol::TokenUsageInfo;
 use praxis_state::ThreadSourceKind;
 use serde_json::Value;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::BufReader;
 use tracing::info;
-use tracing::trace;
 use tracing::warn;
 
 use crate::INTERACTIVE_SESSION_SOURCES;
@@ -39,11 +35,13 @@ mod migration;
 mod names;
 pub(crate) mod native_codec;
 pub(crate) mod resume_selection;
+mod rollout_stream;
 
 pub use history::ThreadHistoryReader;
 pub use names::ThreadNameResolver;
 pub use names::ThreadNameWriter;
 use resume_selection::select_resume_path;
+pub(crate) use rollout_stream::RolloutItemStream;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadGitInfo {
@@ -450,43 +448,13 @@ pub async fn scan_items(
     path: &Path,
     mut on_item: impl FnMut(RolloutItem),
 ) -> io::Result<(Option<ThreadId>, usize)> {
-    trace!("Reading persisted thread from {path:?}");
-    let file = tokio::fs::File::open(path).await?;
-    let mut lines = BufReader::new(file).lines();
-    let mut thread_id = None;
-    let mut parse_errors = 0usize;
-    let mut item_count = 0usize;
-    let mut saw_non_empty_line = false;
-
-    while let Some(line) = lines.next_line().await? {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        saw_non_empty_line = true;
-        match serde_json::from_str::<RolloutLine>(line) {
-            Ok(rollout_line) => {
-                let item = rollout_line.item;
-                if thread_id.is_none()
-                    && let RolloutItem::SessionMeta(session_meta) = &item
-                {
-                    thread_id = Some(session_meta.meta.id);
-                }
-                item_count = item_count.saturating_add(1);
-                on_item(item);
-            }
-            Err(error) => {
-                warn!("failed to parse persisted thread line: {line:?}, error: {error}");
-                parse_errors = parse_errors.saturating_add(1);
-            }
-        }
+    let mut stream = RolloutItemStream::open(path).await?;
+    while let Some(item) = stream.next_item().await? {
+        on_item(item);
     }
-
-    if !saw_non_empty_line {
-        return Err(IoError::other("empty session file"));
-    }
+    let (thread_id, parse_errors) = stream.outcome();
     tracing::debug!(
-        item_count,
+        item_count = stream.item_count(),
         ?thread_id,
         parse_errors,
         "scanned persisted thread"

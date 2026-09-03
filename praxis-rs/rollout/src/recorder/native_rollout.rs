@@ -90,6 +90,7 @@ impl NativeRolloutWriter {
         if next_sequence > 1 {
             writer.reconcile_locator(rollout_path).await?;
         } else {
+            validate_projection(rollout_path, thread_id).await?;
             writer.import_projection(rollout_path, thread_id).await?;
         }
         writer
@@ -103,11 +104,10 @@ impl NativeRolloutWriter {
         let store = ThreadStore::from_praxis_home(init.praxis_home);
         let existed = store.thread_exists(thread_id).await;
         let projection_exists = tokio::fs::try_exists(rollout_path).await?;
-        let imported_items = if !existed && projection_exists {
-            Some(read_projection(rollout_path, init.thread_id).await?)
-        } else {
-            None
-        };
+        let import_projection = !existed && projection_exists;
+        if import_projection {
+            validate_projection(rollout_path, init.thread_id).await?;
+        }
         let thread = store.open_thread(thread_id).await.map_err(store_error)?;
         thread
             .ensure_created(init.source, init.workspace.clone(), None)
@@ -152,9 +152,12 @@ impl NativeRolloutWriter {
         };
         if existed && next_sequence > 1 {
             writer.reconcile_locator(rollout_path).await?;
-        } else if let Some(items) = imported_items {
-            writer.append(&items).await?;
+        } else if import_projection {
+            writer
+                .import_projection(rollout_path, init.thread_id)
+                .await?;
         } else if projection_exists {
+            validate_projection(rollout_path, init.thread_id).await?;
             writer
                 .import_projection(rollout_path, init.thread_id)
                 .await?;
@@ -175,37 +178,58 @@ impl NativeRolloutWriter {
         rollout_path: &Path,
         expected_thread_id: ThreadId,
     ) -> io::Result<()> {
-        let items = read_projection(rollout_path, expected_thread_id).await?;
         self.metadata.updated_at_unix_ms = rollout_modified_unix_ms(rollout_path).await;
-        self.append(&items).await
+        let mut stream = crate::thread_store::RolloutItemStream::open(rollout_path).await?;
+        let mut metadata_delta = NativeMetadataDelta::default();
+        let mut appended = false;
+        while let Some(item) = stream.next_item().await? {
+            self.append_buffered(&item, &mut metadata_delta).await?;
+            appended = true;
+        }
+        let (parsed_thread_id, parse_errors) = stream.outcome();
+        ensure_valid_projection(parsed_thread_id, parse_errors, expected_thread_id)?;
+        self.reconcile_metadata_if_needed(metadata_delta).await?;
+        if appended {
+            self.thread.sync().await.map_err(store_error)?;
+        }
+        Ok(())
     }
 
     pub(super) async fn append(&mut self, items: &[RolloutItem]) -> io::Result<()> {
         let mut metadata_delta = NativeMetadataDelta::default();
         for item in items {
-            metadata_delta.merge(self.metadata.apply(self.thread_id, item));
-            let sequence = self.next_sequence;
-            self.thread
-                .execute(
-                    ThreadActor::Runtime,
-                    Some(format!("rollout:{sequence}")),
-                    ThreadCommand::RecordNativeAgentEvent {
-                        agent_sequence: sequence,
-                        event_id: format!("rollout:{sequence}"),
-                        turn_id: None,
-                        route: route(item),
-                        payload: encode_item(item)?,
-                    },
-                    CommitMode::Buffered,
-                )
-                .await
-                .map_err(store_error)?;
-            self.next_sequence = sequence.saturating_add(1);
+            self.append_buffered(item, &mut metadata_delta).await?;
         }
         self.reconcile_metadata_if_needed(metadata_delta).await?;
         if !items.is_empty() {
             self.thread.sync().await.map_err(store_error)?;
         }
+        Ok(())
+    }
+
+    async fn append_buffered(
+        &mut self,
+        item: &RolloutItem,
+        metadata_delta: &mut NativeMetadataDelta,
+    ) -> io::Result<()> {
+        metadata_delta.merge(self.metadata.apply(self.thread_id, item));
+        let sequence = self.next_sequence;
+        self.thread
+            .execute(
+                ThreadActor::Runtime,
+                Some(format!("rollout:{sequence}")),
+                ThreadCommand::RecordNativeAgentEvent {
+                    agent_sequence: sequence,
+                    event_id: format!("rollout:{sequence}"),
+                    turn_id: None,
+                    route: route(item),
+                    payload: encode_item(item)?,
+                },
+                CommitMode::Buffered,
+            )
+            .await
+            .map_err(store_error)?;
+        self.next_sequence = sequence.saturating_add(1);
         Ok(())
     }
 
@@ -460,16 +484,21 @@ fn native_thread_id(thread_id: ThreadId) -> io::Result<praxis_thread_store_contr
         .map_err(store_error)
 }
 
-async fn read_projection(
-    rollout_path: &Path,
+async fn validate_projection(rollout_path: &Path, expected_thread_id: ThreadId) -> io::Result<()> {
+    let (parsed_thread_id, parse_errors) =
+        crate::thread_store::scan_items(rollout_path, |_| {}).await?;
+    ensure_valid_projection(parsed_thread_id, parse_errors, expected_thread_id)
+}
+
+fn ensure_valid_projection(
+    parsed_thread_id: Option<ThreadId>,
+    parse_errors: usize,
     expected_thread_id: ThreadId,
-) -> io::Result<Vec<RolloutItem>> {
-    let (items, parsed_thread_id, parse_errors) =
-        crate::thread_store::read_items(rollout_path).await?;
+) -> io::Result<()> {
     if parse_errors != 0 || parsed_thread_id != Some(expected_thread_id) {
         return Err(io::Error::other(format!(
             "cannot import rollout projection with {parse_errors} parse errors or mismatched thread id"
         )));
     }
-    Ok(items)
+    Ok(())
 }
