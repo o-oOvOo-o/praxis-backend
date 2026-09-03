@@ -320,11 +320,15 @@ mod job {
         rollout_cwd: &Path,
         stage_one_context: &RequestContext,
     ) -> anyhow::Result<(StageOneOutput, Option<TokenUsage>)> {
-        let rollout_items =
+        let rollout_contents =
             praxis_rollout::ThreadHistoryReader::from_praxis_home(session.praxis_home().await)
-                .read_items(rollout_path)
-                .await?;
-        let rollout_contents = serialize_filtered_rollout_response_items(&rollout_items)?;
+                .fold_items(
+                    rollout_path,
+                    MemoryRolloutSerializer::new(),
+                    MemoryRolloutSerializer::push,
+                )
+                .await?
+                .finish()?;
 
         let prompt = Prompt {
             input: vec![ResponseItem::Message {
@@ -477,31 +481,73 @@ mod job {
     pub(super) fn serialize_filtered_rollout_response_items(
         items: &[RolloutItem],
     ) -> crate::error::Result<String> {
-        let filtered = items
-            .iter()
-            .filter_map(|item| {
-                if let RolloutItem::ResponseItem(item) = item {
-                    sanitize_response_item_for_memories(item)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-        serde_json::to_string(&filtered).map_err(|err| {
-            PraxisErr::InvalidRequest(format!("failed to serialize rollout memory: {err}"))
-        })
+        let mut serializer = MemoryRolloutSerializer::new();
+        for item in items.iter().cloned() {
+            serializer.push(item);
+        }
+        serializer.finish()
     }
 
-    fn sanitize_response_item_for_memories(item: &ResponseItem) -> Option<ResponseItem> {
-        let ResponseItem::Message {
-            id,
-            role,
-            content,
-            end_turn,
-            phase,
-        } = item
-        else {
-            return should_persist_response_item_for_memories(item).then(|| item.clone());
+    struct MemoryRolloutSerializer {
+        bytes: Vec<u8>,
+        has_items: bool,
+        error: Option<serde_json::Error>,
+    }
+
+    impl MemoryRolloutSerializer {
+        fn new() -> Self {
+            Self {
+                bytes: vec![b'['],
+                has_items: false,
+                error: None,
+            }
+        }
+
+        fn push(&mut self, item: RolloutItem) {
+            if self.error.is_some() {
+                return;
+            }
+            let RolloutItem::ResponseItem(item) = item else {
+                return;
+            };
+            let Some(item) = sanitize_response_item_for_memories(item) else {
+                return;
+            };
+            if self.has_items {
+                self.bytes.push(b',');
+            }
+            if let Err(error) = serde_json::to_writer(&mut self.bytes, &item) {
+                self.error = Some(error);
+                return;
+            }
+            self.has_items = true;
+        }
+
+        fn finish(mut self) -> crate::error::Result<String> {
+            if let Some(error) = self.error {
+                return Err(PraxisErr::InvalidRequest(format!(
+                    "failed to serialize rollout memory: {error}"
+                )));
+            }
+            self.bytes.push(b']');
+            String::from_utf8(self.bytes).map_err(|error| {
+                PraxisErr::InvalidRequest(format!(
+                    "failed to encode serialized rollout memory: {error}"
+                ))
+            })
+        }
+    }
+
+    fn sanitize_response_item_for_memories(item: ResponseItem) -> Option<ResponseItem> {
+        let (id, role, content, end_turn, phase) = match item {
+            ResponseItem::Message {
+                id,
+                role,
+                content,
+                end_turn,
+                phase,
+            } => (id, role, content, end_turn, phase),
+            item => return should_persist_response_item_for_memories(&item).then_some(item),
         };
 
         if role == "developer" {
@@ -509,24 +555,29 @@ mod job {
         }
 
         if role != "user" {
-            return Some(item.clone());
+            return Some(ResponseItem::Message {
+                id,
+                role,
+                content,
+                end_turn,
+                phase,
+            });
         }
 
         let content = content
-            .iter()
+            .into_iter()
             .filter(|content_item| !is_memory_excluded_contextual_user_fragment(content_item))
-            .cloned()
             .collect::<Vec<_>>();
         if content.is_empty() {
             return None;
         }
 
         Some(ResponseItem::Message {
-            id: id.clone(),
-            role: role.clone(),
+            id,
+            role,
             content,
-            end_turn: *end_turn,
-            phase: phase.clone(),
+            end_turn,
+            phase,
         })
     }
 }
