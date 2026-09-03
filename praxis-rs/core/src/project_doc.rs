@@ -99,7 +99,7 @@ pub async fn read_project_docs(config: &Config) -> std::io::Result<Option<String
     }
 
     let mut remaining: u64 = max_total as u64;
-    let mut parts: Vec<String> = Vec::new();
+    let mut output = String::new();
 
     for p in paths {
         if remaining == 0 {
@@ -113,29 +113,40 @@ pub async fn read_project_docs(config: &Config) -> std::io::Result<Option<String
         };
 
         let size = file.metadata().await?.len();
-        let mut reader = tokio::io::BufReader::new(file).take(remaining);
+        let read_budget = remaining;
+        let mut reader = tokio::io::BufReader::new(file).take(read_budget);
         let mut data: Vec<u8> = Vec::new();
         reader.read_to_end(&mut data).await?;
+        remaining = remaining.saturating_sub(data.len() as u64);
 
-        if size > remaining {
+        if size > read_budget {
             tracing::warn!(
                 "Project doc `{}` exceeds remaining budget ({} bytes) - truncating.",
                 p.display(),
-                remaining,
+                read_budget,
             );
         }
 
-        let text = String::from_utf8_lossy(&data).to_string();
-        if !text.trim().is_empty() {
-            parts.push(text);
-            remaining = remaining.saturating_sub(data.len() as u64);
+        let text = match String::from_utf8(data) {
+            Ok(text) => text,
+            Err(error) => String::from_utf8_lossy(error.as_bytes()).into_owned(),
+        };
+        if text.trim().is_empty() {
+            continue;
+        }
+        if output.is_empty() {
+            output = text;
+        } else {
+            output.reserve(2 + text.len());
+            output.push_str("\n\n");
+            output.push_str(&text);
         }
     }
 
-    if parts.is_empty() {
+    if output.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(parts.join("\n\n")))
+        Ok(Some(output))
     }
 }
 
