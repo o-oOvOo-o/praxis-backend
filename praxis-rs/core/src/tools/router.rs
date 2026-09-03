@@ -98,6 +98,10 @@ impl ToolRouter {
         self.model_visible_specs.clone()
     }
 
+    pub(crate) fn model_visible_specs_ref(&self) -> &[ToolSpec] {
+        &self.model_visible_specs
+    }
+
     pub fn find_spec(&self, tool_name: &str) -> Option<ToolSpec> {
         self.specs
             .iter()

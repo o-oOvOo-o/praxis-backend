@@ -1,5 +1,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
+#[cfg(feature = "code_mode")]
+use std::sync::OnceLock;
 
 use anyhow::Context;
 use praxis_capability_runtime::CapabilityId;
@@ -22,11 +24,28 @@ const TOOLS_OWNER_ID: &str = "praxis.core.tools";
 pub(crate) struct ToolCapability {
     router: TypedCapability<ToolRouter>,
     _scope: Arc<CapabilityScope>,
+    #[cfg(feature = "code_mode")]
+    code_mode_metadata: Arc<OnceLock<Arc<[praxis_code_mode::EnabledToolMetadata]>>>,
 }
 
 impl ToolCapability {
     pub(crate) fn router(&self) -> &ToolRouter {
         self.router.value()
+    }
+
+    #[cfg(feature = "code_mode")]
+    pub(crate) fn code_mode_metadata(&self) -> Arc<[praxis_code_mode::EnabledToolMetadata]> {
+        self.code_mode_metadata
+            .get_or_init(|| {
+                praxis_tools::collect_code_mode_tool_definitions(
+                    self.router.model_visible_specs_ref(),
+                )
+                .iter()
+                .map(praxis_code_mode::enabled_tool_metadata)
+                .collect::<Vec<_>>()
+                .into()
+            })
+            .clone()
     }
 }
 
@@ -131,6 +150,8 @@ fn acquire(
     Ok(ToolCapability {
         router,
         _scope: Arc::clone(scope),
+        #[cfg(feature = "code_mode")]
+        code_mode_metadata: Arc::new(OnceLock::new()),
     })
 }
 

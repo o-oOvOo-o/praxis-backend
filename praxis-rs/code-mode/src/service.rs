@@ -615,7 +615,7 @@ mod tests {
     fn execute_request(source: &str) -> ExecuteRequest {
         ExecuteRequest {
             tool_call_id: "call_1".to_string(),
-            enabled_tools: Vec::new(),
+            enabled_tools: Arc::from([]),
             source: source.to_string(),
             stored_values: HashMap::new(),
             yield_time_ms: Some(1),

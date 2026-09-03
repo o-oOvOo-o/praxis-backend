@@ -29,7 +29,6 @@ use crate::tools::tool_call_runtime::ToolCallRuntime;
 use crate::unified_exec::resolve_max_tokens;
 use praxis_features::Feature;
 use praxis_tools::ToolSpec;
-use praxis_tools::collect_code_mode_tool_definitions;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::formatted_truncate_text_content_items_with_policy;
 use praxis_utils_output_truncation::truncate_function_output_items_with_policy;
@@ -271,9 +270,8 @@ fn truncate_code_mode_result(
 
 pub(super) fn build_enabled_tools(
     router: &ToolCapability,
-) -> Vec<praxis_code_mode::ToolDefinition> {
-    let specs = router.model_visible_specs();
-    collect_code_mode_tool_definitions(&specs)
+) -> std::sync::Arc<[praxis_code_mode::EnabledToolMetadata]> {
+    router.code_mode_metadata()
 }
 
 async fn call_nested_tool(

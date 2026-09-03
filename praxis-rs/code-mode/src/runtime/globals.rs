@@ -47,7 +47,7 @@ fn build_tools_object<'s>(
         .map(|state| state.enabled_tools.clone())
         .unwrap_or_default();
 
-    for tool in enabled_tools {
+    for tool in enabled_tools.iter() {
         let name = v8::String::new(scope, &tool.global_name)
             .ok_or_else(|| "failed to allocate tool name".to_string())?;
         let function = tool_function(scope, &tool.tool_name)?;

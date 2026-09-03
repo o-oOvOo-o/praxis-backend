@@ -5,6 +5,7 @@ mod value;
 
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::mpsc as std_mpsc;
 use std::thread;
@@ -13,8 +14,6 @@ use serde_json::Value as JsonValue;
 use tokio::sync::mpsc;
 
 use crate::description::EnabledToolMetadata;
-use crate::description::ToolDefinition;
-use crate::description::enabled_tool_metadata;
 use crate::response::FunctionCallOutputContentItem;
 
 pub const DEFAULT_EXEC_YIELD_TIME_MS: u64 = 10_000;
@@ -25,7 +24,7 @@ const EXIT_SENTINEL: &str = "__praxis_code_mode_exit__";
 #[derive(Clone, Debug)]
 pub struct ExecuteRequest {
     pub tool_call_id: String,
-    pub enabled_tools: Vec<ToolDefinition>,
+    pub enabled_tools: Arc<[EnabledToolMetadata]>,
     pub source: String,
     pub stored_values: HashMap<String, JsonValue>,
     pub yield_time_ms: Option<u64>,
@@ -106,16 +105,11 @@ pub(crate) fn spawn_runtime(
 ) -> Result<(std_mpsc::Sender<RuntimeCommand>, v8::IsolateHandle), String> {
     let (command_tx, command_rx) = std_mpsc::channel();
     let (isolate_handle_tx, isolate_handle_rx) = std_mpsc::sync_channel(1);
-    let enabled_tools = request
-        .enabled_tools
-        .iter()
-        .map(enabled_tool_metadata)
-        .collect::<Vec<_>>();
     let (builtin_specifier, builtin_source) = module_loader::runtime_module();
     module_sources.insert(builtin_specifier.to_string(), builtin_source.to_string());
     let config = RuntimeConfig {
         tool_call_id: request.tool_call_id,
-        enabled_tools,
+        enabled_tools: request.enabled_tools,
         source: request.source,
         stored_values: request.stored_values,
         module_sources,
@@ -134,7 +128,7 @@ pub(crate) fn spawn_runtime(
 #[derive(Clone)]
 struct RuntimeConfig {
     tool_call_id: String,
-    enabled_tools: Vec<EnabledToolMetadata>,
+    enabled_tools: Arc<[EnabledToolMetadata]>,
     source: String,
     stored_values: HashMap<String, JsonValue>,
     module_sources: BTreeMap<String, String>,
@@ -144,7 +138,7 @@ pub(super) struct RuntimeState {
     event_tx: mpsc::Sender<RuntimeEvent>,
     pending_tool_calls: HashMap<String, v8::Global<v8::PromiseResolver>>,
     stored_values: HashMap<String, JsonValue>,
-    enabled_tools: Vec<EnabledToolMetadata>,
+    enabled_tools: Arc<[EnabledToolMetadata]>,
     next_tool_call_id: u64,
     tool_call_id: String,
     exit_requested: bool,
@@ -302,6 +296,7 @@ fn send_result(
 mod tests {
     use std::collections::BTreeMap;
     use std::collections::HashMap;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use pretty_assertions::assert_eq;
@@ -314,7 +309,7 @@ mod tests {
     fn execute_request(source: &str) -> ExecuteRequest {
         ExecuteRequest {
             tool_call_id: "call_1".to_string(),
-            enabled_tools: Vec::new(),
+            enabled_tools: Arc::from([]),
             source: source.to_string(),
             stored_values: HashMap::new(),
             yield_time_ms: Some(1),
