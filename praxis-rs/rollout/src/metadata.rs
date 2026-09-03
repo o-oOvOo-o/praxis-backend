@@ -80,6 +80,10 @@ pub fn builder_from_items(
         return Some(builder);
     }
 
+    builder_from_rollout_path(rollout_path)
+}
+
+fn builder_from_rollout_path(rollout_path: &Path) -> Option<ThreadMetadataBuilder> {
     let file_name = rollout_path.file_name()?.to_str()?;
     if !file_name.starts_with(ROLLOUT_PREFIX) || !file_name.ends_with(ROLLOUT_SUFFIX) {
         return None;
@@ -100,35 +104,48 @@ pub async fn extract_metadata_from_rollout(
     rollout_path: &Path,
     default_provider: &str,
 ) -> anyhow::Result<ExtractionOutcome> {
-    let (items, _thread_id, parse_errors) = crate::thread_store::read_items(rollout_path).await?;
-    if items.is_empty() {
+    let mut saw_item = false;
+    let mut first_session_meta = None;
+    let mut memory_mode = None;
+    crate::thread_store::scan_items(rollout_path, |item| {
+        saw_item = true;
+        if let RolloutItem::SessionMeta(meta_line) = item {
+            if let Some(mode) = meta_line.meta.memory_mode.clone() {
+                memory_mode = Some(mode);
+            }
+            if first_session_meta.is_none() {
+                first_session_meta = Some(meta_line);
+            }
+        }
+    })
+    .await?;
+    if !saw_item {
         return Err(anyhow::anyhow!(
             "empty session file: {}",
             rollout_path.display()
         ));
     }
-    let builder = builder_from_items(items.as_slice(), rollout_path).ok_or_else(|| {
-        anyhow::anyhow!(
-            "rollout missing metadata builder: {}",
-            rollout_path.display()
-        )
-    })?;
+    let builder = first_session_meta
+        .as_ref()
+        .and_then(|meta| builder_from_session_meta(meta, rollout_path))
+        .or_else(|| builder_from_rollout_path(rollout_path))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "rollout missing metadata builder: {}",
+                rollout_path.display()
+            )
+        })?;
     let mut metadata = builder.build(default_provider);
-    for item in &items {
-        apply_rollout_item(&mut metadata, item, default_provider);
-    }
+    let (_, parse_errors) = crate::thread_store::scan_items(rollout_path, |item| {
+        apply_rollout_item(&mut metadata, &item, default_provider);
+    })
+    .await?;
     if let Some(updated_at) = file_modified_time_utc(rollout_path).await {
         metadata.updated_at = updated_at;
     }
     Ok(ExtractionOutcome {
         metadata,
-        memory_mode: items.iter().rev().find_map(|item| match item {
-            RolloutItem::SessionMeta(meta_line) => meta_line.meta.memory_mode.clone(),
-            RolloutItem::ResponseItem(_)
-            | RolloutItem::Compacted(_)
-            | RolloutItem::TurnContext(_)
-            | RolloutItem::EventMsg(_) => None,
-        }),
+        memory_mode,
         parse_errors,
     })
 }
