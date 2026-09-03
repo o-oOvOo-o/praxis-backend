@@ -326,10 +326,11 @@ impl LiveThreadStore {
     {
         let journal = Arc::clone(&self.journal);
         run_blocking(move || {
-            let journal = journal
+            let snapshot = journal
                 .lock()
-                .map_err(|_| ThreadStoreError::WriterPoisoned)?;
-            let head = journal.head();
+                .map_err(|_| ThreadStoreError::WriterPoisoned)?
+                .snapshot();
+            let head = snapshot.head();
             let through = through.unwrap_or(head.revision);
             if through > head.revision {
                 return Err(ThreadStoreError::RevisionNotFound(through.get()));
@@ -343,7 +344,13 @@ impl LiveThreadStore {
             let start = after
                 .checked_next()
                 .ok_or(ThreadStoreError::RevisionOverflow)?;
-            Ok(journal.fold_range(ThreadRevisionRange::inclusive(start, through)?, state, fold)?)
+            Ok(
+                snapshot.fold_range(
+                    ThreadRevisionRange::inclusive(start, through)?,
+                    state,
+                    fold,
+                )?,
+            )
         })
         .await
     }

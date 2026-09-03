@@ -51,6 +51,37 @@ pub struct ThreadJournal {
     dirty_batch_count: u64,
 }
 
+#[derive(Clone)]
+pub struct ThreadJournalSnapshot {
+    config: JournalConfig,
+    thread_id: ThreadId,
+    head: ThreadHead,
+    segments: Vec<SegmentInfo>,
+}
+
+impl ThreadJournalSnapshot {
+    pub const fn head(&self) -> ThreadHead {
+        self.head
+    }
+
+    pub fn fold_range<S>(
+        &self,
+        range: ThreadRevisionRange,
+        state: S,
+        fold: impl FnMut(&mut S, &ThreadEventEnvelope),
+    ) -> Result<S, JournalError> {
+        projection::fold_range(
+            &self.config,
+            self.thread_id,
+            self.head,
+            &self.segments,
+            range,
+            state,
+            fold,
+        )
+    }
+}
+
 #[derive(Default)]
 struct PendingSegmentSyncs {
     sequences: Vec<u64>,
@@ -168,6 +199,15 @@ impl ThreadJournal {
 
     pub const fn head(&self) -> ThreadHead {
         self.head
+    }
+
+    pub fn snapshot(&self) -> ThreadJournalSnapshot {
+        ThreadJournalSnapshot {
+            config: self.config.clone(),
+            thread_id: self.thread_id,
+            head: self.head,
+            segments: self.segments.clone(),
+        }
     }
 
     /// Reports whether another live writer currently owns this journal.

@@ -15,6 +15,7 @@ mod snapshot;
 
 pub use error::JournalError;
 pub use journal::ThreadJournal;
+pub use journal::ThreadJournalSnapshot;
 pub use model::AppendOutcome;
 pub use model::DurabilityBarrier;
 pub use model::JournalBatch;
