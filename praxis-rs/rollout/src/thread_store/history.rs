@@ -43,39 +43,39 @@ impl ThreadHistoryReader {
             .ok_or_else(|| IoError::other("rollout path does not contain a thread id"))?;
         let native_thread_id = native_thread_id(thread_id)?;
         if self.native_store.thread_exists(native_thread_id).await {
-            let thread = self
+            let folded = self
                 .native_store
-                .open_thread(native_thread_id)
-                .await
-                .map_err(native_store_error)?;
-            if thread
-                .next_agent_event_sequence()
-                .await
-                .map_err(native_store_error)?
-                > 1
-            {
-                let (state, foreign_events) = thread
-                    .fold_all((state, 0usize), move |(state, foreign_events), event| {
+                .fold_thread_events(
+                    native_thread_id,
+                    (state, fold, 0usize, 0usize),
+                    move |(state, fold, native_events, foreign_events), event| {
                         if let praxis_thread_store_contracts::ThreadEventBody::NativeAgentEventRecorded {
                             payload,
                             ..
                         } = &event.body
                         {
+                            *native_events = native_events.saturating_add(1);
                             match native_codec::decode_item(payload) {
                                 Some(item) => fold(state, item),
                                 None => *foreign_events = foreign_events.saturating_add(1),
                             }
                         }
-                    })
-                    .await
-                    .map_err(native_store_error)?;
+                    },
+                )
+                .await
+                .map_err(native_store_error)?
+                .ok_or_else(|| IoError::other("native thread disappeared during history read"))?;
+            let (native_state, native_fold, native_events, foreign_events) = folded;
+            if native_events != 0 {
                 if foreign_events != 0 {
                     return Err(IoError::other(format!(
                         "native thread contains {foreign_events} events from an incompatible schema"
                     )));
                 }
-                return Ok(state);
+                return Ok(native_state);
             }
+            state = native_state;
+            fold = native_fold;
         }
 
         let (parsed_thread_id, parse_errors) =

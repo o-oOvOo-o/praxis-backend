@@ -35,6 +35,7 @@ pub(crate) struct ThreadIndex {
 
 #[derive(Debug)]
 struct SharedIndex {
+    database_path: std::path::PathBuf,
     pool: SqlitePool,
     initialized: OnceCell<()>,
 }
@@ -56,6 +57,11 @@ impl ThreadIndex {
         self.shared
             .initialized
             .get_or_try_init(|| async {
+                if let Some(parent) = self.shared.database_path.parent() {
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(sqlx::Error::Io)?;
+                }
                 let projection_schema = format!(
                     "CREATE TABLE IF NOT EXISTS thread_projection (
                 thread_id TEXT PRIMARY KEY NOT NULL,
@@ -529,6 +535,7 @@ fn shared_index(path: std::path::PathBuf, options: SqliteConnectOptions) -> Arc<
         return index;
     }
     let index = Arc::new(SharedIndex {
+        database_path: path.clone(),
         pool: SqlitePoolOptions::new()
             .max_connections(4)
             .connect_lazy_with(options),
