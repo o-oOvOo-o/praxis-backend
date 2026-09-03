@@ -224,12 +224,62 @@ fn resolve_module<'s>(
     scope: &mut v8::PinScope<'s, '_>,
     specifier: &str,
 ) -> Option<v8::Local<'s, v8::Module>> {
-    if let Some(message) =
-        v8::String::new(scope, &format!("Unsupported import in exec: {specifier}"))
-    {
-        scope.throw_exception(message.into());
-    } else {
-        scope.throw_exception(v8::undefined(scope).into());
+    let cached = scope
+        .get_slot::<RuntimeState>()
+        .and_then(|state| state.module_cache.get(specifier))
+        .cloned();
+    if let Some(cached) = cached {
+        return Some(v8::Local::new(scope, &cached));
     }
-    None
+
+    let source_text = scope
+        .get_slot::<RuntimeState>()
+        .and_then(|state| state.module_sources.get(specifier))
+        .cloned();
+    let Some(source_text) = source_text else {
+        throw_module_error(scope, &format!("unsupported Praxis module `{specifier}`"));
+        return None;
+    };
+    let module = compile_module(scope, specifier, &source_text)?;
+    let cached = v8::Global::new(scope, module);
+    if let Some(state) = scope.get_slot_mut::<RuntimeState>() {
+        state.module_cache.insert(specifier.to_string(), cached);
+    }
+    Some(module)
+}
+
+pub(super) const fn runtime_module() -> (&'static str, &'static str) {
+    (
+        "praxis:runtime",
+        "export const tools = globalThis.tools;\n\
+         export const allTools = globalThis.ALL_TOOLS;\n\
+         export const text = globalThis.text;\n\
+         export const image = globalThis.image;\n\
+         export const store = globalThis.store;\n\
+         export const load = globalThis.load;\n\
+         export const notify = globalThis.notify;\n\
+         export const yieldControl = globalThis.yield_control;\n\
+         export const exit = globalThis.exit;",
+    )
+}
+
+fn compile_module<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    specifier: &str,
+    source_text: &str,
+) -> Option<v8::Local<'s, v8::Module>> {
+    let source = v8::String::new(scope, source_text)?;
+    let origin = script_origin(scope, specifier).ok()?;
+    let mut source = v8::script_compiler::Source::new(source, Some(&origin));
+    v8::script_compiler::compile_module(scope, &mut source).or_else(|| {
+        throw_module_error(scope, &format!("failed to compile module `{specifier}`"));
+        None
+    })
+}
+
+fn throw_module_error(scope: &mut v8::PinScope<'_, '_>, message: &str) {
+    let exception = v8::String::new(scope, message)
+        .map(Into::into)
+        .unwrap_or_else(|| v8::undefined(scope).into());
+    scope.throw_exception(exception);
 }

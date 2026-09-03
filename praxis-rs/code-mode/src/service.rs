@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::PoisonError;
@@ -49,6 +50,13 @@ struct Inner {
     turn_message_tx: mpsc::Sender<TurnMessage>,
     turn_message_rx: Arc<Mutex<mpsc::Receiver<TurnMessage>>>,
     next_cell_id: AtomicU64,
+    modules: RwLock<BTreeMap<String, String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodeModule {
+    pub specifier: String,
+    pub source: String,
 }
 
 pub struct CodeModeService {
@@ -70,8 +78,38 @@ impl CodeModeService {
                 turn_message_tx,
                 turn_message_rx: Arc::new(Mutex::new(turn_message_rx)),
                 next_cell_id: AtomicU64::new(1),
+                modules: RwLock::new(BTreeMap::new()),
             }),
         }
+    }
+
+    pub fn register_module(&self, module: CodeModule) -> Result<(), String> {
+        validate_module(&module)?;
+        self.inner
+            .modules
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(module.specifier, module.source);
+        Ok(())
+    }
+
+    pub fn unregister_module(&self, specifier: &str) -> bool {
+        self.inner
+            .modules
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(specifier)
+            .is_some()
+    }
+
+    pub fn module_specifiers(&self) -> Vec<String> {
+        self.inner
+            .modules
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .cloned()
+            .collect()
     }
 
     pub async fn stored_values(&self) -> HashMap<String, JsonValue> {
@@ -89,7 +127,14 @@ impl CodeModeService {
             .fetch_add(1, Ordering::Relaxed)
             .to_string();
         let (event_tx, event_rx) = mpsc::channel(Self::RUNTIME_EVENT_CAPACITY);
-        let (runtime_tx, runtime_terminate_handle) = spawn_runtime(request.clone(), event_tx)?;
+        let module_sources = self
+            .inner
+            .modules
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let (runtime_tx, runtime_terminate_handle) =
+            spawn_runtime(request.clone(), module_sources, event_tx)?;
         let (control_tx, control_rx) = mpsc::channel(Self::CONTROL_CAPACITY);
         let (response_tx, response_rx) = oneshot::channel();
         let cancellation_token = CancellationToken::new();
@@ -256,6 +301,23 @@ async fn terminate_active_sessions(inner: &Inner) {
             .send(SessionControlCommand::Terminate { response_tx })
             .await;
     }
+}
+
+fn validate_module(module: &CodeModule) -> Result<(), String> {
+    let specifier = module.specifier.trim();
+    if specifier.is_empty()
+        || !specifier.contains(':')
+        || specifier.chars().any(char::is_whitespace)
+    {
+        return Err("code module specifier must be a non-empty namespaced identifier".to_string());
+    }
+    if specifier == "praxis:runtime" {
+        return Err("praxis:runtime is a reserved built-in module".to_string());
+    }
+    if module.source.trim().is_empty() {
+        return Err(format!("code module `{specifier}` has empty source"));
+    }
+    Ok(())
 }
 
 impl Default for CodeModeService {
@@ -525,8 +587,10 @@ async fn run_session_control(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::sync::RwLock;
     use std::sync::atomic::AtomicU64;
     use std::time::Duration;
 
@@ -534,6 +598,7 @@ mod tests {
     use tokio::sync::Mutex;
     use tokio::sync::mpsc;
     use tokio::sync::oneshot;
+    use tokio_util::sync::CancellationToken;
 
     use super::CodeModeService;
     use super::Inner;
@@ -567,6 +632,7 @@ mod tests {
             turn_message_tx,
             turn_message_rx: Arc::new(Mutex::new(turn_message_rx)),
             next_cell_id: AtomicU64::new(1),
+            modules: RwLock::new(BTreeMap::new()),
         })
     }
 
@@ -679,6 +745,7 @@ text(JSON.stringify(returnsUndefined));
                 yield_time_ms: None,
                 ..execute_request("")
             },
+            BTreeMap::new(),
             runtime_event_tx,
         )
         .unwrap();

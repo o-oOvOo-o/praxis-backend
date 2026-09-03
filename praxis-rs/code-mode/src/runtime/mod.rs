@@ -3,6 +3,7 @@ mod globals;
 mod module_loader;
 mod value;
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::mpsc as std_mpsc;
@@ -100,6 +101,7 @@ pub(crate) enum RuntimeEvent {
 
 pub(crate) fn spawn_runtime(
     request: ExecuteRequest,
+    mut module_sources: BTreeMap<String, String>,
     event_tx: mpsc::Sender<RuntimeEvent>,
 ) -> Result<(std_mpsc::Sender<RuntimeCommand>, v8::IsolateHandle), String> {
     let (command_tx, command_rx) = std_mpsc::channel();
@@ -109,11 +111,14 @@ pub(crate) fn spawn_runtime(
         .iter()
         .map(enabled_tool_metadata)
         .collect::<Vec<_>>();
+    let (builtin_specifier, builtin_source) = module_loader::runtime_module();
+    module_sources.insert(builtin_specifier.to_string(), builtin_source.to_string());
     let config = RuntimeConfig {
         tool_call_id: request.tool_call_id,
         enabled_tools,
         source: request.source,
         stored_values: request.stored_values,
+        module_sources,
     };
 
     thread::spawn(move || {
@@ -132,6 +137,7 @@ struct RuntimeConfig {
     enabled_tools: Vec<EnabledToolMetadata>,
     source: String,
     stored_values: HashMap<String, JsonValue>,
+    module_sources: BTreeMap<String, String>,
 }
 
 pub(super) struct RuntimeState {
@@ -142,6 +148,8 @@ pub(super) struct RuntimeState {
     next_tool_call_id: u64,
     tool_call_id: String,
     exit_requested: bool,
+    module_sources: BTreeMap<String, String>,
+    module_cache: HashMap<String, v8::Global<v8::Module>>,
 }
 
 pub(super) enum CompletionState {
@@ -190,6 +198,8 @@ fn run_runtime(
         next_tool_call_id: 1,
         tool_call_id: config.tool_call_id,
         exit_requested: false,
+        module_sources: config.module_sources,
+        module_cache: HashMap::new(),
     });
 
     if let Err(error_text) = globals::install_globals(scope) {
@@ -290,6 +300,7 @@ fn send_result(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::collections::HashMap;
     use std::time::Duration;
 
@@ -314,8 +325,12 @@ mod tests {
     #[tokio::test]
     async fn terminate_execution_stops_cpu_bound_module() {
         let (event_tx, mut event_rx) = mpsc::channel(16);
-        let (_runtime_tx, runtime_terminate_handle) =
-            spawn_runtime(execute_request("while (true) {}"), event_tx).unwrap();
+        let (_runtime_tx, runtime_terminate_handle) = spawn_runtime(
+            execute_request("while (true) {}"),
+            BTreeMap::new(),
+            event_tx,
+        )
+        .unwrap();
 
         let started_event = tokio::time::timeout(Duration::from_secs(1), event_rx.recv())
             .await
