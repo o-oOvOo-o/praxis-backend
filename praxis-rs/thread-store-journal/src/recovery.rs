@@ -25,6 +25,7 @@ use std::io::SeekFrom;
 use std::path::Path;
 use std::path::PathBuf;
 
+#[derive(Clone, Copy)]
 pub(crate) struct FramePointer {
     pub previous_record_digest: Digest,
     pub start_revision: praxis_thread_store_contracts::ThreadRevision,
@@ -46,7 +47,6 @@ impl FramePointer {
 pub(crate) struct RecoveryState {
     pub head: ThreadHead,
     pub segments: Vec<SegmentInfo>,
-    pub frames: Vec<FramePointer>,
     pub command_index: CommandIndex,
 }
 
@@ -139,7 +139,6 @@ fn recover_with_mode(
         } else {
             Vec::new()
         },
-        frames: Vec::new(),
         command_index: CommandIndex::new(),
     };
     let mut seen_commands = HashSet::new();
@@ -227,25 +226,69 @@ pub(crate) fn read_pointer(
     Ok(frame)
 }
 
-pub(crate) fn read_pointer_command_id(
-    pointer: &FramePointer,
-    file: &mut File,
-    path: &Path,
-) -> Result<[u8; 16], JournalError> {
-    file.seek(SeekFrom::Start(pointer.offset))?;
-    let mut bytes = [0; FRAME_HEADER_LEN];
-    file.read_exact(&mut bytes)?;
-    let header =
-        decode_frame_header(&bytes).map_err(|reason| corrupt(path, pointer.offset, reason))?;
-    let decoded_len = frame_len(&header).map_err(|reason| corrupt(path, pointer.offset, reason))?;
-    if decoded_len != pointer.len {
+pub(crate) fn find_command_pointer(
+    segments: &[SegmentInfo],
+    command_id: CommandId,
+) -> Result<Option<FramePointer>, JournalError> {
+    let expected = *command_id.as_uuid().as_bytes();
+    for segment in segments {
+        let mut found = None;
+        visit_segment_pointers(segment, |pointer, stored_command_id, _| {
+            if stored_command_id == expected {
+                found = Some(pointer);
+                return Ok(true);
+            }
+            Ok(false)
+        })?;
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    Ok(None)
+}
+
+pub(crate) fn visit_segment_pointers(
+    segment: &SegmentInfo,
+    mut visit: impl FnMut(FramePointer, [u8; 16], &mut File) -> Result<bool, JournalError>,
+) -> Result<bool, JournalError> {
+    let mut file = File::open(&segment.path)?;
+    let mut offset = SEGMENT_HEADER_LEN as u64;
+    while offset < segment.bytes {
+        file.seek(SeekFrom::Start(offset))?;
+        let mut bytes = [0; FRAME_HEADER_LEN];
+        file.read_exact(&mut bytes)?;
+        let header =
+            decode_frame_header(&bytes).map_err(|reason| corrupt(&segment.path, offset, reason))?;
+        let len = frame_len(&header).map_err(|reason| corrupt(&segment.path, offset, reason))?;
+        let next = offset
+            .checked_add(len)
+            .ok_or_else(|| corrupt(&segment.path, offset, "segment offset overflow"))?;
+        if next > segment.bytes {
+            return Err(corrupt(
+                &segment.path,
+                offset,
+                "frame extends beyond recovered segment length",
+            ));
+        }
+        let pointer = FramePointer {
+            previous_record_digest: header.previous_record_digest,
+            start_revision: header.start_revision,
+            offset,
+            len,
+        };
+        if visit(pointer, header.command_id, &mut file)? {
+            return Ok(true);
+        }
+        offset = next;
+    }
+    if offset != segment.bytes {
         return Err(corrupt(
-            path,
-            pointer.offset,
-            "frame length does not match recovered pointer",
+            &segment.path,
+            offset,
+            "segment framing does not end at recovered length",
         ));
     }
-    Ok(header.command_id)
+    Ok(false)
 }
 
 fn recover_segment(
@@ -329,17 +372,18 @@ fn recover_segment(
                 .map_err(|reason| corrupt(&path, offset, reason))?;
         if mode.is_writer() {
             let command_id = decoded.stored.command_id();
-            let frame_index = state.frames.len();
             if !seen_commands.insert(command_id) {
                 return Err(corrupt(&path, offset, "duplicate committed command id"));
             }
-            state.command_index.insert(command_id, frame_index);
-            state.frames.push(FramePointer {
-                previous_record_digest: previous_head.record_digest,
-                start_revision: decoded.header.start_revision,
-                offset,
-                len: length,
-            });
+            state.command_index.insert(
+                command_id,
+                FramePointer {
+                    previous_record_digest: previous_head.record_digest,
+                    start_revision: decoded.header.start_revision,
+                    offset,
+                    len: length,
+                },
+            );
         }
         decoded
             .stored

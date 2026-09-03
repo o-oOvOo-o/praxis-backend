@@ -1,3 +1,4 @@
+use crate::recovery::FramePointer;
 use praxis_thread_store_contracts::CommandId;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -9,7 +10,7 @@ const HASH_STEP: u64 = 0x9e37_79b9_7f4a_7c15;
 
 pub(crate) struct CommandIndex {
     filter: Option<Box<[u64]>>,
-    recent: HashMap<CommandId, usize>,
+    recent: HashMap<CommandId, FramePointer>,
     order: VecDeque<CommandId>,
 }
 
@@ -22,14 +23,14 @@ impl CommandIndex {
         }
     }
 
-    pub(crate) fn insert(&mut self, command_id: CommandId, frame_index: usize) {
+    pub(crate) fn insert(&mut self, command_id: CommandId, pointer: FramePointer) {
         let filter = self
             .filter
             .get_or_insert_with(|| vec![0; FILTER_WORDS].into_boxed_slice());
         for bit in command_bits(command_id) {
             filter[bit / u64::BITS as usize] |= 1_u64 << (bit % u64::BITS as usize);
         }
-        if self.recent.insert(command_id, frame_index).is_some() {
+        if self.recent.insert(command_id, pointer).is_some() {
             return;
         }
         self.order.push_back(command_id);
@@ -49,7 +50,7 @@ impl CommandIndex {
         })
     }
 
-    pub(crate) fn recent_frame(&self, command_id: CommandId) -> Option<usize> {
+    pub(crate) fn recent_frame(&self, command_id: CommandId) -> Option<FramePointer> {
         self.recent.get(&command_id).copied()
     }
 }
