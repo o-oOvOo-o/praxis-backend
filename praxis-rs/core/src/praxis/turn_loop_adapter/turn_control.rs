@@ -235,7 +235,7 @@ pub(in crate::praxis::turn_loop_adapter) mod hooks {
                 None => hooks.bridge_state.last_agent_message().await,
             };
             let model_request_input_messages =
-                hooks.bridge_state.model_request_input_messages().await;
+                hooks.bridge_state.take_model_request_input_messages().await;
             let decision = stop_hook_decision::run_stop_hooks(
                 &hooks.session,
                 &hooks.turn_context,

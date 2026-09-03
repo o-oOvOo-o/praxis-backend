@@ -28,11 +28,12 @@ pub(in crate::praxis::turn_loop_adapter::model_stream) mod model_round {
 
             request: &ModelRequest,
         ) -> PraxisRoundInput {
-            let round_input = round_input::build_round_input(&input.turn_context, &request.prompt);
+            let (round_input, user_messages) =
+                round_input::build_round_input(&input.turn_context, &request.prompt);
 
             input
                 .bridge_state
-                .set_model_request_input_messages(round_input.user_messages.clone())
+                .set_model_request_input_messages(user_messages)
                 .await;
 
             round_input

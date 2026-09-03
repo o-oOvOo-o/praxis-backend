@@ -271,23 +271,24 @@ pub(in crate::praxis::turn_loop_adapter) mod round_input {
     #[derive(Debug)]
     pub(in crate::praxis::turn_loop_adapter) struct PraxisRoundInput {
         pub(in crate::praxis::turn_loop_adapter) items: Vec<ResponseItem>,
-        pub(in crate::praxis::turn_loop_adapter) user_messages: Vec<String>,
         pub(in crate::praxis::turn_loop_adapter) turn_metadata_header: Option<String>,
     }
 
     pub(in crate::praxis::turn_loop_adapter) fn build_round_input(
         turn_context: &TurnContext,
         prompt_items: &[praxis_loop::model::PromptItem],
-    ) -> PraxisRoundInput {
+    ) -> (PraxisRoundInput, Vec<String>) {
         let items = prompt_bridge::response_items_from_prompt_items(prompt_items);
         let user_messages = round_user_messages(&items);
         let turn_metadata_header = turn_context.turn_metadata_state.current_header_value();
 
-        PraxisRoundInput {
-            items,
+        (
+            PraxisRoundInput {
+                items,
+                turn_metadata_header,
+            },
             user_messages,
-            turn_metadata_header,
-        }
+        )
     }
 
     fn round_user_messages(input: &[ResponseItem]) -> Vec<String> {
@@ -369,10 +370,10 @@ pub(in crate::praxis::turn_loop_adapter) mod state {
             *self.model_request_input_messages.lock().await = messages;
         }
 
-        pub(in crate::praxis::turn_loop_adapter) async fn model_request_input_messages(
+        pub(in crate::praxis::turn_loop_adapter) async fn take_model_request_input_messages(
             &self,
         ) -> Vec<String> {
-            self.model_request_input_messages.lock().await.clone()
+            std::mem::take(&mut *self.model_request_input_messages.lock().await)
         }
 
         pub(in crate::praxis::turn_loop_adapter) async fn record_agent_message(
