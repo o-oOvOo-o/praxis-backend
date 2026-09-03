@@ -6,6 +6,7 @@ use crate::JournalDurability;
 use crate::JournalError;
 use crate::SegmentInfo;
 use crate::ThreadRevisionRange;
+use crate::command_index::CommandIndex;
 use crate::format::EncodedFrame;
 use crate::format::SEGMENT_HEADER_LEN;
 use crate::format::encode_batch;
@@ -20,6 +21,7 @@ use crate::projection;
 use crate::recovery::FramePointer;
 use crate::recovery::FrameReadCursor;
 use crate::recovery::read_pointer;
+use crate::recovery::read_pointer_command_id;
 use crate::recovery::recover_fold;
 use fs2::FileExt;
 use praxis_thread_store_contracts::CommandId;
@@ -27,7 +29,6 @@ use praxis_thread_store_contracts::ThreadCommandReceipt;
 use praxis_thread_store_contracts::ThreadEventEnvelope;
 use praxis_thread_store_contracts::ThreadHead;
 use praxis_thread_store_contracts::ThreadId;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -47,7 +48,7 @@ pub struct ThreadJournal {
     head: ThreadHead,
     segments: Vec<SegmentInfo>,
     frames: Vec<FramePointer>,
-    command_frames: HashMap<CommandId, usize>,
+    command_index: CommandIndex,
     pending_syncs: PendingSegmentSyncs,
     dirty_batch_count: u64,
 }
@@ -160,7 +161,7 @@ impl ThreadJournal {
                 head: recovered.head,
                 segments: recovered.segments,
                 frames: recovered.frames,
-                command_frames: recovered.command_frames,
+                command_index: recovered.command_index,
                 pending_syncs: PendingSegmentSyncs::default(),
                 dirty_batch_count: 0,
             },
@@ -217,7 +218,7 @@ impl ThreadJournal {
         batch: JournalBatch,
         durability: JournalDurability,
     ) -> Result<AppendOutcome, JournalError> {
-        if let Some(&frame_index) = self.command_frames.get(&batch.command_id) {
+        if let Some(frame_index) = self.find_command_frame(batch.command_id)? {
             let (command_digest, receipt) = self.read_committed_command(frame_index)?;
             if command_digest == batch.command_digest {
                 return Ok(AppendOutcome::Duplicate(receipt));
@@ -282,7 +283,7 @@ impl ThreadJournal {
             .stored
             .into_receipt_and_events()
             .map_err(JournalError::InvalidBatch)?;
-        self.command_frames.insert(command_id, frame_index);
+        self.command_index.insert(command_id, frame_index);
         Ok(AppendOutcome::Committed { receipt, events })
     }
 
@@ -325,7 +326,7 @@ impl ThreadJournal {
         &self,
         command_id: CommandId,
     ) -> Result<Option<ThreadCommandReceipt>, JournalError> {
-        let Some(&frame_index) = self.command_frames.get(&command_id) else {
+        let Some(frame_index) = self.find_command_frame(command_id)? else {
             return Ok(None);
         };
         let (_, receipt) = self.read_committed_command(frame_index)?;
@@ -368,6 +369,51 @@ impl ThreadJournal {
                     reason,
                 })?;
         Ok((command_digest, receipt))
+    }
+
+    fn find_command_frame(&self, command_id: CommandId) -> Result<Option<usize>, JournalError> {
+        if !self.command_index.maybe_contains(command_id) {
+            return Ok(None);
+        }
+        if let Some(frame_index) = self.command_index.recent_frame(command_id) {
+            return Ok(Some(frame_index));
+        }
+
+        let mut open_segment = None;
+        let mut open_segment_index = usize::MAX;
+        for (frame_index, frame) in self.frames.iter().enumerate() {
+            let frame_segment_is_open =
+                self.segments
+                    .get(open_segment_index)
+                    .is_some_and(|segment| {
+                        segment.first_revision <= frame.start_revision
+                            && frame.start_revision <= segment.last_revision
+                    });
+            if !frame_segment_is_open {
+                open_segment_index = crate::recovery::segment_index_for_revision(
+                    &self.segments,
+                    frame.start_revision,
+                )
+                .ok_or_else(|| {
+                    JournalError::InvalidConfig(
+                        "command frame references a missing segment".to_string(),
+                    )
+                })?;
+                open_segment = Some(File::open(&self.segments[open_segment_index].path)?);
+            }
+            let segment = &self.segments[open_segment_index];
+            let stored_command_id = read_pointer_command_id(
+                frame,
+                open_segment.as_mut().ok_or_else(|| {
+                    JournalError::InvalidConfig("command segment was not opened".to_string())
+                })?,
+                &segment.path,
+            )?;
+            if stored_command_id == *command_id.as_uuid().as_bytes() {
+                return Ok(Some(frame_index));
+            }
+        }
+        Ok(None)
     }
 
     fn select_segment(&mut self, frame_bytes: usize) -> Result<usize, JournalError> {

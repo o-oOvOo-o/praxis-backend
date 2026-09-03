@@ -1,6 +1,7 @@
 use crate::JournalConfig;
 use crate::JournalError;
 use crate::SegmentInfo;
+use crate::command_index::CommandIndex;
 use crate::format::DecodedFrame;
 use crate::format::FRAME_HEADER_LEN;
 use crate::format::SEGMENT_HEADER_LEN;
@@ -15,7 +16,7 @@ use praxis_thread_store_contracts::Digest;
 use praxis_thread_store_contracts::ThreadEventEnvelope;
 use praxis_thread_store_contracts::ThreadHead;
 use praxis_thread_store_contracts::ThreadId;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
@@ -46,7 +47,7 @@ pub(crate) struct RecoveryState {
     pub head: ThreadHead,
     pub segments: Vec<SegmentInfo>,
     pub frames: Vec<FramePointer>,
-    pub command_frames: HashMap<CommandId, usize>,
+    pub command_index: CommandIndex,
 }
 
 #[derive(Default)]
@@ -139,8 +140,9 @@ fn recover_with_mode(
             Vec::new()
         },
         frames: Vec::new(),
-        command_frames: HashMap::new(),
+        command_index: CommandIndex::new(),
     };
+    let mut seen_commands = HashSet::new();
     let mut decode_buffer = Vec::new();
     for (index, (sequence, path)) in paths.into_iter().enumerate() {
         let expected_sequence =
@@ -163,6 +165,7 @@ fn recover_with_mode(
             index + 1 == path_count,
             mode,
             &mut state,
+            &mut seen_commands,
             &mut decode_buffer,
             visit,
         )?;
@@ -224,6 +227,27 @@ pub(crate) fn read_pointer(
     Ok(frame)
 }
 
+pub(crate) fn read_pointer_command_id(
+    pointer: &FramePointer,
+    file: &mut File,
+    path: &Path,
+) -> Result<[u8; 16], JournalError> {
+    file.seek(SeekFrom::Start(pointer.offset))?;
+    let mut bytes = [0; FRAME_HEADER_LEN];
+    file.read_exact(&mut bytes)?;
+    let header =
+        decode_frame_header(&bytes).map_err(|reason| corrupt(path, pointer.offset, reason))?;
+    let decoded_len = frame_len(&header).map_err(|reason| corrupt(path, pointer.offset, reason))?;
+    if decoded_len != pointer.len {
+        return Err(corrupt(
+            path,
+            pointer.offset,
+            "frame length does not match recovered pointer",
+        ));
+    }
+    Ok(header.command_id)
+}
+
 fn recover_segment(
     config: &JournalConfig,
     thread_id: ThreadId,
@@ -232,6 +256,7 @@ fn recover_segment(
     is_last: bool,
     mode: RecoveryMode,
     state: &mut RecoveryState,
+    seen_commands: &mut HashSet<CommandId>,
     decode_buffer: &mut Vec<u8>,
     visit: &mut impl FnMut(ThreadEventEnvelope),
 ) -> Result<(), JournalError> {
@@ -305,14 +330,10 @@ fn recover_segment(
         if mode.is_writer() {
             let command_id = decoded.stored.command_id();
             let frame_index = state.frames.len();
-            match state.command_frames.entry(command_id) {
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    entry.insert(frame_index);
-                }
-                std::collections::hash_map::Entry::Occupied(_) => {
-                    return Err(corrupt(&path, offset, "duplicate committed command id"));
-                }
+            if !seen_commands.insert(command_id) {
+                return Err(corrupt(&path, offset, "duplicate committed command id"));
             }
+            state.command_index.insert(command_id, frame_index);
             state.frames.push(FramePointer {
                 previous_record_digest: previous_head.record_digest,
                 start_revision: decoded.header.start_revision,

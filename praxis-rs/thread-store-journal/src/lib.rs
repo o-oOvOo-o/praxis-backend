@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(clippy::expect_used))]
 
+mod command_index;
 mod error;
 mod format;
 mod io;
