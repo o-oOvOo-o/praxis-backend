@@ -1,13 +1,15 @@
-use crate::compact::collect_user_messages;
 use crate::compact::content_items_to_text;
+use crate::compact::is_summary_message;
 use crate::event_mapping::is_contextual_user_message_content;
 use crate::praxis::Session;
+use praxis_protocol::items::TurnItem;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::trim_and_truncate_end_chars_with_ellipsis;
 use praxis_utils_output_truncation::truncate_end_chars_with_ellipsis;
 use praxis_utils_output_truncation::truncate_text;
+use std::collections::VecDeque;
 
 const TITLE_PREVIEW_ENTRY_MAX_CHARS: usize = 480;
 const SUMMARY_RECENT_MESSAGE_COUNT: usize = 6;
@@ -61,10 +63,14 @@ impl HistoryPreview {
     }
 
     pub(crate) fn latest_user_message(&self, policy: TruncationPolicy) -> Option<String> {
-        collect_user_messages(&self.items)
-            .into_iter()
-            .last()
-            .map(|message| truncate_text(&message, policy))
+        self.items.iter().rev().find_map(|item| {
+            let Some(TurnItem::UserMessage(user)) = crate::event_mapping::parse_turn_item(item)
+            else {
+                return None;
+            };
+            let message = user.message();
+            (!is_summary_message(&message)).then(|| truncate_text(&message, policy))
+        })
     }
 
     pub(crate) fn requested_final_line_marker(&self) -> Option<String> {
@@ -109,7 +115,8 @@ impl HistoryPreview {
     }
 
     pub(crate) fn title_preview(&self, max_messages: usize, max_chars: usize) -> Option<String> {
-        let mut entries = Vec::new();
+        let mut entries = VecDeque::new();
+        let mut has_entry = false;
         for item in &self.items {
             let ResponseItem::Message { role, content, .. } = item else {
                 continue;
@@ -129,18 +136,22 @@ impl HistoryPreview {
             if trimmed.is_empty() || (role == "user" && is_bootstrap_context_message(trimmed)) {
                 continue;
             }
-            entries.push(format!(
-                "{role_label}: {}",
-                truncate_end_chars_with_ellipsis(trimmed, TITLE_PREVIEW_ENTRY_MAX_CHARS)
-            ));
+            has_entry = true;
+            push_bounded(
+                &mut entries,
+                max_messages,
+                format!(
+                    "{role_label}: {}",
+                    truncate_end_chars_with_ellipsis(trimmed, TITLE_PREVIEW_ENTRY_MAX_CHARS)
+                ),
+            );
         }
 
-        if entries.is_empty() {
+        if !has_entry {
             return None;
         }
 
-        let keep_from = entries.len().saturating_sub(max_messages);
-        let preview = entries[keep_from..].join("\n\n");
+        let preview = entries.make_contiguous().join("\n\n");
         Some(truncate_end_chars_with_ellipsis(&preview, max_chars))
     }
 
@@ -148,44 +159,52 @@ impl HistoryPreview {
         &self,
         last_agent_message: Option<&str>,
     ) -> Option<String> {
-        let mut transcript = Vec::new();
+        let mut recent = VecDeque::with_capacity(SUMMARY_RECENT_MESSAGE_COUNT);
+        let mut first_user = None;
+        let mut has_transcript = false;
         for item in &self.items {
             if let ResponseItem::Message { role, content, .. } = item
                 && !(role == "user" && is_contextual_user_message_content(content))
                 && let Some(text) = extract_text_content(content)
             {
-                transcript.push((role.as_str(), text));
+                has_transcript = true;
+                if role == "user" && first_user.is_none() {
+                    first_user = Some(trim_and_truncate_end_chars_with_ellipsis(
+                        &text,
+                        SUMMARY_FIRST_USER_MAX_CHARS,
+                    ));
+                }
+                push_bounded(
+                    &mut recent,
+                    SUMMARY_RECENT_MESSAGE_COUNT,
+                    (role.as_str(), text),
+                );
             }
         }
 
         if let Some(last_agent_message) = last_agent_message {
             let trimmed = last_agent_message.trim();
             if !trimmed.is_empty() {
-                let duplicate_last_assistant = transcript
-                    .last()
+                let duplicate_last_assistant = recent
+                    .back()
                     .is_some_and(|(role, text)| *role == "assistant" && text == trimmed);
                 if !duplicate_last_assistant {
-                    transcript.push(("assistant", trimmed.to_string()));
+                    has_transcript = true;
+                    push_bounded(
+                        &mut recent,
+                        SUMMARY_RECENT_MESSAGE_COUNT,
+                        ("assistant", trimmed.to_string()),
+                    );
                 }
             }
         }
 
-        if transcript.is_empty() {
+        if !has_transcript {
             return None;
         }
 
-        let first_user = transcript
+        let recent = recent
             .iter()
-            .find(|(role, _)| *role == "user")
-            .map(|(_, text)| text.clone())
-            .unwrap_or_default();
-        let recent = transcript
-            .iter()
-            .rev()
-            .take(SUMMARY_RECENT_MESSAGE_COUNT)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
             .map(|(role, text)| {
                 format!(
                     "{}: {}",
@@ -199,14 +218,8 @@ impl HistoryPreview {
             .collect::<Vec<_>>();
 
         let mut sections = Vec::new();
-        if !first_user.is_empty() {
-            sections.push(format!(
-                "Original user goal: {}",
-                trim_and_truncate_end_chars_with_ellipsis(
-                    &first_user,
-                    SUMMARY_FIRST_USER_MAX_CHARS,
-                )
-            ));
+        if let Some(first_user) = first_user.filter(|text| !text.is_empty()) {
+            sections.push(format!("Original user goal: {first_user}"));
         }
         sections.push("Recent conversation:".to_string());
         sections.extend(recent);
@@ -215,7 +228,7 @@ impl HistoryPreview {
     }
 
     pub(crate) fn current_thread_section(&self, max_turns: usize) -> Option<String> {
-        let mut turns = Vec::new();
+        let mut turns = VecDeque::new();
         let mut current_user = Vec::new();
         let mut current_assistant = Vec::new();
 
@@ -232,10 +245,14 @@ impl HistoryPreview {
                         continue;
                     };
                     if !current_user.is_empty() || !current_assistant.is_empty() {
-                        turns.push((
-                            std::mem::take(&mut current_user),
-                            std::mem::take(&mut current_assistant),
-                        ));
+                        push_bounded(
+                            &mut turns,
+                            max_turns,
+                            (
+                                std::mem::take(&mut current_user),
+                                std::mem::take(&mut current_assistant),
+                            ),
+                        );
                     }
                     current_user.push(text);
                 }
@@ -256,18 +273,10 @@ impl HistoryPreview {
         }
 
         if !current_user.is_empty() || !current_assistant.is_empty() {
-            turns.push((current_user, current_assistant));
+            push_bounded(&mut turns, max_turns, (current_user, current_assistant));
         }
 
-        let retained_turns = turns
-            .into_iter()
-            .rev()
-            .take(max_turns)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>();
-        if retained_turns.is_empty() {
+        if turns.is_empty() {
             return None;
         }
 
@@ -275,8 +284,8 @@ impl HistoryPreview {
             "Most recent user/assistant turns from this exact thread. Use them for continuity when responding.".to_string(),
         ];
 
-        let retained_turn_count = retained_turns.len();
-        for (index, (user_messages, assistant_messages)) in retained_turns.into_iter().enumerate() {
+        let retained_turn_count = turns.len();
+        for (index, (user_messages, assistant_messages)) in turns.into_iter().enumerate() {
             lines.push(String::new());
             if retained_turn_count == 1 || index + 1 == retained_turn_count {
                 lines.push("### Latest turn".to_string());
@@ -297,6 +306,16 @@ impl HistoryPreview {
 
         Some(lines.join("\n"))
     }
+}
+
+fn push_bounded<T>(items: &mut VecDeque<T>, max_len: usize, item: T) {
+    if max_len == 0 {
+        return;
+    }
+    if items.len() == max_len {
+        items.pop_front();
+    }
+    items.push_back(item);
 }
 
 pub(crate) fn is_bootstrap_context_message(text: &str) -> bool {
