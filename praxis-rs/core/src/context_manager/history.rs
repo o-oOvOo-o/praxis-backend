@@ -181,24 +181,28 @@ impl ContextManager {
             return;
         }
 
-        let snapshot = self.items.clone();
-        let user_positions = user_message_positions(&snapshot);
-        let Some(&first_instruction_turn_idx) = user_positions.first() else {
-            self.replace(snapshot);
+        let Some(first_instruction_turn_idx) = self.items.iter().position(is_user_turn_boundary)
+        else {
             return;
         };
 
         let n_from_end = usize::try_from(num_turns).unwrap_or(usize::MAX);
-        let mut cut_idx = if n_from_end >= user_positions.len() {
-            first_instruction_turn_idx
-        } else {
-            user_positions[user_positions.len() - n_from_end]
-        };
+        let cut_idx = self
+            .items
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, item)| is_user_turn_boundary(item))
+            .nth(n_from_end.saturating_sub(1))
+            .map_or(first_instruction_turn_idx, |(index, _)| index);
 
-        cut_idx =
-            self.trim_pre_turn_context_updates(&snapshot, first_instruction_turn_idx, cut_idx);
+        let (cut_idx, clear_reference_context) =
+            self.trim_pre_turn_context_updates(first_instruction_turn_idx, cut_idx);
+        if clear_reference_context {
+            self.reference_context_item = None;
+        }
 
-        self.replace(snapshot[..cut_idx].to_vec());
+        self.items.truncate(cut_idx);
     }
 
     pub(crate) fn update_token_info(
@@ -355,25 +359,25 @@ impl ContextManager {
     /// above the rolled-back turn boundary.
     ///
     /// `first_instruction_turn_idx` is the earliest rollback-eligible instruction-turn boundary
-    /// in `snapshot`; the trim walk never crosses it so any session-prefix items that predate the
+    /// in `self.items`; the trim walk never crosses it so any session-prefix items that predate the
     /// first real turn survive rollback.
     ///
     /// `cut_idx` is the tentative slice boundary after dropping the requested number of
     /// instruction turns, before stripping contextual pre-turn items that sit immediately above
     /// that boundary.
     ///
-    /// If any trimmed developer message was a mixed `build_initial_context` bundle containing both
-    /// rollback-trimmable contextual fragments and persistent developer text, this also clears the
-    /// stored `reference_context_item` baseline so the next real turn falls back to full
-    /// reinjection.
+    /// The returned flag is true when a trimmed developer message was a mixed
+    /// `build_initial_context` bundle containing both rollback-trimmable contextual fragments and
+    /// persistent developer text. The caller then clears the stored `reference_context_item`
+    /// baseline so the next real turn falls back to full reinjection.
     fn trim_pre_turn_context_updates(
-        &mut self,
-        snapshot: &[ResponseItem],
+        &self,
         first_instruction_turn_idx: usize,
         mut cut_idx: usize,
-    ) -> usize {
+    ) -> (usize, bool) {
+        let mut clear_reference_context = false;
         while cut_idx > first_instruction_turn_idx {
-            match &snapshot[cut_idx - 1] {
+            match &self.items[cut_idx - 1] {
                 ResponseItem::Message { role, content, .. }
                     if role == "developer" && is_contextual_dev_message_content(content) =>
                 {
@@ -381,7 +385,7 @@ impl ContextManager {
                         // Mixed `build_initial_context` bundles are not reconstructible from
                         // steady-state diffs once trimmed, so the next real turn must fully
                         // reinject context instead of diffing against a stale baseline.
-                        self.reference_context_item = None;
+                        clear_reference_context = true;
                     }
                     cut_idx -= 1;
                 }
@@ -393,7 +397,7 @@ impl ContextManager {
                 _ => break,
             }
         }
-        cut_idx
+        (cut_idx, clear_reference_context)
     }
 }
 
@@ -652,16 +656,6 @@ pub(crate) fn is_user_turn_boundary(item: &ResponseItem) -> bool {
 
 fn is_inter_agent_instruction_content(content: &[ContentItem]) -> bool {
     InterAgentCommunication::is_message_content(content)
-}
-
-fn user_message_positions(items: &[ResponseItem]) -> Vec<usize> {
-    let mut positions = Vec::new();
-    for (idx, item) in items.iter().enumerate() {
-        if is_user_turn_boundary(item) {
-            positions.push(idx);
-        }
-    }
-    positions
 }
 
 #[cfg(test)]
