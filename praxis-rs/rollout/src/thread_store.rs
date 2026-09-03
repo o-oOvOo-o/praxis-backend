@@ -96,6 +96,7 @@ pub struct ListThreadsQuery {
 pub struct ThreadStore<'a, C: RolloutConfigView> {
     config: &'a C,
     state_db: Option<StateDbHandle>,
+    native_store: praxis_thread_store::ThreadStore,
     history: ThreadHistoryReader,
 }
 
@@ -115,10 +116,13 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
     pub async fn open(config: &'a C) -> Self {
         let state_db = state_db::get_state_db(config).await;
         migration::ensure_started(config);
-        let history = ThreadHistoryReader::from_praxis_home(config.praxis_home().to_path_buf());
+        let native_store =
+            praxis_thread_store::ThreadStore::from_praxis_home(config.praxis_home().to_path_buf());
+        let history = ThreadHistoryReader::from_native_store(native_store.clone());
         Self {
             config,
             state_db,
+            native_store,
             history,
         }
     }
@@ -161,7 +165,7 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
     }
 
     pub async fn list_threads(&self, query: ListThreadsQuery) -> io::Result<ThreadSummaryPage> {
-        list_threads_with_state_db(self.config, self.state_db(), query).await
+        list_threads_with_state_db(self.config, self.state_db(), &self.native_store, query).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -276,11 +280,8 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
         let native_id =
             praxis_thread_store_contracts::ThreadId::parse(thread_id.to_string().as_str())
                 .map_err(|error| io::Error::other(error.to_string()))?;
-        let native_store = praxis_thread_store::ThreadStore::from_praxis_home(
-            self.config.praxis_home().to_path_buf(),
-        );
-        if native_store.thread_exists(native_id).await {
-            native_store
+        if self.native_store.thread_exists(native_id).await {
+            self.native_store
                 .set_archived(native_id, archived)
                 .await
                 .map_err(|error| io::Error::other(error.to_string()))?;
@@ -292,7 +293,7 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
         let native_id =
             praxis_thread_store_contracts::ThreadId::parse(thread_id.to_string().as_str())
                 .map_err(|error| io::Error::other(error.to_string()))?;
-        praxis_thread_store::ThreadStore::from_praxis_home(self.config.praxis_home().to_path_buf())
+        self.native_store
             .delete_thread(native_id)
             .await
             .map_err(|error| io::Error::other(error.to_string()))
@@ -481,6 +482,7 @@ pub async fn read_initial_history(path: &Path) -> io::Result<InitialHistory> {
 async fn list_threads_with_state_db(
     config: &impl RolloutConfigView,
     state_db_ctx: Option<&praxis_state::StateRuntime>,
+    native_store: &praxis_thread_store::ThreadStore,
     query: ListThreadsQuery,
 ) -> io::Result<ThreadSummaryPage> {
     let source_filters = compute_source_filters(query.source_kinds);
@@ -498,6 +500,7 @@ async fn list_threads_with_state_db(
         let page = list_directory_page(
             config,
             state_db_ctx,
+            native_store,
             page_size,
             cursor.as_ref(),
             query.sort_key,
@@ -591,6 +594,7 @@ async fn list_threads_with_state_db(
 async fn list_directory_page(
     config: &impl RolloutConfigView,
     state_db_ctx: Option<&praxis_state::StateRuntime>,
+    native_store: &praxis_thread_store::ThreadStore,
     page_size: usize,
     cursor: Option<&Cursor>,
     sort_key: ThreadSortKey,
@@ -605,6 +609,7 @@ async fn list_directory_page(
         match list_native_directory_page(
             config,
             state_db_ctx,
+            native_store,
             page_size,
             cursor,
             sort_key,
@@ -686,6 +691,7 @@ async fn list_directory_page(
 async fn list_native_directory_page(
     config: &impl RolloutConfigView,
     state_db_ctx: Option<&praxis_state::StateRuntime>,
+    native_store: &praxis_thread_store::ThreadStore,
     page_size: usize,
     cursor: Option<&Cursor>,
     sort_key: ThreadSortKey,
@@ -725,11 +731,10 @@ async fn list_native_directory_page(
             .map_err(|error| io::Error::other(error.to_string()))?;
         query.set_cursor_after(sort_value, thread_id);
     }
-    let page =
-        praxis_thread_store::ThreadStore::from_praxis_home(config.praxis_home().to_path_buf())
-            .list_threads(query)
-            .await
-            .map_err(|error| io::Error::other(error.to_string()))?;
+    let page = native_store
+        .list_threads(query)
+        .await
+        .map_err(|error| io::Error::other(error.to_string()))?;
     let protocol_ids = page
         .items
         .iter()

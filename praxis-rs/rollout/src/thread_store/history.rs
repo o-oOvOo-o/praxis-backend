@@ -25,6 +25,10 @@ impl ThreadHistoryReader {
         }
     }
 
+    pub(crate) fn from_native_store(native_store: praxis_thread_store::ThreadStore) -> Self {
+        Self { native_store }
+    }
+
     pub async fn fold_items<S, F>(
         &self,
         rollout_path: &Path,
