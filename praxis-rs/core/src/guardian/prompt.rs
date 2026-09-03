@@ -66,8 +66,9 @@ pub(crate) async fn build_guardian_prompt_items(
     retry_reason: Option<String>,
     request: GuardianApprovalRequest,
 ) -> serde_json::Result<Vec<UserInput>> {
-    let history = session.clone_history().await;
-    let transcript_entries = collect_guardian_transcript_entries(history.raw_items());
+    let transcript_entries = session
+        .project_history(collect_guardian_transcript_entries)
+        .await;
     let planned_action_json = format_guardian_action_pretty(&request)?;
 
     let (transcript_entries, omission_note) =

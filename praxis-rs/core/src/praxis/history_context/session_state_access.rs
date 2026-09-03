@@ -34,6 +34,11 @@ impl Session {
         state.history.raw_items().to_vec()
     }
 
+    pub(crate) async fn project_history<T>(&self, project: impl FnOnce(&[ResponseItem]) -> T) -> T {
+        let state = self.state.lock().await;
+        project(state.history.raw_items())
+    }
+
     pub(crate) async fn clone_message_history(&self) -> Vec<ResponseItem> {
         let state = self.state.lock().await;
         state.history.clone_message_items()
