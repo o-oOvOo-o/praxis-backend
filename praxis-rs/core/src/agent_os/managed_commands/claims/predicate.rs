@@ -13,11 +13,16 @@ impl AgentOs {
         let Some(active) = state.active_coordinator_for_thread(thread_id) else {
             return false;
         };
-        state.runtime_commands.values().any(|command| {
-            command.to_thread_id == thread_id
-                && command.status.is_unclaimed()
-                && command.expires_at > now
-                && command.matches_coordinator(Some(active))
+        state.live_runtime_command_ids.iter().any(|command_id| {
+            state
+                .runtime_commands
+                .get(command_id)
+                .is_some_and(|command| {
+                    command.to_thread_id == thread_id
+                        && command.status.is_unclaimed()
+                        && command.expires_at > now
+                        && command.matches_coordinator(Some(active))
+                })
         })
     }
 }

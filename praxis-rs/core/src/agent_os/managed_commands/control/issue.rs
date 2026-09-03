@@ -72,6 +72,7 @@ impl AgentOs {
                 updated_at: now,
                 expires_at: now + AgentOsPolicy::get().ticket_ttl(),
             };
+            state.live_runtime_command_ids.insert(command_id.clone());
             state.runtime_commands.insert(command_id, command.clone());
             command
         };

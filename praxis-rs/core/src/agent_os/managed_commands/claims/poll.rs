@@ -17,11 +17,18 @@ impl AgentOs {
             let active = state.active_coordinator_for_thread(thread_id).cloned();
             let mut commands = Vec::new();
             let mut changed_commands = Vec::new();
-            for command in state.runtime_commands.values_mut() {
-                if command.to_thread_id != thread_id {
+            let command_ids = state
+                .live_runtime_command_ids
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut terminal_ids = Vec::new();
+            for command_id in command_ids {
+                let Some(command) = state.runtime_commands.get_mut(&command_id) else {
+                    terminal_ids.push(command_id);
                     continue;
-                }
-                if !command.status.is_live() {
+                };
+                if command.to_thread_id != thread_id {
                     continue;
                 }
                 let next_status = command.poll_status(active.as_ref(), now, auto_ack);
@@ -30,10 +37,14 @@ impl AgentOs {
                     command.updated_at = now;
                     changed_commands.push(command.clone());
                     if !next_status.is_live() {
+                        terminal_ids.push(command_id);
                         continue;
                     }
                 }
                 commands.push(command.clone());
+            }
+            for command_id in terminal_ids {
+                state.live_runtime_command_ids.remove(&command_id);
             }
             (commands, changed_commands)
         };

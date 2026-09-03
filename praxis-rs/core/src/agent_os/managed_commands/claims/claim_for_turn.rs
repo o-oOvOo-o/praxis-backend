@@ -30,9 +30,10 @@ impl AgentOs {
             let mut changed_tasks = Vec::new();
             let mut changed_threads = Vec::new();
             let command_ids = state
-                .runtime_commands
+                .live_runtime_command_ids
                 .iter()
-                .filter_map(|(command_id, command)| {
+                .filter_map(|command_id| {
+                    let command = state.runtime_commands.get(command_id)?;
                     if command.to_thread_id != thread_id {
                         return None;
                     }
@@ -58,6 +59,10 @@ impl AgentOs {
                 command.expires_at = now + ttl;
                 let updated_command = command.clone();
                 changed_commands.push(updated_command.clone());
+
+                if !next_status.is_live() {
+                    state.live_runtime_command_ids.remove(&command_id);
+                }
 
                 if next_status == RuntimeCommandStatus::Executing {
                     let snapshots = state.apply_assign_runtime_status(&updated_command, now, true);

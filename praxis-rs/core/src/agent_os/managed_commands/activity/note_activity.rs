@@ -18,7 +18,16 @@ impl AgentOs {
                 })
                 .unwrap_or_default();
             let mut changed = Vec::new();
-            for command in state.runtime_commands.values_mut() {
+            let command_ids = state
+                .live_runtime_command_ids
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            for command_id in command_ids {
+                let Some(command) = state.runtime_commands.get_mut(&command_id) else {
+                    state.live_runtime_command_ids.remove(&command_id);
+                    continue;
+                };
                 if command.to_thread_id != thread_id {
                     continue;
                 }

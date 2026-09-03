@@ -70,11 +70,15 @@ impl AgentOsState {
         thread_id: ThreadId,
         task_id: &str,
     ) -> bool {
-        self.runtime_commands.values().any(|command| {
-            command.to_thread_id == thread_id
-                && command.command_type == RuntimeCommandType::AssignTask
-                && command.task_id.as_deref() == Some(task_id)
-                && command.status.is_live()
+        self.live_runtime_command_ids.iter().any(|command_id| {
+            self.runtime_commands
+                .get(command_id)
+                .is_some_and(|command| {
+                    command.to_thread_id == thread_id
+                        && command.command_type == RuntimeCommandType::AssignTask
+                        && command.task_id.as_deref() == Some(task_id)
+                        && command.status.is_live()
+                })
         })
     }
 }

@@ -48,6 +48,9 @@ impl AgentOs {
             command.status = status;
             command.updated_at = now;
             let command_snapshot = command.clone();
+            if !command_snapshot.status.is_live() {
+                state.live_runtime_command_ids.remove(command_id);
+            }
             let snapshots = state.apply_assign_runtime_status(&command_snapshot, now, false);
             (command_snapshot, snapshots.thread, snapshots.task)
         };

@@ -5,17 +5,25 @@ impl AgentOs {
         let now = Utc::now();
         let expired = {
             let mut state = self.state.write().await;
-            state
-                .runtime_commands
-                .values_mut()
-                .filter(|command| command.status.is_live())
-                .filter(|command| command.expires_at <= now)
-                .map(|command| {
+            let live_ids = state
+                .live_runtime_command_ids
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>();
+            let mut expired = Vec::new();
+            for command_id in live_ids {
+                let Some(command) = state.runtime_commands.get_mut(&command_id) else {
+                    state.live_runtime_command_ids.remove(&command_id);
+                    continue;
+                };
+                if command.expires_at <= now {
                     command.status = RuntimeCommandStatus::Expired;
                     command.updated_at = now;
-                    command.clone()
-                })
-                .collect::<Vec<_>>()
+                    expired.push(command.clone());
+                    state.live_runtime_command_ids.remove(&command_id);
+                }
+            }
+            expired
         };
         for command in expired {
             self.persist_runtime_command_snapshot(&command).await;

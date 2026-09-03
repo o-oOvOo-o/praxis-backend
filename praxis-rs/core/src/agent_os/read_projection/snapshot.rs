@@ -39,9 +39,9 @@ impl AgentOsSnapshot {
         );
         let pending_runtime_commands = newest_by_created_at(
             state
-                .runtime_commands
-                .values()
-                .filter(|command| command.status.is_live()),
+                .live_runtime_command_ids
+                .iter()
+                .filter_map(|command_id| state.runtime_commands.get(command_id)),
             options.pending_runtime_command_limit,
             |command| command.created_at,
         );
