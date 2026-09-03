@@ -98,39 +98,52 @@ pub fn formatted_truncate_text_content_items_with_policy(
     items: &[FunctionCallOutputContentItem],
     policy: TruncationPolicy,
 ) -> (Vec<FunctionCallOutputContentItem>, Option<usize>) {
-    let text_segments = items
-        .iter()
-        .filter_map(|item| match item {
-            FunctionCallOutputContentItem::InputText { text } => Some(text.as_str()),
-            FunctionCallOutputContentItem::InputImage { .. } => None,
-        })
-        .collect::<Vec<_>>();
+    formatted_truncate_owned_text_content_items_with_policy(items.to_vec(), policy)
+}
 
-    if text_segments.is_empty() {
-        return (items.to_vec(), None);
+/// Truncates function output without cloning the original items when they fit the budget.
+///
+/// Prefer this entry point when the caller already owns the output collection. The borrowed
+/// variant remains available for callers that need to retain their input.
+pub fn formatted_truncate_owned_text_content_items_with_policy(
+    items: Vec<FunctionCallOutputContentItem>,
+    policy: TruncationPolicy,
+) -> (Vec<FunctionCallOutputContentItem>, Option<usize>) {
+    let mut has_text = false;
+    let mut combined_len = 0usize;
+    for item in &items {
+        let FunctionCallOutputContentItem::InputText { text } = item else {
+            continue;
+        };
+
+        has_text = true;
+        if combined_len != 0 {
+            combined_len = combined_len.saturating_add(1);
+        }
+        combined_len = combined_len.saturating_add(text.len());
     }
 
-    let mut combined = String::new();
-    for text in &text_segments {
+    if !has_text || combined_len <= policy.byte_budget() {
+        return (items, None);
+    }
+
+    let mut combined = String::with_capacity(combined_len);
+    for item in &items {
+        let FunctionCallOutputContentItem::InputText { text } = item else {
+            continue;
+        };
         if !combined.is_empty() {
             combined.push('\n');
         }
         combined.push_str(text);
     }
 
-    if combined.len() <= policy.byte_budget() {
-        return (items.to_vec(), None);
-    }
-
     let mut out = vec![FunctionCallOutputContentItem::InputText {
         text: formatted_truncate_text(&combined, policy),
     }];
-    out.extend(items.iter().filter_map(|item| match item {
+    out.extend(items.into_iter().filter_map(|item| match item {
         FunctionCallOutputContentItem::InputImage { image_url, detail } => {
-            Some(FunctionCallOutputContentItem::InputImage {
-                image_url: image_url.clone(),
-                detail: *detail,
-            })
+            Some(FunctionCallOutputContentItem::InputImage { image_url, detail })
         }
         FunctionCallOutputContentItem::InputText { .. } => None,
     }));

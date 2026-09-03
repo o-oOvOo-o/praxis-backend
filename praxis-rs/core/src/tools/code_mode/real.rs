@@ -30,7 +30,7 @@ use crate::unified_exec::resolve_max_tokens;
 use praxis_features::Feature;
 use praxis_tools::ToolSpec;
 use praxis_utils_output_truncation::TruncationPolicy;
-use praxis_utils_output_truncation::formatted_truncate_text_content_items_with_policy;
+use praxis_utils_output_truncation::formatted_truncate_owned_text_content_items_with_policy;
 use praxis_utils_output_truncation::truncate_function_output_items_with_policy;
 
 pub(crate) use execute_handler::CodeModeExecuteHandler;
@@ -258,7 +258,7 @@ fn truncate_code_mode_result(
         .all(|item| matches!(item, FunctionCallOutputContentItem::InputText { .. }))
     {
         let (truncated_items, _) =
-            formatted_truncate_text_content_items_with_policy(&items, policy);
+            formatted_truncate_owned_text_content_items_with_policy(items, policy);
         return truncated_items;
     }
 
