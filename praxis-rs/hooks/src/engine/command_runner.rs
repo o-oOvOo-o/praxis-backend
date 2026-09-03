@@ -21,6 +21,39 @@ pub(crate) struct CommandRunResult {
     pub error: Option<String>,
 }
 
+pub(crate) enum CommandCompletion<'a> {
+    Success { stdout: &'a str },
+    Rejected { reason: Option<String> },
+    Failed { message: String },
+}
+
+impl CommandRunResult {
+    pub(crate) fn completion(&self, exit_two_rejects: bool) -> CommandCompletion<'_> {
+        if let Some(message) = self.error.clone() {
+            return CommandCompletion::Failed { message };
+        }
+        match self.exit_code {
+            Some(0) => CommandCompletion::Success {
+                stdout: &self.stdout,
+            },
+            Some(2) if exit_two_rejects => CommandCompletion::Rejected {
+                reason: non_empty(&self.stderr),
+            },
+            Some(code) => CommandCompletion::Failed {
+                message: format!("hook exited with code {code}"),
+            },
+            None => CommandCompletion::Failed {
+                message: "hook exited without a status code".to_string(),
+            },
+        }
+    }
+}
+
+fn non_empty(text: &str) -> Option<String> {
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
 pub(crate) async fn run_command(
     shell: &CommandShell,
     handler: &ConfiguredHandler,

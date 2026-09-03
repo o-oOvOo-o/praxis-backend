@@ -11,6 +11,7 @@ use praxis_protocol::protocol::HookRunSummary;
 use super::common;
 use crate::engine::CommandShell;
 use crate::engine::ConfiguredHandler;
+use crate::engine::command_runner::CommandCompletion;
 use crate::engine::command_runner::CommandRunResult;
 use crate::engine::dispatcher;
 use crate::engine::output_parser;
@@ -135,111 +136,94 @@ fn parse_completed(
     let mut stop_reason = None;
     let mut additional_contexts_for_model = Vec::new();
 
-    match run_result.error.as_deref() {
-        Some(error) => {
+    match run_result.completion(true) {
+        CommandCompletion::Failed { message } => {
             status = HookRunStatus::Failed;
             entries.push(HookOutputEntry {
                 kind: HookOutputEntryKind::Error,
-                text: error.to_string(),
+                text: message,
             });
         }
-        None => match run_result.exit_code {
-            Some(0) => {
-                let trimmed_stdout = run_result.stdout.trim();
-                if trimmed_stdout.is_empty() {
-                } else if let Some(parsed) =
-                    output_parser::parse_user_prompt_submit(&run_result.stdout)
-                {
-                    if let Some(system_message) = parsed.universal.system_message {
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Warning,
-                            text: system_message,
-                        });
-                    }
-                    if parsed.invalid_block_reason.is_none()
-                        && let Some(additional_context) = parsed.additional_context
-                    {
-                        common::append_additional_context(
-                            &mut entries,
-                            &mut additional_contexts_for_model,
-                            additional_context,
-                        );
-                    }
-                    let _ = parsed.universal.suppress_output;
-                    if !parsed.universal.continue_processing {
-                        status = HookRunStatus::Stopped;
-                        should_stop = true;
-                        stop_reason = parsed.universal.stop_reason.clone();
-                        if let Some(stop_reason_text) = parsed.universal.stop_reason {
-                            entries.push(HookOutputEntry {
-                                kind: HookOutputEntryKind::Stop,
-                                text: stop_reason_text,
-                            });
-                        }
-                    } else if let Some(invalid_block_reason) = parsed.invalid_block_reason {
-                        status = HookRunStatus::Failed;
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Error,
-                            text: invalid_block_reason,
-                        });
-                    } else if parsed.should_block {
-                        status = HookRunStatus::Blocked;
-                        should_stop = true;
-                        stop_reason = parsed.reason.clone();
-                        if let Some(reason) = parsed.reason {
-                            entries.push(HookOutputEntry {
-                                kind: HookOutputEntryKind::Feedback,
-                                text: reason,
-                            });
-                        }
-                    }
-                } else if trimmed_stdout.starts_with('{') || trimmed_stdout.starts_with('[') {
-                    status = HookRunStatus::Failed;
+        CommandCompletion::Success { stdout } => {
+            let trimmed_stdout = stdout.trim();
+            if trimmed_stdout.is_empty() {
+            } else if let Some(parsed) = output_parser::parse_user_prompt_submit(stdout) {
+                if let Some(system_message) = parsed.universal.system_message {
                     entries.push(HookOutputEntry {
-                        kind: HookOutputEntryKind::Error,
-                        text: "hook returned invalid user prompt submit JSON output".to_string(),
+                        kind: HookOutputEntryKind::Warning,
+                        text: system_message,
                     });
-                } else {
-                    let additional_context = trimmed_stdout.to_string();
+                }
+                if parsed.invalid_block_reason.is_none()
+                    && let Some(additional_context) = parsed.additional_context
+                {
                     common::append_additional_context(
                         &mut entries,
                         &mut additional_contexts_for_model,
                         additional_context,
                     );
                 }
-            }
-            Some(2) => {
-                if let Some(reason) = common::trimmed_non_empty(&run_result.stderr) {
-                    status = HookRunStatus::Blocked;
+                let _ = parsed.universal.suppress_output;
+                if !parsed.universal.continue_processing {
+                    status = HookRunStatus::Stopped;
                     should_stop = true;
-                    stop_reason = Some(reason.clone());
-                    entries.push(HookOutputEntry {
-                        kind: HookOutputEntryKind::Feedback,
-                        text: reason,
-                    });
-                } else {
+                    stop_reason = parsed.universal.stop_reason.clone();
+                    if let Some(stop_reason_text) = parsed.universal.stop_reason {
+                        entries.push(HookOutputEntry {
+                            kind: HookOutputEntryKind::Stop,
+                            text: stop_reason_text,
+                        });
+                    }
+                } else if let Some(invalid_block_reason) = parsed.invalid_block_reason {
                     status = HookRunStatus::Failed;
                     entries.push(HookOutputEntry {
                         kind: HookOutputEntryKind::Error,
-                        text: "UserPromptSubmit hook exited with code 2 but did not write a blocking reason to stderr".to_string(),
+                        text: invalid_block_reason,
                     });
+                } else if parsed.should_block {
+                    status = HookRunStatus::Blocked;
+                    should_stop = true;
+                    stop_reason = parsed.reason.clone();
+                    if let Some(reason) = parsed.reason {
+                        entries.push(HookOutputEntry {
+                            kind: HookOutputEntryKind::Feedback,
+                            text: reason,
+                        });
+                    }
                 }
-            }
-            Some(exit_code) => {
+            } else if trimmed_stdout.starts_with('{') || trimmed_stdout.starts_with('[') {
                 status = HookRunStatus::Failed;
                 entries.push(HookOutputEntry {
                     kind: HookOutputEntryKind::Error,
-                    text: format!("hook exited with code {exit_code}"),
+                    text: "hook returned invalid user prompt submit JSON output".to_string(),
                 });
+            } else {
+                let additional_context = trimmed_stdout.to_string();
+                common::append_additional_context(
+                    &mut entries,
+                    &mut additional_contexts_for_model,
+                    additional_context,
+                );
             }
-            None => {
-                status = HookRunStatus::Failed;
-                entries.push(HookOutputEntry {
-                    kind: HookOutputEntryKind::Error,
-                    text: "hook exited without a status code".to_string(),
-                });
-            }
-        },
+        }
+        CommandCompletion::Rejected {
+            reason: Some(reason),
+        } => {
+            status = HookRunStatus::Blocked;
+            should_stop = true;
+            stop_reason = Some(reason.clone());
+            entries.push(HookOutputEntry {
+                kind: HookOutputEntryKind::Feedback,
+                text: reason,
+            });
+        }
+        CommandCompletion::Rejected { reason: None } => {
+            status = HookRunStatus::Failed;
+            entries.push(HookOutputEntry {
+                kind: HookOutputEntryKind::Error,
+                text: "UserPromptSubmit hook exited with code 2 but did not write a blocking reason to stderr".to_string(),
+            });
+        }
     }
 
     let completed = HookCompletedEvent {

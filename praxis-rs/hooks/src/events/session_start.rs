@@ -11,6 +11,7 @@ use praxis_protocol::protocol::HookRunSummary;
 use super::common;
 use crate::engine::CommandShell;
 use crate::engine::ConfiguredHandler;
+use crate::engine::command_runner::CommandCompletion;
 use crate::engine::command_runner::CommandRunResult;
 use crate::engine::dispatcher;
 use crate::engine::output_parser;
@@ -147,76 +148,69 @@ fn parse_completed(
     let mut stop_reason = None;
     let mut additional_contexts_for_model = Vec::new();
 
-    match run_result.error.as_deref() {
-        Some(error) => {
+    match run_result.completion(false) {
+        CommandCompletion::Failed { message }
+        | CommandCompletion::Rejected {
+            reason: Some(message),
+        } => {
             status = HookRunStatus::Failed;
             entries.push(HookOutputEntry {
                 kind: HookOutputEntryKind::Error,
-                text: error.to_string(),
+                text: message,
             });
         }
-        None => match run_result.exit_code {
-            Some(0) => {
-                let trimmed_stdout = run_result.stdout.trim();
-                if trimmed_stdout.is_empty() {
-                } else if let Some(parsed) = output_parser::parse_session_start(&run_result.stdout)
-                {
-                    if let Some(system_message) = parsed.universal.system_message {
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Warning,
-                            text: system_message,
-                        });
-                    }
-                    if let Some(additional_context) = parsed.additional_context {
-                        common::append_additional_context(
-                            &mut entries,
-                            &mut additional_contexts_for_model,
-                            additional_context,
-                        );
-                    }
-                    let _ = parsed.universal.suppress_output;
-                    if !parsed.universal.continue_processing {
-                        status = HookRunStatus::Stopped;
-                        should_stop = true;
-                        stop_reason = parsed.universal.stop_reason.clone();
-                        if let Some(stop_reason_text) = parsed.universal.stop_reason {
-                            entries.push(HookOutputEntry {
-                                kind: HookOutputEntryKind::Stop,
-                                text: stop_reason_text,
-                            });
-                        }
-                    }
-                // Preserve plain-text context support without treating malformed JSON as context.
-                } else if trimmed_stdout.starts_with('{') || trimmed_stdout.starts_with('[') {
-                    status = HookRunStatus::Failed;
+        CommandCompletion::Rejected { reason: None } => {
+            status = HookRunStatus::Failed;
+            entries.push(HookOutputEntry {
+                kind: HookOutputEntryKind::Error,
+                text: "hook rejected session start without a reason".to_string(),
+            });
+        }
+        CommandCompletion::Success { stdout } => {
+            let trimmed_stdout = stdout.trim();
+            if trimmed_stdout.is_empty() {
+            } else if let Some(parsed) = output_parser::parse_session_start(stdout) {
+                if let Some(system_message) = parsed.universal.system_message {
                     entries.push(HookOutputEntry {
-                        kind: HookOutputEntryKind::Error,
-                        text: "hook returned invalid session start JSON output".to_string(),
+                        kind: HookOutputEntryKind::Warning,
+                        text: system_message,
                     });
-                } else {
-                    let additional_context = trimmed_stdout.to_string();
+                }
+                if let Some(additional_context) = parsed.additional_context {
                     common::append_additional_context(
                         &mut entries,
                         &mut additional_contexts_for_model,
                         additional_context,
                     );
                 }
-            }
-            Some(exit_code) => {
+                let _ = parsed.universal.suppress_output;
+                if !parsed.universal.continue_processing {
+                    status = HookRunStatus::Stopped;
+                    should_stop = true;
+                    stop_reason = parsed.universal.stop_reason.clone();
+                    if let Some(stop_reason_text) = parsed.universal.stop_reason {
+                        entries.push(HookOutputEntry {
+                            kind: HookOutputEntryKind::Stop,
+                            text: stop_reason_text,
+                        });
+                    }
+                }
+            // Preserve plain-text context support without treating malformed JSON as context.
+            } else if trimmed_stdout.starts_with('{') || trimmed_stdout.starts_with('[') {
                 status = HookRunStatus::Failed;
                 entries.push(HookOutputEntry {
                     kind: HookOutputEntryKind::Error,
-                    text: format!("hook exited with code {exit_code}"),
+                    text: "hook returned invalid session start JSON output".to_string(),
                 });
+            } else {
+                let additional_context = trimmed_stdout.to_string();
+                common::append_additional_context(
+                    &mut entries,
+                    &mut additional_contexts_for_model,
+                    additional_context,
+                );
             }
-            None => {
-                status = HookRunStatus::Failed;
-                entries.push(HookOutputEntry {
-                    kind: HookOutputEntryKind::Error,
-                    text: "hook exited without a status code".to_string(),
-                });
-            }
-        },
+        }
     }
 
     let completed = HookCompletedEvent {

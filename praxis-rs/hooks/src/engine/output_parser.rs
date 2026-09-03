@@ -253,7 +253,7 @@ fn unsupported_pre_tool_use_hook_specific_output(
     } else if output
         .additional_context
         .as_deref()
-        .and_then(trimmed_reason)
+        .and_then(non_empty_reason)
         .is_some()
     {
         Some("PreToolUse hook returned unsupported additionalContext".to_string())
@@ -269,7 +269,7 @@ fn unsupported_pre_tool_use_hook_specific_output(
                 if output
                     .permission_decision_reason
                     .as_deref()
-                    .and_then(trimmed_reason)
+                    .and_then(non_empty_reason)
                     .is_none()
                 {
                     Some(invalid_pre_tool_use_reason_message())
@@ -297,7 +297,7 @@ fn unsupported_pre_tool_use_flat_decision(
             Some("PreToolUse hook returned unsupported decision:approve".to_string())
         }
         Some(PreToolUseDecisionWire::Block) => {
-            if reason.and_then(trimmed_reason).is_none() {
+            if reason.and_then(non_empty_reason).is_none() {
                 Some(invalid_block_message("PreToolUse"))
             } else {
                 None
@@ -319,10 +319,14 @@ fn invalid_pre_tool_use_reason_message() -> String {
 }
 
 fn trimmed_reason(reason: &str) -> Option<String> {
+    non_empty_reason(reason).map(str::to_owned)
+}
+
+fn non_empty_reason(reason: &str) -> Option<&str> {
     let trimmed = reason.trim();
     if trimmed.is_empty() {
         None
     } else {
-        Some(trimmed.to_string())
+        Some(trimmed)
     }
 }

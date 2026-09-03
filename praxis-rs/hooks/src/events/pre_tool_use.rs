@@ -11,6 +11,7 @@ use praxis_protocol::protocol::HookRunSummary;
 use super::common;
 use crate::engine::CommandShell;
 use crate::engine::ConfiguredHandler;
+use crate::engine::command_runner::CommandCompletion;
 use crate::engine::command_runner::CommandRunResult;
 use crate::engine::dispatcher;
 use crate::engine::output_parser;
@@ -130,50 +131,31 @@ fn parse_completed(
     let mut should_block = false;
     let mut block_reason = None;
 
-    match run_result.error.as_deref() {
-        Some(error) => {
+    match run_result.completion(true) {
+        CommandCompletion::Failed { message } => {
             status = HookRunStatus::Failed;
             entries.push(HookOutputEntry {
                 kind: HookOutputEntryKind::Error,
-                text: error.to_string(),
+                text: message,
             });
         }
-        None => match run_result.exit_code {
-            Some(0) => {
-                let trimmed_stdout = run_result.stdout.trim();
-                if trimmed_stdout.is_empty() {
-                } else if let Some(parsed) = output_parser::parse_pre_tool_use(&run_result.stdout) {
-                    if let Some(system_message) = parsed.universal.system_message {
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Warning,
-                            text: system_message,
-                        });
-                    }
-                    if let Some(invalid_reason) = parsed.invalid_reason {
-                        status = HookRunStatus::Failed;
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Error,
-                            text: invalid_reason,
-                        });
-                    } else if let Some(reason) = parsed.block_reason {
-                        status = HookRunStatus::Blocked;
-                        should_block = true;
-                        block_reason = Some(reason.clone());
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Feedback,
-                            text: reason,
-                        });
-                    }
-                } else if trimmed_stdout.starts_with('{') || trimmed_stdout.starts_with('[') {
+        CommandCompletion::Success { stdout } => {
+            let trimmed_stdout = stdout.trim();
+            if trimmed_stdout.is_empty() {
+            } else if let Some(parsed) = output_parser::parse_pre_tool_use(stdout) {
+                if let Some(system_message) = parsed.universal.system_message {
+                    entries.push(HookOutputEntry {
+                        kind: HookOutputEntryKind::Warning,
+                        text: system_message,
+                    });
+                }
+                if let Some(invalid_reason) = parsed.invalid_reason {
                     status = HookRunStatus::Failed;
                     entries.push(HookOutputEntry {
                         kind: HookOutputEntryKind::Error,
-                        text: "hook returned invalid pre-tool-use JSON output".to_string(),
+                        text: invalid_reason,
                     });
-                }
-            }
-            Some(2) => {
-                if let Some(reason) = common::trimmed_non_empty(&run_result.stderr) {
+                } else if let Some(reason) = parsed.block_reason {
                     status = HookRunStatus::Blocked;
                     should_block = true;
                     block_reason = Some(reason.clone());
@@ -181,29 +163,33 @@ fn parse_completed(
                         kind: HookOutputEntryKind::Feedback,
                         text: reason,
                     });
-                } else {
-                    status = HookRunStatus::Failed;
-                    entries.push(HookOutputEntry {
-                        kind: HookOutputEntryKind::Error,
-                        text: "PreToolUse hook exited with code 2 but did not write a blocking reason to stderr".to_string(),
-                    });
                 }
-            }
-            Some(exit_code) => {
+            } else if trimmed_stdout.starts_with('{') || trimmed_stdout.starts_with('[') {
                 status = HookRunStatus::Failed;
                 entries.push(HookOutputEntry {
                     kind: HookOutputEntryKind::Error,
-                    text: format!("hook exited with code {exit_code}"),
+                    text: "hook returned invalid pre-tool-use JSON output".to_string(),
                 });
             }
-            None => {
-                status = HookRunStatus::Failed;
-                entries.push(HookOutputEntry {
-                    kind: HookOutputEntryKind::Error,
-                    text: "hook exited without a status code".to_string(),
-                });
-            }
-        },
+        }
+        CommandCompletion::Rejected {
+            reason: Some(reason),
+        } => {
+            status = HookRunStatus::Blocked;
+            should_block = true;
+            block_reason = Some(reason.clone());
+            entries.push(HookOutputEntry {
+                kind: HookOutputEntryKind::Feedback,
+                text: reason,
+            });
+        }
+        CommandCompletion::Rejected { reason: None } => {
+            status = HookRunStatus::Failed;
+            entries.push(HookOutputEntry {
+                kind: HookOutputEntryKind::Error,
+                text: "PreToolUse hook exited with code 2 but did not write a blocking reason to stderr".to_string(),
+            });
+        }
     }
 
     let completed = HookCompletedEvent {

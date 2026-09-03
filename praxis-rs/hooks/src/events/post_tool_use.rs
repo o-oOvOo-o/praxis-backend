@@ -12,6 +12,7 @@ use serde_json::Value;
 use super::common;
 use crate::engine::CommandShell;
 use crate::engine::ConfiguredHandler;
+use crate::engine::command_runner::CommandCompletion;
 use crate::engine::command_runner::CommandRunResult;
 use crate::engine::dispatcher;
 use crate::engine::output_parser;
@@ -155,114 +156,99 @@ fn parse_completed(
     let mut additional_contexts_for_model = Vec::new();
     let mut feedback_messages_for_model = Vec::new();
 
-    match run_result.error.as_deref() {
-        Some(error) => {
+    match run_result.completion(true) {
+        CommandCompletion::Failed { message } => {
             status = HookRunStatus::Failed;
             entries.push(HookOutputEntry {
                 kind: HookOutputEntryKind::Error,
-                text: error.to_string(),
+                text: message,
             });
         }
-        None => match run_result.exit_code {
-            Some(0) => {
-                let trimmed_stdout = run_result.stdout.trim();
-                if trimmed_stdout.is_empty() {
-                } else if let Some(parsed) = output_parser::parse_post_tool_use(&run_result.stdout)
+        CommandCompletion::Success { stdout } => {
+            let trimmed_stdout = stdout.trim();
+            if trimmed_stdout.is_empty() {
+            } else if let Some(parsed) = output_parser::parse_post_tool_use(stdout) {
+                if let Some(system_message) = parsed.universal.system_message {
+                    entries.push(HookOutputEntry {
+                        kind: HookOutputEntryKind::Warning,
+                        text: system_message,
+                    });
+                }
+                if parsed.invalid_reason.is_none()
+                    && parsed.invalid_block_reason.is_none()
+                    && let Some(additional_context) = parsed.additional_context
                 {
-                    if let Some(system_message) = parsed.universal.system_message {
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Warning,
-                            text: system_message,
-                        });
-                    }
-                    if parsed.invalid_reason.is_none()
-                        && parsed.invalid_block_reason.is_none()
-                        && let Some(additional_context) = parsed.additional_context
-                    {
-                        common::append_additional_context(
-                            &mut entries,
-                            &mut additional_contexts_for_model,
-                            additional_context,
-                        );
-                    }
-                    if !parsed.universal.continue_processing {
-                        status = HookRunStatus::Stopped;
-                        should_stop = true;
-                        stop_reason = parsed.universal.stop_reason.clone();
-                        let stop_text = parsed
-                            .universal
-                            .stop_reason
-                            .unwrap_or_else(|| "PostToolUse hook stopped execution".to_string());
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Stop,
-                            text: stop_text.clone(),
-                        });
-                        let model_feedback = parsed
-                            .reason
-                            .as_deref()
-                            .and_then(common::trimmed_non_empty)
-                            .unwrap_or(stop_text);
-                        feedback_messages_for_model.push(model_feedback);
-                    } else if let Some(invalid_reason) = parsed.invalid_reason {
-                        status = HookRunStatus::Failed;
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Error,
-                            text: invalid_reason,
-                        });
-                    } else if let Some(invalid_block_reason) = parsed.invalid_block_reason {
-                        status = HookRunStatus::Failed;
-                        entries.push(HookOutputEntry {
-                            kind: HookOutputEntryKind::Error,
-                            text: invalid_block_reason,
-                        });
-                    } else if parsed.should_block {
-                        status = HookRunStatus::Blocked;
-                        if let Some(reason) = parsed.reason {
-                            entries.push(HookOutputEntry {
-                                kind: HookOutputEntryKind::Feedback,
-                                text: reason.clone(),
-                            });
-                            feedback_messages_for_model.push(reason);
-                        }
-                    }
-                } else if trimmed_stdout.starts_with('{') || trimmed_stdout.starts_with('[') {
+                    common::append_additional_context(
+                        &mut entries,
+                        &mut additional_contexts_for_model,
+                        additional_context,
+                    );
+                }
+                if !parsed.universal.continue_processing {
+                    status = HookRunStatus::Stopped;
+                    should_stop = true;
+                    stop_reason = parsed.universal.stop_reason.clone();
+                    let stop_text = parsed
+                        .universal
+                        .stop_reason
+                        .unwrap_or_else(|| "PostToolUse hook stopped execution".to_string());
+                    entries.push(HookOutputEntry {
+                        kind: HookOutputEntryKind::Stop,
+                        text: stop_text.clone(),
+                    });
+                    let model_feedback = parsed
+                        .reason
+                        .as_deref()
+                        .and_then(common::trimmed_non_empty)
+                        .unwrap_or(stop_text);
+                    feedback_messages_for_model.push(model_feedback);
+                } else if let Some(invalid_reason) = parsed.invalid_reason {
                     status = HookRunStatus::Failed;
                     entries.push(HookOutputEntry {
                         kind: HookOutputEntryKind::Error,
-                        text: "hook returned invalid post-tool-use JSON output".to_string(),
+                        text: invalid_reason,
                     });
-                }
-            }
-            Some(2) => {
-                if let Some(reason) = common::trimmed_non_empty(&run_result.stderr) {
-                    entries.push(HookOutputEntry {
-                        kind: HookOutputEntryKind::Feedback,
-                        text: reason.clone(),
-                    });
-                    feedback_messages_for_model.push(reason);
-                } else {
+                } else if let Some(invalid_block_reason) = parsed.invalid_block_reason {
                     status = HookRunStatus::Failed;
                     entries.push(HookOutputEntry {
                         kind: HookOutputEntryKind::Error,
-                        text: "PostToolUse hook exited with code 2 but did not write feedback to stderr".to_string(),
+                        text: invalid_block_reason,
                     });
+                } else if parsed.should_block {
+                    status = HookRunStatus::Blocked;
+                    if let Some(reason) = parsed.reason {
+                        entries.push(HookOutputEntry {
+                            kind: HookOutputEntryKind::Feedback,
+                            text: reason.clone(),
+                        });
+                        feedback_messages_for_model.push(reason);
+                    }
                 }
-            }
-            Some(exit_code) => {
+            } else if trimmed_stdout.starts_with('{') || trimmed_stdout.starts_with('[') {
                 status = HookRunStatus::Failed;
                 entries.push(HookOutputEntry {
                     kind: HookOutputEntryKind::Error,
-                    text: format!("hook exited with code {exit_code}"),
+                    text: "hook returned invalid post-tool-use JSON output".to_string(),
                 });
             }
-            None => {
-                status = HookRunStatus::Failed;
-                entries.push(HookOutputEntry {
-                    kind: HookOutputEntryKind::Error,
-                    text: "hook exited without a status code".to_string(),
-                });
-            }
-        },
+        }
+        CommandCompletion::Rejected {
+            reason: Some(reason),
+        } => {
+            entries.push(HookOutputEntry {
+                kind: HookOutputEntryKind::Feedback,
+                text: reason.clone(),
+            });
+            feedback_messages_for_model.push(reason);
+        }
+        CommandCompletion::Rejected { reason: None } => {
+            status = HookRunStatus::Failed;
+            entries.push(HookOutputEntry {
+                kind: HookOutputEntryKind::Error,
+                text: "PostToolUse hook exited with code 2 but did not write feedback to stderr"
+                    .to_string(),
+            });
+        }
     }
 
     let completed = HookCompletedEvent {
