@@ -401,7 +401,7 @@ impl UnifiedExecProcess {
                         for chunk in chunks {
                             let bytes = chunk.chunk.into_inner();
                             let mut guard = output_buffer.lock().await;
-                            guard.push_chunk(bytes.clone());
+                            guard.push_chunk(&bytes);
                             drop(guard);
                             let _ = output_tx.send(bytes);
                             output_notify.notify_waiters();
@@ -468,7 +468,7 @@ impl UnifiedExecProcess {
                 match receiver.recv().await {
                     Ok(chunk) => {
                         let mut guard = buffer.lock().await;
-                        guard.push_chunk(chunk.clone());
+                        guard.push_chunk(&chunk);
                         drop(guard);
                         let _ = output_tx.send(chunk);
                         output_notify.notify_waiters();

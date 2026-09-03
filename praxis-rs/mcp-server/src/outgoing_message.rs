@@ -49,7 +49,7 @@ impl OutgoingMessageSender {
         let (tx_approve, rx_approve) = oneshot::channel();
         {
             let mut request_id_to_callback = self.request_id_to_callback.lock().await;
-            request_id_to_callback.insert(id, tx_approve);
+            request_id_to_callback.insert(id.clone(), tx_approve);
         }
 
         let outgoing_message = OutgoingMessage::Request(OutgoingRequest {

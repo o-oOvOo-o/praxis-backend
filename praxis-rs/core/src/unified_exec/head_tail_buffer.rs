@@ -43,17 +43,13 @@ impl HeadTailBuffer {
         self.omitted_bytes
     }
 
-    pub(crate) fn push_chunk(&mut self, chunk: Vec<u8>) {
+    pub(crate) fn push_chunk(&mut self, chunk: &[u8]) {
         if chunk.is_empty() {
             return;
         }
 
         let head_space = self.head_budget.saturating_sub(self.head.len());
         let split = head_space.min(chunk.len());
-        if split == chunk.len() && self.head.is_empty() {
-            self.head = chunk;
-            return;
-        }
         self.head.extend_from_slice(&chunk[..split]);
         self.push_to_tail(&chunk[split..]);
     }

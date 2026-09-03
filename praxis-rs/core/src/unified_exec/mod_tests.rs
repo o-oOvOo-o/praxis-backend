@@ -199,9 +199,9 @@ async fn write_stdin(
 #[test]
 fn push_chunk_preserves_prefix_and_suffix() {
     let mut buffer = HeadTailBuffer::default();
-    buffer.push_chunk(vec![b'a'; UNIFIED_EXEC_OUTPUT_MAX_BYTES]);
-    buffer.push_chunk(vec![b'b']);
-    buffer.push_chunk(vec![b'c']);
+    buffer.push_chunk(&vec![b'a'; UNIFIED_EXEC_OUTPUT_MAX_BYTES]);
+    buffer.push_chunk(b"b");
+    buffer.push_chunk(b"c");
 
     assert_eq!(buffer.retained_bytes(), UNIFIED_EXEC_OUTPUT_MAX_BYTES);
     let snapshot = buffer.snapshot_chunks();
@@ -221,8 +221,8 @@ fn push_chunk_preserves_prefix_and_suffix() {
 #[test]
 fn head_tail_buffer_default_preserves_prefix_and_suffix() {
     let mut buffer = HeadTailBuffer::default();
-    buffer.push_chunk(vec![b'a'; UNIFIED_EXEC_OUTPUT_MAX_BYTES]);
-    buffer.push_chunk(b"bc".to_vec());
+    buffer.push_chunk(&vec![b'a'; UNIFIED_EXEC_OUTPUT_MAX_BYTES]);
+    buffer.push_chunk(b"bc");
 
     let rendered = buffer.to_bytes();
     assert_eq!(rendered.first(), Some(&b'a'));
