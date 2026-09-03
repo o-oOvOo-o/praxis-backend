@@ -22,6 +22,8 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::thread;
 
@@ -32,6 +34,7 @@ pub type CapabilityActivation =
 const DISPOSAL_REAPER_STACK_BYTES: usize = 512 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
 pub enum CapabilityLifecycle {
     Discovered,
     Resolved,
@@ -58,17 +61,19 @@ pub(crate) struct GenerationRecord {
     owner: CapabilityOwnerId,
     scope: ScopeId,
     capabilities: Vec<CapabilityId>,
-    mutable: Mutex<GenerationMutable>,
+    state: AtomicUsize,
+    payloads: ArcSwap<BTreeMap<CapabilityId, Arc<dyn Any + Send + Sync>>>,
+    resources: Mutex<GenerationResources>,
     disposal_tx: mpsc::Sender<DisposalJob>,
 }
 
-struct GenerationMutable {
-    lifecycle: CapabilityLifecycle,
-    leases: usize,
-    payloads: BTreeMap<CapabilityId, Arc<dyn Any + Send + Sync>>,
+struct GenerationResources {
     disposers: Vec<CapabilityDisposer>,
     disposal_failures: Vec<String>,
 }
+
+const LIFECYCLE_BITS: usize = 3;
+const LIFECYCLE_MASK: usize = (1 << LIFECYCLE_BITS) - 1;
 
 #[derive(Clone)]
 pub struct CapabilityRuntime {
@@ -559,14 +564,16 @@ impl CapabilityTransaction {
                 owner: self.owner.clone(),
                 scope: self.scope.clone(),
                 capabilities: activated.clone(),
-                mutable: Mutex::new(GenerationMutable {
-                    lifecycle: if activated.is_empty() {
+                state: AtomicUsize::new(pack_generation_state(
+                    if activated.is_empty() {
                         CapabilityLifecycle::Disposed
                     } else {
                         CapabilityLifecycle::Active
                     },
-                    leases: 0,
-                    payloads,
+                    0,
+                )),
+                payloads: ArcSwap::from_pointee(payloads),
+                resources: Mutex::new(GenerationResources {
                     disposers,
                     disposal_failures: Vec::new(),
                 }),
@@ -636,71 +643,117 @@ impl GenerationRecord {
         self.id
     }
 
-    fn lock_mutable(&self) -> MutexGuard<'_, GenerationMutable> {
-        self.mutable
+    fn lock_resources(&self) -> MutexGuard<'_, GenerationResources> {
+        self.resources
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub(crate) fn lifecycle(&self) -> CapabilityLifecycle {
-        self.lock_mutable().lifecycle
+        unpack_generation_state(self.state.load(Ordering::Acquire)).0
     }
 
     fn snapshot_state(&self) -> (CapabilityLifecycle, usize, Vec<String>) {
-        let mutable = self.lock_mutable();
-        (
-            mutable.lifecycle,
-            mutable.leases,
-            mutable.disposal_failures.clone(),
-        )
+        let (lifecycle, leases) = unpack_generation_state(self.state.load(Ordering::Acquire));
+        let resources = self.lock_resources();
+        (lifecycle, leases, resources.disposal_failures.clone())
     }
 
     fn payload(&self, capability: &CapabilityId) -> Option<Arc<dyn Any + Send + Sync>> {
-        self.lock_mutable().payloads.get(capability).cloned()
+        self.payloads.load().get(capability).cloned()
     }
 
     fn try_acquire(&self) -> bool {
-        let mut mutable = self.lock_mutable();
-        if mutable.lifecycle != CapabilityLifecycle::Active {
-            return false;
+        let mut current = self.state.load(Ordering::Acquire);
+        loop {
+            let (lifecycle, leases) = unpack_generation_state(current);
+            if lifecycle != CapabilityLifecycle::Active {
+                return false;
+            }
+            let next = pack_generation_state(
+                lifecycle,
+                leases
+                    .checked_add(1)
+                    .expect("capability lease count overflow"),
+            );
+            match self.state.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(actual) => current = actual,
+            }
         }
-        mutable.leases = mutable
-            .leases
-            .checked_add(1)
-            .expect("capability lease count overflow");
-        true
     }
 
     pub(crate) fn retain_lease(&self) -> bool {
-        let mut mutable = self.lock_mutable();
-        if matches!(
-            mutable.lifecycle,
-            CapabilityLifecycle::Retired | CapabilityLifecycle::Disposed
-        ) {
-            return false;
+        let mut current = self.state.load(Ordering::Acquire);
+        loop {
+            let (lifecycle, leases) = unpack_generation_state(current);
+            if matches!(
+                lifecycle,
+                CapabilityLifecycle::Retired | CapabilityLifecycle::Disposed
+            ) {
+                return false;
+            }
+            let next = pack_generation_state(
+                lifecycle,
+                leases
+                    .checked_add(1)
+                    .expect("capability lease count overflow"),
+            );
+            match self.state.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return true,
+                Err(actual) => current = actual,
+            }
         }
-        mutable.leases = mutable
-            .leases
-            .checked_add(1)
-            .expect("capability lease count overflow");
-        true
     }
 
     fn begin_quiescing(&self) -> Option<Vec<CapabilityDisposer>> {
-        let mut mutable = self.lock_mutable();
-        if mutable.lifecycle == CapabilityLifecycle::Active {
-            mutable.lifecycle = CapabilityLifecycle::Quiescing;
+        let mut current = self.state.load(Ordering::Acquire);
+        loop {
+            let (lifecycle, leases) = unpack_generation_state(current);
+            if lifecycle != CapabilityLifecycle::Active {
+                break;
+            }
+            let next = pack_generation_state(CapabilityLifecycle::Quiescing, leases);
+            match self.state.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
         }
-        take_disposal_if_drained(&mut mutable)
+        self.take_disposal_if_drained()
     }
 
     pub(crate) fn release_lease(self: &Arc<Self>) {
-        let disposers = {
-            let mut mutable = self.lock_mutable();
-            debug_assert!(mutable.leases > 0, "lease count must not underflow");
-            mutable.leases = mutable.leases.saturating_sub(1);
-            take_disposal_if_drained(&mut mutable)
-        };
+        let mut current = self.state.load(Ordering::Acquire);
+        loop {
+            let (lifecycle, leases) = unpack_generation_state(current);
+            debug_assert!(leases > 0, "lease count must not underflow");
+            let next = pack_generation_state(lifecycle, leases.saturating_sub(1));
+            match self.state.compare_exchange_weak(
+                current,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
+        let disposers = self.take_disposal_if_drained();
         if let Some(disposers) = disposers {
             self.schedule_disposal(disposers);
         }
@@ -727,19 +780,58 @@ impl GenerationRecord {
     }
 
     fn complete_disposal(&self, failures: Vec<String>) {
-        let mut mutable = self.lock_mutable();
-        mutable.disposal_failures.extend(failures);
-        mutable.lifecycle = CapabilityLifecycle::Disposed;
+        self.lock_resources().disposal_failures.extend(failures);
+        let mut current = self.state.load(Ordering::Acquire);
+        loop {
+            let (_, leases) = unpack_generation_state(current);
+            let next = pack_generation_state(CapabilityLifecycle::Disposed, leases);
+            match self.state.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Release,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    fn take_disposal_if_drained(&self) -> Option<Vec<CapabilityDisposer>> {
+        let quiescing = pack_generation_state(CapabilityLifecycle::Quiescing, 0);
+        let retired = pack_generation_state(CapabilityLifecycle::Retired, 0);
+        if self
+            .state
+            .compare_exchange(quiescing, retired, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return None;
+        }
+        self.payloads.store(Arc::new(BTreeMap::new()));
+        Some(std::mem::take(&mut self.lock_resources().disposers))
     }
 }
 
-fn take_disposal_if_drained(mutable: &mut GenerationMutable) -> Option<Vec<CapabilityDisposer>> {
-    if mutable.leases != 0 || mutable.lifecycle != CapabilityLifecycle::Quiescing {
-        return None;
-    }
-    mutable.lifecycle = CapabilityLifecycle::Retired;
-    mutable.payloads.clear();
-    Some(std::mem::take(&mut mutable.disposers))
+fn pack_generation_state(lifecycle: CapabilityLifecycle, leases: usize) -> usize {
+    leases
+        .checked_mul(1 << LIFECYCLE_BITS)
+        .expect("capability lease count overflow")
+        | lifecycle as usize
+}
+
+fn unpack_generation_state(state: usize) -> (CapabilityLifecycle, usize) {
+    let lifecycle = match state & LIFECYCLE_MASK {
+        0 => CapabilityLifecycle::Discovered,
+        1 => CapabilityLifecycle::Resolved,
+        2 => CapabilityLifecycle::Staged,
+        3 => CapabilityLifecycle::Validated,
+        4 => CapabilityLifecycle::Active,
+        5 => CapabilityLifecycle::Quiescing,
+        6 => CapabilityLifecycle::Retired,
+        7 => CapabilityLifecycle::Disposed,
+        _ => unreachable!(),
+    };
+    (lifecycle, state >> LIFECYCLE_BITS)
 }
 
 impl RuntimeInner {
