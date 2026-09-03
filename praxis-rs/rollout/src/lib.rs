@@ -47,7 +47,6 @@ pub use thread_store::ThreadNameWriter;
 pub use thread_store::ThreadStore;
 pub use thread_store::ThreadSummary;
 pub use thread_store::ThreadSummaryPage;
-pub use thread_store::list_threads;
 
 #[cfg(test)]
 mod tests;

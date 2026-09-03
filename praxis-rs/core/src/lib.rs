@@ -189,7 +189,6 @@ pub use rollout::list::ThreadsPage;
 pub use rollout::list::parse_cursor;
 pub use rollout::list::read_head_for_summary;
 pub use rollout::list::read_session_meta_line;
-pub use rollout::list_threads;
 pub use rollout::policy::EventPersistenceMode;
 pub use rollout::rollout_date_parts;
 mod function_tool;

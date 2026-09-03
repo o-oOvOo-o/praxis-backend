@@ -429,14 +429,6 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
     }
 }
 
-pub async fn list_threads(
-    config: &impl RolloutConfigView,
-    query: ListThreadsQuery,
-) -> io::Result<ThreadSummaryPage> {
-    let store = ThreadStore::open(config).await;
-    store.list_threads(query).await
-}
-
 /// Reads all persisted items and the canonical thread identity in one scan.
 pub async fn read_items(path: &Path) -> io::Result<(Vec<RolloutItem>, Option<ThreadId>, usize)> {
     let mut items = Vec::new();

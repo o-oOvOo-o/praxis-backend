@@ -11,7 +11,6 @@ pub use praxis_rollout::ThreadNameWriter;
 pub use praxis_rollout::ThreadStore;
 pub use praxis_rollout::ThreadSummary;
 pub use praxis_rollout::ThreadSummaryPage;
-pub use praxis_rollout::list_threads;
 pub use praxis_rollout::rollout_date_parts;
 
 impl praxis_rollout::RolloutConfigView for Config {
