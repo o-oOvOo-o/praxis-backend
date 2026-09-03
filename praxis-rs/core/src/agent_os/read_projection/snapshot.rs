@@ -24,14 +24,32 @@ impl AgentOsSnapshot {
         options: AgentOsSnapshotOptions,
         sequence: impl FnOnce() -> u64,
     ) -> Self {
-        let mut artifacts = state.artifacts.values().cloned().collect::<Vec<_>>();
-        artifacts.sort_by(|left, right| right.created_at.cmp(&left.created_at));
-        let mut worker_requests = state.worker_requests.values().cloned().collect::<Vec<_>>();
-        worker_requests.sort_by(|left, right| right.created_at.cmp(&left.created_at));
-        let mut runtime_commands = state.runtime_commands.values().cloned().collect::<Vec<_>>();
-        runtime_commands.sort_by(|left, right| right.created_at.cmp(&left.created_at));
-        let mut intent_plans = state.intent_plans.values().cloned().collect::<Vec<_>>();
-        intent_plans.sort_by(|left, right| right.created_at.cmp(&left.created_at));
+        let recent_artifacts = newest_by_created_at(
+            state.artifacts.values(),
+            options.recent_artifact_limit,
+            |artifact| artifact.created_at,
+        );
+        let pending_worker_requests = newest_by_created_at(
+            state
+                .worker_requests
+                .values()
+                .filter(|request| request.status == WorkerRequestStatus::Pending),
+            options.pending_worker_request_limit,
+            |request| request.created_at,
+        );
+        let pending_runtime_commands = newest_by_created_at(
+            state
+                .runtime_commands
+                .values()
+                .filter(|command| command.status.is_live()),
+            options.pending_runtime_command_limit,
+            |command| command.created_at,
+        );
+        let recent_intent_plans = newest_by_created_at(
+            state.intent_plans.values(),
+            options.recent_intent_plan_limit,
+            |plan| plan.created_at,
+        );
 
         Self {
             sequence: sequence(),
@@ -41,26 +59,20 @@ impl AgentOsSnapshot {
                 .cloned()
                 .map(AgentOsLeaseSummary::from)
                 .collect(),
-            recent_artifacts: artifacts
+            recent_artifacts: recent_artifacts
                 .into_iter()
-                .take(options.recent_artifact_limit)
                 .map(AgentOsArtifactSummary::from)
                 .collect(),
-            pending_worker_requests: worker_requests
+            pending_worker_requests: pending_worker_requests
                 .into_iter()
-                .filter(|request| request.status == WorkerRequestStatus::Pending)
-                .take(options.pending_worker_request_limit)
                 .map(AgentOsWorkerRequestSummary::from)
                 .collect(),
-            pending_runtime_commands: runtime_commands
+            pending_runtime_commands: pending_runtime_commands
                 .into_iter()
-                .filter(|command| command.status.is_live())
-                .take(options.pending_runtime_command_limit)
                 .map(RuntimeCommandSummary::from)
                 .collect(),
-            recent_intent_plans: intent_plans
+            recent_intent_plans: recent_intent_plans
                 .into_iter()
-                .take(options.recent_intent_plan_limit)
                 .map(AgentOsIntentPlanSummary::from)
                 .collect(),
         }
@@ -71,4 +83,24 @@ impl AgentOsSnapshot {
             && self.pending_worker_requests.is_empty()
             && self.pending_runtime_commands.is_empty()
     }
+}
+
+fn newest_by_created_at<'a, T, I, F>(values: I, limit: usize, created_at: F) -> Vec<T>
+where
+    T: Clone + 'a,
+    I: Iterator<Item = &'a T>,
+    F: Fn(&T) -> chrono::DateTime<chrono::Utc>,
+{
+    if limit == 0 {
+        return Vec::new();
+    }
+    let mut values = values.collect::<Vec<_>>();
+    if values.len() > limit {
+        values.select_nth_unstable_by(limit, |left, right| {
+            created_at(right).cmp(&created_at(left))
+        });
+        values.truncate(limit);
+    }
+    values.sort_unstable_by(|left, right| created_at(right).cmp(&created_at(left)));
+    values.into_iter().take(limit).cloned().collect::<Vec<_>>()
 }
