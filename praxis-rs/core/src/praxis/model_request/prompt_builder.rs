@@ -237,12 +237,12 @@ fn project_plan_working_state(input: &mut Vec<ResponseItem>) -> Option<TokenSavi
     );
 
     let original_tokens = serialized_token_count(input);
-    let mut projected = input.clone();
     let projected_call_ids = updates
         .iter()
         .map(|(call_id, _)| call_id.as_str())
         .collect::<HashSet<_>>();
-    for item in &mut projected {
+    let mut rollback = Vec::new();
+    for (item_index, item) in input.iter_mut().enumerate() {
         match item {
             ResponseItem::FunctionCall {
                 name,
@@ -250,35 +250,84 @@ fn project_plan_working_state(input: &mut Vec<ResponseItem>) -> Option<TokenSavi
                 call_id,
                 ..
             } if name == "update_plan" && projected_call_ids.contains(call_id.as_str()) => {
-                *arguments = "{\"projected_into\":\"praxis-working-state\"}".to_string();
+                rollback.push(PlanProjectionRollback::Arguments {
+                    item_index,
+                    value: std::mem::replace(
+                        arguments,
+                        "{\"projected_into\":\"praxis-working-state\"}".to_string(),
+                    ),
+                });
             }
             ResponseItem::FunctionCallOutput { call_id, output }
             | ResponseItem::CustomToolCallOutput {
                 call_id, output, ..
             } if projected_call_ids.contains(call_id.as_str()) => {
-                output.body = FunctionCallOutputBody::Text(
-                    "<praxis-reference kind=\"working-state\" />".to_string(),
-                );
+                rollback.push(PlanProjectionRollback::Output {
+                    item_index,
+                    body: std::mem::replace(
+                        &mut output.body,
+                        FunctionCallOutputBody::Text(
+                            "<praxis-reference kind=\"working-state\" />".to_string(),
+                        ),
+                    ),
+                });
             }
             _ => {}
         }
     }
-    projected.push(ResponseItem::Message {
+    input.push(ResponseItem::Message {
         id: None,
         role: "developer".to_string(),
         content: vec![ContentItem::InputText { text: state_text }],
         end_turn: None,
         phase: None,
     });
-    let sent_tokens = serialized_token_count(&projected);
+    let sent_tokens = serialized_token_count(input);
     let event = savings_event(
         TokenSavingKind::WorkingStateProjection,
         original_tokens,
         sent_tokens,
         "prompt://working-state/plan",
-    )?;
-    *input = projected;
-    Some(event)
+    );
+    if event.is_none() {
+        input.pop();
+        restore_plan_projection(input, rollback);
+    }
+    event
+}
+
+enum PlanProjectionRollback {
+    Arguments {
+        item_index: usize,
+        value: String,
+    },
+    Output {
+        item_index: usize,
+        body: FunctionCallOutputBody,
+    },
+}
+
+fn restore_plan_projection(input: &mut [ResponseItem], rollback: Vec<PlanProjectionRollback>) {
+    for entry in rollback {
+        match entry {
+            PlanProjectionRollback::Arguments { item_index, value } => {
+                if let Some(ResponseItem::FunctionCall { arguments, .. }) =
+                    input.get_mut(item_index)
+                {
+                    *arguments = value;
+                }
+            }
+            PlanProjectionRollback::Output { item_index, body } => {
+                if let Some(
+                    ResponseItem::FunctionCallOutput { output, .. }
+                    | ResponseItem::CustomToolCallOutput { output, .. },
+                ) = input.get_mut(item_index)
+                {
+                    output.body = body;
+                }
+            }
+        }
+    }
 }
 
 fn savings_event(
