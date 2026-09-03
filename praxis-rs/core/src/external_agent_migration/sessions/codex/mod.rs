@@ -3,7 +3,6 @@ use super::source::ExternalAgentSource;
 use crate::config::Config;
 use std::io;
 use std::path::Path;
-use std::path::PathBuf;
 use tokio::fs;
 use tracing::warn;
 use walkdir::WalkDir;
@@ -137,44 +136,27 @@ async fn copy_if_changed(source: &Path, dest: &Path) -> io::Result<bool> {
         return Ok(false);
     }
 
-    let parent = dest.parent().ok_or_else(|| {
-        io::Error::other(format!(
-            "Codex bridge rollout destination has no parent: {}",
-            dest.display()
-        ))
-    })?;
-    fs::create_dir_all(parent).await?;
     copy_via_temp_file(source, dest).await?;
     Ok(true)
 }
 
 async fn copy_via_temp_file(source: &Path, dest: &Path) -> io::Result<()> {
-    let temp_path = temp_path_for(dest);
-    if let Some(parent) = temp_path.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-    match fs::remove_file(&temp_path).await {
-        Ok(()) => {}
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-        Err(err) => return Err(err),
-    }
-    fs::copy(source, &temp_path).await?;
-    match fs::remove_file(dest).await {
-        Ok(()) => {}
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-        Err(err) => return Err(err),
-    }
-    fs::rename(&temp_path, dest).await
-}
-
-fn temp_path_for(path: &Path) -> PathBuf {
-    let mut file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("rollout")
-        .to_string();
-    file_name.push_str(".tmp");
-    path.with_file_name(file_name)
+    let parent = dest.parent().ok_or_else(|| {
+        io::Error::other(format!(
+            "rollout destination has no parent: {}",
+            dest.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).await?;
+    let temporary = tempfile::NamedTempFile::new_in(parent)?;
+    fs::copy(source, temporary.path()).await?;
+    tokio::fs::File::from_std(temporary.as_file().try_clone()?)
+        .sync_all()
+        .await?;
+    temporary
+        .persist(dest)
+        .map(|_| ())
+        .map_err(|error| error.error)
 }
 
 async fn reconcile_rollout(
