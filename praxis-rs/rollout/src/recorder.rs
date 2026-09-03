@@ -149,7 +149,7 @@ impl RolloutRecorder {
     /// For newly created sessions, this precomputes path/metadata and defers
     /// file creation/open until an explicit `persist()` call.
     ///
-    /// For resumed sessions, this immediately opens the existing rollout file.
+    /// For resumed sessions, this immediately opens the native thread writer.
     pub async fn new(
         config: &impl RolloutConfigView,
         params: RolloutRecorderParams,
@@ -158,7 +158,6 @@ impl RolloutRecorder {
     ) -> std::io::Result<Self> {
         let praxis_home = config.praxis_home().to_path_buf();
         let (
-            file,
             deferred_log_file_info,
             rollout_path,
             meta,
@@ -218,7 +217,6 @@ impl RolloutRecorder {
                 };
 
                 (
-                    None,
                     Some(log_file_info),
                     path,
                     Some(session_meta),
@@ -232,12 +230,7 @@ impl RolloutRecorder {
                 event_persistence_mode,
             } => {
                 let native_writer = NativeRolloutWriter::resume(praxis_home, &path).await?;
-                let file = tokio::fs::OpenOptions::new()
-                    .append(true)
-                    .open(&path)
-                    .await?;
                 (
-                    Some(file),
                     None,
                     path,
                     None,
@@ -255,11 +248,7 @@ impl RolloutRecorder {
         // future will yield, which is fine – we only need to ensure we do not
         // perform *blocking* I/O on the caller's thread.
         let (tx, rx) = mpsc::channel::<RolloutCmd>(256);
-        // Spawn a Tokio task that owns the file handle and performs async
-        // writes. Using `tokio::fs::File` keeps everything on the async I/O
-        // driver instead of blocking the runtime.
         tokio::task::spawn(rollout_writer(
-            file,
             deferred_log_file_info,
             native_writer,
             native_init,
@@ -421,7 +410,6 @@ fn open_log_file(path: &Path) -> std::io::Result<File> {
 
 #[allow(clippy::too_many_arguments)]
 async fn rollout_writer(
-    file: Option<tokio::fs::File>,
     mut deferred_log_file_info: Option<LogFileInfo>,
     mut native_writer: Option<NativeRolloutWriter>,
     mut native_init: Option<NativeRolloutInit>,
@@ -434,34 +422,13 @@ async fn rollout_writer(
     default_provider: String,
     generate_memories: bool,
 ) -> std::io::Result<()> {
-    let mut locator_writer = file.map(JsonlWriter::new);
-    let mut persisted = locator_writer.is_some();
+    let mut persisted = native_writer.is_some();
     let mut buffered_items = Vec::<RolloutItem>::new();
     let mut pending_name = None;
     let mut name_reconciled = false;
     if let Some(builder) = state_builder.as_mut() {
         builder.rollout_path = rollout_path.clone();
     }
-
-    // Resumed sessions already have a file handle open, so session metadata can
-    // be written immediately if present.
-    if locator_writer.is_some()
-        && let Some(session_meta) = meta.take()
-    {
-        write_session_meta(
-            native_writer.as_mut(),
-            locator_writer.as_mut(),
-            session_meta,
-            &cwd,
-            &rollout_path,
-            state_db_ctx.as_deref(),
-            &mut state_builder,
-            default_provider.as_str(),
-            generate_memories,
-        )
-        .await?;
-    }
-    drop(locator_writer);
 
     // Process rollout commands
     while let Some(cmd) = rx.recv().await {
@@ -720,10 +687,7 @@ async fn reconcile_thread_name_from_state(
     ) else {
         return Ok(());
     };
-    let names = match state_db
-        .get_thread_names(&HashSet::from([thread_id]))
-        .await
-    {
+    let names = match state_db.get_thread_names(&HashSet::from([thread_id])).await {
         Ok(names) => names,
         Err(error) => {
             warn!("failed to read compatibility thread name projection: {error}");
