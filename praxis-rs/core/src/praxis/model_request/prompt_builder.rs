@@ -209,25 +209,34 @@ fn successful_tool_output_text(item: &ResponseItem) -> Option<&str> {
 }
 
 fn project_plan_working_state(input: &mut Vec<ResponseItem>) -> Option<TokenSavingEvent> {
-    let updates = input
-        .iter()
-        .filter_map(|item| match item {
-            ResponseItem::FunctionCall {
-                name,
-                arguments,
-                call_id,
-                ..
-            } if name == "update_plan" => serde_json::from_str::<UpdatePlanArgs>(arguments)
-                .ok()
-                .map(|args| (call_id.clone(), args)),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    if updates.len() < 2 {
+    let mut update_count = 0usize;
+    let mut latest_update = None;
+    let mut projected_call_ids = HashSet::new();
+    for item in input.iter() {
+        let ResponseItem::FunctionCall {
+            name,
+            arguments,
+            call_id,
+            ..
+        } = item
+        else {
+            continue;
+        };
+        if name != "update_plan" {
+            continue;
+        }
+        let Ok(update) = serde_json::from_str::<UpdatePlanArgs>(arguments) else {
+            continue;
+        };
+        update_count = update_count.saturating_add(1);
+        projected_call_ids.insert(call_id.clone());
+        latest_update = Some((call_id.clone(), update));
+    }
+    if update_count < 2 {
         return None;
     }
 
-    let (call_id, update) = updates.last()?;
+    let (call_id, update) = latest_update?;
     let state = serde_json::json!({
         "format": "praxis.plan-state.v2",
         "call_id": call_id,
@@ -240,10 +249,6 @@ fn project_plan_working_state(input: &mut Vec<ResponseItem>) -> Option<TokenSavi
     );
 
     let original_tokens = serialized_token_count(input);
-    let projected_call_ids = updates
-        .iter()
-        .map(|(call_id, _)| call_id.as_str())
-        .collect::<HashSet<_>>();
     let mut rollback = Vec::new();
     for (item_index, item) in input.iter_mut().enumerate() {
         match item {
