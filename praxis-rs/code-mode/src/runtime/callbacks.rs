@@ -126,7 +126,7 @@ pub(super) fn store_callback(
         }
     };
     if let Some(state) = scope.get_slot_mut::<RuntimeState>() {
-        state.stored_values.insert(key, serialized);
+        std::sync::Arc::make_mut(&mut state.stored_values).insert(key, serialized);
     }
 }
 

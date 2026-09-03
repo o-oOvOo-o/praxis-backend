@@ -21,12 +21,14 @@ pub const DEFAULT_WAIT_YIELD_TIME_MS: u64 = 10_000;
 pub const DEFAULT_MAX_OUTPUT_TOKENS_PER_EXEC_CALL: usize = 10_000;
 const EXIT_SENTINEL: &str = "__praxis_code_mode_exit__";
 
+pub type StoredValues = Arc<HashMap<String, JsonValue>>;
+
 #[derive(Clone, Debug)]
 pub struct ExecuteRequest {
     pub tool_call_id: String,
     pub enabled_tools: Arc<[EnabledToolMetadata]>,
     pub source: String,
-    pub stored_values: HashMap<String, JsonValue>,
+    pub stored_values: StoredValues,
     pub yield_time_ms: Option<u64>,
     pub max_output_tokens: Option<usize>,
 }
@@ -51,7 +53,7 @@ pub enum RuntimeResponse {
     Result {
         cell_id: String,
         content_items: Vec<FunctionCallOutputContentItem>,
-        stored_values: HashMap<String, JsonValue>,
+        stored_values: StoredValues,
         error_text: Option<String>,
     },
 }
@@ -93,7 +95,7 @@ pub(crate) enum RuntimeEvent {
         text: String,
     },
     Result {
-        stored_values: HashMap<String, JsonValue>,
+        stored_values: StoredValues,
         error_text: Option<String>,
     },
 }
@@ -128,14 +130,14 @@ struct RuntimeConfig {
     tool_call_id: String,
     enabled_tools: Arc<[EnabledToolMetadata]>,
     source: String,
-    stored_values: HashMap<String, JsonValue>,
+    stored_values: StoredValues,
     module_sources: Arc<BTreeMap<String, Arc<str>>>,
 }
 
 pub(super) struct RuntimeState {
     event_tx: mpsc::Sender<RuntimeEvent>,
     pending_tool_calls: HashMap<String, v8::Global<v8::PromiseResolver>>,
-    stored_values: HashMap<String, JsonValue>,
+    stored_values: StoredValues,
     enabled_tools: Arc<[EnabledToolMetadata]>,
     next_tool_call_id: u64,
     tool_call_id: String,
@@ -147,7 +149,7 @@ pub(super) struct RuntimeState {
 pub(super) enum CompletionState {
     Pending,
     Completed {
-        stored_values: HashMap<String, JsonValue>,
+        stored_values: StoredValues,
         error_text: Option<String>,
     },
 }
@@ -195,7 +197,7 @@ fn run_runtime(
     });
 
     if let Err(error_text) = globals::install_globals(scope) {
-        send_result(&event_tx, HashMap::new(), Some(error_text));
+        send_result(&event_tx, StoredValues::default(), Some(error_text));
         return;
     }
 
@@ -281,7 +283,7 @@ fn capture_scope_send_error(
 
 fn send_result(
     event_tx: &mpsc::Sender<RuntimeEvent>,
-    stored_values: HashMap<String, JsonValue>,
+    stored_values: StoredValues,
     error_text: Option<String>,
 ) {
     let _ = event_tx.blocking_send(RuntimeEvent::Result {
@@ -309,7 +311,7 @@ mod tests {
             tool_call_id: "call_1".to_string(),
             enabled_tools: Arc::from([]),
             source: source.to_string(),
-            stored_values: HashMap::new(),
+            stored_values: StoredValues::default(),
             yield_time_ms: Some(1),
             max_output_tokens: None,
         }
@@ -344,7 +346,7 @@ mod tests {
         else {
             panic!("expected runtime result after termination");
         };
-        assert_eq!(stored_values, HashMap::new());
+        assert!(stored_values.is_empty());
         assert!(error_text.is_some());
 
         assert!(

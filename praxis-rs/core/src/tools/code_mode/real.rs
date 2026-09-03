@@ -59,14 +59,11 @@ impl CodeModeService {
         }
     }
 
-    pub(crate) async fn stored_values(&self) -> std::collections::HashMap<String, JsonValue> {
+    pub(crate) async fn stored_values(&self) -> praxis_code_mode::StoredValues {
         self.inner.stored_values().await
     }
 
-    pub(crate) async fn replace_stored_values(
-        &self,
-        values: std::collections::HashMap<String, JsonValue>,
-    ) {
+    pub(crate) async fn replace_stored_values(&self, values: praxis_code_mode::StoredValues) {
         self.inner.replace_stored_values(values).await;
     }
 

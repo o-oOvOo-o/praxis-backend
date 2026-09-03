@@ -21,6 +21,7 @@ use crate::runtime::ExecuteRequest;
 use crate::runtime::RuntimeCommand;
 use crate::runtime::RuntimeEvent;
 use crate::runtime::RuntimeResponse;
+use crate::runtime::StoredValues;
 use crate::runtime::TurnMessage;
 use crate::runtime::WaitRequest;
 use crate::runtime::spawn_runtime;
@@ -45,7 +46,7 @@ struct SessionHandle {
 }
 
 struct Inner {
-    stored_values: Mutex<HashMap<String, JsonValue>>,
+    stored_values: Mutex<StoredValues>,
     sessions: Mutex<HashMap<String, SessionHandle>>,
     turn_message_tx: mpsc::Sender<TurnMessage>,
     turn_message_rx: Arc<Mutex<mpsc::Receiver<TurnMessage>>>,
@@ -73,7 +74,7 @@ impl CodeModeService {
 
         Self {
             inner: Arc::new(Inner {
-                stored_values: Mutex::new(HashMap::new()),
+                stored_values: Mutex::new(StoredValues::default()),
                 sessions: Mutex::new(HashMap::new()),
                 turn_message_tx,
                 turn_message_rx: Arc::new(Mutex::new(turn_message_rx)),
@@ -113,11 +114,11 @@ impl CodeModeService {
             .collect()
     }
 
-    pub async fn stored_values(&self) -> HashMap<String, JsonValue> {
+    pub async fn stored_values(&self) -> StoredValues {
         self.inner.stored_values.lock().await.clone()
     }
 
-    pub async fn replace_stored_values(&self, values: HashMap<String, JsonValue>) {
+    pub async fn replace_stored_values(&self, values: StoredValues) {
         *self.inner.stored_values.lock().await = values;
     }
 
@@ -358,7 +359,7 @@ enum SessionControlCommand {
 
 struct PendingResult {
     content_items: Vec<FunctionCallOutputContentItem>,
-    stored_values: HashMap<String, JsonValue>,
+    stored_values: StoredValues,
     error_text: Option<String>,
 }
 
@@ -374,7 +375,7 @@ fn missing_cell_response(cell_id: String) -> RuntimeResponse {
         error_text: Some(format!("exec cell {cell_id} not found")),
         cell_id,
         content_items: Vec::new(),
-        stored_values: HashMap::new(),
+        stored_values: StoredValues::default(),
     }
 }
 
@@ -446,7 +447,7 @@ async fn run_session_control(
                     if pending_result.is_none() {
                         let result = PendingResult {
                             content_items: std::mem::take(&mut content_items),
-                            stored_values: HashMap::new(),
+                            stored_values: StoredValues::default(),
                             error_text: Some("exec runtime ended unexpectedly".to_string()),
                         };
                         if send_or_buffer_result(
@@ -618,7 +619,7 @@ mod tests {
             tool_call_id: "call_1".to_string(),
             enabled_tools: Arc::from([]),
             source: source.to_string(),
-            stored_values: HashMap::new(),
+            stored_values: StoredValues::default(),
             yield_time_ms: Some(1),
             max_output_tokens: None,
         }
@@ -628,7 +629,7 @@ mod tests {
         let (turn_message_tx, turn_message_rx) =
             mpsc::channel(CodeModeService::TURN_MESSAGE_CAPACITY);
         Arc::new(Inner {
-            stored_values: Mutex::new(HashMap::new()),
+            stored_values: Mutex::new(StoredValues::default()),
             sessions: Mutex::new(HashMap::new()),
             turn_message_tx,
             turn_message_rx: Arc::new(Mutex::new(turn_message_rx)),
@@ -657,7 +658,7 @@ mod tests {
                 content_items: vec![FunctionCallOutputContentItem::InputText {
                     text: "before".to_string(),
                 }],
-                stored_values: HashMap::new(),
+                stored_values: StoredValues::default(),
                 error_text: None,
             }
         );
@@ -683,7 +684,7 @@ mod tests {
                 content_items: vec![FunctionCallOutputContentItem::InputText {
                     text: "false".to_string(),
                 }],
-                stored_values: HashMap::new(),
+                stored_values: StoredValues::default(),
                 error_text: None,
             }
         );
@@ -726,7 +727,7 @@ text(JSON.stringify(returnsUndefined));
                         text: "[true,true,true]".to_string(),
                     },
                 ],
-                stored_values: HashMap::new(),
+                stored_values: StoredValues::default(),
                 error_text: None,
             }
         );
