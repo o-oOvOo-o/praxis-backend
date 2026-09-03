@@ -1,5 +1,6 @@
 use crate::exec::ExecToolCallOutput;
 use crate::exec::StreamOutput;
+use praxis_utils_string::collapse_whitespace;
 
 const REDUCED_HEAD_LINES: usize = 160;
 const REDUCED_TAIL_LINES: usize = 80;
@@ -416,10 +417,6 @@ fn parse_time_like_seconds(value: &str) -> Option<f64> {
         Some(value / 10f64.powi(i32::try_from(digits.len()).ok()?))
     });
     Some((hour * 3600 + minute * 60 + second) as f64 + fraction.unwrap_or(0.0))
-}
-
-fn collapse_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn format_duration(seconds: f64) -> String {

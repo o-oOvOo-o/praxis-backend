@@ -1,4 +1,5 @@
 use super::*;
+use praxis_utils_string::collapse_whitespace;
 
 pub(super) fn parse_search_links(
     page: &RenderedPage,
@@ -447,10 +448,8 @@ pub(super) fn clip_text(text: &str, max_chars: usize) -> Option<String> {
 }
 
 pub(super) fn clean_text(text: &str) -> String {
-    decode_html_entities(text)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    let decoded = decode_html_entities(text);
+    collapse_whitespace(&decoded)
 }
 
 pub(super) fn decode_html_entities(text: &str) -> String {

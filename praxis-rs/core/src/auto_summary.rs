@@ -7,6 +7,7 @@ use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::ContentItem;
 use praxis_protocol::models::ResponseItem;
 use praxis_utils_output_truncation::truncate_end_chars_with_ellipsis;
+use praxis_utils_string::collapse_whitespace;
 use tracing::debug;
 use tracing::warn;
 
@@ -90,13 +91,7 @@ fn heuristic_summary(conversation_preview: &str) -> String {
 }
 
 fn sanitize_summary(raw: &str) -> String {
-    let compact = raw
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim()
-        .trim_matches('"')
-        .to_string();
+    let compact = collapse_whitespace(raw).trim_matches('"').to_string();
     truncate_end_chars_with_ellipsis(&compact, SUMMARY_CHAR_LIMIT)
 }
 

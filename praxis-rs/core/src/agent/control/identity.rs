@@ -1,6 +1,7 @@
 use crate::agent::role::DEFAULT_ROLE_NAME;
 use crate::agent::role::resolve_role_config;
 use crate::config::Config;
+use praxis_utils_string::collapse_whitespace_and_controls;
 
 const AGENT_NAMES: &str = include_str!("../agent_names.txt");
 
@@ -54,13 +55,7 @@ pub(super) fn build_agent_display_identity(
 }
 
 fn normalize_agent_title(value: &str) -> Option<String> {
-    let collapsed = value
-        .chars()
-        .map(|ch| if ch.is_control() { ' ' } else { ch })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let collapsed = collapse_whitespace_and_controls(value);
     let trimmed = collapsed
         .trim()
         .trim_matches(|ch| matches!(ch, '-' | '_' | ':' | '：' | '|' | '、' | '，' | ',' | '。'));

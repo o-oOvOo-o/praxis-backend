@@ -1,4 +1,5 @@
 use super::*;
+use praxis_utils_string::collapse_whitespace;
 
 pub(super) fn search_action_detail(
     query: &Option<String>,
@@ -109,7 +110,7 @@ pub fn web_search_detail(action: Option<&WebSearchAction>, query: &str) -> Strin
 }
 
 pub(super) fn normalized_query(query: &str) -> Option<String> {
-    let query = query.split_whitespace().collect::<Vec<_>>().join(" ");
+    let query = collapse_whitespace(query);
     if query.is_empty() { None } else { Some(query) }
 }
 

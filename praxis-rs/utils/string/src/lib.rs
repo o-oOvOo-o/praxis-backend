@@ -6,6 +6,31 @@ pub use truncate::approx_tokens_from_byte_count;
 pub use truncate::truncate_middle_chars;
 pub use truncate::truncate_middle_with_token_budget;
 
+pub fn collapse_whitespace(value: &str) -> String {
+    collapse_separators(value, char::is_whitespace)
+}
+
+pub fn collapse_whitespace_and_controls(value: &str) -> String {
+    collapse_separators(value, |ch| ch.is_whitespace() || ch.is_control())
+}
+
+fn collapse_separators(value: &str, is_separator: impl Fn(char) -> bool) -> String {
+    let mut collapsed = String::new();
+    let mut separator_pending = false;
+    for ch in value.chars() {
+        if is_separator(ch) {
+            separator_pending = !collapsed.is_empty();
+            continue;
+        }
+        if separator_pending {
+            collapsed.push(' ');
+            separator_pending = false;
+        }
+        collapsed.push(ch);
+    }
+    collapsed
+}
+
 // Truncate a &str to a byte budget at a char boundary (prefix)
 #[inline]
 pub fn take_bytes_at_char_boundary(s: &str, maxb: usize) -> &str {

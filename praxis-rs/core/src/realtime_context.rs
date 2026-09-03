@@ -7,6 +7,7 @@ use praxis_state::SortKey;
 use praxis_state::ThreadMetadata;
 use praxis_utils_output_truncation::TruncationPolicy;
 use praxis_utils_output_truncation::truncate_text;
+use praxis_utils_string::collapse_whitespace;
 use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -365,10 +366,7 @@ fn format_thread_group(
         let Some(first_user_message) = entry.first_user_message.as_deref() else {
             continue;
         };
-        let ask = first_user_message
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let ask = collapse_whitespace(first_user_message);
         let dedupe_key = format!("{}:{ask}", entry.cwd.display());
         if ask.is_empty() || !seen.insert(dedupe_key) {
             continue;

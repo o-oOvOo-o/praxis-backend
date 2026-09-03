@@ -1,5 +1,6 @@
 use praxis_utils_absolute_path::AbsolutePathBuf;
 use praxis_utils_plugins::PLUGIN_MANIFEST_PATH;
+use praxis_utils_string::collapse_whitespace;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
@@ -595,7 +596,7 @@ fn resolve_default_prompts(
 }
 
 fn resolve_default_prompt_str(plugin_root: &Path, field: &str, prompt: &str) -> Option<String> {
-    let prompt = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+    let prompt = collapse_whitespace(prompt);
     if prompt.is_empty() {
         warn_invalid_default_prompt(plugin_root, field, "prompt must not be empty");
         return None;

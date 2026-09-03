@@ -1,4 +1,5 @@
 use super::super::super::*;
+use praxis_utils_string::collapse_whitespace_and_controls;
 
 impl AgentControl {
     pub(super) fn live_agent_reference_hint(&self) -> String {
@@ -65,19 +66,7 @@ impl AgentControl {
 }
 
 fn format_live_agent_task_preview(value: &str) -> Option<String> {
-    let collapsed = value
-        .chars()
-        .map(|ch| {
-            if ch.is_control() || ch.is_whitespace() {
-                ' '
-            } else {
-                ch
-            }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let collapsed = collapse_whitespace_and_controls(value);
     let trimmed = collapsed.trim();
     if trimmed.is_empty() {
         return None;
