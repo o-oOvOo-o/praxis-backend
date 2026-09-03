@@ -740,6 +740,21 @@ async fn list_native_directory_page(
     } else {
         HashMap::new()
     };
+    let missing_locators = protocol_ids
+        .iter()
+        .filter(|thread_id| !state_threads.contains_key(thread_id))
+        .copied()
+        .collect::<HashSet<_>>();
+    let locator_root = config.praxis_home().join(if archived {
+        crate::ARCHIVED_SESSIONS_SUBDIR
+    } else {
+        crate::SESSIONS_SUBDIR
+    });
+    let fallback_paths = directory::find_rollout_paths(&locator_root, &missing_locators).await?;
+    for (thread_id, path) in &fallback_paths {
+        state_db::read_repair_rollout_path(state_db_ctx, Some(*thread_id), Some(archived), path)
+            .await;
+    }
     let next_cursor = page.next_cursor.as_ref().and_then(|_| {
         let last = page.items.last()?;
         let unix_ms = match sort_key {
@@ -757,13 +772,7 @@ async fn list_native_directory_page(
         let path = if let Some(metadata) = state_threads.get(&thread_id) {
             Some(metadata.rollout_path.clone())
         } else {
-            crate::list::find_thread_path_by_id_str_with_db_context(
-                config.praxis_home(),
-                &thread_id.to_string(),
-                ThreadArchiveFilter::from_archived_only(Some(archived)),
-                state_db_ctx,
-            )
-            .await?
+            fallback_paths.get(&thread_id).cloned()
         };
         let Some(path) = path else {
             continue;

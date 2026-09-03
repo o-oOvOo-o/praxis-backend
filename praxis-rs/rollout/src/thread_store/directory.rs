@@ -1,6 +1,10 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
+use std::path::PathBuf;
 
 use chrono::SecondsFormat;
+use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::SessionSource;
 use serde_json::Value;
 use time::format_description::well_known::Rfc3339;
@@ -20,6 +24,47 @@ use crate::list::parse_timestamp_uuid_from_filename;
 use crate::state_db;
 
 use super::resume_selection::filter_fs_page_by_cwd;
+
+pub(super) async fn find_rollout_paths(
+    root: &Path,
+    thread_ids: &HashSet<ThreadId>,
+) -> std::io::Result<HashMap<ThreadId, PathBuf>> {
+    if thread_ids.is_empty() || !tokio::fs::try_exists(root).await? {
+        return Ok(HashMap::new());
+    }
+    let mut directories = vec![root.to_path_buf()];
+    let mut found = HashMap::with_capacity(thread_ids.len());
+    while let Some(directory) = directories.pop() {
+        let mut entries = tokio::fs::read_dir(directory).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let file_type = entry.file_type().await?;
+            if file_type.is_dir() {
+                directories.push(entry.path());
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name();
+            let Some(file_name) = file_name.to_str() else {
+                continue;
+            };
+            let Some((_, uuid)) = parse_timestamp_uuid_from_filename(file_name) else {
+                continue;
+            };
+            let Ok(thread_id) = ThreadId::from_string(&uuid.to_string()) else {
+                continue;
+            };
+            if thread_ids.contains(&thread_id) {
+                found.entry(thread_id).or_insert_with(|| entry.path());
+                if found.len() == thread_ids.len() {
+                    return Ok(found);
+                }
+            }
+        }
+    }
+    Ok(found)
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn list_raw_threads(
