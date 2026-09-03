@@ -14,6 +14,7 @@ mod turn_lifecycle;
 pub use canonical::CanonicalEncode;
 pub use canonical::CanonicalHasher;
 pub use canonical::Digest;
+pub use command::NativeAgentEventCommand;
 pub use command::ThreadCommand;
 pub use command::ThreadCommandEnvelope;
 pub use command::ThreadCommandHeader;

@@ -5,6 +5,7 @@ use praxis_thread_store_contracts::BatchId;
 use praxis_thread_store_contracts::CommandId;
 use praxis_thread_store_contracts::ContentRef;
 use praxis_thread_store_contracts::EventId;
+use praxis_thread_store_contracts::NativeAgentEventCommand;
 use praxis_thread_store_contracts::NewThreadEvent;
 use praxis_thread_store_contracts::ThreadActor;
 use praxis_thread_store_contracts::ThreadCommand;
@@ -155,11 +156,8 @@ impl LiveThreadStore {
             )
         })
         .await?;
-        for event in &outcome.events {
-            if !self.index.apply(event).await? {
-                self.synchronize_index().await?;
-                break;
-            }
+        if !self.index.apply_all(&outcome.events).await? {
+            self.synchronize_index().await?;
         }
         Ok(outcome.receipt)
     }
@@ -467,12 +465,25 @@ struct CommitOutcome {
 
 fn event_bodies(command: ThreadCommand) -> Vec<ThreadEventBody> {
     match command {
+        ThreadCommand::RecordNativeAgentEvents { events } => {
+            events.into_iter().map(native_agent_event_body).collect()
+        }
         ThreadCommand::ReconcileSessionMetadata {
             name,
             resume_config,
             dynamic_tools,
         } => metadata_event_bodies(name, resume_config, dynamic_tools),
         command => vec![event_body(command)],
+    }
+}
+
+fn native_agent_event_body(event: NativeAgentEventCommand) -> ThreadEventBody {
+    ThreadEventBody::NativeAgentEventRecorded {
+        agent_sequence: event.agent_sequence,
+        event_id: event.event_id,
+        turn_id: event.turn_id,
+        route: event.route,
+        payload: event.payload,
     }
 }
 
@@ -543,6 +554,9 @@ fn event_body(command: ThreadCommand) -> ThreadEventBody {
             route,
             payload,
         },
+        ThreadCommand::RecordNativeAgentEvents { .. } => {
+            unreachable!("bulk native events are expanded before single-event conversion")
+        }
         ThreadCommand::AppendTranscriptItem {
             item_id,
             turn_id,

@@ -26,6 +26,26 @@ pub struct ThreadResumeConfig {
     pub reasoning_effort: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativeAgentEventCommand {
+    pub agent_sequence: u64,
+    pub event_id: String,
+    pub turn_id: Option<TurnId>,
+    pub route: crate::AgentEventRoute,
+    pub payload: ContentRef,
+}
+
+impl CanonicalEncode for NativeAgentEventCommand {
+    fn encode_canonical(&self, hasher: &mut CanonicalHasher) {
+        self.agent_sequence.encode_canonical(hasher);
+        self.event_id.encode_canonical(hasher);
+        self.turn_id.encode_canonical(hasher);
+        self.route.encode_canonical(hasher);
+        self.payload.encode_canonical(hasher);
+    }
+}
+
 impl CanonicalEncode for ThreadResumeConfig {
     fn encode_canonical(&self, hasher: &mut CanonicalHasher) {
         self.model.encode_canonical(hasher);
@@ -121,6 +141,9 @@ pub enum ThreadCommand {
         turn_id: Option<TurnId>,
         route: crate::AgentEventRoute,
         payload: ContentRef,
+    },
+    RecordNativeAgentEvents {
+        events: Vec<NativeAgentEventCommand>,
     },
     AppendTranscriptItem {
         item_id: ItemId,
@@ -411,6 +434,11 @@ impl CanonicalEncode for ThreadCommand {
                 generation.encode_canonical(hasher);
                 created_at_unix_ms.encode_canonical(hasher);
                 updated_at_unix_ms.encode_canonical(hasher);
+            }
+            Self::RecordNativeAgentEvents { events } => {
+                // Append-only command tag: existing persisted command digests must remain stable.
+                hasher.u8(28);
+                events.encode_canonical(hasher);
             }
         }
     }

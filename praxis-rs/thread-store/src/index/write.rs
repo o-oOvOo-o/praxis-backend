@@ -31,6 +31,49 @@ impl WriteCursor {
 }
 
 impl ThreadIndex {
+    pub(crate) async fn apply_all(
+        &self,
+        events: &[ThreadEventEnvelope],
+    ) -> Result<bool, ThreadStoreError> {
+        let mut index = 0;
+        while index < events.len() {
+            let ThreadIndexMutation::NativeAgent {
+                sequence,
+                turn_started: false,
+            } = ThreadIndexMutation::from_event(&events[index])
+            else {
+                if !self.apply(&events[index]).await? {
+                    return Ok(false);
+                }
+                index += 1;
+                continue;
+            };
+            let first = WriteCursor::new(&events[index])?;
+            let mut last = WriteCursor::new(&events[index])?;
+            let mut max_sequence = sequence;
+            index += 1;
+            while index < events.len() {
+                let ThreadIndexMutation::NativeAgent {
+                    sequence,
+                    turn_started: false,
+                } = ThreadIndexMutation::from_event(&events[index])
+                else {
+                    break;
+                };
+                last = WriteCursor::new(&events[index])?;
+                max_sequence = max_sequence.max(sequence);
+                index += 1;
+            }
+            if !self
+                .apply_native_agent_run(&first, &last, max_sequence)
+                .await?
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     pub(crate) async fn apply(
         &self,
         event: &ThreadEventEnvelope,
@@ -94,6 +137,33 @@ impl ThreadIndex {
             return Ok(result.rows_affected() == 1);
         }
         self.apply_turn_start(cursor, sequence).await
+    }
+
+    async fn apply_native_agent_run(
+        &self,
+        first: &WriteCursor,
+        last: &WriteCursor,
+        max_sequence: u64,
+    ) -> Result<bool, ThreadStoreError> {
+        if first.thread_id != last.thread_id {
+            return Ok(false);
+        }
+        let sequence =
+            i64::try_from(max_sequence).map_err(|_| ThreadStoreError::RevisionOverflow)?;
+        let result = sqlx::query(
+            "UPDATE thread_projection SET revision = ?, updated_at = ?,
+                last_agent_sequence = MAX(last_agent_sequence, ?)
+             WHERE thread_id = ? AND revision = ? AND projection_generation = ?",
+        )
+        .bind(last.revision)
+        .bind(last.updated_at)
+        .bind(sequence)
+        .bind(&first.thread_id)
+        .bind(first.expected_revision)
+        .bind(CURRENT_PROJECTION_GENERATION)
+        .execute(&self.shared.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     async fn apply_turn_start(

@@ -11,6 +11,7 @@ use praxis_thread_store::CommitMode;
 use praxis_thread_store::LiveThreadStore;
 use praxis_thread_store::ThreadStore;
 use praxis_thread_store_contracts::AgentEventRoute;
+use praxis_thread_store_contracts::NativeAgentEventCommand;
 use praxis_thread_store_contracts::ThreadActor;
 use praxis_thread_store_contracts::ThreadCommand;
 use praxis_thread_store_contracts::ThreadEventBody;
@@ -36,6 +37,9 @@ pub(crate) struct NativeRolloutWriter {
     metadata: NativeRolloutMetadata,
     metadata_generation: u32,
 }
+
+const IMPORT_BATCH_ITEMS: usize = 64;
+const MAX_BATCH_CONTENT_BYTES: usize = 8 * 1024 * 1024;
 
 impl NativeRolloutWriter {
     pub(crate) async fn resume(praxis_home: PathBuf, rollout_path: &Path) -> io::Result<Self> {
@@ -182,9 +186,19 @@ impl NativeRolloutWriter {
         let mut stream = crate::thread_store::RolloutItemStream::open(rollout_path).await?;
         let mut metadata_delta = NativeMetadataDelta::default();
         let mut appended = false;
+        let mut batch = Vec::with_capacity(IMPORT_BATCH_ITEMS);
         while let Some(item) = stream.next_item().await? {
-            self.append_buffered(&item, &mut metadata_delta).await?;
             appended = true;
+            batch.push(item);
+            if batch.len() == IMPORT_BATCH_ITEMS {
+                self.append_buffered_batch(&batch, &mut metadata_delta)
+                    .await?;
+                batch.clear();
+            }
+        }
+        if !batch.is_empty() {
+            self.append_buffered_batch(&batch, &mut metadata_delta)
+                .await?;
         }
         let (parsed_thread_id, parse_errors) = stream.outcome();
         ensure_valid_projection(parsed_thread_id, parse_errors, expected_thread_id)?;
@@ -197,9 +211,8 @@ impl NativeRolloutWriter {
 
     pub(super) async fn append(&mut self, items: &[RolloutItem]) -> io::Result<()> {
         let mut metadata_delta = NativeMetadataDelta::default();
-        for item in items {
-            self.append_buffered(item, &mut metadata_delta).await?;
-        }
+        self.append_buffered_batch(items, &mut metadata_delta)
+            .await?;
         self.reconcile_metadata_if_needed(metadata_delta).await?;
         if !items.is_empty() {
             self.thread.sync().await.map_err(store_error)?;
@@ -207,29 +220,70 @@ impl NativeRolloutWriter {
         Ok(())
     }
 
-    async fn append_buffered(
+    async fn append_buffered_batch(
         &mut self,
-        item: &RolloutItem,
+        items: &[RolloutItem],
         metadata_delta: &mut NativeMetadataDelta,
     ) -> io::Result<()> {
-        metadata_delta.merge(self.metadata.apply(self.thread_id, item));
-        let sequence = self.next_sequence;
-        self.thread
-            .execute(
-                ThreadActor::Runtime,
-                Some(format!("rollout:{sequence}")),
-                ThreadCommand::RecordNativeAgentEvent {
+        if items.is_empty() {
+            return Ok(());
+        }
+        let mut cursor = 0;
+        while cursor < items.len() {
+            let mut next_metadata = self.metadata.clone();
+            let mut next_delta = NativeMetadataDelta::default();
+            let mut events = Vec::with_capacity(IMPORT_BATCH_ITEMS.min(items.len() - cursor));
+            let mut content_bytes = 0usize;
+            while cursor < items.len() && events.len() < IMPORT_BATCH_ITEMS {
+                let item = &items[cursor];
+                let payload = encode_item(item)?;
+                let payload_bytes = match &payload {
+                    praxis_thread_store_contracts::ContentRef::InlineText { text } => text.len(),
+                    praxis_thread_store_contracts::ContentRef::Artifact { bytes, .. } => {
+                        usize::try_from(*bytes).unwrap_or(usize::MAX)
+                    }
+                };
+                if !events.is_empty()
+                    && content_bytes.saturating_add(payload_bytes) > MAX_BATCH_CONTENT_BYTES
+                {
+                    break;
+                }
+                next_delta.merge(next_metadata.apply(self.thread_id, item));
+                let offset = u64::try_from(events.len())
+                    .map_err(|_| io::Error::other("native rollout batch is too large"))?;
+                let sequence = self
+                    .next_sequence
+                    .checked_add(offset)
+                    .ok_or_else(|| io::Error::other("native rollout sequence overflow"))?;
+                events.push(NativeAgentEventCommand {
                     agent_sequence: sequence,
                     event_id: format!("rollout:{sequence}"),
                     turn_id: None,
                     route: route(item),
-                    payload: encode_item(item)?,
-                },
-                CommitMode::Buffered,
-            )
-            .await
-            .map_err(store_error)?;
-        self.next_sequence = sequence.saturating_add(1);
+                    payload,
+                });
+                content_bytes = content_bytes.saturating_add(payload_bytes);
+                cursor += 1;
+            }
+            let item_count = u64::try_from(events.len())
+                .map_err(|_| io::Error::other("native rollout batch is too large"))?;
+            let next_sequence = self
+                .next_sequence
+                .checked_add(item_count)
+                .ok_or_else(|| io::Error::other("native rollout sequence overflow"))?;
+            self.thread
+                .execute(
+                    ThreadActor::Runtime,
+                    Some(format!("rollout-batch:{}", self.next_sequence)),
+                    ThreadCommand::RecordNativeAgentEvents { events },
+                    CommitMode::Buffered,
+                )
+                .await
+                .map_err(store_error)?;
+            self.next_sequence = next_sequence;
+            self.metadata = next_metadata;
+            metadata_delta.merge(next_delta);
+        }
         Ok(())
     }
 
