@@ -42,6 +42,8 @@ struct StateDbCacheEntry {
     init_lock: AsyncMutex<()>,
 }
 
+const MAX_CACHED_STATE_DB_RUNTIMES: usize = 8;
+
 impl StateDbCacheEntry {
     fn new() -> Self {
         Self {
@@ -83,10 +85,33 @@ fn runtime_cache_entry(key: StateDbKey) -> Arc<StateDbCacheEntry> {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     };
-    cache
-        .entry(key)
-        .or_insert_with(|| Arc::new(StateDbCacheEntry::new()))
-        .clone()
+    if let Some(entry) = cache.get(&key) {
+        return Arc::clone(entry);
+    }
+
+    prune_idle_runtime_cache(&mut cache);
+    let entry = Arc::new(StateDbCacheEntry::new());
+    cache.insert(key, Arc::clone(&entry));
+    entry
+}
+
+fn prune_idle_runtime_cache(cache: &mut HashMap<StateDbKey, Arc<StateDbCacheEntry>>) {
+    while cache.len() >= MAX_CACHED_STATE_DB_RUNTIMES {
+        let idle_key = cache.iter().find_map(|(key, entry)| {
+            if Arc::strong_count(entry) != 1 {
+                return None;
+            }
+            let runtime_is_idle = entry
+                .runtime
+                .get()
+                .is_none_or(|runtime| Arc::strong_count(runtime) == 1);
+            runtime_is_idle.then(|| key.clone())
+        });
+        let Some(idle_key) = idle_key else {
+            break;
+        };
+        cache.remove(&idle_key);
+    }
 }
 
 /// Initialize the state runtime for thread state persistence and backfill checks.
