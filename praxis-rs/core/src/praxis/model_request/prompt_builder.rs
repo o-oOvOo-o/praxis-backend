@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+use std::io;
+use std::io::Write;
 
 use praxis_protocol::models::BaseInstructions;
 use praxis_protocol::models::ContentItem;
@@ -8,6 +10,7 @@ use praxis_protocol::plan_tool::UpdatePlanArgs;
 use praxis_protocol::protocol::TokenSavingEvent;
 use praxis_protocol::protocol::TokenSavingKind;
 use praxis_utils_output_truncation::approx_token_count;
+use praxis_utils_output_truncation::approx_tokens_from_byte_count;
 
 use crate::client_common::Prompt;
 use crate::praxis::TurnContext;
@@ -348,10 +351,27 @@ fn savings_event(
 }
 
 fn serialized_token_count<T: serde::Serialize + ?Sized>(value: &T) -> i64 {
-    serde_json::to_string(value)
-        .ok()
-        .and_then(|text| i64::try_from(approx_token_count(&text)).ok())
-        .unwrap_or(0)
+    let mut counter = SerializedByteCounter::default();
+    if serde_json::to_writer(&mut counter, value).is_err() {
+        return 0;
+    }
+    i64::try_from(approx_tokens_from_byte_count(counter.bytes)).unwrap_or(0)
+}
+
+#[derive(Default)]
+struct SerializedByteCounter {
+    bytes: usize,
+}
+
+impl Write for SerializedByteCounter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.bytes = self.bytes.saturating_add(buffer.len());
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
