@@ -50,7 +50,7 @@ struct Inner {
     turn_message_tx: mpsc::Sender<TurnMessage>,
     turn_message_rx: Arc<Mutex<mpsc::Receiver<TurnMessage>>>,
     next_cell_id: AtomicU64,
-    modules: RwLock<BTreeMap<String, String>>,
+    modules: RwLock<Arc<BTreeMap<String, Arc<str>>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,28 +78,29 @@ impl CodeModeService {
                 turn_message_tx,
                 turn_message_rx: Arc::new(Mutex::new(turn_message_rx)),
                 next_cell_id: AtomicU64::new(1),
-                modules: RwLock::new(BTreeMap::new()),
+                modules: RwLock::new(Arc::new(BTreeMap::new())),
             }),
         }
     }
 
     pub fn register_module(&self, module: CodeModule) -> Result<(), String> {
         validate_module(&module)?;
-        self.inner
+        let mut modules = self
+            .inner
             .modules
             .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(module.specifier, module.source);
+            .unwrap_or_else(PoisonError::into_inner);
+        Arc::make_mut(&mut modules).insert(module.specifier, Arc::from(module.source));
         Ok(())
     }
 
     pub fn unregister_module(&self, specifier: &str) -> bool {
-        self.inner
+        let mut modules = self
+            .inner
             .modules
             .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(specifier)
-            .is_some()
+            .unwrap_or_else(PoisonError::into_inner);
+        Arc::make_mut(&mut modules).remove(specifier).is_some()
     }
 
     pub fn module_specifiers(&self) -> Vec<String> {
@@ -632,7 +633,7 @@ mod tests {
             turn_message_tx,
             turn_message_rx: Arc::new(Mutex::new(turn_message_rx)),
             next_cell_id: AtomicU64::new(1),
-            modules: RwLock::new(BTreeMap::new()),
+            modules: RwLock::new(Arc::new(BTreeMap::new())),
         })
     }
 
@@ -745,7 +746,7 @@ text(JSON.stringify(returnsUndefined));
                 yield_time_ms: None,
                 ..execute_request("")
             },
-            BTreeMap::new(),
+            Arc::new(BTreeMap::new()),
             runtime_event_tx,
         )
         .unwrap();

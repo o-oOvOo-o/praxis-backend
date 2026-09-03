@@ -100,13 +100,11 @@ pub(crate) enum RuntimeEvent {
 
 pub(crate) fn spawn_runtime(
     request: ExecuteRequest,
-    mut module_sources: BTreeMap<String, String>,
+    module_sources: Arc<BTreeMap<String, Arc<str>>>,
     event_tx: mpsc::Sender<RuntimeEvent>,
 ) -> Result<(std_mpsc::Sender<RuntimeCommand>, v8::IsolateHandle), String> {
     let (command_tx, command_rx) = std_mpsc::channel();
     let (isolate_handle_tx, isolate_handle_rx) = std_mpsc::sync_channel(1);
-    let (builtin_specifier, builtin_source) = module_loader::runtime_module();
-    module_sources.insert(builtin_specifier.to_string(), builtin_source.to_string());
     let config = RuntimeConfig {
         tool_call_id: request.tool_call_id,
         enabled_tools: request.enabled_tools,
@@ -131,7 +129,7 @@ struct RuntimeConfig {
     enabled_tools: Arc<[EnabledToolMetadata]>,
     source: String,
     stored_values: HashMap<String, JsonValue>,
-    module_sources: BTreeMap<String, String>,
+    module_sources: Arc<BTreeMap<String, Arc<str>>>,
 }
 
 pub(super) struct RuntimeState {
@@ -142,7 +140,7 @@ pub(super) struct RuntimeState {
     next_tool_call_id: u64,
     tool_call_id: String,
     exit_requested: bool,
-    module_sources: BTreeMap<String, String>,
+    module_sources: Arc<BTreeMap<String, Arc<str>>>,
     module_cache: HashMap<String, v8::Global<v8::Module>>,
 }
 
@@ -322,7 +320,7 @@ mod tests {
         let (event_tx, mut event_rx) = mpsc::channel(16);
         let (_runtime_tx, runtime_terminate_handle) = spawn_runtime(
             execute_request("while (true) {}"),
-            BTreeMap::new(),
+            Arc::new(BTreeMap::new()),
             event_tx,
         )
         .unwrap();

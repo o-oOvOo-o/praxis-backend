@@ -232,15 +232,16 @@ fn resolve_module<'s>(
         return Some(v8::Local::new(scope, &cached));
     }
 
-    let source_text = scope
+    let registered_source = scope
         .get_slot::<RuntimeState>()
         .and_then(|state| state.module_sources.get(specifier))
         .cloned();
+    let source_text = runtime_module_source(specifier).or_else(|| registered_source.as_deref());
     let Some(source_text) = source_text else {
         throw_module_error(scope, &format!("unsupported Praxis module `{specifier}`"));
         return None;
     };
-    let module = compile_module(scope, specifier, &source_text)?;
+    let module = compile_module(scope, specifier, source_text)?;
     let cached = v8::Global::new(scope, module);
     if let Some(state) = scope.get_slot_mut::<RuntimeState>() {
         state.module_cache.insert(specifier.to_string(), cached);
@@ -248,9 +249,8 @@ fn resolve_module<'s>(
     Some(module)
 }
 
-pub(super) const fn runtime_module() -> (&'static str, &'static str) {
-    (
-        "praxis:runtime",
+fn runtime_module_source(specifier: &str) -> Option<&'static str> {
+    (specifier == "praxis:runtime").then_some(
         "export const tools = globalThis.tools;\n\
          export const allTools = globalThis.ALL_TOOLS;\n\
          export const text = globalThis.text;\n\
