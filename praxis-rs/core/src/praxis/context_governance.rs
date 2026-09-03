@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::VecDeque;
 
 use tokio::sync::RwLock;
 
@@ -10,6 +11,7 @@ const DEFAULT_TRIGGER_PERCENT: i64 = 85;
 const DEFAULT_RESERVED_TOKENS: i64 = 50_000;
 const MAX_RESERVED_WINDOW_PERCENT: i64 = 20;
 const OVERFLOW_SAFETY_PERCENT: i64 = 85;
+const MAX_OBSERVED_CONTEXT_LIMITS: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RuntimeModelKey {
@@ -25,7 +27,13 @@ struct ObservedContextLimit {
 
 #[derive(Debug, Default)]
 pub(crate) struct ContextGovernanceState {
-    observed_limits: RwLock<HashMap<RuntimeModelKey, ObservedContextLimit>>,
+    observed_limits: RwLock<ObservedContextLimits>,
+}
+
+#[derive(Debug, Default)]
+struct ObservedContextLimits {
+    by_runtime: HashMap<RuntimeModelKey, ObservedContextLimit>,
+    insertion_order: VecDeque<RuntimeModelKey>,
 }
 
 impl ContextGovernanceState {
@@ -45,11 +53,21 @@ impl ContextGovernanceState {
             })?;
         let key = RuntimeModelKey::from_turn_context(turn_context);
         let mut limits = self.observed_limits.write().await;
+        if !limits.by_runtime.contains_key(&key) {
+            limits.insertion_order.push_back(key.clone());
+        }
         let entry = limits
+            .by_runtime
             .entry(key)
             .or_insert(ObservedContextLimit { tokens: observed });
         entry.tokens = entry.tokens.min(observed);
-        Some(entry.tokens)
+        let effective = entry.tokens;
+        while limits.by_runtime.len() > MAX_OBSERVED_CONTEXT_LIMITS {
+            if let Some(expired) = limits.insertion_order.pop_front() {
+                limits.by_runtime.remove(&expired);
+            }
+        }
+        Some(effective)
     }
 
     pub(crate) async fn effective_context_window(&self, turn_context: &TurnContext) -> Option<i64> {
@@ -58,6 +76,7 @@ impl ContextGovernanceState {
             .observed_limits
             .read()
             .await
+            .by_runtime
             .get(&RuntimeModelKey::from_turn_context(turn_context))
             .map(|limit| limit.tokens);
         match (catalog, observed) {

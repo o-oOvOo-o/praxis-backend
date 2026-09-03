@@ -22,11 +22,10 @@ impl AgentOs {
         };
         {
             let mut state = self.state.write().await;
-            state.events.push(entry.clone());
+            state.events.push_back(entry.clone());
             let max_events = AgentOsPolicy::get().max_events_in_memory;
-            if state.events.len() > max_events {
-                let trim_count = state.events.len() - max_events;
-                state.events.drain(0..trim_count);
+            while state.events.len() > max_events {
+                state.events.pop_front();
             }
         }
         if let Some(db) = self.state_db.read().await.clone() {

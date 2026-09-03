@@ -14,7 +14,24 @@ struct ModelRuntimeRegistryState {
     include_timing_metrics: bool,
     beta_features_header: Option<String>,
     native_local_config: NativeLocalModelConfig,
-    clients: StdMutex<HashMap<ModelRuntimeKey, ModelClient>>,
+    clients: StdMutex<ModelRuntimeClients>,
+}
+
+const MAX_CACHED_MODEL_RUNTIMES: usize = 8;
+
+#[derive(Default)]
+struct ModelRuntimeClients {
+    by_key: HashMap<ModelRuntimeKey, ModelClient>,
+    recency: std::collections::VecDeque<ModelRuntimeKey>,
+}
+
+impl std::fmt::Debug for ModelRuntimeClients {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ModelRuntimeClients")
+            .field("cached", &self.by_key.len())
+            .finish()
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -72,7 +89,7 @@ impl ModelRuntimeRegistry {
                 include_timing_metrics,
                 beta_features_header,
                 native_local_config,
-                clients: StdMutex::new(HashMap::new()),
+                clients: StdMutex::new(ModelRuntimeClients::default()),
             }),
         }
     }
@@ -88,8 +105,9 @@ impl ModelRuntimeRegistry {
             .clients
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(client) = clients.get(&key) {
-            return client.clone();
+        if let Some(client) = clients.by_key.get(&key).cloned() {
+            clients.mark_used(&key);
+            return client;
         }
 
         let client = ModelClient::new_with_native_local_config(
@@ -123,5 +141,24 @@ impl ModelRuntimeRegistry {
     ) -> bool {
         self.client_for(provider_id, provider)
             .responses_websocket_enabled()
+    }
+}
+
+impl ModelRuntimeClients {
+    fn mark_used(&mut self, key: &ModelRuntimeKey) {
+        if let Some(index) = self.recency.iter().position(|candidate| candidate == key) {
+            self.recency.remove(index);
+        }
+        self.recency.push_back(key.clone());
+    }
+
+    fn insert(&mut self, key: ModelRuntimeKey, client: ModelClient) {
+        self.mark_used(&key);
+        self.by_key.insert(key, client);
+        while self.by_key.len() > MAX_CACHED_MODEL_RUNTIMES {
+            if let Some(expired) = self.recency.pop_front() {
+                self.by_key.remove(&expired);
+            }
+        }
     }
 }

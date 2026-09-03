@@ -18,14 +18,12 @@ impl AgentOsEventBatch {
         let mut events = state
             .events
             .iter()
-            .filter(|event| event.sequence > query.since_sequence)
+            .rev()
+            .take_while(|event| event.sequence > query.since_sequence)
+            .take(query.limit)
             .cloned()
             .collect::<Vec<_>>();
-        events.sort_by_key(|event| event.sequence);
-        if events.len() > query.limit {
-            let drop_count = events.len() - query.limit;
-            events.drain(0..drop_count);
-        }
+        events.reverse();
         Self {
             current_sequence: current_sequence(),
             events,
