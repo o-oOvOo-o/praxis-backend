@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use praxis_protocol::models::BaseInstructions;
@@ -89,11 +88,13 @@ fn deferred_tool_schema_event(
 }
 
 fn project_repeated_tool_outputs(input: &mut [ResponseItem]) -> Vec<TokenSavingEvent> {
-    let mut canonical_outputs = Vec::<(Option<bool>, String, String)>::new();
+    let mut canonical_outputs = Vec::<(Option<bool>, String, usize)>::new();
     let mut saved_exact_tokens: usize = 0;
     let mut saved_delta_tokens: usize = 0;
 
-    for item in input.iter_mut() {
+    for item_index in 0..input.len() {
+        let (previous_items, current_items) = input.split_at_mut(item_index);
+        let item = &mut current_items[0];
         let (call_id, output) = match item {
             ResponseItem::FunctionCallOutput { call_id, output }
             | ResponseItem::CustomToolCallOutput {
@@ -111,30 +112,33 @@ fn project_repeated_tool_outputs(input: &mut [ResponseItem]) -> Vec<TokenSavingE
         if approx_token_count(text) < REPEATED_OUTPUT_MIN_TOKENS {
             continue;
         }
-        let original = text.clone();
+        let original = text.as_str();
         let projection = canonical_outputs
             .iter()
-            .find(|(candidate_success, _, candidate)| {
-                *candidate_success == success && candidate == &original
-            })
-            .map(|(_, source_call_id, _)| {
-                (
-                    TokenSavingKind::UnchangedResource,
-                    format!(
-                        "<praxis-reference kind=\"unchanged-tool-output\" source_call_id=\"{source_call_id}\" />"
-                    ),
-                )
+            .find_map(|(candidate_success, source_call_id, candidate_index)| {
+                let candidate = successful_tool_output_text(&previous_items[*candidate_index])?;
+                (*candidate_success == success && candidate == original).then(|| {
+                    (
+                        TokenSavingKind::UnchangedResource,
+                        format!(
+                            "<praxis-reference kind=\"unchanged-tool-output\" source_call_id=\"{source_call_id}\" />"
+                        ),
+                    )
+                })
             })
             .or_else(|| {
                 canonical_outputs
                     .iter()
-                    .filter(|(candidate_success, _, candidate)| {
-                        *candidate_success == success
+                    .filter_map(|(candidate_success, source_call_id, candidate_index)| {
+                        let candidate =
+                            successful_tool_output_text(&previous_items[*candidate_index])?;
+                        (*candidate_success == success
                             && original.len() > candidate.len()
-                            && original.starts_with(candidate)
+                            && original.starts_with(candidate))
+                        .then_some((source_call_id, candidate))
                     })
-                    .max_by_key(|(_, _, candidate)| candidate.len())
-                    .map(|(_, source_call_id, candidate)| {
+                    .max_by_key(|(_, candidate)| candidate.len())
+                    .map(|(source_call_id, candidate)| {
                         (
                             TokenSavingKind::OutputDelta,
                             format!(
@@ -145,13 +149,13 @@ fn project_repeated_tool_outputs(input: &mut [ResponseItem]) -> Vec<TokenSavingE
                     })
             });
         let Some((kind, projected)) = projection else {
-            canonical_outputs.push((success, call_id.clone(), original));
+            canonical_outputs.push((success, call_id.clone(), item_index));
             continue;
         };
         let saved_tokens =
-            approx_token_count(&original).saturating_sub(approx_token_count(&projected));
+            approx_token_count(original).saturating_sub(approx_token_count(&projected));
         if saved_tokens == 0 {
-            canonical_outputs.push((success, call_id.clone(), original));
+            canonical_outputs.push((success, call_id.clone(), item_index));
             continue;
         }
         *text = projected;
@@ -184,6 +188,21 @@ fn project_repeated_tool_outputs(input: &mut [ResponseItem]) -> Vec<TokenSavingE
         TokenSavingEvent::reversible(kind, saved_tokens as i64, Some(reference.to_string()))
     })
     .collect()
+}
+
+fn successful_tool_output_text(item: &ResponseItem) -> Option<&str> {
+    let output = match item {
+        ResponseItem::FunctionCallOutput { output, .. }
+        | ResponseItem::CustomToolCallOutput { output, .. } => output,
+        _ => return None,
+    };
+    if output.success == Some(false) {
+        return None;
+    }
+    match &output.body {
+        FunctionCallOutputBody::Text(text) => Some(text),
+        FunctionCallOutputBody::ContentItems(_) => None,
+    }
 }
 
 fn project_plan_working_state(input: &mut Vec<ResponseItem>) -> Option<TokenSavingEvent> {
