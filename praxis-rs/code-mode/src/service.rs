@@ -487,10 +487,12 @@ async fn run_session_control(
                     RuntimeEvent::YieldRequested => {
                         yield_timer = None;
                         if let Some(response_tx) = response_tx.take() {
-                            let _ = response_tx.send(RuntimeResponse::Yielded {
+                            if response_tx.send(RuntimeResponse::Yielded {
                                 cell_id: cell_id.clone(),
                                 content_items: std::mem::take(&mut content_items),
-                            });
+                            }).is_err() {
+                                break;
+                            }
                         }
                     }
                     RuntimeEvent::Notify { call_id, text } => {
@@ -589,10 +591,12 @@ async fn run_session_control(
             } => {
                 yield_timer = None;
                 if let Some(response_tx) = response_tx.take() {
-                    let _ = response_tx.send(RuntimeResponse::Yielded {
+                    if response_tx.send(RuntimeResponse::Yielded {
                         cell_id: cell_id.clone(),
                         content_items: std::mem::take(&mut content_items),
-                    });
+                    }).is_err() {
+                        break;
+                    }
                 }
             }
         }
