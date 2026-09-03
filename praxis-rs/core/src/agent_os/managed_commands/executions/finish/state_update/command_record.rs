@@ -60,5 +60,7 @@ fn finish_command_record(
     let process_ref = command
         .process_id
         .map(|process_id| (process_id, command.runtime_owner_id.clone()));
-    Ok((command.clone(), process_ref))
+    let command = command.clone();
+    state.live_command_ids.remove(command_id);
+    Ok((command, process_ref))
 }

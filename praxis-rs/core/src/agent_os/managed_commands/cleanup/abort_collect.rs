@@ -16,13 +16,10 @@ impl AgentOs {
     ) -> Vec<LiveCommandCleanupRef> {
         let state = self.state.read().await;
         state
-            .commands
-            .values()
-            .filter(|command| {
-                command.thread_id == thread_id
-                    && command.task_id == task_id
-                    && command.ended_at.is_none()
-            })
+            .live_command_ids
+            .iter()
+            .filter_map(|command_id| state.commands.get(command_id))
+            .filter(|command| command.thread_id == thread_id && command.task_id == task_id)
             .map(|command| {
                 (
                     command.command_id.clone(),
@@ -42,8 +39,9 @@ impl AgentOs {
         let mut state = self.state.write().await;
         let now = Utc::now();
         let command_ticket_ids = state
-            .commands
-            .values()
+            .live_command_ids
+            .iter()
+            .filter_map(|command_id| state.commands.get(command_id))
             .filter(|command| command.thread_id == thread_id && command.task_id == task_id)
             .map(|command| command.ticket_id.clone())
             .collect::<HashSet<_>>();

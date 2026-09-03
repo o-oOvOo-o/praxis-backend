@@ -11,6 +11,7 @@ pub(crate) struct AgentOsState {
     pub(super) tickets: HashMap<String, ExecutionTicket>,
     pub(super) intent_plans: HashMap<String, CommandIntentPlan>,
     pub(super) commands: HashMap<String, CommandRecord>,
+    pub(super) live_command_ids: HashSet<String>,
     pub(super) processes: HashMap<String, ManagedProcessRecord>,
     pub(super) artifacts: HashMap<String, ArtifactRecord>,
     pub(super) worker_requests: HashMap<String, WorkerRequestRecord>,

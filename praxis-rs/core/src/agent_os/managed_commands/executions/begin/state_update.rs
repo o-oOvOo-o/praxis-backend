@@ -48,6 +48,7 @@ impl AgentOs {
             let process_key = process_registry_key(process_id, process.runtime_owner_id.as_deref());
             state.processes.insert(process_key, process);
         }
+        state.live_command_ids.insert(record.command_id.clone());
         state
             .commands
             .insert(record.command_id.clone(), record.clone());
