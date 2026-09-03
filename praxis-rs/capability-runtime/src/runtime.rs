@@ -22,6 +22,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
@@ -145,7 +146,6 @@ impl RouteSnapshot {
 
 impl CapabilityRuntime {
     pub fn new(scopes: ScopeGraph) -> Self {
-        let (disposal_tx, disposal_rx) = mpsc::channel();
         let state = RuntimeState {
             revision: 0,
             next_generation: 1,
@@ -159,9 +159,8 @@ impl CapabilityRuntime {
             commit_gate: Mutex::new(()),
             state: Mutex::new(state),
             routes,
-            disposal_tx,
+            disposal_tx: shared_disposal_sender(),
         });
-        spawn_disposal_reaper(disposal_rx);
         Self { inner }
     }
 
@@ -848,17 +847,24 @@ impl RuntimeInner {
     }
 }
 
-fn spawn_disposal_reaper(jobs: mpsc::Receiver<DisposalJob>) {
-    thread::Builder::new()
-        .name("praxis-capability-reaper".to_string())
-        .stack_size(DISPOSAL_REAPER_STACK_BYTES)
-        .spawn(move || {
-            while let Ok(job) = jobs.recv() {
-                let failures = dispose_all(job.disposers);
-                job.generation.complete_disposal(failures);
-            }
+fn shared_disposal_sender() -> mpsc::Sender<DisposalJob> {
+    static DISPOSAL_SENDER: OnceLock<mpsc::Sender<DisposalJob>> = OnceLock::new();
+    DISPOSAL_SENDER
+        .get_or_init(|| {
+            let (sender, jobs) = mpsc::channel::<DisposalJob>();
+            thread::Builder::new()
+                .name("praxis-capability-reaper".to_string())
+                .stack_size(DISPOSAL_REAPER_STACK_BYTES)
+                .spawn(move || {
+                    while let Ok(job) = jobs.recv() {
+                        let failures = dispose_all(job.disposers);
+                        job.generation.complete_disposal(failures);
+                    }
+                })
+                .expect("failed to start capability disposal reaper");
+            sender
         })
-        .expect("failed to start capability disposal reaper");
+        .clone()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
