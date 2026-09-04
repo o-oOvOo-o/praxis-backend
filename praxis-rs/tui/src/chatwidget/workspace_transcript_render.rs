@@ -109,12 +109,14 @@ impl ChatWidget {
         let cache = self.workspace_active_tail_cache(width)?;
         Some(WorkspaceTranscriptTail {
             lane: cache.lane,
-            lines: cache.lines.clone(),
+            lines: Arc::clone(&cache.lines),
             patch_cell_id: self
                 .active_cell
                 .as_ref()
                 .and_then(|cell| cell.patch_cell_id()),
-            mouse_targets: cache.mouse_targets.clone(),
+            mouse_targets: Arc::clone(&cache.mouse_targets),
+            revision: cache.key.revision,
+            animation_tick: cache.key.animation_tick,
         })
     }
 
@@ -146,8 +148,8 @@ impl ChatWidget {
             *self.workspace_active_tail_cache.borrow_mut() = Some(WorkspaceActiveTailCache {
                 key,
                 lane,
-                lines,
-                mouse_targets,
+                lines: lines.into(),
+                mouse_targets: mouse_targets.into(),
             });
         }
 

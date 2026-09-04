@@ -32,9 +32,11 @@ const CHAT_TIMELINE_USER_WIDTH_PERCENT: u16 = 58;
 #[derive(Clone, Debug)]
 pub(crate) struct WorkspaceTranscriptTail {
     pub(crate) lane: ChatLane,
-    pub(crate) lines: Vec<Line<'static>>,
+    pub(crate) lines: Arc<[Line<'static>]>,
     pub(crate) patch_cell_id: Option<PatchCellId>,
-    pub(crate) mouse_targets: Vec<HistoryCellMouseTarget>,
+    pub(crate) mouse_targets: Arc<[HistoryCellMouseTarget]>,
+    pub(crate) revision: u64,
+    pub(crate) animation_tick: Option<u64>,
 }
 
 pub(crate) struct WorkspaceTranscriptRequest<'a> {
@@ -95,6 +97,7 @@ impl WorkspaceTranscriptViewport {
 #[derive(Default)]
 pub(crate) struct WorkspaceTranscriptCache {
     committed_layout: Option<WorkspaceTranscriptCommittedLayout>,
+    viewport: Option<WorkspaceTranscriptCachedViewport>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,6 +108,34 @@ struct WorkspaceTranscriptCommittedLayoutKey {
     committed_first_ptr: usize,
     committed_last_ptr: usize,
     presentation_revision: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorkspaceTranscriptTailKey {
+    lane: ChatLane,
+    patch_cell_id: Option<PatchCellId>,
+    revision: u64,
+    animation_tick: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorkspaceTranscriptViewportKey {
+    layout: WorkspaceTranscriptDynamicLayoutKey,
+    scroll_from_bottom: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorkspaceTranscriptDynamicLayoutKey {
+    content_area: Rect,
+    committed: WorkspaceTranscriptCommittedLayoutKey,
+    tail: Option<WorkspaceTranscriptTailKey>,
+}
+
+#[derive(Clone, Debug)]
+struct WorkspaceTranscriptCachedViewport {
+    key: WorkspaceTranscriptViewportKey,
+    viewport: WorkspaceTranscriptViewport,
+    total_rows: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -120,6 +151,12 @@ pub(crate) type WorkspaceTranscriptRow = Arc<TranscriptVisibleRow>;
 impl WorkspaceTranscriptCache {
     pub(crate) fn scroll_limit(&mut self, request: WorkspaceTranscriptRequest<'_>) -> usize {
         let visible_rows = usize::from(request.content_area.height);
+        let layout_key = workspace_transcript_dynamic_layout_key(&request);
+        if let Some(cached) = self.viewport.as_ref()
+            && cached.key.layout == layout_key
+        {
+            return cached.total_rows.saturating_sub(visible_rows);
+        }
         let committed_layout = self.committed_layout_for_request(&request);
         let total_rows = total_rows_for_request(&request, committed_layout);
         total_rows.saturating_sub(visible_rows)
@@ -129,6 +166,13 @@ impl WorkspaceTranscriptCache {
         &mut self,
         request: WorkspaceTranscriptRequest<'_>,
     ) -> WorkspaceTranscriptViewport {
+        let viewport_key = workspace_transcript_viewport_key(&request);
+        if let Some(cached) = self.viewport.as_ref()
+            && cached.key == viewport_key
+        {
+            return cached.viewport.clone();
+        }
+
         let content_area = request.content_area;
         let visible_rows = usize::from(content_area.height);
         let scroll_from_bottom = request.scroll_from_bottom;
@@ -146,58 +190,49 @@ impl WorkspaceTranscriptCache {
                     .sum()
             });
 
-        if visible_rows == 0 || total_rows == 0 {
-            return WorkspaceTranscriptViewport {
+        let viewport = if visible_rows == 0 || total_rows == 0 {
+            WorkspaceTranscriptViewport {
                 content_area,
                 rows: Vec::new(),
                 patch_cell_ids: Vec::new(),
-            };
-        }
-
-        let skipped = scroll_from_bottom.min(total_rows);
-        let end = total_rows.saturating_sub(skipped);
-        let start = end.saturating_sub(visible_rows);
-        let visible = if let Some(segments) = segments.as_ref() {
-            visible_rows_from_segments(segments, start, end)
+            }
         } else {
-            committed_layout.rows[start..end].to_vec()
-        };
-        let mut patch_cell_ids = Vec::new();
-        for row in &visible {
-            for id in &row.patch_cell_ids {
-                if !patch_cell_ids.contains(id) {
-                    patch_cell_ids.push(*id);
+            let skipped = scroll_from_bottom.min(total_rows);
+            let end = total_rows.saturating_sub(skipped);
+            let start = end.saturating_sub(visible_rows);
+            let visible = if let Some(segments) = segments.as_ref() {
+                visible_rows_from_segments(segments, start, end)
+            } else {
+                committed_layout.rows[start..end].to_vec()
+            };
+            let mut patch_cell_ids = Vec::new();
+            for row in &visible {
+                for id in &row.patch_cell_ids {
+                    if !patch_cell_ids.contains(id) {
+                        patch_cell_ids.push(*id);
+                    }
                 }
             }
-        }
 
-        WorkspaceTranscriptViewport {
-            content_area,
-            rows: visible,
-            patch_cell_ids,
-        }
+            WorkspaceTranscriptViewport {
+                content_area,
+                rows: visible,
+                patch_cell_ids,
+            }
+        };
+        self.viewport = Some(WorkspaceTranscriptCachedViewport {
+            key: viewport_key,
+            viewport: viewport.clone(),
+            total_rows,
+        });
+        viewport
     }
 
     fn committed_layout_for_request(
         &mut self,
         request: &WorkspaceTranscriptRequest<'_>,
     ) -> &WorkspaceTranscriptCommittedLayout {
-        let key = WorkspaceTranscriptCommittedLayoutKey {
-            width: request.content_area.width,
-            theme_kind: request.theme_kind,
-            committed_len: request.transcript_cells.len(),
-            committed_first_ptr: request
-                .transcript_cells
-                .first()
-                .map(history_cell_ptr_id)
-                .unwrap_or_default(),
-            committed_last_ptr: request
-                .transcript_cells
-                .last()
-                .map(history_cell_ptr_id)
-                .unwrap_or_default(),
-            presentation_revision: request.presentation_revision,
-        };
+        let key = workspace_transcript_committed_layout_key(request);
         let needs_refresh = self
             .committed_layout
             .as_ref()
@@ -218,6 +253,54 @@ impl WorkspaceTranscriptCache {
         self.committed_layout
             .as_ref()
             .expect("workspace transcript committed layout cache should be populated")
+    }
+}
+
+fn workspace_transcript_committed_layout_key(
+    request: &WorkspaceTranscriptRequest<'_>,
+) -> WorkspaceTranscriptCommittedLayoutKey {
+    WorkspaceTranscriptCommittedLayoutKey {
+        width: request.content_area.width,
+        theme_kind: request.theme_kind,
+        committed_len: request.transcript_cells.len(),
+        committed_first_ptr: request
+            .transcript_cells
+            .first()
+            .map(history_cell_ptr_id)
+            .unwrap_or_default(),
+        committed_last_ptr: request
+            .transcript_cells
+            .last()
+            .map(history_cell_ptr_id)
+            .unwrap_or_default(),
+        presentation_revision: request.presentation_revision,
+    }
+}
+
+fn workspace_transcript_viewport_key(
+    request: &WorkspaceTranscriptRequest<'_>,
+) -> WorkspaceTranscriptViewportKey {
+    WorkspaceTranscriptViewportKey {
+        layout: workspace_transcript_dynamic_layout_key(request),
+        scroll_from_bottom: request.scroll_from_bottom,
+    }
+}
+
+fn workspace_transcript_dynamic_layout_key(
+    request: &WorkspaceTranscriptRequest<'_>,
+) -> WorkspaceTranscriptDynamicLayoutKey {
+    WorkspaceTranscriptDynamicLayoutKey {
+        content_area: request.content_area,
+        committed: workspace_transcript_committed_layout_key(request),
+        tail: request
+            .active_tail
+            .as_ref()
+            .map(|tail| WorkspaceTranscriptTailKey {
+                lane: tail.lane,
+                patch_cell_id: tail.patch_cell_id,
+                revision: tail.revision,
+                animation_tick: tail.animation_tick,
+            }),
     }
 }
 
@@ -427,7 +510,7 @@ fn merged_tail_rows(
     if !lines.is_empty() {
         lines.push(Line::from(""));
     }
-    lines.extend(tail.lines.clone());
+    lines.extend(tail.lines.iter().cloned());
     let mut patch_cell_ids = block.patch_cell_ids.clone();
     if let Some(id) = tail.patch_cell_id
         && !patch_cell_ids.contains(&id)
@@ -450,12 +533,12 @@ fn active_tail_rows(
     tail: &WorkspaceTranscriptTail,
 ) -> Vec<WorkspaceTranscriptRow> {
     let patch_cell_ids = tail.patch_cell_id.into_iter().collect::<Vec<_>>();
-    let mouse_actions = header_mouse_actions(tail.mouse_targets.clone());
+    let mouse_actions = header_mouse_actions(tail.mouse_targets.iter().cloned().collect());
     rows_for_block(
         width,
         theme,
         tail.lane,
-        tail.lines.clone(),
+        tail.lines.iter().cloned().collect(),
         &patch_cell_ids,
         &mouse_actions,
     )
