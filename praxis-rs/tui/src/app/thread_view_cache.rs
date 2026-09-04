@@ -2,7 +2,9 @@ use crate::app_event::AppEvent;
 use crate::chatwidget::ChatWidget;
 use crate::history_cell::HistoryCell;
 use crate::tui;
+use crate::tui_config::TuiRuntimeConfig;
 use color_eyre::eyre::Result;
+use praxis_core::config::Config;
 use praxis_protocol::ThreadId;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -86,6 +88,17 @@ impl ThreadViewCache {
 }
 
 impl App {
+    pub(super) fn cached_thread_runtime_config(
+        &self,
+        thread_id: ThreadId,
+    ) -> Option<(Config, TuiRuntimeConfig)> {
+        let cached = self.thread_view_cache.entries.get(&thread_id)?;
+        Some((
+            cached.chat_widget.config_ref().clone(),
+            cached.chat_widget.tui_config_ref().clone(),
+        ))
+    }
+
     pub(super) fn suspend_active_thread_view_for_switch(
         &mut self,
     ) -> (Option<ThreadId>, Option<u64>) {

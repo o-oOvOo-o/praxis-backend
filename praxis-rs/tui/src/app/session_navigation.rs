@@ -206,43 +206,51 @@ impl App {
             return Ok(None);
         }
 
-        let (mut resume_config, resume_tui_config) = match self
-            .rebuild_config_for_resume_or_fallback(&current_cwd, resume_cwd)
-            .await
+        let cached_runtime_config = (has_cached_projection && !same_cwd)
+            .then(|| self.cached_thread_runtime_config(target_session.thread_id))
+            .flatten()
+            .filter(|(config, _)| config.cwd.as_path() == resume_cwd.as_path());
+        let (mut resume_config, mut resume_tui_config) = if let Some(cached) = cached_runtime_config
         {
-            Ok(cfg) => cfg,
-            Err(err) => {
-                self.chat_widget.add_error_message(format!(
-                    "Failed to rebuild configuration for Praxis thread switch: {err}"
-                ));
-                return Ok(None);
+            cached
+        } else {
+            match self
+                .rebuild_config_for_resume_or_fallback(&current_cwd, resume_cwd)
+                .await
+            {
+                Ok(cfg) => cfg,
+                Err(err) => {
+                    self.chat_widget.add_error_message(format!(
+                        "Failed to rebuild configuration for Praxis thread switch: {err}"
+                    ));
+                    return Ok(None);
+                }
             }
         };
         self.apply_runtime_policy_overrides(&mut resume_config);
 
         if has_cached_projection && !same_cwd {
-            let previous_config = self.config.clone();
-            let previous_tui_config = self.tui_config.clone();
-            self.config = resume_config.clone();
-            self.tui_config = resume_tui_config.clone();
+            let previous_config = std::mem::replace(&mut self.config, resume_config);
+            let previous_tui_config = std::mem::replace(&mut self.tui_config, resume_tui_config);
             tui.set_notification_method(self.tui_config.notification_method);
             self.file_search
                 .update_search_dir(self.config.cwd.to_path_buf());
-            if self
+            let switch_result = self
                 .switch_to_cached_workspace_thread(tui, target_session.thread_id)
-                .await?
-            {
+                .await;
+            if matches!(switch_result, Ok(true)) {
                 // Cross-cwd cached views retain their observers too; only discovery needs the
                 // normal rate-limited refresh cadence.
                 self.refresh_workspace_threads(app_gateway, /*force*/ false);
                 tui.frame_requester().schedule_frame();
                 return Ok(None);
             }
-            self.config = previous_config;
-            self.tui_config = previous_tui_config;
+            resume_config = std::mem::replace(&mut self.config, previous_config);
+            resume_tui_config = std::mem::replace(&mut self.tui_config, previous_tui_config);
             tui.set_notification_method(self.tui_config.notification_method);
             self.file_search
                 .update_search_dir(self.config.cwd.to_path_buf());
+            switch_result?;
         }
 
         let resumed = match app_gateway

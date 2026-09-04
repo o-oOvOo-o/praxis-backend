@@ -146,7 +146,6 @@ impl ChatWidget {
         &self.config
     }
 
-    #[cfg(test)]
     pub(crate) fn tui_config_ref(&self) -> &TuiRuntimeConfig {
         &self.tui_config
     }
