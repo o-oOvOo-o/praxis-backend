@@ -19,7 +19,16 @@ use std::sync::Mutex;
 use std::sync::MutexGuard;
 use tokio::sync::mpsc;
 
-const LATEST_PROJECTION_EVENT_SLOTS: usize = 4;
+#[derive(Clone, Copy)]
+enum LatestProjectionEventSlot {
+    TokenUsage,
+    Goal,
+    Heartbeat,
+    Selfwork,
+    TurnDiff,
+}
+
+const LATEST_PROJECTION_EVENT_SLOTS: usize = LatestProjectionEventSlot::TurnDiff as usize + 1;
 
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
@@ -339,7 +348,8 @@ impl ThreadEventStore {
         self.bump_snapshot_revision();
         let sequence = self.last_event_sequence;
         if let Some(slot) = latest_projection_event_slot(&event) {
-            self.latest_projection_events[slot] = Some(ThreadEventEnvelope { sequence, event });
+            self.latest_projection_events[slot as usize] =
+                Some(ThreadEventEnvelope { sequence, event });
             return sequence;
         }
         if let Some(buffered) = self.buffer.back_mut()
@@ -463,17 +473,20 @@ impl ThreadEventStore {
     }
 }
 
-fn latest_projection_event_slot(event: &ThreadBufferedEvent) -> Option<usize> {
+fn latest_projection_event_slot(event: &ThreadBufferedEvent) -> Option<LatestProjectionEventSlot> {
     let ThreadBufferedEvent::Notification(notification) = event else {
         return None;
     };
     match notification {
-        ServerNotification::ThreadTokenUsageUpdated(_) => Some(0),
-        ServerNotification::ThreadGoalUpdated(_) | ServerNotification::ThreadGoalCleared(_) => {
-            Some(1)
+        ServerNotification::ThreadTokenUsageUpdated(_) => {
+            Some(LatestProjectionEventSlot::TokenUsage)
         }
-        ServerNotification::ThreadHeartbeatUpdated(_) => Some(2),
-        ServerNotification::ThreadSelfworkUpdated(_) => Some(3),
+        ServerNotification::ThreadGoalUpdated(_) | ServerNotification::ThreadGoalCleared(_) => {
+            Some(LatestProjectionEventSlot::Goal)
+        }
+        ServerNotification::ThreadHeartbeatUpdated(_) => Some(LatestProjectionEventSlot::Heartbeat),
+        ServerNotification::ThreadSelfworkUpdated(_) => Some(LatestProjectionEventSlot::Selfwork),
+        ServerNotification::TurnDiffUpdated(_) => Some(LatestProjectionEventSlot::TurnDiff),
         _ => None,
     }
 }
