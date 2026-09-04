@@ -155,12 +155,22 @@ impl App {
         let has_cached_projection = self
             .thread_event_channels
             .contains_key(&target_session.thread_id);
-        let raw_same_cwd = target_session
-            .cwd
-            .as_deref()
-            .is_none_or(|cwd| cwd == self.config.cwd.as_path());
+        // A materialized view carries the exact runtime config under which it was built. Prefer
+        // that over list-row metadata: it avoids filesystem canonicalization for path spelling
+        // differences and prevents a stale row cwd from forcing an otherwise hot view through
+        // config reload. Unknown views retain the existing row-based behavior.
+        let current_cwd = self.config.cwd.as_path();
+        let cached_view_same_cwd = self
+            .cached_thread_view_cwd(target_session.thread_id)
+            .map(|cwd| cwd == current_cwd);
+        let known_same_cwd = cached_view_same_cwd.unwrap_or_else(|| {
+            target_session
+                .cwd
+                .as_deref()
+                .is_none_or(|cwd| cwd == current_cwd)
+        });
         if has_cached_projection
-            && raw_same_cwd
+            && known_same_cwd
             && self
                 .switch_to_cached_workspace_thread(tui, target_session.thread_id)
                 .await?
@@ -171,13 +181,17 @@ impl App {
         }
 
         let current_cwd = self.config.cwd.to_path_buf();
+        let cached_view_cwd = self
+            .cached_thread_view_cwd(target_session.thread_id)
+            .map(Path::to_path_buf);
+        let target_cwd = cached_view_cwd.as_deref().or(target_session.cwd.as_deref());
         let resume_cwd = if self.remote_app_gateway_url.is_some() {
             current_cwd.clone()
         } else {
             match crate::resolve_cwd_for_resume_or_fork(
                 tui,
                 &current_cwd,
-                target_session.cwd.as_deref(),
+                target_cwd,
                 CwdPromptAction::Resume,
                 /*allow_prompt*/ false,
             )
@@ -193,7 +207,7 @@ impl App {
 
         let same_cwd = !crate::cwds_differ(&current_cwd, &resume_cwd);
         if has_cached_projection
-            && !raw_same_cwd
+            && !known_same_cwd
             && same_cwd
             && self
                 .switch_to_cached_workspace_thread(tui, target_session.thread_id)

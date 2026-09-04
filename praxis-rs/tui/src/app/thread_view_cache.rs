@@ -88,6 +88,13 @@ impl ThreadViewCache {
 }
 
 impl App {
+    pub(super) fn cached_thread_view_cwd(&self, thread_id: ThreadId) -> Option<&std::path::Path> {
+        self.thread_view_cache
+            .entries
+            .get(&thread_id)
+            .map(|cached| cached.chat_widget.config_ref().cwd.as_path())
+    }
+
     pub(super) fn cached_thread_runtime_config(
         &self,
         thread_id: ThreadId,
