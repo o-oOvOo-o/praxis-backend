@@ -279,7 +279,7 @@ fn workspace_status_priority(status: &ThreadStatus) -> u8 {
     }
 }
 
-fn workspace_row_priority(row: &ThreadListRow) -> u8 {
+pub(crate) fn workspace_row_priority(row: &ThreadListRow) -> u8 {
     if workspace_row_is_controlled(row) {
         return 3;
     }

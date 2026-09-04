@@ -8,6 +8,7 @@ use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::workspace::ThreadListRow;
 use crate::workspace::parse_workspace_thread_id;
 use crate::workspace::sort_workspace_thread_rows;
+use crate::workspace::workspace_row_priority;
 use crate::workspace::workspace_row_should_auto_observe;
 use crate::workspace::workspace_single_line;
 use crate::workspace::workspace_thread_list_params;
@@ -60,6 +61,22 @@ impl App {
         };
         update(&mut self.workspace.rows[index]);
         if resort_after_update {
+            self.resort_workspace_thread_rows();
+        }
+        true
+    }
+
+    fn update_workspace_thread_row_by_priority(
+        &mut self,
+        thread_id: ThreadId,
+        update: impl FnOnce(&mut ThreadListRow),
+    ) -> bool {
+        let Some(index) = self.workspace.row_index(thread_id) else {
+            return false;
+        };
+        let previous_priority = workspace_row_priority(&self.workspace.rows[index]);
+        update(&mut self.workspace.rows[index]);
+        if workspace_row_priority(&self.workspace.rows[index]) != previous_priority {
             self.resort_workspace_thread_rows();
         }
         true
@@ -185,13 +202,9 @@ impl App {
                 let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
                     return true;
                 };
-                if !self.update_workspace_thread_row(
-                    thread_id,
-                    /*resort_after_update*/ true,
-                    |row| {
-                        row.status = notification.status.clone();
-                    },
-                ) {
+                if !self.update_workspace_thread_row_by_priority(thread_id, |row| {
+                    row.status = notification.status.clone();
+                }) {
                     return true;
                 }
                 false
@@ -200,13 +213,9 @@ impl App {
                 let Some(thread_id) = parse_workspace_thread_id(&notification.thread_id) else {
                     return true;
                 };
-                if !self.update_workspace_thread_row(
-                    thread_id,
-                    /*resort_after_update*/ true,
-                    |row| {
-                        row.control_state = notification.control_state.clone();
-                    },
-                ) {
+                if !self.update_workspace_thread_row_by_priority(thread_id, |row| {
+                    row.control_state = notification.control_state.clone();
+                }) {
                     return true;
                 }
                 if self

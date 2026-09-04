@@ -82,6 +82,7 @@ pub(crate) use thread_row::parse_workspace_thread_id;
 pub(crate) use thread_row::refresh_workspace_subagent_summaries;
 pub(crate) use thread_row::sort_workspace_thread_rows;
 pub(crate) use thread_row::workspace_row_is_controlled;
+pub(crate) use thread_row::workspace_row_priority;
 pub(crate) use thread_row::workspace_row_should_auto_observe;
 pub(crate) use thread_row::workspace_single_line;
 pub(crate) use thread_row::workspace_status_without_control;
