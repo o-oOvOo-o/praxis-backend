@@ -22,6 +22,45 @@ impl App {
             }
         }
         for thread_id in thread_ids {
+            // A hydrated local projection is continuously maintained by its listener. Reading it
+            // again here serialized one gateway round trip per known thread before the picker
+            // could open. Only incomplete metadata-only entries still need a remote liveness
+            // check; selecting one also performs the same check before attachment.
+            let locally_closed = self
+                .thread_event_channels
+                .get(&thread_id)
+                .and_then(|channel| {
+                    let store = lock_thread_event_store(&channel.store);
+                    store.session.as_ref().map(|_| {
+                        matches!(
+                            store.status,
+                            Some(praxis_app_gateway_protocol::ThreadStatus::NotLoaded)
+                        )
+                    })
+                });
+            if let Some(is_closed) = locally_closed {
+                let existing = self.agent_navigation.get(&thread_id).cloned();
+                if existing
+                    .as_ref()
+                    .is_none_or(|entry| entry.is_closed != is_closed)
+                {
+                    self.upsert_agent_picker_thread(
+                        thread_id,
+                        existing
+                            .as_ref()
+                            .and_then(|entry| entry.agent_base_name.clone()),
+                        existing
+                            .as_ref()
+                            .and_then(|entry| entry.agent_title.clone()),
+                        existing
+                            .as_ref()
+                            .and_then(|entry| entry.agent_display_name.clone()),
+                        existing.as_ref().and_then(|entry| entry.agent_role.clone()),
+                        is_closed,
+                    );
+                }
+                continue;
+            }
             if !self
                 .refresh_agent_picker_thread_liveness(app_gateway, thread_id)
                 .await
