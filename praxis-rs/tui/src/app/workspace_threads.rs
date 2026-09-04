@@ -60,6 +60,7 @@ impl App {
             return false;
         };
         update(&mut self.workspace.rows[index]);
+        self.workspace.mark_subagent_summaries_dirty();
         if resort_after_update {
             self.resort_workspace_thread_rows();
         }
@@ -76,6 +77,7 @@ impl App {
         };
         let previous_priority = workspace_row_priority(&self.workspace.rows[index]);
         update(&mut self.workspace.rows[index]);
+        self.workspace.mark_subagent_summaries_dirty();
         if workspace_row_priority(&self.workspace.rows[index]) != previous_priority {
             self.resort_workspace_thread_rows();
         }
@@ -84,6 +86,7 @@ impl App {
 
     pub(super) fn remove_workspace_thread_row(&mut self, thread_id: ThreadId) {
         self.workspace.rows.retain(|row| row.thread_id != thread_id);
+        self.workspace.mark_subagent_summaries_dirty();
         self.clamp_workspace_thread_rows();
     }
 
@@ -93,6 +96,7 @@ impl App {
         } else {
             self.workspace.rows.push(row);
         }
+        self.workspace.mark_subagent_summaries_dirty();
         self.resort_workspace_thread_rows();
     }
 
@@ -460,6 +464,7 @@ impl App {
             .map(|row| row.thread_id)
             .or(active_thread_id);
         self.workspace.rows = rows;
+        self.workspace.mark_subagent_summaries_dirty();
         self.workspace
             .pagination
             .set_next_cursor(response.next_cursor);

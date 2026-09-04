@@ -18,7 +18,6 @@ use crate::workspace::WorkspaceMenuAction;
 use crate::workspace::WorkspaceOverlay;
 use crate::workspace::WorkspacePaneSplit;
 use crate::workspace::WorkspaceVisibleItem;
-use crate::workspace::refresh_workspace_subagent_summaries;
 use crate::workspace::workspace_chrome_action_label;
 use crate::workspace::workspace_chrome_action_shortcut;
 use crate::workspace::workspace_chrome_menu_actions;
@@ -397,7 +396,7 @@ impl App {
         buf: &mut ratatui::buffer::Buffer,
         framed: bool,
     ) {
-        refresh_workspace_subagent_summaries(&mut self.workspace.rows);
+        self.workspace.refresh_subagent_summaries_if_dirty();
         let theme = self.chat_widget.workspace_theme();
         let text = theme.text;
         let muted = theme.muted;

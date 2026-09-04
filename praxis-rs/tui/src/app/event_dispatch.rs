@@ -157,6 +157,7 @@ impl App {
                     Ok(thread_name) => {
                         if let Some(index) = self.workspace.row_index(thread_id) {
                             self.workspace.rows[index].name = workspace_single_line(&thread_name);
+                            self.workspace.mark_subagent_summaries_dirty();
                         }
                         self.chat_widget.add_info_message(
                             format!("Thread name regenerated: {thread_name}"),

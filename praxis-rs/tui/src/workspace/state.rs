@@ -14,6 +14,7 @@ use super::session_picker::render_session_picker;
 use super::session_picker_loader::SessionPickerPageLoaders;
 use crate::thread_pagination::ThreadListPagination;
 use crate::workspace::thread_row::ThreadListRow;
+use crate::workspace::thread_row::refresh_workspace_subagent_summaries;
 use crate::workspace::thread_row::workspace_row_is_closed;
 use crossterm::event::KeyEvent;
 use praxis_app_gateway_protocol::ThreadListResponse;
@@ -34,6 +35,7 @@ pub(crate) struct WorkspaceState {
     main_pane: WorkspacePane,
     pub(crate) launch: LaunchStripState,
     pub(crate) rows: Vec<ThreadListRow>,
+    subagent_summaries_dirty: bool,
     pub(crate) usage_by_thread: HashMap<ThreadId, TokenUsageInfo>,
     pub(crate) pinned_thread_ids: HashSet<ThreadId>,
     pub(crate) expanded_subagent_parent_ids: HashSet<ThreadId>,
@@ -156,6 +158,17 @@ impl WorkspaceState {
             enabled,
             ..Self::default()
         }
+    }
+
+    pub(crate) fn mark_subagent_summaries_dirty(&mut self) {
+        self.subagent_summaries_dirty = true;
+    }
+
+    pub(crate) fn refresh_subagent_summaries_if_dirty(&mut self) {
+        if !std::mem::take(&mut self.subagent_summaries_dirty) {
+            return;
+        }
+        refresh_workspace_subagent_summaries(&mut self.rows);
     }
 
     pub(crate) fn clamp_list_scroll(&mut self, visible_rows: usize) {
