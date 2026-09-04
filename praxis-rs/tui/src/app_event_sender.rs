@@ -55,6 +55,9 @@ impl AppEventSender {
             (Some(generation), AppEvent::InsertHistoryCell(cell)) => {
                 AppEvent::InsertHistoryCellForView { generation, cell }
             }
+            (Some(generation), AppEvent::InsertHistoryCells(cells)) => {
+                AppEvent::InsertHistoryCellsForView { generation, cells }
+            }
             (_, event) => event,
         };
         // Record inbound events for high-fidelity session replay.

@@ -187,6 +187,7 @@ pub(super) async fn make_chatwidget_manual(
         praxis_op_target: super::PraxisOpTarget::Direct(op_tx),
         bottom_pane: bottom,
         active_cell: None,
+        history_output_batch: None,
         active_cell_revision: 0,
         work_panel: WorkPanelState::default(),
         transcript_search: TranscriptSearchState::default(),

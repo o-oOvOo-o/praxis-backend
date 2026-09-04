@@ -581,6 +581,8 @@ pub(crate) struct ChatWidget {
     praxis_op_target: PraxisOpTarget,
     bottom_pane: BottomPane,
     active_cell: Option<Box<dyn HistoryCell>>,
+    /// Short-lived sink used to commit snapshot replay cells with one app event.
+    history_output_batch: Option<Vec<Box<dyn HistoryCell>>>,
     /// Monotonic-ish counter used to invalidate transcript overlay caching.
     ///
     /// The transcript overlay appends a cached "live tail" for the current active cell. Most

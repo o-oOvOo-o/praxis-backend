@@ -78,6 +78,7 @@ impl ChatWidget {
                 skills: None,
             }),
             active_cell,
+            history_output_batch: None,
             active_cell_revision: 0,
             transcript_search: TranscriptSearchState::default(),
             transcript_search_document_cache: None,

@@ -549,6 +549,7 @@ impl App {
         let replay_generation = self.history_view_generation;
         if should_buffer_replay {
             self.thread_replay_buffer_generation = Some(replay_generation);
+            self.chat_widget.begin_history_output_batch();
         }
         let ThreadEventSnapshot {
             session,
@@ -580,6 +581,9 @@ impl App {
             .set_queue_autosend_suppressed(/*suppressed*/ false);
         self.chat_widget
             .set_initial_user_message_submit_suppressed(/*suppressed*/ false);
+        if should_buffer_replay {
+            self.chat_widget.finish_history_output_batch();
+        }
         self.chat_widget.submit_initial_user_message_if_pending();
         if resume_restored_queue {
             self.chat_widget.maybe_send_next_queued_input();

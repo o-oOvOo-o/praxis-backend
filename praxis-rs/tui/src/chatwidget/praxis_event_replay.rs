@@ -402,8 +402,7 @@ impl ChatWidget {
                         &mut rendered,
                     );
                     let body_cell = AgentMessageCell::new(rendered, /*is_first_line*/ false);
-                    self.app_event_tx
-                        .send(AppEvent::InsertHistoryCell(Box::new(body_cell)));
+                    self.emit_history_cell(Box::new(body_cell));
                 }
             }
             // Final message is rendered as part of the AgentMessage.

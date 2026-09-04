@@ -96,8 +96,7 @@ impl ChatWidget {
                     ev.call_id
                 );
                 self.needs_final_message_separator = true;
-                self.app_event_tx
-                    .send(AppEvent::InsertHistoryCell(Box::new(orphan)));
+                self.emit_history_cell(Box::new(orphan));
                 self.request_redraw();
             }
             ExecEndTarget::NewCell => {

@@ -366,6 +366,11 @@ pub(crate) enum AppEvent {
         generation: u64,
         cell: Box<dyn HistoryCell>,
     },
+    InsertHistoryCells(Vec<Box<dyn HistoryCell>>),
+    InsertHistoryCellsForView {
+        generation: u64,
+        cells: Vec<Box<dyn HistoryCell>>,
+    },
     /// Finish an atomic thread replay and allow the terminal to draw the completed projection.
     FinishThreadReplayBuffer {
         generation: u64,

@@ -1,6 +1,28 @@
 use super::*;
 
 impl ChatWidget {
+    pub(crate) fn begin_history_output_batch(&mut self) {
+        debug_assert!(self.history_output_batch.is_none());
+        self.history_output_batch = Some(Vec::new());
+    }
+
+    pub(crate) fn finish_history_output_batch(&mut self) {
+        let Some(cells) = self.history_output_batch.take() else {
+            return;
+        };
+        if !cells.is_empty() {
+            self.app_event_tx.send(AppEvent::InsertHistoryCells(cells));
+        }
+    }
+
+    pub(super) fn emit_history_cell(&mut self, cell: Box<dyn HistoryCell>) {
+        if let Some(batch) = self.history_output_batch.as_mut() {
+            batch.push(cell);
+        } else {
+            self.app_event_tx.send(AppEvent::InsertHistoryCell(cell));
+        }
+    }
+
     pub(crate) fn handle_history_entry_response(
         &mut self,
         event: praxis_protocol::protocol::GetHistoryEntryResponseEvent,
@@ -17,7 +39,7 @@ impl ChatWidget {
     pub(super) fn flush_active_cell(&mut self) {
         if let Some(active) = self.active_cell.take() {
             self.needs_final_message_separator = true;
-            self.app_event_tx.send(AppEvent::InsertHistoryCell(active));
+            self.emit_history_cell(active);
         }
     }
 
@@ -31,7 +53,7 @@ impl ChatWidget {
             self.flush_active_cell();
             self.needs_final_message_separator = true;
         }
-        self.app_event_tx.send(AppEvent::InsertHistoryCell(cell));
+        self.emit_history_cell(cell);
     }
 
     /// Mark the active cell as failed (✗) and flush it into history.
