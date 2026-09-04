@@ -146,7 +146,7 @@ impl App {
         ThreadReplaySource,
     )> {
         let channel = self.thread_event_channels.get_mut(&thread_id)?;
-        let receiver = channel.receiver.take()?;
+        let receiver = channel.take_rebased_receiver()?;
         let mut store = lock_thread_event_store(&channel.store);
         store.active = true;
         channel.replay_through_sequence = store.last_event_sequence();
@@ -166,7 +166,7 @@ impl App {
         u64,
     )> {
         let channel = self.thread_event_channels.get_mut(&thread_id)?;
-        let receiver = channel.receiver.take()?;
+        let receiver = channel.take_rebased_receiver()?;
         let mut store = lock_thread_event_store(&channel.store);
         store.active = true;
         channel.replay_through_sequence = store.last_event_sequence();

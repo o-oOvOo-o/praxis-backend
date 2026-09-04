@@ -32,6 +32,7 @@ enum LatestProjectionEventSlot {
 
 const LATEST_PROJECTION_EVENT_SLOTS: usize = LatestProjectionEventSlot::Control as usize + 1;
 const CACHED_VIEW_DELTA_EVENT_LIMIT: usize = 256;
+const STALE_LIVE_QUEUE_ASYNC_DROP_THRESHOLD: usize = 256;
 
 #[derive(Debug)]
 struct CachedViewDeltaLog {
@@ -738,6 +739,29 @@ impl ThreadEventChannel {
             replay_through_sequence: 0,
             replay_view_revision: 0,
         }
+    }
+
+    /// Starts a new live-delivery epoch while activation establishes its replay marker.
+    ///
+    /// Every envelope reaches `ThreadEventStore` before it is copied into the live queue, so an
+    /// inactive receiver only contains events already represented by replay or a cached-view
+    /// delta. Reusing that receiver would make activation walk those duplicate envelopes merely
+    /// to reject their old sequence numbers. Replace it instead and release a potentially large
+    /// stale queue away from the UI task.
+    pub(super) fn take_rebased_receiver(
+        &mut self,
+    ) -> Option<mpsc::UnboundedReceiver<ThreadEventEnvelope>> {
+        let stale_receiver = self.receiver.take()?;
+        let (sender, receiver) = mpsc::unbounded_channel();
+        self.sender = sender;
+        if stale_receiver.len() >= STALE_LIVE_QUEUE_ASYNC_DROP_THRESHOLD
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let _ = runtime.spawn_blocking(move || drop(stale_receiver));
+        } else {
+            drop(stale_receiver);
+        }
+        Some(receiver)
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
