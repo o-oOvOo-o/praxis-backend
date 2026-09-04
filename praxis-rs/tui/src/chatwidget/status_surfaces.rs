@@ -79,6 +79,15 @@ pub(super) struct CachedProjectRootName {
 }
 
 impl ChatWidget {
+    pub(crate) fn begin_status_surface_refresh_batch(&mut self) {
+        debug_assert!(!self.defer_status_surface_refresh);
+        self.defer_status_surface_refresh = true;
+    }
+
+    pub(crate) fn finish_status_surface_refresh_batch(&mut self) {
+        self.defer_status_surface_refresh = false;
+    }
+
     pub(super) fn open_status_line_setup(&mut self) {
         let configured_status_line_items = self.configured_status_line_items();
         let view = StatusLineSetupView::new(
@@ -394,6 +403,9 @@ impl ChatWidget {
     /// warnings once, synchronizes shared cached state (such as git-branch
     /// lookup), then renders each surface from that shared snapshot.
     pub(crate) fn refresh_status_surfaces(&mut self) {
+        if self.defer_status_surface_refresh {
+            return;
+        }
         let selections = self.status_surface_selections();
         self.warn_invalid_status_line_items_once(&selections.invalid_status_line_items);
         self.warn_invalid_terminal_title_items_once(&selections.invalid_terminal_title_items);
@@ -405,6 +417,9 @@ impl ChatWidget {
 
     /// Recomputes and emits the terminal title from config and runtime state.
     pub(crate) fn refresh_terminal_title(&mut self) {
+        if self.defer_status_surface_refresh {
+            return;
+        }
         let selections = self.status_surface_selections();
         self.warn_invalid_terminal_title_items_once(&selections.invalid_terminal_title_items);
         self.sync_status_surface_shared_state(&selections);
@@ -412,6 +427,9 @@ impl ChatWidget {
     }
 
     pub(super) fn request_status_line_branch_refresh(&mut self) {
+        if self.defer_status_surface_refresh {
+            return;
+        }
         let selections = self.status_surface_selections();
         if !selections.uses_git_branch() {
             return;

@@ -140,6 +140,7 @@ impl ChatWidget {
             turn_status_snapshot: TurnRuntimeState::default(),
             pending_guardian_review_status: PendingGuardianReviewStatus::default(),
             terminal_title_status_kind: TerminalTitleStatusKind::TurnRunning,
+            defer_status_surface_refresh: false,
             retry_status_header: None,
             pending_status_indicator_restore: false,
             suppress_queue_autosend: false,

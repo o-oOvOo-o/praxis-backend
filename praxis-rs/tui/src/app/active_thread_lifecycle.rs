@@ -558,6 +558,7 @@ impl App {
             self.thread_replay_buffer_generation = Some(replay_generation);
             self.chat_widget.begin_history_output_batch();
         }
+        self.chat_widget.begin_status_surface_refresh_batch();
         let ThreadEventSnapshot {
             session,
             turns,
@@ -596,6 +597,7 @@ impl App {
         if should_buffer_replay {
             self.chat_widget.finish_history_output_batch();
         }
+        self.chat_widget.finish_status_surface_refresh_batch();
         self.chat_widget.submit_initial_user_message_if_pending();
         if resume_restored_queue {
             self.chat_widget.maybe_send_next_queued_input();

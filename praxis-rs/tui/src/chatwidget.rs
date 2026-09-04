@@ -691,6 +691,7 @@ pub(crate) struct ChatWidget {
     pending_guardian_review_status: PendingGuardianReviewStatus,
     // Semantic status used for terminal-title status rendering.
     terminal_title_status_kind: TerminalTitleStatusKind,
+    defer_status_surface_refresh: bool,
     // Previous status header to restore after a transient stream retry.
     retry_status_header: Option<String>,
     // Set when commentary output completes; once stream queues go idle we restore the status row.

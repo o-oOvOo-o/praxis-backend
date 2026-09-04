@@ -11,7 +11,9 @@ use std::sync::Arc;
 use super::App;
 use super::lock_thread_event_store;
 
-const THREAD_VIEW_CACHE_MAX_ENTRIES: usize = 4;
+// Keep more short-thread views hot without increasing the dominant transcript-cell budget.
+// Long transcripts are still evicted at the same 400-cell ceiling.
+const THREAD_VIEW_CACHE_MAX_ENTRIES: usize = 8;
 const THREAD_VIEW_CACHE_MAX_TRANSCRIPT_CELLS: usize = 400;
 
 pub(super) struct CachedThreadView {

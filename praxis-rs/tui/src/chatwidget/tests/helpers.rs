@@ -214,6 +214,7 @@ pub(super) async fn make_chatwidget_manual(
         plan_stream_controller: None,
         pending_guardian_review_status: PendingGuardianReviewStatus::default(),
         terminal_title_status_kind: TerminalTitleStatusKind::TurnRunning,
+        defer_status_surface_refresh: false,
         last_copyable_output: None,
         pending_turn_copyable_output: None,
         running_commands: HashMap::new(),
