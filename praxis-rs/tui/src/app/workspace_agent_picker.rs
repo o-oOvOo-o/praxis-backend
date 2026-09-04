@@ -425,7 +425,15 @@ impl App {
         }
 
         let has_cached_projection = self.thread_event_channels.contains_key(&thread_id);
-        if !has_cached_projection
+        let needs_liveness_check = !has_cached_projection
+            && self
+                .agent_navigation
+                .get(&thread_id)
+                .is_none_or(|entry| entry.is_closed);
+        // A known open picker entry can attach directly: thread/resume is authoritative and
+        // reports the same disappearance race. Running thread/read immediately before it added a
+        // serialized gateway round trip to every first switch without strengthening correctness.
+        if needs_liveness_check
             && !self
                 .refresh_agent_picker_thread_liveness(app_gateway, thread_id)
                 .await
