@@ -518,7 +518,7 @@ impl App {
                                 AppRunControl::Continue
                             }
                         } else {
-                            app.clear_active_thread().await;
+                            app.clear_active_thread();
                             AppRunControl::Continue
                         }
                     }

@@ -34,14 +34,14 @@ async fn refresh_pending_thread_approvals_only_lists_inactive_threads() {
         /*is_closed*/ false,
     );
 
-    app.refresh_pending_thread_approvals().await;
+    app.refresh_pending_thread_approvals();
     assert_eq!(
         app.chat_widget.pending_thread_approvals(),
         &["墨子-审批工具 [explorer]".to_string()]
     );
 
     app.active_thread_id = Some(agent_thread_id);
-    app.refresh_pending_thread_approvals().await;
+    app.refresh_pending_thread_approvals();
     assert!(app.chat_widget.pending_thread_approvals().is_empty());
 }
 

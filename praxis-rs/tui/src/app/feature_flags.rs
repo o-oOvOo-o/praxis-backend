@@ -251,8 +251,8 @@ impl App {
                 ThreadEventStore::op_can_change_pending_replay_state(&op).then(|| op.clone());
             let submitted = self.chat_widget.submit_op(op);
             if submitted && let Some(op) = replay_state_op.as_ref() {
-                self.note_active_thread_outbound_op(op).await;
-                self.refresh_pending_thread_approvals().await;
+                self.note_active_thread_outbound_op(op);
+                self.refresh_pending_thread_approvals();
             }
         }
 

@@ -190,7 +190,7 @@ impl App {
             control_state,
         } = started;
         let previous_thread_id = self.active_thread_id;
-        self.store_active_thread_receiver().await;
+        self.store_active_thread_receiver();
 
         self.apply_current_permissions_to_thread_session(&mut session);
         let thread_id = session.thread_id;
@@ -222,10 +222,10 @@ impl App {
             store.rebase_buffer_after_session_refresh();
         }
 
-        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id).await else {
+        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id) else {
             if let Some(previous_thread_id) = previous_thread_id {
                 self.active_thread_id = None;
-                self.activate_thread_channel(previous_thread_id).await;
+                self.activate_thread_channel(previous_thread_id);
             }
             return Err(color_eyre::eyre::eyre!(
                 "Praxis thread {thread_id} is already attached but has no replay receiver."
@@ -255,7 +255,7 @@ impl App {
         self.workspace.reset_chat_scroll();
         self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
         self.drain_active_thread_events(tui).await?;
-        self.refresh_pending_thread_approvals().await;
+        self.refresh_pending_thread_approvals();
         Ok(())
     }
 
@@ -274,11 +274,11 @@ impl App {
         }
 
         let previous_thread_id = self.active_thread_id;
-        self.store_active_thread_receiver().await;
-        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id).await else {
+        self.store_active_thread_receiver();
+        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id) else {
             if let Some(previous_thread_id) = previous_thread_id {
                 self.active_thread_id = None;
-                self.activate_thread_channel(previous_thread_id).await;
+                self.activate_thread_channel(previous_thread_id);
             }
             return Ok(false);
         };
@@ -287,7 +287,7 @@ impl App {
             self.active_thread_id = None;
             self.active_thread_rx = None;
             if let Some(previous_thread_id) = previous_thread_id {
-                self.activate_thread_channel(previous_thread_id).await;
+                self.activate_thread_channel(previous_thread_id);
             }
             return Ok(false);
         };
@@ -318,7 +318,7 @@ impl App {
         self.workspace.reset_chat_scroll();
         self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
         self.drain_active_thread_events(tui).await?;
-        self.refresh_pending_thread_approvals().await;
+        self.refresh_pending_thread_approvals();
         Ok(true)
     }
 
@@ -461,7 +461,7 @@ impl App {
         if !disconnected {
             self.active_thread_rx = Some(rx);
         } else {
-            self.clear_active_thread().await;
+            self.clear_active_thread();
         }
 
         if self.has_pending_transcript_scrollback_work() {

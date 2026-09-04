@@ -413,7 +413,7 @@ async fn replay_thread_snapshot_restores_draft_and_queued_input() {
             Vec::new(),
         ),
     );
-    app.activate_thread_channel(thread_id).await;
+    app.activate_thread_channel(thread_id);
     app.chat_widget.handle_thread_session(session.clone());
 
     app.chat_widget
@@ -433,7 +433,7 @@ async fn replay_thread_snapshot_restores_draft_and_queued_input() {
         .capture_thread_input_state()
         .expect("expected thread input state");
 
-    app.store_active_thread_receiver().await;
+    app.store_active_thread_receiver();
 
     let snapshot = {
         let channel = app
@@ -476,7 +476,7 @@ async fn active_turn_id_for_thread_uses_snapshot_turns() {
     );
 
     assert_eq!(
-        app.active_turn_id_for_thread(thread_id).await,
+        app.active_turn_id_for_thread(thread_id),
         Some("turn-1".to_string())
     );
 }
@@ -801,7 +801,7 @@ async fn replay_thread_snapshot_restores_pending_pastes_for_submit() {
             Vec::new(),
         ),
     );
-    app.activate_thread_channel(thread_id).await;
+    app.activate_thread_channel(thread_id);
     app.chat_widget.handle_thread_session(session);
 
     let large = "x".repeat(1005);
@@ -811,7 +811,7 @@ async fn replay_thread_snapshot_restores_pending_pastes_for_submit() {
         .capture_thread_input_state()
         .expect("expected thread input state");
 
-    app.store_active_thread_receiver().await;
+    app.store_active_thread_receiver();
 
     let snapshot = {
         let channel = app

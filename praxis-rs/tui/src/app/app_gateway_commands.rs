@@ -69,8 +69,8 @@ impl App {
             .await?
         {
             if ThreadEventStore::op_can_change_pending_replay_state(&op) {
-                self.note_thread_outbound_op(thread_id, &op).await;
-                self.refresh_pending_thread_approvals().await;
+                self.note_thread_outbound_op(thread_id, &op);
+                self.refresh_pending_thread_approvals();
             }
             return Ok(());
         }
@@ -111,7 +111,7 @@ impl App {
     ) -> Result<bool> {
         match op.view() {
             AppCommandView::Interrupt => {
-                let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await else {
+                let Some(turn_id) = self.active_turn_id_for_thread(thread_id) else {
                     return Ok(true);
                 };
                 app_gateway.turn_interrupt(thread_id, turn_id).await?;
@@ -133,7 +133,7 @@ impl App {
                 personality,
             } => {
                 let mut should_start_turn = true;
-                if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
+                if let Some(turn_id) = self.active_turn_id_for_thread(thread_id) {
                     match app_gateway
                         .turn_steer(thread_id, turn_id, items.to_vec())
                         .await
@@ -288,8 +288,8 @@ impl App {
         {
             Ok(()) => {
                 if ThreadEventStore::op_can_change_pending_replay_state(op) {
-                    self.note_thread_outbound_op(thread_id, op).await;
-                    self.refresh_pending_thread_approvals().await;
+                    self.note_thread_outbound_op(thread_id, op);
+                    self.refresh_pending_thread_approvals();
                 }
                 Ok(true)
             }

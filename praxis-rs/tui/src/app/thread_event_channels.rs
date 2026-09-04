@@ -46,18 +46,18 @@ impl App {
             .or_insert_with(|| ThreadEventChannel::new(THREAD_EVENT_REPLAY_CAPACITY))
     }
 
-    async fn set_thread_active(&mut self, thread_id: ThreadId, active: bool) {
+    fn set_thread_active(&mut self, thread_id: ThreadId, active: bool) {
         if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
             let mut store = lock_thread_event_store(&channel.store);
             store.active = active;
         }
     }
 
-    pub(super) async fn activate_thread_channel(&mut self, thread_id: ThreadId) {
+    pub(super) fn activate_thread_channel(&mut self, thread_id: ThreadId) {
         if self.active_thread_id.is_some() {
             return;
         }
-        self.set_thread_active(thread_id, /*active*/ true).await;
+        self.set_thread_active(thread_id, /*active*/ true);
         let receiver = if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
             channel.receiver.take()
         } else {
@@ -65,10 +65,10 @@ impl App {
         };
         self.active_thread_id = Some(thread_id);
         self.active_thread_rx = receiver;
-        self.refresh_pending_thread_approvals().await;
+        self.refresh_pending_thread_approvals();
     }
 
-    pub(super) async fn store_active_thread_receiver(&mut self) {
+    pub(super) fn store_active_thread_receiver(&mut self) {
         let Some(active_id) = self.active_thread_id else {
             return;
         };
@@ -84,7 +84,7 @@ impl App {
         }
     }
 
-    pub(super) async fn activate_thread_for_replay(
+    pub(super) fn activate_thread_for_replay(
         &mut self,
         thread_id: ThreadId,
     ) -> Option<(
@@ -112,15 +112,15 @@ impl App {
             .is_some_and(|channel| envelope.sequence > channel.replay_through_sequence)
     }
 
-    pub(super) async fn clear_active_thread(&mut self) {
+    pub(super) fn clear_active_thread(&mut self) {
         if let Some(active_id) = self.active_thread_id.take() {
-            self.set_thread_active(active_id, /*active*/ false).await;
+            self.set_thread_active(active_id, /*active*/ false);
         }
         self.active_thread_rx = None;
-        self.refresh_pending_thread_approvals().await;
+        self.refresh_pending_thread_approvals();
     }
 
-    pub(super) async fn note_thread_outbound_op(&mut self, thread_id: ThreadId, op: &AppCommand) {
+    pub(super) fn note_thread_outbound_op(&mut self, thread_id: ThreadId, op: &AppCommand) {
         let Some(channel) = self.thread_event_channels.get(&thread_id) else {
             return;
         };
@@ -128,17 +128,17 @@ impl App {
         store.note_outbound_op(op);
     }
 
-    pub(super) async fn note_active_thread_outbound_op(&mut self, op: &AppCommand) {
+    pub(super) fn note_active_thread_outbound_op(&mut self, op: &AppCommand) {
         if !ThreadEventStore::op_can_change_pending_replay_state(op) {
             return;
         }
         let Some(thread_id) = self.active_thread_id else {
             return;
         };
-        self.note_thread_outbound_op(thread_id, op).await;
+        self.note_thread_outbound_op(thread_id, op);
     }
 
-    pub(super) async fn active_turn_id_for_thread(&self, thread_id: ThreadId) -> Option<String> {
+    pub(super) fn active_turn_id_for_thread(&self, thread_id: ThreadId) -> Option<String> {
         let channel = self.thread_event_channels.get(&thread_id)?;
         let store = lock_thread_event_store(&channel.store);
         store.active_turn_id().map(ToOwned::to_owned)

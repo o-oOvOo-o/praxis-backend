@@ -65,7 +65,7 @@ impl App {
             if !disconnected {
                 self.active_thread_rx = Some(rx);
             } else {
-                self.clear_active_thread().await;
+                self.clear_active_thread();
             }
         }
         self.handle_backtrack_rollback_succeeded(num_turns);
@@ -257,7 +257,7 @@ impl App {
                     /*hint*/ None,
                 );
             } else {
-                self.clear_active_thread().await;
+                self.clear_active_thread();
                 self.chat_widget.add_error_message(format!(
                     "Agent thread {closed_thread_id} closed. Failed to switch back to main thread {primary_thread_id}.",
                 ));

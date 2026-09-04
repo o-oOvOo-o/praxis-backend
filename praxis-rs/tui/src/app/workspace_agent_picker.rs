@@ -468,13 +468,13 @@ impl App {
         }
 
         let previous_thread_id = self.active_thread_id;
-        self.store_active_thread_receiver().await;
-        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id).await else {
+        self.store_active_thread_receiver();
+        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id) else {
             self.chat_widget
                 .add_error_message(format!("Agent thread {thread_id} is already active."));
             if let Some(previous_thread_id) = previous_thread_id {
                 self.active_thread_id = None;
-                self.activate_thread_channel(previous_thread_id).await;
+                self.activate_thread_channel(previous_thread_id);
             }
             return Ok(());
         };
@@ -503,7 +503,7 @@ impl App {
             self.chat_widget.add_info_message(message, /*hint*/ None);
         }
         self.drain_active_thread_events(tui).await?;
-        self.refresh_pending_thread_approvals().await;
+        self.refresh_pending_thread_approvals();
 
         Ok(())
     }

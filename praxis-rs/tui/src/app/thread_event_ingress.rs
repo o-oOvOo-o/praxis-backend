@@ -1,26 +1,20 @@
 use super::*;
 
 impl App {
-    pub(super) async fn refresh_pending_thread_approvals(&mut self) {
-        let channels: Vec<_> = self
-            .thread_event_channels
-            .iter()
-            .map(|(thread_id, channel)| (*thread_id, Arc::clone(&channel.store)))
-            .collect();
-
+    pub(super) fn refresh_pending_thread_approvals(&mut self) {
         let mut pending_thread_ids = Vec::new();
-        for (thread_id, store) in channels {
-            if Some(thread_id) == self.active_thread_id {
+        for (thread_id, channel) in &self.thread_event_channels {
+            if Some(*thread_id) == self.active_thread_id {
                 continue;
             }
 
-            let store = lock_thread_event_store(&store);
+            let store = lock_thread_event_store(&channel.store);
             if store.has_pending_thread_approvals() {
-                pending_thread_ids.push(thread_id);
+                pending_thread_ids.push(*thread_id);
             }
         }
 
-        pending_thread_ids.sort_by_key(ThreadId::to_string);
+        pending_thread_ids.sort_by_cached_key(ThreadId::to_string);
 
         let threads = pending_thread_ids
             .into_iter()
@@ -65,7 +59,7 @@ impl App {
             }
         }
         if pending_approval_visibility_changed && self.active_thread_id != Some(thread_id) {
-            self.refresh_pending_thread_approvals().await;
+            self.refresh_pending_thread_approvals();
         }
         Ok(())
     }
@@ -216,7 +210,7 @@ impl App {
             }
         }
         if pending_approval_visibility_changed && self.active_thread_id != Some(thread_id) {
-            self.refresh_pending_thread_approvals().await;
+            self.refresh_pending_thread_approvals();
         }
         Ok(())
     }
@@ -272,7 +266,7 @@ impl App {
                 control_state.clone(),
             );
         }
-        self.activate_thread_channel(thread_id).await;
+        self.activate_thread_channel(thread_id);
         self.chat_widget
             .set_initial_user_message_submit_suppressed(/*suppressed*/ true);
         self.chat_widget.handle_thread_session(session);

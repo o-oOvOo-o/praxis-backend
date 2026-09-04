@@ -334,7 +334,6 @@ async fn switch_replay_watermark_rejects_queued_store_duplicate() {
 
     let (mut receiver, snapshot) = app
         .activate_thread_for_replay(thread_id)
-        .await
         .expect("thread should activate");
     app.active_thread_id = Some(thread_id);
     assert_eq!(snapshot.events.len(), 1);
@@ -457,7 +456,7 @@ async fn feedback_submission_for_inactive_thread_replays_into_origin_thread() {
             Vec::new(),
         ),
     );
-    app.activate_thread_channel(active_thread_id).await;
+    app.activate_thread_channel(active_thread_id);
     app.chat_widget.handle_thread_session(active_session);
     while app_event_rx.try_recv().is_ok() {}
 
