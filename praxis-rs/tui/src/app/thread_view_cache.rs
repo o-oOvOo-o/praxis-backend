@@ -114,9 +114,9 @@ impl App {
             view_is_cache_candidate
                 .then(|| {
                     let materialized = materialized_revision?;
-                    let status = store.status.as_ref()?;
-                    (!status.is_active() && store.view_revision() == materialized)
-                        .then_some(materialized)
+                    // Running views are safe to retain too: any transcript-changing event
+                    // advances the store revision and rejects this cached revision on restore.
+                    (store.view_revision() == materialized).then_some(materialized)
                 })
                 .flatten()
         };
@@ -243,12 +243,7 @@ impl App {
             return;
         };
         let store = lock_thread_event_store(&channel.store);
-        if store.last_event_sequence() != processed_sequence
-            || store
-                .status
-                .as_ref()
-                .is_none_or(|status| status.is_active())
-        {
+        if store.last_event_sequence() != processed_sequence {
             return;
         }
         let revision = store.view_revision();
@@ -274,12 +269,7 @@ impl App {
             return;
         };
         let store = lock_thread_event_store(&channel.store);
-        if store.view_revision() == revision
-            && store
-                .status
-                .as_ref()
-                .is_some_and(|status| !status.is_active())
-        {
+        if store.view_revision() == revision {
             drop(store);
             self.active_thread_view_materialized_revision = Some(revision);
         }
