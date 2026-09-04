@@ -307,6 +307,12 @@ impl ThreadEventStore {
     fn push_buffered_event(&mut self, event: ThreadBufferedEvent) -> u64 {
         self.last_event_sequence = self.last_event_sequence.saturating_add(1);
         let sequence = self.last_event_sequence;
+        if let Some(buffered) = self.buffer.back_mut()
+            && merge_adjacent_stream_event(&mut buffered.event, &event)
+        {
+            buffered.sequence = sequence;
+            return sequence;
+        }
         self.buffer
             .push_back(ThreadEventEnvelope { sequence, event });
         if self.buffer.len() > self.capacity
@@ -379,6 +385,81 @@ impl ThreadEventStore {
 
     pub(super) fn clear_active_turn_id(&mut self) {
         self.active_turn_id = None;
+    }
+}
+
+fn merge_adjacent_stream_event(
+    buffered: &mut ThreadBufferedEvent,
+    incoming: &ThreadBufferedEvent,
+) -> bool {
+    let (ThreadBufferedEvent::Notification(buffered), ThreadBufferedEvent::Notification(incoming)) =
+        (buffered, incoming)
+    else {
+        return false;
+    };
+
+    match (buffered, incoming) {
+        (
+            ServerNotification::AgentMessageDelta(buffered),
+            ServerNotification::AgentMessageDelta(incoming),
+        ) if buffered.thread_id == incoming.thread_id
+            && buffered.turn_id == incoming.turn_id
+            && buffered.item_id == incoming.item_id =>
+        {
+            buffered.delta.push_str(&incoming.delta);
+            true
+        }
+        (ServerNotification::PlanDelta(buffered), ServerNotification::PlanDelta(incoming))
+            if buffered.thread_id == incoming.thread_id
+                && buffered.turn_id == incoming.turn_id
+                && buffered.item_id == incoming.item_id =>
+        {
+            buffered.delta.push_str(&incoming.delta);
+            true
+        }
+        (
+            ServerNotification::ReasoningSummaryTextDelta(buffered),
+            ServerNotification::ReasoningSummaryTextDelta(incoming),
+        ) if buffered.thread_id == incoming.thread_id
+            && buffered.turn_id == incoming.turn_id
+            && buffered.item_id == incoming.item_id
+            && buffered.summary_index == incoming.summary_index =>
+        {
+            buffered.delta.push_str(&incoming.delta);
+            true
+        }
+        (
+            ServerNotification::ReasoningTextDelta(buffered),
+            ServerNotification::ReasoningTextDelta(incoming),
+        ) if buffered.thread_id == incoming.thread_id
+            && buffered.turn_id == incoming.turn_id
+            && buffered.item_id == incoming.item_id
+            && buffered.content_index == incoming.content_index =>
+        {
+            buffered.delta.push_str(&incoming.delta);
+            true
+        }
+        (
+            ServerNotification::CommandExecutionOutputDelta(buffered),
+            ServerNotification::CommandExecutionOutputDelta(incoming),
+        ) if buffered.thread_id == incoming.thread_id
+            && buffered.turn_id == incoming.turn_id
+            && buffered.item_id == incoming.item_id =>
+        {
+            buffered.delta.push_str(&incoming.delta);
+            true
+        }
+        (
+            ServerNotification::FileChangeOutputDelta(buffered),
+            ServerNotification::FileChangeOutputDelta(incoming),
+        ) if buffered.thread_id == incoming.thread_id
+            && buffered.turn_id == incoming.turn_id
+            && buffered.item_id == incoming.item_id =>
+        {
+            buffered.delta.push_str(&incoming.delta);
+            true
+        }
+        _ => false,
     }
 }
 
