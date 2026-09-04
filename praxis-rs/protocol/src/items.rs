@@ -150,23 +150,65 @@ impl UserMessageItem {
     }
 
     pub fn to_user_message_event(&self) -> UserMessageEvent {
+        let text_capacity = self
+            .content
+            .iter()
+            .map(|input| match input {
+                UserInput::Text { text, .. } => text.len(),
+                _ => 0,
+            })
+            .sum();
+        let mut message = String::with_capacity(text_capacity);
+        let mut images = Vec::new();
+        let mut local_images = Vec::new();
+        let mut text_elements = Vec::new();
+        for input in &self.content {
+            match input {
+                UserInput::Text {
+                    text,
+                    text_elements: input_elements,
+                } => {
+                    let offset = message.len();
+                    message.push_str(text);
+                    text_elements.extend(input_elements.iter().map(|element| {
+                        TextElement::new(
+                            ByteRange {
+                                start: offset + element.byte_range.start,
+                                end: offset + element.byte_range.end,
+                            },
+                            element.placeholder(text).map(str::to_owned),
+                        )
+                    }));
+                }
+                UserInput::Image { image_url } => images.push(image_url.clone()),
+                UserInput::LocalImage { path } => local_images.push(path.clone()),
+                UserInput::Skill { .. } | UserInput::Mention { .. } => {}
+            }
+        }
         UserMessageEvent {
-            message: self.message(),
-            images: Some(self.image_urls()),
-            local_images: self.local_image_paths(),
-            text_elements: self.text_elements(),
+            message,
+            images: Some(images),
+            local_images,
+            text_elements,
         }
     }
 
     pub fn message(&self) -> String {
-        self.content
+        let capacity = self
+            .content
             .iter()
-            .map(|c| match c {
-                UserInput::Text { text, .. } => text.clone(),
-                _ => String::new(),
+            .map(|input| match input {
+                UserInput::Text { text, .. } => text.len(),
+                _ => 0,
             })
-            .collect::<Vec<String>>()
-            .join("")
+            .sum();
+        let mut message = String::with_capacity(capacity);
+        for input in &self.content {
+            if let UserInput::Text { text, .. } = input {
+                message.push_str(text);
+            }
+        }
+        message
     }
 
     pub fn text_elements(&self) -> Vec<TextElement> {
