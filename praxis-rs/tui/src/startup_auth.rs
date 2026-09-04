@@ -14,6 +14,9 @@ pub(super) fn install_color_eyre() -> color_eyre::Result<()> {
 }
 
 pub(crate) fn cwds_differ(current_cwd: &Path, session_cwd: &Path) -> bool {
+    if current_cwd == session_cwd {
+        return false;
+    }
     match (
         path_utils::normalize_for_path_comparison(current_cwd),
         path_utils::normalize_for_path_comparison(session_cwd),

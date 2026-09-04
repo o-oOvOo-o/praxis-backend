@@ -152,6 +152,24 @@ impl App {
             return Ok(None);
         }
 
+        let has_cached_projection = self
+            .thread_event_channels
+            .contains_key(&target_session.thread_id);
+        let raw_same_cwd = target_session
+            .cwd
+            .as_deref()
+            .is_none_or(|cwd| cwd == self.config.cwd.as_path());
+        if has_cached_projection
+            && raw_same_cwd
+            && self
+                .switch_to_cached_workspace_thread(tui, target_session.thread_id)
+                .await?
+        {
+            self.refresh_workspace_threads(app_gateway, /*force*/ false);
+            tui.frame_requester().schedule_frame();
+            return Ok(None);
+        }
+
         let current_cwd = self.config.cwd.to_path_buf();
         let resume_cwd = if self.remote_app_gateway_url.is_some() {
             current_cwd.clone()
@@ -173,11 +191,9 @@ impl App {
             }
         };
 
-        let has_cached_projection = self
-            .thread_event_channels
-            .contains_key(&target_session.thread_id);
         let same_cwd = !crate::cwds_differ(&current_cwd, &resume_cwd);
         if has_cached_projection
+            && !raw_same_cwd
             && same_cwd
             && self
                 .switch_to_cached_workspace_thread(tui, target_session.thread_id)
