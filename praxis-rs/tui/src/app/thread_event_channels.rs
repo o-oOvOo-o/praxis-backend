@@ -9,6 +9,7 @@ use crate::app_gateway_session::AppGatewaySession;
 use crate::app_gateway_session::ThreadSessionState;
 use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::chatwidget::ChatWidget;
+use crate::chatwidget::ReplayKind;
 use praxis_protocol::ThreadId;
 use tokio::sync::mpsc;
 
@@ -19,6 +20,7 @@ pub(super) struct CachedThreadProjectionState {
     pub(super) status: Option<praxis_app_gateway_protocol::ThreadStatus>,
     pub(super) control_state: Option<praxis_app_gateway_protocol::ThreadControlState>,
     pub(super) token_usage: Option<praxis_app_gateway_protocol::ThreadTokenUsage>,
+    pub(super) goal_notification: Option<praxis_app_gateway_protocol::ServerNotification>,
 }
 
 impl CachedThreadProjectionState {
@@ -27,6 +29,9 @@ impl CachedThreadProjectionState {
         chat_widget.set_thread_control_state(self.control_state.as_ref());
         if let Some(token_usage) = self.token_usage {
             chat_widget.set_token_info(Some(token_usage_info_from_app_gateway(token_usage)));
+        }
+        if let Some(notification) = self.goal_notification {
+            chat_widget.handle_server_notification(notification, Some(ReplayKind::ThreadSnapshot));
         }
     }
 }
@@ -152,6 +157,7 @@ impl App {
                 status: store.status.clone(),
                 control_state: store.control_state.clone(),
                 token_usage: store.latest_token_usage(),
+                goal_notification: store.latest_goal_notification(),
             })
         } else {
             ThreadViewActivationState::Replay(store.snapshot())

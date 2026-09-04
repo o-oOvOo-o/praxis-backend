@@ -454,6 +454,19 @@ impl ThreadEventStore {
         Some(notification.token_usage.clone())
     }
 
+    pub(super) fn latest_goal_notification(&self) -> Option<ServerNotification> {
+        let envelope =
+            self.latest_projection_events[LatestProjectionEventSlot::Goal as usize].as_ref()?;
+        let ThreadBufferedEvent::Notification(notification) = &envelope.event else {
+            return None;
+        };
+        matches!(
+            notification,
+            ServerNotification::ThreadGoalUpdated(_) | ServerNotification::ThreadGoalCleared(_)
+        )
+        .then(|| notification.clone())
+    }
+
     fn bump_view_revision(&mut self) {
         self.view_revision = self.view_revision.wrapping_add(1);
     }
@@ -520,6 +533,10 @@ fn event_requires_view_replay(event: &ThreadBufferedEvent) -> bool {
                 | ServerNotification::ThreadControlChanged(_)
                 // Usage is a latest-value status projection applied directly to cached views.
                 | ServerNotification::ThreadTokenUsageUpdated(_)
+                // Goal state is a latest-value work-panel projection; completion bookkeeping
+                // still runs through the original notification handler on cache activation.
+                | ServerNotification::ThreadGoalUpdated(_)
+                | ServerNotification::ThreadGoalCleared(_)
                 // Heartbeats are routing/liveness metadata and have no ChatWidget effect.
                 | ServerNotification::ThreadHeartbeatUpdated(_)
                 // The diff notification only asks the active view to refresh its status line;
