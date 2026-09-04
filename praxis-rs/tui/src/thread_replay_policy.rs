@@ -24,6 +24,10 @@ pub(crate) fn compact_visible_replay_turns(turns: Vec<Turn>) -> Vec<Turn> {
     VisibleReplayBudget::default().compact(turns)
 }
 
+pub(crate) fn clone_compact_visible_replay_turns(turns: &[Turn]) -> Vec<Turn> {
+    VisibleReplayBudget::default().clone_compact(turns)
+}
+
 pub(crate) fn compact_conversation_replay_turns(turns: Vec<Turn>) -> Vec<Turn> {
     let turns = turns
         .into_iter()
@@ -44,6 +48,35 @@ fn is_conversation_item(item: &ThreadItem) -> bool {
 }
 
 impl VisibleReplayBudget {
+    fn clone_compact(self, turns: &[Turn]) -> Vec<Turn> {
+        if turns.len() <= self.max_turns
+            && turns.iter().map(|turn| turn.items.len()).sum::<usize>() <= self.max_items
+        {
+            return turns.to_vec();
+        }
+
+        let mut item_count = 0usize;
+        let mut kept = Vec::with_capacity(self.max_turns.min(turns.len()));
+        for turn in turns.iter().rev().take(self.max_turns) {
+            let remaining = self.max_items.saturating_sub(item_count);
+            if remaining == 0 {
+                break;
+            }
+            let skip = turn.items.len().saturating_sub(remaining);
+            let items = turn.items[skip..].to_vec();
+            item_count = item_count.saturating_add(items.len());
+            kept.push(Turn {
+                id: turn.id.clone(),
+                items,
+                status: turn.status.clone(),
+                error: turn.error.clone(),
+                collaboration_mode_kind: turn.collaboration_mode_kind,
+            });
+        }
+        kept.reverse();
+        kept
+    }
+
     fn compact(self, turns: Vec<Turn>) -> Vec<Turn> {
         if turns.len() <= self.max_turns
             && turns.iter().map(|turn| turn.items.len()).sum::<usize>() <= self.max_items

@@ -4,6 +4,7 @@ use crate::app_event::FeedbackCategory;
 use crate::app_gateway_session::ThreadSessionState;
 use crate::bottom_pane::FeedbackAudience;
 use crate::chatwidget::ThreadInputState;
+use crate::thread_replay_policy::clone_compact_visible_replay_turns;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::ThreadControlState;
@@ -329,7 +330,7 @@ impl ThreadEventStore {
     pub(super) fn snapshot(&self) -> ThreadEventSnapshot {
         ThreadEventSnapshot {
             session: self.session.clone(),
-            turns: self.turns.clone(),
+            turns: clone_compact_visible_replay_turns(&self.turns),
             status: self.status.clone(),
             control_state: self.control_state.clone(),
             events: self

@@ -173,6 +173,21 @@ impl App {
             }
         };
 
+        let has_cached_projection = self
+            .thread_event_channels
+            .contains_key(&target_session.thread_id);
+        let same_cwd = !crate::cwds_differ(&current_cwd, &resume_cwd);
+        if has_cached_projection
+            && same_cwd
+            && self
+                .switch_to_cached_workspace_thread(tui, target_session.thread_id)
+                .await?
+        {
+            self.refresh_workspace_threads(app_gateway, true);
+            tui.frame_requester().schedule_frame();
+            return Ok(None);
+        }
+
         let (mut resume_config, resume_tui_config) = match self
             .rebuild_config_for_resume_or_fallback(&current_cwd, resume_cwd)
             .await
@@ -187,10 +202,7 @@ impl App {
         };
         self.apply_runtime_policy_overrides(&mut resume_config);
 
-        if self
-            .thread_event_channels
-            .contains_key(&target_session.thread_id)
-        {
+        if has_cached_projection && !same_cwd {
             let previous_config = self.config.clone();
             let previous_tui_config = self.tui_config.clone();
             self.config = resume_config.clone();
