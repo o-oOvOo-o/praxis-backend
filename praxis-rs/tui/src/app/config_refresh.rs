@@ -1,4 +1,5 @@
 use super::*;
+use crate::app_gateway_session::ThreadSessionState;
 use praxis_app_core::praxis_model_change_divider_message;
 
 impl App {
@@ -300,15 +301,6 @@ impl App {
     pub(super) async fn sync_cached_thread_permissions_from_config(&mut self) {
         let (approval_policy, approvals_reviewer, sandbox_policy) =
             self.current_thread_permissions();
-        if let Some(session) = self.primary_session_configured.as_mut() {
-            Self::apply_thread_permissions(
-                session,
-                approval_policy,
-                approvals_reviewer,
-                &sandbox_policy,
-            );
-        }
-
         let stores = self
             .thread_event_channels
             .values()

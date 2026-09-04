@@ -179,15 +179,6 @@ impl App {
         {
             self.config.model_provider = provider;
         }
-        if self
-            .primary_thread_id
-            .is_some_and(|thread_id| thread_id.to_string() == notification.thread_id.as_str())
-            && let Some(session) = self.primary_session_configured.as_mut()
-        {
-            session.model_provider_id = notification.model_provider.clone();
-            session.model = notification.model.clone();
-            session.reasoning_effort = notification.reasoning_effort.clone();
-        }
     }
 
     fn apply_thread_permissions_changed_to_runtime_config(
@@ -208,15 +199,6 @@ impl App {
             .set(sandbox_policy.clone())
         {
             tracing::warn!(%err, "failed to sync sandbox policy from app-gateway");
-        }
-        if self
-            .primary_thread_id
-            .is_some_and(|thread_id| thread_id.to_string() == notification.thread_id.as_str())
-            && let Some(session) = self.primary_session_configured.as_mut()
-        {
-            session.approval_policy = approval_policy;
-            session.approvals_reviewer = approvals_reviewer;
-            session.sandbox_policy = sandbox_policy;
         }
     }
 

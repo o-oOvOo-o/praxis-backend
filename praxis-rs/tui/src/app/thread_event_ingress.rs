@@ -1,4 +1,5 @@
 use super::*;
+use crate::app_gateway_session::ThreadSessionState;
 
 impl App {
     pub(super) fn refresh_pending_thread_approvals(&mut self) {
@@ -158,7 +159,8 @@ impl App {
         let ServerNotification::ThreadStarted(notification) = notification else {
             return None;
         };
-        let mut session = self.primary_session_configured.clone()?;
+        let primary_thread_id = self.primary_thread_id?;
+        let mut session = self.thread_session_state(primary_thread_id)?;
         session.thread_id = thread_id;
         session.thread_name = notification.thread.name.clone();
         session.model_provider_id = notification.thread.model_provider.clone();
@@ -279,7 +281,6 @@ impl App {
         self.apply_current_permissions_to_thread_session(&mut session);
         let thread_id = session.thread_id;
         self.primary_thread_id = Some(thread_id);
-        self.primary_session_configured = Some(session.clone());
         self.upsert_agent_picker_thread(
             thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
             /*agent_display_name*/ None, /*agent_role*/ None, /*is_closed*/ false,

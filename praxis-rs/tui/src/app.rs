@@ -9,7 +9,6 @@ use crate::app_event::WindowsSandboxEnableMode;
 use crate::app_event_sender::AppEventSender;
 use crate::app_gateway_session::AppGatewaySession;
 use crate::app_gateway_session::AppGatewayStartedThread;
-use crate::app_gateway_session::ThreadSessionState;
 use crate::app_gateway_session::app_gateway_rate_limit_snapshots_to_core;
 use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::bottom_pane::ApprovalRequest;
@@ -384,7 +383,6 @@ pub(crate) struct App {
     thread_view_cache: ThreadViewCache,
     primary_thread_id: Option<ThreadId>,
     last_subagent_backfill_attempt: Option<ThreadId>,
-    primary_session_configured: Option<ThreadSessionState>,
     pending_primary_events: VecDeque<ThreadBufferedEvent>,
     pending_app_gateway_requests: PendingAppGatewayRequests,
     workspace: WorkspaceState,

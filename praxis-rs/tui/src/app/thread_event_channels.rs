@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 const THREAD_EVENT_REPLAY_CAPACITY: usize = 32768;
 
 pub(super) enum ThreadViewActivationState {
-    Cached(ThreadSessionState),
+    Cached,
     Replay(ThreadEventSnapshot),
 }
 
@@ -129,11 +129,17 @@ impl App {
         channel.replay_through_sequence = store.last_event_sequence();
         let revision = store.snapshot_revision();
         channel.replay_snapshot_revision = revision;
-        let state = match (cached_revision == Some(revision), store.session.clone()) {
-            (true, Some(session)) => ThreadViewActivationState::Cached(session),
-            _ => ThreadViewActivationState::Replay(store.snapshot()),
+        let state = if cached_revision == Some(revision) && store.session.is_some() {
+            ThreadViewActivationState::Cached
+        } else {
+            ThreadViewActivationState::Replay(store.snapshot())
         };
         Some((receiver, state, revision))
+    }
+
+    pub(super) fn thread_session_state(&self, thread_id: ThreadId) -> Option<ThreadSessionState> {
+        let channel = self.thread_event_channels.get(&thread_id)?;
+        lock_thread_event_store(&channel.store).session.clone()
     }
 
     pub(super) fn active_thread_event_is_after_replay(

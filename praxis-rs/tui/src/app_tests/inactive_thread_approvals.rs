@@ -336,7 +336,6 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
 
     app.primary_thread_id = Some(main_thread_id);
     app.active_thread_id = Some(main_thread_id);
-    app.primary_session_configured = Some(primary_session.clone());
     app.thread_event_channels.insert(
         main_thread_id,
         ThreadEventChannel::new_with_session(
@@ -456,7 +455,6 @@ async fn inactive_thread_started_notification_preserves_primary_model_when_path_
 
     app.primary_thread_id = Some(main_thread_id);
     app.active_thread_id = Some(main_thread_id);
-    app.primary_session_configured = Some(primary_session.clone());
     app.thread_event_channels.insert(
         main_thread_id,
         ThreadEventChannel::new_with_session(

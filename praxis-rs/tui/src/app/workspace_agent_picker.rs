@@ -249,8 +249,8 @@ impl App {
         thread: &praxis_app_gateway_protocol::Thread,
     ) -> ThreadSessionState {
         let mut session = self
-            .primary_session_configured
-            .clone()
+            .primary_thread_id
+            .and_then(|primary_thread_id| self.thread_session_state(primary_thread_id))
             .unwrap_or(ThreadSessionState {
                 thread_id,
                 forked_from_id: None,
@@ -476,7 +476,7 @@ impl App {
             return Ok(());
         };
         let (snapshot, cached_view) = match activation_state {
-            ThreadViewActivationState::Cached(_) => (None, cached_view),
+            ThreadViewActivationState::Cached => (None, cached_view),
             ThreadViewActivationState::Replay(mut snapshot) => {
                 if let Some(stale_view) = cached_view.take() {
                     self.carry_cached_thread_input_state_into_snapshot(

@@ -93,7 +93,6 @@ impl App {
         drop(self.thread_view_cache.drain());
         self.primary_thread_id = None;
         self.last_subagent_backfill_attempt = None;
-        self.primary_session_configured = None;
         self.pending_primary_events.clear();
         self.pending_app_gateway_requests.clear();
         self.workspace_observed_thread_ids.clear();
@@ -205,7 +204,6 @@ impl App {
             .map(|row| row.source_kind.agent_rank())
             .unwrap_or(0);
         self.primary_thread_id = Some(thread_id);
-        self.primary_session_configured = Some(session.clone());
         self.upsert_agent_picker_thread(
             thread_id, /*agent_base_name*/ None, /*agent_title*/ None,
             /*agent_display_name*/ None, /*agent_role*/ None, /*is_closed*/ false,
@@ -292,8 +290,8 @@ impl App {
             return Ok(false);
         };
 
-        let (session, snapshot, cached_view) = match activation_state {
-            ThreadViewActivationState::Cached(session) => (session, None, cached_view),
+        let (snapshot, cached_view) = match activation_state {
+            ThreadViewActivationState::Cached => (None, cached_view),
             ThreadViewActivationState::Replay(mut snapshot) => {
                 if let Some(stale_view) = cached_view.take() {
                     self.carry_cached_thread_input_state_into_snapshot(
@@ -302,22 +300,21 @@ impl App {
                         &mut snapshot,
                     );
                 }
-                let Some(session) = snapshot.session.clone() else {
+                if snapshot.session.is_none() {
                     self.active_thread_id = None;
                     self.active_thread_rx = None;
                     if let Some(previous_thread_id) = previous_thread_id {
                         self.activate_thread_channel(previous_thread_id);
                     }
                     return Ok(false);
-                };
-                (session, Some(snapshot), None)
+                }
+                (Some(snapshot), None)
             }
         };
 
         self.active_thread_id = Some(thread_id);
         self.active_thread_rx = Some(receiver);
         self.primary_thread_id = Some(thread_id);
-        self.primary_session_configured = Some(session);
         let default_launch_rank = self
             .workspace
             .rows

@@ -390,7 +390,6 @@ impl App {
             thread_view_cache: ThreadViewCache::default(),
             primary_thread_id: None,
             last_subagent_backfill_attempt: None,
-            primary_session_configured: None,
             pending_primary_events: VecDeque::new(),
             pending_app_gateway_requests: PendingAppGatewayRequests::default(),
             workspace: WorkspaceState::new(workspace_mode),
