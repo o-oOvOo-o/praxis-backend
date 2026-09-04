@@ -111,7 +111,7 @@ struct WorkspaceTranscriptCommittedLayoutKey {
 struct WorkspaceTranscriptCommittedLayout {
     key: WorkspaceTranscriptCommittedLayoutKey,
     rows: Vec<WorkspaceTranscriptRow>,
-    blocks: Vec<WorkspaceTranscriptBlock>,
+    last_block: Option<WorkspaceTranscriptBlock>,
 }
 
 type WorkspaceTranscriptBlock = TranscriptBlock;
@@ -195,7 +195,7 @@ impl WorkspaceTranscriptCache {
             self.committed_layout = Some(WorkspaceTranscriptCommittedLayout {
                 key,
                 rows: Vec::new(),
-                blocks: Vec::new(),
+                last_block: None,
             });
             let layout = self
                 .committed_layout
@@ -281,7 +281,7 @@ fn row_segments_for_request<'a>(
         )];
     };
 
-    if let Some(last_block) = committed_layout.blocks.last()
+    if let Some(last_block) = committed_layout.last_block.as_ref()
         && matches!(tail.lane, ChatLane::Assistant)
         && matches!(last_block.lane, ChatLane::Assistant)
         && tail.mouse_targets.is_empty()
@@ -366,28 +366,32 @@ fn build_committed_layout(
     }
 
     layout.rows.clear();
-    layout.blocks.clear();
+    layout.last_block = None;
+    let block_count = content_blocks.len();
     for (index, block) in content_blocks.into_iter().enumerate() {
         if index > 0 {
             layout.rows.push(blank_row());
         }
         let row_start = layout.rows.len();
+        let retained_block = (index + 1 == block_count).then(|| {
+            WorkspaceTranscriptBlock::new(
+                block.lane,
+                block.lines.clone(),
+                block.patch_cell_ids.clone(),
+                block.mouse_actions.clone(),
+                row_start,
+            )
+        });
         let rendered_rows = rows_for_block(
             width,
             request.theme,
             block.lane,
-            block.lines.clone(),
+            block.lines,
             &block.patch_cell_ids,
             &block.mouse_actions,
         );
         layout.rows.extend(rendered_rows);
-        layout.blocks.push(WorkspaceTranscriptBlock::new(
-            block.lane,
-            block.lines,
-            block.patch_cell_ids,
-            block.mouse_actions,
-            row_start,
-        ));
+        layout.last_block = retained_block;
     }
 }
 
