@@ -575,7 +575,6 @@ impl App {
             .set_queue_autosend_suppressed(/*suppressed*/ true);
         self.chat_widget.restore_thread_input_state(input_state);
         if !turns.is_empty() {
-            let turns = compact_visible_replay_turns(turns);
             self.chat_widget
                 .replay_thread_turns(turns, ReplayKind::ThreadSnapshot);
         }

@@ -566,9 +566,14 @@ impl ChatWidget {
         notification: ItemCompletedNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        let ItemCompletedNotification {
+            item,
+            turn_id,
+            thread_id: _,
+        } = notification;
         self.handle_thread_item(
-            notification.item,
-            notification.turn_id,
+            item,
+            &turn_id,
             replay_kind.map_or(ThreadItemRenderSource::Live, ThreadItemRenderSource::Replay),
         );
     }

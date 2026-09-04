@@ -22,7 +22,11 @@ impl ChatWidget {
                 self.on_task_started();
             }
             for item in items {
-                self.replay_thread_item(item, turn_id.clone(), replay_kind);
+                self.handle_thread_item(
+                    item,
+                    &turn_id,
+                    ThreadItemRenderSource::Replay(replay_kind),
+                );
             }
             self.handle_replayed_turn_status(
                 turn_id,
@@ -92,19 +96,20 @@ impl ChatWidget {
         );
     }
 
+    #[cfg(test)]
     pub(crate) fn replay_thread_item(
         &mut self,
         item: ThreadItem,
         turn_id: String,
         replay_kind: ReplayKind,
     ) {
-        self.handle_thread_item(item, turn_id, ThreadItemRenderSource::Replay(replay_kind))
+        self.handle_thread_item(item, &turn_id, ThreadItemRenderSource::Replay(replay_kind))
     }
 
     pub(super) fn handle_thread_item(
         &mut self,
         item: ThreadItem,
-        turn_id: String,
+        turn_id: &str,
         render_source: ThreadItemRenderSource,
     ) {
         let from_replay = render_source.is_replay();
@@ -230,7 +235,7 @@ impl ChatWidget {
                     self.on_exec_command_begin(ExecCommandBeginEvent {
                         call_id: id.clone(),
                         process_id,
-                        turn_id: turn_id.clone(),
+                        turn_id: turn_id.to_owned(),
                         command: split_command_string(&command),
                         cwd,
                         parsed_cmd: command_actions
@@ -254,7 +259,7 @@ impl ChatWidget {
                     self.on_exec_command_end(ExecCommandEndEvent {
                         call_id: id,
                         process_id,
-                        turn_id: turn_id.clone(),
+                        turn_id: turn_id.to_owned(),
                         command: split_command_string(&command),
                         cwd,
                         parsed_cmd: command_actions
@@ -299,7 +304,7 @@ impl ChatWidget {
                 ) {
                     self.on_patch_apply_end(praxis_protocol::protocol::PatchApplyEndEvent {
                         call_id: id,
-                        turn_id: turn_id.clone(),
+                        turn_id: turn_id.to_owned(),
                         stdout: String::new(),
                         stderr: String::new(),
                         success: !matches!(
