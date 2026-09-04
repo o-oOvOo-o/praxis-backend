@@ -43,15 +43,20 @@ impl App {
             (channel.sender.clone(), Arc::clone(&channel.store))
         };
 
-        let (should_send, sequence) = {
+        let (should_send, sequence, pending_approval_visibility_changed) = {
             let mut guard = store.lock().await;
             if guard.session.is_none()
                 && let Some(session) = inferred_session
             {
                 guard.session = Some(session);
             }
+            let had_pending_approvals = guard.has_pending_thread_approvals();
             let sequence = guard.push_notification(notification.clone());
-            (guard.active, sequence)
+            (
+                guard.active,
+                sequence,
+                had_pending_approvals != guard.has_pending_thread_approvals(),
+            )
         };
 
         if should_send {
@@ -63,7 +68,9 @@ impl App {
                 tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
         }
-        self.refresh_pending_thread_approvals().await;
+        if pending_approval_visibility_changed && self.active_thread_id != Some(thread_id) {
+            self.refresh_pending_thread_approvals().await;
+        }
         Ok(())
     }
 
@@ -181,11 +188,16 @@ impl App {
             (channel.sender.clone(), Arc::clone(&channel.store))
         };
 
-        let (should_send, sequence) = {
+        let (should_send, sequence, pending_approval_visibility_changed) = {
             let mut guard = store.lock().await;
+            let had_pending_approvals = guard.has_pending_thread_approvals();
             let inserted = guard.push_request(request.clone());
             let sequence = inserted.then(|| guard.last_event_sequence());
-            (guard.active, sequence)
+            (
+                guard.active,
+                sequence,
+                had_pending_approvals != guard.has_pending_thread_approvals(),
+            )
         };
 
         if should_send && let Some(sequence) = sequence {
@@ -209,7 +221,9 @@ impl App {
                 }
             }
         }
-        self.refresh_pending_thread_approvals().await;
+        if pending_approval_visibility_changed && self.active_thread_id != Some(thread_id) {
+            self.refresh_pending_thread_approvals().await;
+        }
         Ok(())
     }
 
