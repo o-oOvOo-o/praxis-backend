@@ -154,12 +154,18 @@ impl App {
                 revision,
             },
         );
+        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+            lock_thread_event_store(&channel.store).begin_cached_view_delta(revision);
+        }
     }
 
     pub(super) fn cache_thread_view(&mut self, thread_id: ThreadId, view: CachedThreadView) {
         let evicted_views = self.thread_view_cache.insert(thread_id, view);
         for (evicted_thread_id, evicted_view) in evicted_views {
             self.persist_cached_thread_input_state(evicted_thread_id, &evicted_view);
+            if let Some(channel) = self.thread_event_channels.get(&evicted_thread_id) {
+                lock_thread_event_store(&channel.store).clear_cached_view_delta();
+            }
         }
     }
 
@@ -191,6 +197,9 @@ impl App {
     pub(super) fn clear_thread_view_cache_preserving_input(&mut self) {
         for (thread_id, cached_view) in self.thread_view_cache.drain() {
             self.persist_cached_thread_input_state(thread_id, &cached_view);
+            if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+                lock_thread_event_store(&channel.store).clear_cached_view_delta();
+            }
         }
     }
 

@@ -31,6 +31,14 @@ enum LatestProjectionEventSlot {
 }
 
 const LATEST_PROJECTION_EVENT_SLOTS: usize = LatestProjectionEventSlot::Control as usize + 1;
+const CACHED_VIEW_DELTA_EVENT_LIMIT: usize = 256;
+
+#[derive(Debug)]
+struct CachedViewDeltaLog {
+    base_revision: u64,
+    events: VecDeque<ThreadEventEnvelope>,
+    overflowed: bool,
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
@@ -75,6 +83,7 @@ pub(super) struct ThreadEventStore {
     latest_projection_events: [Option<ThreadEventEnvelope>; LATEST_PROJECTION_EVENT_SLOTS],
     last_event_sequence: u64,
     view_revision: u64,
+    cached_view_delta: Option<CachedViewDeltaLog>,
     pending_interactive_replay: PendingInteractiveReplayState,
     active_turn_id: Option<String>,
     pub(super) input_state: Option<ThreadInputState>,
@@ -103,6 +112,7 @@ impl ThreadEventStore {
             latest_projection_events: std::array::from_fn(|_| None),
             last_event_sequence: 0,
             view_revision: 0,
+            cached_view_delta: None,
             pending_interactive_replay: PendingInteractiveReplayState::default(),
             active_turn_id: None,
             input_state: None,
@@ -124,6 +134,7 @@ impl ThreadEventStore {
     }
 
     pub(super) fn set_session(&mut self, session: ThreadSessionState, turns: Vec<Turn>) {
+        self.clear_cached_view_delta();
         self.session = Some(session);
         self.rebase_buffer_after_turn_snapshot(&turns);
         self.set_turns(turns);
@@ -362,6 +373,7 @@ impl ThreadEventStore {
             self.bump_view_revision();
         }
         let sequence = self.last_event_sequence;
+        self.record_cached_view_delta(sequence, &event);
         if let Some(slot) = latest_projection_event_slot(&event) {
             self.latest_projection_events[slot as usize] =
                 Some(ThreadEventEnvelope { sequence, event });
@@ -386,6 +398,7 @@ impl ThreadEventStore {
     }
 
     pub(super) fn apply_thread_rollback(&mut self, response: &ThreadRollbackResponse) {
+        self.clear_cached_view_delta();
         self.set_turns(response.thread.turns.clone());
         self.set_status(response.thread.status.clone());
         self.control_state = response.thread.control_state.clone();
@@ -411,8 +424,58 @@ impl ThreadEventStore {
     where
         T: Into<AppCommand>,
     {
+        self.clear_cached_view_delta();
         self.pending_interactive_replay.note_outbound_op(op);
         self.bump_view_revision();
+    }
+
+    pub(super) fn begin_cached_view_delta(&mut self, base_revision: u64) {
+        self.cached_view_delta =
+            (self.view_revision == base_revision).then(|| CachedViewDeltaLog {
+                base_revision,
+                events: VecDeque::new(),
+                overflowed: false,
+            });
+    }
+
+    pub(super) fn clear_cached_view_delta(&mut self) {
+        self.cached_view_delta = None;
+    }
+
+    pub(super) fn take_cached_view_delta(
+        &mut self,
+        base_revision: u64,
+    ) -> Option<Vec<ThreadEventEnvelope>> {
+        let delta = self.cached_view_delta.take()?;
+        (delta.base_revision == base_revision && !delta.overflowed)
+            .then(|| delta.events.into_iter().collect())
+    }
+
+    fn record_cached_view_delta(&mut self, sequence: u64, event: &ThreadBufferedEvent) {
+        if !event_requires_view_replay(event) {
+            return;
+        }
+        let Some(delta) = self.cached_view_delta.as_mut() else {
+            return;
+        };
+        if delta.overflowed {
+            return;
+        }
+        if let Some(buffered) = delta.events.back_mut()
+            && merge_adjacent_stream_event(&mut buffered.event, event)
+        {
+            buffered.sequence = sequence;
+            return;
+        }
+        if delta.events.len() == CACHED_VIEW_DELTA_EVENT_LIMIT {
+            delta.events.clear();
+            delta.overflowed = true;
+            return;
+        }
+        delta.events.push_back(ThreadEventEnvelope {
+            sequence,
+            event: event.clone(),
+        });
     }
 
     pub(super) fn op_can_change_pending_replay_state<T>(op: T) -> bool

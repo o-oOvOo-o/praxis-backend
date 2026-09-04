@@ -21,10 +21,11 @@ pub(super) struct CachedThreadProjectionState {
     pub(super) control_state: Option<praxis_app_gateway_protocol::ThreadControlState>,
     pub(super) token_usage: Option<praxis_app_gateway_protocol::ThreadTokenUsage>,
     pub(super) goal_notification: Option<praxis_app_gateway_protocol::ServerNotification>,
+    pub(super) events: Vec<ThreadEventEnvelope>,
 }
 
 impl CachedThreadProjectionState {
-    pub(super) fn apply_to(self, chat_widget: &mut ChatWidget) {
+    pub(super) fn apply_to(self, chat_widget: &mut ChatWidget) -> Vec<ThreadEventEnvelope> {
         chat_widget.apply_thread_status_snapshot(self.status.as_ref());
         chat_widget.set_thread_control_state(self.control_state.as_ref());
         if let Some(token_usage) = self.token_usage {
@@ -33,6 +34,7 @@ impl CachedThreadProjectionState {
         if let Some(notification) = self.goal_notification {
             chat_widget.handle_server_notification(notification, Some(ReplayKind::ThreadSnapshot));
         }
+        self.events
     }
 }
 
@@ -152,14 +154,26 @@ impl App {
         channel.replay_through_sequence = store.last_event_sequence();
         let revision = store.view_revision();
         channel.replay_view_revision = revision;
-        let state = if cached_revision == Some(revision) && store.session.is_some() {
+        let cached_events = cached_revision.and_then(|cached_revision| {
+            if cached_revision == revision {
+                store.clear_cached_view_delta();
+                Some(Vec::new())
+            } else {
+                store.take_cached_view_delta(cached_revision)
+            }
+        });
+        let state = if store.session.is_some()
+            && let Some(events) = cached_events
+        {
             ThreadViewActivationState::Cached(CachedThreadProjectionState {
                 status: store.status.clone(),
                 control_state: store.control_state.clone(),
                 token_usage: store.latest_token_usage(),
                 goal_notification: store.latest_goal_notification(),
+                events,
             })
         } else {
+            store.clear_cached_view_delta();
             ThreadViewActivationState::Replay(store.snapshot())
         };
         Some((receiver, state, revision))

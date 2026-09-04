@@ -511,9 +511,9 @@ impl App {
             );
             (ChatWidget::new_with_app_event(init), None)
         };
-        if let Some(projection) = cached_projection {
-            projection.apply_to(&mut target_widget);
-        }
+        let cached_events = cached_projection
+            .map(|projection| projection.apply_to(&mut target_widget))
+            .unwrap_or_default();
         let previous_view = previous_thread_id.zip(previous_view_revision);
         let reused_cached_view = self.install_thread_view_shell(
             tui,
@@ -522,6 +522,10 @@ impl App {
             previous_view,
             target_revision,
         )?;
+
+        if reused_cached_view {
+            self.apply_cached_thread_events(thread_id, cached_events);
+        }
 
         if !reused_cached_view && let Some(snapshot) = snapshot {
             self.replay_thread_snapshot(snapshot, !is_replay_only);

@@ -345,9 +345,9 @@ impl App {
             );
             (ChatWidget::new_with_app_event(init), None)
         };
-        if let Some(projection) = cached_projection {
-            projection.apply_to(&mut target_widget);
-        }
+        let cached_events = cached_projection
+            .map(|projection| projection.apply_to(&mut target_widget))
+            .unwrap_or_default();
         let previous_view = previous_thread_id.zip(previous_view_revision);
         let reused_cached_view = self.install_thread_view_shell(
             tui,
@@ -357,6 +357,9 @@ impl App {
             target_revision,
         )?;
         self.workspace.reset_chat_scroll();
+        if reused_cached_view {
+            self.apply_cached_thread_events(thread_id, cached_events);
+        }
         if !reused_cached_view {
             if let Some(snapshot) = snapshot {
                 self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
@@ -365,6 +368,24 @@ impl App {
         self.drain_active_thread_events(tui).await?;
         self.refresh_pending_thread_approvals();
         Ok(true)
+    }
+
+    pub(super) fn apply_cached_thread_events(
+        &mut self,
+        thread_id: ThreadId,
+        events: Vec<ThreadEventEnvelope>,
+    ) {
+        if events.is_empty() {
+            return;
+        }
+        for envelope in events {
+            self.active_thread_view_materialized_revision = None;
+            self.handle_thread_event_now(envelope.event);
+        }
+        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+            let sequence = lock_thread_event_store(&channel.store).last_event_sequence();
+            self.queue_thread_view_materialized_marker(thread_id, sequence);
+        }
     }
 
     /// Fetches all loaded threads from the app gateway and registers descendants of the primary
