@@ -16,6 +16,8 @@ use crate::status_runtime::GENERIC_STATUS_HEADER;
 use praxis_protocol::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use praxis_protocol::protocol::TokenUsage;
 
+use super::status_surface_cache::StatusSurfaceSelections;
+
 /// Items shown in the terminal title when the user has not configured a
 /// custom selection.
 ///
@@ -42,20 +44,6 @@ pub(super) enum TerminalTitleStatusKind {
     WaitingForBackgroundTerminal,
     Undoing,
     Reasoning,
-}
-
-#[derive(Debug)]
-/// Parsed status-surface configuration for one refresh pass.
-///
-/// The status line and terminal title share some expensive or stateful inputs
-/// (notably git branch lookup and invalid-item warnings). This snapshot lets one
-/// refresh pass compute those shared concerns once, then render both surfaces
-/// from the same selection set.
-struct StatusSurfaceSelections {
-    status_line_items: Vec<StatusLineItem>,
-    invalid_status_line_items: Vec<String>,
-    terminal_title_items: Vec<TerminalTitleItem>,
-    invalid_terminal_title_items: Vec<String>,
 }
 
 impl StatusSurfaceSelections {
@@ -202,18 +190,6 @@ impl ChatWidget {
         self.refreshing_status_outputs = remaining;
         if updated_any {
             self.request_redraw();
-        }
-    }
-
-    fn status_surface_selections(&self) -> StatusSurfaceSelections {
-        let (status_line_items, invalid_status_line_items) = self.status_line_items_with_invalids();
-        let (terminal_title_items, invalid_terminal_title_items) =
-            self.terminal_title_items_with_invalids();
-        StatusSurfaceSelections {
-            status_line_items,
-            invalid_status_line_items,
-            terminal_title_items,
-            invalid_terminal_title_items,
         }
     }
 
@@ -442,7 +418,7 @@ impl ChatWidget {
     /// Parses configured status-line ids into known items and collects unknown ids.
     ///
     /// Unknown ids are deduplicated in insertion order for warning messages.
-    fn status_line_items_with_invalids(&self) -> (Vec<StatusLineItem>, Vec<String>) {
+    pub(super) fn status_line_items_with_invalids(&self) -> (Vec<StatusLineItem>, Vec<String>) {
         parse_items_with_invalids(self.configured_status_line_items())
     }
 
@@ -458,7 +434,9 @@ impl ChatWidget {
     /// Parses configured terminal-title ids into known items and collects unknown ids.
     ///
     /// Unknown ids are deduplicated in insertion order for warning messages.
-    fn terminal_title_items_with_invalids(&self) -> (Vec<TerminalTitleItem>, Vec<String>) {
+    pub(super) fn terminal_title_items_with_invalids(
+        &self,
+    ) -> (Vec<TerminalTitleItem>, Vec<String>) {
         parse_items_with_invalids(self.configured_terminal_title_items())
     }
 

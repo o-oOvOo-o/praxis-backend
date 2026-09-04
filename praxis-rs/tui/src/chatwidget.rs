@@ -480,6 +480,7 @@ mod selfwork_controller;
 mod selfwork_plan;
 mod server_events;
 mod status_controller;
+mod status_surface_cache;
 mod status_surfaces;
 mod status_text;
 mod stream_commit;
@@ -509,6 +510,7 @@ use self::state_types::StatusIndicatorState;
 use self::state_types::WorkspaceActiveTailCache;
 use self::state_types::WorkspaceReasoningChoice;
 use self::state_types::thread_control_display_label;
+use self::status_surface_cache::CachedStatusSurfaceSelections;
 use self::status_surfaces::CachedProjectRootName;
 use self::status_surfaces::TerminalTitleStatusKind;
 use self::transcript_search_support::TranscriptSearchDocumentCache;
@@ -689,8 +691,9 @@ pub(crate) struct ChatWidget {
     // Guardian review keeps its own pending set so it can derive a single
     // footer summary from one or more in-flight review events.
     pending_guardian_review_status: PendingGuardianReviewStatus,
-    // Semantic status used for terminal-title status rendering.
+    // Semantic state used for terminal-title rendering.
     terminal_title_status_kind: TerminalTitleStatusKind,
+    status_surface_selections_cache: Option<CachedStatusSurfaceSelections>,
     defer_status_surface_refresh: bool,
     defer_redraw: bool,
     redraw_deferred: bool,
