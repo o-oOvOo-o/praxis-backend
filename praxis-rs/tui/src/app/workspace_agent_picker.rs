@@ -394,6 +394,11 @@ impl App {
     pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) -> ChatWidget {
         chat_widget.set_workspace_entry_surface_enabled(self.workspace.enabled);
         chat_widget.set_ui_language(self.chat_widget.ui_language());
+        // Account identity, quota displays, warning thresholds, and quota prompts are global
+        // presentation state rather than thread state. Keep them current on the incoming widget
+        // so account notifications do not have to invalidate every materialized thread view.
+        self.chat_widget
+            .sync_global_account_presentation_to(&mut chat_widget);
         // Transfer the last-written terminal title to the replacement widget
         // so it knows what OSC title is currently displayed. Without this, the
         // new widget would redundantly clear and rewrite the same title, causing

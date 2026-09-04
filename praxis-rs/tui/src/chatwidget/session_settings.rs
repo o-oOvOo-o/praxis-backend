@@ -183,6 +183,28 @@ impl ChatWidget {
             .set_connectors_enabled(self.connectors_enabled());
     }
 
+    /// Copies session-global account presentation into a thread-local widget before it becomes
+    /// visible. Cached thread widgets deliberately retain their transcript and composer state,
+    /// while account identity, quota displays, warning progress, and quota prompts follow the
+    /// application session.
+    pub(crate) fn sync_global_account_presentation_to(&self, target: &mut Self) {
+        target
+            .status_account_display
+            .clone_from(&self.status_account_display);
+        target.plan_type = self.plan_type;
+        target.has_chatgpt_account = self.has_chatgpt_account;
+        target
+            .rate_limit_snapshots_by_limit_id
+            .clone_from(&self.rate_limit_snapshots_by_limit_id);
+        target.rate_limit_warnings = self.rate_limit_warnings;
+        target.rate_limit_switch_prompt = self.rate_limit_switch_prompt;
+        let connectors_enabled = target.connectors_enabled();
+        target
+            .bottom_pane
+            .set_connectors_enabled(connectors_enabled);
+        target.refresh_status_line();
+    }
+
     pub(crate) fn should_show_fast_status(
         &self,
         model: &str,
