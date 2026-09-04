@@ -42,6 +42,7 @@ impl App {
             active_thread_id,
             &self.workspace.pinned_thread_ids,
         );
+        self.workspace.mark_visible_items_dirty();
         self.workspace.clamp_selection(visible_rows);
     }
 

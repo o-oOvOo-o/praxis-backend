@@ -22,8 +22,10 @@ use praxis_protocol::ThreadId;
 use praxis_protocol::protocol::TokenUsageInfo;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
@@ -36,6 +38,8 @@ pub(crate) struct WorkspaceState {
     pub(crate) launch: LaunchStripState,
     pub(crate) rows: Vec<ThreadListRow>,
     subagent_summaries_dirty: bool,
+    visible_items_revision: u64,
+    visible_items_cache: RefCell<Option<VisibleItemsCache>>,
     pub(crate) usage_by_thread: HashMap<ThreadId, TokenUsageInfo>,
     pub(crate) pinned_thread_ids: HashSet<ThreadId>,
     pub(crate) expanded_subagent_parent_ids: HashSet<ThreadId>,
@@ -58,6 +62,13 @@ pub(crate) struct WorkspaceState {
     pub(crate) toolbar_new_area: Option<Rect>,
     pub(crate) toolbar_search_area: Option<Rect>,
     pub(crate) overlay: WorkspaceOverlay,
+}
+
+#[derive(Debug)]
+struct VisibleItemsCache {
+    revision: u64,
+    search_active: bool,
+    items: Arc<[WorkspaceVisibleItem]>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -162,6 +173,7 @@ impl WorkspaceState {
 
     pub(crate) fn mark_subagent_summaries_dirty(&mut self) {
         self.subagent_summaries_dirty = true;
+        self.mark_visible_items_dirty();
     }
 
     pub(crate) fn refresh_subagent_summaries_if_dirty(&mut self) {
@@ -169,6 +181,10 @@ impl WorkspaceState {
             return;
         }
         refresh_workspace_subagent_summaries(&mut self.rows);
+    }
+
+    pub(crate) fn mark_visible_items_dirty(&mut self) {
+        self.visible_items_revision = self.visible_items_revision.wrapping_add(1);
     }
 
     pub(crate) fn clamp_list_scroll(&mut self, visible_rows: usize) {
@@ -217,18 +233,18 @@ impl WorkspaceState {
     pub(crate) fn visible_index_for_row(&self, row_index: usize) -> Option<usize> {
         self.visible_items()
             .into_iter()
-            .position(|item| item == WorkspaceVisibleItem::Thread(row_index))
+            .position(|item| *item == WorkspaceVisibleItem::Thread(row_index))
     }
 
     pub(crate) fn visible_index_for_closed_subagents(&self, parent_index: usize) -> Option<usize> {
         self.visible_items()
             .into_iter()
-            .position(|item| item == WorkspaceVisibleItem::ClosedSubagents { parent_index })
+            .position(|item| *item == WorkspaceVisibleItem::ClosedSubagents { parent_index })
     }
 
     pub(crate) fn visible_index_for_thread(&self, thread_id: ThreadId) -> Option<usize> {
         self.visible_items().into_iter().position(|item| {
-            let WorkspaceVisibleItem::Thread(index) = item else {
+            let WorkspaceVisibleItem::Thread(index) = *item else {
                 return false;
             };
             self.rows
@@ -599,8 +615,26 @@ impl WorkspaceState {
         self.visible_items().len()
     }
 
-    pub(crate) fn visible_items(&self) -> Vec<WorkspaceVisibleItem> {
-        if !self.search_query.trim().is_empty() {
+    pub(crate) fn visible_items(&self) -> Arc<[WorkspaceVisibleItem]> {
+        let search_active = !self.search_query.trim().is_empty();
+        if let Some(cache) = self.visible_items_cache.borrow().as_ref()
+            && cache.revision == self.visible_items_revision
+            && cache.search_active == search_active
+        {
+            return Arc::clone(&cache.items);
+        }
+
+        let items: Arc<[WorkspaceVisibleItem]> = self.compute_visible_items(search_active).into();
+        *self.visible_items_cache.borrow_mut() = Some(VisibleItemsCache {
+            revision: self.visible_items_revision,
+            search_active,
+            items: Arc::clone(&items),
+        });
+        items
+    }
+
+    fn compute_visible_items(&self, search_active: bool) -> Vec<WorkspaceVisibleItem> {
+        if search_active {
             return (0..self.rows.len())
                 .map(WorkspaceVisibleItem::Thread)
                 .collect();
@@ -707,6 +741,7 @@ impl WorkspaceState {
         if !self.expanded_subagent_parent_ids.insert(row.thread_id) {
             self.expanded_subagent_parent_ids.remove(&row.thread_id);
         }
+        self.mark_visible_items_dirty();
     }
 
     pub(crate) fn toggle_closed_subagents(&mut self, parent_row_index: usize) {
@@ -723,6 +758,7 @@ impl WorkspaceState {
             self.expanded_closed_subagent_parent_ids
                 .remove(&row.thread_id);
         }
+        self.mark_visible_items_dirty();
     }
 }
 
