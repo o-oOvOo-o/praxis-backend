@@ -133,11 +133,18 @@ impl WorkspaceTranscriptCache {
         let visible_rows = usize::from(content_area.height);
         let scroll_from_bottom = request.scroll_from_bottom;
         let committed_layout = self.committed_layout_for_request(&request);
-        let segments = row_segments_for_request(&request, committed_layout);
+        let segments = request
+            .active_tail
+            .as_ref()
+            .map(|_| row_segments_for_request(&request, committed_layout));
         let total_rows = segments
-            .iter()
-            .map(WorkspaceTranscriptRowSegment::len)
-            .sum();
+            .as_ref()
+            .map_or(committed_layout.rows.len(), |segments| {
+                segments
+                    .iter()
+                    .map(WorkspaceTranscriptRowSegment::len)
+                    .sum()
+            });
 
         if visible_rows == 0 || total_rows == 0 {
             return WorkspaceTranscriptViewport {
@@ -150,7 +157,11 @@ impl WorkspaceTranscriptCache {
         let skipped = scroll_from_bottom.min(total_rows);
         let end = total_rows.saturating_sub(skipped);
         let start = end.saturating_sub(visible_rows);
-        let visible = visible_rows_from_segments(&segments, start, end);
+        let visible = if let Some(segments) = segments.as_ref() {
+            visible_rows_from_segments(segments, start, end)
+        } else {
+            committed_layout.rows[start..end].to_vec()
+        };
         let mut patch_cell_ids = Vec::new();
         for row in &visible {
             for id in &row.patch_cell_ids {
@@ -265,6 +276,9 @@ fn total_rows_for_request(
     request: &WorkspaceTranscriptRequest<'_>,
     committed_layout: &WorkspaceTranscriptCommittedLayout,
 ) -> usize {
+    if request.active_tail.is_none() {
+        return committed_layout.rows.len();
+    }
     row_segments_for_request(request, committed_layout)
         .iter()
         .map(WorkspaceTranscriptRowSegment::len)
