@@ -40,13 +40,13 @@ impl App {
         response: &ThreadRollbackResponse,
     ) {
         if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
-            let (replay_through_sequence, replay_snapshot_revision) = {
+            let (replay_through_sequence, replay_view_revision) = {
                 let mut store = lock_thread_event_store(&channel.store);
                 store.apply_thread_rollback(response);
-                (store.last_event_sequence(), store.snapshot_revision())
+                (store.last_event_sequence(), store.view_revision())
             };
             channel.replay_through_sequence = replay_through_sequence;
-            channel.replay_snapshot_revision = replay_snapshot_revision;
+            channel.replay_view_revision = replay_view_revision;
         }
         self.set_pending_thread_approval_state(thread_id, /*has_pending*/ false);
         if self.active_thread_id != Some(thread_id) {

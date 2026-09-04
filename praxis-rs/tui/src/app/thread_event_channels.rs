@@ -13,8 +13,13 @@ use tokio::sync::mpsc;
 // Live delivery preserves FIFO while this cap bounds the durable replay projection.
 const THREAD_EVENT_REPLAY_CAPACITY: usize = 32768;
 
+pub(super) struct CachedThreadProjectionState {
+    pub(super) status: Option<praxis_app_gateway_protocol::ThreadStatus>,
+    pub(super) control_state: Option<praxis_app_gateway_protocol::ThreadControlState>,
+}
+
 pub(super) enum ThreadViewActivationState {
-    Cached,
+    Cached(CachedThreadProjectionState),
     Replay(ThreadEventSnapshot),
 }
 
@@ -108,7 +113,7 @@ impl App {
         let mut store = lock_thread_event_store(&channel.store);
         store.active = true;
         channel.replay_through_sequence = store.last_event_sequence();
-        channel.replay_snapshot_revision = store.snapshot_revision();
+        channel.replay_view_revision = store.view_revision();
         let snapshot = store.snapshot();
         Some((receiver, snapshot))
     }
@@ -127,10 +132,13 @@ impl App {
         let mut store = lock_thread_event_store(&channel.store);
         store.active = true;
         channel.replay_through_sequence = store.last_event_sequence();
-        let revision = store.snapshot_revision();
-        channel.replay_snapshot_revision = revision;
+        let revision = store.view_revision();
+        channel.replay_view_revision = revision;
         let state = if cached_revision == Some(revision) && store.session.is_some() {
-            ThreadViewActivationState::Cached
+            ThreadViewActivationState::Cached(CachedThreadProjectionState {
+                status: store.status.clone(),
+                control_state: store.control_state.clone(),
+            })
         } else {
             ThreadViewActivationState::Replay(store.snapshot())
         };

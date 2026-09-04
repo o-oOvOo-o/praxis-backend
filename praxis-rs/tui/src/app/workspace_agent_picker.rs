@@ -475,8 +475,8 @@ impl App {
             }
             return Ok(());
         };
-        let (snapshot, cached_view) = match activation_state {
-            ThreadViewActivationState::Cached => (None, cached_view),
+        let (snapshot, cached_view, cached_projection) = match activation_state {
+            ThreadViewActivationState::Cached(projection) => (None, cached_view, Some(projection)),
             ThreadViewActivationState::Replay(mut snapshot) => {
                 if let Some(stale_view) = cached_view.take() {
                     self.carry_cached_thread_input_state_into_snapshot(
@@ -485,7 +485,7 @@ impl App {
                         &mut snapshot,
                     );
                 }
-                (Some(snapshot), None)
+                (Some(snapshot), None, None)
             }
         };
 
@@ -493,7 +493,7 @@ impl App {
         self.active_thread_rx = Some(receiver);
 
         self.advance_history_view_generation();
-        let (target_widget, cached_transcript) = if let Some(cached) = cached_view {
+        let (mut target_widget, cached_transcript) = if let Some(cached) = cached_view {
             tracing::debug!(
                 thread_id = %thread_id,
                 revision = target_revision,
@@ -511,6 +511,10 @@ impl App {
             );
             (ChatWidget::new_with_app_event(init), None)
         };
+        if let Some(projection) = cached_projection {
+            target_widget.apply_thread_status_snapshot(projection.status.as_ref());
+            target_widget.set_thread_control_state(projection.control_state.as_ref());
+        }
         let previous_view = previous_thread_id.zip(previous_view_revision);
         let reused_cached_view = self.install_thread_view_shell(
             tui,

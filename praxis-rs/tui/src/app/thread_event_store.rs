@@ -26,9 +26,11 @@ enum LatestProjectionEventSlot {
     Heartbeat,
     Selfwork,
     TurnDiff,
+    Status,
+    Control,
 }
 
-const LATEST_PROJECTION_EVENT_SLOTS: usize = LatestProjectionEventSlot::TurnDiff as usize + 1;
+const LATEST_PROJECTION_EVENT_SLOTS: usize = LatestProjectionEventSlot::Control as usize + 1;
 
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
@@ -71,7 +73,7 @@ pub(super) struct ThreadEventStore {
     pub(super) buffer: VecDeque<ThreadEventEnvelope>,
     latest_projection_events: [Option<ThreadEventEnvelope>; LATEST_PROJECTION_EVENT_SLOTS],
     last_event_sequence: u64,
-    snapshot_revision: u64,
+    view_revision: u64,
     pending_interactive_replay: PendingInteractiveReplayState,
     active_turn_id: Option<String>,
     pub(super) input_state: Option<ThreadInputState>,
@@ -99,7 +101,7 @@ impl ThreadEventStore {
             buffer: VecDeque::new(),
             latest_projection_events: std::array::from_fn(|_| None),
             last_event_sequence: 0,
-            snapshot_revision: 0,
+            view_revision: 0,
             pending_interactive_replay: PendingInteractiveReplayState::default(),
             active_turn_id: None,
             input_state: None,
@@ -124,7 +126,7 @@ impl ThreadEventStore {
         self.session = Some(session);
         self.rebase_buffer_after_turn_snapshot(&turns);
         self.set_turns(turns);
-        self.bump_snapshot_revision();
+        self.bump_view_revision();
     }
 
     pub(super) fn set_runtime_snapshot(
@@ -144,7 +146,6 @@ impl ThreadEventStore {
             self.active_turn_id = None;
         }
         self.status = Some(status);
-        self.bump_snapshot_revision();
     }
 
     fn rebase_buffer_after_turn_snapshot(&mut self, turns: &[Turn]) {
@@ -356,7 +357,9 @@ impl ThreadEventStore {
 
     fn push_buffered_event(&mut self, event: ThreadBufferedEvent) -> u64 {
         self.last_event_sequence = self.last_event_sequence.saturating_add(1);
-        self.bump_snapshot_revision();
+        if event_requires_view_replay(&event) {
+            self.bump_view_revision();
+        }
         let sequence = self.last_event_sequence;
         if let Some(slot) = latest_projection_event_slot(&event) {
             self.latest_projection_events[slot as usize] =
@@ -388,6 +391,7 @@ impl ThreadEventStore {
         self.buffer.clear();
         self.latest_projection_events.fill_with(|| None);
         self.pending_interactive_replay = PendingInteractiveReplayState::default();
+        self.bump_view_revision();
     }
 
     pub(super) fn snapshot(&self) -> ThreadEventSnapshot {
@@ -406,7 +410,7 @@ impl ThreadEventStore {
         T: Into<AppCommand>,
     {
         self.pending_interactive_replay.note_outbound_op(op);
-        self.bump_snapshot_revision();
+        self.bump_view_revision();
     }
 
     pub(super) fn op_can_change_pending_replay_state<T>(op: T) -> bool
@@ -429,12 +433,12 @@ impl ThreadEventStore {
         self.last_event_sequence
     }
 
-    pub(super) fn snapshot_revision(&self) -> u64 {
-        self.snapshot_revision
+    pub(super) fn view_revision(&self) -> u64 {
+        self.view_revision
     }
 
-    fn bump_snapshot_revision(&mut self) {
-        self.snapshot_revision = self.snapshot_revision.wrapping_add(1);
+    fn bump_view_revision(&mut self) {
+        self.view_revision = self.view_revision.wrapping_add(1);
     }
 
     fn snapshot_events(&self) -> Vec<ThreadBufferedEvent> {
@@ -484,6 +488,16 @@ impl ThreadEventStore {
     }
 }
 
+fn event_requires_view_replay(event: &ThreadBufferedEvent) -> bool {
+    !matches!(
+        event,
+        ThreadBufferedEvent::Notification(
+            ServerNotification::ThreadStatusChanged(_)
+                | ServerNotification::ThreadControlChanged(_)
+        )
+    )
+}
+
 fn latest_projection_event_slot(event: &ThreadBufferedEvent) -> Option<LatestProjectionEventSlot> {
     let ThreadBufferedEvent::Notification(notification) = event else {
         return None;
@@ -498,6 +512,8 @@ fn latest_projection_event_slot(event: &ThreadBufferedEvent) -> Option<LatestPro
         ServerNotification::ThreadHeartbeatUpdated(_) => Some(LatestProjectionEventSlot::Heartbeat),
         ServerNotification::ThreadSelfworkUpdated(_) => Some(LatestProjectionEventSlot::Selfwork),
         ServerNotification::TurnDiffUpdated(_) => Some(LatestProjectionEventSlot::TurnDiff),
+        ServerNotification::ThreadStatusChanged(_) => Some(LatestProjectionEventSlot::Status),
+        ServerNotification::ThreadControlChanged(_) => Some(LatestProjectionEventSlot::Control),
         _ => None,
     }
 }
@@ -583,7 +599,7 @@ pub(super) struct ThreadEventChannel {
     pub(super) receiver: Option<mpsc::UnboundedReceiver<ThreadEventEnvelope>>,
     pub(super) store: Arc<Mutex<ThreadEventStore>>,
     pub(super) replay_through_sequence: u64,
-    pub(super) replay_snapshot_revision: u64,
+    pub(super) replay_view_revision: u64,
 }
 
 pub(super) fn lock_thread_event_store(
@@ -602,7 +618,7 @@ impl ThreadEventChannel {
             receiver: Some(receiver),
             store: Arc::new(Mutex::new(ThreadEventStore::new(capacity))),
             replay_through_sequence: 0,
-            replay_snapshot_revision: 0,
+            replay_view_revision: 0,
         }
     }
 
@@ -620,7 +636,7 @@ impl ThreadEventChannel {
                 capacity, session, turns,
             ))),
             replay_through_sequence: 0,
-            replay_snapshot_revision: 0,
+            replay_view_revision: 0,
         }
     }
 }

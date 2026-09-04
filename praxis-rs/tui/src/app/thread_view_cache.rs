@@ -115,7 +115,7 @@ impl App {
                 .then(|| {
                     let materialized = materialized_revision?;
                     let status = store.status.as_ref()?;
-                    (!status.is_active() && store.snapshot_revision() == materialized)
+                    (!status.is_active() && store.view_revision() == materialized)
                         .then_some(materialized)
                 })
                 .flatten()
@@ -227,7 +227,7 @@ impl App {
             self.active_thread_id.and_then(|thread_id| {
                 self.thread_event_channels
                     .get(&thread_id)
-                    .map(|channel| channel.replay_snapshot_revision)
+                    .map(|channel| channel.replay_view_revision)
             });
     }
 
@@ -251,7 +251,7 @@ impl App {
         {
             return;
         }
-        let revision = store.snapshot_revision();
+        let revision = store.view_revision();
         drop(store);
         self.app_event_tx
             .send(AppEvent::MarkThreadViewMaterialized {
@@ -274,7 +274,7 @@ impl App {
             return;
         };
         let store = lock_thread_event_store(&channel.store);
-        if store.snapshot_revision() == revision
+        if store.view_revision() == revision
             && store
                 .status
                 .as_ref()
