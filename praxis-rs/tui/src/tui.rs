@@ -39,6 +39,8 @@ use ratatui::text::Line;
 use tokio::sync::broadcast;
 use tokio_stream::Stream;
 
+const PENDING_HISTORY_ASYNC_DROP_MIN_LINES: usize = 256;
+
 pub use self::frame_requester::FrameRequester;
 use crate::custom_terminal;
 use crate::custom_terminal::Terminal as CustomTerminal;
@@ -491,7 +493,19 @@ impl Tui {
     }
 
     pub fn clear_pending_history_lines(&mut self) {
-        self.pending_history_lines.clear();
+        if self.pending_history_lines.len() < PENDING_HISTORY_ASYNC_DROP_MIN_LINES {
+            self.pending_history_lines.clear();
+            return;
+        }
+
+        // Switching threads intentionally discards this detached terminal history. Large batches
+        // can own many strings, so release them away from the latency-sensitive UI task.
+        let pending = std::mem::take(&mut self.pending_history_lines);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let _ = runtime.spawn_blocking(move || drop(pending));
+        } else {
+            drop(pending);
+        }
     }
 
     pub fn draw(

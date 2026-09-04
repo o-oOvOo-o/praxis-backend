@@ -20,8 +20,13 @@ impl App {
         if self.workspace.enabled {
             return Ok(());
         }
-        tui.terminal.clear_scrollback()?;
-        tui.terminal.clear()?;
+        // Clear the old thread in one terminal transaction so the first frame of the selected
+        // thread is not delayed by a redundant flush.
+        if tui.is_alt_screen_active() {
+            tui.terminal.clear_visible_screen()?;
+        } else {
+            tui.terminal.clear_scrollback_and_visible_screen_ansi()?;
+        }
         Ok(())
     }
 
