@@ -1,20 +1,21 @@
 use crate::history_cell::HistoryCellMouseAction;
 use crate::history_presentation::PatchCellId;
 use ratatui::text::Line;
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub(crate) struct TranscriptVisibleRow {
     pub(crate) line: Line<'static>,
-    pub(crate) patch_cell_ids: Vec<PatchCellId>,
-    pub(crate) mouse_actions: Vec<HistoryCellMouseAction>,
+    pub(crate) patch_cell_ids: Option<Arc<[PatchCellId]>>,
+    pub(crate) mouse_actions: Option<Arc<[HistoryCellMouseAction]>>,
     pub(crate) selectable_range: Option<(u16, u16)>,
 }
 
 impl TranscriptVisibleRow {
     pub(crate) fn new(
         line: Line<'static>,
-        patch_cell_ids: Vec<PatchCellId>,
-        mouse_actions: Vec<HistoryCellMouseAction>,
+        patch_cell_ids: Option<Arc<[PatchCellId]>>,
+        mouse_actions: Option<Arc<[HistoryCellMouseAction]>>,
     ) -> Self {
         let selectable_range = selectable_range_for_line(&line);
         Self {
@@ -28,8 +29,8 @@ impl TranscriptVisibleRow {
     pub(crate) fn blank() -> Self {
         Self {
             line: Line::from(""),
-            patch_cell_ids: Vec::new(),
-            mouse_actions: Vec::new(),
+            patch_cell_ids: None,
+            mouse_actions: None,
             selectable_range: None,
         }
     }

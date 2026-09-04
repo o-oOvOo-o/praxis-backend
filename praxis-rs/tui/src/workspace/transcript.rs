@@ -89,7 +89,8 @@ impl WorkspaceTranscriptViewport {
         }
         self.rows
             .get(visible_index)
-            .and_then(|row| row.mouse_actions.first())
+            .and_then(|row| row.mouse_actions.as_deref())
+            .and_then(|actions| actions.first())
             .cloned()
     }
 }
@@ -207,9 +208,11 @@ impl WorkspaceTranscriptCache {
             };
             let mut patch_cell_ids = Vec::new();
             for row in &visible {
-                for id in &row.patch_cell_ids {
-                    if !patch_cell_ids.contains(id) {
-                        patch_cell_ids.push(*id);
+                if let Some(row_ids) = row.patch_cell_ids.as_deref() {
+                    for id in row_ids {
+                        if !patch_cell_ids.contains(id) {
+                            patch_cell_ids.push(*id);
+                        }
                     }
                 }
             }
@@ -445,7 +448,7 @@ fn build_committed_layout(
     layout: &mut WorkspaceTranscriptCommittedLayout,
 ) {
     let width = request.content_area.width;
-    let mut content_blocks: Vec<WorkspaceTranscriptContentBlock> = Vec::new();
+    let mut content_blocks = Vec::with_capacity(request.transcript_cells.len());
 
     for cell in request.transcript_cells {
         let lane = cell.chat_lane();
@@ -465,6 +468,12 @@ fn build_committed_layout(
     layout.rows.clear();
     layout.last_block = None;
     let block_count = content_blocks.len();
+    let estimated_rows = content_blocks
+        .iter()
+        .map(|block| block.lines.len().saturating_add(2))
+        .sum::<usize>()
+        .saturating_add(block_count.saturating_sub(1));
+    layout.rows.reserve(estimated_rows);
     for (index, block) in content_blocks.into_iter().enumerate() {
         if index > 0 {
             layout.rows.push(blank_row());
@@ -552,17 +561,21 @@ fn rows_for_block(
     patch_cell_ids: &[PatchCellId],
     mouse_actions: &[HistoryCellMouseAction],
 ) -> Vec<WorkspaceTranscriptRow> {
-    let mut rows: Vec<TranscriptVisibleRow> =
-        chat_timeline_lines_for_raw(width, lane, lines, theme)
-            .into_iter()
-            .map(|line| TranscriptVisibleRow::new(line, patch_cell_ids.to_vec(), Vec::new()))
-            .collect();
-    if !mouse_actions.is_empty() {
-        for row in rows.iter_mut().take(2) {
-            row.mouse_actions.extend(mouse_actions.iter().cloned());
-        }
-    }
-    rows.into_iter().map(Arc::new).collect()
+    let patch_cell_ids =
+        (!patch_cell_ids.is_empty()).then(|| Arc::<[PatchCellId]>::from(patch_cell_ids));
+    let mouse_actions =
+        (!mouse_actions.is_empty()).then(|| Arc::<[HistoryCellMouseAction]>::from(mouse_actions));
+    chat_timeline_lines_for_raw(width, lane, lines, theme)
+        .into_iter()
+        .enumerate()
+        .map(|(index, line)| {
+            Arc::new(TranscriptVisibleRow::new(
+                line,
+                patch_cell_ids.clone(),
+                (index < 2).then(|| mouse_actions.clone()).flatten(),
+            ))
+        })
+        .collect()
 }
 
 fn blank_row() -> WorkspaceTranscriptRow {
