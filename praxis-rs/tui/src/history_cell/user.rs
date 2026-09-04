@@ -19,7 +19,7 @@ fn build_user_message_lines_with_elements(
     style: Style,
     element_style: Style,
 ) -> Vec<Line<'static>> {
-    let mut elements = elements.to_vec();
+    let mut elements = elements.iter().collect::<Vec<_>>();
     elements.sort_by_key(|e| e.byte_range.start);
     let mut offset = 0usize;
     let mut raw_lines: Vec<Line<'static>> = Vec::new();
