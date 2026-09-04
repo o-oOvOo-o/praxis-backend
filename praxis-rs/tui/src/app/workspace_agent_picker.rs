@@ -468,7 +468,7 @@ impl App {
                 self.config.clone(),
                 self.tui_config.clone(),
             );
-            (ChatWidget::new_with_app_event(init), None)
+            (ChatWidget::new_for_thread_replay(init), None)
         };
         // Treat a cached switch as one presentation commit. Projection setters and
         // any queued deltas may each invalidate the same footer/title surfaces, but

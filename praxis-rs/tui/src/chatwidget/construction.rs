@@ -2,7 +2,23 @@ use super::*;
 
 impl ChatWidget {
     pub(crate) fn new_with_app_event(common: ChatWidgetInit) -> Self {
-        Self::new_with_op_target(common, PraxisOpTarget::AppEvent)
+        Self::new_with_op_target(
+            common,
+            PraxisOpTarget::AppEvent,
+            /*initialize_status_surfaces*/ true,
+        )
+    }
+
+    /// Builds a widget that will immediately receive a complete thread replay.
+    ///
+    /// Replay applies session, status, control, and token projections as one batch, so computing
+    /// footer and terminal-title state before those projections exist is both stale and wasted.
+    pub(crate) fn new_for_thread_replay(common: ChatWidgetInit) -> Self {
+        Self::new_with_op_target(
+            common,
+            PraxisOpTarget::AppEvent,
+            /*initialize_status_surfaces*/ false,
+        )
     }
 
     #[allow(dead_code)]
@@ -10,10 +26,18 @@ impl ChatWidget {
         common: ChatWidgetInit,
         praxis_op_tx: UnboundedSender<Op>,
     ) -> Self {
-        Self::new_with_op_target(common, PraxisOpTarget::Direct(praxis_op_tx))
+        Self::new_with_op_target(
+            common,
+            PraxisOpTarget::Direct(praxis_op_tx),
+            /*initialize_status_surfaces*/ true,
+        )
     }
 
-    fn new_with_op_target(common: ChatWidgetInit, praxis_op_target: PraxisOpTarget) -> Self {
+    fn new_with_op_target(
+        common: ChatWidgetInit,
+        praxis_op_target: PraxisOpTarget,
+        initialize_status_surfaces: bool,
+    ) -> Self {
         let ChatWidgetInit {
             config,
             tui_config,
@@ -209,9 +233,6 @@ impl ChatWidget {
             .set_audio_device_selection_enabled(widget.realtime_audio_device_selection_enabled());
         widget
             .bottom_pane
-            .set_status_line_enabled(!widget.configured_status_line_items().is_empty());
-        widget
-            .bottom_pane
             .set_collaboration_modes_enabled(/*enabled*/ true);
         widget.sync_fast_command_enabled();
         widget.sync_personality_command_enabled();
@@ -233,7 +254,9 @@ impl ChatWidget {
             .bottom_pane
             .set_connectors_enabled(widget.connectors_enabled());
         widget.sync_surface_theme();
-        widget.refresh_status_surfaces();
+        if initialize_status_surfaces {
+            widget.refresh_status_surfaces();
+        }
 
         widget
     }

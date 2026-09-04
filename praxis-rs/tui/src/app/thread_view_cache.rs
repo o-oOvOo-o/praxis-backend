@@ -222,7 +222,13 @@ impl App {
                 previous_transcript,
             );
         }
-        self.reset_for_thread_switch(tui)?;
+        if let Err(err) = self.reset_for_thread_switch(tui) {
+            // A replay widget deliberately defers its first status-surface pass. If terminal
+            // reset fails before replay starts, initialize that installed widget before handing
+            // the error back. Cached-view batches remain deferred and are finished by the caller.
+            self.refresh_status_line();
+            return Err(err);
+        }
         if let Some(cached_transcript) = cached_transcript {
             self.transcript_cells = cached_transcript;
             self.active_thread_view_materialized_revision = Some(target_revision);

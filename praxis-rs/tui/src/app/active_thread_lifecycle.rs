@@ -193,8 +193,11 @@ impl App {
                 self.tui_config.clone(),
             ),
         };
-        self.replace_chat_widget(ChatWidget::new_with_app_event(init));
-        self.reset_for_thread_switch(tui)?;
+        self.replace_chat_widget(ChatWidget::new_for_thread_replay(init));
+        if let Err(err) = self.reset_for_thread_switch(tui) {
+            self.refresh_status_line();
+            return Err(err);
+        }
         self.workspace.reset_chat_scroll();
         self.replay_thread_source(replay_source, /*resume_restored_queue*/ true);
         self.drain_active_thread_events(tui).await?;
@@ -282,7 +285,7 @@ impl App {
                 self.config.clone(),
                 self.tui_config.clone(),
             );
-            (ChatWidget::new_with_app_event(init), None)
+            (ChatWidget::new_for_thread_replay(init), None)
         };
         // A hot view restore can touch status, control, token, goal, and live-event
         // projections in one logical commit. Keep their footer/title updates deferred
