@@ -333,7 +333,7 @@ impl App {
                 previous_transcript,
             );
         }
-        if let Err(err) = self.reset_for_thread_switch(tui) {
+        if let Err(err) = self.reset_for_thread_switch(tui, reused_cached_view) {
             // A replay widget deliberately defers its first status-surface pass. If terminal
             // reset fails before replay starts, initialize that installed widget before handing
             // the error back. Cached-view batches remain deferred and are finished by the caller.

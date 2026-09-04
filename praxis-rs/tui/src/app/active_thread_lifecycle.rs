@@ -14,10 +14,18 @@ impl App {
     /// refreshes from the backend. Refresh failures are treated as "thread is only inspectable by
     /// historical id now" and converted into closed picker entries instead of deleting them, so
     /// the stable traversal order remains intact for review and keyboard navigation.
-    pub(super) fn reset_for_thread_switch(&mut self, tui: &mut tui::Tui) -> Result<()> {
+    pub(super) fn reset_for_thread_switch(
+        &mut self,
+        tui: &mut tui::Tui,
+        preserve_alt_screen_frame: bool,
+    ) -> Result<()> {
         tui.clear_pending_history_lines();
         self.reset_thread_view_state();
-        if self.workspace.enabled {
+        // A cached alternate-screen view is already a complete frame. Preserve the terminal's
+        // back buffer so the next draw emits only the cells that changed instead of synchronously
+        // clearing, flushing, and then repainting the whole screen. Cold replay and inline mode
+        // still clear because their replacement transcript is not yet fully materialized here.
+        if self.workspace.enabled || (preserve_alt_screen_frame && tui.is_alt_screen_active()) {
             return Ok(());
         }
         // Clear the old thread in one terminal transaction so the first frame of the selected
