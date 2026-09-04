@@ -190,6 +190,7 @@ use self::thread_event_store::ThreadBufferedEvent;
 use self::thread_event_store::ThreadEventChannel;
 use self::thread_event_store::ThreadEventEnvelope;
 use self::thread_event_store::ThreadEventStore;
+use self::thread_event_store::event_requires_view_replay;
 use self::thread_event_store::lock_thread_event_store;
 use self::thread_view_cache::ThreadViewCache;
 use self::workspace_view_helpers::next_char_boundary;

@@ -350,8 +350,8 @@ impl App {
         if events.is_empty() {
             return;
         }
+        self.active_thread_view_materialized_revision = None;
         for envelope in events {
-            self.active_thread_view_materialized_revision = None;
             self.handle_thread_event_now(envelope.event);
         }
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
@@ -481,16 +481,21 @@ impl App {
         };
 
         let mut disconnected = false;
+        let mut materialization_pending = self.active_thread_view_materialized_revision.is_none();
+        let mut processed_through_sequence = None;
         loop {
             match rx.try_recv() {
                 Ok(envelope) => {
                     if self.active_thread_event_is_after_replay(&envelope) {
                         let sequence = envelope.sequence;
-                        self.active_thread_view_materialized_revision = None;
-                        self.handle_thread_event_now(envelope.event);
-                        if let Some(thread_id) = self.active_thread_id {
-                            self.queue_thread_view_materialized_marker(thread_id, sequence);
+                        let requires_view_materialization =
+                            event_requires_view_replay(&envelope.event);
+                        if requires_view_materialization {
+                            self.active_thread_view_materialized_revision = None;
+                            materialization_pending = true;
                         }
+                        self.handle_thread_event_now(envelope.event);
+                        processed_through_sequence = Some(sequence);
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -505,6 +510,12 @@ impl App {
             self.active_thread_rx = Some(rx);
         } else {
             self.clear_active_thread();
+        }
+        if materialization_pending
+            && let (Some(thread_id), Some(sequence)) =
+                (self.active_thread_id, processed_through_sequence)
+        {
+            self.queue_thread_view_materialized_marker(thread_id, sequence);
         }
 
         if self.has_pending_transcript_scrollback_work() {

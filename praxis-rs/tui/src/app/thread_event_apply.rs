@@ -206,14 +206,19 @@ impl App {
     ///
     /// This function enforces shutdown intent routing: unexpected non-primary
     /// thread shutdowns fail over to the primary thread, while user-requested
-    /// app exits consume only the tracked shutdown completion and then proceed.
+    /// app exits consume only the tracked shutdown completion and then proceed. The return value
+    /// says whether the caller must enqueue a FIFO materialization marker after this event.
     pub(super) async fn handle_active_thread_event(
         &mut self,
         tui: &mut tui::Tui,
         app_gateway: &mut AppGatewaySession,
         event: ThreadBufferedEvent,
-    ) -> Result<()> {
-        self.active_thread_view_materialized_revision = None;
+    ) -> Result<bool> {
+        let materialization_was_pending = self.active_thread_view_materialized_revision.is_none();
+        let requires_view_materialization = event_requires_view_replay(&event);
+        if requires_view_materialization {
+            self.active_thread_view_materialized_revision = None;
+        }
         // Capture this before any potential thread switch: we only want to clear
         // the exit marker when the currently active thread acknowledges shutdown.
         let pending_shutdown_exit_completed = matches!(
@@ -250,7 +255,7 @@ impl App {
                     "Agent thread {closed_thread_id} closed. Failed to switch back to main thread {primary_thread_id}.",
                 ));
             }
-            return Ok(());
+            return Ok(false);
         }
 
         if pending_shutdown_exit_completed {
@@ -267,6 +272,6 @@ impl App {
         if self.has_pending_transcript_scrollback_work() {
             tui.frame_requester().schedule_frame();
         }
-        Ok(())
+        Ok(materialization_was_pending || requires_view_materialization)
     }
 }

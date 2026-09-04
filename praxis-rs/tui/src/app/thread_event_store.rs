@@ -604,7 +604,7 @@ impl ThreadEventStore {
     }
 }
 
-fn event_requires_view_replay(event: &ThreadBufferedEvent) -> bool {
+pub(super) fn event_requires_view_replay(event: &ThreadBufferedEvent) -> bool {
     !matches!(
         event,
         ThreadBufferedEvent::Notification(

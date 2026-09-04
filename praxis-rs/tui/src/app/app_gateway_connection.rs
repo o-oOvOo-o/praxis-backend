@@ -510,23 +510,28 @@ impl App {
                             } else {
                                 let sequence = envelope.sequence;
                                 let thread_id = app.active_thread_id;
-                                if let Err(err) = app.handle_active_thread_event(
-                                    tui,
-                                    &mut app_gateway,
-                                    envelope.event,
-                                ).await {
-                                    match app.handle_app_gateway_loop_error(&app_gateway, err) {
-                                        Ok(control) => control,
-                                        Err(err) => break Err(err),
+                                match app.handle_active_thread_event(
+                                        tui,
+                                        &mut app_gateway,
+                                        envelope.event,
+                                    ).await {
+                                    Ok(should_queue_view_materialization) => {
+                                        if should_queue_view_materialization
+                                            && let Some(thread_id) = thread_id
+                                        {
+                                            app.queue_thread_view_materialized_marker(
+                                                thread_id,
+                                                sequence,
+                                            );
+                                        }
+                                        AppRunControl::Continue
                                     }
-                                } else {
-                                    if let Some(thread_id) = thread_id {
-                                        app.queue_thread_view_materialized_marker(
-                                            thread_id,
-                                            sequence,
-                                        );
+                                    Err(err) => {
+                                        match app.handle_app_gateway_loop_error(&app_gateway, err) {
+                                            Ok(control) => control,
+                                            Err(err) => break Err(err),
+                                        }
                                     }
-                                    AppRunControl::Continue
                                 }
                             }
                         } else {
