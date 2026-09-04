@@ -85,6 +85,7 @@ impl App {
     pub(super) fn reset_thread_event_state(&mut self) {
         self.abort_all_thread_event_listeners();
         self.thread_event_channels.clear();
+        self.pending_approval_thread_ids.clear();
         self.agent_navigation.clear();
         self.active_thread_id = None;
         self.active_thread_rx = None;

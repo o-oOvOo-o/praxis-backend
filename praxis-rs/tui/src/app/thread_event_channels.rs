@@ -152,11 +152,15 @@ impl App {
     }
 
     pub(super) fn note_thread_outbound_op(&mut self, thread_id: ThreadId, op: &AppCommand) {
-        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
-            return;
+        let has_pending = {
+            let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+                return;
+            };
+            let mut store = lock_thread_event_store(&channel.store);
+            store.note_outbound_op(op);
+            store.has_pending_thread_approvals()
         };
-        let mut store = lock_thread_event_store(&channel.store);
-        store.note_outbound_op(op);
+        self.set_pending_thread_approval_state(thread_id, has_pending);
     }
 
     pub(super) fn note_active_thread_outbound_op(&mut self, op: &AppCommand) {

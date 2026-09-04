@@ -48,6 +48,10 @@ impl App {
             channel.replay_through_sequence = replay_through_sequence;
             channel.replay_snapshot_revision = replay_snapshot_revision;
         }
+        self.set_pending_thread_approval_state(thread_id, /*has_pending*/ false);
+        if self.active_thread_id != Some(thread_id) {
+            self.refresh_pending_thread_approvals();
+        }
         if self.active_thread_id == Some(thread_id)
             && let Some(mut rx) = self.active_thread_rx.take()
         {

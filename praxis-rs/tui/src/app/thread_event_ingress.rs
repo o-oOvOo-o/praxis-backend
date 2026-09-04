@@ -2,18 +2,24 @@ use super::*;
 
 impl App {
     pub(super) fn refresh_pending_thread_approvals(&mut self) {
-        let mut pending_thread_ids = Vec::new();
-        for (thread_id, channel) in &self.thread_event_channels {
-            if Some(*thread_id) == self.active_thread_id {
-                continue;
-            }
-
-            let store = lock_thread_event_store(&channel.store);
-            if store.has_pending_thread_approvals() {
-                pending_thread_ids.push(*thread_id);
-            }
+        #[cfg(test)]
+        {
+            self.pending_approval_thread_ids = self
+                .thread_event_channels
+                .iter()
+                .filter_map(|(thread_id, channel)| {
+                    lock_thread_event_store(&channel.store)
+                        .has_pending_thread_approvals()
+                        .then_some(*thread_id)
+                })
+                .collect();
         }
-
+        let mut pending_thread_ids = self
+            .pending_approval_thread_ids
+            .iter()
+            .copied()
+            .filter(|thread_id| Some(*thread_id) != self.active_thread_id)
+            .collect::<Vec<_>>();
         pending_thread_ids.sort_by_cached_key(ThreadId::to_string);
 
         let threads = pending_thread_ids
@@ -24,6 +30,18 @@ impl App {
         self.chat_widget.set_pending_thread_approvals(threads);
     }
 
+    pub(super) fn set_pending_thread_approval_state(
+        &mut self,
+        thread_id: ThreadId,
+        has_pending: bool,
+    ) {
+        if has_pending {
+            self.pending_approval_thread_ids.insert(thread_id);
+        } else {
+            self.pending_approval_thread_ids.remove(&thread_id);
+        }
+    }
+
     pub(super) async fn enqueue_thread_notification(
         &mut self,
         thread_id: ThreadId,
@@ -32,7 +50,7 @@ impl App {
         let inferred_session = self.infer_session_for_thread_notification(thread_id, &notification);
         let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
-        let (live_notification, sequence, pending_approval_visibility_changed) = {
+        let (live_notification, sequence, pending_approval_visibility_changed, has_pending) = {
             let mut guard = lock_thread_event_store(&store);
             if guard.session.is_none()
                 && let Some(session) = inferred_session
@@ -42,10 +60,12 @@ impl App {
             let had_pending_approvals = guard.has_pending_thread_approvals();
             let live_notification = guard.active.then(|| notification.clone());
             let sequence = guard.push_notification(notification);
+            let has_pending = guard.has_pending_thread_approvals();
             (
                 live_notification,
                 sequence,
-                had_pending_approvals != guard.has_pending_thread_approvals(),
+                had_pending_approvals != has_pending,
+                has_pending,
             )
         };
 
@@ -58,8 +78,11 @@ impl App {
                 tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
         }
-        if pending_approval_visibility_changed && self.active_thread_id != Some(thread_id) {
-            self.refresh_pending_thread_approvals();
+        if pending_approval_visibility_changed {
+            self.set_pending_thread_approval_state(thread_id, has_pending);
+            if self.active_thread_id != Some(thread_id) {
+                self.refresh_pending_thread_approvals();
+            }
         }
         Ok(())
     }
@@ -175,16 +198,18 @@ impl App {
         };
         let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
-        let (live_request, sequence, pending_approval_visibility_changed) = {
+        let (live_request, sequence, pending_approval_visibility_changed, has_pending) = {
             let mut guard = lock_thread_event_store(&store);
             let had_pending_approvals = guard.has_pending_thread_approvals();
             let live_request = guard.active.then(|| request.clone());
             let inserted = guard.push_request(request);
             let sequence = inserted.then(|| guard.last_event_sequence());
+            let has_pending = guard.has_pending_thread_approvals();
             (
                 live_request,
                 sequence,
-                had_pending_approvals != guard.has_pending_thread_approvals(),
+                had_pending_approvals != has_pending,
+                has_pending,
             )
         };
 
@@ -209,8 +234,11 @@ impl App {
                 }
             }
         }
-        if pending_approval_visibility_changed && self.active_thread_id != Some(thread_id) {
-            self.refresh_pending_thread_approvals();
+        if pending_approval_visibility_changed {
+            self.set_pending_thread_approval_state(thread_id, has_pending);
+            if self.active_thread_id != Some(thread_id) {
+                self.refresh_pending_thread_approvals();
+            }
         }
         Ok(())
     }
