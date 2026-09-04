@@ -253,6 +253,7 @@ impl App {
         }
         self.active_thread_rx = None;
         self.active_thread_view_materialized_revision = None;
+        self.clear_thread_view_catchup();
         self.refresh_pending_thread_approvals();
     }
 

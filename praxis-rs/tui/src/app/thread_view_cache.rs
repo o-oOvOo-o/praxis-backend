@@ -12,12 +12,15 @@ use std::sync::Arc;
 
 use super::App;
 use super::lock_thread_event_store;
+use super::thread_event_store::ThreadEventEnvelope;
 
 // Keep more short-thread views hot without increasing the dominant transcript-cell budget.
 // Long transcripts are still evicted at the same 400-cell ceiling.
 const THREAD_VIEW_CACHE_MAX_ENTRIES: usize = 8;
 const THREAD_VIEW_CACHE_MAX_TRANSCRIPT_CELLS: usize = 400;
 const THREAD_VIEW_ASYNC_DROP_MIN_TRANSCRIPT_CELLS: usize = 64;
+const THREAD_VIEW_CATCHUP_EVENT_BUDGET: usize = 16;
+const THREAD_VIEW_CATCHUP_ASYNC_DROP_MIN_EVENTS: usize = 64;
 
 pub(super) struct CachedThreadView {
     pub(super) chat_widget: ChatWidget,
@@ -25,11 +28,19 @@ pub(super) struct CachedThreadView {
     pub(super) revision: u64,
 }
 
+struct ThreadViewCatchup {
+    thread_id: ThreadId,
+    generation: u64,
+    target_revision: u64,
+    events: VecDeque<ThreadEventEnvelope>,
+}
+
 #[derive(Default)]
 pub(super) struct ThreadViewCache {
     entries: HashMap<ThreadId, CachedThreadView>,
     lru: VecDeque<ThreadId>,
     transcript_cells: usize,
+    catchup: Option<ThreadViewCatchup>,
 }
 
 impl ThreadViewCache {
@@ -225,6 +236,78 @@ impl App {
                 lock_thread_event_store(&channel.store).clear_cached_view_delta();
             }
             Self::retire_cached_thread_view(cached_view);
+        }
+    }
+
+    pub(super) fn queue_thread_view_catchup(
+        &mut self,
+        thread_id: ThreadId,
+        target_revision: u64,
+        events: VecDeque<ThreadEventEnvelope>,
+    ) {
+        if events.is_empty() {
+            return;
+        }
+        self.active_thread_view_materialized_revision = None;
+        self.thread_view_cache.catchup = Some(ThreadViewCatchup {
+            thread_id,
+            generation: self.history_view_generation,
+            target_revision,
+            events,
+        });
+    }
+
+    pub(super) fn has_pending_thread_view_catchup(&self) -> bool {
+        self.thread_view_cache.catchup.is_some()
+    }
+
+    pub(super) fn clear_thread_view_catchup(&mut self) {
+        if let Some(catchup) = self.thread_view_cache.catchup.take() {
+            Self::retire_thread_view_catchup(catchup);
+        }
+    }
+
+    pub(super) fn drain_thread_view_catchup_chunk(&mut self) -> bool {
+        let Some(mut catchup) = self.thread_view_cache.catchup.take() else {
+            return false;
+        };
+        if self.active_thread_id != Some(catchup.thread_id)
+            || self.history_view_generation != catchup.generation
+        {
+            Self::retire_thread_view_catchup(catchup);
+            return false;
+        }
+
+        self.chat_widget.begin_status_surface_refresh_batch();
+        self.chat_widget.begin_redraw_batch();
+        for _ in 0..THREAD_VIEW_CATCHUP_EVENT_BUDGET {
+            let Some(envelope) = catchup.events.pop_front() else {
+                break;
+            };
+            self.handle_thread_event_now(envelope.event);
+        }
+        self.chat_widget.finish_status_surface_refresh_batch();
+        self.refresh_status_line();
+        self.chat_widget.finish_redraw_batch();
+
+        if catchup.events.is_empty() {
+            self.queue_thread_view_materialized_revision(
+                catchup.thread_id,
+                catchup.target_revision,
+            );
+        } else {
+            self.thread_view_cache.catchup = Some(catchup);
+        }
+        true
+    }
+
+    fn retire_thread_view_catchup(catchup: ThreadViewCatchup) {
+        if catchup.events.len() >= THREAD_VIEW_CATCHUP_ASYNC_DROP_MIN_EVENTS
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let _ = runtime.spawn_blocking(move || drop(catchup));
+        } else {
+            drop(catchup);
         }
     }
 

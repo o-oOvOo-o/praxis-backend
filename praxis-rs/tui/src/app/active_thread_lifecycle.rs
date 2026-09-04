@@ -38,6 +38,7 @@ impl App {
         self.active_thread_id = None;
         self.active_thread_rx = None;
         self.active_thread_view_materialized_revision = None;
+        self.clear_thread_view_catchup();
         for (_, cached_view) in self.thread_view_cache.drain() {
             Self::retire_cached_thread_view(cached_view);
         }
@@ -330,40 +331,28 @@ impl App {
                 return Err(err);
             }
         };
+        if projection_refresh_batch {
+            self.chat_widget.finish_status_surface_refresh_batch();
+            self.refresh_status_line();
+            self.chat_widget.finish_redraw_batch();
+        }
         self.workspace.reset_chat_scroll();
         if reused_cached_view {
-            self.apply_cached_thread_events(thread_id, target_revision, cached_events);
+            self.queue_thread_view_catchup(thread_id, target_revision, cached_events);
         }
         if !reused_cached_view {
             if let Some(replay_source) = replay_source {
                 self.replay_thread_source(replay_source, /*resume_restored_queue*/ true);
             }
         }
-        let drain_result = self.drain_active_thread_events(tui).await;
+        let drain_result = if self.has_pending_thread_view_catchup() {
+            Ok(())
+        } else {
+            self.drain_active_thread_events(tui).await
+        };
         self.refresh_pending_thread_approvals();
-        if projection_refresh_batch {
-            self.chat_widget.finish_status_surface_refresh_batch();
-            self.refresh_status_line();
-            self.chat_widget.finish_redraw_batch();
-        }
         drain_result?;
         Ok(true)
-    }
-
-    pub(super) fn apply_cached_thread_events(
-        &mut self,
-        thread_id: ThreadId,
-        target_revision: u64,
-        events: VecDeque<ThreadEventEnvelope>,
-    ) {
-        if events.is_empty() {
-            return;
-        }
-        self.active_thread_view_materialized_revision = None;
-        for envelope in events {
-            self.handle_thread_event_now(envelope.event);
-        }
-        self.queue_thread_view_materialized_revision(thread_id, target_revision);
     }
 
     /// Fetches all loaded threads from the app gateway and registers descendants of the primary

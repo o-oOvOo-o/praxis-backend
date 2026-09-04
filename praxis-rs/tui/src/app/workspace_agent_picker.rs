@@ -546,9 +546,14 @@ impl App {
                 return Err(err);
             }
         };
+        if projection_refresh_batch {
+            self.chat_widget.finish_status_surface_refresh_batch();
+            self.refresh_status_line();
+            self.chat_widget.finish_redraw_batch();
+        }
 
         if reused_cached_view {
-            self.apply_cached_thread_events(thread_id, target_revision, cached_events);
+            self.queue_thread_view_catchup(thread_id, target_revision, cached_events);
         }
 
         if !reused_cached_view && let Some(replay_source) = replay_source {
@@ -564,13 +569,12 @@ impl App {
             };
             self.chat_widget.add_info_message(message, /*hint*/ None);
         }
-        let drain_result = self.drain_active_thread_events(tui).await;
+        let drain_result = if self.has_pending_thread_view_catchup() {
+            Ok(())
+        } else {
+            self.drain_active_thread_events(tui).await
+        };
         self.refresh_pending_thread_approvals();
-        if projection_refresh_batch {
-            self.chat_widget.finish_status_surface_refresh_batch();
-            self.refresh_status_line();
-            self.chat_widget.finish_redraw_batch();
-        }
         drain_result?;
 
         Ok(())

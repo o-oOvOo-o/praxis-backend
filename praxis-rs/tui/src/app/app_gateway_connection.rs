@@ -503,6 +503,7 @@ impl App {
                     }, if App::should_handle_active_thread_events(
                         waiting_for_initial_session_configured,
                         app.active_thread_rx.is_some()
+                            && !app.has_pending_thread_view_catchup()
                     ) => {
                         if let Some(envelope) = active {
                             if !app.active_thread_event_is_after_replay(&envelope) {
@@ -681,6 +682,9 @@ impl App {
                             frame.set_cursor_position((x, y));
                         }
                     })?;
+                    if self.drain_thread_view_catchup_chunk() {
+                        tui.frame_requester().schedule_frame();
+                    }
                     if self.chat_widget.external_editor_state() == ExternalEditorState::Requested {
                         self.chat_widget
                             .set_external_editor_state(ExternalEditorState::Active);
