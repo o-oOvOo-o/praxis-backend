@@ -699,20 +699,16 @@ impl App {
         );
         self.workspace.clear_search_focus();
         self.workspace.clear_overlay();
-        let Some(row) = self.workspace.rows.get(up_index).cloned() else {
+        let Some(target_session) = self.workspace.rows.get(up_index).map(|row| SessionTarget {
+            path: row.path.clone(),
+            thread_id: row.thread_id,
+            thread_name: Some(row.name.clone()),
+            cwd: Some(row.cwd.clone()),
+        }) else {
             return Ok(None);
         };
-        self.resume_session_target(
-            tui,
-            app_gateway,
-            SessionTarget {
-                path: row.path,
-                thread_id: row.thread_id,
-                thread_name: Some(row.name),
-                cwd: Some(row.cwd),
-            },
-        )
-        .await
+        self.resume_session_target(tui, app_gateway, target_session)
+            .await
     }
 
     pub(super) fn handle_workspace_mouse_scroll(

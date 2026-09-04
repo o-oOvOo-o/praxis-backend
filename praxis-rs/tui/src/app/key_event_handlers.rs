@@ -251,20 +251,18 @@ impl App {
                 else {
                     return true;
                 };
-                let Some(row) = self.workspace.rows.get(row_index).cloned() else {
+                let Some(target_session) =
+                    self.workspace.rows.get(row_index).map(|row| SessionTarget {
+                        path: row.path.clone(),
+                        thread_id: row.thread_id,
+                        thread_name: Some(row.name.clone()),
+                        cwd: Some(row.cwd.clone()),
+                    })
+                else {
                     return true;
                 };
                 let _ = self
-                    .resume_session_target(
-                        tui,
-                        app_gateway,
-                        SessionTarget {
-                            path: row.path,
-                            thread_id: row.thread_id,
-                            thread_name: Some(row.name),
-                            cwd: Some(row.cwd),
-                        },
-                    )
+                    .resume_session_target(tui, app_gateway, target_session)
                     .await;
                 return true;
             }

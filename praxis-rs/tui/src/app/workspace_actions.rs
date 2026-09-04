@@ -175,26 +175,22 @@ impl App {
         match action {
             WorkspaceMenuAction::Open => {
                 self.workspace.clear_overlay();
-                let Some(row) = self
+                let Some(target_session) = self
                     .workspace
                     .rows
                     .iter()
                     .find(|row| row.thread_id == thread_id)
-                    .cloned()
-                else {
-                    return Ok(None);
-                };
-                self.resume_session_target(
-                    tui,
-                    app_gateway,
-                    SessionTarget {
+                    .map(|row| SessionTarget {
                         path: row.path.clone(),
                         thread_id: row.thread_id,
                         thread_name: Some(row.name.clone()),
                         cwd: Some(row.cwd.clone()),
-                    },
-                )
-                .await
+                    })
+                else {
+                    return Ok(None);
+                };
+                self.resume_session_target(tui, app_gateway, target_session)
+                    .await
             }
             WorkspaceMenuAction::TogglePin => {
                 if !self.workspace.pinned_thread_ids.insert(thread_id) {
