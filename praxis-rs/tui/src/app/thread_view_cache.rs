@@ -11,7 +11,8 @@ use std::sync::Arc;
 use super::App;
 use super::lock_thread_event_store;
 
-const THREAD_VIEW_CACHE_CAPACITY: usize = 2;
+const THREAD_VIEW_CACHE_MAX_ENTRIES: usize = 4;
+const THREAD_VIEW_CACHE_MAX_TRANSCRIPT_CELLS: usize = 400;
 
 pub(super) struct CachedThreadView {
     pub(super) chat_widget: ChatWidget,
@@ -23,30 +24,48 @@ pub(super) struct CachedThreadView {
 pub(super) struct ThreadViewCache {
     entries: HashMap<ThreadId, CachedThreadView>,
     lru: VecDeque<ThreadId>,
+    transcript_cells: usize,
 }
 
 impl ThreadViewCache {
     pub(super) fn take(&mut self, thread_id: ThreadId) -> Option<CachedThreadView> {
         let cached = self.entries.remove(&thread_id)?;
+        self.transcript_cells = self
+            .transcript_cells
+            .saturating_sub(cached.transcript_cells.len());
         self.remove_from_lru(thread_id);
         Some(cached)
     }
 
     pub(super) fn insert(&mut self, thread_id: ThreadId, view: CachedThreadView) {
-        self.entries.insert(thread_id, view);
+        let transcript_cells = view.transcript_cells.len();
         self.remove_from_lru(thread_id);
+        if let Some(replaced) = self.entries.insert(thread_id, view) {
+            self.transcript_cells = self
+                .transcript_cells
+                .saturating_sub(replaced.transcript_cells.len());
+        }
+        self.transcript_cells = self.transcript_cells.saturating_add(transcript_cells);
         self.lru.push_back(thread_id);
-        while self.entries.len() > THREAD_VIEW_CACHE_CAPACITY {
+        while self.entries.len() > 1
+            && (self.entries.len() > THREAD_VIEW_CACHE_MAX_ENTRIES
+                || self.transcript_cells > THREAD_VIEW_CACHE_MAX_TRANSCRIPT_CELLS)
+        {
             let Some(evicted) = self.lru.pop_front() else {
                 break;
             };
-            self.entries.remove(&evicted);
+            if let Some(view) = self.entries.remove(&evicted) {
+                self.transcript_cells = self
+                    .transcript_cells
+                    .saturating_sub(view.transcript_cells.len());
+            }
         }
     }
 
     pub(super) fn clear(&mut self) {
         self.entries.clear();
         self.lru.clear();
+        self.transcript_cells = 0;
     }
 
     fn remove_from_lru(&mut self, thread_id: ThreadId) {
