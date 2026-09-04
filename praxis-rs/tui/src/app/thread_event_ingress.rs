@@ -35,15 +35,10 @@ impl App {
         thread_id: ThreadId,
         notification: ServerNotification,
     ) -> Result<()> {
-        let inferred_session = self
-            .infer_session_for_thread_notification(thread_id, &notification)
-            .await;
-        let (sender, store) = {
-            let channel = self.ensure_thread_channel(thread_id);
-            (channel.sender.clone(), Arc::clone(&channel.store))
-        };
+        let inferred_session = self.infer_session_for_thread_notification(thread_id, &notification);
+        let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
-        let (should_send, sequence, pending_approval_visibility_changed) = {
+        let (live_notification, sequence, pending_approval_visibility_changed) = {
             let mut guard = store.lock().await;
             if guard.session.is_none()
                 && let Some(session) = inferred_session
@@ -51,20 +46,21 @@ impl App {
                 guard.session = Some(session);
             }
             let had_pending_approvals = guard.has_pending_thread_approvals();
-            let sequence = guard.push_notification(notification.clone());
+            let live_notification = guard.active.then(|| notification.clone());
+            let sequence = guard.push_notification(notification);
             (
-                guard.active,
+                live_notification,
                 sequence,
                 had_pending_approvals != guard.has_pending_thread_approvals(),
             )
         };
 
-        if should_send {
+        if let Some(notification) = live_notification {
             let envelope = ThreadEventEnvelope {
                 sequence,
                 event: ThreadBufferedEvent::Notification(notification),
             };
-            if let Err(err) = sender.send(envelope) {
+            if let Err(err) = self.thread_event_channels[&thread_id].sender.send(envelope) {
                 tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
         }
@@ -137,7 +133,7 @@ impl App {
         }
     }
 
-    pub(super) async fn infer_session_for_thread_notification(
+    pub(super) fn infer_session_for_thread_notification(
         &mut self,
         thread_id: ThreadId,
         notification: &ServerNotification,
@@ -183,29 +179,27 @@ impl App {
         } else {
             None
         };
-        let (sender, store) = {
-            let channel = self.ensure_thread_channel(thread_id);
-            (channel.sender.clone(), Arc::clone(&channel.store))
-        };
+        let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
-        let (should_send, sequence, pending_approval_visibility_changed) = {
+        let (live_request, sequence, pending_approval_visibility_changed) = {
             let mut guard = store.lock().await;
             let had_pending_approvals = guard.has_pending_thread_approvals();
-            let inserted = guard.push_request(request.clone());
+            let live_request = guard.active.then(|| request.clone());
+            let inserted = guard.push_request(request);
             let sequence = inserted.then(|| guard.last_event_sequence());
             (
-                guard.active,
+                live_request,
                 sequence,
                 had_pending_approvals != guard.has_pending_thread_approvals(),
             )
         };
 
-        if should_send && let Some(sequence) = sequence {
+        if let (Some(request), Some(sequence)) = (live_request, sequence) {
             let envelope = ThreadEventEnvelope {
                 sequence,
                 event: ThreadBufferedEvent::Request(request),
             };
-            if let Err(err) = sender.send(envelope) {
+            if let Err(err) = self.thread_event_channels[&thread_id].sender.send(envelope) {
                 tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
         } else if sequence.is_some()
@@ -232,23 +226,21 @@ impl App {
         thread_id: ThreadId,
         event: GetHistoryEntryResponseEvent,
     ) -> Result<()> {
-        let (sender, store) = {
-            let channel = self.ensure_thread_channel(thread_id);
-            (channel.sender.clone(), Arc::clone(&channel.store))
-        };
+        let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
-        let (should_send, sequence) = {
+        let (live_event, sequence) = {
             let mut guard = store.lock().await;
-            let sequence = guard.push_history_entry_response(event.clone());
-            (guard.active, sequence)
+            let live_event = guard.active.then(|| event.clone());
+            let sequence = guard.push_history_entry_response(event);
+            (live_event, sequence)
         };
 
-        if should_send {
+        if let Some(event) = live_event {
             let envelope = ThreadEventEnvelope {
                 sequence,
                 event: ThreadBufferedEvent::HistoryEntryResponse(event),
             };
-            if let Err(err) = sender.send(envelope) {
+            if let Err(err) = self.thread_event_channels[&thread_id].sender.send(envelope) {
                 tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
         }

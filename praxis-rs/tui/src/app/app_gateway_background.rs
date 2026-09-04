@@ -217,23 +217,21 @@ impl App {
         thread_id: ThreadId,
         event: FeedbackThreadEvent,
     ) {
-        let (sender, store) = {
-            let channel = self.ensure_thread_channel(thread_id);
-            (channel.sender.clone(), Arc::clone(&channel.store))
-        };
+        let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
-        let (should_send, sequence) = {
+        let (live_event, sequence) = {
             let mut guard = store.lock().await;
-            let sequence = guard.push_feedback_submission(event.clone());
-            (guard.active, sequence)
+            let live_event = guard.active.then(|| event.clone());
+            let sequence = guard.push_feedback_submission(event);
+            (live_event, sequence)
         };
 
-        if should_send {
+        if let Some(event) = live_event {
             let envelope = ThreadEventEnvelope {
                 sequence,
                 event: ThreadBufferedEvent::FeedbackSubmission(event),
             };
-            if let Err(err) = sender.send(envelope) {
+            if let Err(err) = self.thread_event_channels[&thread_id].sender.send(envelope) {
                 tracing::warn!("thread {thread_id} event channel closed: {err}");
             }
         }
