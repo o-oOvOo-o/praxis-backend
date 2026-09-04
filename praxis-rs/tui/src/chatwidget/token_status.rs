@@ -2,6 +2,9 @@ use super::*;
 
 impl ChatWidget {
     pub(crate) fn set_token_info(&mut self, info: Option<TokenUsageInfo>) {
+        if self.token_info == info {
+            return;
+        }
         match info {
             Some(info) => self.apply_token_info(info),
             None => {

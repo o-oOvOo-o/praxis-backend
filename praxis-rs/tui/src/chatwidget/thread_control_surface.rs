@@ -6,6 +6,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn set_thread_control_state(&mut self, control_state: Option<&ThreadControlState>) {
+        if self.thread_control_state.as_ref() == control_state {
+            return;
+        }
         self.thread_control_state = control_state.cloned();
         self.sync_work_panel_control();
         if let Some(control_state) = control_state

@@ -448,10 +448,9 @@ impl ThreadEventStore {
     pub(super) fn take_cached_view_delta(
         &mut self,
         base_revision: u64,
-    ) -> Option<Vec<ThreadEventEnvelope>> {
+    ) -> Option<VecDeque<ThreadEventEnvelope>> {
         let delta = self.cached_view_delta.take()?;
-        (delta.base_revision == base_revision && !delta.overflowed)
-            .then(|| delta.events.into_iter().collect())
+        (delta.base_revision == base_revision && !delta.overflowed).then_some(delta.events)
     }
 
     fn record_cached_view_delta(&mut self, sequence: u64, event: &ThreadBufferedEvent) {

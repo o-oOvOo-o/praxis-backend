@@ -333,7 +333,7 @@ impl App {
     pub(super) fn apply_cached_thread_events(
         &mut self,
         thread_id: ThreadId,
-        events: Vec<ThreadEventEnvelope>,
+        events: VecDeque<ThreadEventEnvelope>,
     ) {
         if events.is_empty() {
             return;

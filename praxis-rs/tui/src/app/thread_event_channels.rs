@@ -10,6 +10,7 @@ use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::chatwidget::ChatWidget;
 use crate::chatwidget::ReplayKind;
 use praxis_protocol::ThreadId;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
@@ -38,11 +39,11 @@ pub(super) struct CachedThreadProjectionState {
     pub(super) control_state: Option<praxis_app_gateway_protocol::ThreadControlState>,
     pub(super) token_usage: Option<praxis_app_gateway_protocol::ThreadTokenUsage>,
     pub(super) goal_notification: Option<praxis_app_gateway_protocol::ServerNotification>,
-    pub(super) events: Vec<ThreadEventEnvelope>,
+    pub(super) events: VecDeque<ThreadEventEnvelope>,
 }
 
 impl CachedThreadProjectionState {
-    pub(super) fn apply_to(self, chat_widget: &mut ChatWidget) -> Vec<ThreadEventEnvelope> {
+    pub(super) fn apply_to(self, chat_widget: &mut ChatWidget) -> VecDeque<ThreadEventEnvelope> {
         chat_widget.apply_thread_status_snapshot(self.status.as_ref());
         chat_widget.set_thread_control_state(self.control_state.as_ref());
         if let Some(token_usage) = self.token_usage {
@@ -175,7 +176,7 @@ impl App {
         let cached_events = cached_revision.and_then(|cached_revision| {
             if cached_revision == revision {
                 store.clear_cached_view_delta();
-                Some(Vec::new())
+                Some(VecDeque::new())
             } else {
                 store.take_cached_view_delta(cached_revision)
             }

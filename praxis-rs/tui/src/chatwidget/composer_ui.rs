@@ -6,6 +6,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn set_ui_language(&mut self, language: UiLanguage) {
+        if self.ui_language == language {
+            return;
+        }
         self.ui_language = language;
         self.request_redraw();
     }
