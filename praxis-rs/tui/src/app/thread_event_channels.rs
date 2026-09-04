@@ -185,6 +185,7 @@ impl App {
         channel.replay_through_sequence = store.last_event_sequence();
         channel.replay_view_revision = store.view_revision();
         let replay_source = ThreadReplaySource::new(&store);
+        store.begin_cached_view_delta(channel.replay_view_revision);
         Some((receiver, replay_source))
     }
 
@@ -225,6 +226,7 @@ impl App {
             store.clear_cached_view_delta();
             ThreadViewActivationState::Replay(ThreadReplaySource::new(&store))
         };
+        store.begin_cached_view_delta(revision);
         Some((receiver, state, revision))
     }
 

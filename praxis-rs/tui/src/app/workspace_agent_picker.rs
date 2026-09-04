@@ -548,7 +548,7 @@ impl App {
         };
 
         if reused_cached_view {
-            self.apply_cached_thread_events(thread_id, cached_events);
+            self.apply_cached_thread_events(thread_id, target_revision, cached_events);
         }
 
         if !reused_cached_view && let Some(replay_source) = replay_source {

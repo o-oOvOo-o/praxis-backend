@@ -129,13 +129,9 @@ impl App {
             let mut store = lock_thread_event_store(&store_handle);
             store.active = false;
             view_is_cache_candidate
-                .then(|| {
-                    let materialized = materialized_revision?;
-                    // Running views are safe to retain too: any transcript-changing event
-                    // advances the store revision and rejects this cached revision on restore.
-                    (store.view_revision() == materialized).then_some(materialized)
-                })
+                .then_some(materialized_revision)
                 .flatten()
+                .filter(|materialized| store.cached_view_delta_tracks(*materialized))
         };
         if let Some(receiver) = receiver {
             channel.receiver = Some(receiver);
@@ -272,12 +268,16 @@ impl App {
     }
 
     pub(super) fn mark_active_thread_view_materialized(&mut self) {
-        self.active_thread_view_materialized_revision =
-            self.active_thread_id.and_then(|thread_id| {
-                self.thread_event_channels
-                    .get(&thread_id)
-                    .map(|channel| channel.replay_view_revision)
-            });
+        let Some(thread_id) = self.active_thread_id else {
+            return;
+        };
+        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+            return;
+        };
+        let revision = channel.replay_view_revision;
+        if lock_thread_event_store(&channel.store).cached_view_delta_tracks(revision) {
+            self.active_thread_view_materialized_revision = Some(revision);
+        }
     }
 
     pub(super) fn queue_thread_view_materialized_marker(
@@ -291,12 +291,34 @@ impl App {
         let Some(channel) = self.thread_event_channels.get(&thread_id) else {
             return;
         };
-        let store = lock_thread_event_store(&channel.store);
+        let mut store = lock_thread_event_store(&channel.store);
         if store.last_event_sequence() != processed_sequence {
             return;
         }
         let revision = store.view_revision();
+        store.begin_cached_view_delta(revision);
         drop(store);
+        self.send_thread_view_materialized_marker(thread_id, revision);
+    }
+
+    pub(super) fn queue_thread_view_materialized_revision(
+        &self,
+        thread_id: ThreadId,
+        revision: u64,
+    ) {
+        if self.active_thread_id != Some(thread_id) {
+            return;
+        }
+        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+            return;
+        };
+        if !lock_thread_event_store(&channel.store).cached_view_delta_tracks(revision) {
+            return;
+        }
+        self.send_thread_view_materialized_marker(thread_id, revision);
+    }
+
+    fn send_thread_view_materialized_marker(&self, thread_id: ThreadId, revision: u64) {
         self.app_event_tx
             .send(AppEvent::MarkThreadViewMaterialized {
                 thread_id,
@@ -318,7 +340,7 @@ impl App {
             return;
         };
         let store = lock_thread_event_store(&channel.store);
-        if store.view_revision() == revision {
+        if store.cached_view_delta_tracks(revision) {
             drop(store);
             self.active_thread_view_materialized_revision = Some(revision);
         }

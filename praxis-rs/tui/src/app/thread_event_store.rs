@@ -19,6 +19,11 @@ use std::sync::Mutex;
 use std::sync::MutexGuard;
 use tokio::sync::mpsc;
 
+mod cached_view_delta;
+
+pub(super) use cached_view_delta::CachedViewDelta;
+use cached_view_delta::CachedViewDeltaLog;
+
 #[derive(Clone, Copy)]
 enum LatestProjectionEventSlot {
     TokenUsage,
@@ -31,21 +36,7 @@ enum LatestProjectionEventSlot {
 }
 
 const LATEST_PROJECTION_EVENT_SLOTS: usize = LatestProjectionEventSlot::Control as usize + 1;
-const CACHED_VIEW_DELTA_EVENT_LIMIT: usize = 256;
 const STALE_LIVE_QUEUE_ASYNC_DROP_THRESHOLD: usize = 256;
-
-#[derive(Debug)]
-struct CachedViewDeltaLog {
-    base_revision: u64,
-    events: VecDeque<ThreadEventEnvelope>,
-    surface_dirty: bool,
-    overflowed: bool,
-}
-
-pub(super) struct CachedViewDelta {
-    pub(super) events: VecDeque<ThreadEventEnvelope>,
-    pub(super) surface_dirty: bool,
-}
 
 #[cfg(test)]
 #[derive(Debug, Clone)]
@@ -436,13 +427,21 @@ impl ThreadEventStore {
     }
 
     pub(super) fn begin_cached_view_delta(&mut self, base_revision: u64) {
+        if self
+            .cached_view_delta
+            .as_ref()
+            .is_some_and(|delta| delta.tracks(base_revision))
+        {
+            return;
+        }
         self.cached_view_delta =
-            (self.view_revision == base_revision).then(|| CachedViewDeltaLog {
-                base_revision,
-                events: VecDeque::new(),
-                surface_dirty: false,
-                overflowed: false,
-            });
+            (self.view_revision == base_revision).then(|| CachedViewDeltaLog::new(base_revision));
+    }
+
+    pub(super) fn cached_view_delta_tracks(&self, base_revision: u64) -> bool {
+        self.cached_view_delta
+            .as_ref()
+            .is_some_and(|delta| delta.tracks(base_revision))
     }
 
     pub(super) fn clear_cached_view_delta(&mut self) {
@@ -451,42 +450,13 @@ impl ThreadEventStore {
 
     pub(super) fn take_cached_view_delta(&mut self, base_revision: u64) -> Option<CachedViewDelta> {
         let delta = self.cached_view_delta.take()?;
-        (delta.base_revision == base_revision && !delta.overflowed).then_some(CachedViewDelta {
-            events: delta.events,
-            surface_dirty: delta.surface_dirty,
-        })
+        delta.finish(base_revision)
     }
 
     fn record_cached_view_delta(&mut self, sequence: u64, event: &ThreadBufferedEvent) {
-        if cached_surface_event(event)
-            && let Some(delta) = self.cached_view_delta.as_mut()
-        {
-            delta.surface_dirty = true;
+        if let Some(delta) = self.cached_view_delta.as_mut() {
+            delta.record(sequence, event);
         }
-        if !event_requires_view_replay(event) {
-            return;
-        }
-        let Some(delta) = self.cached_view_delta.as_mut() else {
-            return;
-        };
-        if delta.overflowed {
-            return;
-        }
-        if let Some(buffered) = delta.events.back_mut()
-            && merge_adjacent_stream_event(&mut buffered.event, event)
-        {
-            buffered.sequence = sequence;
-            return;
-        }
-        if delta.events.len() == CACHED_VIEW_DELTA_EVENT_LIMIT {
-            delta.events.clear();
-            delta.overflowed = true;
-            return;
-        }
-        delta.events.push_back(ThreadEventEnvelope {
-            sequence,
-            event: event.clone(),
-        });
     }
 
     pub(super) fn op_can_change_pending_replay_state<T>(op: T) -> bool

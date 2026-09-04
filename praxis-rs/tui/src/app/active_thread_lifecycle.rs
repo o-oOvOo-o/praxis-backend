@@ -332,7 +332,7 @@ impl App {
         };
         self.workspace.reset_chat_scroll();
         if reused_cached_view {
-            self.apply_cached_thread_events(thread_id, cached_events);
+            self.apply_cached_thread_events(thread_id, target_revision, cached_events);
         }
         if !reused_cached_view {
             if let Some(replay_source) = replay_source {
@@ -353,6 +353,7 @@ impl App {
     pub(super) fn apply_cached_thread_events(
         &mut self,
         thread_id: ThreadId,
+        target_revision: u64,
         events: VecDeque<ThreadEventEnvelope>,
     ) {
         if events.is_empty() {
@@ -362,10 +363,7 @@ impl App {
         for envelope in events {
             self.handle_thread_event_now(envelope.event);
         }
-        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-            let sequence = lock_thread_event_store(&channel.store).last_event_sequence();
-            self.queue_thread_view_materialized_marker(thread_id, sequence);
-        }
+        self.queue_thread_view_materialized_revision(thread_id, target_revision);
     }
 
     /// Fetches all loaded threads from the app gateway and registers descendants of the primary
