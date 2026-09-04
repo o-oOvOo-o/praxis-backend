@@ -313,7 +313,7 @@ impl App {
             .map(|channel| Arc::clone(&channel.store))
             .collect::<Vec<_>>();
         for store in stores {
-            let mut store = store.lock().await;
+            let mut store = lock_thread_event_store(&store);
             if let Some(session) = store.session.as_mut() {
                 Self::apply_thread_permissions(
                     session,

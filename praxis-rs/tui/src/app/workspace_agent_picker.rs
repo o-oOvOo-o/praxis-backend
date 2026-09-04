@@ -1,5 +1,6 @@
 use super::App;
 use super::agent_navigation::AgentNavigationState;
+use super::thread_event_store::lock_thread_event_store;
 use crate::app_gateway_session::AppGatewaySession;
 use crate::app_gateway_session::ThreadSessionState;
 use crate::chatwidget::ChatWidget;
@@ -152,7 +153,7 @@ impl App {
             row.control_state = control_state.clone();
         });
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-            let mut store = channel.store.lock().await;
+            let mut store = lock_thread_event_store(&channel.store);
             store.set_status(status);
             store.control_state = control_state;
         }
@@ -353,7 +354,7 @@ impl App {
         };
         self.apply_current_permissions_to_thread_session(&mut session);
         let channel = self.ensure_thread_channel(thread_id);
-        let mut store = channel.store.lock().await;
+        let mut store = lock_thread_event_store(&channel.store);
         store.set_runtime_snapshot(session, turns, status, control_state);
         Ok(live_attached)
     }
@@ -448,7 +449,7 @@ impl App {
                     ));
                     return Ok(());
                 };
-                channel.store.lock().await.snapshot()
+                lock_thread_event_store(&channel.store).snapshot()
             };
             if !self
                 .refresh_live_thread_snapshot(

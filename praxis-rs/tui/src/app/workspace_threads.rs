@@ -1,4 +1,5 @@
 use super::App;
+use super::thread_event_store::lock_thread_event_store;
 use super::workspace_view_helpers::workspace_search_term;
 use crate::app_event::AppEvent;
 use crate::app_gateway_session::AppGatewaySession;
@@ -152,7 +153,7 @@ impl App {
             Arc::clone(&channel.store)
         };
         {
-            let mut store = store.lock().await;
+            let mut store = lock_thread_event_store(&store);
             store.set_runtime_snapshot(session, turns, status.clone(), control_state.clone());
             store.rebase_buffer_after_session_refresh();
         }

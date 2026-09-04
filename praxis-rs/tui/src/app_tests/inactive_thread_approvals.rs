@@ -15,7 +15,7 @@ async fn refresh_pending_thread_approvals_only_lists_inactive_threads() {
 
     let agent_channel = ThreadEventChannel::new(/*capacity*/ 1);
     {
-        let mut store = agent_channel.store.lock().await;
+        let mut store = lock_thread_event_store(&agent_channel.store);
         store.push_request(exec_approval_request(
             agent_thread_id,
             "turn-1",

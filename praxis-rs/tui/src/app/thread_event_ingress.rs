@@ -2,7 +2,7 @@ use super::*;
 
 impl App {
     pub(super) async fn refresh_pending_thread_approvals(&mut self) {
-        let channels: Vec<(ThreadId, Arc<Mutex<ThreadEventStore>>)> = self
+        let channels: Vec<_> = self
             .thread_event_channels
             .iter()
             .map(|(thread_id, channel)| (*thread_id, Arc::clone(&channel.store)))
@@ -14,7 +14,7 @@ impl App {
                 continue;
             }
 
-            let store = store.lock().await;
+            let store = lock_thread_event_store(&store);
             if store.has_pending_thread_approvals() {
                 pending_thread_ids.push(thread_id);
             }
@@ -39,7 +39,7 @@ impl App {
         let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
         let (live_notification, sequence, pending_approval_visibility_changed) = {
-            let mut guard = store.lock().await;
+            let mut guard = lock_thread_event_store(&store);
             if guard.session.is_none()
                 && let Some(session) = inferred_session
             {
@@ -182,7 +182,7 @@ impl App {
         let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
         let (live_request, sequence, pending_approval_visibility_changed) = {
-            let mut guard = store.lock().await;
+            let mut guard = lock_thread_event_store(&store);
             let had_pending_approvals = guard.has_pending_thread_approvals();
             let live_request = guard.active.then(|| request.clone());
             let inserted = guard.push_request(request);
@@ -229,7 +229,7 @@ impl App {
         let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
         let (live_event, sequence) = {
-            let mut guard = store.lock().await;
+            let mut guard = lock_thread_event_store(&store);
             let live_event = guard.active.then(|| event.clone());
             let sequence = guard.push_history_entry_response(event);
             (live_event, sequence)
@@ -264,7 +264,7 @@ impl App {
         );
         let channel = self.ensure_thread_channel(thread_id);
         {
-            let mut store = channel.store.lock().await;
+            let mut store = lock_thread_event_store(&channel.store);
             store.set_runtime_snapshot(
                 session.clone(),
                 turns.clone(),

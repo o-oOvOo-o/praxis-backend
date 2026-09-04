@@ -53,7 +53,7 @@ impl App {
             row.control_state = control_state.clone();
         });
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-            let mut store = channel.store.lock().await;
+            let mut store = lock_thread_event_store(&channel.store);
             store.set_runtime_snapshot(session, turns, status, control_state);
             store.rebase_buffer_after_session_refresh();
             *snapshot = store.snapshot();
@@ -217,7 +217,7 @@ impl App {
             Arc::clone(&channel.store)
         };
         {
-            let mut store = store.lock().await;
+            let mut store = lock_thread_event_store(&store);
             store.set_runtime_snapshot(session, turns, status, control_state);
             store.rebase_buffer_after_session_refresh();
         }

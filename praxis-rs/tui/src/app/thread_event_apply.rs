@@ -41,7 +41,7 @@ impl App {
     ) {
         if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
             let replay_through_sequence = {
-                let mut store = channel.store.lock().await;
+                let mut store = lock_thread_event_store(&channel.store);
                 store.apply_thread_rollback(response);
                 store.last_event_sequence()
             };

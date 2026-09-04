@@ -1,6 +1,7 @@
 use super::App;
 use super::ThreadInteractiveRequest;
 use super::default_exec_approval_decisions;
+use super::thread_event_store::lock_thread_event_store;
 use crate::app_gateway_core_conversions::app_gateway_request_id_to_mcp_request_id;
 use crate::app_gateway_core_conversions::command_execution_decision_to_review_decision;
 use crate::app_gateway_core_conversions::network_approval_context_to_core;
@@ -76,7 +77,7 @@ impl App {
 
     async fn thread_cwd(&self, thread_id: ThreadId) -> Option<PathBuf> {
         let channel = self.thread_event_channels.get(&thread_id)?;
-        let store = channel.store.lock().await;
+        let store = lock_thread_event_store(&channel.store);
         store.session.as_ref().map(|session| session.cwd.clone())
     }
 

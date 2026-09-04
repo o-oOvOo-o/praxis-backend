@@ -440,7 +440,7 @@ async fn replay_thread_snapshot_restores_draft_and_queued_input() {
             .thread_event_channels
             .get(&thread_id)
             .expect("thread channel should exist");
-        let store = channel.store.lock().await;
+        let store = lock_thread_event_store(&channel.store);
         assert_eq!(store.input_state, Some(expected_input_state));
         store.snapshot()
     };
@@ -818,7 +818,7 @@ async fn replay_thread_snapshot_restores_pending_pastes_for_submit() {
             .thread_event_channels
             .get(&thread_id)
             .expect("thread channel should exist");
-        let store = channel.store.lock().await;
+        let store = lock_thread_event_store(&channel.store);
         assert_eq!(store.input_state, Some(expected_input_state));
         store.snapshot()
     };

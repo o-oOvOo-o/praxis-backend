@@ -15,7 +15,8 @@ use praxis_app_gateway_protocol::TurnStatus;
 use praxis_protocol::protocol::GetHistoryEntryResponseEvent;
 use std::collections::VecDeque;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone)]
@@ -469,6 +470,14 @@ pub(super) struct ThreadEventChannel {
     pub(super) receiver: Option<mpsc::UnboundedReceiver<ThreadEventEnvelope>>,
     pub(super) store: Arc<Mutex<ThreadEventStore>>,
     pub(super) replay_through_sequence: u64,
+}
+
+pub(super) fn lock_thread_event_store(
+    store: &Mutex<ThreadEventStore>,
+) -> MutexGuard<'_, ThreadEventStore> {
+    store
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl ThreadEventChannel {

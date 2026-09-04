@@ -119,7 +119,6 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::select;
-use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::unbounded_channel;
@@ -191,6 +190,7 @@ use self::thread_event_store::ThreadEventChannel;
 use self::thread_event_store::ThreadEventEnvelope;
 use self::thread_event_store::ThreadEventSnapshot;
 use self::thread_event_store::ThreadEventStore;
+use self::thread_event_store::lock_thread_event_store;
 use self::workspace_view_helpers::next_char_boundary;
 use self::workspace_view_helpers::previous_char_boundary;
 

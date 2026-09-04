@@ -97,7 +97,7 @@ async fn open_agent_picker_marks_terminal_read_errors_closed() -> Result<()> {
     let thread_id = ThreadId::new();
     let channel = ThreadEventChannel::new(/*capacity*/ 1);
     {
-        let mut store = channel.store.lock().await;
+        let mut store = lock_thread_event_store(&channel.store);
         store.status = Some(praxis_app_gateway_protocol::ThreadStatus::Active {
             active_flags: vec![praxis_app_gateway_protocol::ThreadActiveFlag::Running],
         });

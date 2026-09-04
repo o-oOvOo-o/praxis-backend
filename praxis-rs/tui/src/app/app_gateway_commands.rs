@@ -1,5 +1,6 @@
 use super::App;
 use super::thread_event_store::ThreadEventStore;
+use super::thread_event_store::lock_thread_event_store;
 use crate::app_command::AppCommand;
 use crate::app_command::AppCommandView;
 use crate::app_gateway_session::AppGatewaySession;
@@ -146,7 +147,7 @@ impl App {
                                 return Ok(true);
                             } else if active_turn_missing_steer_error(&error) {
                                 if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-                                    let mut store = channel.store.lock().await;
+                                    let mut store = lock_thread_event_store(&channel.store);
                                     store.clear_active_turn_id();
                                 }
                                 should_start_turn = true;

@@ -290,7 +290,7 @@ async fn switch_replay_watermark_rejects_queued_store_duplicate() {
     let mut channel = ThreadEventChannel::new(/*capacity*/ 8);
     let event = turn_started_notification(thread_id, "turn-live");
     let sequence = {
-        let mut store = channel.store.lock().await;
+        let mut store = lock_thread_event_store(&channel.store);
         store.push_notification(event.clone())
     };
     channel
@@ -449,7 +449,7 @@ async fn feedback_submission_for_inactive_thread_replays_into_origin_thread() {
             .thread_event_channels
             .get(&origin_thread_id)
             .expect("origin thread channel should exist");
-        let store = channel.store.lock().await;
+        let store = lock_thread_event_store(&channel.store);
         assert!(matches!(
             store.buffer.back().map(|envelope| &envelope.event),
             Some(ThreadBufferedEvent::FeedbackSubmission(_))

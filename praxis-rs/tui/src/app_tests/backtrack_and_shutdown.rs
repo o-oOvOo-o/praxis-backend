@@ -509,7 +509,7 @@ async fn thread_rollback_response_discards_queued_active_thread_events() {
         },
     ));
     let sequence = {
-        let mut store = channel.store.lock().await;
+        let mut store = lock_thread_event_store(&channel.store);
         match &event {
             ThreadBufferedEvent::Notification(notification) => {
                 store.push_notification(notification.clone())

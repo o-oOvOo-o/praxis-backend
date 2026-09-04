@@ -11,6 +11,7 @@ use super::app_gateway_fetch::fetch_plugins_list;
 use super::thread_event_store::FeedbackThreadEvent;
 use super::thread_event_store::ThreadBufferedEvent;
 use super::thread_event_store::ThreadEventEnvelope;
+use super::thread_event_store::lock_thread_event_store;
 use crate::app_event::AppEvent;
 use crate::app_event::FeedbackCategory;
 use crate::app_gateway_session::AppGatewaySession;
@@ -220,7 +221,7 @@ impl App {
         let store = Arc::clone(&self.ensure_thread_channel(thread_id).store);
 
         let (live_event, sequence) = {
-            let mut guard = store.lock().await;
+            let mut guard = lock_thread_event_store(&store);
             let live_event = guard.active.then(|| event.clone());
             let sequence = guard.push_feedback_submission(event);
             (live_event, sequence)

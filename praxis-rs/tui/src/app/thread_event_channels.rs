@@ -3,6 +3,7 @@ use super::thread_event_store::ThreadEventChannel;
 use super::thread_event_store::ThreadEventEnvelope;
 use super::thread_event_store::ThreadEventSnapshot;
 use super::thread_event_store::ThreadEventStore;
+use super::thread_event_store::lock_thread_event_store;
 use crate::app_command::AppCommand;
 use crate::app_gateway_session::AppGatewaySession;
 use praxis_protocol::ThreadId;
@@ -47,7 +48,7 @@ impl App {
 
     async fn set_thread_active(&mut self, thread_id: ThreadId, active: bool) {
         if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
-            let mut store = channel.store.lock().await;
+            let mut store = lock_thread_event_store(&channel.store);
             store.active = active;
         }
     }
@@ -74,7 +75,7 @@ impl App {
         let input_state = self.chat_widget.capture_thread_input_state();
         if let Some(channel) = self.thread_event_channels.get_mut(&active_id) {
             let receiver = self.active_thread_rx.take();
-            let mut store = channel.store.lock().await;
+            let mut store = lock_thread_event_store(&channel.store);
             store.active = false;
             store.input_state = input_state;
             if let Some(receiver) = receiver {
@@ -92,7 +93,7 @@ impl App {
     )> {
         let channel = self.thread_event_channels.get_mut(&thread_id)?;
         let receiver = channel.receiver.take()?;
-        let mut store = channel.store.lock().await;
+        let mut store = lock_thread_event_store(&channel.store);
         store.active = true;
         channel.replay_through_sequence = store.last_event_sequence();
         let snapshot = store.snapshot();
@@ -123,7 +124,7 @@ impl App {
         let Some(channel) = self.thread_event_channels.get(&thread_id) else {
             return;
         };
-        let mut store = channel.store.lock().await;
+        let mut store = lock_thread_event_store(&channel.store);
         store.note_outbound_op(op);
     }
 
@@ -139,7 +140,7 @@ impl App {
 
     pub(super) async fn active_turn_id_for_thread(&self, thread_id: ThreadId) -> Option<String> {
         let channel = self.thread_event_channels.get(&thread_id)?;
-        let store = channel.store.lock().await;
+        let store = lock_thread_event_store(&channel.store);
         store.active_turn_id().map(ToOwned::to_owned)
     }
 }
