@@ -556,7 +556,14 @@ impl App {
         let replay_generation = self.history_view_generation;
         if should_buffer_replay {
             self.thread_replay_buffer_generation = Some(replay_generation);
-            self.chat_widget.begin_history_output_batch();
+            let capacity_hint = snapshot
+                .turns
+                .iter()
+                .map(|turn| turn.items.len())
+                .sum::<usize>()
+                .saturating_add(snapshot.events.len())
+                .min(256);
+            self.chat_widget.begin_history_output_batch(capacity_hint);
         }
         self.chat_widget.begin_status_surface_refresh_batch();
         let ThreadEventSnapshot {

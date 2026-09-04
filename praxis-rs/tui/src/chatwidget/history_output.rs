@@ -1,9 +1,9 @@
 use super::*;
 
 impl ChatWidget {
-    pub(crate) fn begin_history_output_batch(&mut self) {
+    pub(crate) fn begin_history_output_batch(&mut self, capacity_hint: usize) {
         debug_assert!(self.history_output_batch.is_none());
-        self.history_output_batch = Some(Vec::new());
+        self.history_output_batch = Some(Vec::with_capacity(capacity_hint));
     }
 
     pub(crate) fn finish_history_output_batch(&mut self) {
