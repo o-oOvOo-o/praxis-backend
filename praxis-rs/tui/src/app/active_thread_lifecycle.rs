@@ -134,8 +134,8 @@ impl App {
             status,
             control_state,
         } = started;
-        let previous_thread_id = self.active_thread_id;
-        self.store_active_thread_receiver(/*input_state_retained_by_view_cache*/ false);
+        let (previous_thread_id, previous_view_revision) =
+            self.suspend_active_thread_view_for_switch();
 
         self.apply_current_permissions_to_thread_session(&mut session);
         let thread_id = session.thread_id;
@@ -174,6 +174,7 @@ impl App {
                 "Praxis thread {thread_id} is already attached but has no replay receiver."
             ));
         };
+        let target_revision = self.thread_event_channels[&thread_id].replay_view_revision;
         self.active_thread_id = Some(thread_id);
         self.active_thread_rx = Some(receiver);
         self.workspace
@@ -193,11 +194,14 @@ impl App {
                 self.tui_config.clone(),
             ),
         };
-        self.replace_chat_widget(ChatWidget::new_for_thread_replay(init));
-        if let Err(err) = self.reset_for_thread_switch(tui) {
-            self.refresh_status_line();
-            return Err(err);
-        }
+        let target_widget = ChatWidget::new_for_thread_replay(init);
+        self.install_thread_view_shell(
+            tui,
+            target_widget,
+            /*cached_transcript*/ None,
+            previous_thread_id.zip(previous_view_revision),
+            target_revision,
+        )?;
         self.workspace.reset_chat_scroll();
         self.replay_thread_source(replay_source, /*resume_restored_queue*/ true);
         self.drain_active_thread_events(tui).await?;
