@@ -27,10 +27,17 @@ impl ChatWidget {
     /// returns once stream queues are idle. Final-answer completion (or absent
     /// phase for legacy models) clears the flag to preserve historical behavior.
     pub(super) fn on_agent_message_item_completed(&mut self, item: AgentMessageItem) {
-        let mut message = String::new();
-        for content in &item.content {
+        let AgentMessageItem { content, phase, .. } = item;
+        let mut content = content.into_iter();
+        let mut message = content
+            .next()
+            .map(|content| match content {
+                AgentMessageContent::Text { text } => text,
+            })
+            .unwrap_or_default();
+        for content in content {
             match content {
-                AgentMessageContent::Text { text } => message.push_str(text),
+                AgentMessageContent::Text { text } => message.push_str(&text),
             }
         }
         self.finalize_completed_assistant_message(
@@ -38,11 +45,11 @@ impl ChatWidget {
         );
         if self.agent_turn_running
             && !message.is_empty()
-            && matches!(item.phase, Some(MessagePhase::FinalAnswer) | None)
+            && matches!(phase.as_ref(), Some(MessagePhase::FinalAnswer) | None)
         {
             self.pending_turn_copyable_output = Some(message.clone());
         }
-        self.pending_status_indicator_restore = match item.phase {
+        self.pending_status_indicator_restore = match phase {
             // Models that don't support preambles only output AgentMessageItems on turn completion.
             Some(MessagePhase::FinalAnswer) | None => false,
             Some(MessagePhase::Commentary) => true,

@@ -201,14 +201,18 @@ impl ChatWidget {
                 if from_replay {
                     let has_summary = !summary.is_empty();
                     if has_summary {
-                        for delta in summary {
-                            self.on_agent_reasoning_delta(delta, ReasoningBlockKind::Summary);
-                        }
+                        self.on_agent_reasoning_delta(
+                            join_replay_text_segments(summary),
+                            ReasoningBlockKind::Summary,
+                        );
                         self.on_agent_reasoning_final();
                     }
                     if self.config.show_raw_agent_reasoning || !has_summary {
-                        for delta in content {
-                            self.on_agent_reasoning_delta(delta, ReasoningBlockKind::Full);
+                        if !content.is_empty() {
+                            self.on_agent_reasoning_delta(
+                                join_replay_text_segments(content),
+                                ReasoningBlockKind::Full,
+                            );
                         }
                         self.on_agent_reasoning_final();
                     }
@@ -432,4 +436,16 @@ impl ChatWidget {
             self.request_redraw();
         }
     }
+}
+
+fn join_replay_text_segments(mut segments: Vec<String>) -> String {
+    if segments.len() == 1 {
+        return segments.pop().unwrap_or_default();
+    }
+    let capacity = segments.iter().map(String::len).sum();
+    let mut joined = String::with_capacity(capacity);
+    for segment in segments {
+        joined.push_str(&segment);
+    }
+    joined
 }
