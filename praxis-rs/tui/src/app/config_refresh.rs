@@ -80,6 +80,13 @@ impl App {
             .rebuild_config_for_cwd(self.chat_widget.config_ref().cwd.to_path_buf())
             .await?;
         self.apply_runtime_policy_overrides(&mut config);
+        // New-thread and fork flows refresh configuration defensively before transitioning. When
+        // the fully merged runtime and TUI configs are unchanged, invalidating every materialized
+        // thread view only turns later navigation into a cold replay. Keep the exact-equality fast
+        // path here; any real config difference retains the existing full invalidation semantics.
+        if config == self.config && tui_config == self.tui_config {
+            return Ok(());
+        }
         self.config = config;
         self.tui_config = tui_config;
         self.clear_thread_view_cache_preserving_input();
