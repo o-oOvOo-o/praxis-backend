@@ -333,8 +333,14 @@ impl ChatWidget {
         &self,
         body_area: Rect,
         transcript_cells: &[Arc<dyn HistoryCell>],
-        _current_scroll_from_bottom: usize,
+        current_scroll_from_bottom: usize,
     ) -> usize {
+        // At the live edge there is nothing to clamp. Deferring the exact
+        // history height until the first upward scroll keeps a cold thread
+        // switch from laying out the entire transcript twice.
+        if current_scroll_from_bottom == 0 {
+            return 0;
+        }
         let layout = self.workspace_layout_for_area(body_area);
         let Some(content_area) = layout.active_content_area else {
             return 0;
