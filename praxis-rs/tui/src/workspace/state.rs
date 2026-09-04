@@ -640,10 +640,10 @@ impl WorkspaceState {
                 .collect();
         }
 
-        let mut row_indices_by_thread_id = HashMap::with_capacity(self.rows.len());
+        let mut thread_ids = HashSet::with_capacity(self.rows.len());
         let mut child_indices_by_parent_id: HashMap<ThreadId, Vec<usize>> = HashMap::new();
         for (index, row) in self.rows.iter().enumerate() {
-            row_indices_by_thread_id.insert(row.thread_id, index);
+            thread_ids.insert(row.thread_id);
             if let Some(parent_thread_id) = row.subagent_parent_thread_id {
                 child_indices_by_parent_id
                     .entry(parent_thread_id)
@@ -653,12 +653,12 @@ impl WorkspaceState {
         }
 
         let mut items = Vec::with_capacity(self.rows.len());
-        let mut emitted = HashSet::new();
+        let mut emitted = vec![false; self.rows.len()];
         for (index, row) in self.rows.iter().enumerate() {
             if row.subagent_parent_thread_id.is_none()
                 || row
                     .subagent_parent_thread_id
-                    .is_some_and(|parent_id| !row_indices_by_thread_id.contains_key(&parent_id))
+                    .is_some_and(|parent_id| !thread_ids.contains(&parent_id))
             {
                 self.push_visible_row_tree(
                     index,
@@ -675,12 +675,16 @@ impl WorkspaceState {
         &self,
         index: usize,
         child_indices_by_parent_id: &HashMap<ThreadId, Vec<usize>>,
-        emitted: &mut HashSet<usize>,
+        emitted: &mut [bool],
         items: &mut Vec<WorkspaceVisibleItem>,
     ) {
-        if !emitted.insert(index) {
+        let Some(already_emitted) = emitted.get_mut(index) else {
+            return;
+        };
+        if *already_emitted {
             return;
         }
+        *already_emitted = true;
         items.push(WorkspaceVisibleItem::Thread(index));
         let Some(parent_id) = self.rows.get(index).map(|row| row.thread_id) else {
             return;
@@ -690,7 +694,7 @@ impl WorkspaceState {
         }
         let child_indices = child_indices_by_parent_id
             .get(&parent_id)
-            .cloned()
+            .map(Vec::as_slice)
             .unwrap_or_default();
 
         for child_index in child_indices.iter().copied() {
@@ -720,7 +724,7 @@ impl WorkspaceState {
         {
             return;
         }
-        for child_index in child_indices {
+        for child_index in child_indices.iter().copied() {
             if self
                 .rows
                 .get(child_index)
