@@ -370,6 +370,12 @@ pub(crate) enum AppEvent {
     FinishThreadReplayBuffer {
         generation: u64,
     },
+    /// Marks an idle thread view reusable after all cells emitted by an event are applied.
+    MarkThreadViewMaterialized {
+        thread_id: ThreadId,
+        generation: u64,
+        revision: u64,
+    },
 
     /// Apply rollback semantics to local transcript cells.
     ///

@@ -2,6 +2,7 @@ use super::*;
 
 impl App {
     fn insert_history_cell_now(&mut self, tui: &mut tui::Tui, cell: Box<dyn HistoryCell>) {
+        self.active_thread_view_materialized_revision = None;
         let cell: Arc<dyn HistoryCell> = cell.into();
         if let Some(Overlay::Transcript(t)) = &mut self.overlay {
             t.insert_cell(cell.clone());
@@ -189,6 +190,13 @@ impl App {
                     self.mark_active_thread_view_materialized();
                     tui.frame_requester().schedule_frame();
                 }
+            }
+            AppEvent::MarkThreadViewMaterialized {
+                thread_id,
+                generation,
+                revision,
+            } => {
+                self.apply_thread_view_materialized_marker(thread_id, generation, revision);
             }
             AppEvent::ApplyThreadRollback { num_turns } => {
                 if self.apply_non_pending_thread_rollback(num_turns) {

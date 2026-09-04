@@ -507,17 +507,27 @@ impl App {
                         if let Some(envelope) = active {
                             if !app.active_thread_event_is_after_replay(&envelope) {
                                 AppRunControl::Continue
-                            } else if let Err(err) = app.handle_active_thread_event(
-                                tui,
-                                &mut app_gateway,
-                                envelope.event,
-                            ).await {
-                                match app.handle_app_gateway_loop_error(&app_gateway, err) {
-                                    Ok(control) => control,
-                                    Err(err) => break Err(err),
-                                }
                             } else {
-                                AppRunControl::Continue
+                                let sequence = envelope.sequence;
+                                let thread_id = app.active_thread_id;
+                                if let Err(err) = app.handle_active_thread_event(
+                                    tui,
+                                    &mut app_gateway,
+                                    envelope.event,
+                                ).await {
+                                    match app.handle_app_gateway_loop_error(&app_gateway, err) {
+                                        Ok(control) => control,
+                                        Err(err) => break Err(err),
+                                    }
+                                } else {
+                                    if let Some(thread_id) = thread_id {
+                                        app.queue_thread_view_materialized_marker(
+                                            thread_id,
+                                            sequence,
+                                        );
+                                    }
+                                    AppRunControl::Continue
+                                }
                             }
                         } else {
                             app.clear_active_thread();

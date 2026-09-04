@@ -485,8 +485,12 @@ impl App {
             match rx.try_recv() {
                 Ok(envelope) => {
                     if self.active_thread_event_is_after_replay(&envelope) {
+                        let sequence = envelope.sequence;
                         self.active_thread_view_materialized_revision = None;
                         self.handle_thread_event_now(envelope.event);
+                        if let Some(thread_id) = self.active_thread_id {
+                            self.queue_thread_view_materialized_marker(thread_id, sequence);
+                        }
                     }
                 }
                 Err(TryRecvError::Empty) => break,

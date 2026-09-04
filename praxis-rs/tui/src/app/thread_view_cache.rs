@@ -1,3 +1,4 @@
+use crate::app_event::AppEvent;
 use crate::chatwidget::ChatWidget;
 use crate::history_cell::HistoryCell;
 use crate::tui;
@@ -136,5 +137,59 @@ impl App {
                     .get(&thread_id)
                     .map(|channel| channel.replay_snapshot_revision)
             });
+    }
+
+    pub(super) fn queue_thread_view_materialized_marker(
+        &self,
+        thread_id: ThreadId,
+        processed_sequence: u64,
+    ) {
+        if self.active_thread_id != Some(thread_id) {
+            return;
+        }
+        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+            return;
+        };
+        let store = lock_thread_event_store(&channel.store);
+        if store.last_event_sequence() != processed_sequence
+            || store
+                .status
+                .as_ref()
+                .is_none_or(|status| status.is_active())
+        {
+            return;
+        }
+        let revision = store.snapshot_revision();
+        drop(store);
+        self.app_event_tx
+            .send(AppEvent::MarkThreadViewMaterialized {
+                thread_id,
+                generation: self.history_view_generation,
+                revision,
+            });
+    }
+
+    pub(super) fn apply_thread_view_materialized_marker(
+        &mut self,
+        thread_id: ThreadId,
+        generation: u64,
+        revision: u64,
+    ) {
+        if self.active_thread_id != Some(thread_id) || self.history_view_generation != generation {
+            return;
+        }
+        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+            return;
+        };
+        let store = lock_thread_event_store(&channel.store);
+        if store.snapshot_revision() == revision
+            && store
+                .status
+                .as_ref()
+                .is_some_and(|status| !status.is_active())
+        {
+            drop(store);
+            self.active_thread_view_materialized_revision = Some(revision);
+        }
     }
 }
