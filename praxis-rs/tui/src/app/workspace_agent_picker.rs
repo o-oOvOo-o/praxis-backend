@@ -470,17 +470,33 @@ impl App {
             );
             (ChatWidget::new_with_app_event(init), None)
         };
+        // Treat a cached switch as one presentation commit. Projection setters and
+        // any queued deltas may each invalidate the same footer/title surfaces, but
+        // only the final state needs to be rendered.
+        let status_refresh_batch = cached_projection.is_some();
+        if status_refresh_batch {
+            target_widget.begin_status_surface_refresh_batch();
+        }
         let cached_events = cached_projection
             .map(|projection| projection.apply_to(&mut target_widget))
             .unwrap_or_default();
         let previous_view = previous_thread_id.zip(previous_view_revision);
-        let reused_cached_view = self.install_thread_view_shell(
+        let reused_cached_view = match self.install_thread_view_shell(
             tui,
             target_widget,
             cached_transcript,
             previous_view,
             target_revision,
-        )?;
+        ) {
+            Ok(reused_cached_view) => reused_cached_view,
+            Err(err) => {
+                if status_refresh_batch {
+                    self.chat_widget.finish_status_surface_refresh_batch();
+                    self.refresh_status_line();
+                }
+                return Err(err);
+            }
+        };
 
         if reused_cached_view {
             self.apply_cached_thread_events(thread_id, cached_events);
@@ -499,8 +515,13 @@ impl App {
             };
             self.chat_widget.add_info_message(message, /*hint*/ None);
         }
-        self.drain_active_thread_events(tui).await?;
+        let drain_result = self.drain_active_thread_events(tui).await;
         self.refresh_pending_thread_approvals();
+        if status_refresh_batch {
+            self.chat_widget.finish_status_surface_refresh_batch();
+            self.refresh_status_line();
+        }
+        drain_result?;
 
         Ok(())
     }
