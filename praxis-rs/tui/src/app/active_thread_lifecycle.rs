@@ -33,7 +33,9 @@ impl App {
         self.active_thread_id = None;
         self.active_thread_rx = None;
         self.active_thread_view_materialized_revision = None;
-        drop(self.thread_view_cache.drain());
+        for (_, cached_view) in self.thread_view_cache.drain() {
+            Self::retire_cached_thread_view(cached_view);
+        }
         self.primary_thread_id = None;
         self.last_subagent_backfill_attempt = None;
         self.pending_primary_events.clear();
@@ -245,6 +247,7 @@ impl App {
             ThreadViewActivationState::Replay(replay_source) => {
                 if let Some(stale_view) = cached_view.take() {
                     self.persist_cached_thread_input_state(thread_id, &stale_view);
+                    Self::retire_cached_thread_view(stale_view);
                 }
                 if !replay_source.has_session() {
                     self.active_thread_id = None;

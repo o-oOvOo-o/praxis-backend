@@ -17,6 +17,7 @@ use super::lock_thread_event_store;
 // Long transcripts are still evicted at the same 400-cell ceiling.
 const THREAD_VIEW_CACHE_MAX_ENTRIES: usize = 8;
 const THREAD_VIEW_CACHE_MAX_TRANSCRIPT_CELLS: usize = 400;
+const THREAD_VIEW_ASYNC_DROP_MIN_TRANSCRIPT_CELLS: usize = 64;
 
 pub(super) struct CachedThreadView {
     pub(super) chat_widget: ChatWidget,
@@ -177,12 +178,35 @@ impl App {
     }
 
     pub(super) fn cache_thread_view(&mut self, thread_id: ThreadId, view: CachedThreadView) {
+        if let Some(replaced_view) = self.thread_view_cache.take(thread_id) {
+            Self::retire_cached_thread_view(replaced_view);
+        }
         let evicted_views = self.thread_view_cache.insert(thread_id, view);
         for (evicted_thread_id, evicted_view) in evicted_views {
             self.persist_cached_thread_input_state(evicted_thread_id, &evicted_view);
             if let Some(channel) = self.thread_event_channels.get(&evicted_thread_id) {
                 lock_thread_event_store(&channel.store).clear_cached_view_delta();
             }
+            Self::retire_cached_thread_view(evicted_view);
+        }
+    }
+
+    /// Releases a detached view without making the UI task walk a large transcript's final Arc
+    /// references. The non-Send widget shell is dropped here; only the Send transcript ownership
+    /// batch moves to the blocking pool. Small batches stay local to avoid scheduling overhead.
+    pub(super) fn retire_cached_thread_view(view: CachedThreadView) {
+        let CachedThreadView {
+            chat_widget,
+            transcript_cells,
+            revision: _,
+        } = view;
+        drop(chat_widget);
+        if transcript_cells.len() >= THREAD_VIEW_ASYNC_DROP_MIN_TRANSCRIPT_CELLS
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let _ = runtime.spawn_blocking(move || drop(transcript_cells));
+        } else {
+            drop(transcript_cells);
         }
     }
 
@@ -204,6 +228,7 @@ impl App {
             if let Some(channel) = self.thread_event_channels.get(&thread_id) {
                 lock_thread_event_store(&channel.store).clear_cached_view_delta();
             }
+            Self::retire_cached_thread_view(cached_view);
         }
     }
 

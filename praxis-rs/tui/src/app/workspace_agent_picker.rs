@@ -482,6 +482,7 @@ impl App {
             ThreadViewActivationState::Replay(replay_source) => {
                 if let Some(stale_view) = cached_view.take() {
                     self.persist_cached_thread_input_state(thread_id, &stale_view);
+                    Self::retire_cached_thread_view(stale_view);
                 }
                 (Some(replay_source), None, None)
             }
