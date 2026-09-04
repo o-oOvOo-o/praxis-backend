@@ -6,11 +6,17 @@ use super::thread_event_store::ThreadEventStore;
 use super::thread_event_store::lock_thread_event_store;
 use crate::app_command::AppCommand;
 use crate::app_gateway_session::AppGatewaySession;
+use crate::app_gateway_session::ThreadSessionState;
 use praxis_protocol::ThreadId;
 use tokio::sync::mpsc;
 
 // Live delivery preserves FIFO while this cap bounds the durable replay projection.
 const THREAD_EVENT_REPLAY_CAPACITY: usize = 32768;
+
+pub(super) enum ThreadViewActivationState {
+    Cached(ThreadSessionState),
+    Replay(ThreadEventSnapshot),
+}
 
 impl App {
     pub(super) async fn shutdown_current_thread(&mut self, app_gateway: &mut AppGatewaySession) {
@@ -99,6 +105,29 @@ impl App {
         channel.replay_snapshot_revision = store.snapshot_revision();
         let snapshot = store.snapshot();
         Some((receiver, snapshot))
+    }
+
+    pub(super) fn activate_thread_for_view(
+        &mut self,
+        thread_id: ThreadId,
+        cached_revision: Option<u64>,
+    ) -> Option<(
+        mpsc::UnboundedReceiver<ThreadEventEnvelope>,
+        ThreadViewActivationState,
+        u64,
+    )> {
+        let channel = self.thread_event_channels.get_mut(&thread_id)?;
+        let receiver = channel.receiver.take()?;
+        let mut store = lock_thread_event_store(&channel.store);
+        store.active = true;
+        channel.replay_through_sequence = store.last_event_sequence();
+        let revision = store.snapshot_revision();
+        channel.replay_snapshot_revision = revision;
+        let state = match (cached_revision == Some(revision), store.session.clone()) {
+            (true, Some(session)) => ThreadViewActivationState::Cached(session),
+            _ => ThreadViewActivationState::Replay(store.snapshot()),
+        };
+        Some((receiver, state, revision))
     }
 
     pub(super) fn active_thread_event_is_after_replay(

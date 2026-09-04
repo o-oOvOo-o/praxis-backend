@@ -23,14 +23,10 @@ pub(super) struct ThreadViewCache {
 }
 
 impl ThreadViewCache {
-    pub(super) fn take_if_current(
-        &mut self,
-        thread_id: ThreadId,
-        revision: u64,
-    ) -> Option<CachedThreadView> {
+    pub(super) fn take(&mut self, thread_id: ThreadId) -> Option<CachedThreadView> {
         let cached = self.entries.remove(&thread_id)?;
         self.remove_from_lru(thread_id);
-        (cached.revision == revision).then_some(cached)
+        Some(cached)
     }
 
     pub(super) fn insert(&mut self, thread_id: ThreadId, view: CachedThreadView) {
@@ -77,12 +73,11 @@ impl App {
         (store.snapshot_revision() == materialized).then_some(materialized)
     }
 
-    pub(super) fn take_cached_thread_view(
+    pub(super) fn take_cached_thread_view_candidate(
         &mut self,
         thread_id: ThreadId,
-        revision: u64,
     ) -> Option<CachedThreadView> {
-        self.thread_view_cache.take_if_current(thread_id, revision)
+        self.thread_view_cache.take(thread_id)
     }
 
     pub(super) fn cache_replaced_thread_view(

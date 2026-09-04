@@ -1,3 +1,4 @@
+use super::thread_event_channels::ThreadViewActivationState;
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -278,8 +279,12 @@ impl App {
         let previous_thread_id = self.active_thread_id;
         let previous_view_revision = previous_thread_id
             .and_then(|thread_id| self.cacheable_active_thread_view_revision(thread_id));
+        let cached_view = self.take_cached_thread_view_candidate(thread_id);
+        let cached_revision = cached_view.as_ref().map(|cached| cached.revision);
         self.store_active_thread_receiver();
-        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id) else {
+        let Some((receiver, activation_state, target_revision)) =
+            self.activate_thread_for_view(thread_id, cached_revision)
+        else {
             if let Some(previous_thread_id) = previous_thread_id {
                 self.active_thread_id = None;
                 self.activate_thread_channel(previous_thread_id);
@@ -287,13 +292,19 @@ impl App {
             return Ok(false);
         };
 
-        let Some(session) = snapshot.session.clone() else {
-            self.active_thread_id = None;
-            self.active_thread_rx = None;
-            if let Some(previous_thread_id) = previous_thread_id {
-                self.activate_thread_channel(previous_thread_id);
+        let (session, snapshot, cached_view) = match activation_state {
+            ThreadViewActivationState::Cached(session) => (session, None, cached_view),
+            ThreadViewActivationState::Replay(snapshot) => {
+                let Some(session) = snapshot.session.clone() else {
+                    self.active_thread_id = None;
+                    self.active_thread_rx = None;
+                    if let Some(previous_thread_id) = previous_thread_id {
+                        self.activate_thread_channel(previous_thread_id);
+                    }
+                    return Ok(false);
+                };
+                (session, Some(snapshot), None)
             }
-            return Ok(false);
         };
 
         self.active_thread_id = Some(thread_id);
@@ -312,12 +323,6 @@ impl App {
             .activate_thread(thread_id, default_launch_rank);
 
         self.advance_history_view_generation();
-        let target_revision = self
-            .thread_event_channels
-            .get(&thread_id)
-            .map(|channel| channel.replay_snapshot_revision)
-            .unwrap_or_default();
-        let cached_view = self.take_cached_thread_view(thread_id, target_revision);
         let (target_widget, cached_transcript) = if let Some(cached) = cached_view {
             tracing::debug!(
                 thread_id = %thread_id,
@@ -356,7 +361,9 @@ impl App {
             tui.frame_requester().schedule_frame();
         } else {
             self.active_thread_view_materialized_revision = None;
-            self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
+            if let Some(snapshot) = snapshot {
+                self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
+            }
         }
         self.drain_active_thread_events(tui).await?;
         self.refresh_pending_thread_approvals();
