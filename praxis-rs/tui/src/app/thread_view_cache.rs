@@ -111,9 +111,6 @@ impl App {
             && !self.chat_widget.realtime_conversation_is_live()
             && self.chat_widget.thread_id() == Some(thread_id)
             && self.active_thread_view_materialized_revision.is_some();
-        let input_state_is_deferred = view_is_cache_candidate && self.workspace.enabled;
-        let input_state =
-            (!input_state_is_deferred).then(|| self.chat_widget.capture_thread_input_state());
         let materialized_revision = self.active_thread_view_materialized_revision;
         let Some(channel) = self.thread_event_channels.get_mut(&thread_id) else {
             return (Some(thread_id), None);
@@ -123,9 +120,6 @@ impl App {
         let revision = {
             let mut store = lock_thread_event_store(&store_handle);
             store.active = false;
-            if let Some(input_state) = input_state {
-                store.input_state = input_state;
-            }
             view_is_cache_candidate
                 .then(|| {
                     let materialized = materialized_revision?;
@@ -138,7 +132,10 @@ impl App {
         if let Some(receiver) = receiver {
             channel.receiver = Some(receiver);
         }
-        if input_state_is_deferred && revision.is_none() {
+        // A materialized view retains its input state inside the cached ChatWidget. Only cold
+        // replay needs an owned snapshot in the event store, so avoid cloning composer text,
+        // images, pending steers, and queued messages on every successful hot switch.
+        if revision.is_none() {
             let input_state = self.chat_widget.capture_thread_input_state();
             lock_thread_event_store(&store_handle).input_state = input_state;
         }
@@ -214,7 +211,9 @@ impl App {
         let reused_cached_view = cached_transcript.is_some();
         let previous_transcript = std::mem::take(&mut self.transcript_cells);
         let previous_widget = self.replace_chat_widget(target_widget);
-        self.reset_for_thread_switch(tui)?;
+        // Commit the old view before the fallible terminal reset. Besides making cached switches
+        // transactional, this guarantees its live input state remains recoverable without first
+        // deep-cloning it into ThreadEventStore.
         if let Some((previous_thread_id, previous_revision)) = previous_view {
             self.cache_replaced_thread_view(
                 previous_thread_id,
@@ -223,6 +222,7 @@ impl App {
                 previous_transcript,
             );
         }
+        self.reset_for_thread_switch(tui)?;
         if let Some(cached_transcript) = cached_transcript {
             self.transcript_cells = cached_transcript;
             self.active_thread_view_materialized_revision = Some(target_revision);
