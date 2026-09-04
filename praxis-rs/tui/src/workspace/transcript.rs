@@ -52,7 +52,6 @@ pub(crate) struct WorkspaceTranscriptViewport {
     pub(crate) content_area: Rect,
     pub(crate) rows: Vec<WorkspaceTranscriptRow>,
     pub(crate) patch_cell_ids: Vec<PatchCellId>,
-    mouse_actions: Vec<Vec<HistoryCellMouseAction>>,
 }
 
 impl WorkspaceTranscriptViewport {
@@ -86,9 +85,9 @@ impl WorkspaceTranscriptViewport {
         {
             return None;
         }
-        self.mouse_actions
+        self.rows
             .get(visible_index)
-            .and_then(|actions| actions.first())
+            .and_then(|row| row.mouse_actions.first())
             .cloned()
     }
 }
@@ -116,7 +115,7 @@ struct WorkspaceTranscriptCommittedLayout {
 }
 
 type WorkspaceTranscriptBlock = TranscriptBlock;
-pub(crate) type WorkspaceTranscriptRow = TranscriptVisibleRow;
+pub(crate) type WorkspaceTranscriptRow = Arc<TranscriptVisibleRow>;
 
 impl WorkspaceTranscriptCache {
     pub(crate) fn scroll_limit(&mut self, request: WorkspaceTranscriptRequest<'_>) -> usize {
@@ -145,7 +144,6 @@ impl WorkspaceTranscriptCache {
                 content_area,
                 rows: Vec::new(),
                 patch_cell_ids: Vec::new(),
-                mouse_actions: Vec::new(),
             };
         }
 
@@ -162,16 +160,10 @@ impl WorkspaceTranscriptCache {
             }
         }
 
-        let mouse_actions = visible
-            .iter()
-            .map(|row| row.mouse_actions.clone())
-            .collect();
-
         WorkspaceTranscriptViewport {
             content_area,
             rows: visible,
             patch_cell_ids,
-            mouse_actions,
         }
     }
 
@@ -459,21 +451,21 @@ fn rows_for_block(
     patch_cell_ids: &[PatchCellId],
     mouse_actions: &[HistoryCellMouseAction],
 ) -> Vec<WorkspaceTranscriptRow> {
-    let mut rows: Vec<WorkspaceTranscriptRow> =
+    let mut rows: Vec<TranscriptVisibleRow> =
         chat_timeline_lines_for_raw(width, lane, lines, theme)
             .into_iter()
-            .map(|line| WorkspaceTranscriptRow::new(line, patch_cell_ids.to_vec(), Vec::new()))
+            .map(|line| TranscriptVisibleRow::new(line, patch_cell_ids.to_vec(), Vec::new()))
             .collect();
     if !mouse_actions.is_empty() {
         for row in rows.iter_mut().take(2) {
             row.mouse_actions.extend(mouse_actions.iter().cloned());
         }
     }
-    rows
+    rows.into_iter().map(Arc::new).collect()
 }
 
 fn blank_row() -> WorkspaceTranscriptRow {
-    WorkspaceTranscriptRow::blank()
+    Arc::new(TranscriptVisibleRow::blank())
 }
 
 fn push_chat_timeline_content_block(

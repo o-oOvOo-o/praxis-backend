@@ -1,9 +1,15 @@
+use std::sync::Arc;
+
 use super::viewport::TranscriptVisibleRow;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
 
-pub(crate) fn render_visible_rows(area: Rect, rows: &[TranscriptVisibleRow], buf: &mut Buffer) {
+pub(crate) fn render_visible_rows(
+    area: Rect,
+    rows: &[Arc<TranscriptVisibleRow>],
+    buf: &mut Buffer,
+) {
     if rows.is_empty() || area.is_empty() {
         return;
     }
