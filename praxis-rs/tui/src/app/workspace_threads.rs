@@ -18,6 +18,7 @@ use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ThreadListResponse;
 use praxis_app_gateway_protocol::ThreadStatus;
 use praxis_protocol::ThreadId;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -424,13 +425,16 @@ impl App {
         } else {
             Vec::new()
         };
+        let mut row_indices = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| (row.thread_id, index))
+            .collect::<HashMap<_, _>>();
         for row in incoming_rows.drain(..) {
-            if let Some(index) = rows
-                .iter()
-                .position(|existing| existing.thread_id == row.thread_id)
-            {
+            if let Some(&index) = row_indices.get(&row.thread_id) {
                 rows[index] = row;
             } else {
+                row_indices.insert(row.thread_id, rows.len());
                 rows.push(row);
             }
         }

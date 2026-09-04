@@ -183,7 +183,9 @@ impl App {
                 .switch_to_cached_workspace_thread(tui, target_session.thread_id)
                 .await?
         {
-            self.refresh_workspace_threads(app_gateway, true);
+            // The long-lived observers already keep known rows current. A rate-limited list
+            // refresh still discovers new rows without issuing thread/list for every view swap.
+            self.refresh_workspace_threads(app_gateway, /*force*/ false);
             tui.frame_requester().schedule_frame();
             return Ok(None);
         }
@@ -214,7 +216,9 @@ impl App {
                 .switch_to_cached_workspace_thread(tui, target_session.thread_id)
                 .await?
             {
-                self.refresh_workspace_threads(app_gateway, true);
+                // Cross-cwd cached views retain their observers too; only discovery needs the
+                // normal rate-limited refresh cadence.
+                self.refresh_workspace_threads(app_gateway, /*force*/ false);
                 tui.frame_requester().schedule_frame();
                 return Ok(None);
             }

@@ -180,26 +180,27 @@ impl AgentNavigationState {
         current_displayed_thread_id: Option<ThreadId>,
         direction: AgentNavigationDirection,
     ) -> Option<ThreadId> {
-        let ordered_threads = self.ordered_threads();
-        if ordered_threads.len() < 2 {
+        if self.threads.len() < 2 {
             return None;
         }
 
         let current_thread_id = current_displayed_thread_id?;
-        let current_idx = ordered_threads
-            .iter()
-            .position(|(thread_id, _)| *thread_id == current_thread_id)?;
-        let next_idx = match direction {
-            AgentNavigationDirection::Next => (current_idx + 1) % ordered_threads.len(),
-            AgentNavigationDirection::Previous => {
-                if current_idx == 0 {
-                    ordered_threads.len() - 1
-                } else {
-                    current_idx - 1
-                }
-            }
-        };
-        Some(ordered_threads[next_idx].0)
+        let current_idx = self.order.iter().position(|thread_id| {
+            *thread_id == current_thread_id && self.threads.contains_key(thread_id)
+        })?;
+        match direction {
+            AgentNavigationDirection::Next => self.order[current_idx + 1..]
+                .iter()
+                .chain(self.order[..current_idx].iter())
+                .find(|thread_id| self.threads.contains_key(thread_id))
+                .copied(),
+            AgentNavigationDirection::Previous => self.order[..current_idx]
+                .iter()
+                .rev()
+                .chain(self.order[current_idx + 1..].iter().rev())
+                .find(|thread_id| self.threads.contains_key(thread_id))
+                .copied(),
+        }
     }
 
     /// Derives the contextual footer label for the currently displayed thread.
