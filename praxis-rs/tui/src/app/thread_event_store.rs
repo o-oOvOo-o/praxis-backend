@@ -38,6 +38,7 @@ pub(super) struct ThreadEventSnapshot {
     pub(super) turns: Vec<Turn>,
     pub(super) status: Option<ThreadStatus>,
     pub(super) control_state: Option<ThreadControlState>,
+    pub(super) token_usage: Option<praxis_app_gateway_protocol::ThreadTokenUsage>,
     pub(super) events: Vec<ThreadBufferedEvent>,
     pub(super) input_state: Option<ThreadInputState>,
 }
@@ -400,6 +401,7 @@ impl ThreadEventStore {
             turns: self.turns.clone(),
             status: self.status.clone(),
             control_state: self.control_state.clone(),
+            token_usage: self.latest_token_usage(),
             events: self.snapshot_events(),
             input_state: self.input_state.clone(),
         }
@@ -435,6 +437,21 @@ impl ThreadEventStore {
 
     pub(super) fn view_revision(&self) -> u64 {
         self.view_revision
+    }
+
+    pub(super) fn latest_token_usage(
+        &self,
+    ) -> Option<praxis_app_gateway_protocol::ThreadTokenUsage> {
+        let envelope = self.latest_projection_events
+            [LatestProjectionEventSlot::TokenUsage as usize]
+            .as_ref()?;
+        let ThreadBufferedEvent::Notification(ServerNotification::ThreadTokenUsageUpdated(
+            notification,
+        )) = &envelope.event
+        else {
+            return None;
+        };
+        Some(notification.token_usage.clone())
     }
 
     fn bump_view_revision(&mut self) {
@@ -477,6 +494,13 @@ impl ThreadEventStore {
             ThreadBufferedEvent::Request(request) => self
                 .pending_interactive_replay
                 .should_replay_snapshot_request(request),
+            ThreadBufferedEvent::Notification(
+                ServerNotification::ThreadStatusChanged(_)
+                | ServerNotification::ThreadControlChanged(_)
+                | ServerNotification::ThreadTokenUsageUpdated(_)
+                | ServerNotification::ThreadHeartbeatUpdated(_)
+                | ServerNotification::TurnDiffUpdated(_),
+            ) => false,
             ThreadBufferedEvent::Notification(_)
             | ThreadBufferedEvent::HistoryEntryResponse(_)
             | ThreadBufferedEvent::FeedbackSubmission(_) => true,
@@ -494,6 +518,8 @@ fn event_requires_view_replay(event: &ThreadBufferedEvent) -> bool {
         ThreadBufferedEvent::Notification(
             ServerNotification::ThreadStatusChanged(_)
                 | ServerNotification::ThreadControlChanged(_)
+                // Usage is a latest-value status projection applied directly to cached views.
+                | ServerNotification::ThreadTokenUsageUpdated(_)
                 // Heartbeats are routing/liveness metadata and have no ChatWidget effect.
                 | ServerNotification::ThreadHeartbeatUpdated(_)
                 // The diff notification only asks the active view to refresh its status line;

@@ -346,8 +346,7 @@ impl App {
             (ChatWidget::new_with_app_event(init), None)
         };
         if let Some(projection) = cached_projection {
-            target_widget.apply_thread_status_snapshot(projection.status.as_ref());
-            target_widget.set_thread_control_state(projection.control_state.as_ref());
+            projection.apply_to(&mut target_widget);
         }
         let previous_view = previous_thread_id.zip(previous_view_revision);
         let reused_cached_view = self.install_thread_view_shell(
@@ -564,6 +563,7 @@ impl App {
             turns,
             status,
             control_state,
+            token_usage,
             events,
             input_state,
         } = snapshot;
@@ -585,6 +585,10 @@ impl App {
             .apply_thread_status_snapshot(status.as_ref());
         self.chat_widget
             .set_thread_control_state(control_state.as_ref());
+        if let Some(token_usage) = token_usage {
+            self.chat_widget
+                .set_token_info(Some(token_usage_info_from_app_gateway(token_usage)));
+        }
         self.chat_widget
             .set_queue_autosend_suppressed(/*suppressed*/ false);
         self.chat_widget

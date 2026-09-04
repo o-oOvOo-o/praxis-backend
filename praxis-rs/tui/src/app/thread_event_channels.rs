@@ -7,6 +7,8 @@ use super::thread_event_store::lock_thread_event_store;
 use crate::app_command::AppCommand;
 use crate::app_gateway_session::AppGatewaySession;
 use crate::app_gateway_session::ThreadSessionState;
+use crate::app_gateway_session::token_usage_info_from_app_gateway;
+use crate::chatwidget::ChatWidget;
 use praxis_protocol::ThreadId;
 use tokio::sync::mpsc;
 
@@ -16,6 +18,17 @@ const THREAD_EVENT_REPLAY_CAPACITY: usize = 32768;
 pub(super) struct CachedThreadProjectionState {
     pub(super) status: Option<praxis_app_gateway_protocol::ThreadStatus>,
     pub(super) control_state: Option<praxis_app_gateway_protocol::ThreadControlState>,
+    pub(super) token_usage: Option<praxis_app_gateway_protocol::ThreadTokenUsage>,
+}
+
+impl CachedThreadProjectionState {
+    pub(super) fn apply_to(self, chat_widget: &mut ChatWidget) {
+        chat_widget.apply_thread_status_snapshot(self.status.as_ref());
+        chat_widget.set_thread_control_state(self.control_state.as_ref());
+        if let Some(token_usage) = self.token_usage {
+            chat_widget.set_token_info(Some(token_usage_info_from_app_gateway(token_usage)));
+        }
+    }
 }
 
 pub(super) enum ThreadViewActivationState {
@@ -138,6 +151,7 @@ impl App {
             ThreadViewActivationState::Cached(CachedThreadProjectionState {
                 status: store.status.clone(),
                 control_state: store.control_state.clone(),
+                token_usage: store.latest_token_usage(),
             })
         } else {
             ThreadViewActivationState::Replay(store.snapshot())
