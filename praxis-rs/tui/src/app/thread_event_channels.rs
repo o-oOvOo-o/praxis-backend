@@ -1,4 +1,5 @@
 use super::App;
+use super::thread_event_store::CachedViewDelta;
 use super::thread_event_store::ThreadBufferedEvent;
 use super::thread_event_store::ThreadEventChannel;
 use super::thread_event_store::ThreadEventEnvelope;
@@ -55,22 +56,33 @@ impl ThreadReplaySource {
 }
 
 pub(super) struct CachedThreadProjectionState {
-    pub(super) status: Option<praxis_app_gateway_protocol::ThreadStatus>,
-    pub(super) control_state: Option<praxis_app_gateway_protocol::ThreadControlState>,
-    pub(super) token_usage: Option<praxis_app_gateway_protocol::ThreadTokenUsage>,
-    pub(super) goal_notification: Option<praxis_app_gateway_protocol::ServerNotification>,
+    surface: Option<CachedThreadSurfaceState>,
     pub(super) events: VecDeque<ThreadEventEnvelope>,
 }
 
+struct CachedThreadSurfaceState {
+    status: Option<praxis_app_gateway_protocol::ThreadStatus>,
+    control_state: Option<praxis_app_gateway_protocol::ThreadControlState>,
+    token_usage: Option<praxis_app_gateway_protocol::ThreadTokenUsage>,
+    goal_notification: Option<praxis_app_gateway_protocol::ServerNotification>,
+}
+
 impl CachedThreadProjectionState {
+    pub(super) fn is_empty(&self) -> bool {
+        self.surface.is_none() && self.events.is_empty()
+    }
+
     pub(super) fn apply_to(self, chat_widget: &mut ChatWidget) -> VecDeque<ThreadEventEnvelope> {
-        chat_widget.apply_thread_status_snapshot(self.status.as_ref());
-        chat_widget.set_thread_control_state(self.control_state.as_ref());
-        if let Some(token_usage) = self.token_usage {
-            chat_widget.set_token_info(Some(token_usage_info_from_app_gateway(token_usage)));
-        }
-        if let Some(notification) = self.goal_notification {
-            chat_widget.handle_server_notification(notification, Some(ReplayKind::ThreadSnapshot));
+        if let Some(surface) = self.surface {
+            chat_widget.apply_thread_status_snapshot(surface.status.as_ref());
+            chat_widget.set_thread_control_state(surface.control_state.as_ref());
+            if let Some(token_usage) = surface.token_usage {
+                chat_widget.set_token_info(Some(token_usage_info_from_app_gateway(token_usage)));
+            }
+            if let Some(notification) = surface.goal_notification {
+                chat_widget
+                    .handle_server_notification(notification, Some(ReplayKind::ThreadSnapshot));
+            }
         }
         self.events
     }
@@ -192,22 +204,21 @@ impl App {
         channel.replay_through_sequence = store.last_event_sequence();
         let revision = store.view_revision();
         channel.replay_view_revision = revision;
-        let cached_events = cached_revision.and_then(|cached_revision| {
-            if cached_revision == revision {
-                store.clear_cached_view_delta();
-                Some(VecDeque::new())
-            } else {
-                store.take_cached_view_delta(cached_revision)
-            }
-        });
+        let cached_delta = cached_revision
+            .and_then(|cached_revision| store.take_cached_view_delta(cached_revision));
         let state = if store.session.is_some()
-            && let Some(events) = cached_events
+            && let Some(CachedViewDelta {
+                events,
+                surface_dirty,
+            }) = cached_delta
         {
             ThreadViewActivationState::Cached(CachedThreadProjectionState {
-                status: store.status.clone(),
-                control_state: store.control_state.clone(),
-                token_usage: store.latest_token_usage(),
-                goal_notification: store.latest_goal_notification(),
+                surface: surface_dirty.then(|| CachedThreadSurfaceState {
+                    status: store.status.clone(),
+                    control_state: store.control_state.clone(),
+                    token_usage: store.latest_token_usage(),
+                    goal_notification: store.latest_goal_notification(),
+                }),
                 events,
             })
         } else {

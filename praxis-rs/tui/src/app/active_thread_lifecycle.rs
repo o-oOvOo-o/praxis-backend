@@ -290,7 +290,9 @@ impl App {
         // A hot view restore can touch status, control, token, goal, and live-event
         // projections in one logical commit. Keep their footer/title updates deferred
         // until the selected view is fully current so switching does one surface pass.
-        let status_refresh_batch = cached_projection.is_some();
+        let status_refresh_batch = cached_projection
+            .as_ref()
+            .is_some_and(|projection| !projection.is_empty());
         if status_refresh_batch {
             target_widget.begin_status_surface_refresh_batch();
         }

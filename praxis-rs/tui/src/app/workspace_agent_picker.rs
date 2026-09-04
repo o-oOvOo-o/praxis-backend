@@ -512,7 +512,9 @@ impl App {
         // Treat a cached switch as one presentation commit. Projection setters and
         // any queued deltas may each invalidate the same footer/title surfaces, but
         // only the final state needs to be rendered.
-        let status_refresh_batch = cached_projection.is_some();
+        let status_refresh_batch = cached_projection
+            .as_ref()
+            .is_some_and(|projection| !projection.is_empty());
         if status_refresh_batch {
             target_widget.begin_status_surface_refresh_batch();
         }

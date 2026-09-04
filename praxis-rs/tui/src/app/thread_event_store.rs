@@ -38,7 +38,13 @@ const STALE_LIVE_QUEUE_ASYNC_DROP_THRESHOLD: usize = 256;
 struct CachedViewDeltaLog {
     base_revision: u64,
     events: VecDeque<ThreadEventEnvelope>,
+    surface_dirty: bool,
     overflowed: bool,
+}
+
+pub(super) struct CachedViewDelta {
+    pub(super) events: VecDeque<ThreadEventEnvelope>,
+    pub(super) surface_dirty: bool,
 }
 
 #[cfg(test)]
@@ -434,6 +440,7 @@ impl ThreadEventStore {
             (self.view_revision == base_revision).then(|| CachedViewDeltaLog {
                 base_revision,
                 events: VecDeque::new(),
+                surface_dirty: false,
                 overflowed: false,
             });
     }
@@ -442,15 +449,20 @@ impl ThreadEventStore {
         self.cached_view_delta = None;
     }
 
-    pub(super) fn take_cached_view_delta(
-        &mut self,
-        base_revision: u64,
-    ) -> Option<VecDeque<ThreadEventEnvelope>> {
+    pub(super) fn take_cached_view_delta(&mut self, base_revision: u64) -> Option<CachedViewDelta> {
         let delta = self.cached_view_delta.take()?;
-        (delta.base_revision == base_revision && !delta.overflowed).then_some(delta.events)
+        (delta.base_revision == base_revision && !delta.overflowed).then_some(CachedViewDelta {
+            events: delta.events,
+            surface_dirty: delta.surface_dirty,
+        })
     }
 
     fn record_cached_view_delta(&mut self, sequence: u64, event: &ThreadBufferedEvent) {
+        if cached_surface_event(event)
+            && let Some(delta) = self.cached_view_delta.as_mut()
+        {
+            delta.surface_dirty = true;
+        }
         if !event_requires_view_replay(event) {
             return;
         }
@@ -609,6 +621,19 @@ fn event_requires_view_replay(event: &ThreadBufferedEvent) -> bool {
                 // The diff notification only asks the active view to refresh its status line;
                 // switching views already performs that refresh.
                 | ServerNotification::TurnDiffUpdated(_)
+        )
+    )
+}
+
+fn cached_surface_event(event: &ThreadBufferedEvent) -> bool {
+    matches!(
+        event,
+        ThreadBufferedEvent::Notification(
+            ServerNotification::ThreadStatusChanged(_)
+                | ServerNotification::ThreadControlChanged(_)
+                | ServerNotification::ThreadTokenUsageUpdated(_)
+                | ServerNotification::ThreadGoalUpdated(_)
+                | ServerNotification::ThreadGoalCleared(_)
         )
     )
 }
