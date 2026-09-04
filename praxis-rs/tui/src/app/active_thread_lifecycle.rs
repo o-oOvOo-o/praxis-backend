@@ -341,26 +341,16 @@ impl App {
             );
             (ChatWidget::new_with_app_event(init), None)
         };
-        let previous_transcript = std::mem::take(&mut self.transcript_cells);
-        let previous_widget = self.replace_chat_widget(target_widget);
-        self.reset_for_thread_switch(tui)?;
-        if let (Some(previous_thread_id), Some(previous_view_revision)) =
-            (previous_thread_id, previous_view_revision)
-        {
-            self.cache_replaced_thread_view(
-                previous_thread_id,
-                previous_view_revision,
-                previous_widget,
-                previous_transcript,
-            );
-        }
+        let previous_view = previous_thread_id.zip(previous_view_revision);
+        let reused_cached_view = self.install_thread_view_shell(
+            tui,
+            target_widget,
+            cached_transcript,
+            previous_view,
+            target_revision,
+        )?;
         self.workspace.reset_chat_scroll();
-        if let Some(cached_transcript) = cached_transcript {
-            self.transcript_cells = cached_transcript;
-            self.active_thread_view_materialized_revision = Some(target_revision);
-            tui.frame_requester().schedule_frame();
-        } else {
-            self.active_thread_view_materialized_revision = None;
+        if !reused_cached_view {
             if let Some(snapshot) = snapshot {
                 self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
             }

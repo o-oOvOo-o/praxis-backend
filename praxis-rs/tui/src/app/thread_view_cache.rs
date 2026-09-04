@@ -1,5 +1,7 @@
 use crate::chatwidget::ChatWidget;
 use crate::history_cell::HistoryCell;
+use crate::tui;
+use color_eyre::eyre::Result;
 use praxis_protocol::ThreadId;
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -95,6 +97,36 @@ impl App {
                 revision,
             },
         );
+    }
+
+    pub(super) fn install_thread_view_shell(
+        &mut self,
+        tui: &mut tui::Tui,
+        target_widget: ChatWidget,
+        cached_transcript: Option<Vec<Arc<dyn HistoryCell>>>,
+        previous_view: Option<(ThreadId, u64)>,
+        target_revision: u64,
+    ) -> Result<bool> {
+        let reused_cached_view = cached_transcript.is_some();
+        let previous_transcript = std::mem::take(&mut self.transcript_cells);
+        let previous_widget = self.replace_chat_widget(target_widget);
+        self.reset_for_thread_switch(tui)?;
+        if let Some((previous_thread_id, previous_revision)) = previous_view {
+            self.cache_replaced_thread_view(
+                previous_thread_id,
+                previous_revision,
+                previous_widget,
+                previous_transcript,
+            );
+        }
+        if let Some(cached_transcript) = cached_transcript {
+            self.transcript_cells = cached_transcript;
+            self.active_thread_view_materialized_revision = Some(target_revision);
+            tui.frame_requester().schedule_frame();
+        } else {
+            self.active_thread_view_materialized_revision = None;
+        }
+        Ok(reused_cached_view)
     }
 
     pub(super) fn mark_active_thread_view_materialized(&mut self) {

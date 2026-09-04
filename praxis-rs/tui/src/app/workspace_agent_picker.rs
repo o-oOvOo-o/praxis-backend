@@ -1,5 +1,6 @@
 use super::App;
 use super::agent_navigation::AgentNavigationState;
+use super::thread_event_channels::ThreadViewActivationState;
 use super::thread_event_store::lock_thread_event_store;
 use crate::app_gateway_session::AppGatewaySession;
 use crate::app_gateway_session::ThreadSessionState;
@@ -457,8 +458,14 @@ impl App {
         }
 
         let previous_thread_id = self.active_thread_id;
+        let previous_view_revision = previous_thread_id
+            .and_then(|thread_id| self.cacheable_active_thread_view_revision(thread_id));
+        let cached_view = self.take_cached_thread_view_candidate(thread_id);
+        let cached_revision = cached_view.as_ref().map(|cached| cached.revision);
         self.store_active_thread_receiver();
-        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id) else {
+        let Some((receiver, activation_state, target_revision)) =
+            self.activate_thread_for_view(thread_id, cached_revision)
+        else {
             self.chat_widget
                 .add_error_message(format!("Agent thread {thread_id} is already active."));
             if let Some(previous_thread_id) = previous_thread_id {
@@ -467,21 +474,46 @@ impl App {
             }
             return Ok(());
         };
+        let (snapshot, cached_view) = match activation_state {
+            ThreadViewActivationState::Cached(_) => (None, cached_view),
+            ThreadViewActivationState::Replay(snapshot) => (Some(snapshot), None),
+        };
 
         self.active_thread_id = Some(thread_id);
         self.active_thread_rx = Some(receiver);
 
         self.advance_history_view_generation();
-        let init = self.chatwidget_init_for_forked_or_resumed_thread(
+        let (target_widget, cached_transcript) = if let Some(cached) = cached_view {
+            tracing::debug!(
+                thread_id = %thread_id,
+                revision = target_revision,
+                "restoring selected agent view from cache"
+            );
+            cached
+                .chat_widget
+                .rebind_history_view(self.history_view_generation);
+            (cached.chat_widget, Some(cached.transcript_cells))
+        } else {
+            let init = self.chatwidget_init_for_forked_or_resumed_thread(
+                tui,
+                self.config.clone(),
+                self.tui_config.clone(),
+            );
+            (ChatWidget::new_with_app_event(init), None)
+        };
+        let previous_view = previous_thread_id.zip(previous_view_revision);
+        let reused_cached_view = self.install_thread_view_shell(
             tui,
-            self.config.clone(),
-            self.tui_config.clone(),
-        );
-        self.replace_chat_widget(ChatWidget::new_with_app_event(init));
+            target_widget,
+            cached_transcript,
+            previous_view,
+            target_revision,
+        )?;
 
-        self.reset_for_thread_switch(tui)?;
-        self.replay_thread_snapshot(snapshot, !is_replay_only);
-        if is_replay_only {
+        if !reused_cached_view && let Some(snapshot) = snapshot {
+            self.replay_thread_snapshot(snapshot, !is_replay_only);
+        }
+        if !reused_cached_view && is_replay_only {
             let message = if attached_replay_only {
                 format!(
                     "Agent thread {thread_id} could not be resumed live. Replaying saved transcript."
