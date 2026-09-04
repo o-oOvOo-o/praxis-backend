@@ -25,6 +25,36 @@ fn thread_event_store_tracks_active_turn_lifecycle() {
 }
 
 #[test]
+fn completed_turn_folds_covered_stream_events_into_turn_snapshot() {
+    let thread_id = ThreadId::new();
+    let mut store = ThreadEventStore::new(/*capacity*/ 16);
+    store.push_notification(agent_message_delta_notification(
+        thread_id,
+        "turn-complete",
+        "agent-live",
+        "streamed answer",
+    ));
+    store.push_notification(hook_started_notification(thread_id, "turn-complete"));
+    store.push_notification(hook_completed_notification(thread_id, "turn-complete"));
+
+    store.push_notification(turn_completed_notification(
+        thread_id,
+        "turn-complete",
+        TurnStatus::Completed,
+    ));
+
+    let snapshot = store.snapshot();
+    assert_eq!(snapshot.turns.len(), 1);
+    assert_eq!(snapshot.turns[0].id, "turn-complete");
+    assert!(snapshot.events.iter().all(|event| matches!(
+        event,
+        ThreadBufferedEvent::Notification(ServerNotification::HookStarted(_))
+            | ThreadBufferedEvent::Notification(ServerNotification::HookCompleted(_))
+    )));
+    assert_eq!(snapshot.events.len(), 2);
+}
+
+#[test]
 fn thread_event_store_restores_active_turn_from_snapshot_turns() {
     let thread_id = ThreadId::new();
     let session = test_thread_session(thread_id, PathBuf::from("/tmp/project"));

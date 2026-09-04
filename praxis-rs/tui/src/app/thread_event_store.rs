@@ -238,7 +238,23 @@ impl ThreadEventStore {
         self.turns = turns;
     }
 
+    fn upsert_turn_snapshot(&mut self, turn: Turn) {
+        if let Some(existing) = self
+            .turns
+            .iter_mut()
+            .find(|existing| existing.id == turn.id)
+        {
+            *existing = turn;
+        } else {
+            self.turns.push(turn);
+        }
+    }
+
     pub(super) fn push_notification(&mut self, notification: ServerNotification) -> u64 {
+        let completed_turn = match &notification {
+            ServerNotification::TurnCompleted(notification) => Some(notification.turn.clone()),
+            _ => None,
+        };
         self.pending_interactive_replay
             .note_server_notification(&notification);
         if let Some(session) = self.session.as_mut()
@@ -276,7 +292,12 @@ impl ThreadEventStore {
             }
             _ => {}
         }
-        self.push_buffered_event(ThreadBufferedEvent::Notification(notification))
+        let sequence = self.push_buffered_event(ThreadBufferedEvent::Notification(notification));
+        if let Some(turn) = completed_turn {
+            self.upsert_turn_snapshot(turn);
+            self.rebase_buffer_after_session_refresh();
+        }
+        sequence
     }
 
     pub(super) fn push_request(&mut self, request: ServerRequest) -> bool {
