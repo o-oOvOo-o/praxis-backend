@@ -494,6 +494,11 @@ fn event_requires_view_replay(event: &ThreadBufferedEvent) -> bool {
         ThreadBufferedEvent::Notification(
             ServerNotification::ThreadStatusChanged(_)
                 | ServerNotification::ThreadControlChanged(_)
+                // Heartbeats are routing/liveness metadata and have no ChatWidget effect.
+                | ServerNotification::ThreadHeartbeatUpdated(_)
+                // The diff notification only asks the active view to refresh its status line;
+                // switching views already performs that refresh.
+                | ServerNotification::TurnDiffUpdated(_)
         )
     )
 }
