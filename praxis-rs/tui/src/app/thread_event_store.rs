@@ -4,7 +4,7 @@ use crate::app_event::FeedbackCategory;
 use crate::app_gateway_session::ThreadSessionState;
 use crate::bottom_pane::FeedbackAudience;
 use crate::chatwidget::ThreadInputState;
-use crate::thread_replay_policy::clone_compact_visible_replay_turns;
+use crate::thread_replay_policy::compact_visible_replay_turns;
 use praxis_app_gateway_protocol::ServerNotification;
 use praxis_app_gateway_protocol::ServerRequest;
 use praxis_app_gateway_protocol::ThreadControlState;
@@ -122,6 +122,7 @@ impl ThreadEventStore {
 
     pub(super) fn set_session(&mut self, session: ThreadSessionState, turns: Vec<Turn>) {
         self.session = Some(session);
+        self.rebase_buffer_after_turn_snapshot(&turns);
         self.set_turns(turns);
         self.bump_snapshot_revision();
     }
@@ -146,6 +147,14 @@ impl ThreadEventStore {
         self.bump_snapshot_revision();
     }
 
+    fn rebase_buffer_after_turn_snapshot(&mut self, turns: &[Turn]) {
+        self.buffer.retain(|envelope| {
+            Self::event_survives_session_refresh(&envelope.event)
+                || Self::event_is_not_covered_by_turn_snapshot(&envelope.event, turns)
+        });
+    }
+
+    #[cfg(test)]
     pub(super) fn rebase_buffer_after_session_refresh(&mut self) {
         let turns = &self.turns;
         self.buffer.retain(|envelope| {
@@ -252,7 +261,7 @@ impl ThreadEventStore {
             .rev()
             .find(|turn| matches!(turn.status, TurnStatus::InProgress))
             .map(|turn| turn.id.clone());
-        self.turns = turns;
+        self.turns = compact_visible_replay_turns(turns);
     }
 
     fn upsert_turn_snapshot(&mut self, turn: Turn) {
@@ -312,7 +321,9 @@ impl ThreadEventStore {
         let sequence = self.push_buffered_event(ThreadBufferedEvent::Notification(notification));
         if let Some(turn) = completed_turn {
             self.upsert_turn_snapshot(turn);
-            self.rebase_buffer_after_session_refresh();
+            let turns = std::mem::take(&mut self.turns);
+            self.rebase_buffer_after_turn_snapshot(&turns);
+            self.turns = compact_visible_replay_turns(turns);
         }
         sequence
     }
@@ -382,7 +393,7 @@ impl ThreadEventStore {
     pub(super) fn snapshot(&self) -> ThreadEventSnapshot {
         ThreadEventSnapshot {
             session: self.session.clone(),
-            turns: clone_compact_visible_replay_turns(&self.turns),
+            turns: self.turns.clone(),
             status: self.status.clone(),
             control_state: self.control_state.clone(),
             events: self.snapshot_events(),

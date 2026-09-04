@@ -155,7 +155,6 @@ impl App {
         {
             let mut store = lock_thread_event_store(&store);
             store.set_runtime_snapshot(session, turns, status.clone(), control_state.clone());
-            store.rebase_buffer_after_session_refresh();
         }
 
         if self.workspace_active_thread_id() == Some(thread_id) {

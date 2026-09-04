@@ -56,7 +56,6 @@ impl App {
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {
             let mut store = lock_thread_event_store(&channel.store);
             store.set_runtime_snapshot(session, turns, status, control_state);
-            store.rebase_buffer_after_session_refresh();
             *snapshot = store.snapshot();
             return;
         }
@@ -222,7 +221,6 @@ impl App {
         {
             let mut store = lock_thread_event_store(&store);
             store.set_runtime_snapshot(session, turns, status, control_state);
-            store.rebase_buffer_after_session_refresh();
         }
 
         let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id) else {
