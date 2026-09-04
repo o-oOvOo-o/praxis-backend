@@ -535,41 +535,39 @@ impl App {
         source: ThreadReplaySource,
         resume_restored_queue: bool,
     ) {
-        let store = lock_thread_event_store(&source.store);
-        let events = store.snapshot_event_refs();
         let should_buffer_replay =
-            store.session.is_some() || !store.turns.is_empty() || !events.is_empty();
+            source.session.is_some() || !source.turns.is_empty() || !source.events.is_empty();
         let replay_generation = self.history_view_generation;
         if should_buffer_replay {
             self.thread_replay_buffer_generation = Some(replay_generation);
-            let capacity_hint = store
+            let capacity_hint = source
                 .turns
                 .iter()
                 .map(|turn| turn.items.len())
                 .sum::<usize>()
-                .saturating_add(events.len())
+                .saturating_add(source.events.len())
                 .min(256);
             self.chat_widget.begin_history_output_batch(capacity_hint);
         }
         self.chat_widget.begin_status_surface_refresh_batch();
-        if let Some(session) = store.session.clone() {
+        if let Some(session) = source.session {
             self.chat_widget.handle_thread_session(session);
         }
         self.chat_widget
             .set_queue_autosend_suppressed(/*suppressed*/ true);
         self.chat_widget
-            .restore_thread_input_state(store.input_state.clone());
-        if !store.turns.is_empty() {
-            self.chat_widget.replay_thread_turn_refs(&store.turns);
+            .restore_thread_input_state(source.input_state);
+        if !source.turns.is_empty() {
+            self.chat_widget.replay_thread_turn_refs(&source.turns);
         }
-        for event in events {
-            self.handle_thread_event_replay(event.clone());
+        for event in source.events {
+            self.handle_thread_event_replay(event);
         }
         self.chat_widget
-            .apply_thread_status_snapshot(store.status.as_ref());
+            .apply_thread_status_snapshot(source.status.as_ref());
         self.chat_widget
-            .set_thread_control_state(store.control_state.as_ref());
-        if let Some(token_usage) = store.latest_token_usage() {
+            .set_thread_control_state(source.control_state.as_ref());
+        if let Some(token_usage) = source.token_usage {
             self.chat_widget
                 .set_token_info(Some(token_usage_info_from_app_gateway(token_usage)));
         }
@@ -581,7 +579,6 @@ impl App {
             self.chat_widget.finish_history_output_batch();
         }
         self.chat_widget.finish_status_surface_refresh_batch();
-        drop(store);
         self.chat_widget.submit_initial_user_message_if_pending();
         if resume_restored_queue {
             self.chat_widget.maybe_send_next_queued_input();

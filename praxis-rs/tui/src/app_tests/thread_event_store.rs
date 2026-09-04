@@ -344,6 +344,43 @@ async fn switch_replay_watermark_rejects_queued_store_duplicate() {
     assert!(!app.active_thread_event_is_after_replay(&queued));
 }
 
+#[tokio::test]
+async fn replay_source_shares_a_stable_turn_projection() {
+    let mut app = make_test_app().await;
+    let thread_id = ThreadId::new();
+    let mut channel = ThreadEventChannel::new(/*capacity*/ 8);
+    {
+        let mut store = lock_thread_event_store(&channel.store);
+        store.set_session(
+            test_thread_session(thread_id, PathBuf::from("/tmp/project")),
+            vec![test_turn(
+                "turn-before-switch",
+                TurnStatus::Completed,
+                Vec::new(),
+            )],
+        );
+    }
+    let store_handle = Arc::clone(&channel.store);
+    app.thread_event_channels.insert(thread_id, channel);
+
+    let (_, replay) = app
+        .activate_thread_for_replay(thread_id)
+        .expect("thread should activate");
+    let stored_turns = Arc::clone(&lock_thread_event_store(&store_handle).turns);
+    assert!(Arc::ptr_eq(&replay.turns, &stored_turns));
+
+    lock_thread_event_store(&store_handle).set_turns(vec![test_turn(
+        "turn-after-switch",
+        TurnStatus::Completed,
+        Vec::new(),
+    )]);
+    assert_eq!(replay.turns[0].id, "turn-before-switch");
+    assert_eq!(
+        lock_thread_event_store(&store_handle).turns[0].id,
+        "turn-after-switch"
+    );
+}
+
 #[test]
 fn live_delivery_stays_fifo_beyond_replay_capacity() {
     let mut channel = ThreadEventChannel::new(/*capacity*/ 2);

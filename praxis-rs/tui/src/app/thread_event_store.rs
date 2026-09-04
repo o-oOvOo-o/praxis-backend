@@ -78,7 +78,7 @@ pub(super) struct FeedbackThreadEvent {
 #[derive(Debug)]
 pub(super) struct ThreadEventStore {
     pub(super) session: Option<ThreadSessionState>,
-    pub(super) turns: Vec<Turn>,
+    pub(super) turns: Arc<Vec<Turn>>,
     pub(super) status: Option<ThreadStatus>,
     pub(super) control_state: Option<ThreadControlState>,
     pub(super) buffer: VecDeque<ThreadEventEnvelope>,
@@ -107,7 +107,7 @@ impl ThreadEventStore {
     pub(super) fn new(capacity: usize) -> Self {
         Self {
             session: None,
-            turns: Vec::new(),
+            turns: Arc::new(Vec::new()),
             status: None,
             control_state: None,
             buffer: VecDeque::new(),
@@ -276,18 +276,15 @@ impl ThreadEventStore {
             .rev()
             .find(|turn| matches!(turn.status, TurnStatus::InProgress))
             .map(|turn| turn.id.clone());
-        self.turns = compact_visible_replay_turns(turns);
+        self.turns = Arc::new(compact_visible_replay_turns(turns));
     }
 
     fn upsert_turn_snapshot(&mut self, turn: Turn) {
-        if let Some(existing) = self
-            .turns
-            .iter_mut()
-            .find(|existing| existing.id == turn.id)
-        {
+        let turns = Arc::make_mut(&mut self.turns);
+        if let Some(existing) = turns.iter_mut().find(|existing| existing.id == turn.id) {
             *existing = turn;
         } else {
-            self.turns.push(turn);
+            turns.push(turn);
         }
     }
 
@@ -336,9 +333,9 @@ impl ThreadEventStore {
         let sequence = self.push_buffered_event(ThreadBufferedEvent::Notification(notification));
         if let Some(turn) = completed_turn {
             self.upsert_turn_snapshot(turn);
-            let turns = std::mem::take(&mut self.turns);
+            let turns = std::mem::take(Arc::make_mut(&mut self.turns));
             self.rebase_buffer_after_turn_snapshot(&turns);
-            self.turns = compact_visible_replay_turns(turns);
+            self.turns = Arc::new(compact_visible_replay_turns(turns));
         }
         sequence
     }
@@ -414,7 +411,7 @@ impl ThreadEventStore {
     pub(super) fn snapshot(&self) -> ThreadEventSnapshot {
         ThreadEventSnapshot {
             session: self.session.clone(),
-            turns: self.turns.clone(),
+            turns: self.turns.as_ref().clone(),
             status: self.status.clone(),
             control_state: self.control_state.clone(),
             token_usage: self.latest_token_usage(),

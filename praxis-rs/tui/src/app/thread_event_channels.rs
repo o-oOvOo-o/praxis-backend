@@ -1,4 +1,5 @@
 use super::App;
+use super::thread_event_store::ThreadBufferedEvent;
 use super::thread_event_store::ThreadEventChannel;
 use super::thread_event_store::ThreadEventEnvelope;
 use super::thread_event_store::ThreadEventStore;
@@ -9,6 +10,12 @@ use crate::app_gateway_session::ThreadSessionState;
 use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::chatwidget::ChatWidget;
 use crate::chatwidget::ReplayKind;
+use crate::chatwidget::ThreadInputState;
+use praxis_app_gateway_protocol::ServerNotification;
+use praxis_app_gateway_protocol::ThreadControlState;
+use praxis_app_gateway_protocol::ThreadStatus;
+use praxis_app_gateway_protocol::ThreadTokenUsage;
+use praxis_app_gateway_protocol::Turn;
 use praxis_protocol::ThreadId;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -20,17 +27,30 @@ const THREAD_EVENT_REPLAY_CAPACITY: usize = 32768;
 
 #[derive(Debug)]
 pub(super) struct ThreadReplaySource {
-    pub(super) store: Arc<Mutex<ThreadEventStore>>,
-    has_session: bool,
+    pub(super) session: Option<ThreadSessionState>,
+    pub(super) turns: Arc<Vec<Turn>>,
+    pub(super) status: Option<ThreadStatus>,
+    pub(super) control_state: Option<ThreadControlState>,
+    pub(super) token_usage: Option<ThreadTokenUsage>,
+    pub(super) events: Vec<ThreadBufferedEvent>,
+    pub(super) input_state: Option<ThreadInputState>,
 }
 
 impl ThreadReplaySource {
-    fn new(store: Arc<Mutex<ThreadEventStore>>, has_session: bool) -> Self {
-        Self { store, has_session }
+    fn new(store: &ThreadEventStore) -> Self {
+        Self {
+            session: store.session.clone(),
+            turns: Arc::clone(&store.turns),
+            status: store.status.clone(),
+            control_state: store.control_state.clone(),
+            token_usage: store.latest_token_usage(),
+            events: store.snapshot_event_refs().into_iter().cloned().collect(),
+            input_state: store.input_state.clone(),
+        }
     }
 
     pub(super) fn has_session(&self) -> bool {
-        self.has_session
+        self.session.is_some()
     }
 }
 
@@ -152,8 +172,7 @@ impl App {
         store.active = true;
         channel.replay_through_sequence = store.last_event_sequence();
         channel.replay_view_revision = store.view_revision();
-        let replay_source =
-            ThreadReplaySource::new(Arc::clone(&channel.store), store.session.is_some());
+        let replay_source = ThreadReplaySource::new(&store);
         Some((receiver, replay_source))
     }
 
@@ -193,10 +212,7 @@ impl App {
             })
         } else {
             store.clear_cached_view_delta();
-            ThreadViewActivationState::Replay(ThreadReplaySource::new(
-                Arc::clone(&channel.store),
-                store.session.is_some(),
-            ))
+            ThreadViewActivationState::Replay(ThreadReplaySource::new(&store))
         };
         Some((receiver, state, revision))
     }
