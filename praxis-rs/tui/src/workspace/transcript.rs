@@ -183,7 +183,11 @@ impl WorkspaceTranscriptCache {
             .committed_layout
             .as_ref()
             .is_some_and(|layout| layout.key == committed_key);
-        if scroll_from_bottom == 0 && request.active_tail.is_none() && !has_current_full_layout {
+        let tail_is_virtualizable = request
+            .active_tail
+            .as_ref()
+            .is_none_or(|tail| !tail.lines.is_empty());
+        if scroll_from_bottom == 0 && tail_is_virtualizable && !has_current_full_layout {
             let viewport = Arc::new(bottom_committed_viewport(&request, visible_rows));
             self.viewport = Some(WorkspaceTranscriptCachedViewport {
                 key: viewport_key,
@@ -454,7 +458,7 @@ fn bottom_committed_viewport(
     visible_rows: usize,
 ) -> WorkspaceTranscriptViewport {
     let content_area = request.content_area;
-    if visible_rows == 0 || request.transcript_cells.is_empty() {
+    if visible_rows == 0 || (request.transcript_cells.is_empty() && request.active_tail.is_none()) {
         return WorkspaceTranscriptViewport {
             content_area,
             rows: Vec::new(),
@@ -465,8 +469,20 @@ fn bottom_committed_viewport(
     let width = content_area.width;
     let mut suffix_rows = Vec::with_capacity(visible_rows);
     let mut next_index = request.transcript_cells.len();
-    while next_index > 0 && suffix_rows.len() < visible_rows {
-        let mut reverse_cells: Vec<WorkspaceTranscriptRenderedCell> = Vec::new();
+    let mut pending_tail =
+        request
+            .active_tail
+            .as_ref()
+            .map(|tail| WorkspaceTranscriptRenderedCell {
+                lane: tail.lane,
+                lines: tail.lines.iter().cloned().collect(),
+                patch_cell_id: tail.patch_cell_id,
+                mouse_actions: header_mouse_actions(tail.mouse_targets.iter().cloned().collect()),
+                separate_from_previous: true,
+            });
+    while (next_index > 0 || pending_tail.is_some()) && suffix_rows.len() < visible_rows {
+        let mut reverse_cells: Vec<WorkspaceTranscriptRenderedCell> =
+            pending_tail.take().into_iter().collect();
         while next_index > 0 {
             let cell = &request.transcript_cells[next_index - 1];
             let lane = cell.chat_lane();
