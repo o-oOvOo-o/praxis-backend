@@ -70,9 +70,13 @@ impl ChatWidget {
     }
 
     pub(crate) fn set_pending_thread_approvals(&mut self, threads: Vec<String>) {
-        self.pending_thread_approvals_count = threads.len();
+        let next_count = threads.len();
+        let count_changed = self.pending_thread_approvals_count != next_count;
+        self.pending_thread_approvals_count = next_count;
         self.bottom_pane.set_pending_thread_approvals(threads);
-        self.sync_work_panel_queue();
+        if count_changed {
+            self.sync_work_panel_queue();
+        }
     }
 
     pub(crate) fn add_diff_in_progress(&mut self) {
