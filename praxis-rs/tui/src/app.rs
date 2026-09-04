@@ -198,6 +198,9 @@ use self::workspace_view_helpers::previous_char_boundary;
 
 const EXTERNAL_EDITOR_HINT: &str = "Save and close external editor to continue.";
 const APP_GATEWAY_EVENT_DRAIN_BUDGET: usize = 512;
+// A thread can keep producing stream events while its view is being activated. Bound the eager
+// catch-up so a busy producer cannot indefinitely delay the first frame of the selected view.
+const THREAD_ACTIVATION_EVENT_DRAIN_BUDGET: usize = 32;
 
 enum ThreadInteractiveRequest {
     Approval(ApprovalRequest),

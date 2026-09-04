@@ -486,7 +486,10 @@ impl App {
         let mut disconnected = false;
         let mut materialization_pending = self.active_thread_view_materialized_revision.is_none();
         let mut processed_through_sequence = None;
-        loop {
+        // The receiver is rebased immediately before activation, so this only catches events that
+        // raced with the view swap. Keep the eager batch bounded: remaining FIFO events stay in
+        // `rx` and the main event loop consumes them after it gets a chance to render the new view.
+        for _ in 0..THREAD_ACTIVATION_EVENT_DRAIN_BUDGET {
             match rx.try_recv() {
                 Ok(envelope) => {
                     if self.active_thread_event_is_after_replay(&envelope) {
