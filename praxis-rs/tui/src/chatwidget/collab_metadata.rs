@@ -1,6 +1,10 @@
 use super::*;
 
 impl ChatWidget {
+    pub(crate) fn rebind_history_view(&self, generation: u64) {
+        self.app_event_tx.rebind_history_view(generation);
+    }
+
     /// Moves the session-wide agent label cache into a replacement widget without cloning it.
     pub(crate) fn transfer_collab_agent_metadata_to(&mut self, target: &mut Self) {
         target.collab_agent_metadata = std::mem::take(&mut self.collab_agent_metadata);

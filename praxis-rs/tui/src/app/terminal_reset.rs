@@ -74,6 +74,7 @@ impl App {
         self.deferred_history_lines.clear();
         self.has_emitted_history_lines = false;
         self.thread_replay_buffer_generation = None;
+        self.active_thread_view_materialized_revision = None;
         self.backtrack = BacktrackState::default();
         self.backtrack_render_pending = false;
         self.transcript_scrollback_backfill = None;

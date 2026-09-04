@@ -360,7 +360,7 @@ impl App {
     }
 
     /// Replaces the chat widget while preserving shared per-session presentation state.
-    pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
+    pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) -> ChatWidget {
         chat_widget.set_workspace_entry_surface_enabled(self.workspace.enabled);
         chat_widget.set_ui_language(self.chat_widget.ui_language());
         // Transfer the last-written terminal title to the replacement widget
@@ -373,8 +373,9 @@ impl App {
         }
         self.chat_widget
             .transfer_collab_agent_metadata_to(&mut chat_widget);
-        self.chat_widget = chat_widget;
+        let previous = std::mem::replace(&mut self.chat_widget, chat_widget);
         self.sync_active_agent_label();
+        previous
     }
 
     pub(super) async fn select_agent_thread(

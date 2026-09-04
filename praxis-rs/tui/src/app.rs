@@ -155,6 +155,7 @@ mod thread_event_channels;
 mod thread_event_ingress;
 mod thread_event_store;
 mod thread_interactive_requests;
+mod thread_view_cache;
 mod workspace_actions;
 mod workspace_agent_picker;
 mod workspace_render;
@@ -191,6 +192,7 @@ use self::thread_event_store::ThreadEventEnvelope;
 use self::thread_event_store::ThreadEventSnapshot;
 use self::thread_event_store::ThreadEventStore;
 use self::thread_event_store::lock_thread_event_store;
+use self::thread_view_cache::ThreadViewCache;
 use self::workspace_view_helpers::next_char_boundary;
 use self::workspace_view_helpers::previous_char_boundary;
 
@@ -377,6 +379,8 @@ pub(crate) struct App {
     agent_navigation: AgentNavigationState,
     active_thread_id: Option<ThreadId>,
     active_thread_rx: Option<mpsc::UnboundedReceiver<ThreadEventEnvelope>>,
+    active_thread_view_materialized_revision: Option<u64>,
+    thread_view_cache: ThreadViewCache,
     primary_thread_id: Option<ThreadId>,
     last_subagent_backfill_attempt: Option<ThreadId>,
     primary_session_configured: Option<ThreadSessionState>,

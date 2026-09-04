@@ -385,6 +385,8 @@ impl App {
             agent_navigation: AgentNavigationState::default(),
             active_thread_id: None,
             active_thread_rx: None,
+            active_thread_view_materialized_revision: None,
+            thread_view_cache: ThreadViewCache::default(),
             primary_thread_id: None,
             last_subagent_backfill_attempt: None,
             primary_session_configured: None,

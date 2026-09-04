@@ -1,4 +1,7 @@
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 use crate::app_command::AppCommand;
 use praxis_protocol::ThreadId;
@@ -17,7 +20,7 @@ use crate::session_log;
 #[derive(Clone, Debug)]
 pub(crate) struct AppEventSender {
     pub app_event_tx: UnboundedSender<AppEvent>,
-    history_view_generation: Option<u64>,
+    history_view_generation: Option<Arc<AtomicU64>>,
 }
 
 impl AppEventSender {
@@ -31,14 +34,24 @@ impl AppEventSender {
     pub(crate) fn scoped_to_history_view(&self, generation: u64) -> Self {
         Self {
             app_event_tx: self.app_event_tx.clone(),
-            history_view_generation: Some(generation),
+            history_view_generation: Some(Arc::new(AtomicU64::new(generation))),
+        }
+    }
+
+    pub(crate) fn rebind_history_view(&self, generation: u64) {
+        if let Some(bound_generation) = &self.history_view_generation {
+            bound_generation.store(generation, Ordering::Release);
         }
     }
 
     /// Send an event to the app event channel. If it fails, we swallow the
     /// error and log it.
     pub(crate) fn send(&self, event: AppEvent) {
-        let event = match (self.history_view_generation, event) {
+        let generation = self
+            .history_view_generation
+            .as_ref()
+            .map(|generation| generation.load(Ordering::Acquire));
+        let event = match (generation, event) {
             (Some(generation), AppEvent::InsertHistoryCell(cell)) => {
                 AppEvent::InsertHistoryCellForView { generation, cell }
             }

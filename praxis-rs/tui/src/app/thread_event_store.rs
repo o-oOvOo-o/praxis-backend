@@ -59,6 +59,7 @@ pub(super) struct ThreadEventStore {
     pub(super) control_state: Option<ThreadControlState>,
     pub(super) buffer: VecDeque<ThreadEventEnvelope>,
     last_event_sequence: u64,
+    snapshot_revision: u64,
     pending_interactive_replay: PendingInteractiveReplayState,
     active_turn_id: Option<String>,
     pub(super) input_state: Option<ThreadInputState>,
@@ -85,6 +86,7 @@ impl ThreadEventStore {
             control_state: None,
             buffer: VecDeque::new(),
             last_event_sequence: 0,
+            snapshot_revision: 0,
             pending_interactive_replay: PendingInteractiveReplayState::default(),
             active_turn_id: None,
             input_state: None,
@@ -108,6 +110,7 @@ impl ThreadEventStore {
     pub(super) fn set_session(&mut self, session: ThreadSessionState, turns: Vec<Turn>) {
         self.session = Some(session);
         self.set_turns(turns);
+        self.bump_snapshot_revision();
     }
 
     pub(super) fn set_runtime_snapshot(
@@ -127,6 +130,7 @@ impl ThreadEventStore {
             self.active_turn_id = None;
         }
         self.status = Some(status);
+        self.bump_snapshot_revision();
     }
 
     pub(super) fn rebase_buffer_after_session_refresh(&mut self) {
@@ -328,6 +332,7 @@ impl ThreadEventStore {
 
     fn push_buffered_event(&mut self, event: ThreadBufferedEvent) -> u64 {
         self.last_event_sequence = self.last_event_sequence.saturating_add(1);
+        self.bump_snapshot_revision();
         let sequence = self.last_event_sequence;
         if let Some(buffered) = self.buffer.back_mut()
             && merge_adjacent_stream_event(&mut buffered.event, &event)
@@ -383,6 +388,7 @@ impl ThreadEventStore {
         T: Into<AppCommand>,
     {
         self.pending_interactive_replay.note_outbound_op(op);
+        self.bump_snapshot_revision();
     }
 
     pub(super) fn op_can_change_pending_replay_state<T>(op: T) -> bool
@@ -403,6 +409,14 @@ impl ThreadEventStore {
 
     pub(super) fn last_event_sequence(&self) -> u64 {
         self.last_event_sequence
+    }
+
+    pub(super) fn snapshot_revision(&self) -> u64 {
+        self.snapshot_revision
+    }
+
+    fn bump_snapshot_revision(&mut self) {
+        self.snapshot_revision = self.snapshot_revision.wrapping_add(1);
     }
 
     pub(super) fn clear_active_turn_id(&mut self) {
@@ -491,6 +505,7 @@ pub(super) struct ThreadEventChannel {
     pub(super) receiver: Option<mpsc::UnboundedReceiver<ThreadEventEnvelope>>,
     pub(super) store: Arc<Mutex<ThreadEventStore>>,
     pub(super) replay_through_sequence: u64,
+    pub(super) replay_snapshot_revision: u64,
 }
 
 pub(super) fn lock_thread_event_store(
@@ -509,6 +524,7 @@ impl ThreadEventChannel {
             receiver: Some(receiver),
             store: Arc::new(Mutex::new(ThreadEventStore::new(capacity))),
             replay_through_sequence: 0,
+            replay_snapshot_revision: 0,
         }
     }
 
@@ -526,6 +542,7 @@ impl ThreadEventChannel {
                 capacity, session, turns,
             ))),
             replay_through_sequence: 0,
+            replay_snapshot_revision: 0,
         }
     }
 }

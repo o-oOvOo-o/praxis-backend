@@ -40,12 +40,13 @@ impl App {
         response: &ThreadRollbackResponse,
     ) {
         if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
-            let replay_through_sequence = {
+            let (replay_through_sequence, replay_snapshot_revision) = {
                 let mut store = lock_thread_event_store(&channel.store);
                 store.apply_thread_rollback(response);
-                store.last_event_sequence()
+                (store.last_event_sequence(), store.snapshot_revision())
             };
             channel.replay_through_sequence = replay_through_sequence;
+            channel.replay_snapshot_revision = replay_snapshot_revision;
         }
         if self.active_thread_id == Some(thread_id)
             && let Some(mut rx) = self.active_thread_rx.take()
@@ -226,6 +227,7 @@ impl App {
         app_gateway: &mut AppGatewaySession,
         event: ThreadBufferedEvent,
     ) -> Result<()> {
+        self.active_thread_view_materialized_revision = None;
         // Capture this before any potential thread switch: we only want to clear
         // the exit marker when the currently active thread acknowledges shutdown.
         let pending_shutdown_exit_completed = matches!(

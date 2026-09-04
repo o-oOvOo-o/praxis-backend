@@ -88,6 +88,8 @@ impl App {
         self.agent_navigation.clear();
         self.active_thread_id = None;
         self.active_thread_rx = None;
+        self.active_thread_view_materialized_revision = None;
+        self.thread_view_cache.clear();
         self.primary_thread_id = None;
         self.last_subagent_backfill_attempt = None;
         self.primary_session_configured = None;
@@ -274,6 +276,8 @@ impl App {
         }
 
         let previous_thread_id = self.active_thread_id;
+        let previous_view_revision = previous_thread_id
+            .and_then(|thread_id| self.cacheable_active_thread_view_revision(thread_id));
         self.store_active_thread_receiver();
         let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id) else {
             if let Some(previous_thread_id) = previous_thread_id {
@@ -308,15 +312,52 @@ impl App {
             .activate_thread(thread_id, default_launch_rank);
 
         self.advance_history_view_generation();
-        let init = self.chatwidget_init_for_forked_or_resumed_thread(
-            tui,
-            self.config.clone(),
-            self.tui_config.clone(),
-        );
-        self.replace_chat_widget(ChatWidget::new_with_app_event(init));
+        let target_revision = self
+            .thread_event_channels
+            .get(&thread_id)
+            .map(|channel| channel.replay_snapshot_revision)
+            .unwrap_or_default();
+        let cached_view = self.take_cached_thread_view(thread_id, target_revision);
+        let (target_widget, cached_transcript) = if let Some(cached) = cached_view {
+            tracing::debug!(
+                thread_id = %thread_id,
+                revision = target_revision,
+                "restoring materialized thread view from cache"
+            );
+            cached
+                .chat_widget
+                .rebind_history_view(self.history_view_generation);
+            (cached.chat_widget, Some(cached.transcript_cells))
+        } else {
+            let init = self.chatwidget_init_for_forked_or_resumed_thread(
+                tui,
+                self.config.clone(),
+                self.tui_config.clone(),
+            );
+            (ChatWidget::new_with_app_event(init), None)
+        };
+        let previous_transcript = std::mem::take(&mut self.transcript_cells);
+        let previous_widget = self.replace_chat_widget(target_widget);
         self.reset_for_thread_switch(tui)?;
+        if let (Some(previous_thread_id), Some(previous_view_revision)) =
+            (previous_thread_id, previous_view_revision)
+        {
+            self.cache_replaced_thread_view(
+                previous_thread_id,
+                previous_view_revision,
+                previous_widget,
+                previous_transcript,
+            );
+        }
         self.workspace.reset_chat_scroll();
-        self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
+        if let Some(cached_transcript) = cached_transcript {
+            self.transcript_cells = cached_transcript;
+            self.active_thread_view_materialized_revision = Some(target_revision);
+            tui.frame_requester().schedule_frame();
+        } else {
+            self.active_thread_view_materialized_revision = None;
+            self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
+        }
         self.drain_active_thread_events(tui).await?;
         self.refresh_pending_thread_approvals();
         Ok(true)
@@ -447,6 +488,7 @@ impl App {
             match rx.try_recv() {
                 Ok(envelope) => {
                     if self.active_thread_event_is_after_replay(&envelope) {
+                        self.active_thread_view_materialized_revision = None;
                         self.handle_thread_event_now(envelope.event);
                     }
                 }

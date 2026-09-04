@@ -186,6 +186,7 @@ impl App {
             AppEvent::FinishThreadReplayBuffer { generation } => {
                 if self.thread_replay_buffer_generation == Some(generation) {
                     self.thread_replay_buffer_generation = None;
+                    self.mark_active_thread_view_materialized();
                     tui.frame_requester().schedule_frame();
                 }
             }

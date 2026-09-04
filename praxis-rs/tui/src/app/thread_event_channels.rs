@@ -96,6 +96,7 @@ impl App {
         let mut store = lock_thread_event_store(&channel.store);
         store.active = true;
         channel.replay_through_sequence = store.last_event_sequence();
+        channel.replay_snapshot_revision = store.snapshot_revision();
         let snapshot = store.snapshot();
         Some((receiver, snapshot))
     }
@@ -117,6 +118,7 @@ impl App {
             self.set_thread_active(active_id, /*active*/ false);
         }
         self.active_thread_rx = None;
+        self.active_thread_view_materialized_revision = None;
         self.refresh_pending_thread_approvals();
     }
 
