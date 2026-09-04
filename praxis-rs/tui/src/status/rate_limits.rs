@@ -60,7 +60,7 @@ pub(crate) enum StatusRateLimitData {
 pub(crate) const RATE_LIMIT_STALE_THRESHOLD_MINUTES: i64 = 15;
 
 /// Display-friendly representation of one usage window from a snapshot.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RateLimitWindowDisplay {
     /// Percent used for the window.
     pub used_percent: f64,
@@ -86,7 +86,7 @@ impl RateLimitWindowDisplay {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RateLimitSnapshotDisplay {
     /// Canonical limit identifier (for example: `hosted_agent` or `praxis_other`).
     pub limit_name: String,
@@ -101,7 +101,7 @@ pub(crate) struct RateLimitSnapshotDisplay {
 }
 
 /// Display-ready credits state extracted from protocol snapshots.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CreditsSnapshotDisplay {
     /// Whether credits tracking is enabled for the account.
     pub has_credits: bool,

@@ -188,6 +188,16 @@ impl ChatWidget {
     /// while account identity, quota displays, warning progress, and quota prompts follow the
     /// application session.
     pub(crate) fn sync_global_account_presentation_to(&self, target: &mut Self) {
+        if target.status_account_display == self.status_account_display
+            && target.plan_type == self.plan_type
+            && target.has_chatgpt_account == self.has_chatgpt_account
+            && target.rate_limit_snapshots_by_limit_id == self.rate_limit_snapshots_by_limit_id
+            && target.rate_limit_warnings == self.rate_limit_warnings
+            && target.rate_limit_switch_prompt == self.rate_limit_switch_prompt
+        {
+            return;
+        }
+
         target
             .status_account_display
             .clone_from(&self.status_account_display);

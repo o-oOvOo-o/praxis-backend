@@ -5,7 +5,7 @@ const RATE_LIMIT_WARNING_THRESHOLDS: [f64; 3] = [75.0, 90.0, 95.0];
 pub(crate) const NUDGE_MODEL_SLUG: &str = "gpt-5.1-codex-mini";
 pub(crate) const RATE_LIMIT_SWITCH_PROMPT_THRESHOLD: f64 = 90.0;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct RateLimitWarningState {
     pub(crate) secondary_index: usize,
     pub(crate) primary_index: usize,
@@ -92,7 +92,7 @@ pub(crate) fn get_limits_duration(windows_minutes: i64) -> String {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum RateLimitSwitchPromptState {
     #[default]
     Idle,
