@@ -263,16 +263,10 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
     let mut replay_finished = false;
     while let Ok(event) = app_event_rx.try_recv() {
         match event {
-            AppEvent::InsertHistoryCell(cell) => {
-                assert!(
-                    !replay_finished,
-                    "history cells must be queued before the atomic replay commit"
-                );
-                let cell: Arc<dyn HistoryCell> = cell.into();
-                app.transcript_cells.push(cell);
-            }
-            AppEvent::FinishThreadReplayBuffer { generation } => {
+            AppEvent::CommitThreadReplay { generation, cells } => {
                 assert_eq!(generation, 0);
+                app.transcript_cells
+                    .extend(cells.into_iter().map(Arc::<dyn HistoryCell>::from));
                 replay_finished = true;
             }
             _ => {}
@@ -365,9 +359,11 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
 
     let mut saw_named_wait = false;
     while let Ok(event) = app_event_rx.try_recv() {
-        if let AppEvent::InsertHistoryCell(cell) = event {
-            let transcript = lines_to_single_string(&cell.transcript_lines(/*width*/ 80));
-            saw_named_wait |= transcript.contains("Robie [explorer]");
+        if let AppEvent::CommitThreadReplay { cells, .. } = event {
+            saw_named_wait |= cells.into_iter().any(|cell| {
+                lines_to_single_string(&cell.transcript_lines(/*width*/ 80))
+                    .contains("Robie [explorer]")
+            });
         }
     }
 

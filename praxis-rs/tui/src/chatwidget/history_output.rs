@@ -6,13 +6,8 @@ impl ChatWidget {
         self.history_output_batch = Some(Vec::with_capacity(capacity_hint));
     }
 
-    pub(crate) fn finish_history_output_batch(&mut self) {
-        let Some(cells) = self.history_output_batch.take() else {
-            return;
-        };
-        if !cells.is_empty() {
-            self.app_event_tx.send(AppEvent::InsertHistoryCells(cells));
-        }
+    pub(crate) fn take_history_output_batch(&mut self) -> Vec<Box<dyn HistoryCell>> {
+        self.history_output_batch.take().unwrap_or_default()
     }
 
     pub(super) fn emit_history_cell(&mut self, cell: Box<dyn HistoryCell>) {

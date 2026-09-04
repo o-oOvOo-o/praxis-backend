@@ -527,8 +527,10 @@ async fn feedback_submission_for_inactive_thread_replays_into_origin_thread() {
 
     let mut rendered_cells = Vec::new();
     while let Ok(event) = app_event_rx.try_recv() {
-        if let AppEvent::InsertHistoryCell(cell) = event {
-            rendered_cells.push(lines_to_single_string(&cell.display_lines(/*width*/ 120)));
+        if let AppEvent::CommitThreadReplay { cells, .. } = event {
+            rendered_cells.extend(cells.into_iter().map(|cell| {
+                lines_to_single_string(&cell.display_lines(/*width*/ 120))
+            }));
         }
     }
     assert!(rendered_cells.iter().any(|cell| {

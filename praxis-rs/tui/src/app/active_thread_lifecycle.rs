@@ -576,9 +576,11 @@ impl App {
             .set_queue_autosend_suppressed(/*suppressed*/ false);
         self.chat_widget
             .set_initial_user_message_submit_suppressed(/*suppressed*/ false);
-        if should_buffer_replay {
-            self.chat_widget.finish_history_output_batch();
-        }
+        let replayed_cells = if should_buffer_replay {
+            self.chat_widget.take_history_output_batch()
+        } else {
+            Vec::new()
+        };
         self.chat_widget.finish_status_surface_refresh_batch();
         self.chat_widget.finish_redraw_batch();
         self.chat_widget.submit_initial_user_message_if_pending();
@@ -587,8 +589,9 @@ impl App {
         }
         self.refresh_status_line();
         if should_buffer_replay {
-            self.app_event_tx.send(AppEvent::FinishThreadReplayBuffer {
+            self.app_event_tx.send(AppEvent::CommitThreadReplay {
                 generation: replay_generation,
+                cells: replayed_cells,
             });
         }
     }

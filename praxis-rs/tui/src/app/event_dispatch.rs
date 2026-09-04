@@ -203,14 +203,9 @@ impl App {
                     self.insert_history_cell_now(tui, cell);
                 }
             }
-            AppEvent::InsertHistoryCells(cells) => self.insert_history_cells_now(tui, cells),
-            AppEvent::InsertHistoryCellsForView { generation, cells } => {
-                if generation == self.history_view_generation {
-                    self.insert_history_cells_now(tui, cells);
-                }
-            }
-            AppEvent::FinishThreadReplayBuffer { generation } => {
+            AppEvent::CommitThreadReplay { generation, cells } => {
                 if self.thread_replay_buffer_generation == Some(generation) {
+                    self.insert_history_cells_now(tui, cells);
                     self.thread_replay_buffer_generation = None;
                     self.mark_active_thread_view_materialized();
                     tui.frame_requester().schedule_frame();

@@ -366,14 +366,10 @@ pub(crate) enum AppEvent {
         generation: u64,
         cell: Box<dyn HistoryCell>,
     },
-    InsertHistoryCells(Vec<Box<dyn HistoryCell>>),
-    InsertHistoryCellsForView {
+    /// Atomically install a cold replay projection and make its view cacheable.
+    CommitThreadReplay {
         generation: u64,
         cells: Vec<Box<dyn HistoryCell>>,
-    },
-    /// Finish an atomic thread replay and allow the terminal to draw the completed projection.
-    FinishThreadReplayBuffer {
-        generation: u64,
     },
     /// Marks an idle thread view reusable after all cells emitted by an event are applied.
     MarkThreadViewMaterialized {
