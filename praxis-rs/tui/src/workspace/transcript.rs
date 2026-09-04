@@ -134,7 +134,7 @@ struct WorkspaceTranscriptDynamicLayoutKey {
 #[derive(Clone, Debug)]
 struct WorkspaceTranscriptCachedViewport {
     key: WorkspaceTranscriptViewportKey,
-    viewport: WorkspaceTranscriptViewport,
+    viewport: Arc<WorkspaceTranscriptViewport>,
     total_rows: usize,
 }
 
@@ -165,12 +165,12 @@ impl WorkspaceTranscriptCache {
     pub(crate) fn viewport(
         &mut self,
         request: WorkspaceTranscriptRequest<'_>,
-    ) -> WorkspaceTranscriptViewport {
+    ) -> Arc<WorkspaceTranscriptViewport> {
         let viewport_key = workspace_transcript_viewport_key(&request);
         if let Some(cached) = self.viewport.as_ref()
             && cached.key == viewport_key
         {
-            return cached.viewport.clone();
+            return Arc::clone(&cached.viewport);
         }
 
         let content_area = request.content_area;
@@ -190,7 +190,7 @@ impl WorkspaceTranscriptCache {
                     .sum()
             });
 
-        let viewport = if visible_rows == 0 || total_rows == 0 {
+        let viewport = Arc::new(if visible_rows == 0 || total_rows == 0 {
             WorkspaceTranscriptViewport {
                 content_area,
                 rows: Vec::new(),
@@ -219,10 +219,10 @@ impl WorkspaceTranscriptCache {
                 rows: visible,
                 patch_cell_ids,
             }
-        };
+        });
         self.viewport = Some(WorkspaceTranscriptCachedViewport {
             key: viewport_key,
-            viewport: viewport.clone(),
+            viewport: Arc::clone(&viewport),
             total_rows,
         });
         viewport

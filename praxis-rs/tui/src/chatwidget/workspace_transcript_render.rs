@@ -38,7 +38,7 @@ impl ChatWidget {
         layout: ChatWidgetLayout,
         transcript_cells: &[Arc<dyn HistoryCell>],
         scroll_from_bottom: usize,
-    ) -> Option<WorkspaceTranscriptViewport> {
+    ) -> Option<Arc<WorkspaceTranscriptViewport>> {
         let content_area = layout.active_content_area?;
         if content_area.is_empty() {
             return None;
