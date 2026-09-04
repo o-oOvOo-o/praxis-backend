@@ -136,7 +136,7 @@ struct WorkspaceTranscriptDynamicLayoutKey {
 struct WorkspaceTranscriptCachedViewport {
     key: WorkspaceTranscriptViewportKey,
     viewport: Arc<WorkspaceTranscriptViewport>,
-    total_rows: usize,
+    total_rows: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -155,8 +155,9 @@ impl WorkspaceTranscriptCache {
         let layout_key = workspace_transcript_dynamic_layout_key(&request);
         if let Some(cached) = self.viewport.as_ref()
             && cached.key.layout == layout_key
+            && let Some(total_rows) = cached.total_rows
         {
-            return cached.total_rows.saturating_sub(visible_rows);
+            return total_rows.saturating_sub(visible_rows);
         }
         let committed_layout = self.committed_layout_for_request(&request);
         let total_rows = total_rows_for_request(&request, committed_layout);
@@ -177,6 +178,20 @@ impl WorkspaceTranscriptCache {
         let content_area = request.content_area;
         let visible_rows = usize::from(content_area.height);
         let scroll_from_bottom = request.scroll_from_bottom;
+        let committed_key = workspace_transcript_committed_layout_key(&request);
+        let has_current_full_layout = self
+            .committed_layout
+            .as_ref()
+            .is_some_and(|layout| layout.key == committed_key);
+        if scroll_from_bottom == 0 && request.active_tail.is_none() && !has_current_full_layout {
+            let viewport = Arc::new(bottom_committed_viewport(&request, visible_rows));
+            self.viewport = Some(WorkspaceTranscriptCachedViewport {
+                key: viewport_key,
+                viewport: Arc::clone(&viewport),
+                total_rows: None,
+            });
+            return viewport;
+        }
         let committed_layout = self.committed_layout_for_request(&request);
         let segments = request
             .active_tail
@@ -206,16 +221,7 @@ impl WorkspaceTranscriptCache {
             } else {
                 committed_layout.rows[start..end].to_vec()
             };
-            let mut patch_cell_ids = Vec::new();
-            for row in &visible {
-                if let Some(row_ids) = row.patch_cell_ids.as_deref() {
-                    for id in row_ids {
-                        if !patch_cell_ids.contains(id) {
-                            patch_cell_ids.push(*id);
-                        }
-                    }
-                }
-            }
+            let patch_cell_ids = patch_cell_ids_for_rows(&visible);
 
             WorkspaceTranscriptViewport {
                 content_area,
@@ -226,7 +232,7 @@ impl WorkspaceTranscriptCache {
         self.viewport = Some(WorkspaceTranscriptCachedViewport {
             key: viewport_key,
             viewport: Arc::clone(&viewport),
-            total_rows,
+            total_rows: Some(total_rows),
         });
         viewport
     }
@@ -443,6 +449,117 @@ fn visible_rows_from_segments(
     rows
 }
 
+fn bottom_committed_viewport(
+    request: &WorkspaceTranscriptRequest<'_>,
+    visible_rows: usize,
+) -> WorkspaceTranscriptViewport {
+    let content_area = request.content_area;
+    if visible_rows == 0 || request.transcript_cells.is_empty() {
+        return WorkspaceTranscriptViewport {
+            content_area,
+            rows: Vec::new(),
+            patch_cell_ids: Vec::new(),
+        };
+    }
+
+    let width = content_area.width;
+    let mut suffix_rows = Vec::with_capacity(visible_rows);
+    let mut next_index = request.transcript_cells.len();
+    while next_index > 0 && suffix_rows.len() < visible_rows {
+        let mut reverse_cells: Vec<WorkspaceTranscriptRenderedCell> = Vec::new();
+        while next_index > 0 {
+            let cell = &request.transcript_cells[next_index - 1];
+            let lane = cell.chat_lane();
+            let cell_width = lane_width(width, lane);
+            let rendered = WorkspaceTranscriptRenderedCell {
+                lane,
+                lines: wrap_lines(cell.committed_display_lines(cell_width), cell_width),
+                patch_cell_id: cell.patch_cell_id(),
+                mouse_actions: header_mouse_actions(cell.mouse_targets(cell_width)),
+                separate_from_previous: !cell.is_stream_continuation(),
+            };
+            if rendered.lines.is_empty() {
+                next_index -= 1;
+                continue;
+            }
+
+            let merges_with_newer = reverse_cells.first().is_some_and(|newer| {
+                matches!(rendered.lane, ChatLane::Assistant)
+                    && rendered.mouse_actions.is_empty()
+                    && matches!(newer.lane, ChatLane::Assistant)
+                    && newer.mouse_actions.is_empty()
+            });
+            if !reverse_cells.is_empty() && !merges_with_newer {
+                break;
+            }
+            next_index -= 1;
+            reverse_cells.push(rendered);
+        }
+        if reverse_cells.is_empty() {
+            break;
+        }
+
+        let mut blocks = Vec::with_capacity(1);
+        for cell in reverse_cells.into_iter().rev() {
+            push_chat_timeline_content_block(
+                &mut blocks,
+                cell.lane,
+                cell.lines,
+                cell.patch_cell_id,
+                cell.mouse_actions,
+                cell.separate_from_previous,
+            );
+        }
+        let Some(block) = blocks.pop() else {
+            continue;
+        };
+        let block_rows = rows_for_block(
+            width,
+            request.theme,
+            block.lane,
+            block.lines,
+            &block.patch_cell_ids,
+            &block.mouse_actions,
+        );
+        let separator_rows = usize::from(!suffix_rows.is_empty());
+        let combined_len = block_rows
+            .len()
+            .saturating_add(separator_rows)
+            .saturating_add(suffix_rows.len());
+        let mut combined = Vec::with_capacity(combined_len.min(visible_rows));
+        let skip = combined_len.saturating_sub(visible_rows);
+        combined.extend(
+            block_rows
+                .into_iter()
+                .chain((separator_rows > 0).then(blank_row))
+                .chain(suffix_rows)
+                .skip(skip),
+        );
+        suffix_rows = combined;
+    }
+
+    let patch_cell_ids = patch_cell_ids_for_rows(&suffix_rows);
+    WorkspaceTranscriptViewport {
+        content_area,
+        rows: suffix_rows,
+        patch_cell_ids,
+    }
+}
+
+fn patch_cell_ids_for_rows(rows: &[WorkspaceTranscriptRow]) -> Vec<PatchCellId> {
+    let mut patch_cell_ids = Vec::new();
+    for row in rows {
+        if let Some(row_ids) = row.patch_cell_ids.as_deref() {
+            for id in row_ids {
+                if !patch_cell_ids.contains(id) {
+                    patch_cell_ids.push(*id);
+                }
+            }
+        }
+    }
+    patch_cell_ids
+}
+
 fn build_committed_layout(
     request: &WorkspaceTranscriptRequest<'_>,
     layout: &mut WorkspaceTranscriptCommittedLayout,
@@ -507,6 +624,14 @@ struct WorkspaceTranscriptContentBlock {
     lines: Vec<Line<'static>>,
     patch_cell_ids: Vec<PatchCellId>,
     mouse_actions: Vec<HistoryCellMouseAction>,
+}
+
+struct WorkspaceTranscriptRenderedCell {
+    lane: ChatLane,
+    lines: Vec<Line<'static>>,
+    patch_cell_id: Option<PatchCellId>,
+    mouse_actions: Vec<HistoryCellMouseAction>,
+    separate_from_previous: bool,
 }
 
 fn merged_tail_rows(
