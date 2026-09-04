@@ -438,17 +438,13 @@ impl App {
             }
             return Ok(());
         };
-        let (snapshot, cached_view, cached_projection) = match activation_state {
+        let (replay_source, cached_view, cached_projection) = match activation_state {
             ThreadViewActivationState::Cached(projection) => (None, cached_view, Some(projection)),
-            ThreadViewActivationState::Replay(mut snapshot) => {
+            ThreadViewActivationState::Replay(replay_source) => {
                 if let Some(stale_view) = cached_view.take() {
-                    self.carry_cached_thread_input_state_into_snapshot(
-                        thread_id,
-                        &stale_view,
-                        &mut snapshot,
-                    );
+                    self.persist_cached_thread_input_state(thread_id, &stale_view);
                 }
-                (Some(snapshot), None, None)
+                (Some(replay_source), None, None)
             }
         };
 
@@ -490,8 +486,8 @@ impl App {
             self.apply_cached_thread_events(thread_id, cached_events);
         }
 
-        if !reused_cached_view && let Some(snapshot) = snapshot {
-            self.replay_thread_snapshot(snapshot, !is_replay_only);
+        if !reused_cached_view && let Some(replay_source) = replay_source {
+            self.replay_thread_source(replay_source, !is_replay_only);
         }
         if !reused_cached_view && is_replay_only {
             let message = if attached_replay_only {

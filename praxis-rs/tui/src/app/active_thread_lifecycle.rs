@@ -165,7 +165,7 @@ impl App {
             store.set_runtime_snapshot(session, turns, status, control_state);
         }
 
-        let Some((receiver, snapshot)) = self.activate_thread_for_replay(thread_id) else {
+        let Some((receiver, replay_source)) = self.activate_thread_for_replay(thread_id) else {
             if let Some(previous_thread_id) = previous_thread_id {
                 self.active_thread_id = None;
                 self.activate_thread_channel(previous_thread_id);
@@ -196,7 +196,7 @@ impl App {
         self.replace_chat_widget(ChatWidget::new_with_app_event(init));
         self.reset_for_thread_switch(tui)?;
         self.workspace.reset_chat_scroll();
-        self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
+        self.replay_thread_source(replay_source, /*resume_restored_queue*/ true);
         self.drain_active_thread_events(tui).await?;
         self.refresh_pending_thread_approvals();
         Ok(())
@@ -233,17 +233,13 @@ impl App {
             return Ok(false);
         };
 
-        let (snapshot, cached_view, cached_projection) = match activation_state {
+        let (replay_source, cached_view, cached_projection) = match activation_state {
             ThreadViewActivationState::Cached(projection) => (None, cached_view, Some(projection)),
-            ThreadViewActivationState::Replay(mut snapshot) => {
+            ThreadViewActivationState::Replay(replay_source) => {
                 if let Some(stale_view) = cached_view.take() {
-                    self.carry_cached_thread_input_state_into_snapshot(
-                        thread_id,
-                        &stale_view,
-                        &mut snapshot,
-                    );
+                    self.persist_cached_thread_input_state(thread_id, &stale_view);
                 }
-                if snapshot.session.is_none() {
+                if !replay_source.has_session() {
                     self.active_thread_id = None;
                     self.active_thread_rx = None;
                     if let Some(previous_thread_id) = previous_thread_id {
@@ -251,7 +247,7 @@ impl App {
                     }
                     return Ok(false);
                 }
-                (Some(snapshot), None, None)
+                (Some(replay_source), None, None)
             }
         };
 
@@ -304,8 +300,8 @@ impl App {
             self.apply_cached_thread_events(thread_id, cached_events);
         }
         if !reused_cached_view {
-            if let Some(snapshot) = snapshot {
-                self.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ true);
+            if let Some(replay_source) = replay_source {
+                self.replay_thread_source(replay_source, /*resume_restored_queue*/ true);
             }
         }
         self.drain_active_thread_events(tui).await?;
@@ -510,53 +506,46 @@ impl App {
         (active_thread_id != primary_thread_id).then_some((active_thread_id, primary_thread_id))
     }
 
-    pub(super) fn replay_thread_snapshot(
+    pub(super) fn replay_thread_source(
         &mut self,
-        snapshot: ThreadEventSnapshot,
+        source: ThreadReplaySource,
         resume_restored_queue: bool,
     ) {
+        let store = lock_thread_event_store(&source.store);
+        let events = store.snapshot_event_refs();
         let should_buffer_replay =
-            snapshot.session.is_some() || !snapshot.turns.is_empty() || !snapshot.events.is_empty();
+            store.session.is_some() || !store.turns.is_empty() || !events.is_empty();
         let replay_generation = self.history_view_generation;
         if should_buffer_replay {
             self.thread_replay_buffer_generation = Some(replay_generation);
-            let capacity_hint = snapshot
+            let capacity_hint = store
                 .turns
                 .iter()
                 .map(|turn| turn.items.len())
                 .sum::<usize>()
-                .saturating_add(snapshot.events.len())
+                .saturating_add(events.len())
                 .min(256);
             self.chat_widget.begin_history_output_batch(capacity_hint);
         }
         self.chat_widget.begin_status_surface_refresh_batch();
-        let ThreadEventSnapshot {
-            session,
-            turns,
-            status,
-            control_state,
-            token_usage,
-            events,
-            input_state,
-        } = snapshot;
-        if let Some(session) = session {
+        if let Some(session) = store.session.clone() {
             self.chat_widget.handle_thread_session(session);
         }
         self.chat_widget
             .set_queue_autosend_suppressed(/*suppressed*/ true);
-        self.chat_widget.restore_thread_input_state(input_state);
-        if !turns.is_empty() {
-            self.chat_widget
-                .replay_thread_turns(turns, ReplayKind::ThreadSnapshot);
+        self.chat_widget
+            .restore_thread_input_state(store.input_state.clone());
+        if !store.turns.is_empty() {
+            self.chat_widget.replay_thread_turn_refs(&store.turns);
         }
         for event in events {
-            self.handle_thread_event_replay(event);
+            self.handle_thread_event_replay(event.clone());
         }
         self.chat_widget
-            .apply_thread_status_snapshot(status.as_ref());
+            .apply_thread_status_snapshot(store.status.as_ref());
         self.chat_widget
-            .set_thread_control_state(control_state.as_ref());
-        if let Some(token_usage) = token_usage {
+            .set_thread_control_state(store.control_state.as_ref());
+        if let Some(token_usage) = store.latest_token_usage() {
             self.chat_widget
                 .set_token_info(Some(token_usage_info_from_app_gateway(token_usage)));
         }
@@ -568,6 +557,7 @@ impl App {
             self.chat_widget.finish_history_output_batch();
         }
         self.chat_widget.finish_status_surface_refresh_batch();
+        drop(store);
         self.chat_widget.submit_initial_user_message_if_pending();
         if resume_restored_queue {
             self.chat_widget.maybe_send_next_queued_input();

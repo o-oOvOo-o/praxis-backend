@@ -40,6 +40,7 @@ struct CachedViewDeltaLog {
     overflowed: bool,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
     pub(super) session: Option<ThreadSessionState>,
@@ -408,6 +409,7 @@ impl ThreadEventStore {
         self.bump_view_revision();
     }
 
+    #[cfg(test)]
     pub(super) fn snapshot(&self) -> ThreadEventSnapshot {
         ThreadEventSnapshot {
             session: self.session.clone(),
@@ -534,7 +536,12 @@ impl ThreadEventStore {
         self.view_revision = self.view_revision.wrapping_add(1);
     }
 
+    #[cfg(test)]
     fn snapshot_events(&self) -> Vec<ThreadBufferedEvent> {
+        self.snapshot_event_refs().into_iter().cloned().collect()
+    }
+
+    pub(super) fn snapshot_event_refs(&self) -> Vec<&ThreadBufferedEvent> {
         let mut latest = self
             .latest_projection_events
             .iter()
@@ -559,7 +566,7 @@ impl ThreadEventStore {
             }
             .expect("snapshot event iterator should contain the selected event");
             if self.snapshot_event_should_replay(&envelope.event) {
-                events.push(envelope.event.clone());
+                events.push(&envelope.event);
             }
         }
         events

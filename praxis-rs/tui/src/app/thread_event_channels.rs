@@ -1,7 +1,6 @@
 use super::App;
 use super::thread_event_store::ThreadEventChannel;
 use super::thread_event_store::ThreadEventEnvelope;
-use super::thread_event_store::ThreadEventSnapshot;
 use super::thread_event_store::ThreadEventStore;
 use super::thread_event_store::lock_thread_event_store;
 use crate::app_command::AppCommand;
@@ -11,10 +10,28 @@ use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::chatwidget::ChatWidget;
 use crate::chatwidget::ReplayKind;
 use praxis_protocol::ThreadId;
+use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::sync::mpsc;
 
 // Live delivery preserves FIFO while this cap bounds the durable replay projection.
 const THREAD_EVENT_REPLAY_CAPACITY: usize = 32768;
+
+#[derive(Debug)]
+pub(super) struct ThreadReplaySource {
+    pub(super) store: Arc<Mutex<ThreadEventStore>>,
+    has_session: bool,
+}
+
+impl ThreadReplaySource {
+    fn new(store: Arc<Mutex<ThreadEventStore>>, has_session: bool) -> Self {
+        Self { store, has_session }
+    }
+
+    pub(super) fn has_session(&self) -> bool {
+        self.has_session
+    }
+}
 
 pub(super) struct CachedThreadProjectionState {
     pub(super) status: Option<praxis_app_gateway_protocol::ThreadStatus>,
@@ -40,7 +57,7 @@ impl CachedThreadProjectionState {
 
 pub(super) enum ThreadViewActivationState {
     Cached(CachedThreadProjectionState),
-    Replay(ThreadEventSnapshot),
+    Replay(ThreadReplaySource),
 }
 
 impl App {
@@ -126,7 +143,7 @@ impl App {
         thread_id: ThreadId,
     ) -> Option<(
         mpsc::UnboundedReceiver<ThreadEventEnvelope>,
-        ThreadEventSnapshot,
+        ThreadReplaySource,
     )> {
         let channel = self.thread_event_channels.get_mut(&thread_id)?;
         let receiver = channel.receiver.take()?;
@@ -134,8 +151,9 @@ impl App {
         store.active = true;
         channel.replay_through_sequence = store.last_event_sequence();
         channel.replay_view_revision = store.view_revision();
-        let snapshot = store.snapshot();
-        Some((receiver, snapshot))
+        let replay_source =
+            ThreadReplaySource::new(Arc::clone(&channel.store), store.session.is_some());
+        Some((receiver, replay_source))
     }
 
     pub(super) fn activate_thread_for_view(
@@ -174,7 +192,10 @@ impl App {
             })
         } else {
             store.clear_cached_view_delta();
-            ThreadViewActivationState::Replay(store.snapshot())
+            ThreadViewActivationState::Replay(ThreadReplaySource::new(
+                Arc::clone(&channel.store),
+                store.session.is_some(),
+            ))
         };
         Some((receiver, state, revision))
     }

@@ -1,6 +1,29 @@
 use super::*;
 
 impl ChatWidget {
+    pub(crate) fn replay_thread_turn_refs(&mut self, turns: &[Turn]) {
+        for turn in turns {
+            if matches!(turn.status, TurnStatus::InProgress) {
+                self.last_non_retry_error = None;
+                self.on_task_started();
+            }
+            for item in &turn.items {
+                self.handle_thread_item(
+                    item.clone(),
+                    &turn.id,
+                    ThreadItemRenderSource::Replay(ReplayKind::ThreadSnapshot),
+                );
+            }
+            self.handle_replayed_turn_status(
+                turn.id.clone(),
+                turn.status.clone(),
+                turn.error.clone(),
+                turn.collaboration_mode_kind.clone(),
+                ReplayKind::ThreadSnapshot,
+            );
+        }
+    }
+
     pub(crate) fn replay_thread_turns(&mut self, turns: Vec<Turn>, replay_kind: ReplayKind) {
         if matches!(replay_kind, ReplayKind::ResumeInitialMessages) {
             self.replay_initial_thread_turns_compact(turns);

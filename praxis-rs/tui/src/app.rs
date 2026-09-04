@@ -184,11 +184,11 @@ use self::startup_effects::select_model_availability_nux;
 use self::startup_effects::should_show_model_migration_prompt;
 #[cfg(test)]
 use self::startup_effects::target_preset_for_upgrade;
+use self::thread_event_channels::ThreadReplaySource;
 use self::thread_event_store::FeedbackThreadEvent;
 use self::thread_event_store::ThreadBufferedEvent;
 use self::thread_event_store::ThreadEventChannel;
 use self::thread_event_store::ThreadEventEnvelope;
-use self::thread_event_store::ThreadEventSnapshot;
 use self::thread_event_store::ThreadEventStore;
 use self::thread_event_store::lock_thread_event_store;
 use self::thread_view_cache::ThreadViewCache;

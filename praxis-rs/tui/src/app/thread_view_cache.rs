@@ -194,19 +194,6 @@ impl App {
         lock_thread_event_store(&channel.store).input_state = input_state;
     }
 
-    pub(super) fn carry_cached_thread_input_state_into_snapshot(
-        &mut self,
-        thread_id: ThreadId,
-        cached_view: &CachedThreadView,
-        snapshot: &mut super::thread_event_store::ThreadEventSnapshot,
-    ) {
-        let input_state = cached_view.chat_widget.capture_thread_input_state();
-        snapshot.input_state = input_state.clone();
-        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-            lock_thread_event_store(&channel.store).input_state = input_state;
-        }
-    }
-
     pub(super) fn clear_thread_view_cache_preserving_input(&mut self) {
         for (thread_id, cached_view) in self.thread_view_cache.drain() {
             self.persist_cached_thread_input_state(thread_id, &cached_view);
