@@ -359,12 +359,7 @@ impl App {
         Ok(live_attached)
     }
 
-    /// Replaces the chat widget and re-seeds the new widget's collab metadata from the navigation
-    /// cache.
-    ///
-    /// Thread switches reconstruct the `ChatWidget`, which loses the `collab_agent_metadata` map.
-    /// This helper copies every known nickname/role from `AgentNavigationState` into the
-    /// replacement widget so that replayed collab items render agent names immediately.
+    /// Replaces the chat widget while preserving shared per-session presentation state.
     pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
         chat_widget.set_workspace_entry_surface_enabled(self.workspace.enabled);
         chat_widget.set_ui_language(self.chat_widget.ui_language());
@@ -376,15 +371,8 @@ impl App {
         if chat_widget.last_terminal_title.is_none() {
             chat_widget.last_terminal_title = previous_terminal_title;
         }
-        for (thread_id, entry) in self.agent_navigation.ordered_threads() {
-            chat_widget.set_collab_agent_metadata(
-                thread_id,
-                entry.agent_base_name.clone(),
-                entry.agent_title.clone(),
-                entry.agent_display_name.clone(),
-                entry.agent_role.clone(),
-            );
-        }
+        self.chat_widget
+            .transfer_collab_agent_metadata_to(&mut chat_widget);
         self.chat_widget = chat_widget;
         self.sync_active_agent_label();
     }

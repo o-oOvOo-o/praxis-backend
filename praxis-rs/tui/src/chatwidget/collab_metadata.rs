@@ -1,6 +1,11 @@
 use super::*;
 
 impl ChatWidget {
+    /// Moves the session-wide agent label cache into a replacement widget without cloning it.
+    pub(crate) fn transfer_collab_agent_metadata_to(&mut self, target: &mut Self) {
+        target.collab_agent_metadata = std::mem::take(&mut self.collab_agent_metadata);
+    }
+
     /// Stores or overwrites the cached nickname and role for a collab agent thread.
     ///
     /// Called by `App::upsert_agent_picker_thread` and `App::replace_chat_widget` to keep the
