@@ -74,16 +74,22 @@ impl App {
         self.refresh_pending_thread_approvals();
     }
 
-    pub(super) fn store_active_thread_receiver(&mut self) {
+    pub(super) fn store_active_thread_receiver(
+        &mut self,
+        input_state_retained_by_view_cache: bool,
+    ) {
         let Some(active_id) = self.active_thread_id else {
             return;
         };
-        let input_state = self.chat_widget.capture_thread_input_state();
+        let input_state = (!input_state_retained_by_view_cache)
+            .then(|| self.chat_widget.capture_thread_input_state());
         if let Some(channel) = self.thread_event_channels.get_mut(&active_id) {
             let receiver = self.active_thread_rx.take();
             let mut store = lock_thread_event_store(&channel.store);
             store.active = false;
-            store.input_state = input_state;
+            if let Some(input_state) = input_state {
+                store.input_state = input_state;
+            }
             if let Some(receiver) = receiver {
                 channel.receiver = Some(receiver);
             }

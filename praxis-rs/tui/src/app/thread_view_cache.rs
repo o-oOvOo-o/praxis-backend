@@ -37,7 +37,12 @@ impl ThreadViewCache {
         Some(cached)
     }
 
-    pub(super) fn insert(&mut self, thread_id: ThreadId, view: CachedThreadView) {
+    pub(super) fn insert(
+        &mut self,
+        thread_id: ThreadId,
+        view: CachedThreadView,
+    ) -> Vec<(ThreadId, CachedThreadView)> {
+        let mut evicted_views = Vec::new();
         let transcript_cells = view.transcript_cells.len();
         self.remove_from_lru(thread_id);
         if let Some(replaced) = self.entries.insert(thread_id, view) {
@@ -58,14 +63,17 @@ impl ThreadViewCache {
                 self.transcript_cells = self
                     .transcript_cells
                     .saturating_sub(view.transcript_cells.len());
+                evicted_views.push((evicted, view));
             }
         }
+        evicted_views
     }
 
-    pub(super) fn clear(&mut self) {
-        self.entries.clear();
+    pub(super) fn drain(&mut self) -> Vec<(ThreadId, CachedThreadView)> {
+        let entries = self.entries.drain().collect();
         self.lru.clear();
         self.transcript_cells = 0;
+        entries
     }
 
     fn remove_from_lru(&mut self, thread_id: ThreadId) {
@@ -76,23 +84,50 @@ impl ThreadViewCache {
 }
 
 impl App {
-    pub(super) fn cacheable_active_thread_view_revision(&self, thread_id: ThreadId) -> Option<u64> {
-        if self.thread_replay_buffer_generation.is_some()
-            || self.overlay.is_some()
-            || !self.chat_widget.no_modal_or_popup_active()
-            || self.chat_widget.realtime_conversation_is_live()
-            || self.chat_widget.thread_id() != Some(thread_id)
-        {
-            return None;
+    pub(super) fn suspend_active_thread_view_for_switch(
+        &mut self,
+    ) -> (Option<ThreadId>, Option<u64>) {
+        let Some(thread_id) = self.active_thread_id else {
+            return (None, None);
+        };
+        let view_is_cache_candidate = self.thread_replay_buffer_generation.is_none()
+            && self.overlay.is_none()
+            && self.chat_widget.no_modal_or_popup_active()
+            && !self.chat_widget.realtime_conversation_is_live()
+            && self.chat_widget.thread_id() == Some(thread_id)
+            && self.active_thread_view_materialized_revision.is_some();
+        let input_state_is_deferred = view_is_cache_candidate && self.workspace.enabled;
+        let input_state =
+            (!input_state_is_deferred).then(|| self.chat_widget.capture_thread_input_state());
+        let materialized_revision = self.active_thread_view_materialized_revision;
+        let Some(channel) = self.thread_event_channels.get_mut(&thread_id) else {
+            return (Some(thread_id), None);
+        };
+        let receiver = self.active_thread_rx.take();
+        let store_handle = Arc::clone(&channel.store);
+        let revision = {
+            let mut store = lock_thread_event_store(&store_handle);
+            store.active = false;
+            if let Some(input_state) = input_state {
+                store.input_state = input_state;
+            }
+            view_is_cache_candidate
+                .then(|| {
+                    let materialized = materialized_revision?;
+                    let status = store.status.as_ref()?;
+                    (!status.is_active() && store.snapshot_revision() == materialized)
+                        .then_some(materialized)
+                })
+                .flatten()
+        };
+        if let Some(receiver) = receiver {
+            channel.receiver = Some(receiver);
         }
-        let materialized = self.active_thread_view_materialized_revision?;
-        let channel = self.thread_event_channels.get(&thread_id)?;
-        let store = lock_thread_event_store(&channel.store);
-        let status = store.status.as_ref()?;
-        if status.is_active() {
-            return None;
+        if input_state_is_deferred && revision.is_none() {
+            let input_state = self.chat_widget.capture_thread_input_state();
+            lock_thread_event_store(&store_handle).input_state = input_state;
         }
-        (store.snapshot_revision() == materialized).then_some(materialized)
+        (Some(thread_id), revision)
     }
 
     pub(super) fn take_cached_thread_view_candidate(
@@ -109,7 +144,7 @@ impl App {
         chat_widget: ChatWidget,
         transcript_cells: Vec<Arc<dyn HistoryCell>>,
     ) {
-        self.thread_view_cache.insert(
+        self.cache_thread_view(
             thread_id,
             CachedThreadView {
                 chat_widget,
@@ -117,6 +152,44 @@ impl App {
                 revision,
             },
         );
+    }
+
+    pub(super) fn cache_thread_view(&mut self, thread_id: ThreadId, view: CachedThreadView) {
+        let evicted_views = self.thread_view_cache.insert(thread_id, view);
+        for (evicted_thread_id, evicted_view) in evicted_views {
+            self.persist_cached_thread_input_state(evicted_thread_id, &evicted_view);
+        }
+    }
+
+    pub(super) fn persist_cached_thread_input_state(
+        &mut self,
+        thread_id: ThreadId,
+        cached_view: &CachedThreadView,
+    ) {
+        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+            return;
+        };
+        let input_state = cached_view.chat_widget.capture_thread_input_state();
+        lock_thread_event_store(&channel.store).input_state = input_state;
+    }
+
+    pub(super) fn carry_cached_thread_input_state_into_snapshot(
+        &mut self,
+        thread_id: ThreadId,
+        cached_view: &CachedThreadView,
+        snapshot: &mut super::thread_event_store::ThreadEventSnapshot,
+    ) {
+        let input_state = cached_view.chat_widget.capture_thread_input_state();
+        snapshot.input_state = input_state.clone();
+        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+            lock_thread_event_store(&channel.store).input_state = input_state;
+        }
+    }
+
+    pub(super) fn clear_thread_view_cache_preserving_input(&mut self) {
+        for (thread_id, cached_view) in self.thread_view_cache.drain() {
+            self.persist_cached_thread_input_state(thread_id, &cached_view);
+        }
     }
 
     pub(super) fn install_thread_view_shell(

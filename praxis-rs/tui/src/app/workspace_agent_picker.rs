@@ -457,15 +457,16 @@ impl App {
             }
         }
 
-        let previous_thread_id = self.active_thread_id;
-        let previous_view_revision = previous_thread_id
-            .and_then(|thread_id| self.cacheable_active_thread_view_revision(thread_id));
-        let cached_view = self.take_cached_thread_view_candidate(thread_id);
+        let (previous_thread_id, previous_view_revision) =
+            self.suspend_active_thread_view_for_switch();
+        let mut cached_view = self.take_cached_thread_view_candidate(thread_id);
         let cached_revision = cached_view.as_ref().map(|cached| cached.revision);
-        self.store_active_thread_receiver();
         let Some((receiver, activation_state, target_revision)) =
             self.activate_thread_for_view(thread_id, cached_revision)
         else {
+            if let Some(cached_view) = cached_view {
+                self.cache_thread_view(thread_id, cached_view);
+            }
             self.chat_widget
                 .add_error_message(format!("Agent thread {thread_id} is already active."));
             if let Some(previous_thread_id) = previous_thread_id {
@@ -476,7 +477,16 @@ impl App {
         };
         let (snapshot, cached_view) = match activation_state {
             ThreadViewActivationState::Cached(_) => (None, cached_view),
-            ThreadViewActivationState::Replay(snapshot) => (Some(snapshot), None),
+            ThreadViewActivationState::Replay(mut snapshot) => {
+                if let Some(stale_view) = cached_view.take() {
+                    self.carry_cached_thread_input_state_into_snapshot(
+                        thread_id,
+                        &stale_view,
+                        &mut snapshot,
+                    );
+                }
+                (Some(snapshot), None)
+            }
         };
 
         self.active_thread_id = Some(thread_id);

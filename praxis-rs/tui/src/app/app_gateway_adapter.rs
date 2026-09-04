@@ -81,14 +81,14 @@ impl App {
                 self.refresh_mcp_startup_expected_servers_from_config();
             }
             ServerNotification::AccountRateLimitsUpdated(notification) => {
-                self.thread_view_cache.clear();
+                self.clear_thread_view_cache_preserving_input();
                 self.chat_widget.on_rate_limit_snapshot(Some(
                     app_gateway_rate_limit_snapshot_to_core(notification.rate_limits.clone()),
                 ));
                 return;
             }
             ServerNotification::AccountUpdated(notification) => {
-                self.thread_view_cache.clear();
+                self.clear_thread_view_cache_preserving_input();
                 self.chat_widget.update_account_state(
                     status_account_display_from_auth_mode(
                         notification.auth_mode,

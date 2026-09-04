@@ -81,7 +81,7 @@ impl App {
         self.apply_runtime_policy_overrides(&mut config);
         self.config = config;
         self.tui_config = tui_config;
-        self.thread_view_cache.clear();
+        self.clear_thread_view_cache_preserving_input();
         self.active_thread_view_materialized_revision = None;
         self.chat_widget.sync_plugin_mentions_config(&self.config);
         self.chat_widget.set_tui_config(self.tui_config.clone());

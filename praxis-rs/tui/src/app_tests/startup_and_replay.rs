@@ -433,7 +433,7 @@ async fn replay_thread_snapshot_restores_draft_and_queued_input() {
         .capture_thread_input_state()
         .expect("expected thread input state");
 
-    app.store_active_thread_receiver();
+    app.store_active_thread_receiver(/*input_state_retained_by_view_cache*/ false);
 
     let snapshot = {
         let channel = app
@@ -811,7 +811,7 @@ async fn replay_thread_snapshot_restores_pending_pastes_for_submit() {
         .capture_thread_input_state()
         .expect("expected thread input state");
 
-    app.store_active_thread_receiver();
+    app.store_active_thread_receiver(/*input_state_retained_by_view_cache*/ false);
 
     let snapshot = {
         let channel = app

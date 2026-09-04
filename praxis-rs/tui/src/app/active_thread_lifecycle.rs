@@ -90,7 +90,7 @@ impl App {
         self.active_thread_id = None;
         self.active_thread_rx = None;
         self.active_thread_view_materialized_revision = None;
-        self.thread_view_cache.clear();
+        drop(self.thread_view_cache.drain());
         self.primary_thread_id = None;
         self.last_subagent_backfill_attempt = None;
         self.primary_session_configured = None;
@@ -193,7 +193,7 @@ impl App {
             control_state,
         } = started;
         let previous_thread_id = self.active_thread_id;
-        self.store_active_thread_receiver();
+        self.store_active_thread_receiver(/*input_state_retained_by_view_cache*/ false);
 
         self.apply_current_permissions_to_thread_session(&mut session);
         let thread_id = session.thread_id;
@@ -275,15 +275,16 @@ impl App {
             return Ok(false);
         }
 
-        let previous_thread_id = self.active_thread_id;
-        let previous_view_revision = previous_thread_id
-            .and_then(|thread_id| self.cacheable_active_thread_view_revision(thread_id));
-        let cached_view = self.take_cached_thread_view_candidate(thread_id);
+        let (previous_thread_id, previous_view_revision) =
+            self.suspend_active_thread_view_for_switch();
+        let mut cached_view = self.take_cached_thread_view_candidate(thread_id);
         let cached_revision = cached_view.as_ref().map(|cached| cached.revision);
-        self.store_active_thread_receiver();
         let Some((receiver, activation_state, target_revision)) =
             self.activate_thread_for_view(thread_id, cached_revision)
         else {
+            if let Some(cached_view) = cached_view {
+                self.cache_thread_view(thread_id, cached_view);
+            }
             if let Some(previous_thread_id) = previous_thread_id {
                 self.active_thread_id = None;
                 self.activate_thread_channel(previous_thread_id);
@@ -293,7 +294,14 @@ impl App {
 
         let (session, snapshot, cached_view) = match activation_state {
             ThreadViewActivationState::Cached(session) => (session, None, cached_view),
-            ThreadViewActivationState::Replay(snapshot) => {
+            ThreadViewActivationState::Replay(mut snapshot) => {
+                if let Some(stale_view) = cached_view.take() {
+                    self.carry_cached_thread_input_state_into_snapshot(
+                        thread_id,
+                        &stale_view,
+                        &mut snapshot,
+                    );
+                }
                 let Some(session) = snapshot.session.clone() else {
                     self.active_thread_id = None;
                     self.active_thread_rx = None;
