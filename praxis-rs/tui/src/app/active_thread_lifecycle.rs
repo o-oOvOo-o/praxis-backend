@@ -538,6 +538,7 @@ impl App {
         let should_buffer_replay =
             source.session.is_some() || !source.turns.is_empty() || !source.events.is_empty();
         let replay_generation = self.history_view_generation;
+        self.chat_widget.begin_redraw_batch();
         if should_buffer_replay {
             self.thread_replay_buffer_generation = Some(replay_generation);
             let capacity_hint = source
@@ -579,6 +580,7 @@ impl App {
             self.chat_widget.finish_history_output_batch();
         }
         self.chat_widget.finish_status_surface_refresh_batch();
+        self.chat_widget.finish_redraw_batch();
         self.chat_widget.submit_initial_user_message_if_pending();
         if resume_restored_queue {
             self.chat_widget.maybe_send_next_queued_input();

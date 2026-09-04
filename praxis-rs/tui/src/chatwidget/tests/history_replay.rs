@@ -2,6 +2,21 @@ use super::*;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn replay_redraw_batch_coalesces_invalidations() {
+    let (mut chat, _rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
+
+    chat.begin_redraw_batch();
+    chat.request_redraw();
+    chat.request_redraw();
+
+    assert!(chat.defer_redraw);
+    assert!(chat.redraw_deferred);
+    chat.finish_redraw_batch();
+    assert!(!chat.defer_redraw);
+    assert!(!chat.redraw_deferred);
+}
+
+#[tokio::test]
 async fn workspace_new_thread_uses_cat_entry_without_legacy_session_header() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.set_workspace_entry_surface_enabled(true);

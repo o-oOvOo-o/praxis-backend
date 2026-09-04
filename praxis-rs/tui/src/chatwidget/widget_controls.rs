@@ -19,7 +19,25 @@ impl ChatWidget {
     }
 
     pub(super) fn request_redraw(&mut self) {
+        if self.defer_redraw {
+            self.redraw_deferred = true;
+            return;
+        }
         self.frame_requester.schedule_frame();
+    }
+
+    pub(crate) fn begin_redraw_batch(&mut self) {
+        debug_assert!(!self.defer_redraw);
+        self.defer_redraw = true;
+        self.redraw_deferred = false;
+    }
+
+    pub(crate) fn finish_redraw_batch(&mut self) {
+        debug_assert!(self.defer_redraw);
+        self.defer_redraw = false;
+        if std::mem::take(&mut self.redraw_deferred) {
+            self.frame_requester.schedule_frame();
+        }
     }
 
     pub(super) fn bump_active_cell_revision(&mut self) {
