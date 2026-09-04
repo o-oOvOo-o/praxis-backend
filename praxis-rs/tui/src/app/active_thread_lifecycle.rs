@@ -8,63 +8,6 @@ enum ThreadViewPresentation {
 }
 
 impl App {
-    pub(super) async fn refresh_live_thread_snapshot(
-        &mut self,
-        app_gateway: &mut AppGatewaySession,
-        thread_id: ThreadId,
-        is_replay_only: bool,
-        snapshot: &mut ThreadEventSnapshot,
-    ) -> bool {
-        if is_replay_only {
-            return true;
-        }
-
-        match app_gateway.attach_thread(&self.config, thread_id).await {
-            Ok(started) => {
-                self.apply_refreshed_snapshot_thread(thread_id, started, snapshot)
-                    .await;
-                true
-            }
-            Err(err) => {
-                tracing::warn!(
-                    thread_id = %thread_id,
-                    error = %err,
-                    "failed to refresh inferred thread session before replay"
-                );
-                false
-            }
-        }
-    }
-
-    pub(super) async fn apply_refreshed_snapshot_thread(
-        &mut self,
-        thread_id: ThreadId,
-        started: AppGatewayStartedThread,
-        snapshot: &mut ThreadEventSnapshot,
-    ) {
-        let AppGatewayStartedThread {
-            mut session,
-            turns,
-            status,
-            control_state,
-        } = started;
-        self.apply_current_permissions_to_thread_session(&mut session);
-        self.update_workspace_thread_row(thread_id, /*resort_after_update*/ true, |row| {
-            row.status = status.clone();
-            row.control_state = control_state.clone();
-        });
-        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
-            let mut store = lock_thread_event_store(&channel.store);
-            store.set_runtime_snapshot(session, turns, status, control_state);
-            *snapshot = store.snapshot();
-            return;
-        }
-        snapshot.session = Some(session);
-        snapshot.turns = turns;
-        snapshot.status = Some(status);
-        snapshot.control_state = control_state;
-    }
-
     /// Opens the `/agent` picker after refreshing cached labels for known threads.
     ///
     /// The picker state is derived from long-lived thread channels plus best-effort metadata

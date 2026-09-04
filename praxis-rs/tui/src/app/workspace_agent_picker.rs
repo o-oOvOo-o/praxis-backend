@@ -243,7 +243,7 @@ impl App {
         }
     }
 
-    async fn session_state_for_thread_read(
+    fn session_state_for_thread_read(
         &self,
         thread_id: ThreadId,
         thread: &praxis_app_gateway_protocol::Thread,
@@ -317,22 +317,19 @@ impl App {
                     error = %resume_err,
                     "failed to resume live thread for selection; falling back to thread/read"
                 );
-                let (thread, turns) = match app_gateway
+                let mut thread = match app_gateway
                     .thread_read(thread_id, /*include_turns*/ true)
                     .await
                 {
-                    Ok(thread) => {
-                        let turns = thread.turns.clone();
-                        (thread, turns)
-                    }
+                    Ok(thread) => thread,
                     Err(err) if Self::can_fallback_from_include_turns_error(&err) => {
-                        let thread = app_gateway
+                        app_gateway
                             .thread_read(thread_id, /*include_turns*/ false)
-                            .await?;
-                        (thread, Vec::new())
+                            .await?
                     }
                     Err(err) => return Err(err),
                 };
+                let turns = std::mem::take(&mut thread.turns);
                 if turns.is_empty() {
                     // A `thread/read` fallback without turns would create a blank local replay
                     // channel with no live listener attached, which blocks later real re-attach.
@@ -340,17 +337,11 @@ impl App {
                         "Agent thread {thread_id} is not yet available for replay or live attach."
                     ));
                 }
-                let mut session = self.session_state_for_thread_read(thread_id, &thread).await;
+                let mut session = self.session_state_for_thread_read(thread_id, &thread);
                 // `thread/read` can seed replay state, but it does not attach the app-gateway
                 // listener that `thread/resume` establishes, so treat this path as replay-only.
                 session.model.clear();
-                (
-                    session,
-                    turns,
-                    thread.status.clone(),
-                    thread.control_state.clone(),
-                    false,
-                )
+                (session, turns, thread.status, thread.control_state, false)
             }
         };
         self.apply_current_permissions_to_thread_session(&mut session);
@@ -405,14 +396,12 @@ impl App {
             .get(&thread_id)
             .is_some_and(|entry| entry.is_closed);
         let mut attached_replay_only = false;
-        let mut live_snapshot_was_refreshed = false;
         if self.should_attach_live_thread_for_selection(thread_id) {
             match self
                 .attach_live_thread_for_selection(app_gateway, thread_id)
                 .await
             {
                 Ok(live_attached) => {
-                    live_snapshot_was_refreshed = live_attached;
                     attached_replay_only = !live_attached;
                     if attached_replay_only {
                         is_replay_only = true;
@@ -429,32 +418,6 @@ impl App {
             self.chat_widget
                 .add_error_message(format!("Agent thread {thread_id} is no longer available."));
             return Ok(());
-        }
-
-        if !live_snapshot_was_refreshed && !has_cached_projection {
-            let mut cached_snapshot = {
-                let Some(channel) = self.thread_event_channels.get(&thread_id) else {
-                    self.chat_widget.add_error_message(format!(
-                        "Agent thread {thread_id} has no local projection to refresh."
-                    ));
-                    return Ok(());
-                };
-                lock_thread_event_store(&channel.store).snapshot()
-            };
-            if !self
-                .refresh_live_thread_snapshot(
-                    app_gateway,
-                    thread_id,
-                    is_replay_only,
-                    &mut cached_snapshot,
-                )
-                .await
-            {
-                self.chat_widget.add_error_message(format!(
-                    "Failed to refresh agent thread {thread_id}; the current view was left unchanged."
-                ));
-                return Ok(());
-            }
         }
 
         let (previous_thread_id, previous_view_revision) =
