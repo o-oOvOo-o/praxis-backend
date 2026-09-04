@@ -19,6 +19,8 @@ use std::sync::Mutex;
 use std::sync::MutexGuard;
 use tokio::sync::mpsc;
 
+const LATEST_PROJECTION_EVENT_SLOTS: usize = 4;
+
 #[derive(Debug, Clone)]
 pub(super) struct ThreadEventSnapshot {
     pub(super) session: Option<ThreadSessionState>,
@@ -58,6 +60,7 @@ pub(super) struct ThreadEventStore {
     pub(super) status: Option<ThreadStatus>,
     pub(super) control_state: Option<ThreadControlState>,
     pub(super) buffer: VecDeque<ThreadEventEnvelope>,
+    latest_projection_events: [Option<ThreadEventEnvelope>; LATEST_PROJECTION_EVENT_SLOTS],
     last_event_sequence: u64,
     snapshot_revision: u64,
     pending_interactive_replay: PendingInteractiveReplayState,
@@ -85,6 +88,7 @@ impl ThreadEventStore {
             status: None,
             control_state: None,
             buffer: VecDeque::new(),
+            latest_projection_events: std::array::from_fn(|_| None),
             last_event_sequence: 0,
             snapshot_revision: 0,
             pending_interactive_replay: PendingInteractiveReplayState::default(),
@@ -334,6 +338,10 @@ impl ThreadEventStore {
         self.last_event_sequence = self.last_event_sequence.saturating_add(1);
         self.bump_snapshot_revision();
         let sequence = self.last_event_sequence;
+        if let Some(slot) = latest_projection_event_slot(&event) {
+            self.latest_projection_events[slot] = Some(ThreadEventEnvelope { sequence, event });
+            return sequence;
+        }
         if let Some(buffered) = self.buffer.back_mut()
             && merge_adjacent_stream_event(&mut buffered.event, &event)
         {
@@ -357,6 +365,7 @@ impl ThreadEventStore {
         self.set_status(response.thread.status.clone());
         self.control_state = response.thread.control_state.clone();
         self.buffer.clear();
+        self.latest_projection_events.fill_with(|| None);
         self.pending_interactive_replay = PendingInteractiveReplayState::default();
     }
 
@@ -366,19 +375,7 @@ impl ThreadEventStore {
             turns: clone_compact_visible_replay_turns(&self.turns),
             status: self.status.clone(),
             control_state: self.control_state.clone(),
-            events: self
-                .buffer
-                .iter()
-                .filter(|envelope| match &envelope.event {
-                    ThreadBufferedEvent::Request(request) => self
-                        .pending_interactive_replay
-                        .should_replay_snapshot_request(request),
-                    ThreadBufferedEvent::Notification(_)
-                    | ThreadBufferedEvent::HistoryEntryResponse(_)
-                    | ThreadBufferedEvent::FeedbackSubmission(_) => true,
-                })
-                .map(|envelope| envelope.event.clone())
-                .collect(),
+            events: self.snapshot_events(),
             input_state: self.input_state.clone(),
         }
     }
@@ -419,8 +416,65 @@ impl ThreadEventStore {
         self.snapshot_revision = self.snapshot_revision.wrapping_add(1);
     }
 
+    fn snapshot_events(&self) -> Vec<ThreadBufferedEvent> {
+        let mut latest = self
+            .latest_projection_events
+            .iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        latest.sort_unstable_by_key(|envelope| envelope.sequence);
+
+        let mut buffered = self.buffer.iter().peekable();
+        let mut latest = latest.into_iter().peekable();
+        let mut events = Vec::with_capacity(self.buffer.len() + LATEST_PROJECTION_EVENT_SLOTS);
+        loop {
+            let envelope = match (buffered.peek(), latest.peek()) {
+                (Some(buffered_event), Some(projected))
+                    if buffered_event.sequence <= projected.sequence =>
+                {
+                    buffered.next()
+                }
+                (Some(_), Some(_)) => latest.next(),
+                (Some(_), None) => buffered.next(),
+                (None, Some(_)) => latest.next(),
+                (None, None) => break,
+            }
+            .expect("snapshot event iterator should contain the selected event");
+            if self.snapshot_event_should_replay(&envelope.event) {
+                events.push(envelope.event.clone());
+            }
+        }
+        events
+    }
+
+    fn snapshot_event_should_replay(&self, event: &ThreadBufferedEvent) -> bool {
+        match event {
+            ThreadBufferedEvent::Request(request) => self
+                .pending_interactive_replay
+                .should_replay_snapshot_request(request),
+            ThreadBufferedEvent::Notification(_)
+            | ThreadBufferedEvent::HistoryEntryResponse(_)
+            | ThreadBufferedEvent::FeedbackSubmission(_) => true,
+        }
+    }
+
     pub(super) fn clear_active_turn_id(&mut self) {
         self.active_turn_id = None;
+    }
+}
+
+fn latest_projection_event_slot(event: &ThreadBufferedEvent) -> Option<usize> {
+    let ThreadBufferedEvent::Notification(notification) = event else {
+        return None;
+    };
+    match notification {
+        ServerNotification::ThreadTokenUsageUpdated(_) => Some(0),
+        ServerNotification::ThreadGoalUpdated(_) | ServerNotification::ThreadGoalCleared(_) => {
+            Some(1)
+        }
+        ServerNotification::ThreadHeartbeatUpdated(_) => Some(2),
+        ServerNotification::ThreadSelfworkUpdated(_) => Some(3),
+        _ => None,
     }
 }
 
