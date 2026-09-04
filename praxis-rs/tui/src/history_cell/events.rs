@@ -37,6 +37,10 @@ impl HistoryCell for ModelChangeDivider {
             Style::default().fg(Color::Green),
         )]
     }
+
+    fn has_visible_output(&self) -> bool {
+        true
+    }
 }
 
 pub(crate) fn new_model_change_divider(message: String) -> ModelChangeDivider {
@@ -327,6 +331,10 @@ impl HistoryCell for ProposedPlanCell {
         lines.extend(plan_lines.into_iter().map(|line| line.style(plan_style)));
         lines
     }
+
+    fn has_visible_output(&self) -> bool {
+        true
+    }
 }
 
 impl HistoryCell for ProposedPlanStreamCell {
@@ -342,6 +350,10 @@ impl HistoryCell for ProposedPlanStreamCell {
 
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         self.lines.clone()
+    }
+
+    fn has_visible_output(&self) -> bool {
+        !self.lines.is_empty()
     }
 
     fn is_stream_continuation(&self) -> bool {
@@ -419,6 +431,10 @@ impl HistoryCell for PlanUpdateCell {
         lines.extend(prefix_lines(indented_lines, "  └ ".dim(), "    ".into()));
 
         lines
+    }
+
+    fn has_visible_output(&self) -> bool {
+        true
     }
 }
 

@@ -22,7 +22,7 @@ impl SessionHeader {
 impl ChatWidget {
     /// Commit visible session diagnostics without creating a persistent welcome cell.
     pub(super) fn apply_session_info_cell(&mut self, cell: history_cell::SessionInfoCell) {
-        if cell.display_lines(u16::MAX).is_empty() {
+        if !cell.has_visible_output() {
             return;
         }
         self.flush_active_cell();

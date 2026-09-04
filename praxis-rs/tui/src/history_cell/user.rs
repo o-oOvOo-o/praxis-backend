@@ -182,4 +182,8 @@ impl HistoryCell for UserHistoryCell {
 
         lines
     }
+
+    fn has_visible_output(&self) -> bool {
+        !self.remote_image_urls.is_empty() || !self.message.trim().is_empty()
+    }
 }

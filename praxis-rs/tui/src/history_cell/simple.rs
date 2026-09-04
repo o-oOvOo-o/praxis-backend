@@ -136,6 +136,10 @@ impl HistoryCell for AgentMessageCell {
         adaptive_wrap_lines(&self.lines, RtOptions::new(width as usize))
     }
 
+    fn has_visible_output(&self) -> bool {
+        !self.lines.is_empty()
+    }
+
     fn is_stream_continuation(&self) -> bool {
         !self.is_first_line
     }
@@ -155,6 +159,10 @@ impl PlainHistoryCell {
 impl HistoryCell for PlainHistoryCell {
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         self.lines.clone()
+    }
+
+    fn has_visible_output(&self) -> bool {
+        !self.lines.is_empty()
     }
 }
 
@@ -185,6 +193,10 @@ impl HistoryCell for ResumeReplayHistoryCell {
 
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         vec![self.line.clone()]
+    }
+
+    fn has_visible_output(&self) -> bool {
+        true
     }
 }
 

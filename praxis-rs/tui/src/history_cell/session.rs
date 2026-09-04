@@ -111,6 +111,10 @@ impl HistoryCell for CompositeHistoryCell {
         out
     }
 
+    fn has_visible_output(&self) -> bool {
+        self.parts.iter().any(|part| part.has_visible_output())
+    }
+
     fn transcript_animation_tick(&self) -> Option<u64> {
         self.parts
             .iter()

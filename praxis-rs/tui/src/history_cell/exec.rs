@@ -71,6 +71,10 @@ impl HistoryCell for UnifiedExecInteractionCell {
         out.extend(input_wrapped);
         out
     }
+
+    fn has_visible_output(&self) -> bool {
+        true
+    }
 }
 
 pub(crate) fn new_unified_exec_interaction(
@@ -200,6 +204,10 @@ impl HistoryCell for UnifiedExecProcessesCell {
         }
 
         out
+    }
+
+    fn has_visible_output(&self) -> bool {
+        true
     }
 
     fn desired_height(&self, width: u16) -> u16 {

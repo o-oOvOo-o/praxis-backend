@@ -123,6 +123,14 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
     /// Returns the logical lines for the main chat viewport.
     fn display_lines(&self, width: u16) -> Vec<Line<'static>>;
 
+    /// Returns whether this cell produces main-viewport output.
+    ///
+    /// The compatibility default preserves the historical rendering check. Cells that can answer
+    /// exactly from stored data override it to avoid a throwaway full-width render during replay.
+    fn has_visible_output(&self) -> bool {
+        !self.display_lines(u16::MAX).is_empty()
+    }
+
     /// Returns the logical lines that should be committed into scrollback history.
     ///
     /// Most cells commit exactly what they display live. Cells with transient startup animations
