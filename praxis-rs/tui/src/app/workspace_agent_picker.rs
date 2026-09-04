@@ -512,11 +512,12 @@ impl App {
         // Treat a cached switch as one presentation commit. Projection setters and
         // any queued deltas may each invalidate the same footer/title surfaces, but
         // only the final state needs to be rendered.
-        let status_refresh_batch = cached_projection
+        let projection_refresh_batch = cached_projection
             .as_ref()
             .is_some_and(|projection| !projection.is_empty());
-        if status_refresh_batch {
+        if projection_refresh_batch {
             target_widget.begin_status_surface_refresh_batch();
+            target_widget.begin_redraw_batch();
         }
         let cached_events = cached_projection
             .map(|projection| projection.apply_to(&mut target_widget))
@@ -531,9 +532,10 @@ impl App {
         ) {
             Ok(reused_cached_view) => reused_cached_view,
             Err(err) => {
-                if status_refresh_batch {
+                if projection_refresh_batch {
                     self.chat_widget.finish_status_surface_refresh_batch();
                     self.refresh_status_line();
+                    self.chat_widget.finish_redraw_batch();
                 }
                 return Err(err);
             }
@@ -558,9 +560,10 @@ impl App {
         }
         let drain_result = self.drain_active_thread_events(tui).await;
         self.refresh_pending_thread_approvals();
-        if status_refresh_batch {
+        if projection_refresh_batch {
             self.chat_widget.finish_status_surface_refresh_batch();
             self.refresh_status_line();
+            self.chat_widget.finish_redraw_batch();
         }
         drain_result?;
 
