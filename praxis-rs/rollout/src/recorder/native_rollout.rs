@@ -65,6 +65,15 @@ impl NativeRolloutWriter {
             .open_thread(native_thread_id)
             .await
             .map_err(store_error)?;
+        Self::from_recovered(thread, thread_id, rollout_path, /*locator*/ None).await
+    }
+
+    pub(super) async fn from_recovered(
+        thread: LiveThreadStore,
+        thread_id: ThreadId,
+        rollout_path: &Path,
+        locator: Option<&praxis_protocol::protocol::SessionMetaLine>,
+    ) -> io::Result<Self> {
         let next_sequence = thread
             .next_agent_event_sequence()
             .await
@@ -92,7 +101,7 @@ impl NativeRolloutWriter {
             metadata_generation,
         };
         if next_sequence > 1 {
-            writer.reconcile_locator(rollout_path).await?;
+            writer.reconcile_locator(rollout_path, locator).await?;
         } else {
             validate_projection(rollout_path, thread_id).await?;
             writer.import_projection(rollout_path, thread_id).await?;
@@ -155,7 +164,9 @@ impl NativeRolloutWriter {
             metadata_generation,
         };
         if existed && next_sequence > 1 {
-            writer.reconcile_locator(rollout_path).await?;
+            writer
+                .reconcile_locator(rollout_path, /*locator*/ None)
+                .await?;
         } else if import_projection {
             writer
                 .import_projection(rollout_path, init.thread_id)
@@ -167,7 +178,9 @@ impl NativeRolloutWriter {
                 .await?;
         }
         if !existed && projection_exists && writer.next_sequence > 1 {
-            writer.reconcile_locator(rollout_path).await?;
+            writer
+                .reconcile_locator(rollout_path, /*locator*/ None)
+                .await?;
         }
         if writer.next_sequence > 1 {
             writer
@@ -380,9 +393,13 @@ impl NativeRolloutWriter {
         Ok(())
     }
 
-    async fn reconcile_locator(&mut self, rollout_path: &Path) -> io::Result<()> {
+    async fn reconcile_locator(
+        &mut self,
+        rollout_path: &Path,
+        locator: Option<&praxis_protocol::protocol::SessionMetaLine>,
+    ) -> io::Result<()> {
         if !tokio::fs::try_exists(rollout_path).await? {
-            return self.rebuild_locator(rollout_path).await;
+            return self.rebuild_locator(rollout_path, locator).await;
         }
         let mut projected_items = 0u64;
         let (projected_thread_id, parse_errors) =
@@ -392,12 +409,16 @@ impl NativeRolloutWriter {
             .await?;
         let expected_thread_id = ThreadId::from_string(&self.thread.thread_id().to_string()).ok();
         if parse_errors != 0 || projected_thread_id != expected_thread_id || projected_items != 1 {
-            self.rebuild_locator(rollout_path).await?;
+            self.rebuild_locator(rollout_path, locator).await?;
         }
         Ok(())
     }
 
-    async fn rebuild_locator(&self, rollout_path: &Path) -> io::Result<()> {
+    async fn rebuild_locator(
+        &self,
+        rollout_path: &Path,
+        locator: Option<&praxis_protocol::protocol::SessionMetaLine>,
+    ) -> io::Result<()> {
         let parent = rollout_path
             .parent()
             .ok_or_else(|| io::Error::other("rollout projection path has no parent"))?;
@@ -406,33 +427,44 @@ impl NativeRolloutWriter {
         let (file, temporary_path) = temporary.into_parts();
         let expected_thread_id = ThreadId::from_string(&self.thread.thread_id().to_string())
             .map_err(|error| io::Error::other(error.to_string()))?;
-        let rebuild = self
-            .thread
-            .fold_all(LocatorRebuild::new(file), move |rebuild, event| {
-                if rebuild.error.is_some() {
-                    return;
-                }
-                if !rebuild.wrote_locator
-                    && let ThreadEventBody::NativeAgentEventRecorded { payload, .. } = &event.body
-                {
-                    match decode_item(payload) {
-                        Some(item) => {
-                            if matches!(
-                                &item,
-                                RolloutItem::SessionMeta(meta)
-                                    if meta.meta.id == expected_thread_id
-                            ) {
-                                rebuild.write(&item);
+        let rebuild = if let Some(locator) = locator {
+            if locator.meta.id != expected_thread_id {
+                return Err(io::Error::other(
+                    "prepared locator belongs to another thread",
+                ));
+            }
+            let mut rebuild = LocatorRebuild::new(file);
+            rebuild.write(&RolloutItem::SessionMeta(locator.clone()));
+            rebuild
+        } else {
+            self.thread
+                .fold_all(LocatorRebuild::new(file), move |rebuild, event| {
+                    if rebuild.error.is_some() {
+                        return;
+                    }
+                    if !rebuild.wrote_locator
+                        && let ThreadEventBody::NativeAgentEventRecorded { payload, .. } =
+                            &event.body
+                    {
+                        match decode_item(payload) {
+                            Some(item) => {
+                                if matches!(
+                                    &item,
+                                    RolloutItem::SessionMeta(meta)
+                                        if meta.meta.id == expected_thread_id
+                                ) {
+                                    rebuild.write(&item);
+                                }
+                            }
+                            None => {
+                                rebuild.foreign_events = rebuild.foreign_events.saturating_add(1);
                             }
                         }
-                        None => {
-                            rebuild.foreign_events = rebuild.foreign_events.saturating_add(1);
-                        }
                     }
-                }
-            })
-            .await
-            .map_err(store_error)?;
+                })
+                .await
+                .map_err(store_error)?
+        };
         if rebuild.foreign_events != 0 {
             return Err(io::Error::other(format!(
                 "native thread contains {} events from an incompatible schema",

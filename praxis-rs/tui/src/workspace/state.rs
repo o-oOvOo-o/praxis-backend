@@ -34,6 +34,8 @@ const PICKER_LIST_TOP_OFFSET: u16 = 4;
 #[derive(Debug, Default)]
 pub(crate) struct WorkspaceState {
     pub(crate) enabled: bool,
+    pub(crate) pending_thread_load:
+        super::pending_navigation::PendingNavigation<uuid::Uuid, ThreadId>,
     main_pane: WorkspacePane,
     pub(crate) launch: LaunchStripState,
     pub(crate) rows: Vec<ThreadListRow>,
@@ -42,6 +44,7 @@ pub(crate) struct WorkspaceState {
     visible_items_cache: RefCell<Option<VisibleItemsCache>>,
     pub(crate) usage_by_thread: HashMap<ThreadId, TokenUsageInfo>,
     pub(crate) pinned_thread_ids: HashSet<ThreadId>,
+    pub(crate) name_generation_in_flight: HashSet<ThreadId>,
     pub(crate) expanded_subagent_parent_ids: HashSet<ThreadId>,
     pub(crate) expanded_closed_subagent_parent_ids: HashSet<ThreadId>,
     pub(crate) search_query: String,
@@ -101,6 +104,7 @@ pub(crate) enum WorkspaceMenuAction {
     Open,
     TogglePin,
     Rename,
+    RegenerateName,
     Archive,
     Delete,
     ForkLocal,

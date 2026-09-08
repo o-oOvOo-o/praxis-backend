@@ -385,7 +385,7 @@ impl ChatWidget {
     }
 
     pub(super) fn lower_cost_preset(&self) -> Option<ModelPreset> {
-        let models = self.model_catalog.try_list_models().ok()?;
+        let models = self.model_catalog.list_models();
         models
             .iter()
             .find(|preset| preset.show_in_picker && preset.model == NUDGE_MODEL_SLUG)

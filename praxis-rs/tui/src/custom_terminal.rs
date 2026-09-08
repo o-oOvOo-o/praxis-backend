@@ -638,6 +638,15 @@ where
         Ok(())
     }
 
+    /// Invalidates the terminal diff cache without clearing the visible screen.
+    ///
+    /// This is used when application state changes wholesale (for example, a workspace thread
+    /// switch). The following draw then republishes every non-default cell even if the physical
+    /// terminal was cleared independently of this in-memory terminal.
+    pub fn force_full_redraw(&mut self) {
+        self.previous_buffer_mut().reset();
+    }
+
     /// Clear terminal scrollback (if supported) and force a full redraw.
     pub fn clear_scrollback(&mut self) -> io::Result<()> {
         if self.viewport_area.is_empty() {
@@ -934,6 +943,29 @@ mod tests {
     use ratatui::style::Color;
     use ratatui::style::Style;
     use ratatui::style::Stylize;
+
+    #[test]
+    fn force_full_redraw_repairs_an_externally_cleared_screen() {
+        let backend = crate::test_backend::VT100Backend::new(8, 2);
+        let mut terminal = Terminal::with_options(backend).expect("test terminal");
+        terminal.set_viewport_area(Rect::new(0, 0, 8, 2));
+        let render_x = |frame: &mut Frame<'_>| {
+            frame.buffer_mut().set_string(0, 0, "X", Style::default());
+        };
+
+        terminal.draw(render_x).expect("initial draw");
+        terminal
+            .backend_mut()
+            .clear_region(ClearType::All)
+            .expect("external clear");
+        terminal.backend_mut().flush().expect("flush clear");
+        terminal.draw(render_x).expect("cached redraw");
+        assert!(!terminal.backend().to_string().contains('X'));
+
+        terminal.force_full_redraw();
+        terminal.draw(render_x).expect("forced redraw");
+        assert!(terminal.backend().to_string().contains('X'));
+    }
 
     #[test]
     fn diff_buffers_does_not_emit_clear_to_end_for_full_width_row() {

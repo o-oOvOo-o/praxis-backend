@@ -225,6 +225,16 @@ impl ChatWidget {
         self.request_redraw();
     }
 
+    pub(crate) fn restore_running_turn_elapsed_seconds(&mut self, elapsed_seconds: Option<u64>) {
+        let Some(elapsed_seconds) = elapsed_seconds else {
+            return;
+        };
+        let Some(status) = self.bottom_pane.status_widget_mut() else {
+            return;
+        };
+        status.restore_elapsed_seconds(status.elapsed_seconds().max(elapsed_seconds));
+    }
+
     pub(crate) fn set_queue_autosend_suppressed(&mut self, suppressed: bool) {
         self.suppress_queue_autosend = suppressed;
     }

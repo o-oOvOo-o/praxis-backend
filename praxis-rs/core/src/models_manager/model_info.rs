@@ -1,5 +1,6 @@
 use praxis_protocol::config_types::ReasoningSummary;
 use praxis_protocol::openai_models::ConfigShellToolType;
+use praxis_protocol::openai_models::DEFAULT_REASONING_EFFORT;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelInstructionsVariables;
 use praxis_protocol::openai_models::ModelMessages;
@@ -26,6 +27,7 @@ const LOCAL_PRAGMATIC_TEMPLATE: &str = "You are a deeply pragmatic, effective so
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 
 pub(crate) fn with_config_overrides(mut model: ModelInfo, config: &Config) -> ModelInfo {
+    model.default_reasoning_level = Some(DEFAULT_REASONING_EFFORT);
     if let Some(supports_reasoning_summaries) = config.model_supports_reasoning_summaries
         && supports_reasoning_summaries
     {
@@ -86,6 +88,10 @@ pub(crate) fn with_known_model_capability_overrides(mut model: ModelInfo) -> Mod
     if model.apply_patch_tool_type.is_none() {
         model.apply_patch_tool_type = known_model.apply_patch_tool_type;
     }
+    if known_model.model_messages.is_some() {
+        model.base_instructions = known_model.base_instructions;
+        model.model_messages = known_model.model_messages;
+    }
     model
 }
 
@@ -117,7 +123,7 @@ pub(crate) fn anthropic_model_infos() -> Vec<ModelInfo> {
             "claude-sonnet-5",
             "Claude Sonnet 5",
             "Best combination of speed and intelligence for coding and agentic work.",
-            Some(ReasoningEffort::High),
+            Some(DEFAULT_REASONING_EFFORT),
             Some(1_000_000),
             true,
             false,
@@ -127,7 +133,7 @@ pub(crate) fn anthropic_model_infos() -> Vec<ModelInfo> {
             "claude-opus-4-8",
             "Claude Opus 4.8",
             "High-capability Claude model for complex reasoning and long-horizon agentic coding.",
-            Some(ReasoningEffort::High),
+            Some(DEFAULT_REASONING_EFFORT),
             Some(1_000_000),
             true,
             false,
@@ -137,7 +143,7 @@ pub(crate) fn anthropic_model_infos() -> Vec<ModelInfo> {
             "claude-fable-5",
             "Claude Fable 5",
             "Anthropic's highest-capability generally available Claude model.",
-            Some(ReasoningEffort::High),
+            Some(DEFAULT_REASONING_EFFORT),
             Some(1_000_000),
             false,
             true,
@@ -208,20 +214,26 @@ fn kimi_model_info(
     exposes_effort: bool,
     priority: i32,
 ) -> ModelInfo {
-    let effort_description = if exposes_effort {
-        "Use Kimi K3's maximum supported reasoning effort."
-    } else {
-        "Keep Thinking ON to use Kimi K2.7 Code."
-    };
+    let mut supported_reasoning_levels = vec![
+        ReasoningEffortPreset::new(DEFAULT_REASONING_EFFORT, "Balanced thinking.")
+            .with_display_name(if exposes_effort {
+                "medium"
+            } else {
+                "Thinking ON"
+            }),
+    ];
+    if exposes_effort {
+        supported_reasoning_levels.push(ReasoningEffortPreset::new(
+            ReasoningEffort::Max,
+            "Use Kimi K3's maximum supported reasoning effort.",
+        ));
+    }
     ModelInfo {
         slug: slug.into(),
         display_name: display_name.into(),
         description: Some(description.into()),
-        default_reasoning_level: Some(ReasoningEffort::Max),
-        supported_reasoning_levels: vec![
-            ReasoningEffortPreset::new(ReasoningEffort::Max, effort_description)
-                .with_display_name(if exposes_effort { "max" } else { "Thinking ON" }),
-        ],
+        default_reasoning_level: Some(DEFAULT_REASONING_EFFORT),
+        supported_reasoning_levels,
         shell_type: ConfigShellToolType::Default,
         visibility: ModelVisibility::List,
         supported_in_api: true,
@@ -343,7 +355,9 @@ fn anthropic_model_info(
 /// Build a minimal fallback model descriptor for missing/unknown slugs.
 pub(crate) fn model_info_from_slug(slug: &str) -> ModelInfo {
     if let Some(mut model) = known_openai_compatible_model_info(slug) {
-        model.model_messages = local_personality_messages_for_slug(slug);
+        model.model_messages = model
+            .model_messages
+            .or_else(|| local_personality_messages_for_slug(slug));
         return model;
     }
 

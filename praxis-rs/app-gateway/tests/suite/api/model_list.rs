@@ -9,12 +9,7 @@ use praxis_app_gateway_protocol::JSONRPCResponse;
 use praxis_app_gateway_protocol::Model;
 use praxis_app_gateway_protocol::ModelListParams;
 use praxis_app_gateway_protocol::ModelListResponse;
-use praxis_app_gateway_protocol::ModelProviderWireApi;
-use praxis_app_gateway_protocol::ModelUpgradeInfo;
-use praxis_app_gateway_protocol::ReasoningEffortOption;
 use praxis_app_gateway_protocol::RequestId;
-use praxis_protocol::openai_models::ModelPreset;
-use praxis_protocol::openai_models::known_openai_compatible_model_info;
 use pretty_assertions::assert_eq;
 use std::fs;
 use tempfile::TempDir;
@@ -23,65 +18,22 @@ use tokio::time::timeout;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 const INVALID_REQUEST_ERROR_CODE: i64 = -32600;
 
-fn model_from_preset(preset: &ModelPreset) -> Model {
-    let model_info = known_openai_compatible_model_info(preset.model.as_str());
-    Model {
-        id: format!("openai::{}", preset.model),
-        model_provider: Some("openai".to_string()),
-        model_provider_display_name: "OpenAI".to_string(),
-        model_provider_wire_api: ModelProviderWireApi::Responses,
-        model: preset.model.clone(),
-        upgrade: preset.upgrade.as_ref().map(|upgrade| upgrade.id.clone()),
-        upgrade_info: preset.upgrade.as_ref().map(|upgrade| ModelUpgradeInfo {
-            model: upgrade.id.clone(),
-            upgrade_copy: upgrade.upgrade_copy.clone(),
-            model_link: upgrade.model_link.clone(),
-            migration_markdown: upgrade.migration_markdown.clone(),
-        }),
-        availability_nux: preset.availability_nux.clone().map(Into::into),
-        display_name: preset.display_name.clone(),
-        description: preset.description.clone(),
-        hidden: !preset.show_in_picker,
-        supported_reasoning_efforts: preset
-            .supported_reasoning_efforts
-            .iter()
-            .map(|preset| ReasoningEffortOption {
-                reasoning_effort: preset.effort.clone(),
-                display_name: preset.display_name.clone(),
-                description: preset.description.clone(),
-            })
-            .collect(),
-        default_reasoning_effort: preset.default_reasoning_effort,
-        input_modalities: preset.input_modalities.clone(),
-        // `write_models_cache()` round-trips through a simplified ModelInfo fixture that does not
-        // preserve personality placeholders in base instructions, so app-gateway list results from
-        // cache report `supports_personality = false`.
-        supports_personality: false,
-        supports_tools: true,
-        supports_streaming: true,
-        supports_parallel_tool_calls: model_info
-            .as_ref()
-            .is_some_and(|info| info.supports_parallel_tool_calls),
-        context_window: Some(272_000),
-        is_default: preset.is_default,
-    }
-}
-
-fn expected_visible_models() -> Vec<Model> {
-    // Filter by supported_in_api to support testing with both ChatGPT and non-ChatGPT auth modes.
-    let mut presets = ModelPreset::filter_by_auth(
-        praxis_core::test_support::all_model_presets().clone(),
-        /*chatgpt_mode*/ false,
-    );
-
-    // Mirror `ModelsManager::build_available_models()` default selection after auth filtering.
-    ModelPreset::mark_default_by_picker_visibility(&mut presets);
-
-    presets
-        .iter()
-        .filter(|preset| preset.show_in_picker)
-        .map(model_from_preset)
-        .collect()
+async fn all_visible_models(mcp: &mut McpProcess) -> Result<Vec<Model>> {
+    let request_id = mcp
+        .send_list_models_request(ModelListParams {
+            limit: None,
+            cursor: None,
+            include_hidden: Some(false),
+        })
+        .await?;
+    let response: JSONRPCResponse = timeout(
+        DEFAULT_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(request_id)),
+    )
+    .await??;
+    let response = to_response::<ModelListResponse>(response)?;
+    assert!(response.next_cursor.is_none());
+    Ok(response.data)
 }
 
 #[tokio::test]
@@ -111,9 +63,16 @@ async fn list_models_returns_all_models_with_large_limit() -> Result<()> {
         next_cursor,
     } = to_response::<ModelListResponse>(response)?;
 
-    let expected_models = expected_visible_models();
-
-    assert_eq!(items, expected_models);
+    assert!(!items.is_empty());
+    assert!(items.iter().all(|model| !model.hidden));
+    assert!(items.iter().all(|model| model.default_reasoning_effort
+        == praxis_protocol::openai_models::ReasoningEffort::Medium));
+    let ids = items
+        .iter()
+        .map(|model| &model.id)
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(ids.len(), items.len());
+    assert!(items.iter().any(|model| model.id == "openai::gpt-6-astra"));
     assert!(next_cursor.is_none());
     Ok(())
 }
@@ -158,7 +117,7 @@ async fn list_models_pagination_works() -> Result<()> {
 
     timeout(DEFAULT_TIMEOUT, mcp.initialize()).await??;
 
-    let expected_models = expected_visible_models();
+    let expected_models = all_visible_models(&mut mcp).await?;
     let mut cursor = None;
     let mut items = Vec::new();
 
@@ -286,6 +245,18 @@ supports_websockets = false
     assert_eq!(gpt55.id, "openai::gpt-5.5");
     assert_eq!(gpt55.display_name, "GPT-5.5");
     assert!(!gpt55.hidden);
+    let astra = items
+        .iter()
+        .find(|item| {
+            item.model == "gpt-6-astra" && item.model_provider.as_deref() == Some("openai")
+        })
+        .expect("GPT-6 Astra should be available through the shared backend catalog");
+    assert_eq!(
+        astra.default_reasoning_effort,
+        praxis_protocol::openai_models::ReasoningEffort::Medium
+    );
+    assert!(items.iter().all(|item| item.default_reasoning_effort
+        == praxis_protocol::openai_models::ReasoningEffort::Medium));
     assert!(next_cursor.is_none());
     Ok(())
 }

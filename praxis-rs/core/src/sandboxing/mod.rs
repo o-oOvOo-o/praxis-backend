@@ -12,7 +12,6 @@ use crate::exec::ExecExpiration;
 use crate::exec::ExecToolCallOutput;
 use crate::exec::SpawnObserver;
 use crate::exec::StdoutStream;
-use crate::exec::WindowsRestrictedTokenFilesystemOverlay;
 use crate::exec::execute_exec_request;
 #[cfg(target_os = "macos")]
 use crate::spawn::PRAXIS_SANDBOX_ENV_VAR;
@@ -25,6 +24,7 @@ use praxis_protocol::permissions::NetworkSandboxPolicy;
 use praxis_protocol::protocol::SandboxPolicy;
 use praxis_sandboxing::SandboxExecRequest;
 use praxis_sandboxing::SandboxType;
+use praxis_sandboxing::WindowsRestrictedTokenFilesystemOverlay;
 use std::collections::HashMap;
 use std::path::PathBuf;
 

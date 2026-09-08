@@ -2,6 +2,11 @@ use super::*;
 
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 
+pub(super) struct ModelSelection {
+    pub(super) provider_id: String,
+    pub(super) provider: Option<praxis_core::ModelProviderInfo>,
+}
+
 impl ChatWidget {
     pub(crate) fn open_model_popup(&mut self) {
         if !self.is_session_configured() {
@@ -12,16 +17,7 @@ impl ChatWidget {
             return;
         }
 
-        let presets: Vec<ModelPreset> = match self.model_catalog.try_list_models() {
-            Ok(models) => models,
-            Err(_) => {
-                self.add_info_message(
-                    "Models are being updated; please try /model again in a moment.".to_string(),
-                    /*hint*/ None,
-                );
-                return;
-            }
-        };
+        let presets = self.model_catalog.list_models().to_vec();
         self.open_model_popup_with_presets(presets);
     }
 
@@ -137,26 +133,23 @@ impl ChatWidget {
         Some(trimmed.to_string())
     }
 
-    pub(super) fn selection_metadata_or_current(
-        &self,
-        preset: &ModelPreset,
-    ) -> ModelCatalogSelectionMetadata {
+    pub(super) fn selection_metadata_or_current(&self, preset: &ModelPreset) -> ModelSelection {
         if let Some(metadata) = self.model_catalog.selection_metadata(preset.id.as_str()) {
-            return metadata.clone();
-        }
-
-        if let Some(owner) = first_party_model_owner(preset.model.as_str())
-            && let Some(provider) = self.config.model_providers.get(owner.provider_id)
-        {
-            return ModelCatalogSelectionMetadata {
-                provider_id: owner.provider_id.to_owned(),
-                provider: provider.clone(),
+            return ModelSelection {
+                provider_id: metadata.provider_id.clone(),
+                provider: Some(metadata.provider.clone()),
             };
         }
 
-        ModelCatalogSelectionMetadata {
+        if let Some(provider_id) = preset.id.strip_suffix(&format!("::{}", preset.model)) {
+            return ModelSelection {
+                provider_id: provider_id.to_owned(),
+                provider: self.config.model_providers.get(provider_id).cloned(),
+            };
+        }
+        ModelSelection {
             provider_id: self.current_model_provider_id().to_owned(),
-            provider: self.config.model_provider.clone(),
+            provider: Some(self.config.model_provider.clone()),
         }
     }
 
@@ -174,24 +167,13 @@ impl ChatWidget {
             && selection.provider_id == self.current_model_provider_id()
     }
 
-    fn is_frontier_direct_model(preset: &ModelPreset) -> bool {
-        matches!(preset.model.as_str(), "gpt-5.5" | "gpt-5.5-pro")
-    }
-
     pub(super) fn model_picker_primary_rank(preset: &ModelPreset) -> (u8, usize) {
         if Self::is_auto_model(&preset.model) {
             (0, Self::auto_model_order(&preset.model))
-        } else if Self::is_frontier_direct_model(preset) {
-            (
-                1,
-                match preset.model.as_str() {
-                    "gpt-5.5" => 0,
-                    "gpt-5.5-pro" => 1,
-                    _ => usize::MAX,
-                },
-            )
         } else {
-            (2, usize::MAX)
+            praxis_protocol::openai_models::known_openai_compatible_model_info(&preset.model)
+                .map(|model| (1, model.priority.max(0) as usize))
+                .unwrap_or((2, usize::MAX))
         }
     }
 
@@ -232,7 +214,7 @@ impl ChatWidget {
                 let actions = Self::model_selection_actions(
                     model.clone(),
                     selection.provider_id.clone(),
-                    Some(selection.provider.clone()),
+                    selection.provider.clone(),
                     Some(preset.default_reasoning_effort.clone()),
                     should_prompt_plan_mode_scope,
                 );
@@ -318,7 +300,7 @@ impl ChatWidget {
                 tx.send(AppEvent::OpenReasoningPopup {
                     model: preset_for_event,
                     provider_id: selection.provider_id.clone(),
-                    provider: Some(selection.provider.clone()),
+                    provider: selection.provider.clone(),
                 });
             })];
             items.push(SelectionItem {
@@ -570,10 +552,14 @@ impl ChatWidget {
                 .unwrap_or_default();
             format!("⚠ {effort_label} reasoning{delegation} can quickly consume plan limits.")
         });
-        let warn_for_model = preset.model.starts_with("gpt-5.1-codex")
-            || preset.model.starts_with("gpt-5.1-codex-max")
-            || preset.model.starts_with("gpt-5.2")
-            || preset.model.starts_with("gpt-5.6");
+        let warn_for_model = supported.iter().any(|option| {
+            matches!(
+                option.effort,
+                ReasoningEffortConfig::XHigh
+                    | ReasoningEffortConfig::Max
+                    | ReasoningEffortConfig::Ultra
+            )
+        });
 
         struct EffortChoice {
             stored: Option<ReasoningEffortConfig>,

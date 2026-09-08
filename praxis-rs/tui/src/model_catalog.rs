@@ -3,9 +3,8 @@ use praxis_core::models_manager::collaboration_mode_presets::builtin_collaborati
 use praxis_protocol::config_types::CollaborationModeMask;
 use praxis_protocol::openai_models::ModelPreset;
 use std::collections::HashMap;
-use std::convert::Infallible;
 
-use crate::model_discovery::ModelCatalogSelectionMetadata;
+use praxis_core::models_manager::catalog::ModelCatalogSelectionMetadata;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ModelCatalog {
@@ -27,8 +26,8 @@ impl ModelCatalog {
         }
     }
 
-    pub(crate) fn try_list_models(&self) -> Result<Vec<ModelPreset>, Infallible> {
-        Ok(self.models.clone())
+    pub(crate) fn list_models(&self) -> &[ModelPreset] {
+        &self.models
     }
 
     pub(crate) fn list_collaboration_modes(&self) -> Vec<CollaborationModeMask> {

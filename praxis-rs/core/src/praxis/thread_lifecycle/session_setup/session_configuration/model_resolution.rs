@@ -18,11 +18,9 @@ pub(super) async fn resolve(
     session_source: &SessionSource,
 ) -> ResolvedModelSelection {
     let refresh_strategy = refresh_strategy_for(session_source);
-    if config.model.is_none() || !matches!(refresh_strategy, RefreshStrategy::Offline) {
-        let _ = models_manager
-            .list_models_for_config(config, refresh_strategy)
-            .await;
-    }
+    let _ = models_manager
+        .list_spawn_agent_models_for_config(config, refresh_strategy)
+        .await;
     let model = models_manager
         .get_default_model_for_config(&config.model, refresh_strategy, config)
         .await;

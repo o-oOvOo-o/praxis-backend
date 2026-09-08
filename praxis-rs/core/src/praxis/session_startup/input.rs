@@ -31,6 +31,7 @@ pub(super) struct SessionStartupInput {
     pub(super) tx_event: Sender<Event>,
     pub(super) agent_status: watch::Sender<AgentStatus>,
     pub(super) initial_history: InitialHistory,
+    pub(super) prepared_rollout_writer: Option<praxis_rollout::recorder::PreparedRolloutWriter>,
     pub(super) session_source: SessionSource,
     pub(super) environment_manager: Arc<EnvironmentManager>,
     pub(super) capability_runtime: CapabilityRuntime,

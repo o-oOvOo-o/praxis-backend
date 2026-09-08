@@ -10,6 +10,8 @@ use crate::praxis::SessionConfiguration;
 
 pub(in crate::praxis::session_startup::pipeline) struct StartupArtifactsInput<'a> {
     pub(in crate::praxis::session_startup::pipeline) initial_history: &'a InitialHistory,
+    pub(in crate::praxis::session_startup::pipeline) prepared_rollout_writer:
+        Option<praxis_rollout::recorder::PreparedRolloutWriter>,
     pub(in crate::praxis::session_startup::pipeline) session_configuration:
         &'a SessionConfiguration,
     pub(in crate::praxis::session_startup::pipeline) session_source: SessionSource,

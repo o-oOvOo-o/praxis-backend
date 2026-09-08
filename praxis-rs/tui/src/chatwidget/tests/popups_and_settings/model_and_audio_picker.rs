@@ -117,7 +117,7 @@ async fn model_picker_hides_show_in_picker_false_models_from_cache() {
 }
 
 #[tokio::test]
-async fn model_picker_shows_gpt55_on_primary_screen() {
+async fn model_picker_shows_catalog_models_on_primary_screen() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("praxis-auto-balanced")).await;
     chat.thread_id = Some(ThreadId::new());
     let preset = |slug: &str, display_name: &str| ModelPreset {
@@ -142,10 +142,13 @@ async fn model_picker_shows_gpt55_on_primary_screen() {
 
     chat.open_model_popup_with_presets(vec![
         preset("praxis-auto-balanced", "Auto Balanced"),
+        preset("gpt-6-astra", "GPT-6 Astra"),
         preset("gpt-5.5", "GPT-5.5"),
         preset("other-model", "Other Model"),
     ]);
     let popup = render_bottom_popup(&chat, /*width*/ 100);
+    assert!(popup.contains("GPT-6 Astra"));
+    assert!(popup.find("GPT-6 Astra").unwrap() < popup.find("GPT-5.5").unwrap());
 
     assert!(
         popup.contains("GPT-5.5"),
@@ -173,7 +176,7 @@ async fn known_first_party_model_selection_metadata_falls_back_to_owner_provider
     let selection = chat.selection_metadata_or_current(&preset);
 
     assert_eq!(selection.provider_id, "openai");
-    assert_eq!(selection.provider.name, "OpenAI");
+    assert_eq!(selection.provider.unwrap().name, "OpenAI");
 }
 
 #[tokio::test]
@@ -332,4 +335,14 @@ async fn single_reasoning_option_skips_selection() {
             .any(|ev| matches!(ev, AppEvent::UpdateReasoningEffort(Some(effort)) if *effort == ReasoningEffortConfig::High)),
         "expected reasoning effort to be applied automatically; events: {events:?}"
     );
+}
+
+#[tokio::test]
+async fn remote_provider_identity_is_not_replaced_by_current_provider() {
+    let (chat, _, _) = make_chatwidget_manual(Some("gpt-5.5")).await;
+    let mut preset = get_available_model(&chat, "gpt-5.5");
+    preset.id = "remote-only::gpt-5.5".to_owned();
+    let selected = chat.selection_metadata_or_current(&preset);
+    assert_eq!(selected.provider_id, "remote-only");
+    assert!(selected.provider.is_none());
 }

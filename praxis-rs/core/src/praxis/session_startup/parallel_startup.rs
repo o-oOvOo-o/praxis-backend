@@ -32,8 +32,14 @@ pub(super) async fn run(
     session_configuration: &SessionConfiguration,
     rollout_params: RolloutRecorderParams,
     state_builder: Option<ThreadMetadataBuilder>,
+    prepared_rollout_writer: Option<praxis_rollout::recorder::PreparedRolloutWriter>,
 ) -> anyhow::Result<ParallelStartup> {
-    let rollout_fut = rollout_lane::run(Arc::clone(&config), rollout_params, state_builder.clone());
+    let rollout_fut = rollout_lane::run(
+        Arc::clone(&config),
+        rollout_params,
+        state_builder.clone(),
+        prepared_rollout_writer,
+    );
     let is_subagent = matches!(
         session_configuration.session_source,
         SessionSource::SubAgent(_)

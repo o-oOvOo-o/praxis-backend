@@ -1,5 +1,20 @@
 use super::*;
 
+#[test]
+fn pending_thread_replay_never_suppresses_terminal_draws() {
+    assert!(!App::should_skip_tui_event_while_replay_pending(
+        &TuiEvent::Draw,
+        Some(7),
+    ));
+}
+
+#[test]
+fn terminal_draw_watchdog_repairs_a_stalled_frame_stream() {
+    assert!(!App::should_force_terminal_draw(Duration::from_millis(999)));
+    assert!(App::should_force_terminal_draw(Duration::from_secs(1)));
+    assert!(App::should_force_terminal_draw(Duration::from_secs(5)));
+}
+
 #[tokio::test]
 async fn backtrack_selection_with_duplicate_history_targets_unique_turn() {
     let (mut app, _app_event_rx, mut op_rx) = make_test_app_with_channels().await;

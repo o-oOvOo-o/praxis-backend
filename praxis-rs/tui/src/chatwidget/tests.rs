@@ -251,6 +251,7 @@ mod guardian;
 mod helpers;
 mod history_replay;
 mod mcp_startup;
+mod namegen;
 mod permissions;
 mod plan_mode;
 mod popups_and_settings;

@@ -10,7 +10,7 @@
 
 ## Worker 选择
 
-- 当可用时，优先显式使用 OpenAI hosted 路径的最强 coding worker，例如 `agent_type=worker`、`model_provider=openai`、`model=gpt-5.5`、`reasoning_effort=xhigh`。
+- 需要 OpenAI-backed Praxis worker 时，从工具给出的模型目录选择规范 model id，并显式指定 `model_provider=openai`；默认推理档位为 `medium`，只有任务需要或用户指定时才覆盖。
 - 不要发明不可用模型名；如果工具返回模型不存在、权限不足或 reasoning effort 不支持，读取错误并选择已配置的最强 OpenAI-backed Praxis worker。
 - 如果 OpenAI-backed Praxis worker 不可用、余额不足、权限不可用或用户不要求强制使用它，可以回退到 DeepSeek worker 或你自己执行。回退时要明确说明执行层降级，并把任务切得更窄、验证做得更硬。
 

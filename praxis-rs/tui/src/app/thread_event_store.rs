@@ -17,6 +17,9 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+#[cfg(test)]
+use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::mpsc;
 
 mod cached_view_delta;
@@ -85,6 +88,7 @@ pub(super) struct ThreadEventStore {
     cached_view_delta: Option<CachedViewDeltaLog>,
     pending_interactive_replay: PendingInteractiveReplayState,
     active_turn_id: Option<String>,
+    active_turn_started_at: Option<Instant>,
     pub(super) input_state: Option<ThreadInputState>,
     pub(super) capacity: usize,
     pub(super) active: bool,
@@ -114,6 +118,7 @@ impl ThreadEventStore {
             cached_view_delta: None,
             pending_interactive_replay: PendingInteractiveReplayState::default(),
             active_turn_id: None,
+            active_turn_started_at: None,
             input_state: None,
             capacity,
             active: false,
@@ -155,6 +160,7 @@ impl ThreadEventStore {
     pub(super) fn set_status(&mut self, status: ThreadStatus) {
         if !status.is_active() {
             self.active_turn_id = None;
+            self.active_turn_started_at = None;
         }
         self.status = Some(status);
     }
@@ -268,11 +274,15 @@ impl ThreadEventStore {
     }
 
     pub(super) fn set_turns(&mut self, turns: Vec<Turn>) {
-        self.active_turn_id = turns
+        let active_turn_id = turns
             .iter()
             .rev()
             .find(|turn| matches!(turn.status, TurnStatus::InProgress))
             .map(|turn| turn.id.clone());
+        if self.active_turn_id != active_turn_id {
+            self.active_turn_started_at = active_turn_id.as_ref().map(|_| Instant::now());
+        }
+        self.active_turn_id = active_turn_id;
         self.turns = Arc::new(compact_visible_replay_turns(turns));
     }
 
@@ -314,11 +324,15 @@ impl ThreadEventStore {
         }
         match &notification {
             ServerNotification::TurnStarted(turn) => {
+                if self.active_turn_id.as_deref() != Some(turn.turn.id.as_str()) {
+                    self.active_turn_started_at = Some(Instant::now());
+                }
                 self.active_turn_id = Some(turn.turn.id.clone());
             }
             ServerNotification::TurnCompleted(turn) => {
                 if self.active_turn_id.as_deref() == Some(turn.turn.id.as_str()) {
                     self.active_turn_id = None;
+                    self.active_turn_started_at = None;
                 }
             }
             ServerNotification::ThreadClosed(_) => {
@@ -475,6 +489,16 @@ impl ThreadEventStore {
         self.active_turn_id.as_deref()
     }
 
+    pub(super) fn active_turn_elapsed_seconds(&self) -> Option<u64> {
+        self.active_turn_started_at
+            .map(|started| started.elapsed().as_secs())
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_active_turn_elapsed_seconds_for_test(&mut self, seconds: u64) {
+        self.active_turn_started_at = Some(Instant::now() - Duration::from_secs(seconds));
+    }
+
     pub(super) fn last_event_sequence(&self) -> u64 {
         self.last_event_sequence
     }
@@ -571,6 +595,7 @@ impl ThreadEventStore {
 
     pub(super) fn clear_active_turn_id(&mut self) {
         self.active_turn_id = None;
+        self.active_turn_started_at = None;
     }
 }
 

@@ -647,7 +647,9 @@ fn apply_kimi_common_thinking_config(
 
 fn kimi_k3_effort_value(effort: Option<&ReasoningEffortConfig>) -> Result<&'static str> {
     match effort {
-        None => Ok("max"),
+        None => kimi_k3_effort_value(Some(
+            &praxis_protocol::openai_models::DEFAULT_REASONING_EFFORT,
+        )),
         Some(ReasoningEffortConfig::None) => unreachable!("none is handled before mapping"),
         Some(ReasoningEffortConfig::Minimal | ReasoningEffortConfig::Low) => Ok("low"),
         Some(ReasoningEffortConfig::Medium | ReasoningEffortConfig::High) => Ok("high"),

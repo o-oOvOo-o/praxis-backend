@@ -369,7 +369,7 @@ impl ChatComposer {
     }
 
     fn reject_slash_command_if_unavailable(&self, cmd: SlashCommand) -> bool {
-        if !self.is_task_running || cmd.available_during_task() {
+        if !self.is_task_running || crate::slash_command::available_during_task(cmd) {
             return false;
         }
         let message = format!(

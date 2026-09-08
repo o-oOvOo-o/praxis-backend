@@ -27,6 +27,7 @@ pub(in crate::praxis::session_startup::pipeline) async fn collect(
         input.session_configuration,
         rollout_params,
         state_builder,
+        input.prepared_rollout_writer,
     )
     .await?;
 

@@ -479,7 +479,7 @@ fn spawn_agent_common_properties(agent_type_description: &str) -> BTreeMap<Strin
             "model".to_string(),
             JsonSchema::String {
                 description: Some(
-                    "Optional model override for the new agent. Replaces the inherited model; known first-party model ids can also switch the provider automatically. For the strongest OpenAI-backed Praxis coding worker, use `gpt-5.6-sol`; natural aliases like `5.6 sol`, `gpt5.6-sol`, and `gpt 5.6 sol ultra` are accepted."
+                    "Optional model override for the new agent. Replaces the inherited model; known first-party model ids can also switch the provider automatically. Choose a model from the available model catalog below; that catalog owns model capabilities and defaults."
                         .to_string(),
                 ),
             },
@@ -519,7 +519,7 @@ fn spawn_agent_tool_description(
 {available_models_description}
 ### Cross-provider coding workers
 - The models above are Praxis' canonical, credential-ready cross-provider spawn catalog, not merely the current chat provider's picker. A main DeepSeek thread is not pinned to DeepSeek workers.
-- Use `k3[1m]` or `k3` for Kimi K3 workers, Claude model ids for Anthropic workers, and `gpt-5.6-luna`, `gpt-5.6-terra`, or `gpt-5.6-sol` for OpenAI-backed workers. Praxis owns provider inference, keyring credentials, and endpoint routing.
+- Use the model ids and providers from the catalog above. Praxis owns provider inference, keyring credentials, and endpoint routing.
 - If a listed model is requested, select it directly with `model` and optionally `model_provider`; do not speculate that it is unavailable before calling the tool. Report only an actual backend error returned by `spawn_agent`.
 - Praxis configuration is `config.toml` plus its OS credential store. Never invent or ask the user to inspect `.praxis/providers.yaml`.
 

@@ -9,7 +9,7 @@ fn kimi_k3_uses_native_thinking_object_and_max_completion_tokens() {
         .expect("Kimi K3 default request");
     assert_eq!(
         default_request["thinking"],
-        json!({ "type": "enabled", "effort": "max" })
+        json!({ "type": "enabled", "effort": "high" })
     );
     assert_eq!(default_request["max_completion_tokens"], 64 * 1024);
     assert!(default_request.get("output_config").is_none());

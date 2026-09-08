@@ -1,7 +1,6 @@
 use super::ThreadStoreGitInfo;
 use super::ThreadStoreSummary;
 use super::preview::rollout_preview_from_summary_values;
-use super::source_metadata::with_thread_spawn_agent_metadata;
 use super::timestamp::non_empty_timestamp;
 use super::timestamp::non_empty_timestamp_str;
 use super::timestamp::read_updated_at;
@@ -39,13 +38,14 @@ pub(super) async fn read_summary_from_rollout(
         git,
     } = session_meta_line;
     let mut session_meta = session_meta;
-    session_meta.source = with_thread_spawn_agent_metadata(
-        session_meta.source.clone(),
-        session_meta.agent_base_name.clone(),
-        session_meta.agent_title.clone(),
-        session_meta.agent_display_name.clone(),
-        session_meta.agent_role.clone(),
-    );
+    session_meta.source =
+        praxis_protocol::protocol::SessionSource::with_thread_spawn_agent_metadata(
+            session_meta.source.clone(),
+            session_meta.agent_base_name.clone(),
+            session_meta.agent_title.clone(),
+            session_meta.agent_display_name.clone(),
+            session_meta.agent_role.clone(),
+        );
 
     let created_at = non_empty_timestamp_str(&session_meta.timestamp);
     let updated_at = read_updated_at(path, created_at).await;

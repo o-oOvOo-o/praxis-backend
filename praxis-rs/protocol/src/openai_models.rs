@@ -30,6 +30,10 @@ use crate::config_types::Verbosity;
 use crate::models::BASE_INSTRUCTIONS_DEFAULT;
 use crate::models::BASE_INSTRUCTIONS_GPT_5_6;
 
+const BASE_INSTRUCTIONS_GPT_6: &str = include_str!("prompts/base_instructions/gpt_6.md");
+
+pub const DEFAULT_REASONING_EFFORT: ReasoningEffort = ReasoningEffort::Medium;
+
 const PERSONALITY_PLACEHOLDER: &str = "{{ personality }}";
 pub const IMAGE_GENERATION_TOOL_NAME: &str = "image_generation";
 
@@ -491,13 +495,14 @@ impl ModelInfo {
 pub fn provider_neutral_reasoning_levels() -> (Option<ReasoningEffort>, Vec<ReasoningEffortPreset>)
 {
     (
-        None,
+        Some(DEFAULT_REASONING_EFFORT),
         vec![
             ReasoningEffortPreset {
                 effort: ReasoningEffort::Low,
                 display_name: None,
                 description: "Enable model thinking.".to_string(),
             },
+            ReasoningEffortPreset::new(DEFAULT_REASONING_EFFORT, "Balanced model thinking."),
             ReasoningEffortPreset {
                 effort: ReasoningEffort::High,
                 display_name: None,
@@ -521,36 +526,58 @@ pub fn provider_neutral_reasoning_levels() -> (Option<ReasoningEffort>, Vec<Reas
 pub fn known_openai_compatible_model_info(model_id: &str) -> Option<ModelInfo> {
     let normalized = model_id.to_ascii_lowercase();
     match normalized.as_str() {
-        "gpt-5.6-sol" => Some(with_gpt56_prompt(openai_first_party_model_info(
-            model_id,
-            "GPT-5.6-Sol",
-            "Latest frontier agentic coding model.",
-            Some(ReasoningEffort::Medium),
-            gpt56_reasoning_levels(/*supports_ultra*/ true),
-            Some(372_000),
-            Some(MultiAgentVersion::V2),
-            /*priority*/ 1,
-        ))),
-        "gpt-5.6-terra" => Some(with_gpt56_prompt(openai_first_party_model_info(
-            model_id,
-            "GPT-5.6-Terra",
-            "Balanced agentic coding model for everyday work.",
-            Some(ReasoningEffort::Medium),
-            gpt56_reasoning_levels(/*supports_ultra*/ true),
-            Some(372_000),
-            Some(MultiAgentVersion::V2),
-            /*priority*/ 2,
-        ))),
-        "gpt-5.6-luna" => Some(with_gpt56_prompt(openai_first_party_model_info(
-            model_id,
-            "GPT-5.6-Luna",
-            "Fast and affordable agentic coding model.",
-            Some(ReasoningEffort::Medium),
-            gpt56_reasoning_levels(/*supports_ultra*/ false),
-            Some(372_000),
-            Some(MultiAgentVersion::V1),
-            /*priority*/ 3,
-        ))),
+        "gpt-6-astra" => Some(with_model_prompt(
+            openai_first_party_model_info(
+                model_id,
+                "GPT-6 Astra",
+                "Most capable OpenAI model for complex reasoning and coding.",
+                Some(ReasoningEffort::Medium),
+                gpt56_reasoning_levels(/*supports_ultra*/ false),
+                Some(1_050_000),
+                None,
+                /*priority*/ 0,
+            ),
+            BASE_INSTRUCTIONS_GPT_6,
+        )),
+        "gpt-5.6-sol" => Some(with_model_prompt(
+            openai_first_party_model_info(
+                model_id,
+                "GPT-5.6-Sol",
+                "Latest frontier agentic coding model.",
+                Some(ReasoningEffort::Medium),
+                gpt56_reasoning_levels(/*supports_ultra*/ true),
+                Some(372_000),
+                Some(MultiAgentVersion::V2),
+                /*priority*/ 1,
+            ),
+            BASE_INSTRUCTIONS_GPT_5_6,
+        )),
+        "gpt-5.6-terra" => Some(with_model_prompt(
+            openai_first_party_model_info(
+                model_id,
+                "GPT-5.6-Terra",
+                "Balanced agentic coding model for everyday work.",
+                Some(ReasoningEffort::Medium),
+                gpt56_reasoning_levels(/*supports_ultra*/ true),
+                Some(372_000),
+                Some(MultiAgentVersion::V2),
+                /*priority*/ 2,
+            ),
+            BASE_INSTRUCTIONS_GPT_5_6,
+        )),
+        "gpt-5.6-luna" => Some(with_model_prompt(
+            openai_first_party_model_info(
+                model_id,
+                "GPT-5.6-Luna",
+                "Fast and affordable agentic coding model.",
+                Some(ReasoningEffort::Medium),
+                gpt56_reasoning_levels(/*supports_ultra*/ false),
+                Some(372_000),
+                Some(MultiAgentVersion::V1),
+                /*priority*/ 3,
+            ),
+            BASE_INSTRUCTIONS_GPT_5_6,
+        )),
         "gpt-5.5" => Some(openai_first_party_model_info(
             model_id,
             "GPT-5.5",
@@ -575,28 +602,28 @@ pub fn known_openai_compatible_model_info(model_id: &str) -> Option<ModelInfo> {
             model_id,
             "DeepSeek V4 Pro",
             "DeepSeek V4 Pro model metadata from the official DeepSeek API catalog.",
-            Some(ReasoningEffort::High),
+            Some(DEFAULT_REASONING_EFFORT),
             /*priority*/ 10,
         )),
         "deepseek-v4-flash" => Some(deepseek_model_info(
             model_id,
             "DeepSeek V4 Flash",
             "DeepSeek V4 Flash model metadata from the official DeepSeek API catalog.",
-            Some(ReasoningEffort::High),
+            Some(DEFAULT_REASONING_EFFORT),
             /*priority*/ 11,
         )),
         "deepseek-chat" => Some(deepseek_model_info(
             model_id,
             "DeepSeek Chat",
             "Compatibility alias for the non-thinking mode of DeepSeek V4 Flash.",
-            Some(ReasoningEffort::None),
+            Some(DEFAULT_REASONING_EFFORT),
             /*priority*/ 12,
         )),
         "deepseek-reasoner" => Some(deepseek_model_info(
             model_id,
             "DeepSeek Reasoner",
             "Compatibility alias for the thinking mode of DeepSeek V4 Flash.",
-            Some(ReasoningEffort::High),
+            Some(DEFAULT_REASONING_EFFORT),
             /*priority*/ 13,
         )),
         _ => None,
@@ -606,6 +633,7 @@ pub fn known_openai_compatible_model_info(model_id: &str) -> Option<ModelInfo> {
 /// Local first-party model metadata that should be available in pickers even before remote catalog refresh catches up.
 pub fn known_openai_compatible_picker_model_infos() -> Vec<ModelInfo> {
     [
+        "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
         "gpt-5.6-luna",
@@ -662,21 +690,13 @@ fn openai_first_party_model_info(
     }
 }
 
-fn with_gpt56_prompt(mut model: ModelInfo) -> ModelInfo {
-    model.base_instructions = BASE_INSTRUCTIONS_GPT_5_6.to_string();
-    model.model_messages = Some(gpt56_model_messages());
+fn with_model_prompt(mut model: ModelInfo, prompt: &str) -> ModelInfo {
+    model.base_instructions = prompt.to_string();
+    model.model_messages = Some(ModelMessages {
+        instructions_template: Some(prompt.to_string()),
+        instructions_variables: None,
+    });
     model
-}
-
-fn gpt56_model_messages() -> ModelMessages {
-    ModelMessages {
-        instructions_template: Some(BASE_INSTRUCTIONS_GPT_5_6.to_string()),
-        instructions_variables: Some(ModelInstructionsVariables {
-            personality_default: Some(String::new()),
-            personality_friendly: Some(String::new()),
-            personality_pragmatic: Some(String::new()),
-        }),
-    }
 }
 
 fn frontier_reasoning_levels() -> Vec<ReasoningEffortPreset> {
@@ -855,9 +875,7 @@ impl From<ModelInfo> for ModelPreset {
             model: info.slug.clone(),
             display_name: info.display_name,
             description: info.description.unwrap_or_default(),
-            default_reasoning_effort: info
-                .default_reasoning_level
-                .unwrap_or(ReasoningEffort::None),
+            default_reasoning_effort: DEFAULT_REASONING_EFFORT,
             supported_reasoning_efforts: info.supported_reasoning_levels.clone(),
             supports_personality,
             is_default: false, // default is the highest priority available model

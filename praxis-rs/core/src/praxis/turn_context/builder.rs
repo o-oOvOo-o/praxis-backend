@@ -36,6 +36,10 @@ impl Session {
                 &per_turn_config,
             )
             .await;
+        self.services
+            .models_manager
+            .ensure_spawn_catalog_for_config(&per_turn_config)
+            .await;
         let skills_outcome = turn_skills::load(self, &sub_id, &per_turn_config);
         let mut turn_context: TurnContext = Self::make_turn_context(
             self.conversation_id,

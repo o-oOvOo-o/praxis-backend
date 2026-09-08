@@ -654,7 +654,9 @@ impl App {
                 workspace_row_accent(theme, is_active, is_selected, is_hovered, is_controlled),
             );
 
-            let status_color = if is_controlled {
+            let is_loading = self.workspace.pending_thread_load.target() == Some(&row.thread_id);
+            let status_label = if is_loading { "LOAD".to_string() } else { workspace_row_status_label(row) };
+            let status_color = if is_loading { green } else if is_controlled {
                 controlled_accent
             } else {
                 match &row.status {
@@ -721,7 +723,7 @@ impl App {
                     format!(
                         "{:<width$}",
                         workspace_truncate(
-                            &workspace_row_status_label(row),
+                            &status_label,
                             WORKSPACE_STATUS_LABEL_WIDTH,
                         ),
                         width = WORKSPACE_STATUS_LABEL_WIDTH

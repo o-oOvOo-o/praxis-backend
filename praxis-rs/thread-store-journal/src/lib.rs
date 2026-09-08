@@ -101,6 +101,49 @@ mod tests {
     }
 
     #[test]
+    fn recovery_rejects_old_duplicate_command_across_segments() {
+        use std::io::Write as _;
+
+        let root = TempDir::new().expect("tempdir");
+        let thread_id = thread_id(900);
+        let mut journal = open(&root, thread_id);
+        for index in 0..600 {
+            journal
+                .append(
+                    batch(thread_id, 1000 + index, 2000 + index * 2, journal.head()),
+                    JournalDurability::Buffered,
+                )
+                .expect("append unique command");
+        }
+        assert!(journal.segments().len() > 1);
+        let tail = journal
+            .segments()
+            .last()
+            .expect("tail segment")
+            .path
+            .clone();
+        let duplicate = batch(thread_id, 1000, 4000, journal.head());
+        drop(journal);
+        let frame = crate::format::encode_batch(
+            duplicate,
+            JournalDurability::Buffered,
+            JournalConfig::DEFAULT_MAX_FRAME_PAYLOAD_BYTES,
+        )
+        .expect("encode otherwise valid duplicate");
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&tail)
+            .expect("open tail")
+            .write_all(&frame.bytes)
+            .expect("write duplicate");
+        assert!(matches!(
+            ThreadJournal::open(JournalConfig::new(root.path()), thread_id),
+            Err(JournalError::CorruptSegment { reason, .. })
+                if reason == "duplicate committed command id"
+        ));
+    }
+
+    #[test]
     fn snapshot_reads_committed_prefix_while_writer_remains_open() {
         let root = TempDir::new().expect("tempdir");
         let thread_id = thread_id(90);
@@ -185,6 +228,52 @@ mod tests {
                 .expect("reopen and fold journal");
         assert_eq!(reopened.head(), head);
         assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn recovery_preserves_order_across_frames_and_repairs_partial_tail() {
+        use std::io::Write as _;
+        let root = TempDir::new().expect("tempdir");
+        let thread_id = thread_id(200);
+        let config = JournalConfig::new(root.path());
+        let mut journal = ThreadJournal::open(config.clone(), thread_id).expect("open journal");
+        for seed in 0..64 {
+            journal
+                .append(
+                    batch(thread_id, 1000 + seed * 3, 1001 + seed * 3, journal.head()),
+                    JournalDurability::Durable,
+                )
+                .expect("append");
+        }
+        let head = journal.head();
+        let segment = journal.segments()[0].path.clone();
+        drop(journal);
+        let clean_len = std::fs::metadata(&segment).expect("metadata").len();
+        assert!(clean_len > 8192);
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&segment)
+            .expect("open tail")
+            .write_all(&[1, 2, 3])
+            .expect("append partial frame");
+        let revisions = fold_snapshot(
+            JournalConfig::new(root.path()),
+            thread_id,
+            Vec::new(),
+            |revisions, event| revisions.push(event.revision.get()),
+        )
+        .expect("fold snapshot");
+        assert_eq!(revisions, (1..=64).collect::<Vec<_>>());
+        assert_eq!(
+            std::fs::metadata(&segment).expect("metadata").len(),
+            clean_len + 3
+        );
+        let recovered = ThreadJournal::open(config, thread_id).expect("recover journal");
+        assert_eq!(recovered.head(), head);
+        assert_eq!(
+            std::fs::metadata(&segment).expect("metadata").len(),
+            clean_len
+        );
     }
 
     #[test]

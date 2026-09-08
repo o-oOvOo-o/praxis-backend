@@ -9,6 +9,7 @@ pub(crate) fn workspace_menu_actions() -> &'static [WorkspaceMenuAction] {
         WorkspaceMenuAction::Open,
         WorkspaceMenuAction::TogglePin,
         WorkspaceMenuAction::Rename,
+        WorkspaceMenuAction::RegenerateName,
         WorkspaceMenuAction::Archive,
         WorkspaceMenuAction::Delete,
         WorkspaceMenuAction::ForkLocal,
@@ -30,6 +31,8 @@ pub(crate) fn workspace_menu_action_label(
             WorkspaceMenuAction::TogglePin => "Pin",
             WorkspaceMenuAction::Rename if locked => "Rename locked",
             WorkspaceMenuAction::Rename => "Rename...",
+            WorkspaceMenuAction::RegenerateName if locked => "Generate name locked",
+            WorkspaceMenuAction::RegenerateName => "Generate name",
             WorkspaceMenuAction::Archive if locked => "Archive locked",
             WorkspaceMenuAction::Archive => "Archive",
             WorkspaceMenuAction::Delete if locked => "Delete locked",
@@ -45,6 +48,8 @@ pub(crate) fn workspace_menu_action_label(
             WorkspaceMenuAction::TogglePin => "置顶",
             WorkspaceMenuAction::Rename if locked => "重命名被锁定",
             WorkspaceMenuAction::Rename => "重命名...",
+            WorkspaceMenuAction::RegenerateName if locked => "生成名称被锁定",
+            WorkspaceMenuAction::RegenerateName => "生成名称",
             WorkspaceMenuAction::Archive if locked => "归档被锁定",
             WorkspaceMenuAction::Archive => "归档",
             WorkspaceMenuAction::Delete if locked => "删除被锁定",
@@ -61,6 +66,7 @@ pub(crate) fn workspace_menu_action_disabled(action: WorkspaceMenuAction, locked
         && matches!(
             action,
             WorkspaceMenuAction::Rename
+                | WorkspaceMenuAction::RegenerateName
                 | WorkspaceMenuAction::Archive
                 | WorkspaceMenuAction::Delete
                 | WorkspaceMenuAction::ForkLocal

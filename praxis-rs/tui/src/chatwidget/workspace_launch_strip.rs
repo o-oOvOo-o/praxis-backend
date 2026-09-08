@@ -123,7 +123,7 @@ impl ChatWidget {
     }
 
     fn workspace_current_model_preset(&self) -> Option<ModelPreset> {
-        let models = self.model_catalog.try_list_models().ok()?;
+        let models = self.model_catalog.list_models();
         let current_model = self.current_model().to_string();
         let current_provider_id = self.current_model_provider_id().to_string();
 
@@ -135,8 +135,9 @@ impl ChatWidget {
         }
 
         models
-            .into_iter()
+            .iter()
             .find(|preset| preset.model == current_model)
+            .cloned()
     }
 
     fn workspace_reasoning_explicit_effort(&self) -> Option<ReasoningEffortConfig> {

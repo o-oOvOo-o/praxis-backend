@@ -41,6 +41,8 @@ use praxis_state::ThreadMetadataBuilder;
 mod jsonl_writer;
 mod native_metadata;
 mod native_rollout;
+mod prepared_resume;
+pub use prepared_resume::{PreparedRolloutResume, PreparedRolloutWriter};
 
 use jsonl_writer::JsonlWriter;
 use native_rollout::NativeRolloutInit;
@@ -156,6 +158,22 @@ impl RolloutRecorder {
         state_db_ctx: Option<StateDbHandle>,
         state_builder: Option<ThreadMetadataBuilder>,
     ) -> std::io::Result<Self> {
+        Self::new_with_prepared_writer(config, params, state_db_ctx, state_builder, None).await
+    }
+
+    /// Consume an already recovered native writer when resuming a session.
+    pub async fn new_with_prepared_writer(
+        config: &impl RolloutConfigView,
+        params: RolloutRecorderParams,
+        state_db_ctx: Option<StateDbHandle>,
+        state_builder: Option<ThreadMetadataBuilder>,
+        prepared_writer: Option<PreparedRolloutWriter>,
+    ) -> std::io::Result<Self> {
+        if prepared_writer.is_some() && !matches!(&params, RolloutRecorderParams::Resume { .. }) {
+            return Err(std::io::Error::other(
+                "a prepared writer requires resumed session parameters",
+            ));
+        }
         let praxis_home = config.praxis_home().to_path_buf();
         let (
             deferred_log_file_info,
@@ -229,7 +247,10 @@ impl RolloutRecorder {
                 path,
                 event_persistence_mode,
             } => {
-                let native_writer = NativeRolloutWriter::resume(praxis_home, &path).await?;
+                let native_writer = match prepared_writer {
+                    Some(writer) => writer.into_native_writer(&path)?,
+                    None => NativeRolloutWriter::resume(praxis_home, &path).await?,
+                };
                 (
                     None,
                     path,

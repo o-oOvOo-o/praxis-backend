@@ -22,3 +22,5 @@ pub use model::SkillMetadata;
 pub use model::SkillPolicy;
 pub use model::filter_skill_load_outcome_for_product;
 pub use render::render_skills_section;
+
+mod projection;

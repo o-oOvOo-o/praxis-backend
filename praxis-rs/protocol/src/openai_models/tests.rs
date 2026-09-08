@@ -71,6 +71,46 @@ fn unknown_multi_agent_version_is_treated_as_unsupported() {
 }
 
 #[test]
+fn gpt6_astra_is_available_offline_with_official_capabilities() {
+    let models = known_openai_compatible_picker_model_infos();
+    let astra = models
+        .iter()
+        .find(|model| model.slug == "gpt-6-astra")
+        .unwrap();
+    assert_eq!(astra.display_name, "GPT-6 Astra");
+    assert_eq!(astra.context_window, Some(1_050_000));
+    assert_eq!(astra.default_reasoning_level, Some(ReasoningEffort::Medium));
+    assert_eq!(
+        astra
+            .supported_reasoning_levels
+            .iter()
+            .map(|preset| preset.effort.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::XHigh,
+            ReasoningEffort::Max
+        ]
+    );
+    assert!(astra.supported_in_api);
+    assert!(astra.supports_parallel_tool_calls);
+    assert_eq!(astra.visibility, ModelVisibility::List);
+    assert!(!astra.used_fallback_model_metadata);
+    assert_eq!(astra.get_model_instructions(None), BASE_INSTRUCTIONS_GPT_6);
+    assert_eq!(
+        astra.get_model_instructions(Some(Personality::Friendly)),
+        BASE_INSTRUCTIONS_GPT_6
+    );
+    assert!(
+        astra
+            .base_instructions
+            .starts_with("You are Praxis, an agent based on GPT-6.")
+    );
+}
+
+#[test]
 fn known_gpt56_models_match_official_reasoning_capabilities() {
     let sol = known_openai_compatible_model_info("gpt-5.6-sol").unwrap();
     let terra = known_openai_compatible_model_info("gpt-5.6-terra").unwrap();
@@ -90,8 +130,11 @@ fn known_gpt56_models_match_official_reasoning_capabilities() {
     assert_eq!(terra.base_instructions, BASE_INSTRUCTIONS_GPT_5_6);
     assert_eq!(luna.base_instructions, BASE_INSTRUCTIONS_GPT_5_6);
     assert!(sol.model_messages.is_some());
-    assert!(sol.base_instructions.contains("## Context efficiency"));
-    assert!(sol.base_instructions.contains("xN count"));
+    assert!(
+        sol.base_instructions
+            .contains("## Autonomy and persistence")
+    );
+    assert!(sol.base_instructions.starts_with("You are Praxis,"));
     assert!(
         sol.supported_reasoning_levels
             .iter()
@@ -125,7 +168,7 @@ fn deepseek_v4_flash_is_available_in_the_local_picker_catalog() {
         .expect("DeepSeek V4 Flash should be available before remote catalog refresh");
 
     assert_eq!(flash.display_name, "DeepSeek V4 Flash");
-    assert_eq!(flash.default_reasoning_level, Some(ReasoningEffort::High));
+    assert_eq!(flash.default_reasoning_level, Some(ReasoningEffort::Medium));
     assert_eq!(flash.context_window, Some(1_000_000));
 }
 

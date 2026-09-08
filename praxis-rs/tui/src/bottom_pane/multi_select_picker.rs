@@ -188,37 +188,16 @@ impl MultiSelectPicker {
             .and_then(|visible_idx| self.filtered_indices.get(visible_idx).copied());
 
         let filter = self.search_query.trim();
-        if filter.is_empty() {
-            self.filtered_indices = (0..self.items.len()).collect();
-        } else {
-            let mut matches: Vec<(usize, i32)> = Vec::new();
-            for (idx, item) in self.items.iter().enumerate() {
-                let display_name = item.name.as_str();
-                if let Some((_indices, score)) = match_item(filter, display_name, &item.name) {
-                    matches.push((idx, score));
-                }
-            }
-
-            matches.sort_by(|a, b| {
-                a.1.cmp(&b.1).then_with(|| {
-                    let an = self.items[a.0].name.as_str();
-                    let bn = self.items[b.0].name.as_str();
-                    an.cmp(bn)
-                })
-            });
-
-            self.filtered_indices = matches.into_iter().map(|(idx, _score)| idx).collect();
-        }
-
+        let (indices, selected) = super::multi_select_list::filter_items(
+            &self.items,
+            previously_selected,
+            filter,
+            |item| item.name.as_str(),
+            |item| match_item(filter, &item.name, &item.name).map(|(_, score)| score),
+        );
+        self.filtered_indices = indices;
+        self.state.selected_idx = selected;
         let len = self.filtered_indices.len();
-        self.state.selected_idx = previously_selected
-            .and_then(|actual_idx| {
-                self.filtered_indices
-                    .iter()
-                    .position(|idx| *idx == actual_idx)
-            })
-            .or_else(|| (len > 0).then_some(0));
-
         let visible = Self::max_visible_rows(len);
         self.state.clamp_selection(len);
         self.state.ensure_visible(len, visible);
@@ -255,10 +234,12 @@ impl MultiSelectPicker {
             .filter_map(|(visible_idx, actual_idx)| {
                 self.items.get(*actual_idx).map(|item| {
                     let is_selected = self.state.selected_idx == Some(visible_idx);
-                    let prefix = if is_selected { '›' } else { ' ' };
-                    let marker = if item.enabled { 'x' } else { ' ' };
                     let item_name = truncate_text(&item.name, ITEM_NAME_TRUNCATE_LEN);
-                    let name = format!("{prefix} [{marker}] {item_name}");
+                    let name = super::multi_select_list::checkbox_label(
+                        &item_name,
+                        is_selected,
+                        item.enabled,
+                    );
                     GenericDisplayRow {
                         name,
                         description: item.description.clone(),

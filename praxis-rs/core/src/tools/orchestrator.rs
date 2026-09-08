@@ -228,13 +228,16 @@ impl ToolOrchestrator {
             .is_some();
         let initial_sandbox = match tool.sandbox_mode_for_first_attempt(req) {
             SandboxOverride::BypassSandboxFirstAttempt => SandboxType::None,
-            SandboxOverride::NoOverride => self.sandbox.select_initial(
-                &resolved_permissions.file_system_sandbox_policy,
-                resolved_permissions.network_sandbox_policy,
-                tool.sandbox_preference(),
-                resolved_permissions.windows_sandbox_level,
-                has_managed_network_requirements,
-            ),
+            SandboxOverride::NoOverride => self
+                .sandbox
+                .select_initial(
+                    &resolved_permissions.file_system_sandbox_policy,
+                    resolved_permissions.network_sandbox_policy,
+                    tool.sandbox_preference(),
+                    resolved_permissions.windows_sandbox_level,
+                    has_managed_network_requirements,
+                )
+                .map_err(|err| ToolError::Praxis(PraxisErr::from(err)))?,
         };
 
         // Platform-specific flag gating is handled by SandboxManager::select_initial.

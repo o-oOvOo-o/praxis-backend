@@ -103,14 +103,14 @@ impl App {
             _ => {}
         }
 
-        if self.apply_workspace_server_notification(&notification) {
+        let projection_needs_refresh = self.apply_workspace_server_notification(&notification);
+        if workspace_truth_refresh_required(&notification, projection_needs_refresh) {
             self.refresh_workspace_threads(app_gateway_client, /*force*/ true);
         }
 
         let thread_to_observe = self.workspace_observable_notification_thread_id(&notification);
         if let Some(thread_id) = thread_to_observe {
-            self.observe_workspace_thread_if_needed(app_gateway_client, thread_id)
-                .await;
+            self.observe_workspace_thread_if_needed(app_gateway_client, thread_id);
         }
 
         match server_notification_thread_target(&notification) {
@@ -223,6 +223,16 @@ impl App {
             _ => None,
         }
     }
+}
+
+/// `thread/closed` can race a new observer attaching to the same live core.
+/// Treat it as an invalidation, not durable proof that the workspace row is cold.
+/// A fresh `thread/list` response is the gateway's authoritative projection.
+fn workspace_truth_refresh_required(
+    notification: &ServerNotification,
+    projection_needs_refresh: bool,
+) -> bool {
+    projection_needs_refresh || matches!(notification, ServerNotification::ThreadClosed(_))
 }
 
 fn parse_app_gateway_thread_id(thread_id: &str) -> Option<ThreadId> {

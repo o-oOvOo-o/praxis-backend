@@ -338,3 +338,9 @@ The `PasteBurst` logic is currently exercised through `ChatComposer` integration
 
 This document calls out some additional contracts (like “flush before clearing”) that are not yet
 fully pinned by dedicated `PasteBurst` unit tests.
+
+`/namegen` runs while a task is active. It submits a background thread-name
+request without queuing a user turn or waiting in the UI event loop. The thread
+context menu exposes the same action as Generate name. A thread controlled by
+another agent remains locked, and repeated requests for the same thread are
+coalesced while name generation is in progress.

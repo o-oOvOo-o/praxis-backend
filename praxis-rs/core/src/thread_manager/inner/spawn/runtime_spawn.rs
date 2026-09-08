@@ -71,6 +71,7 @@ impl ThreadManagerInner {
             mcp_manager: Arc::clone(&self.mcp_manager),
             skills_watcher: Arc::clone(&self.skills_watcher),
             conversation_history: request.initial_history,
+            prepared_rollout_writer: request.prepared_rollout_writer,
             session_source: request.session_source,
             agent_control: request.agent_control,
             agent_os: Arc::clone(&self.agent_os),

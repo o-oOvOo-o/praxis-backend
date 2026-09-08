@@ -103,6 +103,8 @@ pub(crate) enum AppEvent {
     OpenAgentPicker,
     /// Switch the active thread to the selected agent.
     SelectAgentThread(ThreadId),
+    #[cfg(debug_assertions)]
+    ProbeSelectWorkspaceThread(ThreadId),
 
     /// Submit an op to the specified thread, regardless of current focus.
     SubmitThreadOp {
@@ -138,9 +140,13 @@ pub(crate) enum AppEvent {
     /// Release the read-only control lock on the current thread.
     ReleaseCurrentThreadControl,
 
-    /// Ask the backend to regenerate the current thread name from conversation context.
+    /// Ask the backend to regenerate the selected thread name from conversation context.
     RegenerateThreadName {
         thread_id: ThreadId,
+    },
+    ThreadNameRegenerated {
+        thread_id: ThreadId,
+        result: Result<String, String>,
     },
 
     /// Open the local summary/menu for the active thread goal.
@@ -211,10 +217,19 @@ pub(crate) enum AppEvent {
         result: Result<Vec<RateLimitSnapshot>, String>,
     },
 
+    /// Completion of a background workspace attachment.
+    WorkspaceThreadAttached(Box<crate::app::workspace_thread_load::WorkspaceThreadAttached>),
+
     /// Result of refreshing Praxis Workspace's thread list.
     WorkspaceThreadsLoaded {
         request_id: u64,
         result: Result<ThreadListResponse, String>,
+    },
+
+    /// Result of hydrating a workspace thread without changing its lifecycle.
+    WorkspaceThreadObserved {
+        thread_id: ThreadId,
+        result: Result<praxis_app_gateway_protocol::Thread, String>,
     },
 
     /// Result of loading one page for the Workspace-embedded session picker.

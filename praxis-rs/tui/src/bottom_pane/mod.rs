@@ -42,6 +42,7 @@ use std::time::Duration;
 mod app_link_view;
 mod approval_overlay;
 mod mcp_server_elicitation;
+mod multi_select_list;
 mod multi_select_picker;
 mod request_user_input;
 mod status_line_setup;

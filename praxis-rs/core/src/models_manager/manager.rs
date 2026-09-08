@@ -38,7 +38,6 @@ use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelPreset;
 use praxis_protocol::openai_models::ModelsResponse;
 use praxis_protocol::openai_models::known_openai_compatible_picker_model_infos;
-use std::collections::HashSet;
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -295,6 +294,7 @@ enum CatalogMode {
 #[derive(Debug)]
 pub struct ModelsManager {
     remote_models: RwLock<Vec<ModelInfo>>,
+    spawn_catalog: RwLock<Option<(String, Vec<ModelPreset>)>>,
     catalog_mode: CatalogMode,
     collaboration_modes_config: CollaborationModesConfig,
     /// Base auth manager for the session. Provider-specific auth is derived at request time.
@@ -313,60 +313,70 @@ impl ModelsManager {
         refresh_strategy: RefreshStrategy,
     ) -> Vec<ModelPreset> {
         let current = self.list_models_for_config(config, refresh_strategy).await;
-        self.build_spawn_agent_models_for_config(config, current)
+        let catalog_config = config.clone();
+        let catalog = match tokio::task::spawn_blocking(move || {
+            super::catalog::build_model_catalog(&catalog_config, current)
+        })
+        .await
+        {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                error!(%error, "spawn model catalog refresh failed");
+                return Vec::new();
+            }
+        };
+        let models: Vec<_> = catalog
+            .models
+            .into_iter()
+            .filter_map(|mut preset| {
+                let metadata = catalog.metadata_by_preset_id.get(&preset.id)?;
+                if !spawn_agent_provider_is_approved(&metadata.provider_id, &metadata.provider)
+                    || !self.provider_has_spawn_credentials(
+                        config,
+                        &metadata.provider_id,
+                        &metadata.provider,
+                    )
+                {
+                    return None;
+                }
+                preset.description = format!(
+                    "Praxis provider `{}` ({}). {}",
+                    metadata.provider_id, metadata.provider.name, preset.description
+                );
+                Some(preset)
+            })
+            .collect();
+        *self.spawn_catalog.write().await = Some((spawn_catalog_key(config), models.clone()));
+        models
     }
 
-    /// Build the cross-provider sub-agent catalog without blocking on model refresh.
+    pub(crate) async fn ensure_spawn_catalog_for_config(&self, config: &Config) {
+        let key = spawn_catalog_key(config);
+        if self
+            .spawn_catalog
+            .read()
+            .await
+            .as_ref()
+            .is_some_and(|(cached, _)| *cached == key)
+        {
+            return;
+        }
+        let _ = self
+            .list_spawn_agent_models_for_config(config, RefreshStrategy::Offline)
+            .await;
+    }
+
+    /// Read the prepared snapshot without filesystem discovery or credential lookup.
     pub fn try_list_spawn_agent_models_for_config(
         &self,
         config: &Config,
     ) -> Result<Vec<ModelPreset>, TryLockError> {
-        let current = self.try_list_models_for_config(config)?;
-        Ok(self.build_spawn_agent_models_for_config(config, current))
-    }
-
-    fn build_spawn_agent_models_for_config(
-        &self,
-        config: &Config,
-        current: Vec<ModelPreset>,
-    ) -> Vec<ModelPreset> {
-        let mut models = Vec::new();
-        let mut seen = HashSet::new();
-
-        if spawn_agent_provider_is_approved(
-            config.model_provider_id.as_str(),
-            &config.model_provider,
-        ) {
-            append_spawn_agent_models(
-                &mut models,
-                &mut seen,
-                config.model_provider_id.as_str(),
-                &config.model_provider,
-                current,
-            );
-        }
-
-        for provider_model in first_party_model_presets_for_config(config) {
-            if !spawn_agent_provider_is_approved(
-                provider_model.provider_id.as_str(),
-                &provider_model.provider,
-            ) || !self.provider_has_spawn_credentials(
-                config,
-                provider_model.provider_id.as_str(),
-                &provider_model.provider,
-            ) {
-                continue;
-            }
-            append_spawn_agent_models(
-                &mut models,
-                &mut seen,
-                provider_model.provider_id.as_str(),
-                &provider_model.provider,
-                vec![provider_model.preset],
-            );
-        }
-
-        models
+        let snapshot = self.spawn_catalog.try_read()?;
+        Ok(snapshot
+            .as_ref()
+            .filter(|(key, _)| *key == spawn_catalog_key(config))
+            .map(|(_, models)| models.clone())
+            .unwrap_or_default())
     }
 
     fn provider_has_spawn_credentials(
@@ -460,6 +470,7 @@ impl ModelsManager {
             });
         Self {
             remote_models: RwLock::new(remote_models),
+            spawn_catalog: RwLock::new(None),
             catalog_mode,
             collaboration_modes_config,
             auth_manager,
@@ -1021,25 +1032,6 @@ fn spawn_agent_provider_is_approved(provider_id: &str, provider: &ModelProviderI
         .any(|needle| identity.contains(needle))
 }
 
-fn append_spawn_agent_models(
-    models: &mut Vec<ModelPreset>,
-    seen: &mut HashSet<String>,
-    provider_id: &str,
-    provider: &ModelProviderInfo,
-    presets: Vec<ModelPreset>,
-) {
-    for mut preset in presets {
-        if !seen.insert(preset.model.clone()) {
-            continue;
-        }
-        preset.description = format!(
-            "Praxis provider `{provider_id}` ({}). {}",
-            provider.name, preset.description
-        );
-        models.push(preset);
-    }
-}
-
 fn model_catalog_provider_id_for_provider(provider: &ModelProviderInfo) -> &str {
     if provider.is_openai() {
         OPENAI_PROVIDER_ID
@@ -1055,3 +1047,12 @@ fn model_catalog_provider_id_for_provider(provider: &ModelProviderInfo) -> &str 
 #[cfg(test)]
 #[path = "manager_tests.rs"]
 mod tests;
+
+fn spawn_catalog_key(config: &Config) -> String {
+    format!(
+        "{}:{:?}:{}",
+        config.model_provider_id,
+        config.model_provider,
+        config.config_layer_stack.effective_config()
+    )
+}

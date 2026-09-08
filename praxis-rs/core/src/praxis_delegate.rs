@@ -86,6 +86,7 @@ pub(crate) async fn run_praxis_thread_interactive(
         mcp_manager: Arc::clone(&parent_session.services.mcp_manager),
         skills_watcher: Arc::clone(&parent_session.services.skills_watcher),
         conversation_history: initial_history.unwrap_or(InitialHistory::New),
+        prepared_rollout_writer: None,
         session_source: SessionSource::SubAgent(subagent_source),
         agent_control: parent_session.services.agent_control.clone(),
         agent_os: Arc::clone(&parent_session.services.agent_os),

@@ -13,7 +13,6 @@ use std::path::PathBuf;
 mod money;
 mod preview;
 mod rollout;
-mod source_metadata;
 mod state_db;
 mod timestamp;
 

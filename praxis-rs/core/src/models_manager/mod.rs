@@ -1,4 +1,5 @@
 pub mod cache;
+pub mod catalog;
 pub mod collaboration_mode_presets;
 pub mod manager;
 pub mod model_info;

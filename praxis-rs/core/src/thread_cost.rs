@@ -18,6 +18,13 @@ pub const MODEL_PRICING_AS_OF: &str = "2026-08-09";
 
 // Aligned to the providers' public API pricing pages on 2026-08-09.
 const MODEL_PRICING: &[ModelPricing] = &[
+    // GPT-6 Astra standard pricing verified 2026-09-05 against the official model page.
+    ModelPricing {
+        slug: "gpt-6-astra",
+        input_usd_per_million_micros: 10_000_000,
+        cached_input_usd_per_million_micros: Some(1_000_000),
+        output_usd_per_million_micros: 50_000_000,
+    },
     ModelPricing {
         slug: "gpt-5.6-sol",
         input_usd_per_million_micros: 5_000_000,
@@ -195,7 +202,14 @@ pub(crate) async fn persist_turn_cost_estimate(
 }
 
 pub(crate) fn estimate_turn_cost_micros(model_slug: &str, usage: &TokenUsage) -> Option<i64> {
-    let pricing = pricing_for_model(model_slug)?;
+    let mut pricing = pricing_for_model(model_slug)?;
+    if pricing.slug == "gpt-6-astra" && usage.input_tokens > 272_000 {
+        pricing.input_usd_per_million_micros *= 2;
+        pricing.cached_input_usd_per_million_micros = pricing
+            .cached_input_usd_per_million_micros
+            .map(|rate| rate * 2);
+        pricing.output_usd_per_million_micros = pricing.output_usd_per_million_micros * 3 / 2;
+    }
     let input_cost = component_cost_micros(
         usage.non_cached_input(),
         pricing.input_usd_per_million_micros,
@@ -206,13 +220,8 @@ pub(crate) fn estimate_turn_cost_micros(model_slug: &str, usage: &TokenUsage) ->
             .cached_input_usd_per_million_micros
             .unwrap_or(pricing.input_usd_per_million_micros),
     );
-    let output_cost = component_cost_micros(
-        usage
-            .output_tokens
-            .saturating_add(usage.reasoning_output_tokens)
-            .max(0),
-        pricing.output_usd_per_million_micros,
-    );
+    let output_cost =
+        component_cost_micros(usage.output_tokens, pricing.output_usd_per_million_micros);
 
     Some(
         input_cost
@@ -253,4 +262,42 @@ fn component_cost_micros(tokens: i64, micros_per_million: i64) -> i64 {
     let rate = micros_per_million.max(0) as i128;
     let micros = tokens.saturating_mul(rate) / 1_000_000_i128;
     micros.clamp(0, i64::MAX as i128) as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gpt6_astra_uses_standard_and_long_context_prices() {
+        for (input_tokens, expected) in [(272_000, 6_820_000), (272_001, 11_140_020)] {
+            let usage = TokenUsage {
+                input_tokens,
+                cached_input_tokens: 100_000,
+                output_tokens: 100_000,
+                ..TokenUsage::default()
+            };
+            assert_eq!(
+                estimate_turn_cost_micros("gpt-6-astra", &usage),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn reasoning_tokens_are_not_charged_twice() {
+        let usage = TokenUsage {
+            input_tokens: 1_000_000,
+            cached_input_tokens: 500_000,
+            cache_reported_input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            reasoning_output_tokens: 750_000,
+            total_tokens: 2_000_000,
+        };
+
+        assert_eq!(
+            estimate_turn_cost_micros("gpt-5.6-sol", &usage),
+            Some(32_750_000)
+        );
+    }
 }

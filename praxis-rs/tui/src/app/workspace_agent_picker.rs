@@ -282,7 +282,7 @@ impl App {
         }
     }
 
-    fn session_state_for_thread_read(
+    pub(super) fn session_state_for_thread_read(
         &self,
         thread_id: ThreadId,
         thread: &praxis_app_gateway_protocol::Thread,
@@ -392,6 +392,7 @@ impl App {
 
     /// Replaces the chat widget while preserving shared per-session presentation state.
     pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) -> ChatWidget {
+        self.workspace.pending_thread_load.clear();
         chat_widget.set_workspace_entry_surface_enabled(self.workspace.enabled);
         chat_widget.set_ui_language(self.chat_widget.ui_language());
         // Account identity, quota displays, warning thresholds, and quota prompts are global
@@ -424,6 +425,7 @@ impl App {
             return Ok(());
         }
 
+        self.begin_thread_switch_measurement(thread_id);
         let has_cached_projection = self.thread_event_channels.contains_key(&thread_id);
         let needs_liveness_check = !has_cached_projection
             && self
@@ -504,65 +506,14 @@ impl App {
         self.active_thread_id = Some(thread_id);
         self.active_thread_rx = Some(receiver);
 
-        self.advance_history_view_generation();
-        let (mut target_widget, cached_transcript) = if let Some(cached) = cached_view {
-            tracing::debug!(
-                thread_id = %thread_id,
-                revision = target_revision,
-                "restoring selected agent view from cache"
-            );
-            cached
-                .chat_widget
-                .rebind_history_view(self.history_view_generation);
-            (cached.chat_widget, Some(cached.transcript_cells))
-        } else {
-            let init = self.chatwidget_init_for_forked_or_resumed_thread(
-                tui,
-                self.config.clone(),
-                self.tui_config.clone(),
-            );
-            (ChatWidget::new_for_thread_replay(init), None)
-        };
-        // Treat a cached switch as one presentation commit. Projection setters and
-        // any queued deltas may each invalidate the same footer/title surfaces, but
-        // only the final state needs to be rendered.
-        let projection_refresh_batch = cached_projection
-            .as_ref()
-            .is_some_and(|projection| !projection.is_empty());
-        if projection_refresh_batch {
-            target_widget.begin_status_surface_refresh_batch();
-            target_widget.begin_redraw_batch();
-        }
-        let cached_events = cached_projection
-            .map(|projection| projection.apply_to(&mut target_widget))
-            .unwrap_or_default();
-        let previous_view = previous_thread_id.zip(previous_view_revision);
-        let reused_cached_view = match self.install_thread_view_shell(
+        let reused_cached_view = self.restore_thread_view(
             tui,
-            target_widget,
-            cached_transcript,
-            previous_view,
+            thread_id,
             target_revision,
-        ) {
-            Ok(reused_cached_view) => reused_cached_view,
-            Err(err) => {
-                if projection_refresh_batch {
-                    self.chat_widget.finish_status_surface_refresh_batch();
-                    self.refresh_status_line();
-                    self.chat_widget.finish_redraw_batch();
-                }
-                return Err(err);
-            }
-        };
-        if projection_refresh_batch {
-            self.chat_widget.finish_status_surface_refresh_batch();
-            self.refresh_status_line();
-            self.chat_widget.finish_redraw_batch();
-        }
-
-        if reused_cached_view {
-            self.queue_thread_view_catchup(thread_id, target_revision, cached_events);
-        }
+            previous_thread_id.zip(previous_view_revision),
+            cached_view,
+            cached_projection,
+        )?;
 
         if !reused_cached_view && let Some(replay_source) = replay_source {
             self.replay_thread_source(replay_source, !is_replay_only);

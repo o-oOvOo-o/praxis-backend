@@ -31,6 +31,7 @@ impl From<SessionStartupInput> for SessionStartupFlow {
             tx_event,
             agent_status,
             initial_history,
+            prepared_rollout_writer,
             session_source,
             environment_manager,
             capability_runtime,
@@ -47,6 +48,7 @@ impl From<SessionStartupInput> for SessionStartupFlow {
                 session_configuration,
                 llm_runtime_catalog,
                 initial_history,
+                prepared_rollout_writer,
                 session_source,
             },
             services: SessionStartupServices {

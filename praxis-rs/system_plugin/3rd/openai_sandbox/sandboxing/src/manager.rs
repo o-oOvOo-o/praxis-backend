@@ -9,6 +9,10 @@ use crate::policy_transforms::should_require_platform_sandbox;
 use crate::seatbelt::MACOS_PATH_TO_SEATBELT_EXECUTABLE;
 #[cfg(target_os = "macos")]
 use crate::seatbelt::create_seatbelt_command_args_for_policies;
+use crate::selection::SandboxSelectionError;
+use crate::selection::SandboxType;
+use crate::selection::SandboxablePreference;
+use crate::selection::select_sandbox;
 use praxis_network_proxy::NetworkProxy;
 use praxis_protocol::config_types::WindowsSandboxLevel;
 use praxis_protocol::models::PermissionProfile;
@@ -19,32 +23,6 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::Path;
 use std::path::PathBuf;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SandboxType {
-    None,
-    MacosSeatbelt,
-    LinuxSeccomp,
-    WindowsRestrictedToken,
-}
-
-impl SandboxType {
-    pub fn as_metric_tag(self) -> &'static str {
-        match self {
-            SandboxType::None => "none",
-            SandboxType::MacosSeatbelt => "seatbelt",
-            SandboxType::LinuxSeccomp => "seccomp",
-            SandboxType::WindowsRestrictedToken => "windows_sandbox",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SandboxablePreference {
-    Auto,
-    Require,
-    Forbid,
-}
 
 pub fn get_platform_sandbox(windows_sandbox_enabled: bool) -> Option<SandboxType> {
     if cfg!(target_os = "macos") {
@@ -142,26 +120,16 @@ impl SandboxManager {
         pref: SandboxablePreference,
         windows_sandbox_level: WindowsSandboxLevel,
         has_managed_network_requirements: bool,
-    ) -> SandboxType {
-        match pref {
-            SandboxablePreference::Forbid => SandboxType::None,
-            SandboxablePreference::Require => {
-                get_platform_sandbox(windows_sandbox_level != WindowsSandboxLevel::Disabled)
-                    .unwrap_or(SandboxType::None)
-            }
-            SandboxablePreference::Auto => {
-                if should_require_platform_sandbox(
-                    file_system_policy,
-                    network_policy,
-                    has_managed_network_requirements,
-                ) {
-                    get_platform_sandbox(windows_sandbox_level != WindowsSandboxLevel::Disabled)
-                        .unwrap_or(SandboxType::None)
-                } else {
-                    SandboxType::None
-                }
-            }
-        }
+    ) -> Result<SandboxType, SandboxSelectionError> {
+        select_sandbox(
+            pref,
+            should_require_platform_sandbox(
+                file_system_policy,
+                network_policy,
+                has_managed_network_requirements,
+            ),
+            get_platform_sandbox(windows_sandbox_level != WindowsSandboxLevel::Disabled),
+        )
     }
 
     pub fn transform(

@@ -250,6 +250,37 @@ impl fmt::Display for SessionSource {
 }
 
 impl SessionSource {
+    pub fn with_thread_spawn_agent_metadata(
+        mut self,
+        agent_base_name: Option<String>,
+        agent_title: Option<String>,
+        agent_display_name: Option<String>,
+        agent_role: Option<String>,
+    ) -> Self {
+        if let Self::SubAgent(SubAgentSource::ThreadSpawn {
+            agent_base_name: base,
+            agent_title: title,
+            agent_display_name: display,
+            agent_role: role,
+            ..
+        }) = &mut self
+        {
+            if agent_base_name.is_some() {
+                *base = agent_base_name;
+            }
+            if agent_title.is_some() {
+                *title = agent_title;
+            }
+            if agent_display_name.is_some() {
+                *display = agent_display_name;
+            }
+            if agent_role.is_some() {
+                *role = agent_role;
+            }
+        }
+        self
+    }
+
     pub fn agent_rank(&self) -> u8 {
         self.agent_rank_kind().rank()
     }

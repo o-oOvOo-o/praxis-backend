@@ -374,35 +374,20 @@ impl ChatWidget {
     }
 
     pub(super) fn current_model_supports_personality(&self) -> bool {
-        let model = self.current_model();
         self.model_catalog
-            .try_list_models()
-            .ok()
-            .and_then(|models| {
-                models
-                    .into_iter()
-                    .find(|preset| preset.model == model)
-                    .map(|preset| preset.supports_personality)
-            })
-            .unwrap_or(false)
+            .list_models()
+            .iter()
+            .find(|preset| self.is_current_model_selection(preset))
+            .is_some_and(|preset| preset.supports_personality)
     }
 
-    /// Return whether the effective model currently advertises image-input support.
-    ///
-    /// We intentionally default to `true` when model metadata cannot be read so transient catalog
-    /// failures do not hard-block user input in the UI.
+    /// Unknown models remain image-capable until the backend advertises their modalities.
     pub(super) fn current_model_supports_images(&self) -> bool {
-        let model = self.current_model();
         self.model_catalog
-            .try_list_models()
-            .ok()
-            .and_then(|models| {
-                models
-                    .into_iter()
-                    .find(|preset| preset.model == model)
-                    .map(|preset| preset.input_modalities.contains(&InputModality::Image))
-            })
-            .unwrap_or(true)
+            .list_models()
+            .iter()
+            .find(|preset| self.is_current_model_selection(preset))
+            .is_none_or(|preset| preset.input_modalities.contains(&InputModality::Image))
     }
 
     pub(super) fn sync_image_paste_enabled(&mut self) {

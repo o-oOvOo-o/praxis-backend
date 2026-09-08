@@ -351,6 +351,11 @@ async fn list_models_includes_known_openai_picker_models() {
         .iter()
         .find(|model| model.model == "gpt-5.6-sol")
         .expect("GPT-5.6 Sol should be picker-visible from local known catalog");
+    let astra = models
+        .iter()
+        .find(|model| model.model == "gpt-6-astra")
+        .expect("GPT-6 Astra should be picker-visible from local known catalog");
+    assert!(astra.show_in_picker);
     let gpt56_terra = models
         .iter()
         .find(|model| model.model == "gpt-5.6-terra")
@@ -373,7 +378,7 @@ async fn list_models_includes_known_openai_picker_models() {
     assert!(gpt56_luna.show_in_picker);
     assert_eq!(
         gpt56_sol.default_reasoning_effort,
-        praxis_protocol::openai_models::ReasoningEffort::Low
+        praxis_protocol::openai_models::ReasoningEffort::Medium
     );
     assert_eq!(
         gpt56_terra.default_reasoning_effort,

@@ -96,7 +96,6 @@ use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::mention_codec::LinkedMention;
 use crate::mention_codec::encode_history_mentions;
 use crate::model_catalog::ModelCatalog;
-use crate::model_discovery::ModelCatalogSelectionMetadata;
 use crate::multi_agents;
 use crate::resume_picker::SessionPickerAction;
 use crate::status::StatusAccountDisplay;
@@ -156,7 +155,6 @@ use praxis_core::config::Config;
 use praxis_core::config::Constrained;
 use praxis_core::config::ConstraintResult;
 use praxis_core::config_loader::ConfigLayerStackOrdering;
-use praxis_core::first_party_model_owner;
 use praxis_core::project_doc::DEFAULT_PROJECT_DOC_FILENAME;
 use praxis_core::skills::model::SkillMetadata;
 #[cfg(target_os = "windows")]

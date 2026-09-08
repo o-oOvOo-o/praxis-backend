@@ -15,6 +15,7 @@ pub(super) async fn run(
     config: Arc<Config>,
     rollout_params: RolloutRecorderParams,
     state_builder: Option<ThreadMetadataBuilder>,
+    prepared_rollout_writer: Option<praxis_rollout::recorder::PreparedRolloutWriter>,
 ) -> anyhow::Result<(Option<RolloutRecorder>, Option<StateDbHandle>)> {
     async {
         if config.ephemeral {
@@ -26,11 +27,12 @@ pub(super) async fn run(
                     config.sqlite_home.display()
                 )
             })?;
-            let rollout_recorder = RolloutRecorder::new(
+            let rollout_recorder = RolloutRecorder::new_with_prepared_writer(
                 &config,
                 rollout_params,
                 Some(state_db_ctx.clone()),
                 state_builder,
+                prepared_rollout_writer,
             )
             .await?;
             Ok((Some(rollout_recorder), Some(state_db_ctx)))

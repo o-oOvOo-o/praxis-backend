@@ -1,6 +1,8 @@
 use super::*;
 use praxis_features::Feature;
 
+const TERMINAL_DRAW_WATCHDOG_INTERVAL: Duration = Duration::from_secs(1);
+
 impl App {
     pub(super) async fn drain_app_gateway_events(&mut self, app_gateway: &mut AppGatewaySession) {
         for _ in 0..APP_GATEWAY_EVENT_DRAIN_BUDGET {
@@ -97,8 +99,7 @@ impl App {
                 self.chat_widget
                     .add_info_message("Reconnected to Praxis gateway.".to_string(), None);
                 self.refresh_workspace_threads(app_gateway, true);
-                self.observe_existing_workspace_threads_if_needed(app_gateway)
-                    .await;
+                self.observe_existing_workspace_threads_if_needed(app_gateway);
                 true
             }
             Err(err) => {
@@ -442,8 +443,19 @@ impl App {
             }
         }
 
+        #[cfg(debug_assertions)]
+        app.configure_thread_switch_probe().await?;
+
         let tui_events = tui.event_stream();
         tokio::pin!(tui_events);
+
+        // Frame requests normally flow through `tui_events`, but a lost/coalesced wakeup must not
+        // strand the alternate screen after a thread switch. Keep an independent, low-frequency
+        // draw source so a live TUI repairs itself without depending on another input event.
+        let mut terminal_draw_watchdog = tokio::time::interval(TERMINAL_DRAW_WATCHDOG_INTERVAL);
+        terminal_draw_watchdog.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        terminal_draw_watchdog.tick().await;
+        let mut last_terminal_draw = Instant::now();
 
         tui.frame_requester().schedule_frame();
 
@@ -478,6 +490,22 @@ impl App {
             loop {
                 let app_gateway_reconnect_delay = app.app_gateway_reconnect_delay();
                 let control = select! {
+                    _ = terminal_draw_watchdog.tick() => {
+                        if App::should_force_terminal_draw(last_terminal_draw.elapsed()) {
+                            match app.handle_tui_event(tui, &mut app_gateway, TuiEvent::Draw).await {
+                                Ok(control) => {
+                                    last_terminal_draw = Instant::now();
+                                    control
+                                }
+                                Err(err) => match app.handle_app_gateway_loop_error(&app_gateway, err) {
+                                    Ok(control) => control,
+                                    Err(err) => break Err(err),
+                                },
+                            }
+                        } else {
+                            AppRunControl::Continue
+                        }
+                    }
                     _ = tokio::time::sleep(app_gateway_reconnect_delay.unwrap_or(APP_GATEWAY_RECONNECT_INTERVAL)), if app_gateway_reconnect_delay.is_some() => {
                         if app.try_reconnect_app_gateway(&mut app_gateway).await {
                             listen_for_app_gateway_events = true;
@@ -541,8 +569,14 @@ impl App {
                         }
                     }
                     Some(event) = tui_events.next() => {
+                        let is_draw = matches!(event, TuiEvent::Draw);
                         match app.handle_tui_event(tui, &mut app_gateway, event).await {
-                            Ok(control) => control,
+                            Ok(control) => {
+                                if is_draw {
+                                    last_terminal_draw = Instant::now();
+                                }
+                                control
+                            }
                             Err(err) => match app.handle_app_gateway_loop_error(&app_gateway, err) {
                                 Ok(control) => control,
                                 Err(err) => break Err(err),
@@ -613,7 +647,10 @@ impl App {
         event: TuiEvent,
     ) -> Result<AppRunControl> {
         self.restore_mouse_capture_after_terminal_zoom(tui);
-        if matches!(event, TuiEvent::Draw) && self.thread_replay_buffer_generation.is_some() {
+        if Self::should_skip_tui_event_while_replay_pending(
+            &event,
+            self.thread_replay_buffer_generation,
+        ) {
             return Ok(AppRunControl::Continue);
         }
         if matches!(event, TuiEvent::Draw) {
@@ -671,6 +708,7 @@ impl App {
                     self.chat_widget.pre_draw_tick(tui.is_terminal_focused());
                     let terminal_size = tui.terminal.size()?;
                     let draw_height = terminal_size.height;
+                    let draw_started = Instant::now();
                     tui.draw(draw_height, |frame| {
                         let chat_area = self.render_workspace_or_chat(frame.area(), frame.buffer);
                         let cursor_pos = if self.workspace.enabled {
@@ -682,6 +720,9 @@ impl App {
                             frame.set_cursor_position((x, y));
                         }
                     })?;
+                    self.finish_thread_switch_frame(draw_started.elapsed());
+                    #[cfg(debug_assertions)]
+                    self.start_thread_switch_probe_if_ready();
                     if self.drain_thread_view_catchup_chunk() {
                         tui.frame_requester().schedule_frame();
                     }
@@ -694,5 +735,19 @@ impl App {
             }
         }
         Ok(AppRunControl::Continue)
+    }
+
+    pub(super) fn should_skip_tui_event_while_replay_pending(
+        _event: &TuiEvent,
+        _replay_generation: Option<u64>,
+    ) -> bool {
+        // History cells are already committed atomically by CommitThreadReplay. Blocking
+        // terminal draws here can leave a freshly cleared terminal permanently black when
+        // another gateway event delays that commit, so rendering must always stay live.
+        false
+    }
+
+    pub(super) fn should_force_terminal_draw(elapsed_since_draw: Duration) -> bool {
+        elapsed_since_draw >= TERMINAL_DRAW_WATCHDOG_INTERVAL
     }
 }

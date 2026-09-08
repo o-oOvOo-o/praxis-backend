@@ -25,6 +25,18 @@ fn thread_event_store_tracks_active_turn_lifecycle() {
 }
 
 #[test]
+fn replay_source_preserves_background_turn_elapsed_time() {
+    let thread_id = ThreadId::new();
+    let mut store = ThreadEventStore::new(/*capacity*/ 8);
+    store.push_notification(turn_started_notification(thread_id, "turn-1"));
+    store.set_active_turn_elapsed_seconds_for_test(17);
+
+    let replay = ThreadReplaySource::new(&store);
+
+    assert_eq!(replay.active_turn_elapsed_seconds, Some(17));
+}
+
+#[test]
 fn completed_turn_folds_covered_stream_events_into_turn_snapshot() {
     let thread_id = ThreadId::new();
     let mut store = ThreadEventStore::new(/*capacity*/ 16);

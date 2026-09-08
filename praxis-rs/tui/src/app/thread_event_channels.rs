@@ -35,10 +35,11 @@ pub(super) struct ThreadReplaySource {
     pub(super) token_usage: Option<ThreadTokenUsage>,
     pub(super) events: Vec<ThreadBufferedEvent>,
     pub(super) input_state: Option<ThreadInputState>,
+    pub(super) active_turn_elapsed_seconds: Option<u64>,
 }
 
 impl ThreadReplaySource {
-    fn new(store: &ThreadEventStore) -> Self {
+    pub(super) fn new(store: &ThreadEventStore) -> Self {
         Self {
             session: store.session.clone(),
             turns: Arc::clone(&store.turns),
@@ -47,6 +48,7 @@ impl ThreadReplaySource {
             token_usage: store.latest_token_usage(),
             events: store.snapshot_event_refs().into_iter().cloned().collect(),
             input_state: store.input_state.clone(),
+            active_turn_elapsed_seconds: store.active_turn_elapsed_seconds(),
         }
     }
 

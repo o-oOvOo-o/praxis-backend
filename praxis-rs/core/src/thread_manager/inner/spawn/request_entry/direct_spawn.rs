@@ -25,6 +25,7 @@ impl ThreadManagerInner {
         &self,
         config: Config,
         initial_history: InitialHistory,
+        prepared_rollout_writer: Option<praxis_rollout::recorder::PreparedRolloutWriter>,
         auth_manager: Arc<AuthManager>,
         agent_control: AgentControl,
         dynamic_tools: Vec<DynamicToolSpec>,
@@ -36,6 +37,7 @@ impl ThreadManagerInner {
         Box::pin(self.spawn_thread_with_requested_id(
             config,
             initial_history,
+            prepared_rollout_writer,
             auth_manager,
             agent_control,
             dynamic_tools,
@@ -54,6 +56,7 @@ impl ThreadManagerInner {
         &self,
         config: Config,
         initial_history: InitialHistory,
+        prepared_rollout_writer: Option<praxis_rollout::recorder::PreparedRolloutWriter>,
         auth_manager: Arc<AuthManager>,
         agent_control: AgentControl,
         dynamic_tools: Vec<DynamicToolSpec>,
@@ -63,7 +66,7 @@ impl ThreadManagerInner {
         user_shell_override: Option<Shell>,
         requested_thread_id: Option<ThreadId>,
     ) -> PraxisResult<ThreadSpawnResult> {
-        let request = ThreadSpawnRequest::new(
+        let mut request = ThreadSpawnRequest::new(
             config,
             initial_history,
             auth_manager,
@@ -76,6 +79,7 @@ impl ThreadManagerInner {
         .with_metrics_service_name(metrics_service_name)
         .with_parent_trace(parent_trace)
         .with_user_shell_override(user_shell_override);
+        request.prepared_rollout_writer = prepared_rollout_writer;
         Box::pin(self.spawn_from_request(request)).await
     }
 

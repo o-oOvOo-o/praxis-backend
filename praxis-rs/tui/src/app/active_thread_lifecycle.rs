@@ -26,6 +26,11 @@ impl App {
         // clearing, flushing, and then repainting the whole screen. Cold replay and inline mode
         // still clear because their replacement transcript is not yet fully materialized here.
         if self.workspace.enabled || (preserve_alt_screen_frame && tui.is_alt_screen_active()) {
+            // The physical alternate screen can be cleared by resize, reconnect, or a previous
+            // replay even while ratatui's previous buffer still contains the old frame. Preserve
+            // the visible screen, but invalidate the diff cache so the selected thread's first
+            // frame is always complete.
+            tui.terminal.force_full_redraw();
             return Ok(());
         }
         // Clear the old thread in one terminal transaction so the first frame of the selected
@@ -289,65 +294,15 @@ impl App {
             .launch
             .activate_thread(thread_id, default_launch_rank);
 
-        self.advance_history_view_generation();
-        let (mut target_widget, cached_transcript) = if let Some(cached) = cached_view {
-            tracing::debug!(
-                thread_id = %thread_id,
-                revision = target_revision,
-                "restoring materialized thread view from cache"
-            );
-            cached
-                .chat_widget
-                .rebind_history_view(self.history_view_generation);
-            (cached.chat_widget, Some(cached.transcript_cells))
-        } else {
-            let init = self.chatwidget_init_for_forked_or_resumed_thread(
-                tui,
-                self.config.clone(),
-                self.tui_config.clone(),
-            );
-            (ChatWidget::new_for_thread_replay(init), None)
-        };
-        // A hot view restore can touch status, control, token, goal, and live-event
-        // projections in one logical commit. Keep their footer/title updates deferred
-        // until the selected view is fully current so switching does one surface pass.
-        let projection_refresh_batch = cached_projection
-            .as_ref()
-            .is_some_and(|projection| !projection.is_empty());
-        if projection_refresh_batch {
-            target_widget.begin_status_surface_refresh_batch();
-            target_widget.begin_redraw_batch();
-        }
-        let cached_events = cached_projection
-            .map(|projection| projection.apply_to(&mut target_widget))
-            .unwrap_or_default();
-        let previous_view = previous_thread_id.zip(previous_view_revision);
-        let reused_cached_view = match self.install_thread_view_shell(
+        let reused_cached_view = self.restore_thread_view(
             tui,
-            target_widget,
-            cached_transcript,
-            previous_view,
+            thread_id,
             target_revision,
-        ) {
-            Ok(reused_cached_view) => reused_cached_view,
-            Err(err) => {
-                if projection_refresh_batch {
-                    self.chat_widget.finish_status_surface_refresh_batch();
-                    self.refresh_status_line();
-                    self.chat_widget.finish_redraw_batch();
-                }
-                return Err(err);
-            }
-        };
-        if projection_refresh_batch {
-            self.chat_widget.finish_status_surface_refresh_batch();
-            self.refresh_status_line();
-            self.chat_widget.finish_redraw_batch();
-        }
+            previous_thread_id.zip(previous_view_revision),
+            cached_view,
+            cached_projection,
+        )?;
         self.workspace.reset_chat_scroll();
-        if reused_cached_view {
-            self.queue_thread_view_catchup(thread_id, target_revision, cached_events);
-        }
         if !reused_cached_view {
             if let Some(replay_source) = replay_source {
                 self.replay_thread_source(replay_source, /*resume_restored_queue*/ true);
@@ -561,6 +516,9 @@ impl App {
         source: ThreadReplaySource,
         resume_restored_queue: bool,
     ) {
+        let replay_started = Instant::now();
+        let replay_turns = source.turns.len();
+        let replay_events = source.events.len();
         let should_buffer_replay =
             source.session.is_some() || !source.turns.is_empty() || !source.events.is_empty();
         let replay_generation = self.history_view_generation;
@@ -593,6 +551,8 @@ impl App {
         self.chat_widget
             .apply_thread_status_snapshot(source.status.as_ref());
         self.chat_widget
+            .restore_running_turn_elapsed_seconds(source.active_turn_elapsed_seconds);
+        self.chat_widget
             .set_thread_control_state(source.control_state.as_ref());
         if let Some(token_usage) = source.token_usage {
             self.chat_widget
@@ -614,6 +574,10 @@ impl App {
             self.chat_widget.maybe_send_next_queued_input();
         }
         self.refresh_status_line();
+        tracing::info!(target: "praxis_tui::thread_switch",
+            thread_id = ?self.active_thread_id, turns = replay_turns, events = replay_events,
+            cells = replayed_cells.len(), elapsed_us = replay_started.elapsed().as_micros() as u64,
+            "thread replay projected");
         if should_buffer_replay {
             self.app_event_tx.send(AppEvent::CommitThreadReplay {
                 generation: replay_generation,

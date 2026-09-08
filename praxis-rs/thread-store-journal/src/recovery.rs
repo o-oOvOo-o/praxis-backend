@@ -16,6 +16,7 @@ use praxis_thread_store_contracts::Digest;
 use praxis_thread_store_contracts::ThreadEventEnvelope;
 use praxis_thread_store_contracts::ThreadHead;
 use praxis_thread_store_contracts::ThreadId;
+use std::collections::HashSet;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::Read;
@@ -141,6 +142,7 @@ fn recover_with_mode(
         command_index: CommandIndex::new(),
     };
     let mut decode_buffer = Vec::new();
+    let mut recovered_commands = HashSet::new();
     for (index, (sequence, path)) in paths.into_iter().enumerate() {
         let expected_sequence =
             u64::try_from(index).map_err(|_| corrupt(&path, 0, "segment count exceeds u64"))?;
@@ -163,6 +165,7 @@ fn recover_with_mode(
             mode,
             &mut state,
             &mut decode_buffer,
+            &mut recovered_commands,
             visit,
         )?;
     }
@@ -288,54 +291,6 @@ pub(crate) fn visit_segment_pointers(
     Ok(false)
 }
 
-fn recovered_command_exists(
-    state: &RecoveryState,
-    current_path: &Path,
-    current_offset: u64,
-    command_id: CommandId,
-) -> Result<bool, JournalError> {
-    if !state.command_index.maybe_contains(command_id) {
-        return Ok(false);
-    }
-    if state.command_index.recent_frame(command_id).is_some()
-        || find_command_pointer(&state.segments, command_id)?.is_some()
-    {
-        return Ok(true);
-    }
-    command_exists_in_prefix(current_path, current_offset, command_id)
-}
-
-fn command_exists_in_prefix(
-    path: &Path,
-    end_offset: u64,
-    command_id: CommandId,
-) -> Result<bool, JournalError> {
-    let expected = *command_id.as_uuid().as_bytes();
-    let mut file = File::open(path)?;
-    let mut offset = SEGMENT_HEADER_LEN as u64;
-    while offset < end_offset {
-        file.seek(SeekFrom::Start(offset))?;
-        let mut bytes = [0; FRAME_HEADER_LEN];
-        file.read_exact(&mut bytes)?;
-        let header = decode_frame_header(&bytes).map_err(|reason| corrupt(path, offset, reason))?;
-        let len = frame_len(&header).map_err(|reason| corrupt(path, offset, reason))?;
-        if header.command_id == expected {
-            return Ok(true);
-        }
-        offset = offset
-            .checked_add(len)
-            .ok_or_else(|| corrupt(path, offset, "segment offset overflow"))?;
-        if offset > end_offset {
-            return Err(corrupt(
-                path,
-                offset,
-                "frame crosses the recovered prefix boundary",
-            ));
-        }
-    }
-    Ok(false)
-}
-
 fn recover_segment(
     config: &JournalConfig,
     thread_id: ThreadId,
@@ -345,6 +300,7 @@ fn recover_segment(
     mode: RecoveryMode,
     state: &mut RecoveryState,
     decode_buffer: &mut Vec<u8>,
+    recovered_commands: &mut HashSet<CommandId>,
     visit: &mut impl FnMut(ThreadEventEnvelope),
 ) -> Result<(), JournalError> {
     let mut file = if mode.is_writer() {
@@ -416,7 +372,7 @@ fn recover_segment(
                 .map_err(|reason| corrupt(&path, offset, reason))?;
         if mode.is_writer() {
             let command_id = decoded.stored.command_id();
-            if recovered_command_exists(state, &path, offset, command_id)? {
+            if !recovered_commands.insert(command_id) {
                 return Err(corrupt(&path, offset, "duplicate committed command id"));
             }
             state.command_index.insert(

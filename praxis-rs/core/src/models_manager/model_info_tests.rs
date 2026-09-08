@@ -56,14 +56,14 @@ fn deepseek_builtin_models_use_official_context_window() {
     assert_eq!(model.context_window, Some(1_000_000));
     assert_eq!(model.auto_compact_token_limit(), Some(900_000));
     assert_eq!(model.effective_context_window_percent, 95);
-    assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::High));
+    assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::Medium));
 }
 
 #[test]
 fn fallback_common_model_exposes_optional_thinking_efforts() {
     let model = model_info_from_slug("custom-common-model");
 
-    assert_eq!(model.default_reasoning_level, None);
+    assert_eq!(model.default_reasoning_level, Some(ReasoningEffort::Medium));
     assert_eq!(
         model
             .supported_reasoning_levels
@@ -72,6 +72,7 @@ fn fallback_common_model_exposes_optional_thinking_efforts() {
             .collect::<Vec<_>>(),
         vec![
             ReasoningEffort::Low,
+            ReasoningEffort::Medium,
             ReasoningEffort::High,
             ReasoningEffort::XHigh,
             ReasoningEffort::None
@@ -138,7 +139,10 @@ fn anthropic_catalog_uses_current_messages_api_capabilities() {
 
     assert_eq!(sonnet.context_window, Some(1_000_000));
     assert_eq!(sonnet.auto_compact_token_limit(), Some(900_000));
-    assert_eq!(sonnet.default_reasoning_level, Some(ReasoningEffort::High));
+    assert_eq!(
+        sonnet.default_reasoning_level,
+        Some(ReasoningEffort::Medium)
+    );
     assert!(sonnet.supports_reasoning_summaries);
     assert!(sonnet.supports_parallel_tool_calls);
     assert!(sonnet.supports_reasoning_effort(&ReasoningEffort::Max));
@@ -169,8 +173,8 @@ fn kimi_catalog_declares_tier_windows_and_safe_effort_choices() {
         .expect("K3 1M catalog entry");
     assert_eq!(k3_1m.context_window, Some(1_048_576));
     assert_eq!(k3_1m.auto_compact_token_limit(), Some(943_718));
-    assert_eq!(k3_1m.default_reasoning_level, Some(ReasoningEffort::Max));
-    assert_eq!(k3_1m.supported_reasoning_levels.len(), 1);
+    assert_eq!(k3_1m.default_reasoning_level, Some(ReasoningEffort::Medium));
+    assert_eq!(k3_1m.supported_reasoning_levels.len(), 2);
     assert!(k3_1m.supports_reasoning_effort(&ReasoningEffort::Max));
 
     let k2 = models
@@ -183,6 +187,25 @@ fn kimi_catalog_declares_tier_windows_and_safe_effort_choices() {
         k2.supported_reasoning_levels[0].effective_display_name(),
         "Thinking ON"
     );
+}
+
+#[test]
+fn synced_model_prompts_survive_remote_catalog_and_fallback_resolution() {
+    for slug in ["gpt-6-astra", "gpt-5.6-sol"] {
+        let local = known_openai_compatible_model_info(slug).unwrap();
+        assert_eq!(
+            model_info_from_slug(slug).model_messages,
+            local.model_messages
+        );
+        let mut remote = local.clone();
+        remote.base_instructions = "You are Codex.".to_string();
+        remote.model_messages = None;
+        let updated = with_known_model_capability_overrides(remote);
+        assert_eq!(
+            updated.get_model_instructions(None),
+            local.get_model_instructions(None)
+        );
+    }
 }
 
 #[test]

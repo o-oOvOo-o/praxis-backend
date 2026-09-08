@@ -26,6 +26,7 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         params: ThreadResumeParams,
     ) {
+        let resume_started = std::time::Instant::now();
         if let Ok(thread_id) = ThreadId::from_string(&params.thread_id)
             && self
                 .pending_thread_unloads
@@ -71,14 +72,14 @@ impl PraxisMessageProcessor {
             turn_limit,
         } = params;
 
-        let thread_history = if let Some(history) = history {
+        let (thread_history, prepared_rollout_writer) = if let Some(history) = history {
             let Some(thread_history) = self
                 .resume_thread_from_history(request_id.clone(), history.as_slice())
                 .await
             else {
                 return;
             };
-            thread_history
+            (thread_history, None)
         } else {
             let Some(thread_history) = self
                 .resume_thread_from_rollout(request_id.clone(), &thread_id, path.as_ref())
@@ -89,6 +90,10 @@ impl PraxisMessageProcessor {
             thread_history
         };
 
+        tracing::info!(target: "praxis_app_gateway::thread_resume", thread_id = %thread_id,
+            prepared_writer = prepared_rollout_writer.is_some(),
+            phase = "history_loaded", elapsed_us = resume_started.elapsed().as_micros() as u64,
+            "thread resume stage completed");
         let history_cwd = thread_history.session_cwd();
         let mut typesafe_overrides = self.build_thread_config_overrides(
             model,
@@ -134,6 +139,9 @@ impl PraxisMessageProcessor {
             }
         };
 
+        tracing::info!(target: "praxis_app_gateway::thread_resume", thread_id = %thread_id,
+            phase = "config_loaded", elapsed_us = resume_started.elapsed().as_micros() as u64,
+            "thread resume stage completed");
         let fallback_model_provider = config.model_provider_id.clone();
         let response_history = thread_history.clone();
         let core_dynamic_tools = match build_core_dynamic_tools(dynamic_tools) {
@@ -155,6 +163,7 @@ impl PraxisMessageProcessor {
             .resume_thread_with_history_and_dynamic_tools(
                 config,
                 thread_history,
+                prepared_rollout_writer,
                 self.auth_manager.clone(),
                 core_dynamic_tools,
                 persist_extended_history,
@@ -175,6 +184,9 @@ impl PraxisMessageProcessor {
                 ..
             }) => {
                 let SessionConfiguredEvent { rollout_path, .. } = session_configured;
+                tracing::info!(target: "praxis_app_gateway::thread_resume", thread_id = %thread_id,
+                    phase = "session_resumed", elapsed_us = resume_started.elapsed().as_micros() as u64,
+                    "thread resume stage completed");
                 let Some(rollout_path) = rollout_path else {
                     self.send_internal_error(
                         request_id,
@@ -250,6 +262,9 @@ impl PraxisMessageProcessor {
                     );
                 }
 
+                tracing::info!(target: "praxis_app_gateway::thread_resume", thread_id = %thread_id,
+                    phase = "response_ready", elapsed_us = resume_started.elapsed().as_micros() as u64,
+                    "thread resume stage completed");
                 self.outgoing.send_response(request_id, response).await;
             }
             Err(err) => {
@@ -541,7 +556,10 @@ impl PraxisMessageProcessor {
         request_id: ConnectionRequestId,
         thread_id: &str,
         path: Option<&PathBuf>,
-    ) -> Option<InitialHistory> {
+    ) -> Option<(
+        InitialHistory,
+        Option<praxis_rollout::recorder::PreparedRolloutWriter>,
+    )> {
         let rollout_path = if let Some(path) = path {
             path.clone()
         } else {
@@ -554,11 +572,30 @@ impl PraxisMessageProcessor {
             rollout_path
         };
 
+        match self
+            .thread_manager
+            .prepare_native_resume(&self.config, &rollout_path)
+            .await
+        {
+            Ok(Some(prepared)) => {
+                let (history, writer) = prepared.into_parts();
+                return Some((history, Some(writer)));
+            }
+            Ok(None) => {}
+            Err(err) => {
+                self.send_invalid_request_error(
+                    request_id,
+                    format!("failed to prepare native thread: {err}"),
+                )
+                .await;
+                return None;
+            }
+        }
         match ThreadProjection::new(&self.config)
             .read_initial_history(&rollout_path)
             .await
         {
-            Ok(initial_history) => Some(initial_history),
+            Ok(initial_history) => Some((initial_history, None)),
             Err(err) => {
                 self.send_invalid_request_error(
                     request_id,

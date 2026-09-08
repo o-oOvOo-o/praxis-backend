@@ -37,10 +37,11 @@ impl SessionStartupFlow {
     }
 
     async fn collect_startup_artifacts(
-        &self,
+        &mut self,
     ) -> anyhow::Result<startup_artifacts::StartupArtifacts> {
         startup_artifacts::collect(startup_artifacts::StartupArtifactsInput {
             initial_history: &self.spec.initial_history,
+            prepared_rollout_writer: self.spec.prepared_rollout_writer.take(),
             session_configuration: &self.spec.session_configuration,
             session_source: self.spec.session_source.clone(),
             config: &self.services.config,

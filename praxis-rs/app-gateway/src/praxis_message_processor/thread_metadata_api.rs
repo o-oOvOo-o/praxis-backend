@@ -113,21 +113,24 @@ impl PraxisMessageProcessor {
             }
         };
 
-        let thread_name = match thread.regenerate_thread_name().await {
-            Ok(thread_name) => thread_name,
-            Err(err) => {
-                self.send_internal_error(
-                    request_id,
-                    format!("failed to regenerate thread name: {err}"),
-                )
-                .await;
-                return;
+        let outgoing = Arc::clone(&self.outgoing);
+        self.background_tasks.spawn(async move {
+            match thread.regenerate_thread_name().await {
+                Ok(thread_name) => {
+                    outgoing
+                        .send_response(request_id, ThreadRegenerateNameResponse { thread_name })
+                        .await;
+                }
+                Err(err) => {
+                    outgoing
+                        .send_error(
+                            request_id,
+                            internal_error(format!("failed to regenerate thread name: {err}")),
+                        )
+                        .await;
+                }
             }
-        };
-
-        self.outgoing
-            .send_response(request_id, ThreadRegenerateNameResponse { thread_name })
-            .await;
+        });
     }
 
     pub(crate) async fn thread_metadata_update(

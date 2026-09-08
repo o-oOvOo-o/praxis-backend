@@ -131,9 +131,13 @@ pub(super) fn test_model_catalog(config: &Config) -> Arc<ModelCatalog> {
             .features
             .enabled(Feature::DefaultModeRequestUserInput),
     };
-    Arc::new(ModelCatalog::new(
+    let catalog = praxis_core::models_manager::catalog::project_model_catalog(
+        config,
         praxis_core::test_support::all_model_presets().clone(),
-        HashMap::new(),
+    );
+    Arc::new(ModelCatalog::new(
+        catalog.models,
+        catalog.metadata_by_preset_id,
         collaboration_modes_config,
     ))
 }
@@ -625,10 +629,7 @@ pub(super) fn active_blob(chat: &ChatWidget) -> String {
 }
 
 pub(super) fn get_available_model(chat: &ChatWidget, model: &str) -> ModelPreset {
-    let models = chat
-        .model_catalog
-        .try_list_models()
-        .expect("models lock available");
+    let models = chat.model_catalog.list_models();
     models
         .iter()
         .find(|&preset| preset.model == model)

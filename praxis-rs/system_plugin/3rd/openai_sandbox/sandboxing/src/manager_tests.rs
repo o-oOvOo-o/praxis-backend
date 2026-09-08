@@ -1,5 +1,6 @@
 use super::SandboxCommand;
 use super::SandboxManager;
+use super::SandboxSelectionError;
 use super::SandboxTransformRequest;
 use super::SandboxType;
 use super::SandboxablePreference;
@@ -33,14 +34,14 @@ fn danger_full_access_defaults_to_no_sandbox_without_network_requirements() {
         WindowsSandboxLevel::Disabled,
         /*has_managed_network_requirements*/ false,
     );
-    assert_eq!(sandbox, SandboxType::None);
+    assert_eq!(sandbox, Ok(SandboxType::None));
 }
 
 #[test]
 fn danger_full_access_uses_platform_sandbox_with_network_requirements() {
     let manager = SandboxManager::new();
-    let expected =
-        get_platform_sandbox(/*windows_sandbox_enabled*/ false).unwrap_or(SandboxType::None);
+    let expected = get_platform_sandbox(/*windows_sandbox_enabled*/ false)
+        .ok_or(SandboxSelectionError::RequiredSandboxUnavailable);
     let sandbox = manager.select_initial(
         &FileSystemSandboxPolicy::unrestricted(),
         NetworkSandboxPolicy::Enabled,
@@ -54,8 +55,8 @@ fn danger_full_access_uses_platform_sandbox_with_network_requirements() {
 #[test]
 fn restricted_file_system_uses_platform_sandbox_without_managed_network() {
     let manager = SandboxManager::new();
-    let expected =
-        get_platform_sandbox(/*windows_sandbox_enabled*/ false).unwrap_or(SandboxType::None);
+    let expected = get_platform_sandbox(/*windows_sandbox_enabled*/ false)
+        .ok_or(SandboxSelectionError::RequiredSandboxUnavailable);
     let sandbox = manager.select_initial(
         &FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
             path: FileSystemPath::Special {
@@ -69,6 +70,53 @@ fn restricted_file_system_uses_platform_sandbox_without_managed_network() {
         /*has_managed_network_requirements*/ false,
     );
     assert_eq!(sandbox, expected);
+}
+
+#[test]
+fn external_sandbox_without_managed_network_needs_no_local_backend() {
+    assert_eq!(
+        SandboxManager::new().select_initial(
+            &FileSystemSandboxPolicy::from(&SandboxPolicy::ExternalSandbox {
+                network_access: NetworkAccess::Restricted,
+            }),
+            NetworkSandboxPolicy::Restricted,
+            SandboxablePreference::Auto,
+            WindowsSandboxLevel::Disabled,
+            /*has_managed_network_requirements*/ false,
+        ),
+        Ok(SandboxType::None),
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn required_sandbox_respects_windows_backend_enablement() {
+    let manager = SandboxManager::new();
+    for (level, expected) in [
+        (
+            WindowsSandboxLevel::Disabled,
+            Err(SandboxSelectionError::RequiredSandboxUnavailable),
+        ),
+        (
+            WindowsSandboxLevel::RestrictedToken,
+            Ok(SandboxType::WindowsRestrictedToken),
+        ),
+        (
+            WindowsSandboxLevel::Elevated,
+            Ok(SandboxType::WindowsRestrictedToken),
+        ),
+    ] {
+        assert_eq!(
+            manager.select_initial(
+                &FileSystemSandboxPolicy::unrestricted(),
+                NetworkSandboxPolicy::Enabled,
+                SandboxablePreference::Require,
+                level,
+                /*has_managed_network_requirements*/ false,
+            ),
+            expected,
+        );
+    }
 }
 
 #[test]

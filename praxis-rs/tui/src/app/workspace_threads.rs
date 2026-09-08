@@ -3,7 +3,7 @@ use super::thread_event_store::lock_thread_event_store;
 use super::workspace_view_helpers::workspace_search_term;
 use crate::app_event::AppEvent;
 use crate::app_gateway_session::AppGatewaySession;
-use crate::app_gateway_session::AppGatewayStartedThread;
+use crate::app_gateway_session::read_workspace_thread_with_handle;
 use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::workspace::ThreadListRow;
 use crate::workspace::parse_workspace_thread_id;
@@ -101,9 +101,9 @@ impl App {
         self.resort_workspace_thread_rows();
     }
 
-    pub(super) async fn observe_workspace_thread_if_needed(
+    pub(super) fn observe_workspace_thread_if_needed(
         &mut self,
-        app_gateway: &mut AppGatewaySession,
+        app_gateway: &AppGatewaySession,
         thread_id: ThreadId,
     ) {
         if !self.workspace.enabled {
@@ -117,17 +117,18 @@ impl App {
             return;
         }
 
-        match app_gateway.watch_thread(&self.config, thread_id).await {
-            Ok(started) => self.apply_workspace_observed_thread(started).await,
-            Err(err) => {
-                self.workspace_observed_thread_ids.remove(&thread_id);
-                tracing::warn!(
-                    thread_id = %thread_id,
-                    error = %err,
-                    "failed to attach Praxis observer to externally started thread"
-                );
-            }
-        }
+        let request_handle = app_gateway.request_handle();
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let result = tokio::time::timeout(
+                WORKSPACE_REFRESH_TIMEOUT,
+                read_workspace_thread_with_handle(request_handle, thread_id),
+            )
+            .await
+            .map_err(|_| "thread/read timed out during workspace hydration".to_string())
+            .and_then(|result| result.map_err(|err| format!("{err:#}")));
+            app_event_tx.send(AppEvent::WorkspaceThreadObserved { thread_id, result });
+        });
     }
 
     pub(super) fn workspace_thread_should_auto_observe(&self, thread_id: ThreadId) -> bool {
@@ -137,9 +138,9 @@ impl App {
             .is_some_and(workspace_row_should_auto_observe)
     }
 
-    pub(super) async fn observe_existing_workspace_threads_if_needed(
+    pub(super) fn observe_existing_workspace_threads_if_needed(
         &mut self,
-        app_gateway: &mut AppGatewaySession,
+        app_gateway: &AppGatewaySession,
     ) {
         if !self.workspace.enabled {
             return;
@@ -151,21 +152,52 @@ impl App {
             .filter(|row| workspace_row_should_auto_observe(row))
             .map(|row| row.thread_id)
             .collect::<Vec<_>>();
-        for thread_id in thread_ids {
-            self.observe_workspace_thread_if_needed(app_gateway, thread_id)
-                .await;
+        let thread_ids = thread_ids
+            .into_iter()
+            .filter(|thread_id| self.primary_thread_id != Some(*thread_id))
+            .filter(|thread_id| self.workspace_observed_thread_ids.insert(*thread_id))
+            .collect::<Vec<_>>();
+        if thread_ids.is_empty() {
+            return;
         }
+        let request_handle = app_gateway.request_handle();
+        let app_event_tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            for thread_id in thread_ids {
+                let result = tokio::time::timeout(
+                    WORKSPACE_REFRESH_TIMEOUT,
+                    read_workspace_thread_with_handle(request_handle.clone(), thread_id),
+                )
+                .await
+                .map_err(|_| "thread/read timed out during workspace hydration".to_string())
+                .and_then(|result| result.map_err(|err| format!("{err:#}")));
+                app_event_tx.send(AppEvent::WorkspaceThreadObserved { thread_id, result });
+            }
+        });
     }
 
-    async fn apply_workspace_observed_thread(&mut self, started: AppGatewayStartedThread) {
-        let AppGatewayStartedThread {
-            mut session,
-            turns,
-            status,
-            control_state,
-        } = started;
+    pub(super) fn handle_workspace_thread_observed(
+        &mut self,
+        thread_id: ThreadId,
+        result: Result<praxis_app_gateway_protocol::Thread, String>,
+    ) {
+        let mut thread = match result {
+            Ok(thread) => thread,
+            Err(err) => {
+                self.workspace_observed_thread_ids.remove(&thread_id);
+                tracing::warn!(
+                    thread_id = %thread_id,
+                    error = %err,
+                    "failed to hydrate externally started Praxis thread"
+                );
+                return;
+            }
+        };
+        let turns = std::mem::take(&mut thread.turns);
+        let status = thread.status.clone();
+        let control_state = thread.control_state.clone();
+        let mut session = self.session_state_for_thread_read(thread_id, &thread);
         self.apply_current_permissions_to_thread_session(&mut session);
-        let thread_id = session.thread_id;
         self.update_workspace_thread_row(thread_id, /*resort_after_update*/ true, |row| {
             row.status = status.clone();
             row.control_state = control_state.clone();

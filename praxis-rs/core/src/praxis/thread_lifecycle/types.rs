@@ -43,6 +43,7 @@ pub(crate) struct PraxisSpawnArgs {
     pub(crate) mcp_manager: Arc<McpManager>,
     pub(crate) skills_watcher: Arc<SkillsWatcher>,
     pub(crate) conversation_history: InitialHistory,
+    pub(crate) prepared_rollout_writer: Option<praxis_rollout::recorder::PreparedRolloutWriter>,
     pub(crate) session_source: SessionSource,
     pub(crate) agent_control: AgentControl,
     pub(crate) agent_os: Arc<AgentOs>,

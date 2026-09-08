@@ -866,7 +866,7 @@ impl CoreShellCommandExecutor {
             SandboxablePreference::Auto,
             self.windows_sandbox_level,
             self.network.is_some(),
-        );
+        )?;
         let command = SandboxCommand {
             program: program.clone().into(),
             args: args.to_vec(),

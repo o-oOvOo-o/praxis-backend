@@ -217,6 +217,12 @@ impl App {
                 });
                 Ok(None)
             }
+            WorkspaceMenuAction::RegenerateName => {
+                self.workspace.clear_overlay();
+                self.app_event_tx
+                    .send(crate::app_event::AppEvent::RegenerateThreadName { thread_id });
+                Ok(None)
+            }
             WorkspaceMenuAction::Archive => {
                 self.workspace.overlay =
                     WorkspaceOverlay::ConfirmArchive(WorkspaceArchiveConfirmState {

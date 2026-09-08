@@ -12,6 +12,17 @@ use super::super::ThreadManager;
 use super::super::ThreadSpawnResult;
 
 impl ThreadManager {
+    /// Recover native history and retain its exclusive writer for session initialization.
+    pub async fn prepare_native_resume(
+        &self,
+        config: &Config,
+        path: &std::path::Path,
+    ) -> std::io::Result<Option<praxis_rollout::recorder::PreparedRolloutResume>> {
+        if config.ephemeral {
+            return Ok(None);
+        }
+        praxis_rollout::recorder::PreparedRolloutResume::open(&config.praxis_home, path).await
+    }
     pub async fn resume_thread_with_history(
         &self,
         config: Config,
@@ -23,6 +34,7 @@ impl ThreadManager {
         self.resume_thread_with_history_and_dynamic_tools(
             config,
             initial_history,
+            /*prepared_rollout_writer*/ None,
             auth_manager,
             Vec::new(),
             persist_extended_history,
@@ -35,6 +47,7 @@ impl ThreadManager {
         &self,
         config: Config,
         initial_history: InitialHistory,
+        prepared_rollout_writer: Option<praxis_rollout::recorder::PreparedRolloutWriter>,
         auth_manager: Arc<AuthManager>,
         dynamic_tools: Vec<DynamicToolSpec>,
         persist_extended_history: bool,
@@ -43,6 +56,7 @@ impl ThreadManager {
         Box::pin(self.state.spawn_thread(
             config,
             initial_history,
+            prepared_rollout_writer,
             auth_manager,
             self.agent_control(),
             dynamic_tools,

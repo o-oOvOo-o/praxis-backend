@@ -105,19 +105,24 @@ impl AppGatewaySession {
         Ok(())
     }
 
-    pub(crate) async fn thread_regenerate_name(&mut self, thread_id: ThreadId) -> Result<String> {
+    pub(crate) fn thread_regenerate_name(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> impl std::future::Future<Output = Result<String>> + Send + 'static + use<> {
         let request_id = self.next_request_id();
-        let response: ThreadRegenerateNameResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadRegenerateName {
-                request_id,
-                params: ThreadRegenerateNameParams {
-                    thread_id: thread_id.to_string(),
-                },
-            })
-            .await
-            .wrap_err("thread/name/regenerate failed in TUI")?;
-        Ok(response.thread_name)
+        let handle = self.request_handle();
+        async move {
+            let response: ThreadRegenerateNameResponse = handle
+                .request_typed(ClientRequest::ThreadRegenerateName {
+                    request_id,
+                    params: ThreadRegenerateNameParams {
+                        thread_id: thread_id.to_string(),
+                    },
+                })
+                .await
+                .wrap_err("thread/name/regenerate failed in TUI")?;
+            Ok(response.thread_name)
+        }
     }
 
     pub(crate) async fn thread_archive(&mut self, thread_id: ThreadId) -> Result<()> {

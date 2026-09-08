@@ -14,9 +14,9 @@ use super::App;
 use super::lock_thread_event_store;
 use super::thread_event_store::ThreadEventEnvelope;
 
-// Keep more short-thread views hot without increasing the dominant transcript-cell budget.
-// Long transcripts are still evicted at the same 400-cell ceiling.
+// Retain two recent views so three-thread navigation does not repeatedly replay long histories.
 const THREAD_VIEW_CACHE_MAX_ENTRIES: usize = 8;
+const THREAD_VIEW_CACHE_MIN_RESIDENT_ENTRIES: usize = 2;
 const THREAD_VIEW_CACHE_MAX_TRANSCRIPT_CELLS: usize = 400;
 const THREAD_VIEW_ASYNC_DROP_MIN_TRANSCRIPT_CELLS: usize = 64;
 const THREAD_VIEW_CATCHUP_EVENT_BUDGET: usize = 16;
@@ -37,6 +37,9 @@ struct ThreadViewCatchup {
 
 #[derive(Default)]
 pub(super) struct ThreadViewCache {
+    #[cfg(debug_assertions)]
+    pub(super) switch_probe: Option<super::thread_switch_probe::ThreadSwitchProbe>,
+    pub(super) switch_timing: Option<super::thread_switch_timing::ThreadSwitchTiming<ThreadId>>,
     entries: HashMap<ThreadId, CachedThreadView>,
     lru: VecDeque<ThreadId>,
     transcript_cells: usize,
@@ -68,7 +71,7 @@ impl ThreadViewCache {
         }
         self.transcript_cells = self.transcript_cells.saturating_add(transcript_cells);
         self.lru.push_back(thread_id);
-        while self.entries.len() > 1
+        while self.entries.len() > THREAD_VIEW_CACHE_MIN_RESIDENT_ENTRIES
             && (self.entries.len() > THREAD_VIEW_CACHE_MAX_ENTRIES
                 || self.transcript_cells > THREAD_VIEW_CACHE_MAX_TRANSCRIPT_CELLS)
         {

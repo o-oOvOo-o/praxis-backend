@@ -65,6 +65,7 @@ impl ThreadManager {
         Box::pin(self.state.spawn_thread_with_requested_id(
             config,
             history,
+            /*prepared_rollout_writer*/ None,
             Arc::clone(&self.state.auth_manager),
             self.agent_control(),
             Vec::new(),

@@ -1,3 +1,5 @@
+mod thread_naming;
+
 use super::*;
 use crate::bottom_pane::PluginCommandInvocation;
 use crate::bottom_pane::PluginStatusDocument;
@@ -73,7 +75,7 @@ impl ChatWidget {
     }
 
     pub(super) fn dispatch_command(&mut self, cmd: SlashCommand) {
-        if !cmd.available_during_task() && self.bottom_pane.is_task_running() {
+        if !crate::slash_command::available_during_task(cmd) && self.bottom_pane.is_task_running() {
             let message = format!(
                 "'/{}' is disabled while a task is in progress.",
                 cmd.command()
@@ -154,27 +156,7 @@ impl ChatWidget {
                     .counter("praxis.thread.rename", /*inc*/ 1, &[]);
                 self.show_rename_prompt();
             }
-            SlashCommand::Namegen => {
-                self.session_telemetry
-                    .counter("praxis.thread.namegen", /*inc*/ 1, &[]);
-                let Some(thread_id) = self.thread_id else {
-                    self.add_error_message(
-                        "Thread is not ready yet; cannot regenerate its name.".to_string(),
-                    );
-                    self.bottom_pane.drain_pending_submission_state();
-                    return;
-                };
-                self.app_event_tx
-                    .send(AppEvent::RegenerateThreadName { thread_id });
-                self.add_info_message(
-                    "Regenerating thread name.".to_string(),
-                    Some(
-                        "Praxis will rename this thread from the current conversation context."
-                            .to_string(),
-                    ),
-                );
-                self.bottom_pane.drain_pending_submission_state();
-            }
+            SlashCommand::Namegen => self.regenerate_thread_name(),
             SlashCommand::Model => {
                 self.open_model_popup();
             }
@@ -520,7 +502,7 @@ impl ChatWidget {
             self.dispatch_command(cmd);
             return;
         }
-        if !cmd.available_during_task() && self.bottom_pane.is_task_running() {
+        if !crate::slash_command::available_during_task(cmd) && self.bottom_pane.is_task_running() {
             let message = format!(
                 "'/{}' is disabled while a task is in progress.",
                 cmd.command()

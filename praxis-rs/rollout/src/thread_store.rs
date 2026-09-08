@@ -34,6 +34,7 @@ mod history;
 mod migration;
 mod names;
 pub(crate) mod native_codec;
+mod native_locator;
 pub(crate) mod resume_selection;
 mod rollout_stream;
 
@@ -315,13 +316,30 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
         thread_id: ThreadId,
         archived_only: Option<bool>,
     ) -> io::Result<Option<PathBuf>> {
-        crate::list::find_thread_path_by_id_str_with_db_context(
+        let legacy = crate::list::find_thread_path_by_id_str_with_db_context(
             self.config.praxis_home(),
             &thread_id.to_string(),
             ThreadArchiveFilter::from_archived_only(archived_only),
             self.state_db(),
         )
-        .await
+        .await?;
+        if legacy.is_some() {
+            return Ok(legacy);
+        }
+        let native_id = praxis_thread_store_contracts::ThreadId::parse(&thread_id.to_string())
+            .map_err(io::Error::other)?;
+        let Some(summary) = self
+            .native_store
+            .read_summary(native_id)
+            .await
+            .map_err(io::Error::other)?
+        else {
+            return Ok(None);
+        };
+        if archived_only.is_some_and(|archived| archived != summary.archived) {
+            return Ok(None);
+        }
+        native_locator::path(self.config.praxis_home(), &summary).map(Some)
     }
 
     pub async fn read_thread_summary(
@@ -347,6 +365,28 @@ impl<'a, C: RolloutConfigView> ThreadStore<'a, C> {
                 thread_id,
                 metadata.rollout_path.display()
             );
+        }
+
+        let native_id = praxis_thread_store_contracts::ThreadId::parse(&thread_id.to_string())
+            .map_err(io::Error::other)?;
+        if let Some(native) = self
+            .native_store
+            .read_summary(native_id)
+            .await
+            .map_err(io::Error::other)?
+        {
+            if archived_only.is_some_and(|archived| archived != native.archived) {
+                return Ok(None);
+            }
+            let path = self
+                .find_rollout_path(thread_id, archived_only)
+                .await?
+                .unwrap_or(native_locator::path(self.config.praxis_home(), &native)?);
+            let mut summary = summary_from_native(native, thread_id, path);
+            if summary.model_provider.is_empty() {
+                summary.model_provider = fallback_provider.to_owned();
+            }
+            return Ok(Some(summary));
         }
 
         let Some(rollout_path) = self.find_rollout_path(thread_id, archived_only).await? else {
@@ -774,8 +814,9 @@ async fn list_native_directory_page(
         } else {
             fallback_paths.get(&thread_id).cloned()
         };
-        let Some(path) = path else {
-            continue;
+        let path = match path {
+            Some(path) => path,
+            None => native_locator::path(config.praxis_home(), &native)?,
         };
         let mut summary = state_threads
             .get(&thread_id)
@@ -944,7 +985,7 @@ fn summary_from_thread_item(
     let timestamp = item.created_at.clone();
     let updated_at = item.updated_at.clone().or_else(|| timestamp.clone());
     let cwd = item.cwd?;
-    let source = with_thread_spawn_agent_metadata(
+    let source = praxis_protocol::protocol::SessionSource::with_thread_spawn_agent_metadata(
         item.source.unwrap_or(SessionSource::Unknown),
         item.agent_base_name,
         item.agent_title,
@@ -994,7 +1035,7 @@ fn summary_from_thread_metadata(metadata: &praxis_state::ThreadMetadata) -> Thre
         model: metadata.model.clone(),
         cwd: metadata.cwd.clone(),
         cli_version: metadata.cli_version.clone(),
-        source: with_thread_spawn_agent_metadata(
+        source: praxis_protocol::protocol::SessionSource::with_thread_spawn_agent_metadata(
             parse_session_source(metadata.source.as_str()),
             metadata.agent_base_name.clone(),
             metadata.agent_title.clone(),
@@ -1018,43 +1059,6 @@ fn parse_session_source(source: &str) -> SessionSource {
     serde_json::from_str(source)
         .or_else(|_| serde_json::from_value(Value::String(source.to_string())))
         .unwrap_or(SessionSource::Unknown)
-}
-
-fn with_thread_spawn_agent_metadata(
-    source: SessionSource,
-    agent_base_name: Option<String>,
-    agent_title: Option<String>,
-    agent_display_name: Option<String>,
-    agent_role: Option<String>,
-) -> SessionSource {
-    if agent_base_name.is_none()
-        && agent_title.is_none()
-        && agent_display_name.is_none()
-        && agent_role.is_none()
-    {
-        return source;
-    }
-
-    match source {
-        SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            parent_thread_id,
-            depth,
-            agent_path,
-            agent_base_name: existing_agent_base_name,
-            agent_title: existing_agent_title,
-            agent_display_name: existing_agent_display_name,
-            agent_role: existing_agent_role,
-        }) => SessionSource::SubAgent(SubAgentSource::ThreadSpawn {
-            parent_thread_id,
-            depth,
-            agent_path,
-            agent_base_name: agent_base_name.or(existing_agent_base_name),
-            agent_title: agent_title.or(existing_agent_title),
-            agent_display_name: agent_display_name.or(existing_agent_display_name),
-            agent_role: agent_role.or(existing_agent_role),
-        }),
-        _ => source,
-    }
 }
 
 fn thread_git_info(

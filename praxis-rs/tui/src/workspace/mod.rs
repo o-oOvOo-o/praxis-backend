@@ -7,6 +7,7 @@ mod layout;
 mod list_params;
 mod overlay_layout;
 mod overlay_targets;
+mod pending_navigation;
 mod row_presentation;
 mod session_picker;
 mod session_picker_loader;

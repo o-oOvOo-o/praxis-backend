@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use praxis_app_gateway_protocol::Model;
@@ -9,11 +7,10 @@ use praxis_app_gateway_protocol::ReasoningEffortOption;
 use praxis_core::ModelProviderInfo;
 use praxis_core::ThreadManager;
 use praxis_core::WireApi;
-use praxis_core::capabilities::ProviderCapability;
 use praxis_core::config::Config;
+use praxis_core::models_manager::catalog::build_model_catalog;
+use praxis_core::models_manager::catalog::provider_scoped_preset_id;
 use praxis_core::models_manager::manager::RefreshStrategy;
-use praxis_core::models_manager::manager::first_party_model_presets_for_config;
-use praxis_core::models_manager::manager::local_model_presets_for_config;
 use praxis_protocol::openai_models::ConfigShellToolType;
 use praxis_protocol::openai_models::ModelInfo;
 use praxis_protocol::openai_models::ModelPreset;
@@ -25,133 +22,43 @@ pub async fn supported_models(
     include_hidden: bool,
 ) -> Vec<Model> {
     let models_manager = thread_manager.provider_capability();
-    let local_models_config = config.clone();
-    let local_models_task =
-        tokio::task::spawn_blocking(move || local_model_presets_for_config(&local_models_config));
     let current_presets = models_manager
         .list_models_for_config(config, RefreshStrategy::OnlineIfUncached)
-        .await
-        .into_iter()
-        .filter(|preset| include_hidden || preset.show_in_picker)
-        .collect::<Vec<_>>();
-    let mut models = Vec::with_capacity(current_presets.len().saturating_add(8));
-    let mut seen_models = HashSet::with_capacity(current_presets.len().saturating_add(8));
-    append_provider_models(
-        &models_manager,
-        config,
-        config.model_provider_id.as_str(),
-        &config.model_provider,
-        current_presets,
-        include_hidden,
-        &mut models,
-        &mut seen_models,
-    )
-    .await;
-
-    let mut first_party_catalogs = BTreeMap::new();
-    for model in first_party_model_presets_for_config(config) {
-        if model.provider_id == config.model_provider_id {
-            continue;
-        }
-        first_party_catalogs
-            .entry(model.provider_id)
-            .or_insert_with(|| (model.provider, Vec::new()))
-            .1
-            .push(model.preset);
-    }
-    for (provider_id, (provider, presets)) in first_party_catalogs {
-        append_provider_models(
-            &models_manager,
-            config,
-            provider_id.as_str(),
-            &provider,
-            presets,
-            include_hidden,
-            &mut models,
-            &mut seen_models,
-        )
         .await;
-    }
-
-    let local_model_presets = match local_models_task.await {
-        Ok(presets) => presets,
+    let catalog_config = config.clone();
+    let catalog = match tokio::task::spawn_blocking(move || {
+        build_model_catalog(&catalog_config, current_presets)
+    })
+    .await
+    {
+        Ok(catalog) => catalog,
         Err(error) => {
-            tracing::error!(error = %error, "local model catalog task failed");
-            Vec::new()
+            tracing::error!(%error, "model catalog task failed");
+            return Vec::new();
         }
     };
-    if let Some(first) = local_model_presets.first() {
-        let provider_id = first.provider_id.clone();
-        let provider = first.provider.clone();
-        append_provider_models(
-            &models_manager,
-            config,
-            provider_id.as_str(),
-            &provider,
-            local_model_presets
-                .into_iter()
-                .map(|local_model| local_model.preset)
-                .collect(),
-            include_hidden,
-            &mut models,
-            &mut seen_models,
-        )
-        .await;
-    }
-
-    if let Some(current_model) = config.model.as_deref()
-        && seen_models.insert((config.model_provider_id.clone(), current_model.to_string()))
-    {
-        let model_info = models_manager.get_model_info(current_model, config).await;
-        let mut preset = ModelPreset::from(model_info.clone());
-        preset.show_in_picker = true;
-        preset.is_default = models.is_empty();
-        models.push(model_from_preset(
-            preset,
-            &model_info,
-            config.model_provider_id.as_str(),
-            &config.model_provider,
-        ));
-    }
-
-    models
-}
-
-async fn append_provider_models(
-    models_manager: &ProviderCapability,
-    base_config: &Config,
-    provider_id: &str,
-    provider: &ModelProviderInfo,
-    presets: Vec<ModelPreset>,
-    include_hidden: bool,
-    models: &mut Vec<Model>,
-    seen_models: &mut HashSet<(String, String)>,
-) {
-    let mut provider_config = base_config.clone();
-    provider_config.model_provider_id = provider_id.to_string();
-    provider_config.model_provider = provider.clone();
-
-    for preset in presets {
+    let mut models = Vec::with_capacity(catalog.models.len());
+    for preset in catalog.models {
         if !include_hidden && !preset.show_in_picker {
             continue;
         }
-        if !seen_models.insert((provider_id.to_string(), preset.model.clone())) {
+        let Some(metadata) = catalog.metadata_by_preset_id.get(&preset.id) else {
             continue;
-        }
-        let model_info = models_manager
-            .get_model_info(preset.model.as_str(), &provider_config)
+        };
+        let mut provider_config = config.clone();
+        provider_config.model_provider_id = metadata.provider_id.clone();
+        provider_config.model_provider = metadata.provider.clone();
+        let info = models_manager
+            .get_model_info(&preset.model, &provider_config)
             .await;
         models.push(model_from_preset(
             preset,
-            &model_info,
-            provider_id,
-            provider,
+            &info,
+            &metadata.provider_id,
+            &metadata.provider,
         ));
     }
-}
-
-fn provider_scoped_model_id(provider_id: &str, model: &str) -> String {
-    format!("{provider_id}::{model}")
+    models
 }
 
 fn model_from_preset(
@@ -160,7 +67,7 @@ fn model_from_preset(
     provider_id: &str,
     provider: &ModelProviderInfo,
 ) -> Model {
-    let id = provider_scoped_model_id(provider_id, preset.model.as_str());
+    let id = provider_scoped_preset_id(provider_id, preset.model.as_str());
     Model {
         id,
         model_provider: Some(provider_id.to_owned()),

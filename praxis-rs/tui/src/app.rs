@@ -27,7 +27,6 @@ use crate::history_cell::HistoryCell;
 #[cfg(not(debug_assertions))]
 use crate::history_cell::UpdateAvailableHistoryCell;
 use crate::model_catalog::ModelCatalog;
-use crate::model_discovery::build_model_catalog;
 use crate::multi_agents::format_agent_picker_item_name_for_thread;
 use crate::multi_agents::next_agent_shortcut_matches;
 use crate::multi_agents::previous_agent_shortcut_matches;
@@ -83,6 +82,7 @@ use praxis_core::config::ConfigBuilder;
 use praxis_core::config::ConfigOverrides;
 use praxis_core::config::edit::ConfigEdit;
 use praxis_core::config::edit::ConfigEditsBuilder;
+use praxis_core::models_manager::catalog::project_model_catalog as build_model_catalog;
 use praxis_core::models_manager::collaboration_mode_presets::CollaborationModesConfig;
 #[cfg(target_os = "windows")]
 use praxis_core::windows_sandbox::WindowsSandboxLevelExt;
@@ -154,7 +154,13 @@ mod thread_event_channels;
 mod thread_event_ingress;
 mod thread_event_store;
 mod thread_interactive_requests;
+mod thread_switch_metrics;
+#[cfg(debug_assertions)]
+mod thread_switch_probe;
+mod thread_switch_timing;
 mod thread_view_cache;
+pub(crate) mod workspace_thread_load;
+mod thread_view_restore;
 mod workspace_actions;
 mod workspace_agent_picker;
 mod workspace_render;

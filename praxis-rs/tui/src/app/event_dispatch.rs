@@ -1,39 +1,9 @@
+mod history_insertion;
+mod thread_naming;
+
 use super::*;
 
 impl App {
-    fn insert_history_cell_now(&mut self, tui: &mut tui::Tui, cell: Box<dyn HistoryCell>) {
-        self.active_thread_view_materialized_revision = None;
-        let cell: Arc<dyn HistoryCell> = cell.into();
-        if let Some(Overlay::Transcript(t)) = &mut self.overlay {
-            t.insert_cell(cell.clone());
-            if self.thread_replay_buffer_generation.is_none() {
-                tui.frame_requester().schedule_frame();
-            }
-        }
-        self.transcript_cells.push(cell);
-        if self.thread_replay_buffer_generation.is_none() {
-            tui.frame_requester().schedule_frame();
-        }
-    }
-
-    fn insert_history_cells_now(&mut self, tui: &mut tui::Tui, cells: Vec<Box<dyn HistoryCell>>) {
-        if cells.is_empty() {
-            return;
-        }
-        self.active_thread_view_materialized_revision = None;
-        self.transcript_cells.reserve(cells.len());
-        for cell in cells {
-            let cell: Arc<dyn HistoryCell> = cell.into();
-            if let Some(Overlay::Transcript(transcript)) = &mut self.overlay {
-                transcript.insert_cell(cell.clone());
-            }
-            self.transcript_cells.push(cell);
-        }
-        if self.thread_replay_buffer_generation.is_none() {
-            tui.frame_requester().schedule_frame();
-        }
-    }
-
     pub(super) async fn handle_event(
         &mut self,
         tui: &mut tui::Tui,
@@ -153,22 +123,11 @@ impl App {
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::RegenerateThreadName { thread_id } => {
-                match app_gateway.thread_regenerate_name(thread_id).await {
-                    Ok(thread_name) => {
-                        if let Some(index) = self.workspace.row_index(thread_id) {
-                            self.workspace.rows[index].name = workspace_single_line(&thread_name);
-                            self.workspace.mark_subagent_summaries_dirty();
-                        }
-                        self.chat_widget.add_info_message(
-                            format!("Thread name regenerated: {thread_name}"),
-                            /*hint*/ None,
-                        );
-                    }
-                    Err(err) => {
-                        self.chat_widget
-                            .add_error_message(format!("Failed to regenerate thread name: {err}"));
-                    }
-                }
+                self.start_thread_name_generation(app_gateway, thread_id);
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::ThreadNameRegenerated { thread_id, result } => {
+                self.finish_thread_name_generation(thread_id, result);
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::OpenThreadGoalMenu { thread_id } => {
@@ -484,9 +443,20 @@ impl App {
                 }
             },
             AppEvent::WorkspaceThreadsLoaded { request_id, result } => {
+                #[cfg(debug_assertions)]
+                if result.is_err() && self.thread_view_cache.switch_probe.as_ref().is_some_and(|probe| probe.waiting_for_row.is_some()) {
+                    return Err(color_eyre::eyre::eyre!("probe pagination failed: {result:?}"));
+                }
                 self.handle_workspace_threads_loaded(request_id, result);
-                self.observe_existing_workspace_threads_if_needed(app_gateway)
-                    .await;
+                #[cfg(debug_assertions)]
+                if let Some(target) = self.thread_view_cache.switch_probe.as_mut().and_then(|probe| probe.waiting_for_row.take()) {
+                    self.app_event_tx.send(AppEvent::ProbeSelectWorkspaceThread(target));
+                }
+                self.observe_existing_workspace_threads_if_needed(app_gateway);
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::WorkspaceThreadObserved { thread_id, result } => {
+                self.handle_workspace_thread_observed(thread_id, result);
                 tui.frame_requester().schedule_frame();
             }
             AppEvent::WorkspaceSessionPickerPageLoaded { request, result } => {
@@ -946,9 +916,19 @@ impl App {
                 self.open_agent_picker(app_gateway).await;
                 tui.frame_requester().schedule_frame();
             }
+            AppEvent::WorkspaceThreadAttached(completed) => {
+                self.finish_workspace_thread_attach(tui, app_gateway, *completed).await?;
+            }
             AppEvent::SelectAgentThread(thread_id) => {
+                self.workspace.pending_thread_load.clear();
                 self.select_agent_thread(tui, app_gateway, thread_id)
                     .await?;
+            }
+            #[cfg(debug_assertions)]
+            AppEvent::ProbeSelectWorkspaceThread(thread_id) => {
+                if let Some(control) = self.select_probe_workspace_thread(tui, app_gateway, thread_id).await? {
+                    return Ok(control);
+                }
             }
             AppEvent::OpenSkillsList => {
                 self.chat_widget.open_skills_list();

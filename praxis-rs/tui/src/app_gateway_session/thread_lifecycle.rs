@@ -1,5 +1,8 @@
 use super::*;
 
+const INTERACTIVE_THREAD_ATTACH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const INTERACTIVE_THREAD_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 impl AppGatewaySession {
     pub(crate) async fn start_thread(
         &mut self,
@@ -47,34 +50,20 @@ impl AppGatewaySession {
         config: &Config,
         thread_id: ThreadId,
     ) -> Result<AppGatewayStartedThread> {
-        let request_id = self.next_request_id();
-        let response: ThreadResumeResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadResume {
-                request_id,
-                params: thread_attach_params(thread_id),
-            })
-            .await
-            .wrap_err("thread/resume attach failed in TUI")?;
-        self.refresh_thread_permissions(config, &response.thread.id)
-            .await?;
-        started_thread_from_resume_response(response, config).await
+        tokio::time::timeout(INTERACTIVE_THREAD_ATTACH_TIMEOUT, async {
+            let response =
+                attach_workspace_thread_with_handle(self.request_handle(), thread_id).await?;
+            self.finish_thread_attach(config, response).await
+        })
+        .await
+        .wrap_err("thread/resume attach timed out in TUI")?
     }
 
-    pub(crate) async fn watch_thread(
+    pub(crate) async fn finish_thread_attach(
         &mut self,
         config: &Config,
-        thread_id: ThreadId,
+        response: ThreadResumeResponse,
     ) -> Result<AppGatewayStartedThread> {
-        let request_id = self.next_request_id();
-        let response: ThreadResumeResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadResume {
-                request_id,
-                params: thread_attach_params(thread_id),
-            })
-            .await
-            .wrap_err("thread/resume watch failed in TUI")?;
         self.refresh_thread_permissions(config, &response.thread.id)
             .await?;
         started_thread_from_resume_response(response, config).await
@@ -198,18 +187,20 @@ impl AppGatewaySession {
         include_turns: bool,
     ) -> Result<Thread> {
         let request_id = self.next_request_id();
-        let response: ThreadReadResponse = self
-            .client
-            .request_typed(ClientRequest::ThreadRead {
+        let response: ThreadReadResponse = tokio::time::timeout(
+            INTERACTIVE_THREAD_READ_TIMEOUT,
+            self.client.request_typed(ClientRequest::ThreadRead {
                 request_id,
                 params: ThreadReadParams {
                     thread_id: thread_id.to_string(),
                     include_turns,
                     turn_limit: include_turns.then_some(INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT),
                 },
-            })
-            .await
-            .wrap_err("thread/read failed during TUI session lookup")?;
+            }),
+        )
+        .await
+        .wrap_err("thread/read timed out during TUI session lookup")?
+        .wrap_err("thread/read failed during TUI session lookup")?;
         Ok(response.thread)
     }
 

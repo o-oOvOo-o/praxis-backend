@@ -283,6 +283,7 @@ async fn session_new_fails_when_zsh_fork_enabled_without_zsh_path() {
         tx_event,
         agent_status_tx,
         InitialHistory::New,
+        /*prepared_rollout_writer*/ None,
         SessionSource::Exec,
         Arc::new(praxis_exec_server::EnvironmentManager::new(
             /*exec_server_url*/ None,

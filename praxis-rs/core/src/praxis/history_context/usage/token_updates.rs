@@ -1,14 +1,17 @@
+use std::sync::Arc;
+
 use praxis_protocol::protocol::TokenUsage;
 use praxis_protocol::protocol::TokenUsageInfo;
 
 use crate::error::ContextOverflowError;
+use crate::goals::GoalRuntimeEvent;
 use crate::praxis::Session;
 use crate::praxis::TurnContext;
 use crate::praxis::turn_compaction::effective_auto_compact_token_limit;
 
 impl Session {
     pub(crate) async fn update_token_usage_info(
-        &self,
+        self: &Arc<Self>,
         turn_context: &TurnContext,
         token_usage: Option<&TokenUsage>,
     ) {
@@ -30,6 +33,12 @@ impl Session {
             self.token_ledger.write().await.set_token_info(token_info);
         }
         self.send_token_count_event(turn_context).await;
+        if let Err(err) = self
+            .goal_runtime_apply(GoalRuntimeEvent::UsageUpdated { turn_context })
+            .await
+        {
+            tracing::warn!("failed to account thread goal after usage update: {err:#}");
+        }
     }
 
     pub(crate) async fn recompute_token_usage(&self, turn_context: &TurnContext) {

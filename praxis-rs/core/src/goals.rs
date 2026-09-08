@@ -38,6 +38,9 @@ pub(crate) enum GoalRuntimeEvent<'a> {
     ToolCompletedGoal {
         turn_context: &'a TurnContext,
     },
+    UsageUpdated {
+        turn_context: &'a TurnContext,
+    },
     TurnFinished {
         turn_context: &'a TurnContext,
         turn_completed: bool,
@@ -226,6 +229,14 @@ impl Session {
                 Ok(())
             }),
             GoalRuntimeEvent::ToolCompletedGoal { turn_context } => Box::pin(async move {
+                self.account_thread_goal_progress(
+                    turn_context,
+                    praxis_state::GoalAccountingMode::ActiveOrComplete,
+                )
+                .await?;
+                Ok(())
+            }),
+            GoalRuntimeEvent::UsageUpdated { turn_context } => Box::pin(async move {
                 self.account_thread_goal_progress(
                     turn_context,
                     praxis_state::GoalAccountingMode::ActiveOrComplete,
@@ -869,7 +880,41 @@ fn validate_goal_budget(value: Option<i64>) -> anyhow::Result<()> {
 }
 
 fn goal_token_delta_for_usage(usage: &TokenUsage) -> i64 {
-    usage
-        .non_cached_input()
-        .saturating_add(usage.output_tokens.max(0))
+    usage.total_tokens.max(
+        usage
+            .input_tokens
+            .max(0)
+            .saturating_add(usage.output_tokens.max(0)),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn goal_usage_counts_cached_input_once() {
+        let usage = TokenUsage {
+            input_tokens: 100,
+            cached_input_tokens: 80,
+            cache_reported_input_tokens: 100,
+            output_tokens: 20,
+            reasoning_output_tokens: 15,
+            total_tokens: 120,
+        };
+
+        assert_eq!(goal_token_delta_for_usage(&usage), 120);
+    }
+
+    #[test]
+    fn goal_usage_falls_back_when_provider_omits_total() {
+        let usage = TokenUsage {
+            input_tokens: 100,
+            cached_input_tokens: 80,
+            output_tokens: 20,
+            ..TokenUsage::default()
+        };
+
+        assert_eq!(goal_token_delta_for_usage(&usage), 120);
+    }
 }

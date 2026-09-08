@@ -229,6 +229,7 @@ impl ThreadParamsMode {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct AppGatewayStartedThread {
     pub(crate) session: ThreadSessionState,
     pub(crate) turns: Vec<Turn>,
@@ -296,6 +297,47 @@ impl AppGatewaySession {
     }
 }
 
+pub(crate) async fn attach_workspace_thread_with_handle(
+    request_handle: AppGatewayRequestHandle,
+    thread_id: ThreadId,
+) -> Result<ThreadResumeResponse> {
+    request_handle
+        .request_typed(ClientRequest::ThreadResume {
+            request_id: RequestId::String(format!(
+                "praxis-workspace-attach-{}",
+                uuid::Uuid::new_v4()
+            )),
+            params: thread_attach_params(thread_id),
+        })
+        .await
+        .wrap_err("thread/resume attach failed in TUI")
+}
+
+pub(crate) async fn read_workspace_thread_with_handle(
+    request_handle: AppGatewayRequestHandle,
+    thread_id: ThreadId,
+) -> Result<praxis_app_gateway_protocol::Thread> {
+    let response: ThreadReadResponse = request_handle
+        .request_typed(ClientRequest::ThreadRead {
+            request_id: RequestId::String(format!(
+                "praxis-workspace-read-{}",
+                uuid::Uuid::new_v4()
+            )),
+            params: workspace_thread_read_params(thread_id),
+        })
+        .await
+        .wrap_err("thread/read failed during workspace hydration")?;
+    Ok(response.thread)
+}
+
+fn workspace_thread_read_params(thread_id: ThreadId) -> ThreadReadParams {
+    ThreadReadParams {
+        thread_id: thread_id.to_string(),
+        include_turns: true,
+        turn_limit: Some(INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT),
+    }
+}
+
 pub(crate) fn status_account_display_from_auth_mode(
     auth_mode: Option<AuthMode>,
     plan_type: Option<praxis_protocol::account::PlanType>,
@@ -337,7 +379,16 @@ fn model_preset_from_api_model(model: ApiModel) -> ModelPreset {
     });
 
     ModelPreset {
-        id: model.id,
+        id: model
+            .model_provider
+            .as_deref()
+            .map(|provider| {
+                praxis_core::models_manager::catalog::provider_scoped_preset_id(
+                    provider,
+                    &model.model,
+                )
+            })
+            .unwrap_or(model.id),
         model: model.model,
         display_name: model.display_name,
         description: model.description,
@@ -812,6 +863,20 @@ mod tests {
         assert_eq!(params.personality, None);
         assert_eq!(params.dynamic_tools, None);
         assert!(params.persist_extended_history);
+        assert_eq!(
+            params.turn_limit,
+            Some(INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT)
+        );
+    }
+
+    #[test]
+    fn workspace_observer_uses_bounded_read_only_hydration() {
+        let thread_id = ThreadId::new();
+
+        let params = workspace_thread_read_params(thread_id);
+
+        assert_eq!(params.thread_id, thread_id.to_string());
+        assert!(params.include_turns);
         assert_eq!(
             params.turn_limit,
             Some(INTERACTIVE_THREAD_TURN_HYDRATION_LIMIT)

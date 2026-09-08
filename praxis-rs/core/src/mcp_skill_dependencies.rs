@@ -7,10 +7,7 @@ use praxis_login::default_client::is_first_party_originator;
 use praxis_login::default_client::originator;
 use praxis_protocol::protocol::AskForApproval;
 use praxis_protocol::protocol::SandboxPolicy;
-use praxis_protocol::protocol::SkillDependencies as ProtocolSkillDependencies;
-use praxis_protocol::protocol::SkillInterface as ProtocolSkillInterface;
 use praxis_protocol::protocol::SkillMetadata as ProtocolSkillMetadata;
-use praxis_protocol::protocol::SkillToolDependency as ProtocolSkillToolDependency;
 use praxis_protocol::request_user_input::RequestUserInputArgs;
 use praxis_protocol::request_user_input::RequestUserInputQuestion;
 use praxis_protocol::request_user_input::RequestUserInputQuestionOption;
@@ -218,44 +215,7 @@ pub(crate) async fn maybe_install_mcp_dependencies(
 }
 
 fn protocol_skill_metadata_for_mcp(skills: &[SkillMetadata]) -> Vec<ProtocolSkillMetadata> {
-    skills
-        .iter()
-        .map(|skill| ProtocolSkillMetadata {
-            name: skill.name.clone(),
-            description: skill.description.clone(),
-            short_description: skill.short_description.clone(),
-            interface: skill
-                .interface
-                .clone()
-                .map(|interface| ProtocolSkillInterface {
-                    display_name: interface.display_name,
-                    short_description: interface.short_description,
-                    icon_small: interface.icon_small,
-                    icon_large: interface.icon_large,
-                    brand_color: interface.brand_color,
-                    default_prompt: interface.default_prompt,
-                }),
-            dependencies: skill.dependencies.clone().map(|dependencies| {
-                ProtocolSkillDependencies {
-                    tools: dependencies
-                        .tools
-                        .into_iter()
-                        .map(|tool| ProtocolSkillToolDependency {
-                            r#type: tool.r#type,
-                            value: tool.value,
-                            description: tool.description,
-                            transport: tool.transport,
-                            command: tool.command,
-                            url: tool.url,
-                        })
-                        .collect(),
-                }
-            }),
-            path: skill.path_to_skills_md.clone(),
-            scope: skill.scope,
-            enabled: true,
-        })
-        .collect()
+    skills.iter().map(ProtocolSkillMetadata::from).collect()
 }
 
 async fn should_install_mcp_dependencies(

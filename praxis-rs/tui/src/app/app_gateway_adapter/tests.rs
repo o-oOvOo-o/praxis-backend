@@ -3,6 +3,7 @@ use crate::app_gateway_core_conversions::app_gateway_web_search_action_to_core;
 use crate::app_gateway_session::token_usage_info_from_app_gateway;
 use crate::exec_command::split_command_string;
 use praxis_app_gateway_protocol::Thread;
+use praxis_app_gateway_protocol::ThreadClosedNotification;
 use praxis_app_gateway_protocol::ThreadItem;
 use praxis_app_gateway_protocol::Turn;
 use praxis_app_gateway_protocol::TurnStatus;
@@ -23,6 +24,15 @@ use praxis_protocol::protocol::ErrorEvent;
 use praxis_protocol::protocol::Event;
 use praxis_protocol::protocol::EventMsg;
 use praxis_protocol::protocol::ExecCommandBeginEvent;
+
+#[test]
+fn thread_closed_invalidates_workspace_projection() {
+    let notification = ServerNotification::ThreadClosed(ThreadClosedNotification {
+        thread_id: ThreadId::new().to_string(),
+    });
+
+    assert!(workspace_truth_refresh_required(&notification, false));
+}
 use praxis_protocol::protocol::ExecCommandEndEvent;
 use praxis_protocol::protocol::ExecCommandOutputDeltaEvent;
 use praxis_protocol::protocol::ExecCommandStatus;

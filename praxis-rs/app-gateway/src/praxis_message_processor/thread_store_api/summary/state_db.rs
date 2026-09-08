@@ -1,7 +1,6 @@
 use super::ThreadStoreGitInfo;
 use super::ThreadStoreSummary;
 use super::money::cost_micros_to_usd;
-use super::source_metadata::with_thread_spawn_agent_metadata;
 use chrono::SecondsFormat;
 use praxis_app_gateway_protocol::ThreadTokenUsage;
 use praxis_protocol::ThreadId;
@@ -52,7 +51,7 @@ pub(super) fn summary_from_state_db_metadata(
     let source = serde_json::from_str(&source)
         .or_else(|_| serde_json::from_value(serde_json::Value::String(source.clone())))
         .unwrap_or(SessionSource::Unknown);
-    let source = with_thread_spawn_agent_metadata(
+    let source = praxis_protocol::protocol::SessionSource::with_thread_spawn_agent_metadata(
         source,
         agent_base_name,
         agent_title,

@@ -9,5 +9,7 @@ pub(in crate::praxis::session_startup::pipeline::flow) struct SessionStartupSpec
         SessionConfiguration,
     pub(in crate::praxis::session_startup::pipeline::flow) llm_runtime_catalog: LlmRuntimeCatalog,
     pub(in crate::praxis::session_startup::pipeline::flow) initial_history: InitialHistory,
+    pub(in crate::praxis::session_startup::pipeline::flow) prepared_rollout_writer:
+        Option<praxis_rollout::recorder::PreparedRolloutWriter>,
     pub(in crate::praxis::session_startup::pipeline::flow) session_source: SessionSource,
 }
